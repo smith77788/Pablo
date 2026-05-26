@@ -515,7 +515,6 @@ async def cb_net_broadcast(callback: CallbackQuery, pool: asyncpg.Pool,
             "📢 <b>Сетевая рассылка</b>\n\nАудитория сети пуста.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
-        await callback.answer()
         return
 
     await state.set_state(NetworkBroadcast.waiting_message)
@@ -527,7 +526,6 @@ async def cb_net_broadcast(callback: CallbackQuery, pool: asyncpg.Pool,
         "Напишите текст рассылки (HTML поддерживается):",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(NetworkBroadcast.waiting_message, F.text)
@@ -558,7 +556,12 @@ async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: Netwo
 
     users = await db.get_unique_network_users(pool, callback.from_user.id)
     if not users:
-        await callback.answer("Аудитория пуста.", show_alert=True)
+        kb_empty = InlineKeyboardBuilder()
+        kb_empty.button(text="◀️ К сети", callback_data=NetworkCb(action="menu"))
+        await callback.message.edit_text(
+            "📢 <b>Сетевая рассылка</b>\n\nАудитория сети пуста.",
+            parse_mode="HTML", reply_markup=kb_empty.as_markup(),
+        )
         return
 
     # Group by bot_id

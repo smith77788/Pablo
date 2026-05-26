@@ -1,9 +1,11 @@
 """Auto-reply rules management for managed bots."""
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
-from bot.callbacks import AutoReplyCb
+from bot.callbacks import AutoReplyCb, AutoCb
 from bot.keyboards import auto_reply_menu, auto_reply_trigger_menu, auto_reply_view, back_to_bot, auto_reply_copy_target
 from bot.states import AddAutoReply
 from database import db
@@ -222,3 +224,174 @@ async def cb_ar_copy_confirm(callback: CallbackQuery, callback_data: AutoReplyCb
         reply_markup=auto_reply_menu(callback_data.bot_id, replies),
     )
     await callback.answer(f"✅ Скопировано {copied} правил в {dst_label}!", show_alert=True)
+
+
+# ── Extended Automation Rule Handlers (webhook / AI-reply / inactivity) ────────
+
+
+class AddAutoRuleExt(StatesGroup):
+    """FSM for creating automation rules with new action/trigger types."""
+    waiting_trigger_value = State()   # inactivity: ask for number of days
+    waiting_action_value = State()    # webhook URL or AI system prompt
+    waiting_name = State()            # final rule name before saving
+
+
+TRIGGER_LABELS_EXT = {
+    "inactivity": "⏳ Неактивность",
+}
+
+ACTION_LABELS_EXT = {
+    "webhook": "🔗 Webhook",
+    "send_ai_reply": "🤖 AI-ответ",
+}
+
+
+@router.callback_query(AutoCb.filter(F.action == "trig_inactivity"))
+async def cb_trig_inactivity(callback: CallbackQuery, callback_data: AutoCb,
+                              state: FSMContext) -> None:
+    """Trigger: user inactive for N days."""
+    await callback.answer()
+    await state.update_data(trigger_type="inactivity", bot_id=callback_data.bot_id)
+    await state.set_state(AddAutoRuleExt.waiting_trigger_value)
+    await callback.message.edit_text(
+        "⏳ <b>Триггер: Неактивность</b>\n\n"
+        "Введите количество дней неактивности пользователя (например: <code>3</code>):",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddAutoRuleExt.waiting_trigger_value, F.text)
+async def msg_inactivity_days(message: Message, state: FSMContext) -> None:
+    """Receive inactivity days, then ask to choose action."""
+    raw = message.text.strip()
+    try:
+        days = int(raw)
+        if days < 1:
+            raise ValueError("must be positive")
+    except (ValueError, TypeError):
+        await message.answer("❌ Введите целое положительное число (например: <code>3</code>).",
+                             parse_mode="HTML")
+        return
+    await state.update_data(trigger_value=str(days))
+    await state.set_state(AddAutoRuleExt.waiting_action_value)
+    data = await state.get_data()
+    bot_id = data["bot_id"]
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Отправить сообщение", callback_data=AutoCb(action="ext_act_send", bot_id=bot_id))
+    kb.button(text="🔗 Webhook", callback_data=AutoCb(action="ext_act_webhook", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    await message.answer(
+        f"⏳ Неактивность: <b>{days} дн.</b>\n\n"
+        "<b>Шаг 2/3</b> — Выберите действие:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "act_webhook"))
+async def cb_act_webhook(callback: CallbackQuery, callback_data: AutoCb,
+                          state: FSMContext) -> None:
+    """Action: webhook — ask for URL."""
+    await callback.answer()
+    await state.update_data(action_type="webhook", bot_id=callback_data.bot_id)
+    await state.set_state(AddAutoRuleExt.waiting_action_value)
+    await callback.message.edit_text(
+        "🔗 <b>Действие: Webhook</b>\n\n"
+        "<b>Шаг 3/3</b> — Введите URL для POST-запроса:\n"
+        "Пример: <code>https://your-service.com/webhook</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "ext_act_webhook"), AddAutoRuleExt.waiting_action_value)
+async def cb_ext_act_webhook(callback: CallbackQuery, callback_data: AutoCb,
+                              state: FSMContext) -> None:
+    """Action: webhook (from inactivity flow) — ask for URL."""
+    await callback.answer()
+    await state.update_data(action_type="webhook")
+    await callback.message.edit_text(
+        "🔗 <b>Действие: Webhook</b>\n\n"
+        "Введите URL для POST-запроса:\n"
+        "Пример: <code>https://your-service.com/webhook</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "ext_act_send"), AddAutoRuleExt.waiting_action_value)
+async def cb_ext_act_send(callback: CallbackQuery, callback_data: AutoCb,
+                           state: FSMContext) -> None:
+    """Action: send_message (from inactivity flow) — ask for text."""
+    await callback.answer()
+    await state.update_data(action_type="send_message")
+    await callback.message.edit_text(
+        "💬 <b>Действие: Отправить сообщение</b>\n\n"
+        "Введите текст сообщения (HTML поддерживается):",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "act_ai_reply"))
+async def cb_act_ai_reply(callback: CallbackQuery, callback_data: AutoCb,
+                           state: FSMContext) -> None:
+    """Action: send_ai_reply — ask for system prompt."""
+    await callback.answer()
+    await state.update_data(action_type="send_ai_reply", bot_id=callback_data.bot_id)
+    await state.set_state(AddAutoRuleExt.waiting_action_value)
+    await callback.message.edit_text(
+        "🤖 <b>Действие: AI-ответ</b>\n\n"
+        "<b>Шаг 3/3</b> — Введите системный промпт (описание персонажа/роли AI):\n"
+        "Пример: <code>Ты вежливый менеджер по продажам компании X.</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddAutoRuleExt.waiting_action_value, F.text)
+async def msg_ext_action_value(message: Message, state: FSMContext) -> None:
+    """Receive webhook URL or AI system prompt or message text, then ask for rule name."""
+    await state.update_data(action_value=message.text.strip())
+    await state.set_state(AddAutoRuleExt.waiting_name)
+    await message.answer(
+        "✅ Значение сохранено!\n\nВведите название для этого правила (для вашего удобства):",
+    )
+
+
+@router.message(AddAutoRuleExt.waiting_name, F.text)
+async def msg_ext_rule_name(message: Message, state: FSMContext,
+                             pool: asyncpg.Pool) -> None:
+    """Save the new automation rule with extended action/trigger types."""
+    data = await state.get_data()
+    await state.clear()
+    bot_id = data["bot_id"]
+    trigger_type = data["trigger_type"]
+    trigger_value = data.get("trigger_value")
+    action_type = data["action_type"]
+    action_value = data.get("action_value", "")
+    rule_name = message.text.strip()
+
+    await db.add_automation_rule(
+        pool, bot_id, rule_name,
+        trigger_type, trigger_value,
+        action_type, action_value,
+    )
+
+    trigger_label = TRIGGER_LABELS_EXT.get(trigger_type, trigger_type)
+    action_label = ACTION_LABELS_EXT.get(action_type, action_type)
+
+    # Build a human-readable value summary
+    if action_type == "webhook":
+        value_summary = f"URL: <code>{action_value[:80]}</code>"
+    elif action_type == "send_ai_reply":
+        value_summary = f"Промпт: <code>{action_value[:80]}</code>"
+    else:
+        value_summary = f"<code>{action_value[:80]}</code>"
+
+    await message.answer(
+        f"✅ <b>Правило создано!</b>\n\n"
+        f"Название: {rule_name}\n"
+        f"Триггер: {trigger_label}\n"
+        f"Действие: {action_label}\n"
+        f"{value_summary}",
+        parse_mode="HTML",
+        reply_markup=back_to_bot(bot_id),
+    )

@@ -23,22 +23,18 @@ from services.search_observer import canonicalize, process_search_result
 log = logging.getLogger(__name__)
 
 _INTERVAL = 3600         # background sweep every hour
-_INTER_SEARCH_DELAY = 2  # seconds between searches (rate limit)
+_INTER_SEARCH_DELAY = 5  # seconds between searches (rate limit)
 
 
 # ── Account selection ──────────────────────────────────────────────────────
 
-async def _get_least_used_account(
+async def _get_all_active_accounts(
     pool: asyncpg.Pool,
     owner_id: int,
-) -> asyncpg.Record | None:
-    """Select the owner's active TG account least recently used."""
-    return await pool.fetchrow(
-        """SELECT id, session_str FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=true
-           ORDER BY last_used ASC NULLS FIRST LIMIT 1""",
-        owner_id,
-    )
+) -> list[asyncpg.Record]:
+    """Return trusted active accounts ordered by trust_score DESC."""
+    from database import db
+    return await db.get_trusted_accounts(pool, owner_id)
 
 
 # ── On-demand check (called from ranking.py handler) ──────────────────────
@@ -64,8 +60,8 @@ async def check_bot_keywords(
     bot_username = (bot_row["username"] or "").lower().lstrip("@")
     entity_id = canonicalize(bot_username)
 
-    account = await _get_least_used_account(pool, owner_id)
-    if not account:
+    accounts = await _get_all_active_accounts(pool, owner_id)
+    if not accounts:
         log.warning("check_bot_keywords: no active accounts for owner %s", owner_id)
         return []
 
@@ -81,55 +77,76 @@ async def check_bot_keywords(
     results_out: list[dict[str, Any]] = []
 
     for kw in keywords:
-        try:
-            search_results = await search_in_telegram(account["session_str"], kw["keyword"])
+        ui_position: int | None = None
+        ui_error = True
 
-            # Determine position for UI (raw lookup, not from observer)
-            position: int | None = None
-            for r in search_results:
-                if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
-                    position = r["position"]
-                    break
+        for account in accounts:
+            try:
+                search_results = await search_in_telegram(
+                    account["session_str"], kw["keyword"], _acc=dict(account)
+                )
 
-            # Write to search_rankings for UI history
+                position: int | None = None
+                for r in search_results:
+                    if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
+                        position = r["position"]
+                        break
+
+                # Feed into observability pipeline (each account is independent)
+                await process_search_result(
+                    pool=pool,
+                    run_id=run_id,
+                    keyword_id=kw["id"],
+                    account_id=account["id"],
+                    keyword=kw["keyword"],
+                    entity_id=entity_id,
+                    results=search_results,
+                    truncated=len(search_results) >= 20,
+                )
+
+                await db.update_tg_account_used(pool, account["id"])
+                log.debug(
+                    "check_bot_keywords: kw=%r bot=%r position=%s account=%s",
+                    kw["keyword"], bot_username, position, account["id"],
+                )
+
+                # Use the first successful account's result for the UI ranking entry
+                if ui_error:
+                    ui_position = position
+                    ui_error = False
+
+                await asyncio.sleep(_INTER_SEARCH_DELAY)
+
+            except Exception as exc:
+                from telethon.errors import FloodWaitError
+                if isinstance(exc, FloodWaitError):
+                    wait = min(exc.seconds + 5, 120)
+                    log.warning(
+                        "check_bot_keywords FloodWait %ds kw=%r account=%s — sleeping",
+                        wait, kw["keyword"], account["id"],
+                    )
+                    from database import db as _db
+                    await _db.record_flood_event(pool, account["id"], operation="ranking_check", flood_seconds=exc.seconds if hasattr(exc, 'seconds') else 0)
+                    await asyncio.sleep(wait)
+                else:
+                    log.warning(
+                        "check_bot_keywords: error for %r account=%s: %s",
+                        kw["keyword"], account["id"], exc,
+                    )
+
+        # Write one UI history entry per keyword sweep
+        if not ui_error:
             await pool.execute(
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
-                kw["id"], bot_id, position,
+                kw["id"], bot_id, ui_position,
             )
 
-            # Feed into observability pipeline
-            await process_search_result(
-                pool=pool,
-                run_id=run_id,
-                keyword_id=kw["id"],
-                account_id=account["id"],
-                keyword=kw["keyword"],
-                entity_id=entity_id,
-                results=search_results,
-                truncated=len(search_results) >= 20,
-            )
-
-            await db.update_tg_account_used(pool, account["id"])
-            log.debug(
-                "check_bot_keywords: kw=%r bot=%r position=%s",
-                kw["keyword"], bot_username, position,
-            )
-            results_out.append({
-                "keyword": kw["keyword"],
-                "keyword_id": kw["id"],
-                "position": position,
-                "error": False,
-            })
-            await asyncio.sleep(_INTER_SEARCH_DELAY)
-
-        except Exception as exc:
-            log.warning("check_bot_keywords: error for %r: %s", kw["keyword"], exc)
-            results_out.append({
-                "keyword": kw["keyword"],
-                "keyword_id": kw["id"],
-                "position": None,
-                "error": True,
-            })
+        results_out.append({
+            "keyword": kw["keyword"],
+            "keyword_id": kw["id"],
+            "position": ui_position,
+            "error": ui_error,
+        })
 
     return results_out
 
@@ -153,56 +170,77 @@ async def _check_all(pool: asyncpg.Pool) -> None:
     run_id = str(uuid.uuid4())
 
     for kw in keywords:
-        try:
-            account = await _get_least_used_account(pool, kw["owner_id"])
-            if not account:
-                log.warning(
-                    "ranking_checker: no active account for owner=%s kw=%r — skipping",
-                    kw["owner_id"], kw["keyword"],
+        accounts = await _get_all_active_accounts(pool, kw["owner_id"])
+        if not accounts:
+            log.warning(
+                "ranking_checker: no active accounts for owner=%s kw=%r — skipping",
+                kw["owner_id"], kw["keyword"],
+            )
+            continue
+
+        bot_username = (kw["bot_username"] or "").lower().lstrip("@")
+        entity_id = canonicalize(bot_username)
+        ui_position: int | None = None
+        ui_written = False
+
+        for account in accounts:
+            try:
+                search_results = await search_in_telegram(
+                    account["session_str"], kw["keyword"], _acc=dict(account)
                 )
-                continue
 
-            bot_username = (kw["bot_username"] or "").lower().lstrip("@")
-            entity_id = canonicalize(bot_username)
+                position: int | None = None
+                for r in search_results:
+                    if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
+                        position = r["position"]
+                        break
 
-            search_results = await search_in_telegram(account["session_str"], kw["keyword"])
+                # Observability pipeline — each account is an independent observation
+                await process_search_result(
+                    pool=pool,
+                    run_id=run_id,
+                    keyword_id=kw["id"],
+                    account_id=account["id"],
+                    keyword=kw["keyword"],
+                    entity_id=entity_id,
+                    results=search_results,
+                    truncated=len(search_results) >= 20,
+                )
 
-            # Determine position for UI
-            position: int | None = None
-            for r in search_results:
-                if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
-                    position = r["position"]
-                    break
+                await db.update_tg_account_used(pool, account["id"])
+                log.debug(
+                    "ranking_checker: kw=%r bot=%r position=%s account=%s",
+                    kw["keyword"], bot_username, position, account["id"],
+                )
 
-            # Write to search_rankings for UI
+                # Use first successful account for the UI history entry
+                if not ui_written:
+                    ui_position = position
+                    ui_written = True
+
+                await asyncio.sleep(_INTER_SEARCH_DELAY)
+
+            except Exception as exc:
+                from telethon.errors import FloodWaitError
+                if isinstance(exc, FloodWaitError):
+                    wait = min(exc.seconds + 5, 120)
+                    log.warning(
+                        "ranking_checker FloodWait %ds kw=%r account=%s — sleeping",
+                        wait, kw["keyword"], account["id"],
+                    )
+                    from database import db as _db
+                    await _db.record_flood_event(pool, account["id"], operation="ranking_check", flood_seconds=exc.seconds if hasattr(exc, 'seconds') else 0)
+                    await asyncio.sleep(wait)
+                else:
+                    log.warning(
+                        "ranking_checker: error for kw=%r (id=%s) account=%s: %s",
+                        kw["keyword"], kw["id"], account["id"], exc,
+                    )
+
+        if ui_written:
             await pool.execute(
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
-                kw["id"], kw["bot_id"], position,
-            )
-
-            # Observability pipeline (handles change detection + deferred alerting)
-            await process_search_result(
-                pool=pool,
-                run_id=run_id,
-                keyword_id=kw["id"],
-                account_id=account["id"],
-                keyword=kw["keyword"],
-                entity_id=entity_id,
-                results=search_results,
-                truncated=len(search_results) >= 20,
-            )
-
-            await db.update_tg_account_used(pool, account["id"])
-            log.debug(
-                "ranking_checker: kw=%r bot=%r position=%s account=%s",
-                kw["keyword"], bot_username, position, account["id"],
-            )
-            await asyncio.sleep(_INTER_SEARCH_DELAY)
-
-        except Exception as exc:
-            log.warning(
-                "ranking_checker: error for kw=%r (id=%s): %s",
-                kw["keyword"], kw["id"], exc,
+                kw["id"], kw["bot_id"], ui_position,
             )
 
 

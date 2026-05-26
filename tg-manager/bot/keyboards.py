@@ -4,7 +4,7 @@ from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
-    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb, ChanCb,
+    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb, ChanCb, RefCb,
 )
 
 PAGE_SIZE = 5
@@ -31,11 +31,12 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb.button(text="📱 Мои аккаунты",          callback_data=AccCb(action="menu"))
     kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
     kb.button(text="💳 Подписка",              callback_data=SubCb(action="menu"))
+    kb.button(text="🔗 Реф. программа",        callback_data=RefCb(action="menu"))
     kb.button(text="🤖 AI-ассистент",          callback_data=AiCb(action="start"))
     kb.button(text="❓ Справка",               callback_data=BotCb(action="help"))
     if is_admin:
         kb.button(text="⚙️ Админка",           callback_data="adm:main")
-    kb.adjust(2, 2, 2, 2, 1 if not is_admin else 2)
+    kb.adjust(2, 2, 2, 2, 2, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
@@ -654,6 +655,16 @@ def automation_action_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="💬 Отправить сообщение", callback_data=AutoCb(action="act_send", bot_id=bot_id))
     kb.button(text="🏷 Добавить тег", callback_data=AutoCb(action="act_add_tag", bot_id=bot_id))
     kb.button(text="🗑 Удалить тег", callback_data=AutoCb(action="act_remove_tag", bot_id=bot_id))
+    kb.button(text="🔗 Подписать на цепочку", callback_data=AutoCb(action="act_funnel", bot_id=bot_id))
+    kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def automation_funnel_select(bot_id: int, funnels: list) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for f in funnels[:8]:
+        kb.button(text=f["name"], callback_data=AutoCb(action="sel_funnel", bot_id=bot_id, rule_id=f["id"]))
     kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()

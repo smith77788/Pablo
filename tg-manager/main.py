@@ -35,6 +35,7 @@ from bot.handlers import net_broadcast as net_bc_handler
 from bot.handlers import network_bulk as net_bulk_handler
 from bot.handlers import ranking as ranking_handler
 from bot.handlers import accounts as accounts_handler
+from bot.handlers import referral as referral_handler
 from bot.handlers import channel_ops as channel_ops_handler
 from bot.handlers import admin as admin_handler
 from services import scheduler
@@ -44,6 +45,9 @@ from services import funnel_runner
 from services import payment_checker
 from services import ranking_checker
 from services import search_observer
+from services import account_monitor
+from services import trust_engine
+from services import shadowban_monitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,6 +130,7 @@ async def main() -> None:
     dp.include_router(ai_handler.router)
     dp.include_router(ranking_handler.router)
     dp.include_router(accounts_handler.router)
+    dp.include_router(referral_handler.router)
     dp.include_router(channel_ops_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
@@ -137,7 +142,8 @@ async def main() -> None:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-    async with aiohttp.ClientSession(connector=connector) as http:
+    http = aiohttp.ClientSession(connector=connector)
+    try:
         asyncio.create_task(scheduler.run(pool, http))
         asyncio.create_task(auto_responder.run(pool, http))
         asyncio.create_task(relay_service.run(pool, http))
@@ -145,12 +151,15 @@ async def main() -> None:
         asyncio.create_task(payment_checker.run(pool, http, bot))
         asyncio.create_task(ranking_checker.run(pool, bot))
         asyncio.create_task(search_observer.run_confirmation_loop(pool, bot))
+        asyncio.create_task(account_monitor.run(pool, bot))
+        asyncio.create_task(trust_engine.run(pool))
+        asyncio.create_task(shadowban_monitor.run(pool, bot))
         log.info("TG Manager started")
-        try:
-            await dp.start_polling(bot, pool=pool, http=http)
-        finally:
-            await pool.close()
-            await bot.session.close()
+        await dp.start_polling(bot, pool=pool, http=http)
+    finally:
+        await pool.close()
+        await http.close()
+        await bot.session.close()
 
 
 if __name__ == "__main__":

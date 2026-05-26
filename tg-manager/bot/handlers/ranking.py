@@ -485,7 +485,7 @@ async def cb_rank_check_now(
         for kw in keywords:
             try:
                 search_results = await account_manager.search_in_telegram(
-                    account["session_str"], kw["keyword"]
+                    account["session_str"], kw["keyword"], _acc=account
                 )
 
                 # Deterministic position lookup for UI display

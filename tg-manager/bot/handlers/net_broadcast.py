@@ -141,7 +141,6 @@ async def msg_net_bc_text(message: Message, state: FSMContext, pool: asyncpg.Poo
 async def cb_net_bc_confirm(callback: CallbackQuery, callback_data: NetBcCb,
                              state: FSMContext, pool: asyncpg.Pool,
                              http: aiohttp.ClientSession) -> None:
-    await callback.answer()
     data = await state.get_data()
     await state.clear()
     text = data.get("text", "")
@@ -151,6 +150,7 @@ async def cb_net_bc_confirm(callback: CallbackQuery, callback_data: NetBcCb,
     if not text:
         await callback.answer("Текст не найден.", show_alert=True)
         return
+    await callback.answer()
 
     bots = await db.get_bots(pool, callback.from_user.id)
     total_started = 0

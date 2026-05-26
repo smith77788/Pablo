@@ -10,11 +10,11 @@ import re
 from html import escape
 
 import asyncpg
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 _DIALOGS_PAGE_SIZE = 10
@@ -30,18 +30,20 @@ from services.account_manager import (
     cleanup_qr_pending,
     confirm_2fa,
     confirm_code,
+    confirm_qr_2fa,
+    generate_device_fingerprint,
     get_account_dialogs_stats,
     get_dialogs,
     get_client_info_and_session,
     import_from_pyrogram_json,
     import_from_session_string,
     resend_code as resend_login_code,
-    start_qr_login,
-    wait_qr_login,
     import_from_tdata,
     send_message,
     send_message_via_account,
     start_login,
+    start_qr_login,
+    wait_qr_login,
 )
 
 router = Router()
@@ -78,6 +80,10 @@ class AccountPost(StatesGroup):
 class AccountSendMsg(StatesGroup):
     waiting_chat_id = State()  # state data: acc_id
     waiting_text = State()     # state data: acc_id, chat_id
+
+
+class QrLogin2FA(StatesGroup):
+    waiting_password = State()  # state data: user_id (implicit from FSM context)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -216,7 +222,7 @@ async def _show_accounts_menu(
     text += f"\n\n<i>Использовано: {used} / {limit_label}</i>"
 
     if used < limit:
-        kb.button(text="📱 Добавить (QR-код)",
+        kb.button(text="🔲 Добавить (QR-код)",
                   callback_data=AccCb(action="qr_login"))
         kb.button(text="☎️ Добавить (номер телефона)",
                   callback_data=AccCb(action="add"))
@@ -233,106 +239,6 @@ async def _show_accounts_menu(
         await message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     else:
         await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
-
-
-# ── QR-code login ──────────────────────────────────────────────────────────────
-
-async def _send_qr_photo(message: Message, user_id: int, pool: asyncpg.Pool) -> None:
-    """Generate and send a fresh QR code. Starts background wait task."""
-    try:
-        png = await start_qr_login(user_id)
-    except Exception as exc:
-        await message.answer(
-            f"❌ Не удалось создать QR-код: <code>{escape(str(exc)[:200])}</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    from aiogram.types import BufferedInputFile
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить QR", callback_data=AccCb(action="qr_refresh"))
-    kb.button(text="❌ Отмена",       callback_data=AccCb(action="cancel_login"))
-    kb.adjust(1)
-
-    await message.answer_photo(
-        BufferedInputFile(png, filename="qr.png"),
-        caption=(
-            "📲 <b>Войти через QR-код</b>\n\n"
-            "1. Откройте Telegram на телефоне\n"
-            "2. Перейдите: <b>Настройки → Устройства → Подключить устройство</b>\n"
-            "3. Наведите камеру на QR-код\n\n"
-            "QR действует <b>30 секунд</b>. Не успели — нажмите «🔄 Обновить QR»."
-        ),
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
-
-    bot = message.bot
-    chat_id = message.chat.id
-    asyncio.create_task(_qr_wait_task(user_id, pool, bot, chat_id))
-
-
-async def _qr_wait_task(user_id: int, pool: asyncpg.Pool, bot, chat_id: int) -> None:
-    """Background task: waits for QR scan, saves account, notifies user."""
-    try:
-        session_str, info = await wait_qr_login(user_id, timeout=30)
-    except asyncio.TimeoutError:
-        return  # User will click "Обновить QR" if needed
-    except Exception:
-        return
-
-    try:
-        await db.add_tg_account(
-            pool,
-            owner_id=user_id,
-            phone=info.get("phone") or "",
-            session_str=session_str,
-            tg_user_id=info.get("tg_user_id"),
-            first_name=info.get("first_name", ""),
-            username=info.get("username", ""),
-        )
-    except Exception as exc:
-        await bot.send_message(
-            chat_id,
-            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    display = escape(info.get("first_name") or info.get("username") or info.get("phone") or "Аккаунт")
-    kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
-    kb.button(text="👤 Все аккаунты",         callback_data=AccCb(action="menu"))
-    kb.adjust(1)
-    await bot.send_message(
-        chat_id,
-        f"✅ <b>Аккаунт добавлен через QR!</b>\n\n👤 {display}",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
-
-
-@router.callback_query(AccCb.filter(F.action == "qr_login"))
-async def cb_qr_login(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
-    if not _api_configured():
-        await callback.message.edit_text(_api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup())
-        return
-    plan, limit = await _get_account_limit(pool, callback.from_user.id)
-    if limit == 0:
-        await callback.message.edit_text(locked_text("Личные аккаунты Telegram", "starter"), parse_mode="HTML", reply_markup=subscription_locked_markup("starter"))
-        return
-    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
-    if len(accounts) >= limit:
-        await callback.message.edit_text("⚠️ Достигнут лимит аккаунтов для вашего плана.", parse_mode="HTML", reply_markup=_cancel_markup())
-        return
-    await _send_qr_photo(callback.message, callback.from_user.id, pool)
-
-
-@router.callback_query(AccCb.filter(F.action == "qr_refresh"))
-async def cb_qr_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer("Генерирую новый QR…")
-    await _send_qr_photo(callback.message, callback.from_user.id, pool)
 
 
 # ── Add account ────────────────────────────────────────────────────────────────
@@ -429,34 +335,16 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
     await state.set_state(AccountLogin.waiting_code)
 
     kb = InlineKeyboardBuilder()
-    if code_type == "app":
-        kb.button(text="💬 Выслать SMS вместо этого", callback_data=AccCb(action="resend_sms"))
-    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+    kb.button(text="💬 Выслать SMS", callback_data=AccCb(action="resend_sms"))
+    kb.button(text="❌ Отмена",      callback_data=AccCb(action="cancel_login"))
     kb.adjust(1)
 
-    if code_type == "sms":
-        instructions = (
-            f"✅ Код отправлен по <b>SMS</b> на номер <code>{escape(phone)}</code>.\n\n"
-            f"Проверьте SMS-сообщения на этом номере."
-        )
-    elif code_type == "call":
-        instructions = (
-            f"📞 Сейчас поступит <b>звонок</b> на <code>{escape(phone)}</code>.\n\n"
-            f"Продиктованный код введите ниже."
-        )
-    else:
-        instructions = (
-            f"📨 Код отправлен в <b>Telegram-приложение</b> на аккаунт "
-            f"<code>{escape(phone)}</code>.\n\n"
-            f"<b>Где искать код:</b>\n"
-            f"• Откройте Telegram (телефон, десктоп или web.telegram.org)\n"
-            f"• В списке чатов найдите диалог с аккаунтом <b>«Telegram»</b> (синяя галочка)\n"
-            f"• Там будет сообщение вида: <code>Login code: 12345</code>\n\n"
-            f"Не нашли — нажмите «💬 Выслать SMS вместо этого»."
-        )
-
     await message.answer(
-        instructions + "\n\nВведите код (только цифры):",
+        f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
+        f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
+        f"(не SMS) — проверьте на всех устройствах.\n\n"
+        f"Не пришёл? Нажмите <b>«Выслать SMS»</b>.\n\n"
+        f"Введите код (только цифры, например <code>12345</code>):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -515,6 +403,254 @@ async def cb_cancel_login(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
     await callback.message.edit_text("❌ Авторизация отменена.", reply_markup=kb.as_markup())
+
+
+# ── QR Login ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "qr_login"))
+async def cb_qr_login(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    bot: Bot,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    await state.clear()
+    user_id = callback.from_user.id
+
+    try:
+        png = await start_qr_login(user_id)
+    except Exception as exc:
+        await callback.message.answer(
+            f"❌ Не удалось запустить QR-вход: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+    kb.adjust(1)
+
+    msg = await callback.message.answer_photo(
+        BufferedInputFile(png, filename="qr.png"),
+        caption=(
+            "🔲 <b>Войдите через QR-код</b>\n\n"
+            "1. Откройте Telegram на телефоне или ПК\n"
+            "2. <b>Настройки → Устройства → Подключить устройство</b>\n"
+            "3. Наведите камеру на QR-код выше\n\n"
+            "<i>Ожидаем сканирование (2 минуты)...</i>"
+        ),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+    asyncio.create_task(
+        _qr_wait_task(bot, user_id, msg.chat.id, msg.message_id, pool,
+                      state.storage, state.key.bot_id),
+        name=f"qr-wait-{user_id}",
+    )
+
+
+async def _qr_wait_task(
+    bot: Bot,
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    pool: asyncpg.Pool,
+    storage,
+    bot_id: int,
+) -> None:
+    """Background task: wait for QR scan and finalize account connection."""
+    from telethon.errors import SessionPasswordNeededError
+    from aiogram.fsm.storage.base import StorageKey
+    from aiogram.fsm.context import FSMContext as _FSMContext
+
+    try:
+        session_str, info = await wait_qr_login(user_id, timeout=120.0)
+    except asyncio.TimeoutError:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔄 Обновить QR", callback_data=AccCb(action="qr_login"))
+        kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption="⏰ QR-код истёк. Нажмите «Обновить QR» чтобы получить новый.",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        await cleanup_qr_pending(user_id)
+        return
+    except SessionPasswordNeededError:
+        # Set FSM state so the password message handler catches the next input
+        key = StorageKey(bot_id=bot_id, chat_id=user_id, user_id=user_id)
+        ctx = _FSMContext(storage=storage, key=key)
+        await ctx.set_state(QrLogin2FA.waiting_password)
+
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+        kb.adjust(1)
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=(
+                    "🔐 <b>Аккаунт защищён паролем 2FA</b>\n\n"
+                    "Введите пароль двухфакторной аутентификации:"
+                ),
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        # Client stays in _pending_qr — needed by confirm_qr_2fa()
+        return
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                chat_id,
+                f"❌ Ошибка QR-входа: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        await cleanup_qr_pending(user_id)
+        return
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone", f"id:{info['tg_user_id']}"),
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
+        )
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                chat_id,
+                f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        await cleanup_qr_pending(user_id)
+        return
+
+    await cleanup_qr_pending(user_id)
+
+    display = escape(info.get("first_name") or info.get("username") or f"id:{info['tg_user_id']}")
+    phone_str = escape(info.get("phone", ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=(
+                f"✅ <b>Аккаунт успешно подключён!</b>\n\n"
+                f"👤 {display}\n"
+                f"📱 {phone_str}"
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        await bot.send_message(
+            chat_id,
+            f"✅ <b>Аккаунт {display} подключён!</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+@router.callback_query(AccCb.filter(F.action == "cancel_qr"))
+async def cb_cancel_qr(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    await cleanup_qr_pending(user_id)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text("❌ QR-вход отменён.", reply_markup=kb.as_markup())
+
+
+@router.message(QrLogin2FA.waiting_password)
+async def handle_qr_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    """Handle 2FA password after QR scan."""
+    password = (message.text or "").strip()
+    user_id = message.from_user.id
+
+    try:
+        session_str, info = await confirm_qr_2fa(user_id, password)
+    except ValueError as exc:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
+        kb.adjust(1)
+        await message.answer(
+            f"❌ {escape(str(exc))}\n\nВведите пароль ещё раз:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    except Exception as exc:
+        await message.answer(
+            f"❌ Ошибка: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        await cleanup_qr_pending(user_id)
+        return
+
+    await state.clear()
+    await cleanup_qr_pending(user_id)
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone", f"id:{info['tg_user_id']}"),
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    display = escape(info.get("first_name") or info.get("username") or f"id:{info['tg_user_id']}")
+    phone_str = escape(info.get("phone", ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        f"✅ <b>Аккаунт успешно подключён!</b>\n\n"
+        f"👤 {display}\n"
+        f"📱 {phone_str}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 # ── Step 2: receive OTP code ───────────────────────────────────────────────────
@@ -632,6 +768,9 @@ async def _finalize_login(
             tg_user_id=info.get("tg_user_id"),
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
+            device_model=info.get("device_model"),
+            system_version=info.get("system_version"),
+            app_version=info.get("app_version"),
         )
     except Exception as exc:
         await message.answer(
@@ -646,13 +785,14 @@ async def _finalize_login(
 
     display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
-    kb.button(text="👤 Все аккаунты",         callback_data=AccCb(action="menu"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
     await message.answer(
-        f"✅ <b>Аккаунт добавлен!</b>\n\n"
-        f"👤 {display_name}  📱 <code>{escape(phone)}</code>",
+        f"✅ <b>Аккаунт успешно добавлен!</b>\n\n"
+        f"👤 {display_name}\n"
+        f"📱 {escape(phone)}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -718,7 +858,7 @@ async def cb_channels(
     )
 
     try:
-        dialogs = await get_dialogs(session_str)
+        dialogs = await get_dialogs(session_str, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -791,7 +931,7 @@ async def cb_post_choose_chat(
     await callback.message.edit_text("⏳ Загружаю список каналов…", parse_mode="HTML")
 
     try:
-        dialogs = await get_dialogs(session_str)
+        dialogs = await get_dialogs(session_str, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -898,7 +1038,7 @@ async def handle_post_text(
     await message.answer("⏳ Отправляю сообщение…")
 
     try:
-        await send_message(session_str, chat_id, text)
+        await send_message(session_str, chat_id, text, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -1010,7 +1150,7 @@ async def cb_check_health(
     )
 
     try:
-        result = await check_account_health(session_str)
+        result = await check_account_health(session_str, _acc=acc)
     except Exception as exc:
         result = {"ok": False, "reason": f"Ошибка: {escape(str(exc)[:200])}"}
 
@@ -1052,7 +1192,7 @@ async def cb_dialogs_stats(
     )
 
     try:
-        stats = await get_account_dialogs_stats(session_str)
+        stats = await get_account_dialogs_stats(session_str, _acc=acc)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -1610,6 +1750,7 @@ async def _finalize_import(
         return
 
     phone = info.get("phone") or f"id:{info.get('tg_user_id', 'unknown')}"
+    device = generate_device_fingerprint()
     try:
         await db.add_tg_account(
             pool,
@@ -1619,6 +1760,9 @@ async def _finalize_import(
             tg_user_id=info.get("tg_user_id") or 0,
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
+            device_model=device["device_model"],
+            system_version=device["system_version"],
+            app_version=device["app_version"],
         )
     except Exception as exc:
         await message.answer(
@@ -1631,13 +1775,16 @@ async def _finalize_import(
     uname = f"@{info['username']}" if info.get("username") else "—"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
-    kb.button(text="👤 Все аккаунты",         callback_data=AccCb(action="menu"))
+    kb.button(text="➕ Импортировать ещё", callback_data=AccCb(action="import_menu"))
+    kb.button(text="🔲 Добавить (QR-код)", callback_data=AccCb(action="qr_login"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        f"✅ <b>Аккаунт импортирован!</b>\n\n"
-        f"Имя: <b>{escape(name)}</b>  |  {escape(uname)}\n"
-        f"Телефон: <code>{escape(phone)}</code>  |  ID: <code>{info.get('tg_user_id', '?')}</code>",
+        f"✅ <b>Аккаунт успешно импортирован!</b>\n\n"
+        f"Имя: <b>{escape(name)}</b>\n"
+        f"Username: {escape(uname)}\n"
+        f"Телефон: <code>{escape(phone)}</code>\n"
+        f"Telegram ID: <code>{info.get('tg_user_id', '?')}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

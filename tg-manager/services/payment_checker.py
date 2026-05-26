@@ -174,12 +174,32 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
     if not updated:
         return  # already confirmed or expired
 
-    await _activate_subscription(pool, payment["user_id"], payment["plan"], payment["period_months"])
+    user_id = payment["user_id"]
+    await _activate_subscription(pool, user_id, payment["plan"], payment["period_months"])
     log.info(
         "Payment confirmed: user=%s plan=%s months=%s ref=%s tx=%s",
-        payment["user_id"], payment["plan"], payment["period_months"],
+        user_id, payment["plan"], payment["period_months"],
         payment["reference"], tx_hash[:16] if tx_hash else "",
     )
+
+    # Referral system: mark paid + check rewards for referrer
+    try:
+        from database import db as _db
+        referrer_id = await _db.mark_referral_paid(pool, user_id)
+        if referrer_id:
+            await _db.check_and_grant_rewards(pool, referrer_id, bot)
+            # Notify referrer about the paid conversion
+            try:
+                await bot.send_message(
+                    referrer_id,
+                    "💳 <b>Один из ваших рефералов оплатил подписку!</b>\n\n"
+                    "Проверьте прогресс и награды: /referral",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning("Referral paid hook error: %s", e)
 
     try:
         em = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(payment["plan"], "💳")

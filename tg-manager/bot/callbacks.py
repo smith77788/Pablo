@@ -182,3 +182,7 @@ class ContactInvCb(CallbackData, prefix="cinv"):
     acc_id: int = 0
     channel_id: int = 0
     page: int = 0
+
+
+class RefCb(CallbackData, prefix="ref"):
+    action: str  # "menu", "leaderboard"
