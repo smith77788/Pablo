@@ -73,6 +73,7 @@ def _make_client(session_string: str = "", device: dict | None = None):
         system_lang_code="ru-RU",
         connection_retries=3,
         timeout=_CONNECT_TIMEOUT,
+        flood_sleep_threshold=0,
     )
 
 
@@ -677,6 +678,9 @@ async def search_in_telegram(session_string: str, query: str, limit: int = 20,
             })
         return items
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            raise
         log.exception("search_in_telegram error: %s", e)
         return []
     finally:
@@ -764,6 +768,9 @@ async def join_channel(session_string: str, invite_or_username: str,
             "members": getattr(ch, "participants_count", 0) or 0,
         }
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            return {"error": f"FloodWait {e.seconds}с — подождите перед вступлением", "flood_wait": e.seconds}
         log.exception("join_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
@@ -784,6 +791,10 @@ async def leave_channel(session_string: str, channel_id: int | str,
         await client(LeaveChannelRequest(channel=entity))
         return True
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            log.warning("leave_channel FloodWait %ds", e.seconds)
+            raise
         log.exception("leave_channel error: %s", e)
         return False
     finally:
@@ -946,12 +957,19 @@ async def invite_users_to_channel(
         entity = await client.get_entity(channel_id)
         for username in usernames:
             try:
+                from telethon.errors import FloodWaitError
                 user = await client.get_entity(username.strip())
                 await client(InviteToChannelRequest(channel=entity, users=[user]))
                 invited += 1
-                await asyncio.sleep(1)
+                await asyncio.sleep(4)
             except Exception as e:
+                from telethon.errors import FloodWaitError
+                if isinstance(e, FloodWaitError):
+                    log.warning("invite_users FloodWait %ds — sleeping", e.seconds)
+                    await asyncio.sleep(min(e.seconds, 300))
+                    continue
                 failed.append(f"{username}: {str(e)[:60]}")
+                await asyncio.sleep(2)
         return {"invited": invited, "failed": failed}
     except Exception as e:
         log.exception("invite_users_to_channel error: %s", e)
@@ -1182,6 +1200,9 @@ async def update_profile(
         await client(UpdateProfileRequest(**kwargs))
         return True
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            raise
         log.exception("update_profile error: %s", e)
         return False
     finally:
@@ -1201,6 +1222,9 @@ async def update_account_username(session_string: str, username: str,
         await client(UpdateUsernameRequest(username=username.lstrip("@")))
         return ""
     except Exception as e:
+        from telethon.errors import FloodWaitError
+        if isinstance(e, FloodWaitError):
+            return f"FloodWait {e.seconds}с — подождите перед изменением username"
         log.exception("update_account_username error: %s", e)
         return str(e)[:200]
     finally:
@@ -1236,7 +1260,7 @@ async def create_bot_via_botfather(
         async def _bf_send(text: str) -> str:
             """Send message to BotFather and return its response text."""
             await client.send_message(_BOTFATHER_USERNAME, text)
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             msgs = await client.get_messages(_BOTFATHER_USERNAME, limit=1)
             return msgs[0].text if msgs else ""
 

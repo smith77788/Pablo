@@ -657,7 +657,7 @@ async def cb_do_bulk_create(
             except Exception:
                 pass
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(5, flood))
+            await asyncio.sleep(max(30, flood))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
@@ -866,7 +866,7 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
         except Exception:
             pass
         flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(2, flood))
+        await asyncio.sleep(max(5, flood))
 
     ch_titles = [ch_map.get(cid, {}).get("title", f"id={cid}") for cid in selected_ids]
     lines = [f"📤 <b>Результаты публикации</b>\n", f"Каналов: {total} · ✅ {ok} · ❌ {err}\n"]
@@ -1701,7 +1701,7 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
             except Exception:
                 pass
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(5, flood))
+            await asyncio.sleep(max(60, flood))
 
     lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
     lines += results_ok + results_err
@@ -2244,7 +2244,7 @@ async def fsm_bulk_channel_id(message: Message, state: FSMContext, pool: asyncpg
                 )
             except Exception:
                 pass
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)
         lines = [f"🚪 <b>Выход из {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
 
@@ -2313,7 +2313,7 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
             except Exception:
                 pass
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(2, flood))
+            await asyncio.sleep(max(5, flood))
         lines = [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
@@ -2391,7 +2391,8 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
                 )
             except Exception:
                 pass
-            await asyncio.sleep(2)
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(5, flood))
         lines = [f"🔗 <b>Вступление в {html.escape(invite)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
         return
@@ -2476,7 +2477,7 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
                 )
             except Exception:
                 pass
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
         lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:

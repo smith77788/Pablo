@@ -23,7 +23,7 @@ from services.search_observer import canonicalize, process_search_result
 log = logging.getLogger(__name__)
 
 _INTERVAL = 3600         # background sweep every hour
-_INTER_SEARCH_DELAY = 2  # seconds between searches (rate limit)
+_INTER_SEARCH_DELAY = 5  # seconds between searches (rate limit)
 
 
 # ── Account selection ──────────────────────────────────────────────────────
@@ -122,10 +122,19 @@ async def check_bot_keywords(
                 await asyncio.sleep(_INTER_SEARCH_DELAY)
 
             except Exception as exc:
-                log.warning(
-                    "check_bot_keywords: error for %r account=%s: %s",
-                    kw["keyword"], account["id"], exc,
-                )
+                from telethon.errors import FloodWaitError
+                if isinstance(exc, FloodWaitError):
+                    wait = min(exc.seconds + 5, 120)
+                    log.warning(
+                        "check_bot_keywords FloodWait %ds kw=%r account=%s — sleeping",
+                        wait, kw["keyword"], account["id"],
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    log.warning(
+                        "check_bot_keywords: error for %r account=%s: %s",
+                        kw["keyword"], account["id"], exc,
+                    )
 
         # Write one UI history entry per keyword sweep
         if not ui_error:
@@ -214,10 +223,19 @@ async def _check_all(pool: asyncpg.Pool) -> None:
                 await asyncio.sleep(_INTER_SEARCH_DELAY)
 
             except Exception as exc:
-                log.warning(
-                    "ranking_checker: error for kw=%r (id=%s) account=%s: %s",
-                    kw["keyword"], kw["id"], account["id"], exc,
-                )
+                from telethon.errors import FloodWaitError
+                if isinstance(exc, FloodWaitError):
+                    wait = min(exc.seconds + 5, 120)
+                    log.warning(
+                        "ranking_checker FloodWait %ds kw=%r account=%s — sleeping",
+                        wait, kw["keyword"], account["id"],
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    log.warning(
+                        "ranking_checker: error for kw=%r (id=%s) account=%s: %s",
+                        kw["keyword"], kw["id"], account["id"], exc,
+                    )
 
         if ui_written:
             await pool.execute(
