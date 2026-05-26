@@ -66,6 +66,34 @@ async def start_login(phone: str) -> tuple[str, str]:
     return result.phone_code_hash, delivery_hint
 
 
+async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
+    """Resend code via next available method (usually SMS if app was first).
+    Returns (new_phone_code_hash, delivery_hint).
+    """
+    from telethon.tl.functions.auth import ResendCodeRequest
+    from telethon.errors import FloodWaitError
+    client = _pending.get(phone)
+    if not client:
+        raise ValueError("Сессия истекла — начните заново.")
+    try:
+        result = await asyncio.wait_for(
+            client(ResendCodeRequest(phone_number=phone, phone_code_hash=phone_code_hash)),
+            timeout=_CONNECT_TIMEOUT,
+        )
+    except FloodWaitError:
+        raise
+    type_name = type(result.type).__name__ if result.type else ""
+    if "Sms" in type_name:
+        hint = "💬 Код отправлен по SMS"
+    elif "Call" in type_name or "Flash" in type_name:
+        hint = "📞 Код придёт звонком"
+    elif "App" in type_name:
+        hint = "📱 Код отправлен в приложение Telegram"
+    else:
+        hint = "💬 Код выслан повторно (SMS или звонок)"
+    return result.phone_code_hash, hint
+
+
 async def confirm_code(phone: str, code: str, phone_code_hash: str):
     """Confirm SMS/TG code. Returns client or 'need_2fa'."""
     from telethon.errors import (

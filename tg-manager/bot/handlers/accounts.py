@@ -33,6 +33,7 @@ from services.account_manager import (
     get_client_info_and_session,
     import_from_pyrogram_json,
     import_from_session_string,
+    resend_code as resend_login_code,
     import_from_tdata,
     send_message,
     send_message_via_account,
@@ -320,14 +321,76 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
 
     await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
     await state.set_state(AccountLogin.waiting_code)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Выслать SMS", callback_data=AccCb(action="resend_sms"))
+    kb.button(text="❌ Отмена",      callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+
     await message.answer(
         f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
-        f"⚠️ <b>Важно:</b> код обычно приходит как уведомление в приложении Telegram "
-        f"(не SMS). Откройте Telegram на другом устройстве или в веб-версии.\n\n"
+        f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
+        f"(не SMS) — проверьте на всех устройствах.\n\n"
+        f"Не пришёл? Нажмите <b>«Выслать SMS»</b>.\n\n"
         f"Введите код (только цифры, например <code>12345</code>):",
         parse_mode="HTML",
-        reply_markup=_cancel_markup(),
+        reply_markup=kb.as_markup(),
     )
+
+
+# ── Resend code via SMS ────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "resend_sms"))
+async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    phone: str = data.get("phone", "")
+    phone_code_hash: str = data.get("phone_code_hash", "")
+
+    if not phone or not phone_code_hash:
+        await callback.message.answer("❌ Сессия истекла. Начните заново: /accounts")
+        await state.clear()
+        return
+
+    try:
+        new_hash, hint = await resend_login_code(phone, phone_code_hash)
+    except Exception as exc:
+        err = str(exc)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            import re as _re
+            m = _re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.answer(
+                f"⏳ Слишком много запросов. Подождите <b>{wait} сек</b> и попробуйте снова.",
+                parse_mode="HTML",
+            )
+        else:
+            await callback.message.answer(
+                f"❌ Не удалось выслать SMS: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+            )
+        return
+
+    await state.update_data(phone_code_hash=new_hash)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+    await callback.message.answer(
+        f"{hint} на <code>{escape(phone)}</code>.\n\n"
+        f"Введите код (только цифры):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "cancel_login"))
+async def cb_cancel_login(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Аккаунты", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text("❌ Авторизация отменена.", reply_markup=kb.as_markup())
 
 
 # ── Step 2: receive OTP code ───────────────────────────────────────────────────
