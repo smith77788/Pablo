@@ -2,9 +2,37 @@
 from __future__ import annotations
 import asyncio
 import logging
-from config import TG_API_ID, TG_API_HASH
+from config import TG_API_ID, TG_API_HASH, TG_PROXY
 
 log = logging.getLogger(__name__)
+
+
+def _parse_proxy(proxy_url: str):
+    """Parse socks5://user:pass@host:port → (socks.SOCKS5, host, port, True, user, pass)
+    or socks5://host:port → (socks.SOCKS5, host, port, True, None, None).
+    Returns None if proxy_url is empty.
+    """
+    if not proxy_url:
+        return None
+    try:
+        import socks
+        url = proxy_url.strip()
+        if "://" in url:
+            url = url.split("://", 1)[1]
+        user, password = None, None
+        if "@" in url:
+            creds, hostpart = url.rsplit("@", 1)
+            if ":" in creds:
+                user, password = creds.split(":", 1)
+            else:
+                user = creds
+        else:
+            hostpart = url
+        host, port = hostpart.rsplit(":", 1)
+        return (socks.SOCKS5, host, int(port), True, user, password)
+    except Exception as e:
+        log.warning("Failed to parse TG_PROXY %r: %s — running without proxy", proxy_url, e)
+        return None
 
 # In-memory pending clients (phone -> client) during login flow
 _pending: dict[str, object] = {}
@@ -19,12 +47,16 @@ _CONNECT_TIMEOUT = 30
 def _make_client(session_string: str = ""):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
+    proxy = _parse_proxy(TG_PROXY)
+    if proxy:
+        log.info("Telethon client using proxy %s:%s", proxy[1], proxy[2])
     return TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),
         TG_API_HASH,
         connection_retries=1,
         timeout=_CONNECT_TIMEOUT,
+        proxy=proxy,
     )
 
 
