@@ -25,8 +25,10 @@ def _make_client(session_string: str = ""):
     )
 
 
-async def start_login(phone: str) -> str:
-    """Начинает авторизацию по номеру телефона. Возвращает phone_code_hash."""
+async def start_login(phone: str) -> tuple[str, str]:
+    """Начинает авторизацию по номеру телефона.
+    Возвращает (phone_code_hash, delivery_hint) где delivery_hint — строка о способе доставки.
+    """
     from telethon.errors import FloodWaitError
     if not TG_API_ID or not TG_API_HASH:
         raise ValueError("TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды.")
@@ -49,7 +51,19 @@ async def start_login(phone: str) -> str:
             pass
         raise
     _pending[phone] = client
-    return result.phone_code_hash
+
+    # Determine where the code was sent so handlers can tell the user
+    type_name = type(result.type).__name__ if result.type else ""
+    if "App" in type_name:
+        delivery_hint = "📱 Код отправлен в приложение Telegram"
+    elif "Sms" in type_name:
+        delivery_hint = "💬 Код отправлен по SMS"
+    elif "Call" in type_name or "Flash" in type_name:
+        delivery_hint = "📞 Код придёт звонком на номер"
+    else:
+        delivery_hint = "📱 Код отправлен (проверьте приложение Telegram или SMS)"
+
+    return result.phone_code_hash, delivery_hint
 
 
 async def confirm_code(phone: str, code: str, phone_code_hash: str):

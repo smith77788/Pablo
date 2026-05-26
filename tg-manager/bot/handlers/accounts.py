@@ -294,7 +294,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
     await message.answer("⏳ Отправляю код на " + escape(phone) + "…")
 
     try:
-        phone_code_hash = await start_login(phone)
+        phone_code_hash, delivery_hint = await start_login(phone)
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -302,6 +302,13 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
             wait = m.group(1) if m else "?"
             await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+            )
+        elif "TG_API_ID" in err or "TG_API_HASH" in err:
+            await message.answer(
+                "⚙️ <b>API-ключи не настроены.</b>\n\n"
+                "Обратитесь к администратору платформы — "
+                "необходимо задать переменные <code>TG_API_ID</code> и <code>TG_API_HASH</code>.",
                 parse_mode="HTML",
             )
         else:
@@ -314,8 +321,10 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
     await state.update_data(phone=phone, phone_code_hash=phone_code_hash)
     await state.set_state(AccountLogin.waiting_code)
     await message.answer(
-        f"✅ Код отправлен на <code>{escape(phone)}</code>.\n\n"
-        f"Введите его (только цифры, например <code>12345</code>):",
+        f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
+        f"⚠️ <b>Важно:</b> код обычно приходит как уведомление в приложении Telegram "
+        f"(не SMS). Откройте Telegram на другом устройстве или в веб-версии.\n\n"
+        f"Введите код (только цифры, например <code>12345</code>):",
         parse_mode="HTML",
         reply_markup=_cancel_markup(),
     )
