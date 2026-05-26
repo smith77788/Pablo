@@ -53,6 +53,12 @@ REPORT_REASONS = {
 REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "😮", "😢", "👎", "💯", "🤔", "🤩"]
 
 
+def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
+    """Exponential backoff: base**attempt capped at cap seconds."""
+    import math
+    return min(base ** attempt, cap)
+
+
 def _progress_bar(done: int, total: int, width: int = 10) -> str:
     filled = round(width * done / total) if total else 0
     return "█" * filled + "░" * (width - filled)
@@ -622,42 +628,76 @@ async def cb_do_bulk_create(
             callback.from_user.id,
         )
     from services import account_manager
+    from database import db as _db
     channel_count = data.get("channel_count", 1)
     name_mode = data.get("name_mode", "none")
     results_ok, results_err = [], []
     total_ops = len(accounts) * channel_count
     done_ops = 0
     global_idx = 1
+    attempt = 0
     progress_msg = await callback.message.edit_text(
         _progress_text("Создание каналов...", 0, total_ops, 0, 0),
         parse_mode="HTML",
     )
-    for acc in accounts:
+    # Round-robin: task i uses accounts[i % len(accounts)]
+    active_accounts = list(accounts)
+    tasks = []
+    for i in range(total_ops):
+        acc = active_accounts[i % len(active_accounts)] if active_accounts else None
+        tasks.append((i, acc))
+
+    for task_i, acc in tasks:
+        if not acc:
+            results_err.append(f"❌ Нет доступных аккаунтов")
+            done_ops += 1
+            global_idx += 1
+            continue
         label = html.escape(acc["first_name"] or acc["phone"])
-        for i in range(channel_count):
-            title = _make_title(data["title"], name_mode, global_idx, acc["first_name"] or acc["phone"])
+        title = _make_title(data["title"], name_mode, global_idx, acc["first_name"] or acc["phone"])
+        # Account rotation on banned/flood_wait
+        tried_accs = set()
+        result = None
+        for candidate in active_accounts:
+            if candidate["id"] in tried_accs:
+                continue
+            tried_accs.add(candidate["id"])
             result = await account_manager.create_channel(
-                acc["session_str"],
+                candidate["session_str"],
                 title=title,
                 about=data.get("about", ""),
                 megagroup=data.get("is_group", False),
-                _acc=acc,
+                _acc=dict(candidate),
             )
-            if "error" in result:
-                results_err.append(f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}")
-            else:
-                results_ok.append(f"✅ {html.escape(title)}: id={result['channel_id']}")
-            done_ops += 1
-            global_idx += 1
-            try:
-                await progress_msg.edit_text(
-                    _progress_text("Создание каналов...", done_ops, total_ops, len(results_ok), len(results_err)),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-            flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(30, flood))
+            if result.get("banned"):
+                await _db.deactivate_account(pool, candidate["id"], "banned detected in bulk op")
+                active_accounts = [a for a in active_accounts if a["id"] != candidate["id"]]
+                continue
+            if result.get("flood_wait"):
+                continue
+            break
+        if result is None:
+            result = {"error": "нет доступных аккаунтов"}
+        if "error" in result:
+            results_err.append(f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}")
+        else:
+            results_ok.append(f"✅ {html.escape(title)}: id={result['channel_id']}")
+        done_ops += 1
+        global_idx += 1
+        try:
+            await progress_msg.edit_text(
+                _progress_text("Создание каналов...", done_ops, total_ops, len(results_ok), len(results_err)),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        # Exponential backoff; reset every 5 iterations
+        if attempt >= 4:
+            attempt = 0
+        else:
+            attempt += 1
+        flood = result.get("flood_wait", 0)
+        await asyncio.sleep(max(_backoff(attempt), flood))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
@@ -845,8 +885,10 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
 
     ch_map = {ch["id"]: ch for ch in channels}
     from services import account_manager
+    from database import db as _db
     total = len(selected_ids)
     ok, err = 0, 0
+    attempt = 0
     progress_msg = await message.answer(
         _progress_text("Публикация постов...", 0, total, 0, 0),
         parse_mode="HTML",
@@ -854,7 +896,10 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
     for idx, ch_id in enumerate(selected_ids, 1):
         access_hash = ch_map.get(ch_id, {}).get("access_hash", 0) or 0
         result = await account_manager.post_to_channel(acc["session_str"], ch_id, text, access_hash=access_hash, _acc=acc)
-        if "error" in result:
+        if result.get("banned"):
+            await _db.deactivate_account(pool, acc_id, "banned detected in bulk op")
+            err += 1
+        elif "error" in result:
             err += 1
         else:
             ok += 1
@@ -865,8 +910,13 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
             )
         except Exception:
             pass
+        # Exponential backoff; reset every 5 iterations
+        if attempt >= 4:
+            attempt = 0
+        else:
+            attempt += 1
         flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(5, flood))
+        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood))
 
     ch_titles = [ch_map.get(cid, {}).get("title", f"id={cid}") for cid in selected_ids]
     lines = [f"📤 <b>Результаты публикации</b>\n", f"Каналов: {total} · ✅ {ok} · ❌ {err}\n"]

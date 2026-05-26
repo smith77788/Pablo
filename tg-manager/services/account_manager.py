@@ -970,13 +970,18 @@ async def invite_users_to_channel(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
+        attempt = 0
         for username in usernames:
             try:
-                from telethon.errors import FloodWaitError
+                from telethon.errors import FloodWaitError, PeerFloodError, UserBannedInChannelError, ChatAdminRequiredError
                 user = await client.get_entity(username.strip())
                 await client(InviteToChannelRequest(channel=entity, users=[user]))
                 invited += 1
-                await asyncio.sleep(4)
+                await asyncio.sleep(_backoff(attempt))
+            except PeerFloodError as e:
+                return {"flood_wait": e.seconds if hasattr(e, 'seconds') else 0, "banned": False, "invited": invited, "failed": failed}
+            except (UserBannedInChannelError, ChatAdminRequiredError):
+                continue
             except Exception as e:
                 from telethon.errors import FloodWaitError
                 if isinstance(e, FloodWaitError):
@@ -985,6 +990,8 @@ async def invite_users_to_channel(
                     continue
                 failed.append(f"{username}: {str(e)[:60]}")
                 await asyncio.sleep(2)
+            finally:
+                attempt = 0 if attempt >= 5 else attempt + 1
         return {"invited": invited, "failed": failed}
     except Exception as e:
         log.exception("invite_users_to_channel error: %s", e)
@@ -1074,7 +1081,7 @@ async def post_to_channel(
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
     """
     from telethon.tl.types import InputPeerChannel
-    from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError
+    from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError, UserBannedInChannelError
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1103,8 +1110,10 @@ async def post_to_channel(
         return {"msg_id": msg.id}
     except FloodWaitError as e:
         return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
-    except ChatWriteForbiddenError:
-        return {"error": "Нет прав для публикации в этом канале"}
+    except UserBannedInChannelError as e:
+        return {"error": f"Аккаунт забанен в канале: {e}", "banned": True}
+    except ChatWriteForbiddenError as e:
+        return {"error": f"Нет прав для публикации в этом канале: {e}", "banned": True}
     except UserNotParticipantError:
         return {"error": "Аккаунт не является участником канала"}
     except Exception as e:
