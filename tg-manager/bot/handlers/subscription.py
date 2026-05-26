@@ -208,21 +208,25 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: 
     if not ton and not tron:
         await callback.answer()
         from bot.utils.subscription import is_platform_admin
+        usd, _ = _calc(plan, months, "TON")
         kb = InlineKeyboardBuilder()
         if is_platform_admin(callback.from_user.id):
             kb.button(
-                text="🎁 Выдать подписку себе (Admin)",
+                text="🎁 Активировать себе (Admin)",
                 callback_data=SubCb(action="admin_grant", plan=plan, months=months),
+            )
+        else:
+            kb.button(
+                text="📩 Запросить подписку",
+                callback_data=SubCb(action="request_sub", plan=plan, months=months),
             )
         kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
         kb.adjust(1)
         await callback.message.edit_text(
-            f"⚠️ <b>Оплата не настроена</b>\n\n"
-            f"Криптовалютные кошельки не сконфигурированы.\n\n"
-            f"<b>Для администратора:</b>\n"
-            f"Откройте /admin → 🔑 Переменные Railway → добавьте <code>TON_WALLET</code> "
-            f"или <code>TRON_WALLET</code>.\n\n"
-            f"Или выдайте подписку вручную: /admin → 💰 Выдать подписку.",
+            f"💳 <b>{plan.upper()} × {months} мес.</b> — <b>${usd}</b>\n\n"
+            f"⚠️ Автоматическая оплата временно недоступна.\n\n"
+            f"Нажмите <b>«📩 Запросить подписку»</b> — администратор получит уведомление "
+            f"и активирует подписку вручную после получения оплаты.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -271,6 +275,48 @@ async def cb_admin_grant(callback: CallbackQuery, callback_data: SubCb, pool: as
         f"✅ <b>Подписка активирована!</b>\n\n"
         f"План: <b>{plan.upper()}</b>\n"
         f"Срок: {months} мес. (до {expires.strftime('%d.%m.%Y')})",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(SubCb.filter(F.action == "request_sub"))
+async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
+    await callback.answer()
+    plan, months = callback_data.plan, callback_data.months
+    usd, _ = _calc(plan, months, "TON")
+    em = PLAN_EMOJIS.get(plan, "")
+    uid = callback.from_user.id
+    username = callback.from_user.username or ""
+    first_name = callback.from_user.first_name or ""
+
+    # Notify all admins
+    admin_ids_raw = os.getenv("ADMIN_IDS", "")
+    admin_ids = [int(x.strip()) for x in admin_ids_raw.split(",") if x.strip().isdigit()]
+    user_label = f"@{username}" if username else first_name
+    notify_text = (
+        f"💳 <b>Запрос на подписку</b>\n\n"
+        f"Пользователь: {user_label} (<code>{uid}</code>)\n"
+        f"План: <b>{em} {plan.upper()}</b> × {months} мес.\n"
+        f"Сумма: <b>${usd}</b>\n\n"
+        f"Чтобы активировать после оплаты:\n"
+        f"<code>/admin</code> → 💰 Выдать подписку →\n"
+        f"<code>{uid} {plan} {months}</code>"
+    )
+    for admin_id in admin_ids:
+        try:
+            await callback.bot.send_message(admin_id, notify_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К планам", callback_data=SubCb(action="menu"))
+    await callback.message.edit_text(
+        f"✅ <b>Запрос отправлен!</b>\n\n"
+        f"Администратор получил уведомление о вашем запросе на подписку "
+        f"<b>{em} {plan.upper()}</b> × {months} мес. (${usd}).\n\n"
+        f"Как только оплата будет получена — подписка будет активирована вручную.\n\n"
+        f"Для связи с администратором напишите в поддержку.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
