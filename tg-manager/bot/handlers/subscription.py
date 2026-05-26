@@ -173,7 +173,7 @@ async def cb_sub_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
 
 @router.callback_query(SubCb.filter(F.action == "plan_features"))
 async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> None:
-    plan = callback_data.plan
+    plan = callback_data.plan or ""
     if plan not in PLAN_DETAILED_FEATURES:
         await callback.answer("Неизвестный план.", show_alert=True)
         return
@@ -199,7 +199,7 @@ async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> Non
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))
 async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
-    plan = callback_data.plan
+    plan = callback_data.plan or ""
     if plan not in PLAN_PRICES_USD:
         await callback.answer("Неизвестный план.", show_alert=True)
         return
@@ -226,7 +226,7 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
 
 @router.callback_query(SubCb.filter(F.action == "choose_period"))
 async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
-    plan, months = callback_data.plan, callback_data.months
+    plan, months = callback_data.plan or "", callback_data.months
     ton = _ton_wallet()
     tron = _tron_wallet()
     await callback.answer()
@@ -289,7 +289,7 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: 
 
 @router.callback_query(SubCb.filter(F.action == "pay"))
 async def cb_pay(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
-    plan, months, currency = callback_data.plan, callback_data.months, callback_data.currency
+    plan, months, currency = callback_data.plan or "", callback_data.months, callback_data.currency or ""
     wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
         await callback.answer("Кошелёк не настроен. Обратитесь к администратору.", show_alert=True)
@@ -389,7 +389,7 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(SubCb.filter(F.action == "request_sub"))
 async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.answer()
-    plan, months = callback_data.plan, callback_data.months
+    plan, months = callback_data.plan or "", callback_data.months
     usd, _ = _calc(plan, months, "TON")
     em = PLAN_EMOJIS.get(plan, "")
     uid = callback.from_user.id
@@ -431,7 +431,7 @@ async def cb_admin_grant(callback: CallbackQuery, callback_data: SubCb, pool: as
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
     await callback.answer()
-    plan, months = callback_data.plan, max(1, callback_data.months)
+    plan, months = callback_data.plan or "", max(1, callback_data.months)
     from datetime import datetime, timedelta
     expires = datetime.utcnow() + timedelta(days=30 * months)
     await pool.execute(
@@ -512,7 +512,7 @@ async def cb_pay_edit(callback: CallbackQuery, callback_data: SubCb, state: FSMC
     if not is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
-    key = callback_data.plan  # reused field for the setting key
+    key = callback_data.plan or ""  # reused field for the setting key
     if key not in _PAY_SETTING_LABELS:
         await callback.answer("Неизвестный параметр.", show_alert=True)
         return
