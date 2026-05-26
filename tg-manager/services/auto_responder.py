@@ -185,8 +185,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                                     timeout=aiohttp.ClientTimeout(total=30),
                                 ) as resp:
                                     if resp.status == 200:
-                                        data = await resp.json()
-                                        ai_text = data["choices"][0]["message"]["content"].strip()
+                                        ai_data = await resp.json()
+                                        ai_text = ai_data["choices"][0]["message"]["content"].strip()
                                         await bot_api.send_message(http, token, chat_id, ai_text)
                         except Exception as exc:
                             log.warning("send_ai_reply failed: %s", exc)
@@ -247,8 +247,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                                     timeout=aiohttp.ClientTimeout(total=30),
                                 ) as resp:
                                     if resp.status == 200:
-                                        data = await resp.json()
-                                        ai_text = data["choices"][0]["message"]["content"].strip()
+                                        ai_data = await resp.json()
+                                        ai_text = ai_data["choices"][0]["message"]["content"].strip()
                                         await bot_api.send_message(http, token, chat_id, ai_text)
                         except Exception as exc:
                             log.warning("send_ai_reply failed: %s", exc)
