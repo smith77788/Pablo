@@ -429,16 +429,34 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
     await state.set_state(AccountLogin.waiting_code)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="💬 Выслать SMS", callback_data=AccCb(action="resend_sms"))
-    kb.button(text="❌ Отмена",      callback_data=AccCb(action="cancel_login"))
+    if code_type == "app":
+        kb.button(text="💬 Выслать SMS вместо этого", callback_data=AccCb(action="resend_sms"))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
     kb.adjust(1)
 
+    if code_type == "sms":
+        instructions = (
+            f"✅ Код отправлен по <b>SMS</b> на номер <code>{escape(phone)}</code>.\n\n"
+            f"Проверьте SMS-сообщения на этом номере."
+        )
+    elif code_type == "call":
+        instructions = (
+            f"📞 Сейчас поступит <b>звонок</b> на <code>{escape(phone)}</code>.\n\n"
+            f"Продиктованный код введите ниже."
+        )
+    else:
+        instructions = (
+            f"📨 Код отправлен в <b>Telegram-приложение</b> на аккаунт "
+            f"<code>{escape(phone)}</code>.\n\n"
+            f"<b>Где искать код:</b>\n"
+            f"• Откройте Telegram (телефон, десктоп или web.telegram.org)\n"
+            f"• В списке чатов найдите диалог с аккаунтом <b>«Telegram»</b> (синяя галочка)\n"
+            f"• Там будет сообщение вида: <code>Login code: 12345</code>\n\n"
+            f"Не нашли — нажмите «💬 Выслать SMS вместо этого»."
+        )
+
     await message.answer(
-        f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
-        f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
-        f"(не SMS) — проверьте на всех устройствах.\n\n"
-        f"Не пришёл? Нажмите <b>«Выслать SMS»</b>.\n\n"
-        f"Введите код (только цифры, например <code>12345</code>):",
+        instructions + "\n\nВведите код (только цифры):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
