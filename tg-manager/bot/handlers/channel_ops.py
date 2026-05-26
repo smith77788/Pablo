@@ -2580,22 +2580,35 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
         msg = await message.answer(
             _progress_text("Обновляю профили...", 0, total, 0, 0), parse_mode="HTML"
         )
+        from database import db as _db
         ok_list, err_list = [], []
+        attempt = 0
         for i, acc in enumerate(accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
             actual_value = f"{value}{i+1}" if field == "username" and i > 0 else value
             try:
                 if field == "username":
-                    err = await account_manager.update_account_username(acc["session_str"], actual_value, _acc=acc)
-                    if err:
-                        err_list.append(f"❌ {label}: {html.escape(err[:50])}")
+                    result = await account_manager.update_account_username(acc["session_str"], actual_value, _acc=dict(acc))
+                    if isinstance(result, dict) and result.get("banned"):
+                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        err_list.append(f"❌ {label}: забанен")
+                    elif isinstance(result, dict) and result.get("flood_wait"):
+                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                    elif result and not isinstance(result, dict):
+                        err_list.append(f"❌ {label}: {html.escape(str(result)[:50])}")
                     else:
                         ok_list.append(f"✅ {label}: @{html.escape(actual_value)}")
                 else:
-                    ok = await account_manager.update_profile(acc["session_str"], **{field: value}, _acc=acc)
-                    (ok_list if ok else err_list).append(
-                        f"{'✅' if ok else '❌'} {label}" + ("" if ok else ": ошибка")
-                    )
+                    result = await account_manager.update_profile(acc["session_str"], **{field: value}, _acc=dict(acc))
+                    if isinstance(result, dict) and result.get("banned"):
+                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        err_list.append(f"❌ {label}: забанен")
+                    elif isinstance(result, dict) and result.get("flood_wait"):
+                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                    elif result:
+                        ok_list.append(f"✅ {label}")
+                    else:
+                        err_list.append(f"❌ {label}: ошибка")
             except Exception as e:
                 err_list.append(f"❌ {label}: {str(e)[:50]}")
             try:
@@ -2605,7 +2618,12 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
                 )
             except Exception:
                 pass
-            await asyncio.sleep(5)
+            # Exponential backoff; reset every 5 iterations
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            await asyncio.sleep(_backoff(attempt, base=2.0, cap=30.0))
         lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
@@ -2734,16 +2752,30 @@ async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Po
         parse_mode="HTML",
     )
 
+    from database import db as _db
     ok_list: list[str] = []
     err_list: list[str] = []
     flood_wait_total = 0
+    active_accounts = list(accounts)
 
     for i, username in enumerate(usernames):
-        acc = accounts[i % n_acc]
-        result = await account_manager.send_dm(acc["session_str"], username, text_to_send, _acc=acc)
+        if not active_accounts:
+            err_list.append(f"❌ @{html.escape(username)}: нет активных аккаунтов")
+            continue
+        n_active = len(active_accounts)
+        acc = active_accounts[i % n_active]
+        result = await account_manager.send_dm(acc["session_str"], username, text_to_send, _acc=dict(acc))
 
         u_escaped = html.escape(username)
-        if result.get("ok"):
+        if result.get("banned"):
+            await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+            active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+            err_list.append(f"❌ @{u_escaped}: аккаунт забанен")
+        elif result.get("flood_wait"):
+            # Skip to next account but keep in pool
+            flood_wait_total += result.get("flood_wait", 0)
+            err_list.append(f"⏳ @{u_escaped}: flood_wait")
+        elif result.get("ok"):
             ok_list.append(f"✅ @{u_escaped}")
         else:
             err = html.escape(result.get("error", "неизвестная ошибка")[:60])
