@@ -546,7 +546,7 @@ async def _qr_wait_task(
     phone_str = escape(info.get("phone", ""))
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="menu"))
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
@@ -633,7 +633,7 @@ async def handle_qr_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext)
     phone_str = escape(info.get("phone", ""))
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="menu"))
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
@@ -775,7 +775,7 @@ async def _finalize_login(
 
     display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="qr_login"))
+    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="menu"))
     kb.button(text="☎️ Добавить по телефону", callback_data=AccCb(action="add"))
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
