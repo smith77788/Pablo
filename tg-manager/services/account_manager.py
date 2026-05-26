@@ -9,6 +9,9 @@ log = logging.getLogger(__name__)
 # In-memory pending clients (phone -> client) during login flow
 _pending: dict[str, object] = {}
 
+# QR login pending: user_id -> (client, qr_login_obj)
+_pending_qr: dict[int, tuple] = {}
+
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
 
@@ -288,6 +291,67 @@ async def cleanup_pending(phone: str) -> None:
     if client:
         try:
             await client.disconnect()
+        except Exception:
+            pass
+
+
+def _url_to_qr_png(url: str) -> bytes:
+    """Render a URL as a QR code PNG and return bytes."""
+    import qrcode
+    import io
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def start_qr_login(user_id: int) -> bytes:
+    """Start QR-code login session. Returns PNG image bytes of the QR code."""
+    if not TG_API_ID or not TG_API_HASH:
+        raise ValueError("TG_API_ID / TG_API_HASH не настроены.")
+    # Clean up any previous QR session for this user
+    old = _pending_qr.pop(user_id, None)
+    if old:
+        try:
+            await old[0].disconnect()
+        except Exception:
+            pass
+    client = _make_client()
+    await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+    qr_login = await client.qr_login()
+    _pending_qr[user_id] = (client, qr_login)
+    return _url_to_qr_png(qr_login.url)
+
+
+async def wait_qr_login(user_id: int, timeout: int = 30) -> tuple[str, dict]:
+    """Wait for the user to scan the QR code (up to timeout seconds).
+    Returns (session_string, info_dict) on success.
+    Raises asyncio.TimeoutError if not scanned in time.
+    """
+    pair = _pending_qr.get(user_id)
+    if not pair:
+        raise ValueError("QR-сессия не найдена — создайте новый QR-код.")
+    client, qr_login = pair
+    await asyncio.wait_for(qr_login.wait(), timeout=timeout)
+    me = await client.get_me()
+    session_str = client.session.save()
+    _pending_qr.pop(user_id, None)
+    return session_str, {
+        "tg_user_id": me.id,
+        "phone": me.phone or "",
+        "first_name": me.first_name or "",
+        "username": me.username or "",
+    }
+
+
+async def cleanup_qr_pending(user_id: int) -> None:
+    pair = _pending_qr.pop(user_id, None)
+    if pair:
+        try:
+            await pair[0].disconnect()
         except Exception:
             pass
 

@@ -5,6 +5,7 @@ so the platform can list channels/groups, post messages, and track search rankin
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from html import escape
 
@@ -26,6 +27,7 @@ from database import db
 from services.account_manager import (
     check_account_health,
     cleanup_pending,
+    cleanup_qr_pending,
     confirm_2fa,
     confirm_code,
     get_account_dialogs_stats,
@@ -34,6 +36,8 @@ from services.account_manager import (
     import_from_pyrogram_json,
     import_from_session_string,
     resend_code as resend_login_code,
+    start_qr_login,
+    wait_qr_login,
     import_from_tdata,
     send_message,
     send_message_via_account,
@@ -212,7 +216,9 @@ async def _show_accounts_menu(
     text += f"\n\n<i>Использовано: {used} / {limit_label}</i>"
 
     if used < limit:
-        kb.button(text="➕ Добавить аккаунт (телефон)",
+        kb.button(text="📱 Добавить (QR-код)",
+                  callback_data=AccCb(action="qr_login"))
+        kb.button(text="☎️ Добавить (номер телефона)",
                   callback_data=AccCb(action="add"))
         kb.button(text="📥 Импорт сессии",
                   callback_data=AccCb(action="import_menu"))
@@ -227,6 +233,105 @@ async def _show_accounts_menu(
         await message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     else:
         await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── QR-code login ──────────────────────────────────────────────────────────────
+
+async def _send_qr_photo(message: Message, user_id: int, pool: asyncpg.Pool) -> None:
+    """Generate and send a fresh QR code. Starts background wait task."""
+    try:
+        png = await start_qr_login(user_id)
+    except Exception as exc:
+        await message.answer(
+            f"❌ Не удалось создать QR-код: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    from aiogram.types import BufferedInputFile
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить QR", callback_data=AccCb(action="qr_refresh"))
+    kb.button(text="❌ Отмена",       callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+
+    await message.answer_photo(
+        BufferedInputFile(png, filename="qr.png"),
+        caption=(
+            "📲 <b>Войти через QR-код</b>\n\n"
+            "1. Откройте Telegram на телефоне\n"
+            "2. Перейдите: <b>Настройки → Устройства → Подключить устройство</b>\n"
+            "3. Наведите камеру на QR-код\n\n"
+            "QR действует <b>30 секунд</b>. Не успели — нажмите «🔄 Обновить QR»."
+        ),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+    bot = message.bot
+    chat_id = message.chat.id
+    asyncio.create_task(_qr_wait_task(user_id, pool, bot, chat_id))
+
+
+async def _qr_wait_task(user_id: int, pool: asyncpg.Pool, bot, chat_id: int) -> None:
+    """Background task: waits for QR scan, saves account, notifies user."""
+    try:
+        session_str, info = await wait_qr_login(user_id, timeout=30)
+    except asyncio.TimeoutError:
+        return  # User will click "Обновить QR" if needed
+    except Exception:
+        return
+
+    try:
+        await db.add_tg_account(
+            pool,
+            owner_id=user_id,
+            phone=info.get("phone") or "",
+            session_str=session_str,
+            tg_user_id=info.get("tg_user_id"),
+            first_name=info.get("first_name", ""),
+            username=info.get("username", ""),
+        )
+    except Exception as exc:
+        await bot.send_message(
+            chat_id,
+            f"❌ Не удалось сохранить аккаунт: <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    display = escape(info.get("first_name") or info.get("username") or info.get("phone") or "Аккаунт")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await bot.send_message(
+        chat_id,
+        f"✅ <b>Аккаунт добавлен через QR!</b>\n\n👤 {display}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "qr_login"))
+async def cb_qr_login(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    if not _api_configured():
+        await callback.message.edit_text(_api_missing_text(), parse_mode="HTML", reply_markup=_cancel_markup())
+        return
+    plan, limit = await _get_account_limit(pool, callback.from_user.id)
+    if limit == 0:
+        await callback.message.edit_text(locked_text("Личные аккаунты Telegram", "starter"), parse_mode="HTML", reply_markup=subscription_locked_markup("starter"))
+        return
+    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
+    if len(accounts) >= limit:
+        await callback.message.edit_text("⚠️ Достигнут лимит аккаунтов для вашего плана.", parse_mode="HTML", reply_markup=_cancel_markup())
+        return
+    await _send_qr_photo(callback.message, callback.from_user.id, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "qr_refresh"))
+async def cb_qr_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer("Генерирую новый QR…")
+    await _send_qr_photo(callback.message, callback.from_user.id, pool)
 
 
 # ── Add account ────────────────────────────────────────────────────────────────
