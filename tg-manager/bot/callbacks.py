@@ -186,3 +186,9 @@ class ContactInvCb(CallbackData, prefix="cinv"):
 
 class RefCb(CallbackData, prefix="ref"):
     action: str  # "menu", "leaderboard"
+
+
+class BmCb(CallbackData, prefix="bm"):
+    action: str
+    sub: str = ""
+    page: int = 0

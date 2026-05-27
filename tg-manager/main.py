@@ -38,6 +38,7 @@ from bot.handlers import accounts as accounts_handler
 from bot.handlers import referral as referral_handler
 from bot.handlers import channel_ops as channel_ops_handler
 from bot.handlers import admin as admin_handler
+from bot.handlers import botmother_menu as bm_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -102,6 +103,7 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage())
 
+    dp.include_router(bm_handler.router)
     dp.include_router(sub_handler.router)
     dp.include_router(start.router)
     dp.include_router(bots.router)
