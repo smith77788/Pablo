@@ -28,6 +28,13 @@ from bot.states import (
     ChannelFactoryFSM,
     EditChannelBulkFSM,
 )
+from bot.utils.op_helpers import (
+    _acc_label,
+    _get_active_accounts,
+    _progress_bar,
+    _progress_text,
+)
+
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -41,37 +48,6 @@ def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
     raw = min(base ** attempt, cap)
     return raw * random.uniform(0.8, 1.2)
 
-
-def _progress_bar(done: int, total: int, width: int = 10) -> str:
-    filled = round(width * done / total) if total else 0
-    return "█" * filled + "░" * (width - filled)
-
-
-def _progress_text(title: str, done: int, total: int, ok: int, err: int) -> str:
-    pct = round(100 * done / total) if total else 0
-    bar = _progress_bar(done, total)
-    return (
-        f"⏳ <b>{title}</b> {done}/{total}\n"
-        f"[{bar}] {pct}%\n"
-        f"✅ Успешно: {ok} | ❌ Ошибок: {err}"
-    )
-
-
-async def _get_active_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
-        "SELECT id, phone, first_name, username, session_str, is_active "
-        "FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=true "
-        "ORDER BY trust_score DESC NULLS LAST "
-        "LIMIT 12",
-        owner_id,
-    )
-
-
-def _acc_label(acc: asyncpg.Record) -> str:
-    name = (acc["first_name"] or "").strip()
-    uname = f"@{acc['username']}" if acc.get("username") else acc["phone"]
-    return f"{name} ({uname})" if name else uname
 
 
 def _back_menu_kb() -> InlineKeyboardBuilder:

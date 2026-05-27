@@ -21,6 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb
 from bot.states import MassPublishFSM, BulkBotEditFSM
+from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -47,31 +48,10 @@ _FILTER_LABELS = {
 }
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
-
-async def _get_active_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
-        "SELECT id, phone, first_name, username FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at",
-        owner_id,
-    )
-
-
-def _acc_label(acc: asyncpg.Record) -> str:
-    name = acc["first_name"] or ""
-    uname = f"@{acc['username']}" if acc["username"] else acc["phone"]
-    return f"{name} ({uname})" if name else uname
-
-
 def _back_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
     return kb
-
-
-def _progress_bar(done: int, total: int, width: int = 10) -> str:
-    filled = round(width * done / total) if total else 0
-    return "█" * filled + "░" * (width - filled)
 
 
 # ── Main menu ────────────────────────────────────────────────────────────────

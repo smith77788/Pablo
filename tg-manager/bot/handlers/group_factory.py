@@ -19,25 +19,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import GroupFCb
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
+from bot.utils.op_helpers import _acc_label, _get_active_accounts
 
 log = logging.getLogger(__name__)
 router = Router()
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-async def _get_active_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
-        "SELECT id, phone, first_name, username, is_active FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at",
-        owner_id,
-    )
-
-
-def _acc_label(acc: asyncpg.Record) -> str:
-    name = acc["first_name"] or ""
-    uname = f"@{acc['username']}" if acc["username"] else acc["phone"]
-    return f"{name} ({uname})" if name else uname
 
 
 def _back_menu_kb() -> InlineKeyboardBuilder:

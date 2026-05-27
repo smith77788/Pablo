@@ -145,25 +145,6 @@ def _cancel_markup():
     return kb.as_markup()
 
 
-# ── /cancel — выход из любого FSM-состояния ───────────────────────────────────
-
-@router.message(Command("cancel"))
-async def cmd_cancel(message: Message, state: FSMContext) -> None:
-    current = await state.get_state()
-    if current is None:
-        await message.answer(
-            "ℹ️ Нет активного действия для отмены.",
-            reply_markup=_cancel_markup(),
-        )
-        return
-    await state.clear()
-    await message.answer(
-        "❌ <b>Действие отменено.</b>",
-        parse_mode="HTML",
-        reply_markup=_cancel_markup(),
-    )
-
-
 # ── /accounts command ──────────────────────────────────────────────────────────
 
 @router.message(Command("accounts"))

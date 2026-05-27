@@ -24,6 +24,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassPubCb
 from bot.states import MassPublishFSM2
+from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, _format_duration
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -40,11 +41,6 @@ _TIMING_OPTIONS = {
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _progress_bar(done: int, total: int, width: int = 10) -> str:
-    filled = round(width * done / total) if total else 0
-    return "█" * filled + "░" * (width - filled)
-
-
 def _progress_text(done: int, total: int, ok: int, err: int) -> str:
     pct = round(100 * done / total) if total else 0
     bar = _progress_bar(done, total)
@@ -53,22 +49,6 @@ def _progress_text(done: int, total: int, ok: int, err: int) -> str:
         f"[{bar}] {pct}%\n"
         f"✅ Успешно: {ok} | ❌ Ошибок: {err}"
     )
-
-
-async def _get_active_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
-        "SELECT id, phone, first_name, username, session_str, is_active "
-        "FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=true "
-        "ORDER BY trust_score DESC NULLS LAST",
-        owner_id,
-    )
-
-
-def _acc_label(acc: asyncpg.Record) -> str:
-    name = (acc["first_name"] or "").strip()
-    uname = f"@{acc['username']}" if acc.get("username") else acc["phone"]
-    return f"{name} ({uname})" if name else uname
 
 
 def _back_menu_kb() -> InlineKeyboardBuilder:
@@ -483,8 +463,3 @@ async def cb_mpub_history(
     )
 
 
-# ── Helper ─────────────────────────────────────────────────────────────────
-
-def _format_duration(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    return f"{m} мин {s:02d}с" if m else f"{s}с"

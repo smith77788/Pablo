@@ -34,6 +34,7 @@ from bot.states import (
     PostToChannelFSM, ReportFSM, SendReactionFSM, UpdateProfileFSM,
 )
 from bot.utils.subscription import require_plan
+from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -66,21 +67,6 @@ def _human_delay(min_s: float, max_s: float) -> float:
     return random.uniform(min_s, max_s)
 
 
-def _progress_bar(done: int, total: int, width: int = 10) -> str:
-    filled = round(width * done / total) if total else 0
-    return "█" * filled + "░" * (width - filled)
-
-
-def _progress_text(title: str, done: int, total: int, ok: int, err: int) -> str:
-    pct = round(100 * done / total) if total else 0
-    bar = _progress_bar(done, total)
-    return (
-        f"⏳ <b>{title}</b> {done}/{total}\n"
-        f"[{bar}] {pct}%\n"
-        f"✅ Успешно: {ok} | ❌ Ошибок: {err}"
-    )
-
-
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
@@ -89,12 +75,6 @@ async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Recor
         "WHERE owner_id=$1 ORDER BY added_at",
         owner_id,
     )
-
-
-def _acc_label(acc: asyncpg.Record) -> str:
-    name = acc["first_name"] or ""
-    uname = f"@{acc['username']}" if acc["username"] else acc["phone"]
-    return f"{name} ({uname})" if name else uname
 
 
 def _back_kb(acc_id: int = 0) -> InlineKeyboardBuilder:
