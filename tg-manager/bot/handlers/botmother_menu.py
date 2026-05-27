@@ -22,6 +22,7 @@ from bot.callbacks import (
     GroupFCb,
     HealthCb,
     MassOpCb,
+    MassPubCb,
     NetBcCb,
     NetworkCb,
     ProxyCb,
@@ -127,11 +128,12 @@ def _settings_kb():
 
 def _bulk_ops_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Боты",         callback_data=NetworkCb(action="menu"))
-    kb.button(text="📡 Каналы",       callback_data=ChanCb(action="menu"))
-    kb.button(text="📱 Аккаунты",     callback_data=AccCb(action="menu"))
-    kb.button(text="◀️ Назад",        callback_data=BmCb(action="operations"))
-    kb.adjust(2, 1, 1)
+    kb.button(text="🤖 Боты (массово)",           callback_data=NetworkCb(action="menu"))
+    kb.button(text="📡 Каналы (bulk join/leave)",  callback_data=ChanCb(action="bulk_menu"))
+    kb.button(text="📤 Публикация в каналы",       callback_data=MassPubCb(action="menu"))
+    kb.button(text="📱 Аккаунты (профиль, bulk)",  callback_data=ChanCb(action="bulk_menu"))
+    kb.button(text="◀️ Назад",                    callback_data=BmCb(action="operations"))
+    kb.adjust(1, 1, 1, 1, 1)
     return kb.as_markup()
 
 

@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
-BUILD_VERSION = "2026.05.27-r1"
+BUILD_VERSION = "2026.05.27-r2"
 
 
 @router.message(Command("version"))
