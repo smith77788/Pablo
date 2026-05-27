@@ -3347,13 +3347,13 @@ async def cb_cinv_proceed(
     )
     from services import account_manager as _am
     acc_rows = await pool.fetch(
-        "SELECT id, session_str, first_name, username FROM tg_accounts "
+        "SELECT id, session_str, first_name, username, device_model, system_version, app_version FROM tg_accounts "
         "WHERE id = ANY($1::int[]) AND owner_id=$2 AND is_active=true",
         selected_accs, callback.from_user.id,
     )
     unique_ids: set[int] = set()
     for acc in acc_rows:
-        contacts = await _am.get_contacts(acc["session_str"])
+        contacts = await _am.get_contacts(acc["session_str"], _acc=dict(acc))
         for c in contacts:
             unique_ids.add(c["user_id"])
 
@@ -3391,7 +3391,7 @@ async def cb_cinv_run(
     await callback.answer()
     await state.clear()
     acc_rows = await pool.fetch(
-        "SELECT id, session_str, first_name, username FROM tg_accounts "
+        "SELECT id, session_str, first_name, username, device_model, system_version, app_version FROM tg_accounts "
         "WHERE id = ANY($1::int[]) AND owner_id=$2 AND is_active=true",
         selected_accs, callback.from_user.id,
     )
@@ -3439,7 +3439,7 @@ async def _cinv_bg(
     contacts_map: dict[int, dict] = {}
     for acc in acc_rows:
         try:
-            for c in await _am.get_contacts(acc["session_str"]):
+            for c in await _am.get_contacts(acc["session_str"], _acc=dict(acc)):
                 contacts_map[c["user_id"]] = c
         except Exception as e:
             log.warning("cinv get_contacts acc=%s: %s", acc["id"], e)
@@ -3487,7 +3487,7 @@ async def _cinv_bg(
         if not chunk:
             continue
         try:
-            res = await _am.invite_users_to_channel(acc["session_str"], chan_target, chunk)
+            res = await _am.invite_users_to_channel(acc["session_str"], chan_target, chunk, _acc=dict(acc))
             total_invited += res.get("invited", 0)
             total_failed += len(res.get("failed", []))
         except Exception as e:
