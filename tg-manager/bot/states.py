@@ -219,3 +219,10 @@ class ContactInviteFSM(StatesGroup):
     entering_channel = State()
     choosing_accounts = State()
     confirming = State()
+
+
+class AssetTemplateFSM(StatesGroup):
+    choosing_type = State()
+    waiting_name = State()
+    waiting_json = State()    # ввод параметров (name, desc, etc.)
+    confirming = State()

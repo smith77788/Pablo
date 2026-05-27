@@ -192,3 +192,9 @@ class BmCb(CallbackData, prefix="bm"):
     action: str
     sub: str = ""
     page: int = 0
+
+
+class AssetTplCb(CallbackData, prefix="atpl"):
+    action: str
+    tpl_id: int = 0
+    asset_type: str = ""   # "bot" | "channel" | "group" | "post"
