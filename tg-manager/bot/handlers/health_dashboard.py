@@ -33,7 +33,7 @@ async def _fetch_account_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
         SELECT
             COUNT(*) AS total,
             COUNT(CASE WHEN is_active THEN 1 END) AS active,
-            COUNT(CASE WHEN flood_wait_until > now() THEN 1 END) AS in_cooldown,
+            COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
             ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust
         FROM tg_accounts
         WHERE owner_id=$1
@@ -47,8 +47,9 @@ async def _fetch_flood_events_7d(pool: asyncpg.Pool, owner_id: int) -> int:
     try:
         val = await pool.fetchval(
             """
-            SELECT COUNT(*) FROM account_flood_log
-            WHERE owner_id=$1 AND created_at > now() - interval '7 days'
+            SELECT COUNT(*) FROM account_flood_log afl
+            JOIN tg_accounts ta ON ta.id = afl.account_id
+            WHERE ta.owner_id=$1 AND afl.created_at > now() - interval '7 days'
             """,
             owner_id,
         )
@@ -95,7 +96,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
     rows = await pool.fetch(
         """
-        SELECT id, phone, first_name, username, trust_score, flood_wait_until,
+        SELECT id, phone, first_name, username, trust_score, cooldown_until,
                COALESCE(flood_count_7d, 0) AS flood_count_7d, is_active
         FROM tg_accounts
         WHERE owner_id=$1
@@ -113,7 +114,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             trust = float(acc["trust_score"] or 1.0)
             phone = acc["phone"] or ""
             name = acc["username"] or acc["first_name"] or phone or f"id{acc['id']}"
-            flood_until = acc["flood_wait_until"]
+            flood_until = acc["cooldown_until"]
             flood_cnt = int(acc["flood_count_7d"] or 0)
 
             if flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
