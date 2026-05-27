@@ -295,13 +295,12 @@ async def cb_pick_bot_for(
     pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
-    sub = callback_data.sub
+    sub = callback_data.sub or ""
     title, back_action = _PICK_META.get(sub, ("Выберите бота", "main"))
 
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
         kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
         await _edit(
             callback,

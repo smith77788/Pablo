@@ -141,7 +141,7 @@ async def cb_mpub_start(
         )
         return
 
-    target_type = callback_data.target_type  # "all" or "account"
+    target_type = callback_data.target_type or ""
 
     if target_type == "all":
         # Skip account selection — use all active accounts

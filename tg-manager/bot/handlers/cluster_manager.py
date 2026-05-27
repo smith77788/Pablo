@@ -222,7 +222,7 @@ async def cb_cluster_view(
 ) -> None:
     await callback.answer()
     user_id = callback.from_user.id
-    cluster_name = callback_data.cluster_name
+    cluster_name = callback_data.cluster_name or ""
 
     rows = await pool.fetch(
         """
@@ -263,7 +263,7 @@ async def cb_cluster_broadcast(
     callback: CallbackQuery, callback_data: ClustMCb
 ) -> None:
     await callback.answer()
-    cluster_name = callback_data.cluster_name
+    cluster_name = callback_data.cluster_name or ""
     # Redirect to network broadcast with cluster segment
     await callback.message.edit_text(
         f"📢 Рассылка по кластеру <b>{cluster_name}</b>\n\n"

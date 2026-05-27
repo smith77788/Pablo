@@ -190,14 +190,14 @@ class RefCb(CallbackData, prefix="ref"):
 
 class BmCb(CallbackData, prefix="bm"):
     action: str
-    sub: str = ""
+    sub: Optional[str] = None
     page: int = 0
 
 
 class AssetTplCb(CallbackData, prefix="atpl"):
     action: str
     tpl_id: int = 0
-    asset_type: str = ""   # "bot" | "channel" | "group" | "post"
+    asset_type: Optional[str] = None
 
 
 class GroupFCb(CallbackData, prefix="grpf"):
@@ -209,7 +209,7 @@ class GroupFCb(CallbackData, prefix="grpf"):
 
 class MassOpCb(CallbackData, prefix="mop"):
     action: str
-    op_type: str = ""    # "bots" | "channels" | "accounts"
+    op_type: Optional[str] = None
     op_id: int = 0
     page: int = 0
 
@@ -229,7 +229,7 @@ class ChanFactCb(CallbackData, prefix="chanf"):
 
 class MassPubCb(CallbackData, prefix="mpub"):
     action: str
-    target_type: str = ""   # "all" | "cluster" | "account"
+    target_type: Optional[str] = None
     target_id: int = 0
     page: int = 0
 
@@ -261,6 +261,6 @@ class ProxyCb(CallbackData, prefix="prx"):
 
 class ClustMCb(CallbackData, prefix="clm"):
     action: str
-    cluster_name: str = ""
+    cluster_name: Optional[str] = None
     bot_id: int = 0
     page: int = 0

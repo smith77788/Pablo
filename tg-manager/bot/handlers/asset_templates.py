@@ -211,7 +211,7 @@ async def cb_list(
     pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
-    asset_type = callback_data.asset_type
+    asset_type = callback_data.asset_type or ""
     label = _TYPE_LABELS.get(asset_type, asset_type)
     templates = await _get_templates(pool, callback.from_user.id, asset_type)
 
@@ -254,7 +254,7 @@ async def cb_view(
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=_view_kb(callback_data.tpl_id, callback_data.asset_type),
+        reply_markup=_view_kb(callback_data.tpl_id, callback_data.asset_type or ""),
     )
 
 
@@ -274,7 +274,7 @@ async def cb_create(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(AssetTplCb.filter(F.action == "choose_type"), AssetTemplateFSM.choosing_type)
 async def cb_choose_type(callback: CallbackQuery, callback_data: AssetTplCb, state: FSMContext) -> None:
     await callback.answer()
-    asset_type = callback_data.asset_type
+    asset_type = callback_data.asset_type or ""
     await state.update_data(asset_type=asset_type)
     await state.set_state(AssetTemplateFSM.waiting_name)
     label = _TYPE_LABELS.get(asset_type, asset_type)
@@ -358,7 +358,7 @@ async def cb_save(
 ) -> None:
     await callback.answer()
     data = await state.get_data()
-    asset_type = data.get("asset_type", callback_data.asset_type)
+    asset_type = data.get("asset_type", callback_data.asset_type or "")
     name = data.get("name", "")
     template = data.get("template", {})
     await state.clear()
@@ -406,7 +406,7 @@ async def cb_delete_confirm(
     await callback.message.edit_text(
         f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{tpl['name']}»</b>?",
         parse_mode="HTML",
-        reply_markup=_delete_confirm_kb(callback_data.tpl_id, callback_data.asset_type),
+        reply_markup=_delete_confirm_kb(callback_data.tpl_id, callback_data.asset_type or ""),
     )
 
 
@@ -422,7 +422,7 @@ async def cb_delete(
         return
     await callback.answer("✅ Шаблон удалён.")
 
-    asset_type = callback_data.asset_type
+    asset_type = callback_data.asset_type or ""
     label = _TYPE_LABELS.get(asset_type, asset_type)
     templates = await _get_templates(pool, callback.from_user.id, asset_type)
     count = len(templates)

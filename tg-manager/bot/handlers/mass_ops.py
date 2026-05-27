@@ -127,7 +127,8 @@ async def cb_mp_target_chosen(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(mp_target=callback_data.op_type)
+    _op_type = callback_data.op_type or ""
+    await state.update_data(mp_target=_op_type)
     await state.set_state(MassPublishFSM.choosing_selector)
 
     kb = InlineKeyboardBuilder()
@@ -136,7 +137,7 @@ async def cb_mp_target_chosen(
     kb.button(text="🗂 По кластеру",           callback_data=MassOpCb(action="mp_filter", op_type="cluster"))
     kb.button(text="❌ Отмена",                callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
-    target_label = _TARGET_LABELS.get(callback_data.op_type, callback_data.op_type)
+    target_label = _TARGET_LABELS.get(_op_type, _op_type)
     await callback.message.edit_text(
         f"📤 <b>Массовая публикация</b>\n"
         f"Цели: <b>{target_label}</b>\n\n"
@@ -153,7 +154,7 @@ async def cb_mp_filter_chosen(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
-    filter_type = callback_data.op_type
+    filter_type = callback_data.op_type or ""
     await state.update_data(mp_filter=filter_type)
     data = await state.get_data()
     target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
@@ -235,7 +236,7 @@ async def cb_mp_cluster_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(mp_cluster=callback_data.op_type, mp_acc_id=None)
+    await state.update_data(mp_cluster=callback_data.op_type or "", mp_acc_id=None)
     data = await state.get_data()
     target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
     await _ask_mp_text(callback.message, state, target_label, edit=True)
@@ -639,7 +640,7 @@ async def cb_bbe_field_chosen(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    field = callback_data.op_type
+    field = callback_data.op_type or ""
     await state.update_data(bbe_field=field)
     await state.set_state(BulkBotEditFSM.waiting_value)
 
