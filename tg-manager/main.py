@@ -161,6 +161,19 @@ async def main() -> None:
     dp.error.register(_global_error_handler)
 
     pool = await create_pool()
+
+    # Register bot commands (shows in Telegram "/" menu)
+    from aiogram.types import BotCommand
+    await bot.set_my_commands([
+        BotCommand(command="start",        description="Главное меню"),
+        BotCommand(command="menu",         description="🏠 BotMother OS"),
+        BotCommand(command="ai",           description="AI-ассистент"),
+        BotCommand(command="accounts",     description="Мои аккаунты"),
+        BotCommand(command="ops",          description="Операции с аккаунтами"),
+        BotCommand(command="subscription", description="Подписка и оплата"),
+        BotCommand(command="ranking",      description="Трекер позиций в поиске"),
+        BotCommand(command="cancel",       description="Отменить текущее действие"),
+    ])
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE

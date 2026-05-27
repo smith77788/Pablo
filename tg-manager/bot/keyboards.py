@@ -4,7 +4,7 @@ from bot.callbacks import (
     BotCb, EditCb, AudCb, WebhookCb, BroadcastCb, BulkCb,
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
-    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb, ChanCb, RefCb,
+    NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb, ChanCb, RefCb, BmCb,
 )
 
 PAGE_SIZE = 5
@@ -25,6 +25,7 @@ LANGUAGES = [
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(text="🏠 BotMother OS",          callback_data=BmCb(action="main"))
     kb.button(text="🤖 Мои боты",              callback_data=BotCb(action="list", page=0))
     kb.button(text="➕ Добавить бота",          callback_data=BotCb(action="add"))
     kb.button(text="🌐 Сеть & операции",       callback_data=NetworkCb(action="menu"))
@@ -36,7 +37,7 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb.button(text="❓ Справка",               callback_data=BotCb(action="help"))
     if is_admin:
         kb.button(text="⚙️ Админка",           callback_data="adm:main")
-    kb.adjust(2, 2, 2, 2, 2, 1 if not is_admin else 2)
+    kb.adjust(1, 2, 2, 2, 2, 2, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
