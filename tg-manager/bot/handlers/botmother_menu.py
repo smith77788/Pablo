@@ -13,18 +13,22 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import (
     AccCb,
     AiCb,
+    AssetTplCb,
     BmCb,
     BotCb,
     ChanCb,
     ClustMCb,
     CompCb,
+    GroupFCb,
     HealthCb,
+    MassOpCb,
     NetBcCb,
     NetworkCb,
     ProxyCb,
     RankCb,
     RefCb,
     RelayCb,
+    ScheduleCb,
     SubCb,
     AutoReplyCb,
 )
@@ -57,7 +61,7 @@ def _infrastructure_kb():
     kb.button(text="📱 Аккаунты",          callback_data=AccCb(action="menu"))
     kb.button(text="🤖 Мои боты",          callback_data=BotCb(action="list", page=0))
     kb.button(text="📡 Каналы & операции", callback_data=ChanCb(action="menu"))
-    kb.button(text="👥 Группы",            callback_data=BmCb(action="groups"))
+    kb.button(text="👥 Группы",            callback_data=GroupFCb(action="menu"))
     kb.button(text="🔗 Кластеры",          callback_data=ClustMCb(action="menu"))
     kb.button(text="🌐 Прокси",            callback_data=ProxyCb(action="menu"))
     kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
@@ -81,10 +85,10 @@ def _visibility_kb():
 def _operations_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
-    kb.button(text="🛠️ Построитель",      callback_data=BmCb(action="op_builder"))
-    kb.button(text="📋 Очередь",           callback_data=BmCb(action="op_queue"))
+    kb.button(text="🛠️ Построитель",      callback_data=MassOpCb(action="menu"))
+    kb.button(text="📋 Очередь",           callback_data=MassOpCb(action="queue"))
     kb.button(text="⏱️ Планировщик",       callback_data=BmCb(action="op_planner"))
-    kb.button(text="📄 Шаблоны",           callback_data=BmCb(action="op_templates"))
+    kb.button(text="📄 Шаблоны",           callback_data=AssetTplCb(action="menu"))
     kb.button(text="📊 Отчёты",            callback_data=BmCb(action="op_reports"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1)
@@ -325,29 +329,299 @@ async def cb_pick_bot_for(
     await _edit(callback, f"<b>{title}</b>\n\nВыберите бота:", kb.as_markup())
 
 
-# ── WIP stubs ─────────────────────────────────────────────────────────────
+# ── Alerts (Visibility → Alerts) ─────────────────────────────────────────
 
-_WIP_ACTIONS = {
-    "groups":        ("👥 Группы",         "operations"),
-    "alerts":        ("🔔 Алерты",         "visibility"),
-    "vis_reports":   ("📋 Отчёты",         "visibility"),
-    "op_builder":    ("🛠️ Построитель",    "operations"),
-    "op_queue":      ("📋 Очередь",        "operations"),
-    "op_planner":    ("⏱️ Планировщик",    "operations"),
-    "op_templates":  ("📄 Шаблоны",        "operations"),
-    "op_reports":    ("📊 Отчёты",         "operations"),
-    "schedules":     ("📅 Расписание",     "broadcasts"),
-    "notifications": ("🔔 Уведомления",   "settings"),
+@router.callback_query(BmCb.filter(F.action == "alerts"))
+async def cb_alerts(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    page = callback_data.page
+    limit = 10
+    offset = page * limit
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        "SELECT severity, event_type, details, created_at, account_id, bot_id "
+        "FROM restriction_events WHERE owner_id=$1 "
+        "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        user_id, limit, offset,
+    )
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM restriction_events WHERE owner_id=$1", user_id
+    ) or 0
+
+    if not rows and page == 0:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+        await _edit(callback, "<b>🔔 Алерты</b>\n\nАлертов нет. Система работает нормально. ✅", kb.as_markup())
+        return
+
+    sev_emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
+    lines = []
+    for r in rows:
+        emoji = sev_emoji.get(r["severity"], "🔔")
+        dt = r["created_at"].strftime("%d.%m %H:%M")
+        if r.get("account_id"):
+            entity = f"acc#{r['account_id']}"
+        elif r.get("bot_id"):
+            entity = f"bot#{r['bot_id']}"
+        else:
+            entity = "—"
+        etype = html.escape(r["event_type"])
+        lines.append(f"{emoji} <code>{dt}</code> {etype} ({entity})")
+
+    total_pages = max(1, -(-total // limit))
+    text = f"<b>🔔 Алерты</b>  стр. {page + 1}/{total_pages}\n\n" + "\n".join(lines)
+
+    kb = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(kb.button(text="◀️", callback_data=BmCb(action="alerts", page=page - 1)))
+    if (page + 1) * limit < total:
+        nav.append(kb.button(text="▶️", callback_data=BmCb(action="alerts", page=page + 1)))
+    if nav:
+        kb.adjust(len(nav))
+    kb.button(text="🗑 Очистить всё", callback_data=BmCb(action="alerts_clear"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    await _edit(callback, text, kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "alerts_clear"))
+async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await pool.execute("DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id)
+    await callback.answer("Алерты очищены", show_alert=True)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    await _edit(callback, "<b>🔔 Алерты</b>\n\nВсе алерты очищены.", kb.as_markup())
+
+
+# ── Visibility Reports ────────────────────────────────────────────────────
+
+@router.callback_query(BmCb.filter(F.action == "vis_reports"))
+async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
+
+    if not kws:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+        await _edit(
+            callback,
+            "<b>📋 Отчёт по позициям</b>\n\nНет отслеживаемых ключевых слов.\n\n"
+            "Добавьте слова через <b>👁️ Visibility → 🔍 Ключевые слова</b>.",
+            kb.as_markup(),
+        )
+        return
+
+    by_bot: dict[str, list] = {}
+    for kw in kws:
+        bot_u = kw["bot_username"] or f"id{kw['bot_id']}"
+        by_bot.setdefault(bot_u, []).append(kw)
+
+    lines: list[str] = []
+    for bot_u, items in by_bot.items():
+        lines.append(f"\n<b>@{html.escape(bot_u)}</b>")
+        for kw in items:
+            pos = kw["position"]
+            if pos is None:
+                pos_str = "—"
+            elif pos <= 3:
+                pos_str = f"🥇 #{pos}"
+            elif pos <= 10:
+                pos_str = f"🟢 #{pos}"
+            elif pos <= 30:
+                pos_str = f"🟡 #{pos}"
+            else:
+                pos_str = f"🔴 #{pos}"
+            kw_text = html.escape(kw["keyword"])
+            lines.append(f"  • {kw_text}: {pos_str}")
+
+    text = "<b>📋 Отчёт по позициям в поиске</b>" + "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n<i>... (показаны первые результаты)</i>"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    await _edit(callback, text, kb.as_markup())
+
+
+# ── Operation Planner ─────────────────────────────────────────────────────
+
+@router.callback_query(BmCb.filter(F.action == "op_planner"))
+async def cb_op_planner(callback: CallbackQuery) -> None:
+    await callback.answer()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚡ Массовые операции", callback_data=MassOpCb(action="menu"))
+    kb.button(text="📅 Расписание рассылок", callback_data=BmCb(action="schedules"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        "<b>⏱️ Планировщик</b>\n\n"
+        "Выберите, что хотите запланировать:\n\n"
+        "• <b>Массовые операции</b> — редактирование ботов, каналов, аккаунтов\n"
+        "• <b>Расписание рассылок</b> — отложенная отправка сообщений подписчикам",
+        kb.as_markup(),
+    )
+
+
+# ── Operation Reports ─────────────────────────────────────────────────────
+
+@router.callback_query(BmCb.filter(F.action == "op_reports"))
+async def cb_op_reports(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    page = callback_data.page
+    limit = 8
+    offset = page * limit
+    user_id = callback.from_user.id
+
+    ops = await pool.fetch(
+        "SELECT id, op_type, status, total_items, done_items, created_at, finished_at "
+        "FROM operation_queue WHERE owner_id=$1 "
+        "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        user_id, limit, offset,
+    )
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", user_id
+    ) or 0
+
+    if not ops and page == 0:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        await _edit(callback, "<b>📊 Отчёты по операциям</b>\n\nОпераций ещё не выполнялось.", kb.as_markup())
+        return
+
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    lines = []
+    for op in ops:
+        emoji = status_emoji.get(op["status"], "❓")
+        dt = op["created_at"].strftime("%d.%m %H:%M")
+        otype = html.escape(op["op_type"])
+        if op["total_items"]:
+            progress = f"{op['done_items']}/{op['total_items']}"
+        else:
+            progress = "—"
+        lines.append(f"{emoji} <code>{dt}</code> {otype} [{progress}]")
+
+    total_pages = max(1, -(-total // limit))
+    text = f"<b>📊 Отчёты по операциям</b>  стр. {page + 1}/{total_pages}\n\n" + "\n".join(lines)
+
+    kb = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(kb.button(text="◀️", callback_data=BmCb(action="op_reports", page=page - 1)))
+    if (page + 1) * limit < total:
+        nav.append(kb.button(text="▶️", callback_data=BmCb(action="op_reports", page=page + 1)))
+    if nav:
+        kb.adjust(len(nav))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    await _edit(callback, text, kb.as_markup())
+
+
+# ── Schedules (bot picker → ScheduleCb) ──────────────────────────────────
+
+@router.callback_query(BmCb.filter(F.action == "schedules"))
+async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    bots = await db.get_bots(pool, callback.from_user.id)
+
+    if not bots:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="broadcasts"))
+        await _edit(
+            callback,
+            "<b>📅 Расписание рассылок</b>\n\nУ вас нет ботов.\n"
+            "Добавьте бота через <b>🏗️ Infrastructure → 🤖 Мои боты</b>.",
+            kb.as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for bot in bots:
+        name = html.escape(bot.get("username") or bot.get("first_name") or f"id{bot['bot_id']}")
+        kb.button(text=f"🤖 @{name}", callback_data=ScheduleCb(action="menu", bot_id=bot["bot_id"]))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="broadcasts"))
+    kb.adjust(1)
+    await _edit(callback, "<b>📅 Расписание рассылок</b>\n\nВыберите бота:", kb.as_markup())
+
+
+# ── Notifications ─────────────────────────────────────────────────────────
+
+_NOTIF_SQL: dict[str, str] = {
+    "new_user":        "new_user        = NOT new_user",
+    "flood_warning":   "flood_warning   = NOT flood_warning",
+    "position_change": "position_change = NOT position_change",
+    "op_complete":     "op_complete     = NOT op_complete",
+    "restriction":     "restriction     = NOT restriction",
+}
+
+_NOTIF_LABELS = {
+    "new_user":        "Новый пользователь",
+    "flood_warning":   "Флуд-предупреждения",
+    "position_change": "Изменение позиций",
+    "op_complete":     "Завершение операций",
+    "restriction":     "Ограничения аккаунтов",
 }
 
 
-@router.callback_query(BmCb.filter(F.action.in_(_WIP_ACTIONS)))
-async def cb_wip(callback: CallbackQuery, callback_data: BmCb) -> None:
-    await callback.answer()
-    action = callback_data.action
-    title, back_action = _WIP_ACTIONS.get(action, (action, "main"))
-    await _edit(
-        callback,
-        f"<b>{title}</b>\n\n🚧 <b>В разработке</b>\n\nЭта функция будет доступна в следующем обновлении.",
-        _wip_kb(back_action),
+async def _get_or_create_notif(pool: asyncpg.Pool, user_id: int) -> asyncpg.Record:
+    await pool.execute(
+        "INSERT INTO notification_settings(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+        user_id,
     )
+    return await pool.fetchrow("SELECT * FROM notification_settings WHERE user_id=$1", user_id)
+
+
+def _notif_kb(row: asyncpg.Record) -> object:
+    kb = InlineKeyboardBuilder()
+    for field, label in _NOTIF_LABELS.items():
+        val = row[field]
+        icon = "✅" if val else "❌"
+        kb.button(text=f"{icon} {label}", callback_data=BmCb(action="notif_toggle", sub=field))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def _notif_text(row: asyncpg.Record) -> str:
+    lines = ["<b>🔔 Настройки уведомлений</b>\n"]
+    for field, label in _NOTIF_LABELS.items():
+        icon = "✅" if row[field] else "❌"
+        lines.append(f"{icon} {label}")
+    lines.append("\n<i>Нажмите на пункт, чтобы включить / отключить уведомление.</i>")
+    return "\n".join(lines)
+
+
+@router.callback_query(BmCb.filter(F.action == "notifications"))
+async def cb_notifications(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    row = await _get_or_create_notif(pool, callback.from_user.id)
+    await _edit(callback, _notif_text(row), _notif_kb(row))
+
+
+@router.callback_query(BmCb.filter(F.action == "notif_toggle"))
+async def cb_notif_toggle(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    field = callback_data.sub or ""
+    toggle_expr = _NOTIF_SQL.get(field)
+    if not toggle_expr:
+        return
+
+    await pool.execute(
+        f"INSERT INTO notification_settings(user_id) VALUES($1) "
+        f"ON CONFLICT(user_id) DO UPDATE SET {toggle_expr}, updated_at=now()",
+        callback.from_user.id,
+    )
+    row = await pool.fetchrow("SELECT * FROM notification_settings WHERE user_id=$1", callback.from_user.id)
+    await _edit(callback, _notif_text(row), _notif_kb(row))
