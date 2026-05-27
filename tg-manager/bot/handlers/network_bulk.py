@@ -6,7 +6,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.callbacks import NetworkCb, BulkCb
+from bot.callbacks import NetworkCb
 from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text, is_platform_admin
@@ -338,26 +338,3 @@ async def msg_import_tokens(message: Message, state: FSMContext,
         parse_mode="HTML", reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
     )
 
-
-# ── Backward compat: old BulkCb handlers redirect to network ops ──────────────
-
-@router.callback_query(BulkCb.filter(F.action == "menu"))
-async def cb_bulk_menu_compat(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
-    ov = await db.get_network_overview(pool, callback.from_user.id)
-    await callback.message.edit_text(
-        f"🌐 <b>Сеть & массовые операции</b>\n\n"
-        f"🤖 Ботов: <b>{ov['total_bots']}</b> | 👤 Юзеров: <b>{ov['unique_users']:,}</b>",
-        parse_mode="HTML",
-        reply_markup=network_ops_menu(),
-    )
-
-
-@router.callback_query(BulkCb.filter(F.action == "import"))
-async def cb_bulk_import_compat(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
-    await callback.answer()
-    await state.set_state(ImportBots.waiting_tokens)
-    await callback.message.edit_text(
-        "📥 <b>Массовый импорт ботов</b>\n\nОтправьте токены — по одному на строке:",
-        parse_mode="HTML",
-    )
