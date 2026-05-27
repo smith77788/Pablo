@@ -18,6 +18,8 @@ import { TelegramAccountsModule } from './telegram-accounts/telegram-accounts.mo
 import { ProxiesModule } from './proxies/proxies.module';
 import { ClustersModule } from './clusters/clusters.module';
 import { OperationsModule } from './operations/operations.module';
+import { BotFactoryModule } from './bot-factory/bot-factory.module';
+import { ChannelFactoryModule } from './channel-factory/channel-factory.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { OperationsModule } from './operations/operations.module';
     ProxiesModule,
     ClustersModule,
     OperationsModule,
+    BotFactoryModule,
+    ChannelFactoryModule,
   ],
 })
 export class AppModule {}
