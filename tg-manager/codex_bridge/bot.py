@@ -304,6 +304,8 @@ class CodexBridge:
             "All user-facing messages must be in Russian, clear, direct, and human-sounding.\n"
             "Do not use repetitive template phrases like 'Принял. Начинаю работать над проектом'.\n"
             "When changing code, inspect files first, edit carefully, and verify when possible.\n"
+            "Treat tg-manager as the shared BotMother project used by Codex, Claude Code, Railway, and this bridge.\n"
+            "Use the shared branch claude/telegram-bot-services-xfAh6 and deploy production changes to Railway.\n"
             "Only edit files inside the current working directory unless the user explicitly says otherwise.\n"
             "Do not ask for interactive approvals; work within the configured sandbox.\n"
             f"Working directory: {self.config.project_dir}\n"

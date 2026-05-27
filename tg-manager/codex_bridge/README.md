@@ -25,3 +25,12 @@ when a task truly needs a different working directory.
 - All user-facing messages are in Russian.
 - Text, code, Markdown, JSON, CSV, PDF, DOCX, and XLSX files can be attached.
 - `.env` and `.state` are local only and must not be committed.
+
+## Shared Workflow
+
+- BotMother work happens in `tg-manager`.
+- The shared branch is `claude/telegram-bot-services-xfAh6`.
+- Production deploys must be pushed and then deployed through Railway.
+- If GitHub Actions is the deploy trigger, keep `main` fast-forwarded to the
+  same commit as the shared branch.
+- See `../AGENTS.md` for the full agent discipline used by Codex and Claude.
