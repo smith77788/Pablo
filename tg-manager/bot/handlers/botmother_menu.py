@@ -1,8 +1,10 @@
 """BotMother — главное Telegram-native OS меню (9 секций)."""
 from __future__ import annotations
 
+import html
 import logging
 
+import asyncpg
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -26,6 +28,7 @@ from bot.callbacks import (
     SubCb,
     AutoReplyCb,
 )
+from database import db
 
 log = logging.getLogger(__name__)
 
@@ -65,8 +68,8 @@ def _infrastructure_kb():
 
 def _visibility_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔍 Ключевые слова", callback_data=RankCb(action="menu", bot_id=0))
-    kb.button(text="📊 Позиции",        callback_data=RankCb(action="list", bot_id=0))
+    kb.button(text="🔍 Ключевые слова", callback_data=BmCb(action="pick_bot_for", sub="rank"))
+    kb.button(text="📊 Позиции",        callback_data=BmCb(action="pick_bot_for", sub="rank"))
     kb.button(text="🏆 Конкуренты",     callback_data=CompCb(action="menu"))
     kb.button(text="🔔 Алерты",         callback_data=BmCb(action="alerts"))
     kb.button(text="📋 Отчёты",         callback_data=BmCb(action="vis_reports"))
@@ -100,7 +103,7 @@ def _broadcasts_kb():
 
 def _inbox_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="💬 Входящие диалоги", callback_data=RelayCb(action="menu", bot_id=0))
+    kb.button(text="💬 Входящие диалоги", callback_data=BmCb(action="pick_bot_for", sub="relay"))
     kb.button(text="◀️ Назад",            callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb.as_markup()
@@ -108,7 +111,7 @@ def _inbox_kb():
 
 def _settings_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="📢 Авто-ответы",   callback_data=AutoReplyCb(action="list", bot_id=0))
+    kb.button(text="📢 Авто-ответы",   callback_data=BmCb(action="pick_bot_for", sub="ar"))
     kb.button(text="🔔 Уведомления",   callback_data=BmCb(action="notifications"))
     kb.button(text="◀️ Назад",         callback_data=BmCb(action="main"))
     kb.adjust(2, 1)
@@ -298,6 +301,57 @@ async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
         "<b>⚡ Массовые действия</b>\n\nВыберите тип объекта:",
         parse_mode="HTML",
         reply_markup=_bulk_ops_kb(),
+    )
+
+
+# ── Bot picker (Visibility / Inbox / Settings) ───────────────────────────
+
+_PICK_META = {
+    "rank":  ("🔍 Трекер позиций",    "visibility"),
+    "relay": ("💬 Входящие диалоги",  "inbox"),
+    "ar":    ("📢 Авто-ответы",       "settings"),
+}
+
+
+@router.callback_query(BmCb.filter(F.action == "pick_bot_for"))
+async def cb_pick_bot_for(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    sub = callback_data.sub
+    title, back_action = _PICK_META.get(sub, ("Выберите бота", "main"))
+
+    bots = await db.get_bots(pool, callback.from_user.id)
+    if not bots:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
+        await callback.message.edit_text(
+            f"<b>{title}</b>\n\n"
+            "У вас нет ботов. Сначала добавьте бота через <b>🤖 Мои боты → ➕ Добавить</b>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for bot in bots:
+        name = html.escape(bot.get("username") or bot.get("first_name") or f"id{bot['bot_id']}")
+        if sub == "rank":
+            cd = RankCb(action="menu", bot_id=bot["bot_id"])
+        elif sub == "relay":
+            cd = RelayCb(action="menu", bot_id=bot["bot_id"])
+        else:  # ar
+            cd = AutoReplyCb(action="list", bot_id=bot["bot_id"])
+        kb.button(text=f"🤖 @{name}", callback_data=cd)
+    kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"<b>{title}</b>\n\nВыберите бота:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
