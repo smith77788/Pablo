@@ -13,6 +13,11 @@ import { AutomationsModule } from './automations/automations.module';
 import { TemplatesModule } from './templates/templates.module';
 import { TagsModule } from './tags/tags.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
+import { AssetsModule } from './assets/assets.module';
+import { TelegramAccountsModule } from './telegram-accounts/telegram-accounts.module';
+import { ProxiesModule } from './proxies/proxies.module';
+import { ClustersModule } from './clusters/clusters.module';
+import { OperationsModule } from './operations/operations.module';
 
 @Module({
   imports: [
@@ -35,6 +40,11 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
     TemplatesModule,
     TagsModule,
     ApiKeysModule,
+    AssetsModule,
+    TelegramAccountsModule,
+    ProxiesModule,
+    ClustersModule,
+    OperationsModule,
   ],
 })
 export class AppModule {}
