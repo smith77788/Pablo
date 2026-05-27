@@ -147,17 +147,33 @@ async def cmd_menu(message: Message) -> None:
     )
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+async def _edit(callback: CallbackQuery, text: str, markup) -> None:
+    """Edit existing message or send new one if message is unavailable."""
+    try:
+        if callback.message:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+        else:
+            await callback.bot.send_message(callback.from_user.id, text,
+                                            parse_mode="HTML", reply_markup=markup)
+    except Exception as e:
+        log.warning("BotMother _edit error: %s", e)
+        try:
+            await callback.bot.send_message(callback.from_user.id, text,
+                                            parse_mode="HTML", reply_markup=markup)
+        except Exception:
+            pass
+
+
 # ── Main menu callback ────────────────────────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "main"))
 async def cb_main(callback: CallbackQuery, callback_data: BmCb) -> None:
+    log.info("BotMother cb_main from user %s", callback.from_user.id)
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>🏠 BotMother OS</b>\n\nВыберите раздел:",
-        parse_mode="HTML",
-        reply_markup=_main_menu_kb(),
-    )
+    await _edit(callback, "<b>🏠 BotMother OS</b>\n\nВыберите раздел:", _main_menu_kb())
 
 
 # ── Infrastructure ────────────────────────────────────────────────────────
@@ -166,11 +182,7 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "infrastructure"))
 async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>🏗️ Infrastructure</b>\n\nУправляйте аккаунтами, ботами, каналами и сетевой инфраструктурой.",
-        parse_mode="HTML",
-        reply_markup=_infrastructure_kb(),
-    )
+    await _edit(callback, "<b>🏗️ Infrastructure</b>\n\nУправляйте аккаунтами, ботами, каналами и сетевой инфраструктурой.", _infrastructure_kb())
 
 
 # ── Visibility ────────────────────────────────────────────────────────────
@@ -179,11 +191,7 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb) -> Non
 @router.callback_query(BmCb.filter(F.action == "visibility"))
 async def cb_visibility(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>👁️ Visibility</b>\n\nОтслеживайте позиции ботов в поиске Telegram и анализируйте конкурентов.",
-        parse_mode="HTML",
-        reply_markup=_visibility_kb(),
-    )
+    await _edit(callback, "<b>👁️ Visibility</b>\n\nОтслеживайте позиции ботов в поиске Telegram и анализируйте конкурентов.", _visibility_kb())
 
 
 # ── Operations ────────────────────────────────────────────────────────────
@@ -192,11 +200,7 @@ async def cb_visibility(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "operations"))
 async def cb_operations(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>⚙️ Operations</b>\n\nМассовые действия, построитель операций и планировщик задач.",
-        parse_mode="HTML",
-        reply_markup=_operations_kb(),
-    )
+    await _edit(callback, "<b>⚙️ Operations</b>\n\nМассовые действия, построитель операций и планировщик задач.", _operations_kb())
 
 
 # ── Broadcasts ────────────────────────────────────────────────────────────
@@ -205,11 +209,7 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "broadcasts"))
 async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>📢 Broadcasts</b>\n\nРассылки по боту, сетевые рассылки и расписания.",
-        parse_mode="HTML",
-        reply_markup=_broadcasts_kb(),
-    )
+    await _edit(callback, "<b>📢 Broadcasts</b>\n\nРассылки по боту, сетевые рассылки и расписания.", _broadcasts_kb())
 
 
 # ── Inbox / Relay ─────────────────────────────────────────────────────────
@@ -218,11 +218,7 @@ async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "inbox"))
 async def cb_inbox(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>💬 Inbox / Relay</b>\n\nВходящие диалоги и реле-переписка с пользователями.",
-        parse_mode="HTML",
-        reply_markup=_inbox_kb(),
-    )
+    await _edit(callback, "<b>💬 Inbox / Relay</b>\n\nВходящие диалоги и реле-переписка с пользователями.", _inbox_kb())
 
 
 # ── AI Assistant ──────────────────────────────────────────────────────────
@@ -232,16 +228,11 @@ async def cb_inbox(callback: CallbackQuery, callback_data: BmCb) -> None:
 async def cb_ai_assistant(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     # Direct redirect to AI assistant
-    from aiogram.types import InlineKeyboardMarkup
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Открыть AI-ассистент", callback_data=AiCb(action="start"))
     kb.button(text="◀️ Назад",                callback_data=BmCb(action="main"))
     kb.adjust(1)
-    await callback.message.edit_text(
-        "<b>🤖 AI Assistant</b>\n\nИнтеллектуальный помощник для управления ботами.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await _edit(callback, "<b>🤖 AI Assistant</b>\n\nИнтеллектуальный помощник для управления ботами.", kb.as_markup())
 
 
 # ── Billing ───────────────────────────────────────────────────────────────
@@ -254,11 +245,7 @@ async def cb_billing(callback: CallbackQuery, callback_data: BmCb) -> None:
     kb.button(text="💳 Управление подпиской", callback_data=SubCb(action="menu"))
     kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
     kb.adjust(1)
-    await callback.message.edit_text(
-        "<b>💳 Billing</b>\n\nУправление подпиской и тарифными планами.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await _edit(callback, "<b>💳 Billing</b>\n\nУправление подпиской и тарифными планами.", kb.as_markup())
 
 
 # ── Referral ──────────────────────────────────────────────────────────────
@@ -271,11 +258,7 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
     kb.button(text="👥 Реферальная программа", callback_data=RefCb(action="menu"))
     kb.button(text="◀️ Назад",                callback_data=BmCb(action="main"))
     kb.adjust(1)
-    await callback.message.edit_text(
-        "<b>👥 Referral</b>\n\nРеферальная программа и партнёрские вознаграждения.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await _edit(callback, "<b>👥 Referral</b>\n\nРеферальная программа и партнёрские вознаграждения.", kb.as_markup())
 
 
 # ── Settings ──────────────────────────────────────────────────────────────
@@ -284,11 +267,7 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "settings"))
 async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>⚙️ Settings</b>\n\nНастройки авто-ответов, уведомлений и системных параметров.",
-        parse_mode="HTML",
-        reply_markup=_settings_kb(),
-    )
+    await _edit(callback, "<b>⚙️ Settings</b>\n\nНастройки авто-ответов, уведомлений и системных параметров.", _settings_kb())
 
 
 # ── Bulk operations ───────────────────────────────────────────────────────
@@ -297,11 +276,7 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "bulk_ops"))
 async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>⚡ Массовые действия</b>\n\nВыберите тип объекта:",
-        parse_mode="HTML",
-        reply_markup=_bulk_ops_kb(),
-    )
+    await _edit(callback, "<b>⚡ Массовые действия</b>\n\nВыберите тип объекта:", _bulk_ops_kb())
 
 
 # ── Bot picker (Visibility / Inbox / Settings) ───────────────────────────
@@ -327,11 +302,11 @@ async def cb_pick_bot_for(
     if not bots:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
-        await callback.message.edit_text(
-            f"<b>{title}</b>\n\n"
-            "У вас нет ботов. Сначала добавьте бота через <b>🤖 Мои боты → ➕ Добавить</b>.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+        kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
+        await _edit(
+            callback,
+            f"<b>{title}</b>\n\nУ вас нет ботов. Сначала добавьте бота через <b>🤖 Мои боты → ➕ Добавить</b>.",
+            kb.as_markup(),
         )
         return
 
@@ -348,11 +323,7 @@ async def cb_pick_bot_for(
     kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
     kb.adjust(1)
 
-    await callback.message.edit_text(
-        f"<b>{title}</b>\n\nВыберите бота:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await _edit(callback, f"<b>{title}</b>\n\nВыберите бота:", kb.as_markup())
 
 
 # ── WIP stubs ─────────────────────────────────────────────────────────────
@@ -376,10 +347,8 @@ async def cb_wip(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     action = callback_data.action
     title, back_action = _WIP_ACTIONS.get(action, (action, "main"))
-    await callback.message.edit_text(
-        f"<b>{title}</b>\n\n"
-        "🚧 <b>В разработке</b>\n\n"
-        "Эта функция будет доступна в следующем обновлении.",
-        parse_mode="HTML",
-        reply_markup=_wip_kb(back_action),
+    await _edit(
+        callback,
+        f"<b>{title}</b>\n\n🚧 <b>В разработке</b>\n\nЭта функция будет доступна в следующем обновлении.",
+        _wip_kb(back_action),
     )

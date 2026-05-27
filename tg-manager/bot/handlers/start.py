@@ -14,6 +14,13 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
+BUILD_VERSION = "2026.05.27-r1"
+
+
+@router.message(Command("version"))
+async def cmd_version(message: Message) -> None:
+    await message.answer(f"🔖 <b>TG Manager</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML")
+
 
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
@@ -123,7 +130,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
 
     await message.answer(
-        f"👋 <b>TG Manager</b>\n\n"
+        f"👋 <b>TG Manager</b>  <code>v{BUILD_VERSION}</code>\n\n"
         f"{summary}{extra}\n\n"
         f"ID: <code>{uid}</code>\n\n"
         f"💡 Нажмите на бота из списка → откроется меню управления",
