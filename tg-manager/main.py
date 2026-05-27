@@ -43,6 +43,7 @@ from bot.handlers import bot_factory as bot_factory_handler
 from bot.handlers import group_factory as group_factory_handler
 from bot.handlers import mass_ops as mass_ops_handler
 from bot.handlers import asset_templates as asset_tpl_handler
+from bot.handlers import channel_factory as chan_factory_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -112,6 +113,7 @@ async def main() -> None:
     dp.include_router(group_factory_handler.router)
     dp.include_router(mass_ops_handler.router)
     dp.include_router(asset_tpl_handler.router)
+    dp.include_router(chan_factory_handler.router)
     dp.include_router(sub_handler.router)
     dp.include_router(start.router)
     dp.include_router(bots.router)
