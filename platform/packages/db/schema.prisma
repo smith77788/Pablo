@@ -44,6 +44,10 @@ model Tenant {
   competitors      Competitor[]
   auditLogs        AuditLog[]
 
+  telegramSessions TelegramUserSession[]
+  operationQueues  OperationQueue[]
+  assetTemplates   AssetTemplate[]
+
   @@map("tenants")
 }
 
@@ -937,4 +941,96 @@ model AuditLog {
   @@index([tenantId, createdAt])
   @@index([tenantId, entityType, entityId])
   @@map("audit_logs")
+}
+
+// ── Telegram-native State Management ─────────────────────────────
+
+model TelegramUserSession {
+  id           String   @id @default(cuid())
+  telegramId   BigInt   @unique
+  tenantId     String?
+  currentMenu  String   @default("main")
+  currentSection String @default("")
+  wizardState  Json?
+  wizardStep   Int      @default(0)
+  tempData     Json?
+  paginationPage Int    @default(0)
+  lastActivity DateTime @default(now()) @updatedAt
+  createdAt    DateTime @default(now())
+
+  tenant               Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  pendingConfirmations PendingConfirmation[]
+
+  @@map("telegram_user_sessions")
+}
+
+model PendingConfirmation {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     TelegramUserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  actionType  String
+  actionData  Json
+  expiresAt   DateTime
+  confirmedAt DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@map("pending_confirmations")
+}
+
+model OperationQueue {
+  id          String   @id @default(cuid())
+  tenantId    String
+  opType      String
+  status      OperationQueueStatus @default(PENDING)
+  params      Json     @default("{}")
+  result      Json?
+  totalItems  Int      @default(0)
+  doneItems   Int      @default(0)
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps       OperationQueueStep[]
+
+  @@index([tenantId, status])
+  @@map("operation_queues")
+}
+
+enum OperationQueueStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+model OperationQueueStep {
+  id          String   @id @default(cuid())
+  operationId String
+  operation   OperationQueue @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  stepNum     Int
+  target      String?
+  status      String
+  message     String?
+  createdAt   DateTime @default(now())
+
+  @@index([operationId])
+  @@map("operation_queue_steps")
+}
+
+model AssetTemplate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  assetType   String   // "bot" | "channel" | "group" | "post" | "cluster" | "moderation"
+  template    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, assetType])
+  @@map("asset_templates")
 }
