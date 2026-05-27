@@ -432,6 +432,65 @@ async def cb_mp_confirm(
     )
 
 
+@router.callback_query(MassOpCb.filter(F.action == "cancel_op"))
+async def cb_cancel_op(
+    callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await pool.execute(
+        "UPDATE operation_queue SET status='cancelled' WHERE id=$1 AND owner_id=$2 AND status IN ('pending')",
+        callback_data.op_id, callback.from_user.id,
+    )
+    # Refresh queue view
+    rows = await pool.fetch(
+        "SELECT id, op_type, status, done_items, total_items, created_at "
+        "FROM operation_queue "
+        "WHERE owner_id=$1 "
+        "ORDER BY created_at DESC LIMIT 10",
+        callback.from_user.id,
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    if not rows:
+        await callback.message.edit_text(
+            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    _STATUS_ICONS = {
+        "pending":   "⏳",
+        "running":   "🔄",
+        "done":      "✅",
+        "failed":    "❌",
+        "cancelled": "🚫",
+    }
+    lines = ["📋 <b>Очередь операций</b>\n"]
+    for i, r in enumerate(rows, 1):
+        icon = _STATUS_ICONS.get(r["status"], "❓")
+        op_type = html.escape(r["op_type"])
+        status = r["status"]
+        done = r["done_items"] or 0
+        total = r["total_items"] or 0
+        created = r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "—"
+        if status == "running":
+            progress = f"{done}/{total} ✓"
+        elif status == "done":
+            progress = created
+        else:
+            progress = f"{total} элементов"
+        lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
+        if status == "pending":
+            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # DRY RUN PREVIEW
 # ══════════════════════════════════════════════════════════════════════════
@@ -523,13 +582,13 @@ async def cb_queue(
         "cancelled": "🚫",
     }
     lines = ["📋 <b>Очередь операций</b>\n"]
-    for i, row in enumerate(rows, 1):
-        icon = _STATUS_ICONS.get(row["status"], "❓")
-        op_type = html.escape(row["op_type"])
-        status = row["status"]
-        done = row["done_items"] or 0
-        total = row["total_items"] or 0
-        created = row["created_at"].strftime("%Y-%m-%d %H:%M") if row["created_at"] else "—"
+    for i, r in enumerate(rows, 1):
+        icon = _STATUS_ICONS.get(r["status"], "❓")
+        op_type = html.escape(r["op_type"])
+        status = r["status"]
+        done = r["done_items"] or 0
+        total = r["total_items"] or 0
+        created = r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "—"
 
         if status == "running":
             progress = f"{done}/{total} ✓"
@@ -539,6 +598,9 @@ async def cb_queue(
             progress = f"{total} элементов"
 
         lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
+
+        if status == "pending":
+            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
 
     await callback.message.edit_text(
         "\n".join(lines),
