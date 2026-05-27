@@ -13,9 +13,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import RankCb
+from bot.callbacks import RankCb, VisCb
 from bot.keyboards import back_to_bot, subscription_locked_markup
-from bot.states import AddKeyword
+from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
 from bot.utils.subscription import get_plan, locked_text
 from database import db
 

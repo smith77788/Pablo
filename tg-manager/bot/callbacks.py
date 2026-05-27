@@ -238,3 +238,10 @@ class CompCb(CallbackData, prefix="comp"):
     action: str
     comp_id: int = 0
     page: int = 0
+
+
+class VisCb(CallbackData, prefix="vis"):
+    action: str
+    bot_id: int = 0
+    kw_id: int = 0
+    page: int = 0

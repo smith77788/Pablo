@@ -312,3 +312,13 @@ class EditChannelBulkFSM(StatesGroup):
 class AddCompetitorFSM(StatesGroup):
     waiting_username = State()
     waiting_label = State()
+
+
+class AddKeywordFSM(StatesGroup):
+    choosing_bot = State()
+    waiting_keyword = State()
+    waiting_region = State()   # "ua" | "ru" | "en" | "skip"
+
+
+class KeywordAlertFSM(StatesGroup):
+    choosing_threshold = State()  # позиция-порог для алерта
