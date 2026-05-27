@@ -81,9 +81,17 @@ async def cb_mass_menu(callback: CallbackQuery) -> None:
 
 @router.callback_query(MassOpCb.filter(F.action == "mass_publish"))
 async def cb_mass_publish_start(
-    callback: CallbackQuery, state: FSMContext
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    from bot.utils.subscription import require_plan
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            "🔒 <b>Массовая публикация — Starter+</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     await state.set_state(MassPublishFSM.choosing_targets)
     await state.update_data(mp_step="targets")
 
