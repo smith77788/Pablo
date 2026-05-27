@@ -60,6 +60,7 @@ from services import account_monitor
 from services import trust_engine
 from services import shadowban_monitor
 from services import op_worker
+from services import behavioral_engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -191,6 +192,7 @@ async def main() -> None:
         asyncio.create_task(trust_engine.run(pool))
         asyncio.create_task(shadowban_monitor.run(pool, bot))
         asyncio.create_task(op_worker.run(pool, bot))
+        asyncio.create_task(behavioral_engine.run(pool))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:

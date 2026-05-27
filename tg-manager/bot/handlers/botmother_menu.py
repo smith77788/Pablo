@@ -49,10 +49,11 @@ def _main_menu_kb():
     kb.button(text="📢 Broadcasts",       callback_data=BmCb(action="broadcasts"))
     kb.button(text="💬 Inbox / Relay",    callback_data=BmCb(action="inbox"))
     kb.button(text="🤖 AI Assistant",     callback_data=BmCb(action="ai_assistant"))
+    kb.button(text="🧠 Аналитика",        callback_data=BmCb(action="behavioral"))
     kb.button(text="💳 Billing",          callback_data=BmCb(action="billing"))
     kb.button(text="👥 Referral",         callback_data=BmCb(action="referral"))
     kb.button(text="⚙️ Settings",         callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2)
     return kb.as_markup()
 
 
@@ -625,3 +626,101 @@ async def cb_notif_toggle(
     )
     row = await pool.fetchrow("SELECT * FROM notification_settings WHERE user_id=$1", callback.from_user.id)
     await _edit(callback, _notif_text(row), _notif_kb(row))
+
+
+# ── Behavioral Dashboard ──────────────────────────────────────────────────
+
+_BEHAV_VIEWS = {
+    "attention": "📊 Топ по вниманию",
+    "habit":     "🔄 Активные привычки",
+    "decay":     "📉 Угасающие ресурсы",
+    "ecosystem": "🌐 Экосистемные узлы",
+    "memory":    "🔍 Поисковая память",
+}
+
+
+def _behavioral_kb(sub: str = "attention") -> object:
+    kb = InlineKeyboardBuilder()
+    for key, label in _BEHAV_VIEWS.items():
+        marker = "▸ " if key == sub else ""
+        kb.button(text=f"{marker}{label}", callback_data=BmCb(action="behavioral", sub=key))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+@router.callback_query(BmCb.filter(F.action == "behavioral"))
+async def cb_behavioral(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    sub = callback_data.sub or "attention"
+    user_id = callback.from_user.id
+
+    from services import behavioral_engine
+
+    if sub == "memory":
+        rows = await behavioral_engine.get_search_memory(pool, user_id)
+        if not rows:
+            text = "<b>🔍 Поисковая память</b>\n\nДанных ещё нет."
+        else:
+            lines = ["<b>🔍 Поисковая память</b> — ключевые слова\n"]
+            for r in rows:
+                score = int(r["affinity_score"])
+                bar = "█" * (score // 20) + "░" * (5 - score // 20)
+                lines.append(f"• <b>{html.escape(r['keyword'])}</b> [{bar}] ×{r['search_count']}")
+            text = "\n".join(lines)
+    else:
+        score_map = {"attention": "attention_score", "habit": "habit_score",
+                     "decay": "decay_rate", "ecosystem": "ecosystem_score"}
+        score_field = score_map.get(sub, "attention_score")
+
+        if sub == "decay":
+            rows = await pool.fetch(
+                "SELECT entity_type, entity_id, decay_rate, updated_at "
+                "FROM entity_behavioral_score "
+                "WHERE owner_id=$1 AND decay_rate > 0.3 "
+                "ORDER BY decay_rate DESC LIMIT 10",
+                user_id,
+            )
+            title = "📉 Угасающие ресурсы"
+            label = "decay"
+        elif sub == "habit":
+            rows = await pool.fetch(
+                "SELECT entity_type, entity_id, habit_score, updated_at "
+                "FROM entity_behavioral_score "
+                "WHERE owner_id=$1 AND habit_score > 60 "
+                "ORDER BY habit_score DESC LIMIT 10",
+                user_id,
+            )
+            title = "🔄 Активные привычки"
+            label = "habit_score"
+        elif sub == "ecosystem":
+            rows = await pool.fetch(
+                "SELECT entity_type, entity_id, ecosystem_score, updated_at "
+                "FROM entity_behavioral_score "
+                "WHERE owner_id=$1 AND ecosystem_score > 0 "
+                "ORDER BY ecosystem_score DESC LIMIT 10",
+                user_id,
+            )
+            title = "🌐 Экосистемные узлы"
+            label = "ecosystem_score"
+        else:
+            rows = await behavioral_engine.get_top_entities(pool, user_id, score_field)
+            title = "📊 Топ по вниманию"
+            label = "attention_score"
+
+        if not rows:
+            text = f"<b>{title}</b>\n\nДанных ещё нет. Поведенческие оценки обновляются каждые 15 минут."
+        else:
+            lines = [f"<b>{title}</b>\n"]
+            for r in rows:
+                etype = r["entity_type"]
+                eid = r["entity_id"]
+                score_val = r.get(label, 0) or 0
+                lines.append(f"• {etype} #{eid} — {score_val:.1f}")
+            text = "\n".join(lines)
+
+    await _edit(callback, text, _behavioral_kb(sub))

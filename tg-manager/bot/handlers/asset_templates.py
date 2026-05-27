@@ -10,6 +10,7 @@ Callback prefix: atpl
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 from aiogram import F, Router
@@ -18,8 +19,10 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 
-from bot.callbacks import AssetTplCb
-from bot.states import AssetTemplateFSM
+from bot.callbacks import AssetTplCb, ChanFactCb, GroupFCb, MassPubCb
+from bot.states import AssetTemplateFSM, ChannelFactoryFSM, CreateGroupFSM
+from bot.utils.op_helpers import _get_active_accounts
+from database import db
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -380,14 +383,98 @@ async def cb_save(
         )
 
 
-# ── Apply (stub) ───────────────────────────────────────────────────────────────
+# ── Apply template ─────────────────────────────────────────────────────────────
 
 @router.callback_query(AssetTplCb.filter(F.action == "apply"))
-async def cb_apply(callback: CallbackQuery, callback_data: AssetTplCb) -> None:
-    await callback.answer(
-        "🚧 В разработке — применение шаблонов при создании ассетов",
-        show_alert=True,
-    )
+async def cb_apply(
+    callback: CallbackQuery,
+    callback_data: AssetTplCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
+    if not tpl:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    await callback.answer()
+
+    raw = tpl["template"]
+    data: dict = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    asset_type = tpl["asset_type"]
+    tpl_name = tpl["name"]
+
+    if asset_type in ("channel", "group"):
+        accounts = await _get_active_accounts(pool, callback.from_user.id)
+        if not accounts:
+            await callback.message.edit_text(
+                "⚠️ Нет активных аккаунтов для создания. Добавьте аккаунт.",
+                reply_markup=_menu_kb(),
+            )
+            return
+
+        await state.update_data(tpl_prefill=data)
+        if asset_type == "channel":
+            await state.set_state(ChannelFactoryFSM.choosing_account)
+            action = "create_acc"
+            icon = "📡"
+        else:
+            await state.set_state(CreateGroupFSM.choosing_account)
+            action = "create_acc"
+            icon = "👥"
+
+        title_val = data.get("title", "")
+        about_val = data.get("description", "") or data.get("about", "")
+        kb = InlineKeyboardBuilder()
+        for acc in accounts:
+            name = (acc["first_name"] or "").strip()
+            uname = f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
+            label = f"{name} ({uname})" if name else uname
+            if asset_type == "channel":
+                kb.button(text=f"👤 {label}", callback_data=ChanFactCb(action=action, acc_id=acc["id"]))
+            else:
+                kb.button(text=f"👤 {label}", callback_data=GroupFCb(action=action, acc_id=acc["id"]))
+        kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
+        kb.adjust(1)
+
+        preview = (
+            f"{icon} <b>Применение шаблона «{tpl_name}»</b>\n\n"
+            f"Название: <b>{html.escape(title_val or '—')}</b>\n"
+            f"Описание: <b>{html.escape(about_val or '—')}</b>\n\n"
+            "Выберите аккаунт для создания:"
+        )
+        await callback.message.edit_text(preview, parse_mode="HTML", reply_markup=kb.as_markup())
+
+    elif asset_type == "post":
+        text_val = data.get("text", "")
+        await state.update_data(tpl_prefill=data)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📢 Создать рассылку", callback_data=MassPubCb(action="start"))
+        kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
+        kb.adjust(1)
+        preview = html.escape(text_val[:500]) if text_val else "—"
+        await callback.message.edit_text(
+            f"📝 <b>Шаблон поста «{html.escape(tpl_name)}»</b>\n\n"
+            f"<i>Превью:</i>\n{preview}\n\n"
+            "Нажмите «Создать рассылку» — текст будет подставлен автоматически.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+    else:  # bot
+        lines = [f"🤖 <b>Шаблон бота «{html.escape(tpl_name)}»</b>\n"]
+        for k, v in data.items():
+            if v:
+                lines.append(f"<b>{html.escape(k)}:</b> {html.escape(str(v))}")
+        lines.append(
+            "\n<i>Бот добавляется через токен. Используйте эти данные при массовом редактировании.</i>"
+        )
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
+        await callback.message.edit_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
 
 
 # ── Delete flow ────────────────────────────────────────────────────────────────

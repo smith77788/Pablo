@@ -273,6 +273,13 @@ async def msg_add_keyword(
 
     ok = await db.add_tracked_keyword(pool, bot_id, message.from_user.id, keyword)
 
+    if ok:
+        try:
+            from services import behavioral_engine
+            await behavioral_engine.record_search_repeat(pool, message.from_user.id, keyword)
+        except Exception:
+            pass
+
     kb = InlineKeyboardBuilder()
     kb.button(
         text="📊 К позициям",

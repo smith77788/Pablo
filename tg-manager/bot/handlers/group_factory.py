@@ -101,6 +101,19 @@ async def cb_group_create_acc_chosen(
         return
     await callback.answer()
     await state.update_data(acc_id=acc["id"], session_str=acc["session_str"])
+
+    sd = await state.get_data()
+    prefill = sd.get("tpl_prefill") or {}
+    if prefill.get("title"):
+        await state.update_data(
+            title=prefill.get("title", ""),
+            about=prefill.get("description") or prefill.get("about") or "",
+            is_super=True,
+            tpl_prefill=None,
+        )
+        await _show_group_confirm(callback.message, state, edit=True)
+        return
+
     await state.set_state(CreateGroupFSM.waiting_title)
 
     kb = InlineKeyboardBuilder()
@@ -354,15 +367,127 @@ async def cb_group_list_acc(
     )
 
 
-# ── Members stub ───────────────────────────────────────────────────────────
+# ── Members — Step 1: choose account ─────────────────────────────────────
 
 @router.callback_query(GroupFCb.filter(F.action == "members"))
-async def cb_group_members(callback: CallbackQuery) -> None:
+async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        kb.button(
+            text=f"👤 {_acc_label(acc)}",
+            callback_data=GroupFCb(action="members_acc", acc_id=acc["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        "👥 <b>Управление участниками</b>\n\n🚧 В разработке",
+        "👥 <b>Участники групп</b>\n\nВыберите аккаунт:",
         parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Members — Step 2: choose group ────────────────────────────────────────
+
+@router.callback_query(GroupFCb.filter(F.action == "members_acc"))
+async def cb_group_members_acc(
+    callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Загружаю группы...")
+    acc = await pool.fetchrow(
+        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        callback_data.acc_id, callback.from_user.id,
+    )
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    from services import account_manager
+    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    groups = [d for d in (dialogs or []) if d.get("type") in ("megagroup", "supergroup", "group", "chat")]
+
+    if not groups:
+        await callback.message.edit_text(
+            "📋 У этого аккаунта нет групп.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for g in groups[:20]:
+        icon = "🌐" if g.get("type") in ("megagroup", "supergroup") else "👥"
+        title = html.escape(g.get("title", f"id={g['id']}"))
+        kb.button(
+            text=f"{icon} {title}",
+            callback_data=GroupFCb(action="members_list", acc_id=acc["id"], group_id=g["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=GroupFCb(action="members"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "👥 <b>Участники групп</b>\n\nВыберите группу:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Members — Step 3: show members ────────────────────────────────────────
+
+@router.callback_query(GroupFCb.filter(F.action == "members_list"))
+async def cb_group_members_list(
+    callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Загружаю участников...")
+    acc = await pool.fetchrow(
+        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        callback_data.acc_id, callback.from_user.id,
+    )
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    from services import account_manager
+    members = await account_manager.get_channel_members(
+        acc["session_str"], callback_data.group_id, limit=50, _acc=acc
+    )
+
+    if not members:
+        await callback.message.edit_text(
+            "👥 Участников не найдено или нет прав для просмотра.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    lines = [f"👥 <b>Участники</b> ({len(members)} чел.)\n"]
+    for m in members[:30]:
+        if m.get("is_bot"):
+            icon = "🤖"
+        else:
+            icon = "👤"
+        name = html.escape((m.get("first_name") or "").strip() or f"id{m['user_id']}")
+        uname = f" @{html.escape(m['username'])}" if m.get("username") else ""
+        lines.append(f"{icon} {name}{uname}")
+    if len(members) > 30:
+        lines.append(f"\n<i>... и ещё {len(members) - 30} участников</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="◀️ Назад",
+        callback_data=GroupFCb(action="members_acc", acc_id=callback_data.acc_id),
+    )
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

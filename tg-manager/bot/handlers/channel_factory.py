@@ -179,6 +179,19 @@ async def cb_chanf_create_acc_chosen(
         return
     await callback.answer()
     await state.update_data(acc_id=acc["id"], acc_label=_acc_label(acc))
+
+    sd = await state.get_data()
+    prefill = sd.get("tpl_prefill") or {}
+    if prefill.get("title"):
+        await state.update_data(
+            title=prefill.get("title", ""),
+            about=prefill.get("description") or prefill.get("about") or "",
+            channel_username=(prefill.get("username") or "").lstrip("@"),
+            tpl_prefill=None,
+        )
+        await _show_chanf_cluster_or_confirm(callback, state, pool)
+        return
+
     await state.set_state(ChannelFactoryFSM.waiting_title)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
@@ -950,17 +963,157 @@ async def cb_chanf_gen_link(
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 5. STATS STUB
+# 5. CHANNEL STATS
 # ══════════════════════════════════════════════════════════════════════════
 
 @router.callback_query(ChanFactCb.filter(F.action == "stats"))
-async def cb_chanf_stats(callback: CallbackQuery) -> None:
+async def cb_chanf_stats(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    """Step 1: choose account to list channels from."""
     await callback.answer()
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов. Подключите через /accounts",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        kb.button(
+            text=_acc_label(acc),
+            callback_data=ChanFactCb(action="stats_acc", acc_id=acc["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
+    kb.adjust(2)
     await callback.message.edit_text(
-        "📊 <b>Статистика каналов</b>\n\n"
-        "Аналитика по вашим каналам.\n"
-        "Выберите канал для просмотра.\n\n"
-        "<i>Функция в разработке. Скоро здесь появится полная аналитика: охват, вовлечённость, динамика роста.</i>",
+        "📊 <b>Статистика каналов</b>\n\nВыберите аккаунт для загрузки списка каналов:",
         parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
+        reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "stats_acc"))
+async def cb_chanf_stats_acc(
+    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
+) -> None:
+    """Step 2: load channel list for chosen account."""
+    await callback.answer("⏳ Загружаю каналы...")
+    acc = await pool.fetchrow(
+        "SELECT id, session_str, first_name, phone, username "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        callback_data.acc_id, callback.from_user.id,
+    )
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    from services import account_manager
+    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+
+    if not channels:
+        await callback.message.edit_text(
+            "ℹ️ У этого аккаунта нет каналов.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for ch in channels[:20]:
+        title = (ch.get("title") or f"id={ch['id']}")[:30]
+        kb.button(
+            text=f"📊 {title}",
+            callback_data=ChanFactCb(
+                action="stats_chan",
+                acc_id=callback_data.acc_id,
+                channel_id=ch["id"],
+            ),
+        )
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="stats"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📊 <b>Выберите канал</b>\n\nНайдено каналов: <b>{len(channels)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "stats_chan"))
+async def cb_chanf_stats_chan(
+    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
+) -> None:
+    """Step 3: show basic stats for the chosen channel."""
+    await callback.answer("⏳ Получаю статистику...")
+    acc = await pool.fetchrow(
+        "SELECT id, session_str, first_name, phone, username "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        callback_data.acc_id, callback.from_user.id,
+    )
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    from services import account_manager
+
+    # Get dialogs to find the channel metadata
+    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    chan_data = next(
+        (d for d in dialogs if d["id"] == callback_data.channel_id), None
+    )
+
+    if not chan_data:
+        await callback.message.edit_text(
+            "⚠️ Канал не найден в списке диалогов.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    title = html.escape(chan_data.get("title") or f"id={chan_data['id']}")
+    username = chan_data.get("username", "")
+    ch_id = chan_data["id"]
+    ch_type = chan_data.get("type", "channel")
+    members = chan_data.get("members", 0) or 0
+
+    # If members count is 0, try fetching via get_channel_members_count
+    if members == 0 and username:
+        try:
+            fetched = await account_manager.get_channel_members_count(
+                acc["session_str"], username, _acc=acc
+            )
+            if fetched > 0:
+                members = fetched
+        except Exception:
+            pass
+
+    type_label = {
+        "channel": "📡 Канал",
+        "megagroup": "👥 Супергруппа",
+        "supergroup": "👥 Супергруппа",
+        "group": "👥 Группа",
+    }.get(ch_type, "📡 Канал")
+
+    uname_line = f"@{html.escape(username)}" if username else "—"
+
+    text = (
+        f"📊 <b>Статистика канала</b>\n\n"
+        f"Название: <b>{title}</b>\n"
+        f"Тип: {type_label}\n"
+        f"ID: <code>{ch_id}</code>\n"
+        f"Username: {uname_line}\n"
+        f"Участников: <b>{members:,}</b>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="◀️ К списку каналов",
+        callback_data=ChanFactCb(action="stats_acc", acc_id=callback_data.acc_id),
+    )
+    kb.button(text="🏠 Меню", callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
