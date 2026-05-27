@@ -226,3 +226,49 @@ class AssetTemplateFSM(StatesGroup):
     waiting_name = State()
     waiting_json = State()    # ввод параметров (name, desc, etc.)
     confirming = State()
+
+
+class CreateGroupFSM(StatesGroup):
+    choosing_account = State()
+    waiting_title = State()
+    waiting_about = State()
+    choosing_type = State()   # supergroup or group
+    confirming = State()
+
+
+class AnnounceGroupFSM(StatesGroup):
+    choosing_account = State()
+    waiting_text = State()
+    confirming = State()
+
+
+class MassPublishFSM(StatesGroup):
+    choosing_targets = State()    # выбор каналов/групп
+    choosing_selector = State()   # by cluster / by tag / by account / all
+    waiting_text = State()        # текст поста
+    choosing_timing = State()     # немедленно / с задержкой
+    previewing = State()          # предпросмотр перед запуском
+    confirming = State()          # финальное подтверждение
+
+
+class BulkBotEditFSM(StatesGroup):
+    choosing_field = State()      # name | desc | short_desc | commands
+    waiting_value = State()
+    previewing = State()
+    confirming = State()
+
+
+class BotTokenImportFSM(StatesGroup):
+    waiting_tokens = State()    # bulk token paste
+    reviewing = State()         # review import results
+
+
+class BotCloneSettingsFSM(StatesGroup):
+    choosing_source = State()   # source bot
+    choosing_targets = State()  # target bots
+    choosing_fields = State()   # what to clone
+    confirming = State()
+
+
+class BotValidateFSM(StatesGroup):
+    waiting_tokens = State()    # paste tokens to validate

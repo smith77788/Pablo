@@ -198,3 +198,23 @@ class AssetTplCb(CallbackData, prefix="atpl"):
     action: str
     tpl_id: int = 0
     asset_type: str = ""   # "bot" | "channel" | "group" | "post"
+
+
+class GroupFCb(CallbackData, prefix="grpf"):
+    action: str
+    acc_id: int = 0
+    group_id: int = 0
+    page: int = 0
+
+
+class MassOpCb(CallbackData, prefix="mop"):
+    action: str
+    op_type: str = ""    # "bots" | "channels" | "accounts"
+    op_id: int = 0
+    page: int = 0
+
+
+class BotFactCb(CallbackData, prefix="btf"):
+    action: str
+    bot_id: int = 0
+    page: int = 0
