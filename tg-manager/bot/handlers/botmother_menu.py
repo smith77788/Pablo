@@ -32,6 +32,8 @@ from bot.callbacks import (
     SubCb,
     AutoReplyCb,
 )
+from bot.utils.subscription import require_plan, locked_text
+from bot.keyboards import subscription_locked_markup
 from database import db
 
 log = logging.getLogger(__name__)
@@ -403,6 +405,10 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(BmCb.filter(F.action == "vis_reports"))
 async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await _edit(callback, locked_text("Отчёты по позициям", "starter"), subscription_locked_markup("starter"))
+        return
     await callback.answer()
     kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
 
@@ -477,6 +483,10 @@ async def cb_op_reports(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await _edit(callback, locked_text("Отчёты по операциям", "starter"), subscription_locked_markup("starter"))
+        return
     await callback.answer()
     page = callback_data.page
     limit = 8
@@ -655,6 +665,10 @@ async def cb_behavioral(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro"))
+        return
     await callback.answer()
     sub = callback_data.sub or "attention"
     user_id = callback.from_user.id
