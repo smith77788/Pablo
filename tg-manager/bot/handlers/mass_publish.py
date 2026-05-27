@@ -24,7 +24,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassPubCb
 from bot.states import MassPublishFSM2
-from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, _format_duration
+from bot.utils.op_helpers import (
+    _acc_label,
+    _get_active_accounts,
+    _progress_bar,
+    _format_duration,
+    _progress_text as _progress_text_base,
+)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -42,24 +48,14 @@ _TIMING_OPTIONS = {
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _progress_text(done: int, total: int, ok: int, err: int) -> str:
-    pct = round(100 * done / total) if total else 0
-    bar = _progress_bar(done, total)
-    return (
-        f"⏳ <b>Публикация...</b> {done}/{total}\n"
-        f"[{bar}] {pct}%\n"
-        f"✅ Успешно: {ok} | ❌ Ошибок: {err}"
-    )
+    """Thin wrapper that fixes the title for mass-publish progress messages."""
+    return _progress_text_base("Публикация...", done, total, ok, err)
 
 
 def _back_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
     return kb
-
-
-def _format_duration(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    return f"{m} мин {s:02d}с" if m else f"{s}с"
 
 
 # ── Main menu ──────────────────────────────────────────────────────────────

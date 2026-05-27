@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb, RefCb
+from bot.utils.op_helpers import _progress_bar
 from database import db
 
 router = Router()
@@ -20,11 +21,6 @@ _TIERS = [
     ("platinum", "paid",   25, "enterprise", 30, "💎 Платина"),
 ]
 _PLAN_LABEL = {"starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}
-
-
-def _progress_bar(current: int, total: int, width: int = 8) -> str:
-    filled = min(int(current / total * width), width)
-    return "█" * filled + "░" * (width - filled)
 
 
 def _build_dashboard(stats: dict, bot_username: str) -> str:
@@ -50,7 +46,7 @@ def _build_dashboard(stats: dict, bot_username: str) -> str:
             status = "✅ ПОЛУЧЕН"
             bar = "████████"
         else:
-            bar = _progress_bar(count, threshold)
+            bar = _progress_bar(count, threshold, width=8)
             status = f"{bar} {count}/{threshold}"
         lines.append(
             f"{label} [{status}]"
