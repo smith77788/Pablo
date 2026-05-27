@@ -54,9 +54,16 @@ REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "😮", "😢", "👎", "�
 
 
 def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
-    """Exponential backoff: base**attempt capped at cap seconds."""
-    import math
-    return min(base ** attempt, cap)
+    """Exponential backoff with ±20% jitter so operations don't look robotic."""
+    import math, random
+    raw = min(base ** attempt, cap)
+    return raw * random.uniform(0.8, 1.2)
+
+
+def _human_delay(min_s: float, max_s: float) -> float:
+    """Return a random human-like delay between min_s and max_s seconds."""
+    import random
+    return random.uniform(min_s, max_s)
 
 
 def _progress_bar(done: int, total: int, width: int = 10) -> str:
@@ -691,13 +698,13 @@ async def cb_do_bulk_create(
             )
         except Exception:
             pass
-        # Exponential backoff; reset every 5 iterations
+        # Human-like backoff with jitter; reset every 5 iterations
         if attempt >= 4:
             attempt = 0
         else:
             attempt += 1
         flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(_backoff(attempt), flood))
+        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood, _human_delay(25, 40)))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err

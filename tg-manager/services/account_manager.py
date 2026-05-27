@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import random
 from config import TG_API_ID, TG_API_HASH, TG_PROXY
 
 log = logging.getLogger(__name__)
@@ -1310,38 +1311,80 @@ async def create_bot_via_botfather(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
+        def _parse_flood_wait(text: str) -> int | None:
+            """Extract wait seconds from BotFather 'too many attempts' message."""
+            m = re.search(r"try again in (\d+) seconds", text, re.IGNORECASE)
+            return int(m.group(1)) if m else None
+
         async def _bf_send(text: str) -> str:
-            """Send message to BotFather and return its response text."""
+            """Send message to BotFather with human-like delay, return its response."""
+            # Random pre-send pause — like a human thinking before typing
+            await asyncio.sleep(random.uniform(2.0, 5.0))
             await client.send_message(_BOTFATHER_USERNAME, text)
-            await asyncio.sleep(5)
+            # Random wait for BotFather to respond
+            await asyncio.sleep(random.uniform(5.0, 9.0))
             msgs = await client.get_messages(_BOTFATHER_USERNAME, limit=1)
             return msgs[0].text if msgs else ""
 
-        # Step 1: start fresh
-        resp = await _bf_send("/newbot")
-        if "name" not in resp.lower() and "Alright" not in resp:
-            # May be in a previous incomplete flow — cancel first
+        async def _bf_send_with_retry(text: str, max_retries: int = 2) -> str:
+            """Send to BotFather, handling rate limit gracefully."""
+            for attempt in range(max_retries + 1):
+                resp = await _bf_send(text)
+                wait = _parse_flood_wait(resp)
+                if wait is None:
+                    return resp
+                # Rate limited — wait exactly as BotFather says + random buffer
+                jitter = random.randint(10, 30)
+                total_wait = wait + jitter
+                log.info("BotFather rate limit: waiting %ds (asked %ds + %ds buffer)", total_wait, wait, jitter)
+                if attempt == max_retries:
+                    return resp  # Return the error response to caller
+                await asyncio.sleep(total_wait)
+            return ""
+
+        # Step 1: start fresh — detect if in a previous incomplete flow
+        resp = await _bf_send_with_retry("/newbot")
+
+        # Check for rate limit in initial response
+        wait = _parse_flood_wait(resp)
+        if wait is not None:
+            return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
+
+        if "name" not in resp.lower() and "alright" not in resp.lower() and "good name" not in resp.lower():
+            # Previous incomplete flow — cancel it, then retry once
             await _bf_send("/cancel")
-            await asyncio.sleep(1)
-            resp = await _bf_send("/newbot")
+            await asyncio.sleep(random.uniform(3.0, 6.0))
+            resp = await _bf_send_with_retry("/newbot")
+            wait = _parse_flood_wait(resp)
+            if wait is not None:
+                return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
+
+        if "name" not in resp.lower() and "alright" not in resp.lower():
+            return {"error": f"Неожиданный ответ BotFather: {resp[:200]}"}
 
         # Step 2: send display name
-        resp = await _bf_send(bot_display_name)
-
-        # Check for username prompt
+        resp = await _bf_send_with_retry(bot_display_name)
         if "username" not in resp.lower():
-            return {"error": f"Unexpected BotFather response after name: {resp[:200]}"}
+            wait = _parse_flood_wait(resp)
+            if wait is not None:
+                return {"error": f"BotFather rate limit после имени: {wait}с", "flood_wait": wait}
+            return {"error": f"Неожиданный ответ после имени бота: {resp[:200]}"}
 
         # Step 3: send username
         uname = bot_username.lstrip("@")
-        if not uname.endswith("bot") and not uname.endswith("Bot"):
+        if not uname.lower().endswith("bot"):
             uname = uname + "bot"
-        resp = await _bf_send(uname)
+        resp = await _bf_send_with_retry(uname)
 
         # Extract token (format: 123456789:AAABBBCCC...)
         token_match = re.search(r"\b(\d{8,12}:[A-Za-z0-9_-]{35,})\b", resp)
         if not token_match:
-            return {"error": f"Token not found in BotFather response: {resp[:300]}"}
+            wait = _parse_flood_wait(resp)
+            if wait is not None:
+                return {"error": f"BotFather rate limit при создании: {wait}с", "flood_wait": wait}
+            if "username" in resp.lower() and ("already" in resp.lower() or "taken" in resp.lower()):
+                return {"error": f"Username @{uname} уже занят — выберите другой"}
+            return {"error": f"Токен не найден в ответе BotFather: {resp[:300]}"}
 
         token = token_match.group(1)
         return {

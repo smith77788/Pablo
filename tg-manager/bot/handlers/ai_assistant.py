@@ -43,11 +43,11 @@ _SYSTEM_PROMPT = (
 _MAX_TURNS = 100
 
 _FALLBACK_MODELS = [
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5",
     "openai/gpt-4o-mini",
     "openai/gpt-4o",
-    "anthropic/claude-3.5-sonnet",
     "google/gemini-flash-1.5",
-    "meta-llama/llama-3.1-8b-instruct:free",
 ]
 
 
