@@ -39,9 +39,10 @@ _STARTER = "starter"
 
 # Timing options: label → delay in seconds
 _TIMING_OPTIONS = {
-    "delay_5s":  ("⚡ 5 секунд",   5),
-    "delay_30s": ("⏳ 30 секунд",  30),
-    "delay_60s": ("🐌 60 секунд",  60),
+    "delay_5s":   ("⚡ 5 сек (быстро)",     5),
+    "delay_30s":  ("🛡️ 30 сек (безопасно)", 30),
+    "delay_60s":  ("🐌 60 сек (осторожно)", 60),
+    "delay_smart": ("🧠 Умный (30-90 сек)", -1),  # -1 = random
 }
 
 
@@ -75,9 +76,14 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 async def cb_mpub_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.edit_text(
-        "📤 <b>Массовая публикация</b>\n\n"
-        "Отправить пост во все ваши каналы\n"
-        "или выбрать по фильтру.",
+        "📤 <b>Массовая публикация — рассылка в каналы</b>\n\n"
+        "Отправляет один пост одновременно во все ваши каналы.\n\n"
+        "📢 <b>Все каналы</b> — опубликовать во все каналы всех аккаунтов\n"
+        "👤 <b>По аккаунту</b> — выбрать конкретный аккаунт\n"
+        "🔍 <b>Сухой прогон</b> — посчитать каналы без реальной отправки\n"
+        "📋 <b>История</b> — прошлые публикации\n\n"
+        "<i>💡 Сначала импортируйте каналы через "
+        "«📡 Каналы → 📥 Импорт из Telegram»</i>",
         parse_mode="HTML",
         reply_markup=_main_menu_kb().as_markup(),
     )
@@ -207,9 +213,13 @@ async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
     for key, (label, _) in _TIMING_OPTIONS.items():
         kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
     kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
-    kb.adjust(3, 1)
+    kb.adjust(2, 2, 1)
     await message.answer(
-        "⏱️ <b>Задержка между постами:</b>",
+        "⏱️ <b>Задержка между постами:</b>\n\n"
+        "• <b>5 сек</b> — быстро, риск флуд-бана при большом кол-ве\n"
+        "• <b>30 сек</b> — рекомендуется для большинства случаев\n"
+        "• <b>60 сек</b> — максимально безопасно\n"
+        "• <b>Умный</b> — случайно 30-90 сек, имитирует человека",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -254,7 +264,8 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
         if channels:
             acc_count += 1
 
-    estimated_s = total_channels * delay_s
+    effective_delay = 60 if delay_s < 0 else delay_s  # smart = ~60s avg
+    estimated_s = total_channels * effective_delay
     timing_label = _TIMING_OPTIONS.get(data.get("timing_key", "delay_30s"), ("30с", 30))[0]
 
     # Truncate post text for preview
@@ -358,7 +369,13 @@ async def cb_mpub_confirm_send(
                 pass
 
         if idx < total:
-            await asyncio.sleep(delay_s)
+            if delay_s < 0:
+                # Smart timing: random 30-90s with human-like variation
+                import random
+                actual_delay = random.uniform(30, 90)
+            else:
+                actual_delay = delay_s
+            await asyncio.sleep(actual_delay)
 
     elapsed = time.monotonic() - start_ts
     await progress_msg.edit_text(
