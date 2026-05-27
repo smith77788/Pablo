@@ -34,6 +34,16 @@ model Tenant {
   apiKeys       ApiKey[]
   webhooks      Webhook[]
 
+  projects         Project[]
+  telegramAccounts TelegramAccount[]
+  proxies          Proxy[]
+  clusters         Cluster[]
+  assets           Asset[]
+  operations       Operation[]
+  keywords         Keyword[]
+  competitors      Competitor[]
+  auditLogs        AuditLog[]
+
   @@map("tenants")
 }
 
@@ -524,4 +534,407 @@ model Webhook {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("webhooks")
+}
+
+// ─── PROJECTS ─────────────────────────────────────────────────────────────────
+
+model Project {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  niche       String?
+  language    String   @default("ru")
+  region      String?
+  tags        String[] @default([])
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assets    Asset[]
+  clusters  Cluster[]
+  operations Operation[]
+  keywords  Keyword[]
+
+  @@index([tenantId])
+  @@map("projects")
+}
+
+// ─── ASSETS (Unified Asset Registry) ─────────────────────────────────────────
+
+enum AssetType {
+  TELEGRAM_ACCOUNT
+  TELEGRAM_BOT
+  CHANNEL
+  GROUP
+  CHAT
+  PROXY
+  SESSION
+  KEYWORD
+  COMPETITOR
+  OPERATION_TEMPLATE
+}
+
+enum AssetStatus {
+  ACTIVE
+  INACTIVE
+  WARNING
+  LIMITED
+  UNSTABLE
+  DISCONNECTED
+  ARCHIVED
+}
+
+model Asset {
+  id              String      @id @default(uuid())
+  tenantId        String
+  projectId       String?
+  clusterId       String?
+  type            AssetType
+  name            String
+  username        String?
+  externalId      String?
+  status          AssetStatus @default(ACTIVE)
+  healthScore     Float       @default(1.0)
+  riskScore       Float       @default(0.0)
+  visibilityScore Float       @default(0.0)
+  activityScore   Float       @default(0.0)
+  operationalLoad Float       @default(0.0)
+  tags            String[]    @default([])
+  metadata        Json        @default("{}")
+  notes           String?
+  lastActivityAt  DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id])
+  cluster Cluster? @relation(fields: [clusterId], references: [id])
+
+  @@index([tenantId, type])
+  @@index([tenantId, status])
+  @@map("assets")
+}
+
+// ─── TELEGRAM ACCOUNTS ────────────────────────────────────────────────────────
+
+enum TgAccountStatus {
+  ACTIVE
+  DISCONNECTED
+  REQUIRES_LOGIN
+  WARNING
+  LIMITED
+  UNSTABLE
+  ARCHIVED
+}
+
+model TelegramAccount {
+  id               String          @id @default(uuid())
+  tenantId         String
+  projectId        String?
+  clusterId        String?
+  proxyId          String?
+  phone            String?
+  username         String?
+  firstName        String?
+  lastName         String?
+  tgUserId         BigInt?
+  sessionEncrypted String?
+  status           TgAccountStatus @default(ACTIVE)
+  healthScore      Float           @default(1.0)
+  trustScore       Float           @default(1.0)
+  riskScore        Float           @default(0.0)
+  floodCount7d     Int             @default(0)
+  lastFloodAt      DateTime?
+  cooldownUntil    DateTime?
+  deviceModel      String?
+  systemVersion    String?
+  appVersion       String?
+  tags             String[]        @default([])
+  notes            String?
+  isActive         Boolean         @default(true)
+  lastUsedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  proxy          Proxy?            @relation(fields: [proxyId], references: [id])
+  timingProfile  TimingProfile?
+  operationSteps OperationStep[]
+  floodLogs      AccountFloodLog[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("telegram_accounts")
+}
+
+model AccountFloodLog {
+  id          String   @id @default(uuid())
+  accountId   String
+  operation   String?
+  waitSeconds Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  account TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_flood_logs")
+}
+
+// ─── PROXIES ──────────────────────────────────────────────────────────────────
+
+enum ProxyType {
+  SOCKS5
+  HTTP
+  HTTPS
+  MTPROTO
+}
+
+enum ProxyStatus {
+  ACTIVE
+  INACTIVE
+  FAILED
+  CHECKING
+}
+
+model Proxy {
+  id                    String      @id @default(uuid())
+  tenantId              String
+  host                  String
+  port                  Int
+  type                  ProxyType   @default(SOCKS5)
+  usernameEncrypted     String?
+  passwordEncrypted     String?
+  region                String?
+  status                ProxyStatus @default(ACTIVE)
+  latencyMs             Int?
+  healthScore           Float       @default(1.0)
+  failureCount          Int         @default(0)
+  assignedAccountsCount Int         @default(0)
+  lastCheckedAt         DateTime?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accounts TelegramAccount[]
+
+  @@index([tenantId])
+  @@map("proxies")
+}
+
+// ─── CLUSTERS ─────────────────────────────────────────────────────────────────
+
+model Cluster {
+  id              String   @id @default(uuid())
+  tenantId        String
+  projectId       String?
+  name            String
+  description     String?
+  type            String   @default("general")
+  language        String?
+  region          String?
+  niche           String?
+  tags            String[] @default([])
+  assetsCount     Int      @default(0)
+  accountsCount   Int      @default(0)
+  botsCount       Int      @default(0)
+  channelsCount   Int      @default(0)
+  healthScore     Float    @default(1.0)
+  visibilityScore Float    @default(0.0)
+  activityScore   Float    @default(0.0)
+  operationalLoad Float    @default(0.0)
+  riskScore       Float    @default(0.0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project  Project?          @relation(fields: [projectId], references: [id])
+  assets   Asset[]
+  accounts TelegramAccount[]
+
+  @@index([tenantId])
+  @@map("clusters")
+}
+
+// ─── OPERATIONS CENTER ────────────────────────────────────────────────────────
+
+enum OperationStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  QUEUED
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum OperationStepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+model Operation {
+  id                String          @id @default(uuid())
+  tenantId          String
+  projectId         String?
+  createdById       String
+  approvedById      String?
+  name              String
+  description       String?
+  type              String
+  targetScope       Json            @default("{}")
+  selectedAssets    String[]        @default([])
+  selectedClusters  String[]        @default([])
+  status            OperationStatus @default(DRAFT)
+  riskScore         Float           @default(0.0)
+  safetyScore       Float           @default(1.0)
+  estimatedDuration Int?
+  scheduledAt       DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  result            Json?
+  errorMessage      String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   Project?        @relation(fields: [projectId], references: [id])
+  steps     OperationStep[]
+  auditLogs AuditLog[]
+
+  @@index([tenantId, status])
+  @@map("operations")
+}
+
+model OperationStep {
+  id           String              @id @default(uuid())
+  operationId  String
+  accountId    String?
+  assetId      String?
+  actionType   String
+  payload      Json                @default("{}")
+  scheduledFor DateTime?
+  status       OperationStepStatus @default(PENDING)
+  attempts     Int                 @default(0)
+  result       Json?
+  errorMessage String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  operation Operation        @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  account   TelegramAccount? @relation(fields: [accountId], references: [id])
+
+  @@index([operationId, status])
+  @@map("operation_steps")
+}
+
+// ─── TIMING ENGINE ────────────────────────────────────────────────────────────
+
+model TimingProfile {
+  id                        String    @id @default(uuid())
+  accountId                 String    @unique
+  allowedOperationTypes     String[]  @default([])
+  dailyActionBudget         Int       @default(50)
+  hourlyActionBudget        Int       @default(10)
+  minIntervalSeconds        Int       @default(30)
+  reliabilityScore          Float     @default(1.0)
+  historicalSuccessRate     Float     @default(1.0)
+  operationalTemperature    Float     @default(0.0)
+  projectedNextSafeActionAt DateTime?
+  lastActionAt              DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  account TelegramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("timing_profiles")
+}
+
+// ─── VISIBILITY ENGINE ────────────────────────────────────────────────────────
+
+model Keyword {
+  id        String   @id @default(uuid())
+  tenantId  String
+  projectId String?
+  groupName String?
+  keyword   String
+  language  String   @default("ru")
+  region    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   Project?          @relation(fields: [projectId], references: [id])
+  positions KeywordPosition[]
+
+  @@unique([tenantId, keyword])
+  @@index([tenantId])
+  @@map("visibility_keywords")
+}
+
+model KeywordPosition {
+  id          String   @id @default(uuid())
+  keywordId   String
+  assetId     String?
+  assetType   String?
+  position    Int?
+  previousPos Int?
+  delta       Int?
+  checkedAt   DateTime @default(now())
+
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@index([keywordId, checkedAt])
+  @@map("keyword_positions")
+}
+
+model Competitor {
+  id        String   @id @default(uuid())
+  tenantId  String
+  projectId String?
+  name      String
+  username  String?
+  type      String   @default("channel")
+  isTracked Boolean  @default(true)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("competitors")
+}
+
+// ─── AUDIT LOGS ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenantId    String
+  operatorId  String?
+  operationId String?
+  action      String
+  entityType  String?
+  entityId    String?
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operation Operation? @relation(fields: [operationId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@map("audit_logs")
 }
