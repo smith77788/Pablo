@@ -218,3 +218,17 @@ class BotFactCb(CallbackData, prefix="btf"):
     action: str
     bot_id: int = 0
     page: int = 0
+
+
+class ChanFactCb(CallbackData, prefix="chanf"):
+    action: str
+    acc_id: int = 0
+    channel_id: int = 0
+    page: int = 0
+
+
+class MassPubCb(CallbackData, prefix="mpub"):
+    action: str
+    target_type: str = ""   # "all" | "cluster" | "account"
+    target_id: int = 0
+    page: int = 0

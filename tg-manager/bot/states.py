@@ -272,3 +272,38 @@ class BotCloneSettingsFSM(StatesGroup):
 
 class BotValidateFSM(StatesGroup):
     waiting_tokens = State()    # paste tokens to validate
+
+
+class ChannelFactoryFSM(StatesGroup):
+    choosing_account = State()
+    waiting_title = State()
+    waiting_about = State()
+    waiting_username = State()
+    choosing_cluster = State()
+    choosing_template = State()
+    confirming = State()
+
+
+class BulkChannelCreateFSM(StatesGroup):
+    choosing_account = State()
+    waiting_count = State()
+    waiting_prefix = State()    # prefix for channel names: "Shop 1", "Shop 2"...
+    waiting_about = State()
+    confirming = State()
+
+
+class MassPublishFSM2(StatesGroup):
+    choosing_target_type = State()   # all | by_account | by_cluster
+    choosing_target = State()        # specific account or cluster
+    waiting_text = State()
+    choosing_timing = State()        # immediate | delay_5s | delay_30s | delay_60s
+    previewing = State()
+    confirming = State()
+
+
+class EditChannelBulkFSM(StatesGroup):
+    choosing_field = State()     # title | about | username
+    choosing_scope = State()     # all_channels | by_account
+    waiting_value = State()
+    previewing = State()
+    confirming = State()
