@@ -988,3 +988,746 @@ async def cb_rank_notify_toggle(
     kb.adjust(1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VISIBILITY ENGINE
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── VisCb(action="dashboard") — Visibility Dashboard ─────────────────────────
+
+
+@router.callback_query(VisCb.filter(F.action == "dashboard"))
+async def vis_dashboard(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    try:
+        bot_count_row = await pool.fetchrow(
+            """SELECT COUNT(DISTINCT sk.bot_id) AS bots,
+                      COUNT(sk.id)              AS keywords,
+                      MAX(ph.checked_at)        AS last_check
+               FROM search_keywords sk
+               LEFT JOIN position_history ph ON ph.bot_id = sk.bot_id
+               WHERE sk.owner_id = $1 AND sk.is_active = TRUE""",
+            owner_id,
+        )
+    except Exception as exc:
+        log.warning("vis_dashboard DB error: %s", exc)
+        bot_count_row = None
+
+    n_bots = bot_count_row["bots"] if bot_count_row else 0
+    n_keywords = bot_count_row["keywords"] if bot_count_row else 0
+    last_check_raw = bot_count_row["last_check"] if bot_count_row else None
+
+    if last_check_raw:
+        if last_check_raw.tzinfo is None:
+            last_check_raw = last_check_raw.replace(tzinfo=timezone.utc)
+        last_check_str = last_check_raw.strftime("%H:%M")
+    else:
+        last_check_str = "никогда"
+
+    text = (
+        "👁️ <b>Visibility Engine</b>\n\n"
+        f"Отслеживается ботов: <b>{n_bots}</b>\n"
+        f"Ключевых слов: <b>{n_keywords}</b>\n"
+        f"Последняя проверка: <b>{last_check_str}</b>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Все позиции",       callback_data=VisCb(action="all_positions"))
+    kb.button(text="🔍 По боту",           callback_data=VisCb(action="select_bot"))
+    kb.button(text="➕ Добавить слово",    callback_data=VisCb(action="add_keyword"))
+    kb.button(text="📈 Тренды",            callback_data=VisCb(action="trends"))
+    kb.button(text="🔔 Настройки алертов", callback_data=VisCb(action="alerts"))
+    kb.button(text="◀️ Назад",             callback_data=RankCb(action="dashboard", bot_id=0))
+    kb.adjust(2, 2, 1, 1)
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── VisCb(action="all_positions") — Все позиции всех ботов ───────────────────
+
+
+@router.callback_query(VisCb.filter(F.action == "all_positions"))
+async def vis_all_positions(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT sr.keyword, sr.position, sr.checked_at, b.username AS bot_username
+               FROM search_rankings sr
+               JOIN managed_bots b ON b.bot_id = sr.bot_id
+               WHERE b.added_by = $1
+               ORDER BY sr.checked_at DESC
+               LIMIT 20""",
+            owner_id,
+        )
+    except Exception as exc:
+        log.warning("vis_all_positions DB error: %s", exc)
+        rows = []
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=VisCb(action="all_positions"))
+    kb.button(text="◀️ Назад",   callback_data=VisCb(action="dashboard"))
+    kb.adjust(2)
+
+    if not rows:
+        await callback.message.edit_text(
+            "📊 <b>Позиции в поиске</b>\n\nДанных пока нет. Добавьте ключевые слова и запустите проверку.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Group by bot
+    from collections import defaultdict
+    by_bot: dict[str, list] = defaultdict(list)
+    for row in rows:
+        by_bot[row["bot_username"] or "unknown"].append(row)
+
+    lines = ["📊 <b>Позиции в поиске</b>\n"]
+    for bot_un, entries in by_bot.items():
+        bot_safe = html.escape(f"@{bot_un}")
+        lines.append(f"\n🤖 {bot_safe}")
+        for e in entries:
+            kw_safe = html.escape(e["keyword"])
+            pos = e["position"]
+
+            # Fetch previous position from position_history for delta
+            try:
+                prev_row = await pool.fetchrow(
+                    """SELECT position FROM position_history
+                       WHERE bot_id = (SELECT bot_id FROM managed_bots WHERE username=$1 LIMIT 1)
+                         AND keyword = $2
+                       ORDER BY checked_at DESC
+                       LIMIT 1 OFFSET 1""",
+                    bot_un, e["keyword"],
+                )
+                prev_pos = prev_row["position"] if prev_row else None
+            except Exception:
+                prev_pos = None
+
+            arrow = _trend_arrow(pos, prev_pos)
+            alert = ""
+            if prev_pos is not None and pos is not None and pos > prev_pos:
+                alert = " ⚠️"
+            delta_str = ""
+            if prev_pos is not None and pos is not None and pos != prev_pos:
+                direction = "↑" if pos < prev_pos else "↓"
+                delta_str = f" ({direction} с #{prev_pos})"
+
+            if pos is None:
+                lines.append(f"  • «{kw_safe}» → не в топ 20{alert}")
+            else:
+                lines.append(f"  • «{kw_safe}» → #{pos}{delta_str}{arrow}{alert}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── VisCb(action="select_bot") — Выбрать бота для просмотра позиций ──────────
+
+
+@router.callback_query(VisCb.filter(F.action == "select_bot"))
+async def vis_select_bot(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    bots = await db.get_bots(pool, owner_id)
+    if not bots:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
+        await callback.message.edit_text(
+            "👁️ <b>Visibility Engine</b>\n\nУ вас пока нет ботов.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for bot in bots:
+        label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
+        kb.button(
+            text=f"🤖 {label}",
+            callback_data=VisCb(action="by_bot", bot_id=bot["bot_id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "🔍 <b>Позиции по боту</b>\n\nВыберите бота:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── VisCb(action="by_bot", bot_id=X) — Позиции конкретного бота ──────────────
+
+
+@router.callback_query(VisCb.filter(F.action == "by_bot"))
+async def vis_by_bot(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+    bot_id = callback_data.bot_id
+
+    bot_row = await db.get_bot(pool, bot_id, owner_id)
+    if not bot_row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
+
+    try:
+        rows = await pool.fetch(
+            """SELECT sr.keyword, sr.position, sr.checked_at
+               FROM search_rankings sr
+               WHERE sr.bot_id = $1
+               ORDER BY sr.checked_at DESC
+               LIMIT 30""",
+            bot_id,
+        )
+    except Exception as exc:
+        log.warning("vis_by_bot DB error: %s", exc)
+        rows = []
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📈 Тренды", callback_data=VisCb(action="trends", bot_id=bot_id))
+    kb.button(text="◀️ Назад",  callback_data=VisCb(action="select_bot"))
+    kb.adjust(2)
+
+    if not rows:
+        await callback.message.edit_text(
+            f"🔍 <b>Позиции — {html.escape(label)}</b>\n\nДанных пока нет.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Deduplicate — keep latest entry per keyword
+    seen: dict[str, dict] = {}
+    for row in rows:
+        if row["keyword"] not in seen:
+            seen[row["keyword"]] = dict(row)
+
+    lines = [f"🔍 <b>Позиции — {html.escape(label)}</b>\n"]
+    for kw_text, entry in seen.items():
+        kw_safe = html.escape(kw_text)
+        pos = entry["position"]
+        try:
+            prev_row = await pool.fetchrow(
+                """SELECT position FROM position_history
+                   WHERE bot_id = $1 AND keyword = $2
+                   ORDER BY checked_at DESC
+                   LIMIT 1 OFFSET 1""",
+                bot_id, kw_text,
+            )
+            prev_pos = prev_row["position"] if prev_row else None
+        except Exception:
+            prev_pos = None
+
+        arrow = _trend_arrow(pos, prev_pos)
+        delta_str = ""
+        if prev_pos is not None and pos is not None and pos != prev_pos:
+            direction = "↑" if pos < prev_pos else "↓"
+            delta_str = f" ({direction} с #{prev_pos})"
+
+        if pos is None:
+            lines.append(f"  • «{kw_safe}» → не в топ 20 ❌")
+        else:
+            lines.append(f"  • «{kw_safe}» → #{pos}{delta_str}{arrow}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── VisCb(action="add_keyword") — Wizard добавления ключевого слова ───────────
+
+
+@router.callback_query(VisCb.filter(F.action == "add_keyword"))
+async def vis_add_keyword_start(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    bots = await db.get_bots(pool, owner_id)
+    if not bots:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
+        await callback.message.edit_text(
+            "➕ <b>Добавить ключевое слово</b>\n\nСначала добавьте бота через /start.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    await state.set_state(AddKeywordFSM.choosing_bot)
+
+    kb = InlineKeyboardBuilder()
+    for bot in bots:
+        label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
+        kb.button(
+            text=f"🤖 {label}",
+            callback_data=VisCb(action="vis_pick_bot", bot_id=bot["bot_id"]),
+        )
+    kb.button(text="❌ Отмена", callback_data=VisCb(action="dashboard"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "➕ <b>Добавить ключевое слово</b>\n\nШаг 1/3: Выберите бота:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(VisCb.filter(F.action == "vis_pick_bot"), AddKeywordFSM.choosing_bot)
+async def vis_pick_bot(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    await state.update_data(vis_bot_id=callback_data.bot_id)
+    await state.set_state(AddKeywordFSM.waiting_keyword)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=VisCb(action="dashboard"))
+
+    await callback.message.edit_text(
+        "➕ <b>Добавить ключевое слово</b>\n\n"
+        "Шаг 2/3: Введите ключевое слово или фразу:\n\n"
+        "<i>Примеры: крипто бот, tg магазин, ai assistant</i>\n"
+        "<i>Максимум 50 символов.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AddKeywordFSM.waiting_keyword)
+async def vis_receive_keyword(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    keyword = (message.text or "").strip()
+    if not keyword or len(keyword) > 50:
+        await message.answer(
+            "⚠️ Ключевое слово должно быть от 1 до 50 символов. Попробуйте ещё раз:",
+            parse_mode="HTML",
+        )
+        return
+
+    await state.update_data(vis_keyword=keyword)
+    await state.set_state(AddKeywordFSM.waiting_region)
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    region_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇺🇦 UA",  callback_data="vis_reg:ua"),
+            InlineKeyboardButton(text="🇷🇺 RU",  callback_data="vis_reg:ru"),
+        ],
+        [
+            InlineKeyboardButton(text="🇬🇧 EN",  callback_data="vis_reg:en"),
+            InlineKeyboardButton(text="🌍 Все",  callback_data="vis_reg:all"),
+        ],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="vis_reg:cancel")],
+    ])
+
+    await message.answer(
+        f"➕ <b>Добавить ключевое слово</b>\n\n"
+        f"Слово: <b>«{html.escape(keyword)}»</b>\n\n"
+        "Шаг 3/3: Выберите регион/язык:",
+        parse_mode="HTML",
+        reply_markup=region_kb,
+    )
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("vis_reg:"), AddKeywordFSM.waiting_region)
+async def vis_receive_region(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    region_raw = callback.data.split(":", 1)[1]
+    await callback.answer()
+
+    if region_raw == "cancel":
+        await state.clear()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ К дашборду", callback_data=VisCb(action="dashboard"))
+        await callback.message.edit_text(
+            "❌ Добавление ключевого слова отменено.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    region = region_raw  # "ua" | "ru" | "en" | "all"
+    data = await state.get_data()
+    await state.clear()
+
+    bot_id: int = data.get("vis_bot_id", 0)
+    keyword: str = data.get("vis_keyword", "")
+    owner_id = callback.from_user.id
+
+    if not bot_id or not keyword:
+        await callback.message.edit_text(
+            "⚠️ Ошибка: данные не найдены. Начните заново.",
+            parse_mode="HTML",
+        )
+        return
+
+    try:
+        await pool.execute(
+            """INSERT INTO search_keywords(bot_id, keyword, region, owner_id)
+               VALUES($1, $2, $3, $4)
+               ON CONFLICT(bot_id, keyword) DO NOTHING""",
+            bot_id, keyword, region, owner_id,
+        )
+        saved = True
+    except Exception as exc:
+        log.warning("vis_receive_region save error: %s", exc)
+        saved = False
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👁️ Дашборд",  callback_data=VisCb(action="dashboard"))
+    kb.button(text="➕ Ещё слово", callback_data=VisCb(action="add_keyword"))
+    kb.adjust(2)
+
+    kw_safe = html.escape(keyword)
+    if saved:
+        await callback.message.edit_text(
+            f"✅ Ключевое слово <b>«{kw_safe}»</b> добавлено для региона <b>{region.upper()}</b>.\n\n"
+            "Позиция будет определена при следующей проверке.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await callback.message.edit_text(
+            f"ℹ️ Слово <b>«{kw_safe}»</b> уже отслеживается для этого бота.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+# ── VisCb(action="trends") / VisCb(action="trends", bot_id=X) — Тренды ───────
+
+
+@router.callback_query(VisCb.filter(F.action == "trends"))
+async def vis_trends(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+    bot_id = callback_data.bot_id
+
+    if not bot_id:
+        bots = await db.get_bots(pool, owner_id)
+        if not bots:
+            kb = InlineKeyboardBuilder()
+            kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
+            await callback.message.edit_text(
+                "📈 <b>Тренды позиций</b>\n\nНет ботов.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+        if len(bots) == 1:
+            bot_id = bots[0]["bot_id"]
+        else:
+            sel_kb = InlineKeyboardBuilder()
+            for bot in bots:
+                label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
+                sel_kb.button(
+                    text=f"🤖 {label}",
+                    callback_data=VisCb(action="trends", bot_id=bot["bot_id"]),
+                )
+            sel_kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
+            sel_kb.adjust(1)
+            await callback.message.edit_text(
+                "📈 <b>Тренды позиций</b>\n\nВыберите бота:",
+                parse_mode="HTML",
+                reply_markup=sel_kb.as_markup(),
+            )
+            return
+
+    bot_row = await db.get_bot(pool, bot_id, owner_id)
+    if not bot_row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
+
+    try:
+        history_rows = await pool.fetch(
+            """SELECT keyword, position, checked_at
+               FROM position_history
+               WHERE bot_id = $1
+               ORDER BY keyword, checked_at DESC""",
+            bot_id,
+        )
+    except Exception as exc:
+        log.warning("vis_trends position_history error: %s", exc)
+        history_rows = []
+
+    # Fallback to search_rankings if position_history is empty
+    if not history_rows:
+        try:
+            history_rows = await pool.fetch(
+                """SELECT sr.keyword, sr.position, sr.checked_at
+                   FROM search_rankings sr
+                   WHERE sr.bot_id = $1
+                   ORDER BY sr.keyword, sr.checked_at DESC""",
+                bot_id,
+            )
+        except Exception as exc:
+            log.warning("vis_trends search_rankings fallback error: %s", exc)
+            history_rows = []
+
+    kb2 = InlineKeyboardBuilder()
+    kb2.button(text="🔄 Обновить", callback_data=VisCb(action="trends", bot_id=bot_id))
+    kb2.button(text="◀️ Назад",   callback_data=VisCb(action="dashboard"))
+    kb2.adjust(2)
+
+    if not history_rows:
+        await callback.message.edit_text(
+            f"📈 <b>Тренд позиций — {html.escape(label)}</b>\n\nИстория пока пуста.",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+        return
+
+    from collections import defaultdict
+    kw_history: dict[str, list] = defaultdict(list)
+    for row in history_rows:
+        kw_history[row["keyword"]].append(row)
+
+    lines = [f"📈 <b>Тренд позиций — {html.escape(label)}</b>\n"]
+
+    for kw_text, entries in list(kw_history.items())[:10]:
+        kw_safe = html.escape(kw_text)
+        lines.append(f"\n<b>«{kw_safe}»</b>")
+
+        # entries are DESC — reverse for chronological timeline display
+        timeline = list(reversed(entries[:7]))
+        trend_parts = []
+        for entry in timeline:
+            pos = entry["position"]
+            at = entry["checked_at"]
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=timezone.utc)
+            date_label = at.strftime("%d.%m")
+            pos_str = f"#{pos}" if pos is not None else "—"
+            trend_parts.append(f"{date_label}: {pos_str}")
+
+        trend_line = " → ".join(trend_parts)
+
+        first_pos = timeline[0]["position"] if timeline else None
+        last_pos = timeline[-1]["position"] if timeline else None
+        if first_pos is not None and last_pos is not None:
+            if last_pos < first_pos:
+                verdict = " ✅ (улучшение)"
+            elif last_pos > first_pos:
+                verdict = " ⚠️ (ухудшение)"
+            else:
+                verdict = " → (без изменений)"
+        else:
+            verdict = ""
+
+        lines.append(f"{trend_line}{verdict}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb2.as_markup(),
+    )
+
+
+# ── VisCb(action="alerts") — Настройки алертов ───────────────────────────────
+
+
+@router.callback_query(VisCb.filter(F.action == "alerts"))
+async def vis_alerts(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+    await _render_vis_alerts(callback, owner_id, pool)
+
+
+async def _render_vis_alerts(
+    callback: CallbackQuery,
+    owner_id: int,
+    pool: asyncpg.Pool,
+) -> None:
+    try:
+        row = await pool.fetchrow(
+            "SELECT drop_threshold, rise_threshold, alerts_enabled "
+            "FROM visibility_alert_settings WHERE owner_id=$1",
+            owner_id,
+        )
+    except Exception as exc:
+        log.warning("vis_alerts DB error: %s", exc)
+        row = None
+
+    drop_thr = row["drop_threshold"] if row else 10
+    rise_thr = row["rise_threshold"] if row else 5
+    enabled = row["alerts_enabled"] if row else True
+
+    enabled_icon = "✅ Включено" if enabled else "❌ Выключено"
+    toggle_label = "🔕 Выключить алерты" if enabled else "🔔 Включить алерты"
+
+    text = (
+        "🔔 <b>Алерты позиций</b>\n\n"
+        f"Статус: <b>{enabled_icon}</b>\n\n"
+        "Уведомлять если позиция:\n"
+        f"• Упала ниже #{drop_thr} → {'✅ Включено' if enabled else '❌ Выключено'}\n"
+        f"• Поднялась выше #{rise_thr} → {'✅ Включено' if enabled else '❌ Выключено'}"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=toggle_label,        callback_data=VisCb(action="alerts_toggle"))
+    kb.button(text="✏️ Изменить порог", callback_data=VisCb(action="alerts_threshold"))
+    kb.button(text="◀️ Назад",          callback_data=VisCb(action="dashboard"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(VisCb.filter(F.action == "alerts_toggle"))
+async def vis_alerts_toggle(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    try:
+        row = await pool.fetchrow(
+            "SELECT alerts_enabled FROM visibility_alert_settings WHERE owner_id=$1",
+            owner_id,
+        )
+        current = row["alerts_enabled"] if row else True
+        new_val = not current
+        await pool.execute(
+            """INSERT INTO visibility_alert_settings(owner_id, alerts_enabled)
+               VALUES($1, $2)
+               ON CONFLICT(owner_id) DO UPDATE SET alerts_enabled = EXCLUDED.alerts_enabled""",
+            owner_id, new_val,
+        )
+    except Exception as exc:
+        log.warning("vis_alerts_toggle DB error: %s", exc)
+
+    await _render_vis_alerts(callback, owner_id, pool)
+
+
+@router.callback_query(VisCb.filter(F.action == "alerts_threshold"))
+async def vis_alerts_threshold(
+    callback: CallbackQuery,
+    callback_data: VisCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    await state.set_state(KeywordAlertFSM.choosing_threshold)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=VisCb(action="alerts"))
+
+    await callback.message.edit_text(
+        "✏️ <b>Изменить порог алертов</b>\n\n"
+        "Введите два числа через пробел:\n"
+        "<code>порог_падения порог_роста</code>\n\n"
+        "<i>Пример: <code>10 5</code>\n"
+        "Уведомление при падении ниже #10 и росте выше #5</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(KeywordAlertFSM.choosing_threshold)
+async def vis_receive_threshold(
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    parts = (message.text or "").strip().split()
+    owner_id = message.from_user.id
+
+    try:
+        drop_thr = int(parts[0])
+        rise_thr = int(parts[1]) if len(parts) > 1 else 5
+        assert 1 <= drop_thr <= 50 and 1 <= rise_thr <= 50
+    except (ValueError, IndexError, AssertionError):
+        await message.answer(
+            "⚠️ Неверный формат. Введите два числа от 1 до 50, например: <code>10 5</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await state.clear()
+
+    try:
+        await pool.execute(
+            """INSERT INTO visibility_alert_settings(owner_id, drop_threshold, rise_threshold)
+               VALUES($1, $2, $3)
+               ON CONFLICT(owner_id) DO UPDATE
+                 SET drop_threshold = EXCLUDED.drop_threshold,
+                     rise_threshold = EXCLUDED.rise_threshold""",
+            owner_id, drop_thr, rise_thr,
+        )
+        saved = True
+    except Exception as exc:
+        log.warning("vis_receive_threshold save error: %s", exc)
+        saved = False
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔔 К настройкам алертов", callback_data=VisCb(action="alerts"))
+    kb.button(text="👁️ Дашборд",              callback_data=VisCb(action="dashboard"))
+    kb.adjust(1)
+
+    if saved:
+        await message.answer(
+            f"✅ Пороги обновлены:\n"
+            f"• Падение: ниже #{drop_thr}\n"
+            f"• Рост: выше #{rise_thr}",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await message.answer(
+            "⚠️ Ошибка при сохранении. Попробуйте позже.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )

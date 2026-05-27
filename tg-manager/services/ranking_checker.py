@@ -140,6 +140,16 @@ async def check_bot_keywords(
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
                 kw["id"], bot_id, ui_position,
             )
+            # Also persist into position_history for Visibility Engine trends
+            try:
+                await pool.execute(
+                    "INSERT INTO position_history(bot_id, keyword, position) VALUES($1,$2,$3)",
+                    bot_id, kw["keyword"], ui_position,
+                )
+            except Exception as exc:
+                log.debug("position_history insert skipped: %s", exc)
+            # Check visibility alerts
+            await _check_visibility_alerts(pool, bot_id, kw["keyword"], ui_position, owner_id)
 
         results_out.append({
             "keyword": kw["keyword"],
@@ -242,6 +252,101 @@ async def _check_all(pool: asyncpg.Pool) -> None:
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
                 kw["id"], kw["bot_id"], ui_position,
             )
+            # Also persist into position_history for Visibility Engine trends
+            try:
+                await pool.execute(
+                    "INSERT INTO position_history(bot_id, keyword, position) VALUES($1,$2,$3)",
+                    kw["bot_id"], kw["keyword"], ui_position,
+                )
+            except Exception as exc:
+                log.debug("position_history insert skipped: %s", exc)
+            # Check visibility alerts
+            await _check_visibility_alerts(pool, kw["bot_id"], kw["keyword"], ui_position, kw["owner_id"])
+
+
+# ── Visibility alert checker ───────────────────────────────────────────────
+
+async def _check_visibility_alerts(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    keyword: str,
+    position: int | None,
+    owner_id: int,
+) -> None:
+    """Send alert to bot owner if position crossed drop/rise thresholds."""
+    if position is None:
+        return
+    try:
+        row = await pool.fetchrow(
+            "SELECT drop_threshold, rise_threshold, alerts_enabled "
+            "FROM visibility_alert_settings WHERE owner_id=$1",
+            owner_id,
+        )
+    except Exception:
+        return
+
+    if not row or not row["alerts_enabled"]:
+        return
+
+    drop_thr: int = row["drop_threshold"] or 10
+    rise_thr: int = row["rise_threshold"] or 5
+
+    # Fetch previous position from position_history (second-to-last entry)
+    try:
+        prev_row = await pool.fetchrow(
+            """SELECT position FROM position_history
+               WHERE bot_id=$1 AND keyword=$2
+               ORDER BY checked_at DESC
+               LIMIT 1 OFFSET 1""",
+            bot_id, keyword,
+        )
+        prev_pos: int | None = prev_row["position"] if prev_row else None
+    except Exception:
+        return
+
+    if prev_pos is None:
+        return  # no history to compare against
+
+    dropped_below = position > drop_thr and (prev_pos <= drop_thr or position > prev_pos)
+    rose_above = position <= rise_thr and (prev_pos > rise_thr or position < prev_pos)
+
+    if not (dropped_below or rose_above):
+        return
+
+    # Fetch bot username for the alert message
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT username FROM managed_bots WHERE bot_id=$1 LIMIT 1", bot_id
+        )
+        bot_label = f"@{bot_row['username']}" if bot_row and bot_row["username"] else f"bot#{bot_id}"
+    except Exception:
+        bot_label = f"bot#{bot_id}"
+
+    if dropped_below:
+        msg = (
+            f"⚠️ <b>Visibility Alert</b>\n\n"
+            f"Бот {bot_label} — ключевое слово «{keyword}»\n"
+            f"Позиция упала до #{position} (была #{prev_pos})\n"
+            f"Порог: #{drop_thr}"
+        )
+    else:
+        msg = (
+            f"🎉 <b>Visibility Alert</b>\n\n"
+            f"Бот {bot_label} — ключевое слово «{keyword}»\n"
+            f"Позиция поднялась до #{position} (была #{prev_pos})\n"
+            f"Порог роста: #{rise_thr}"
+        )
+
+    try:
+        from aiogram import Bot as _Bot
+        import os
+        token = os.getenv("MANAGER_BOT_TOKEN", "")
+        if token:
+            alert_bot = _Bot(token=token)
+            await alert_bot.send_message(owner_id, msg, parse_mode="HTML")
+            await alert_bot.session.close()
+    except Exception as exc:
+        log.warning("_check_visibility_alerts send error: %s", exc)
 
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
