@@ -5,7 +5,7 @@ Provides:
   - Bulk channel creation (numbered prefix, anti-flood)
   - Bulk channel editing (title / description across all or by account)
   - Invite link generation per channel
-  - Channel stats stub
+  - Channel stats (account → channel list → member count)
 
 Entry point: ChanFactCb(action="menu")
 """
