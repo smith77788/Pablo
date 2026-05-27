@@ -3,6 +3,10 @@ name: Deploy TG Manager to Railway
 on:
   push:
     branches: [main]
+    paths:
+      - 'tg-manager/**'
+      - 'Dockerfile'
+      - 'railway.json'
 
 jobs:
   deploy:
@@ -16,6 +20,7 @@ jobs:
 
       - name: Deploy to Railway
         run: |
+          cd tg-manager
           railway up --service tg-manager --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
