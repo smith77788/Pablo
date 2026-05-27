@@ -6,6 +6,7 @@ Provides:
   - Bulk channel editing (title / description across all or by account)
   - Invite link generation per channel
   - Channel stats (account → channel list → member count)
+  - Import existing Telegram channels into the system
 
 Entry point: ChanFactCb(action="menu")
 """
@@ -34,6 +35,7 @@ from bot.utils.op_helpers import (
     _progress_bar,
     _progress_text,
 )
+from services import session_simulator
 
 
 log = logging.getLogger(__name__)
@@ -73,14 +75,15 @@ async def _send_or_edit(event, text: str, kb: InlineKeyboardBuilder) -> None:
 
 def _main_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Создать канал",        callback_data=ChanFactCb(action="create"))
-    kb.button(text="📋 Массовое создание",    callback_data=ChanFactCb(action="bulk_create"))
-    kb.button(text="✏️ Редактировать",        callback_data=ChanFactCb(action="bulk_edit"))
-    kb.button(text="📤 Массовая публикация",  callback_data=ChanFactCb(action="mass_pub_redirect"))
-    kb.button(text="📊 Статистика каналов",   callback_data=ChanFactCb(action="stats"))
-    kb.button(text="🔗 Генерация ссылок",     callback_data=ChanFactCb(action="gen_links"))
-    kb.button(text="◀️ Назад",               callback_data=ChanFactCb(action="back_to_ops"))
-    kb.adjust(2, 2, 2, 1)
+    kb.button(text="➕ Создать канал",          callback_data=ChanFactCb(action="create"))
+    kb.button(text="📋 Массовое создание",      callback_data=ChanFactCb(action="bulk_create"))
+    kb.button(text="📥 Импорт из Telegram",     callback_data=ChanFactCb(action="import"))
+    kb.button(text="✏️ Редактировать",          callback_data=ChanFactCb(action="bulk_edit"))
+    kb.button(text="📤 Массовая публикация",    callback_data=ChanFactCb(action="mass_pub_redirect"))
+    kb.button(text="📊 Статистика каналов",     callback_data=ChanFactCb(action="stats"))
+    kb.button(text="🔗 Генерация ссылок",       callback_data=ChanFactCb(action="gen_links"))
+    kb.button(text="◀️ Назад",                 callback_data=ChanFactCb(action="back_to_ops"))
+    kb.adjust(2, 1, 2, 2, 1)
     return kb
 
 
@@ -88,9 +91,14 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
 async def cb_chanf_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.edit_text(
-        "📡 <b>Channel Factory</b>\n\n"
-        "Расширенный менеджер каналов.\n"
-        "Создавайте, редактируйте и публикуйте массово.",
+        "📡 <b>Channel Factory — менеджер каналов</b>\n\n"
+        "• <b>Создать канал</b> — новый Telegram-канал через ваш аккаунт\n"
+        "• <b>Массовое создание</b> — несколько каналов с умными задержками\n"
+        "• <b>Импорт из Telegram</b> — подключить уже существующие каналы\n"
+        "• <b>Редактировать</b> — массово изменить название/описание\n"
+        "• <b>Массовая публикация</b> — опубликовать пост во все каналы\n"
+        "• <b>Статистика</b> — подписчики, активность\n"
+        "• <b>Генерация ссылок</b> — invite-ссылки для каналов",
         parse_mode="HTML",
         reply_markup=_main_menu_kb().as_markup(),
     )
@@ -108,6 +116,166 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# IMPORT EXISTING CHANNELS — подключить уже существующие каналы
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(ChanFactCb.filter(F.action == "import"))
+async def cb_chanf_import(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    """Step 1: выбор аккаунта для импорта каналов."""
+    await callback.answer()
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов.\n\nПодключите аккаунт через /accounts",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        kb.button(
+            text=_acc_label(acc),
+            callback_data=ChanFactCb(action="import_acc", acc_id=acc["id"]),
+        )
+    kb.button(text="🔄 Все аккаунты сразу", callback_data=ChanFactCb(action="import_all_accs"))
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
+    kb.adjust(2, 1, 1)
+    await callback.message.edit_text(
+        "📥 <b>Импорт существующих каналов</b>\n\n"
+        "Мы загрузим список каналов из выбранного аккаунта "
+        "и подключим их к системе. После этого вы сможете:\n"
+        "• публиковать посты через «Массовая публикация»\n"
+        "• делать invite и операции с участниками\n"
+        "• видеть статистику\n\n"
+        "Выберите аккаунт:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "import_acc"))
+async def cb_chanf_import_acc(
+    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
+) -> None:
+    """Step 2: загрузить каналы аккаунта и сохранить в систему."""
+    await callback.answer("⏳ Загружаю каналы из Telegram...")
+    acc = await pool.fetchrow(
+        "SELECT id, session_str, phone, first_name, username FROM tg_accounts "
+        "WHERE id=$1 AND owner_id=$2",
+        callback_data.acc_id, callback.from_user.id,
+    )
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    from services import account_manager
+    from database.db import upsert_managed_channels
+
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+    except Exception as e:
+        log.warning("import_acc get_dialogs error: %s", e)
+        await callback.message.edit_text(
+            f"❌ Ошибка при получении диалогов: <code>{html.escape(str(e)[:100])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    channels = [
+        d for d in dialogs
+        if d.get("type") in ("channel", "megagroup", "supergroup", "gigagroup")
+    ]
+    if not channels:
+        await callback.message.edit_text(
+            "ℹ️ У этого аккаунта нет каналов или супергрупп в Telegram.\n\n"
+            "Убедитесь что аккаунт является администратором нужных каналов.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    await upsert_managed_channels(pool, callback.from_user.id, acc["id"], channels)
+
+    acc_label = _acc_label(acc)
+    lines = [f"📥 <b>Импортировано каналов: {len(channels)}</b>\n"]
+    lines += [
+        f"• {html.escape(ch.get('title', '(без названия)'))}"
+        + (f" @{html.escape(ch['username'])}" if ch.get("username") else "")
+        for ch in channels[:20]
+    ]
+    if len(channels) > 20:
+        lines.append(f"... и ещё {len(channels) - 20}")
+    lines.append(f"\n<i>Аккаунт: {html.escape(acc_label)}</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📤 Открыть публикацию", callback_data=ChanFactCb(action="mass_pub_redirect"))
+    kb.button(text="◀️ В меню каналов",     callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "import_all_accs"))
+async def cb_chanf_import_all_accs(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    """Импортировать каналы со ВСЕХ активных аккаунтов."""
+    await callback.answer("⏳ Загружаю каналы со всех аккаунтов...")
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.answer("Нет активных аккаунтов.", show_alert=True)
+        return
+
+    from services import account_manager
+    from database.db import upsert_managed_channels
+
+    total_imported = 0
+    errors = []
+    progress_msg = await callback.message.edit_text(
+        f"⏳ Обработка аккаунтов: 0/{len(accounts)}...",
+        parse_mode="HTML",
+    )
+
+    for idx, acc in enumerate(accounts):
+        try:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+            channels = [
+                d for d in dialogs
+                if d.get("type") in ("channel", "megagroup", "supergroup", "gigagroup")
+            ]
+            if channels:
+                await upsert_managed_channels(pool, callback.from_user.id, acc["id"], channels)
+                total_imported += len(channels)
+            await progress_msg.edit_text(
+                f"⏳ Обработка аккаунтов: {idx+1}/{len(accounts)}...\n"
+                f"Найдено каналов: {total_imported}",
+                parse_mode="HTML",
+            )
+            if idx < len(accounts) - 1:
+                await session_simulator.short_pause(2.0, 5.0)
+        except Exception as e:
+            log.warning("import_all_accs acc=%s error: %s", acc.get("id"), e)
+            errors.append(f"• {_acc_label(acc)}: {str(e)[:50]}")
+
+    text = f"✅ <b>Импорт завершён</b>\n\nПодключено каналов: <b>{total_imported}</b>"
+    if errors:
+        text += f"\n\n⚠️ Ошибки ({len(errors)}):\n" + "\n".join(errors[:5])
+    text += "\n\nТеперь вы можете использовать эти каналы для публикации и операций."
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📤 Открыть публикацию", callback_data=ChanFactCb(action="mass_pub_redirect"))
+    kb.button(text="◀️ В меню каналов",     callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1)
+    await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "mass_pub_redirect"))
@@ -581,7 +749,13 @@ async def _show_bulk_confirm(event, state: FSMContext) -> None:
         f"Аккаунт: <b>{acc_label}</b>\n"
         f"Каналов: <b>{count}</b>\n"
         f"Названия: {preview}\n\n"
-        "⚠️ Задержка 30-60с между созданием каналов."
+        "🛡️ <b>Умный режим:</b>\n"
+        "• 45-90 сек между созданиями\n"
+        "• Пауза 5-10 мин каждые 5 каналов\n"
+        "• Случайные задержки имитируют человека\n\n"
+        "<i>⏱ Ориентировочное время: ~{est} мин</i>".format(
+            est=round((count * 67 + (count // 5) * 450) / 60)
+        )
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Создать", callback_data=ChanFactCb(action="do_bulk_create"))
@@ -634,6 +808,8 @@ async def cb_chanf_do_bulk_create(
 
     for i in range(1, count + 1):
         title = f"{prefix} {i}"
+        # Human-like delay before action (simulate typing channel name)
+        await session_simulator.typing_delay(title)
         result = await account_manager.create_channel(
             acc["session_str"],
             title=title,
@@ -653,7 +829,12 @@ async def cb_chanf_do_bulk_create(
         except Exception:
             pass
         if i < count:
-            delay = random.uniform(30, 60)
+            # Smart anti-flood: human-like delay between channel creations
+            # Every 5 channels — longer pause (5-10 min), otherwise 45-90s
+            if i % 5 == 0:
+                delay = random.uniform(300, 600) * session_simulator.chaos_factor()
+            else:
+                delay = random.uniform(45, 90) * session_simulator.chaos_factor()
             await asyncio.sleep(delay)
 
     lines = ["📋 <b>Результаты массового создания</b>\n"] + results_ok + results_err

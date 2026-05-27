@@ -37,14 +37,20 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
 async def cb_group_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Создать группу",  callback_data=GroupFCb(action="create"))
-    kb.button(text="📋 Мои группы",      callback_data=GroupFCb(action="list"))
-    kb.button(text="👥 Участники",       callback_data=GroupFCb(action="members"))
-    kb.button(text="📢 Объявление",      callback_data=GroupFCb(action="announce"))
-    kb.button(text="◀️ Назад",          callback_data="main_menu")
-    kb.adjust(2, 2, 1)
+    kb.button(text="➕ Создать группу",        callback_data=GroupFCb(action="create"))
+    kb.button(text="📥 Импорт из Telegram",    callback_data=GroupFCb(action="import"))
+    kb.button(text="📋 Мои группы",            callback_data=GroupFCb(action="list"))
+    kb.button(text="👥 Участники",             callback_data=GroupFCb(action="members"))
+    kb.button(text="📢 Объявление",            callback_data=GroupFCb(action="announce"))
+    kb.button(text="◀️ Назад",                callback_data="main_menu")
+    kb.adjust(2, 2, 2, 1)
     await callback.message.edit_text(
-        "👥 <b>Менеджер групп</b>\n\nВыберите действие:",
+        "👥 <b>Менеджер групп</b>\n\n"
+        "• <b>Создать группу</b> — новая группа через ваш аккаунт\n"
+        "• <b>Импорт из Telegram</b> — подключить существующие группы\n"
+        "• <b>Мои группы</b> — список всех групп аккаунтов\n"
+        "• <b>Участники</b> — просмотр участников группы\n"
+        "• <b>Объявление</b> — отправить сообщение во все группы",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -489,6 +495,157 @@ async def cb_group_members_list(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# IMPORT EXISTING GROUPS — подключить уже существующие группы
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(GroupFCb.filter(F.action == "import"))
+async def cb_group_import(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    """Step 1: выбор аккаунта для импорта групп."""
+    await callback.answer()
+    from bot.utils.op_helpers import _get_active_accounts, _acc_label
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов.\n\nПодключите аккаунт через /accounts",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        kb.button(
+            text=_acc_label(acc),
+            callback_data=GroupFCb(action="import_acc", acc_id=acc["id"]),
+        )
+    kb.button(text="🔄 Все аккаунты сразу", callback_data=GroupFCb(action="import_all"))
+    kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
+    kb.adjust(2, 1, 1)
+    await callback.message.edit_text(
+        "📥 <b>Импорт существующих групп</b>\n\n"
+        "Мы загрузим список групп/супергрупп из выбранного аккаунта "
+        "и подключим их к системе.\n\n"
+        "Выберите аккаунт:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(GroupFCb.filter(F.action == "import_acc"))
+async def cb_group_import_acc(
+    callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
+) -> None:
+    """Загрузить группы аккаунта и сохранить в managed_channels."""
+    await callback.answer("⏳ Загружаю группы из Telegram...")
+    from bot.utils.op_helpers import _acc_label
+    acc = await pool.fetchrow(
+        "SELECT id, session_str, phone, first_name, username FROM tg_accounts "
+        "WHERE id=$1 AND owner_id=$2",
+        callback_data.acc_id, callback.from_user.id,
+    )
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    from services import account_manager
+    from database.db import upsert_managed_channels
+
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+    except Exception as e:
+        log.warning("group import_acc get_dialogs error: %s", e)
+        await callback.message.edit_text(
+            f"❌ Ошибка при получении диалогов: <code>{html.escape(str(e)[:100])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    groups = [
+        d for d in dialogs
+        if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+    ]
+    if not groups:
+        await callback.message.edit_text(
+            "ℹ️ У этого аккаунта нет групп в Telegram.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    await upsert_managed_channels(pool, callback.from_user.id, acc["id"], groups)
+
+    lines = [f"📥 <b>Импортировано групп: {len(groups)}</b>\n"]
+    lines += [
+        f"• {html.escape(g.get('title', '(без названия)'))}"
+        + (" 🌐" if g.get("type") in ("megagroup", "supergroup") else "")
+        for g in groups[:20]
+    ]
+    if len(groups) > 20:
+        lines.append(f"... и ещё {len(groups) - 20}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ В меню групп", callback_data=GroupFCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(GroupFCb.filter(F.action == "import_all"))
+async def cb_group_import_all(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    """Импортировать группы со всех активных аккаунтов."""
+    await callback.answer("⏳ Загружаю группы со всех аккаунтов...")
+    from bot.utils.op_helpers import _get_active_accounts, _acc_label
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.answer("Нет активных аккаунтов.", show_alert=True)
+        return
+
+    from services import account_manager
+    from database.db import upsert_managed_channels
+    import asyncio
+
+    total = 0
+    errors = []
+    progress_msg = await callback.message.edit_text(
+        f"⏳ Обработка 0/{len(accounts)} аккаунтов...", parse_mode="HTML"
+    )
+    for idx, acc in enumerate(accounts):
+        try:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+            groups = [
+                d for d in dialogs
+                if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+            ]
+            if groups:
+                await upsert_managed_channels(pool, callback.from_user.id, acc["id"], groups)
+                total += len(groups)
+            await progress_msg.edit_text(
+                f"⏳ Обработка {idx+1}/{len(accounts)} аккаунтов...\nНайдено групп: {total}",
+                parse_mode="HTML",
+            )
+            if idx < len(accounts) - 1:
+                await asyncio.sleep(2)
+        except Exception as e:
+            log.warning("group import_all acc=%s error: %s", acc.get("id"), e)
+            errors.append(f"• {_acc_label(acc)}: {str(e)[:50]}")
+
+    text = f"✅ <b>Импорт завершён</b>\n\nПодключено групп: <b>{total}</b>"
+    if errors:
+        text += f"\n\n⚠️ Ошибки ({len(errors)}):\n" + "\n".join(errors[:5])
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ В меню групп", callback_data=GroupFCb(action="menu"))
+    await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Announce — Step 1: choose account ─────────────────────────────────────

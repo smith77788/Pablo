@@ -142,13 +142,29 @@ def _wip_kb(back_action: str = "main"):
     return kb.as_markup()
 
 
+_MAIN_MENU_TEXT = (
+    "🏠 <b>BotMother OS</b> — Главное меню\n\n"
+    "Это операционная система для управления Telegram-активами.\n"
+    "Выберите раздел:\n\n"
+    "🏗️ <b>Infrastructure</b> — аккаунты, боты, каналы, группы\n"
+    "👁️ <b>Visibility</b> — позиции в поиске, конкуренты\n"
+    "⚙️ <b>Operations</b> — массовые действия и планировщик\n"
+    "📢 <b>Broadcasts</b> — рассылки пользователям ботов\n"
+    "💬 <b>Inbox</b> — ответы на входящие сообщения\n"
+    "🤖 <b>AI</b> — ИИ-помощник для контента\n"
+    "🧠 <b>Аналитика</b> — поведенческий анализ (PRO)\n"
+    "💳 <b>Billing</b> — подписка и оплата\n"
+    "👥 <b>Referral</b> — пригласить друзей\n"
+    "⚙️ <b>Settings</b> — авто-ответы и уведомления"
+)
+
 # ── /menu command ─────────────────────────────────────────────────────────
 
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message) -> None:
     await message.answer(
-        "<b>🏠 BotMother OS</b>\n\nВыберите раздел:",
+        _MAIN_MENU_TEXT,
         parse_mode="HTML",
         reply_markup=_main_menu_kb(),
     )
@@ -180,7 +196,7 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
 async def cb_main(callback: CallbackQuery, callback_data: BmCb) -> None:
     log.info("BotMother cb_main from user %s", callback.from_user.id)
     await callback.answer()
-    await _edit(callback, "<b>🏠 BotMother OS</b>\n\nВыберите раздел:", _main_menu_kb())
+    await _edit(callback, _MAIN_MENU_TEXT, _main_menu_kb())
 
 
 # ── Infrastructure ────────────────────────────────────────────────────────
@@ -189,7 +205,18 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "infrastructure"))
 async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>🏗️ Infrastructure</b>\n\nУправляйте аккаунтами, ботами, каналами и сетевой инфраструктурой.", _infrastructure_kb())
+    await _edit(
+        callback,
+        "🏗️ <b>Infrastructure — ваша инфраструктура</b>\n\n"
+        "📱 <b>Аккаунты</b> — Telegram-аккаунты для операций\n"
+        "🤖 <b>Мои боты</b> — боты с аудиторией, рассылками, воронками\n"
+        "📡 <b>Каналы</b> — создание, импорт, публикация в каналы\n"
+        "👥 <b>Группы</b> — создание и управление группами\n"
+        "🔗 <b>Кластеры</b> — объединить ботов в сеть\n"
+        "🌐 <b>Прокси</b> — прокси для аккаунтов\n"
+        "❤️ <b>Здоровье</b> — статус аккаунтов и ботов",
+        _infrastructure_kb(),
+    )
 
 
 # ── Visibility ────────────────────────────────────────────────────────────
@@ -198,7 +225,16 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb) -> Non
 @router.callback_query(BmCb.filter(F.action == "visibility"))
 async def cb_visibility(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>👁️ Visibility</b>\n\nОтслеживайте позиции ботов в поиске Telegram и анализируйте конкурентов.", _visibility_kb())
+    await _edit(
+        callback,
+        "👁️ <b>Visibility — видимость в поиске Telegram</b>\n\n"
+        "🔍 <b>Ключевые слова</b> — отслеживать по каким запросам находят ваш бот\n"
+        "📊 <b>Позиции</b> — история позиций в поиске Telegram\n"
+        "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
+        "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
+        "📋 <b>Отчёты</b> — сводные отчёты за 7/30 дней",
+        _visibility_kb(),
+    )
 
 
 # ── Operations ────────────────────────────────────────────────────────────
@@ -207,7 +243,17 @@ async def cb_visibility(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "operations"))
 async def cb_operations(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>⚙️ Operations</b>\n\nМассовые действия, построитель операций и планировщик задач.", _operations_kb())
+    await _edit(
+        callback,
+        "⚙️ <b>Operations — массовые операции</b>\n\n"
+        "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
+        "🛠️ <b>Построитель</b> — собрать операцию из блоков\n"
+        "📋 <b>Очередь</b> — текущие и завершённые операции\n"
+        "⏱️ <b>Планировщик</b> — запустить операцию по расписанию\n"
+        "📄 <b>Шаблоны</b> — сохранённые конфигурации операций\n"
+        "📊 <b>Отчёты</b> — история и статистика выполненных операций",
+        _operations_kb(),
+    )
 
 
 # ── Broadcasts ────────────────────────────────────────────────────────────
@@ -216,7 +262,16 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "broadcasts"))
 async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>📢 Broadcasts</b>\n\nРассылки по боту, сетевые рассылки и расписания.", _broadcasts_kb())
+    await _edit(
+        callback,
+        "📢 <b>Broadcasts — рассылки</b>\n\n"
+        "📢 <b>Рассылка по боту</b> — разослать сообщение всем пользователям бота\n"
+        "🌐 <b>Сетевая рассылка</b> — одновременно через несколько ботов\n"
+        "📅 <b>Расписание</b> — запланированные рассылки\n\n"
+        "<i>Каждый бот имеет свою аудиторию. "
+        "Выберите бота → Рассылка → введите текст.</i>",
+        _broadcasts_kb(),
+    )
 
 
 # ── Inbox / Relay ─────────────────────────────────────────────────────────
@@ -225,7 +280,18 @@ async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "inbox"))
 async def cb_inbox(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>💬 Inbox / Relay</b>\n\nВходящие диалоги и реле-переписка с пользователями.", _inbox_kb())
+    await _edit(
+        callback,
+        "💬 <b>Inbox / Relay — входящие сообщения</b>\n\n"
+        "Здесь вы можете отвечать на входящие сообщения "
+        "пользователей ваших ботов в режиме реального времени.\n\n"
+        "<b>Как работает Relay:</b>\n"
+        "1. Пользователь пишет вашему боту\n"
+        "2. Сообщение приходит вам сюда\n"
+        "3. Вы отвечаете — ответ уходит через бота\n\n"
+        "Выберите бота для управления входящими:",
+        _inbox_kb(),
+    )
 
 
 # ── AI Assistant ──────────────────────────────────────────────────────────
@@ -274,7 +340,14 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "settings"))
 async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>⚙️ Settings</b>\n\nНастройки авто-ответов, уведомлений и системных параметров.", _settings_kb())
+    await _edit(
+        callback,
+        "⚙️ <b>Settings — настройки</b>\n\n"
+        "📢 <b>Авто-ответы</b> — автоматически отвечать на ключевые слова\n"
+        "🔔 <b>Уведомления</b> — какие события присылать вам\n\n"
+        "<i>Авто-ответы настраиваются отдельно для каждого бота.</i>",
+        _settings_kb(),
+    )
 
 
 # ── Bulk operations ───────────────────────────────────────────────────────
@@ -283,7 +356,17 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
 @router.callback_query(BmCb.filter(F.action == "bulk_ops"))
 async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    await _edit(callback, "<b>⚡ Массовые действия</b>\n\nВыберите тип объекта:", _bulk_ops_kb())
+    await _edit(
+        callback,
+        "⚡ <b>Массовые действия</b>\n\n"
+        "Массовые операции позволяют управлять множеством объектов одновременно.\n\n"
+        "🤖 <b>Боты</b> — массовое редактирование, клонирование настроек\n"
+        "📡 <b>Каналы</b> — bulk-join, bulk-leave, приглашение участников\n"
+        "📱 <b>Аккаунты</b> — операции через Telegram-аккаунты\n\n"
+        "<i>Все операции выполняются с умными задержками для защиты аккаунтов.</i>\n\n"
+        "Выберите тип:",
+        _bulk_ops_kb(),
+    )
 
 
 # ── Bot picker (Visibility / Inbox / Settings) ───────────────────────────
