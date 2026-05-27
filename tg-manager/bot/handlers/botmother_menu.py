@@ -14,8 +14,12 @@ from bot.callbacks import (
     BmCb,
     BotCb,
     ChanCb,
+    ClustMCb,
+    CompCb,
+    HealthCb,
     NetBcCb,
     NetworkCb,
+    ProxyCb,
     RankCb,
     RefCb,
     RelayCb,
@@ -51,9 +55,9 @@ def _infrastructure_kb():
     kb.button(text="🤖 Мои боты",          callback_data=BotCb(action="list", page=0))
     kb.button(text="📡 Каналы & операции", callback_data=ChanCb(action="menu"))
     kb.button(text="👥 Группы",            callback_data=BmCb(action="groups"))
-    kb.button(text="🔗 Кластеры",          callback_data=NetworkCb(action="clusters"))
-    kb.button(text="🌐 Прокси",            callback_data=BmCb(action="proxies"))
-    kb.button(text="❤️ Здоровье",          callback_data=NetworkCb(action="health"))
+    kb.button(text="🔗 Кластеры",          callback_data=ClustMCb(action="menu"))
+    kb.button(text="🌐 Прокси",            callback_data=ProxyCb(action="menu"))
+    kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
@@ -63,7 +67,7 @@ def _visibility_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🔍 Ключевые слова", callback_data=RankCb(action="menu", bot_id=0))
     kb.button(text="📊 Позиции",        callback_data=RankCb(action="list", bot_id=0))
-    kb.button(text="🏆 Конкуренты",     callback_data=BmCb(action="competitors"))
+    kb.button(text="🏆 Конкуренты",     callback_data=CompCb(action="menu"))
     kb.button(text="🔔 Алерты",         callback_data=BmCb(action="alerts"))
     kb.button(text="📋 Отчёты",         callback_data=BmCb(action="vis_reports"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="main"))
@@ -301,8 +305,6 @@ async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 _WIP_ACTIONS = {
     "groups":        ("👥 Группы",         "operations"),
-    "proxies":       ("🌐 Прокси",         "infrastructure"),
-    "competitors":   ("🏆 Конкуренты",     "visibility"),
     "alerts":        ("🔔 Алерты",         "visibility"),
     "vis_reports":   ("📋 Отчёты",         "visibility"),
     "op_builder":    ("🛠️ Построитель",    "operations"),
