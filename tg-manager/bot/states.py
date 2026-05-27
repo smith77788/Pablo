@@ -307,3 +307,8 @@ class EditChannelBulkFSM(StatesGroup):
     waiting_value = State()
     previewing = State()
     confirming = State()
+
+
+class AddCompetitorFSM(StatesGroup):
+    waiting_username = State()
+    waiting_label = State()

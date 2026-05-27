@@ -232,3 +232,9 @@ class MassPubCb(CallbackData, prefix="mpub"):
     target_type: str = ""   # "all" | "cluster" | "account"
     target_id: int = 0
     page: int = 0
+
+
+class CompCb(CallbackData, prefix="comp"):
+    action: str
+    comp_id: int = 0
+    page: int = 0

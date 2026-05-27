@@ -37,6 +37,7 @@ services:
       - ./schema_v25.sql:/docker-entrypoint-initdb.d/25_schema_v25.sql
       - ./schema_v26.sql:/docker-entrypoint-initdb.d/26_schema_v26.sql
       - ./schema_v27.sql:/docker-entrypoint-initdb.d/27-schema_v27.sql
+      - ./schema_v28.sql:/docker-entrypoint-initdb.d/28-schema_v28.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tgmanager}"]
       interval: 10s

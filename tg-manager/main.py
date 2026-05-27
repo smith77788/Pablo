@@ -44,6 +44,7 @@ from bot.handlers import group_factory as group_factory_handler
 from bot.handlers import mass_ops as mass_ops_handler
 from bot.handlers import asset_templates as asset_tpl_handler
 from bot.handlers import channel_factory as chan_factory_handler
+from bot.handlers import competitors as competitors_handler
 from bot.handlers import mass_publish as mass_pub_handler
 from services import scheduler
 from services import auto_responder
@@ -116,6 +117,7 @@ async def main() -> None:
     dp.include_router(asset_tpl_handler.router)
     dp.include_router(chan_factory_handler.router)
     dp.include_router(mass_pub_handler.router)
+    dp.include_router(competitors_handler.router)
     dp.include_router(sub_handler.router)
     dp.include_router(start.router)
     dp.include_router(bots.router)
