@@ -1,0 +1,312 @@
+"""Proxy Manager — manage and check SOCKS5/HTTP proxies.
+
+Entry point: ProxyCb(action="menu")
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from datetime import datetime, timezone
+
+import asyncpg
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot.callbacks import ProxyCb, BotCb
+from bot.states import AddProxyFSM
+
+log = logging.getLogger(__name__)
+router = Router()
+
+_PROXY_RE = re.compile(
+    r"^(socks5|socks4|http)://([^@/]+:[^@/]+@)?[A-Za-z0-9.\-]+:\d+$",
+    re.IGNORECASE,
+)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _menu_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить прокси",  callback_data=ProxyCb(action="add"))
+    kb.button(text="📋 Мой список",        callback_data=ProxyCb(action="list"))
+    kb.button(text="✅ Проверить все",     callback_data=ProxyCb(action="check_all"))
+    kb.button(text="◀️ Назад",             callback_data=BotCb(action="main"))
+    kb.adjust(2, 1, 1)
+    return kb
+
+
+def _back_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=ProxyCb(action="menu"))
+    return kb
+
+
+def _cancel_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ProxyCb(action="menu"))
+    return kb
+
+
+async def _check_proxy_alive(proxy_url: str) -> bool:
+    """Try connecting to api.telegram.org:443 through the proxy."""
+    try:
+        import aiohttp
+        from aiohttp_socks import ProxyConnector  # type: ignore
+
+        connector = ProxyConnector.from_url(proxy_url)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(
+                "https://api.telegram.org",
+                timeout=aiohttp.ClientTimeout(total=8),
+                ssl=False,
+            ) as resp:
+                return resp.status < 500
+    except Exception:
+        return False
+
+
+# ── Menu ───────────────────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "menu"))
+async def cb_proxy_menu(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.edit_text(
+        "🌐 <b>Менеджер прокси</b>\n\n"
+        "Управляйте прокси-серверами для аккаунтов и ботов.",
+        parse_mode="HTML",
+        reply_markup=_menu_kb().as_markup(),
+    )
+
+
+# ── List ───────────────────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "list"))
+async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        """
+        SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive
+        FROM user_proxies
+        WHERE owner_id=$1
+        ORDER BY created_at DESC
+        """,
+        user_id,
+    )
+
+    lines = ["📋 <b>Мои прокси</b>\n"]
+    kb = InlineKeyboardBuilder()
+
+    if not rows:
+        lines.append("Нет добавленных прокси.")
+    else:
+        for row in rows:
+            if row["is_alive"] is True:
+                status = "✅"
+            elif row["is_alive"] is False:
+                status = "❌"
+            else:
+                status = "❓"
+
+            label = row["label"] or row["proxy_url"]
+            ptype = row["proxy_type"] or "socks5"
+            lines.append(f"{status} <code>{label}</code> [{ptype}]")
+            kb.button(
+                text=f"🗑 Удалить {label[:20]}",
+                callback_data=ProxyCb(action="delete", proxy_id=row["id"]),
+            )
+
+    kb.button(text="◀️ Назад", callback_data=ProxyCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ── Add — step 1: URL ──────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "add"))
+async def cb_proxy_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AddProxyFSM.waiting_url)
+    await callback.message.edit_text(
+        "🌐 <b>Добавить прокси</b>\n\n"
+        "Введите URL прокси в формате:\n"
+        "<code>socks5://user:pass@host:port</code>\n"
+        "или\n"
+        "<code>socks5://host:port</code>",
+        parse_mode="HTML",
+        reply_markup=_cancel_kb().as_markup(),
+    )
+
+
+@router.message(AddProxyFSM.waiting_url)
+async def fsm_proxy_url(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    url = (message.text or "").strip()
+    if not _PROXY_RE.match(url):
+        await message.answer(
+            "⚠️ Неверный формат URL.\n"
+            "Пример: <code>socks5://user:pass@1.2.3.4:1080</code>",
+            parse_mode="HTML",
+            reply_markup=_cancel_kb().as_markup(),
+        )
+        return
+
+    await state.update_data(proxy_url=url)
+    await state.set_state(AddProxyFSM.waiting_label)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=ProxyCb(action="skip_label"))
+    kb.button(text="❌ Отмена", callback_data=ProxyCb(action="menu"))
+    kb.adjust(1)
+
+    await message.answer(
+        "🏷 Введите метку для прокси (например: «Украина 1»)\n"
+        "или нажмите <b>Пропустить</b>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Add — step 2: label ────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "skip_label"))
+async def cb_skip_label(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    proxy_url = data.get("proxy_url", "")
+    await _save_proxy(callback.message, pool, callback.from_user.id, proxy_url, label=None)
+    await state.clear()
+
+
+@router.message(AddProxyFSM.waiting_label)
+async def fsm_proxy_label(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    label = (message.text or "").strip() or None
+    data = await state.get_data()
+    proxy_url = data.get("proxy_url", "")
+    await _save_proxy(message, pool, message.from_user.id, proxy_url, label=label)
+    await state.clear()
+
+
+async def _save_proxy(
+    message: Message,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    proxy_url: str,
+    label: str | None,
+) -> None:
+    # detect type from URL prefix
+    proxy_type = "socks5"
+    if proxy_url.lower().startswith("http://"):
+        proxy_type = "http"
+    elif proxy_url.lower().startswith("socks4://"):
+        proxy_type = "socks4"
+
+    try:
+        await pool.execute(
+            """
+            INSERT INTO user_proxies (owner_id, label, proxy_url, proxy_type)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (owner_id, proxy_url) DO NOTHING
+            """,
+            owner_id, label, proxy_url, proxy_type,
+        )
+        display = label or proxy_url
+        text = f"✅ Прокси <code>{display}</code> добавлен."
+    except Exception as exc:
+        log.exception("Error saving proxy: %s", exc)
+        text = f"⚠️ Ошибка сохранения: {exc}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Список прокси", callback_data=ProxyCb(action="list"))
+    kb.button(text="🏠 Меню прокси",   callback_data=ProxyCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Check all ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "check_all"))
+async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer("Проверяем прокси…")
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        "SELECT id, proxy_url FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+        user_id,
+    )
+
+    if not rows:
+        await callback.message.edit_text(
+            "📋 Нет активных прокси для проверки.",
+            reply_markup=_menu_kb().as_markup(),
+        )
+        return
+
+    tasks = [_check_proxy_alive(r["proxy_url"]) for r in rows]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    ok_count = 0
+    fail_count = 0
+    now = datetime.now(timezone.utc)
+
+    async with pool.acquire() as conn:
+        for row, result in zip(rows, results):
+            alive = isinstance(result, bool) and result
+            if alive:
+                ok_count += 1
+            else:
+                fail_count += 1
+            await conn.execute(
+                "UPDATE user_proxies SET is_alive=$1, last_check=$2 WHERE id=$3",
+                alive, now, row["id"],
+            )
+
+    await callback.message.edit_text(
+        f"✅ Проверка завершена\n\n"
+        f"✅ Рабочих: <b>{ok_count}</b>\n"
+        f"❌ Нерабочих: <b>{fail_count}</b>",
+        parse_mode="HTML",
+        reply_markup=_menu_kb().as_markup(),
+    )
+
+
+# ── Delete ─────────────────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "delete"))
+async def cb_proxy_delete(
+    callback: CallbackQuery, callback_data: ProxyCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    proxy_id = callback_data.proxy_id
+
+    row = await pool.fetchrow(
+        "SELECT label, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2",
+        proxy_id, user_id,
+    )
+    if not row:
+        await callback.answer("Прокси не найден.", show_alert=True)
+        return
+
+    await pool.execute(
+        "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2",
+        proxy_id, user_id,
+    )
+
+    label = row["label"] or row["proxy_url"]
+    await callback.message.edit_text(
+        f"🗑 Прокси <code>{label}</code> удалён.",
+        parse_mode="HTML",
+        reply_markup=_menu_kb().as_markup(),
+    )

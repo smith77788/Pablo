@@ -46,6 +46,9 @@ from bot.handlers import asset_templates as asset_tpl_handler
 from bot.handlers import channel_factory as chan_factory_handler
 from bot.handlers import competitors as competitors_handler
 from bot.handlers import mass_publish as mass_pub_handler
+from bot.handlers import health_dashboard as health_handler
+from bot.handlers import proxy_manager as proxy_handler
+from bot.handlers import cluster_manager as cluster_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -149,6 +152,9 @@ async def main() -> None:
     dp.include_router(accounts_handler.router)
     dp.include_router(referral_handler.router)
     dp.include_router(channel_ops_handler.router)
+    dp.include_router(health_handler.router)
+    dp.include_router(proxy_handler.router)
+    dp.include_router(cluster_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_handler.router)

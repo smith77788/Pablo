@@ -245,3 +245,22 @@ class VisCb(CallbackData, prefix="vis"):
     bot_id: int = 0
     kw_id: int = 0
     page: int = 0
+
+
+class HealthCb(CallbackData, prefix="hlth"):
+    action: str
+    acc_id: int = 0
+    page: int = 0
+
+
+class ProxyCb(CallbackData, prefix="prx"):
+    action: str
+    proxy_id: int = 0
+    page: int = 0
+
+
+class ClustMCb(CallbackData, prefix="clm"):
+    action: str
+    cluster_name: str = ""
+    bot_id: int = 0
+    page: int = 0

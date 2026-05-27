@@ -322,3 +322,13 @@ class AddKeywordFSM(StatesGroup):
 
 class KeywordAlertFSM(StatesGroup):
     choosing_threshold = State()  # позиция-порог для алерта
+
+
+class AddProxyFSM(StatesGroup):
+    waiting_url = State()    # socks5://user:pass@host:port
+    waiting_label = State()
+
+
+class CreateClusterFSM(StatesGroup):
+    waiting_name = State()
+    waiting_description = State()
