@@ -180,21 +180,36 @@ async def _show_accounts_menu(
     kb = InlineKeyboardBuilder()
 
     if accounts:
-        lines = ["👤 <b>Подключённые аккаунты:</b>\n"]
+        lines = [
+            "📱 <b>Личные Telegram-аккаунты</b>\n",
+            "Аккаунты используются для создания каналов/групп, "
+            "вступления, публикаций и других операций в Telegram.\n",
+            "👤 <b>Подключённые аккаунты:</b>\n",
+        ]
         for acc in accounts:
             name = escape(acc["first_name"] or "")
             uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
             phone = escape(acc.get("phone", ""))
             label = name or uname or phone or f"ID {acc['id']}"
             display = f"{label} ({phone})" if phone and name else label
-            lines.append(f"  • {display}")
+            status = "✅" if acc.get("is_active") else "⛔"
+            lines.append(f"  {status} {display}")
             kb.button(
-                text=f"👤 {display}",
+                text=f"{status} {display}",
                 callback_data=AccCb(action="view", acc_id=acc["id"]),
             )
         text = "\n".join(lines)
     else:
-        text = "👤 <b>Личные аккаунты</b>\n\nУ вас нет подключённых аккаунтов."
+        text = (
+            "📱 <b>Личные Telegram-аккаунты</b>\n\n"
+            "Здесь подключаются личные аккаунты Telegram (не боты).\n"
+            "Они нужны для:\n"
+            "• Создания каналов и групп\n"
+            "• Вступления/выхода из каналов\n"
+            "• Публикации постов от имени аккаунта\n"
+            "• Создания ботов через @BotFather\n\n"
+            "Добавьте первый аккаунт ↓"
+        )
 
     kb.adjust(1)
 

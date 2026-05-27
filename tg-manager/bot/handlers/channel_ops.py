@@ -35,6 +35,7 @@ from bot.states import (
 )
 from bot.utils.subscription import require_plan
 from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text
+from services import session_simulator
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -678,13 +679,19 @@ async def cb_do_bulk_create(
             )
         except Exception:
             pass
-        # Human-like backoff with jitter; reset every 5 iterations
+        # Smart anti-flood: rotate attempt counter, apply human-like delay
         if attempt >= 4:
             attempt = 0
         else:
             attempt += 1
         flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood, _human_delay(25, 40)))
+        # Every 5th operation → longer cooldown (simulate human taking a break)
+        if (task_i + 1) % 5 == 0:
+            base_delay = 120.0  # longer pause every 5 operations
+        else:
+            base_delay = _human_delay(25, 40)
+        chaos = session_simulator.chaos_factor()
+        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
