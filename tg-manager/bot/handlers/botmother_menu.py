@@ -1128,12 +1128,24 @@ async def cb_behavioral(
         if not rows:
             text = "<b>🔍 Поисковая память</b>\n\nДанных ещё нет."
         else:
-            lines = ["<b>🔍 Поисковая память</b> — ключевые слова\n"]
+            lines = ["<b>🔍 Поисковая память</b> — нажмите keyword для истории позиций\n"]
             for r in rows:
                 score = int(r["affinity_score"])
                 bar = "█" * (score // 20) + "░" * (5 - score // 20)
                 lines.append(f"• <b>{html.escape(r['keyword'])}</b> [{bar}] ×{r['search_count']}")
             text = "\n".join(lines)
+        # Add clickable keyword buttons (top 8)
+        kb2 = InlineKeyboardBuilder()
+        for r in (rows or [])[:8]:
+            kw = r["keyword"][:40]  # truncate to stay within callback limit
+            kb2.button(text=f"🔍 {kw}", callback_data=BmCb(action="mem_kw", sub=kw))
+        for key, label in _BEHAV_VIEWS.items():
+            marker = "▸ " if key == sub else ""
+            kb2.button(text=f"{marker}{label}", callback_data=BmCb(action="behavioral", sub=key))
+        kb2.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb2.adjust(2, *([1] * (len(_BEHAV_VIEWS) + 1)))
+        await _edit(callback, text, kb2.as_markup())
+        return
     else:
         score_map = {"attention": "attention_score", "habit": "habit_score",
                      "decay": "decay_rate", "ecosystem": "ecosystem_score"}
@@ -1186,3 +1198,50 @@ async def cb_behavioral(
             text = "\n".join(lines)
 
     await _edit(callback, text, _behavioral_kb(sub))
+
+
+@router.callback_query(BmCb.filter(F.action == "mem_kw"))
+async def cb_mem_keyword_drilldown(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """Показать историю позиций по конкретному keyword из поисковой памяти."""
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro"))
+        return
+    await callback.answer()
+    keyword = callback_data.sub or ""
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        """SELECT sr.position, sr.checked_at
+           FROM search_rankings sr
+           JOIN tracked_keywords tk ON tk.id = sr.keyword_id
+           WHERE tk.owner_id = $1 AND tk.keyword = $2
+           ORDER BY sr.checked_at DESC
+           LIMIT 20""",
+        user_id, keyword,
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Поисковая память", callback_data=BmCb(action="behavioral", sub="memory"))
+    kb.adjust(1)
+
+    if not rows:
+        text = (
+            f"<b>🔍 История позиций: {html.escape(keyword)}</b>\n\n"
+            "Данных ещё нет. Позиции появятся после первой проверки."
+        )
+    else:
+        lines = [f"<b>🔍 История позиций: {html.escape(keyword)}</b>\n"]
+        lines.append(f"{'Дата':<19} {'Позиция':>8}")
+        lines.append("─" * 28)
+        for r in rows:
+            dt = r["checked_at"].strftime("%Y-%m-%d %H:%M") if r["checked_at"] else "—"
+            pos = r["position"] if r["position"] else "—"
+            lines.append(f"{dt:<19} {str(pos):>8}")
+        text = "<pre>" + "\n".join(lines) + "</pre>"
+
+    await _edit(callback, text, kb.as_markup())

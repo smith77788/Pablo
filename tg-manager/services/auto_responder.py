@@ -266,6 +266,12 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                 variant = await db.assign_experiment_variant(pool, bot_id, chat_id, active_exp["id"])
                 if variant and variant.get("content"):
                     await bot_api.send_message(http, token, chat_id, variant["content"])
+            elif not is_start and active_exp:
+                # Conversion: any subsequent message from an assigned user counts
+                try:
+                    await db.record_experiment_conversion(pool, bot_id, chat_id, active_exp["id"])
+                except Exception:
+                    pass
 
         if max_update_id > offset:
             await db.set_update_offset(pool, bot_id, max_update_id)
