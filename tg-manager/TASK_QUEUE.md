@@ -7,7 +7,7 @@
 
 ## TASK-001 — Operation Planner FSM
 
-Status: TODO
+Status: DONE
 Priority: P0
 Area: telegram-ux / operation-engine
 Risk: low
@@ -36,7 +36,7 @@ Notes:
 
 ## TASK-002 — Notification Delivery
 
-Status: TODO
+Status: DONE
 Priority: P0
 Area: safety / monitoring
 Risk: low
@@ -65,7 +65,7 @@ Notes:
 
 ## TASK-003 — Post Template → Mass Publish auto-inject
 
-Status: TODO
+Status: DONE
 Priority: P0
 Area: telegram-ux / templates
 Risk: low
@@ -89,7 +89,7 @@ Notes:
 
 ## TASK-004 — Behavioral Collectors Wiring
 
-Status: TODO
+Status: DONE
 Priority: P1
 Area: behavioral / analytics
 Risk: low
@@ -163,7 +163,7 @@ Required Checks:
 
 ## TASK-007 — Visibility Report CSV Export
 
-Status: TODO
+Status: DONE
 Priority: P2
 Area: visibility / reports
 Risk: low
@@ -207,7 +207,7 @@ Required Checks:
 
 ## TASK-009 — Обновить docs после реализации
 
-Status: TODO
+Status: IN_PROGRESS
 Priority: P0
 Area: docs
 Risk: low
