@@ -163,7 +163,7 @@ async def check_bot_keywords(
 
 # ── Background sweep ───────────────────────────────────────────────────────
 
-async def _check_all(pool: asyncpg.Pool) -> None:
+async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
     """Sweep all active keywords across all owners once."""
     keywords = await pool.fetch(
         """SELECT tk.id, tk.keyword, tk.bot_id, tk.owner_id, tk.notify_enabled,
@@ -261,7 +261,7 @@ async def _check_all(pool: asyncpg.Pool) -> None:
             except Exception as exc:
                 log.debug("position_history insert skipped: %s", exc)
             # Check visibility alerts
-            await _check_visibility_alerts(pool, kw["bot_id"], kw["keyword"], ui_position, kw["owner_id"])
+            await _check_visibility_alerts(pool, kw["bot_id"], kw["keyword"], ui_position, kw["owner_id"], bot)
 
 
 # ── Visibility alert checker ───────────────────────────────────────────────
@@ -272,6 +272,7 @@ async def _check_visibility_alerts(
     keyword: str,
     position: int | None,
     owner_id: int,
+    bot: "Bot | None" = None,
 ) -> None:
     """Send alert to bot owner if position crossed drop/rise thresholds."""
     if position is None:
@@ -337,22 +338,8 @@ async def _check_visibility_alerts(
             f"Порог роста: #{rise_thr}"
         )
 
-    # Check user's notification preference before sending
     try:
-        settings = await db.get_notification_settings(pool, owner_id)
-        if not settings.get("position_change", True):
-            return
-    except Exception:
-        pass
-
-    try:
-        from aiogram import Bot as _Bot
-        import os
-        token = os.getenv("MANAGER_BOT_TOKEN", "")
-        if token:
-            alert_bot = _Bot(token=token)
-            await alert_bot.send_message(owner_id, msg, parse_mode="HTML")
-            await alert_bot.session.close()
+        await db.notify_if_enabled(pool, bot, owner_id, "position_change", msg)
     except Exception as exc:
         log.warning("_check_visibility_alerts send error: %s", exc)
 
@@ -362,7 +349,7 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     await asyncio.sleep(60)  # startup delay
     while True:
         try:
-            await _check_all(pool)
+            await _check_all(pool, bot)
         except Exception as exc:
             log.exception("ranking_checker._check_all error: %s", exc)
         await asyncio.sleep(_INTERVAL)
