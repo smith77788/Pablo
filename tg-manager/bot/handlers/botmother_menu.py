@@ -478,19 +478,35 @@ async def cb_alerts(
         await _edit(callback, "<b>🔔 Алерты</b>\n\nАлертов нет. Система работает нормально. ✅", kb.as_markup())
         return
 
+    # Resolve account/bot names for alerts
+    acc_ids = [r["account_id"] for r in rows if r.get("account_id")]
+    bot_ids_a = [r["bot_id"] for r in rows if r.get("bot_id")]
+    acc_names: dict[int, str] = {}
+    bot_names_a: dict[int, str] = {}
+    if acc_ids:
+        for a in await pool.fetch(
+            "SELECT id, COALESCE(phone, username, id::text) AS nm FROM tg_accounts WHERE id=ANY($1)", acc_ids
+        ):
+            acc_names[a["id"]] = a["nm"]
+    if bot_ids_a:
+        for b in await pool.fetch(
+            "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm FROM managed_bots WHERE bot_id=ANY($1)", bot_ids_a
+        ):
+            bot_names_a[b["bot_id"]] = b["nm"]
+
     sev_emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
     lines = []
     for r in rows:
         emoji = sev_emoji.get(r["severity"], "🔔")
         dt = r["created_at"].strftime("%d.%m %H:%M")
         if r.get("account_id"):
-            entity = f"acc#{r['account_id']}"
+            entity = acc_names.get(r["account_id"], f"acc#{r['account_id']}")
         elif r.get("bot_id"):
-            entity = f"bot#{r['bot_id']}"
+            entity = f"@{bot_names_a.get(r['bot_id'], str(r['bot_id']))}"
         else:
             entity = "—"
         etype = html.escape(r["event_type"])
-        lines.append(f"{emoji} <code>{dt}</code> {etype} ({entity})")
+        lines.append(f"{emoji} <code>{dt}</code> {etype} ({html.escape(entity)})")
 
     total_pages = max(1, -(-total // limit))
     text = f"<b>🔔 Алерты</b>  стр. {page + 1}/{total_pages}\n\n" + "\n".join(lines)
