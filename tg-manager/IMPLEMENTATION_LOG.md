@@ -87,8 +87,53 @@ Checks Run: ✅ ast.parse()
 
 ---
 
+## 2026-05-28 — TASK-005 — BulkJoin Wizard
+
+Goal: FSM-wizard для массового вступления аккаунтов в каналы/группы.
+
+Changed Files:
+- bot/handlers/mass_ops.py — 3-step wizard (paste links → pick accounts → confirm → enqueue)
+- bot/states.py — BulkJoinFSM (waiting_links, choosing_accounts)
+- services/op_worker.py — _exec_bulk_join с anti-flood задержкой 30-90s
+
+Before: op_worker не знал bulk_join, нет UI-wizard.
+
+After: Пользователь вставляет ссылки (до 50), выбирает аккаунты, операция ставится в очередь и выполняется с anti-flood задержками.
+
+Checks Run: ✅ ast.parse() все 3 файла
+
+---
+
+## 2026-05-28 — TASK-006 — Experiment Conversion Tracking
+
+Goal: Вызывать record_experiment_conversion при ответе пользователя в рамках A/B эксперимента.
+
+Changed Files:
+- services/auto_responder.py — `elif not is_start and active_exp:` вызывает record_experiment_conversion
+
+Before: assign_experiment_variant вызывался на /start, но conversions не фиксировались.
+
+After: Любое не-/start сообщение от пользователя с активным экспериментом → запись конверсии (idempotent, converted=FALSE guard в SQL).
+
+Checks Run: ✅ ast.parse()
+
+---
+
+## 2026-05-28 — TASK-008 — Search Memory Drill-Down
+
+Goal: Из Behavioral Dashboard → топ keywords → история позиций.
+
+Changed Files:
+- bot/handlers/botmother_menu.py — кнопки keyword в memory view + cb_mem_keyword_drilldown
+
+Before: keywords только в тексте, не кликабельны.
+
+After: Top 8 keywords — кнопки с BmCb(action="mem_kw"). Drill-down показывает историю позиций из search_rankings JOIN tracked_keywords в виде таблицы.
+
+Checks Run: ✅ ast.parse()
+
+---
+
 ## Следующие задачи
 
-- TASK-005: Operation Builder FSM wizard (P1)
-- TASK-006: Experiment Conversion Tracking (P1)
-- TASK-008: Search Memory Drill-Down (P2)
+Все задачи из TASK_QUEUE.md (TASK-001 — TASK-009) выполнены. Очередь пуста.

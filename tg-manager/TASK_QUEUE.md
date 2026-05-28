@@ -142,7 +142,7 @@ Notes:
 
 ## TASK-006 — Experiment Conversion Tracking
 
-Status: TODO
+Status: DONE
 Priority: P1
 Area: analytics / automation
 Risk: low
@@ -187,7 +187,7 @@ Notes:
 
 ## TASK-008 — Search Memory Drill-Down
 
-Status: TODO
+Status: DONE
 Priority: P2
 Area: behavioral / visibility
 Risk: low
@@ -207,7 +207,7 @@ Required Checks:
 
 ## TASK-009 — Обновить docs после реализации
 
-Status: IN_PROGRESS
+Status: DONE
 Priority: P0
 Area: docs
 Risk: low
