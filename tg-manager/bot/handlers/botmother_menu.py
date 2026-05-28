@@ -633,14 +633,47 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     import io
     from aiogram.types import BufferedInputFile
 
+    # Fetch 7-day history for all keywords
+    kw_ids = [kw["keyword_id"] for kw in kws if kw.get("keyword_id")]
+    hist_csv: dict[int, dict] = {}
+    if kw_ids:
+        try:
+            hist_rows = await pool.fetch(
+                """SELECT keyword_id,
+                          MIN(position) FILTER (WHERE position IS NOT NULL) AS best_7d,
+                          MAX(position) FILTER (WHERE position IS NOT NULL) AS worst_7d,
+                          COUNT(*) AS checks_7d
+                   FROM search_rankings
+                   WHERE keyword_id = ANY($1)
+                     AND checked_at > now() - INTERVAL '7 days'
+                   GROUP BY keyword_id""",
+                kw_ids,
+            )
+            for r in hist_rows:
+                hist_csv[r["keyword_id"]] = {
+                    "best_7d": r["best_7d"],
+                    "worst_7d": r["worst_7d"],
+                    "checks_7d": r["checks_7d"],
+                }
+        except Exception:
+            pass
+
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["bot_username", "keyword", "position", "checked_at"])
+    writer.writerow([
+        "bot_username", "keyword", "current_position",
+        "best_7d", "worst_7d", "checks_7d", "checked_at",
+    ])
     for kw in kws:
+        kid = kw.get("keyword_id")
+        hd = hist_csv.get(kid, {})
         writer.writerow([
             kw.get("bot_username") or f"id{kw['bot_id']}",
             kw.get("keyword", ""),
             kw.get("position") or "",
+            hd.get("best_7d") or "",
+            hd.get("worst_7d") or "",
+            hd.get("checks_7d") or "",
             str(kw.get("checked_at") or ""),
         ])
 
@@ -648,7 +681,8 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     file = BufferedInputFile(data, filename="visibility_report.csv")
     await callback.message.answer_document(
         file,
-        caption="📊 <b>Отчёт по позициям в поиске</b>",
+        caption="📊 <b>Отчёт по позициям</b>\n"
+                "<i>current_position, best_7d, worst_7d, checks за 7 дней</i>",
         parse_mode="HTML",
     )
 
