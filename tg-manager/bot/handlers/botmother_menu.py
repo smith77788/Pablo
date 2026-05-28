@@ -672,6 +672,10 @@ async def cb_op_planner(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await _edit(callback, locked_text("Планировщик операций", "starter"), subscription_locked_markup("starter"))
+        return
     await callback.answer()
     await _show_planner_menu(callback, pool, state)
 
