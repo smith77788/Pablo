@@ -45,6 +45,25 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
+
+async def _fire_cross_nav(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    from_type: str,
+    from_id: int,
+    to_type: str,
+    to_id: int,
+) -> None:
+    """Non-blocking cross-navigation event — call with asyncio.ensure_future."""
+    try:
+        from services import behavioral_engine
+        await behavioral_engine.record_cross_nav(
+            pool, owner_id, from_type, from_id, to_type, to_id
+        )
+    except Exception:
+        pass
+
+
 # ── Keyboard builders ─────────────────────────────────────────────────────
 
 
@@ -209,8 +228,10 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "infrastructure"))
-async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
+    import asyncio
+    asyncio.ensure_future(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "infrastructure", 0))
     await _edit(
         callback,
         "🏗️ <b>Infrastructure — ваша инфраструктура</b>\n\n"
@@ -229,8 +250,10 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb) -> Non
 
 
 @router.callback_query(BmCb.filter(F.action == "visibility"))
-async def cb_visibility(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_visibility(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
+    import asyncio
+    asyncio.ensure_future(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "visibility", 0))
     await _edit(
         callback,
         "👁️ <b>Visibility — видимость в поиске Telegram</b>\n\n"
@@ -247,8 +270,10 @@ async def cb_visibility(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "operations"))
-async def cb_operations(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
+    import asyncio
+    asyncio.ensure_future(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
     await _edit(
         callback,
         "⚙️ <b>Operations — массовые операции</b>\n\n"

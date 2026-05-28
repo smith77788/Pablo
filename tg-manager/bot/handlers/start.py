@@ -1,3 +1,6 @@
+import asyncio
+from datetime import datetime, timezone, timedelta
+
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -13,6 +16,14 @@ import logging
 log = logging.getLogger(__name__)
 
 router = Router()
+
+
+async def _record_reentry_safe(pool, uid: int, days_absent: float) -> None:
+    try:
+        from services import behavioral_engine
+        await behavioral_engine.record_reentry(pool, uid, "platform", uid, days_absent)
+    except Exception as e:
+        log.debug("record_reentry failed: %s", e)
 
 BUILD_VERSION = "2026.05.27-r2"
 
@@ -52,9 +63,10 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
     is_new = False
     try:
-        is_new = not await pool.fetchval(
-            "SELECT 1 FROM platform_users WHERE user_id=$1", uid
+        existing = await pool.fetchrow(
+            "SELECT last_active FROM platform_users WHERE user_id=$1", uid
         )
+        is_new = existing is None
         await pool.execute(
             """INSERT INTO platform_users(user_id, username, first_name)
                VALUES($1,$2,$3)
@@ -70,6 +82,16 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
                 message.from_user.username,
                 message.from_user.first_name or "",
             )
+        elif existing and existing["last_active"]:
+            # Record reentry if user was absent 7+ days
+            last = existing["last_active"]
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            days_absent = (datetime.now(timezone.utc) - last).total_seconds() / 86400
+            if days_absent >= 7:
+                asyncio.ensure_future(
+                    _record_reentry_safe(pool, uid, days_absent)
+                )
     except Exception:
         pass
 
