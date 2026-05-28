@@ -1059,8 +1059,64 @@ async def cb_op_detail(
             lines.append(f"  {st_emoji} #{s['step_num']} {tgt}" + (f" — {msg}" if msg else ""))
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="📥 CSV лог операции", callback_data=BmCb(action="op_csv", op_id=op_id))
     kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
+    kb.adjust(1)
     await _edit(callback, "\n".join(lines), kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "op_csv"))
+async def cb_op_csv(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer("⏳ Генерирую CSV…")
+    user_id = callback.from_user.id
+    op_id = callback_data.op_id
+
+    op = await pool.fetchrow(
+        "SELECT id, op_type, status, total_items, done_items, created_at "
+        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    if not op:
+        await callback.answer("Операция не найдена", show_alert=True)
+        return
+
+    steps = await pool.fetch(
+        "SELECT step_num, target, status, message FROM operation_log "
+        "WHERE op_id=$1 ORDER BY step_num",
+        op_id,
+    )
+
+    import csv
+    import io
+    from aiogram.types import BufferedInputFile
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["step_num", "target", "status", "message"])
+    for s in steps:
+        writer.writerow([
+            s["step_num"],
+            s["target"] or "",
+            s["status"] or "",
+            s["message"] or "",
+        ])
+
+    data = buf.getvalue().encode("utf-8-sig")
+    fname = f"op_{op_id}_{op['op_type']}.csv"
+    file = BufferedInputFile(data, filename=fname)
+    await callback.message.answer_document(
+        file,
+        caption=(
+            f"📋 <b>Лог операции #{op_id}</b>\n"
+            f"Тип: {html.escape(op['op_type'])}\n"
+            f"Статус: {op['status']} | {op['done_items']}/{op['total_items'] or '?'} шагов"
+        ),
+        parse_mode="HTML",
+    )
 
 
 # ── Schedules (bot picker → ScheduleCb) ──────────────────────────────────
