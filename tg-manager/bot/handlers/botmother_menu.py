@@ -1080,6 +1080,37 @@ async def cb_op_reports(
         await _edit(callback, "<b>📊 Отчёты по операциям</b>\n\nОпераций ещё не выполнялось.", kb.as_markup())
         return
 
+    # Summary stats for page 0
+    summary_line = ""
+    if page == 0:
+        try:
+            stats = await pool.fetchrow(
+                """SELECT
+                       COUNT(*) FILTER (WHERE status='done')      AS done_cnt,
+                       COUNT(*) FILTER (WHERE status='failed')    AS failed_cnt,
+                       COUNT(*) FILTER (WHERE status='running')   AS running_cnt,
+                       ROUND(AVG(
+                           EXTRACT(EPOCH FROM (finished_at - started_at))
+                       ) FILTER (WHERE status='done' AND finished_at IS NOT NULL AND started_at IS NOT NULL)
+                       )::int AS avg_secs
+                   FROM operation_queue WHERE owner_id=$1""",
+                user_id,
+            )
+            if stats:
+                done_c = stats["done_cnt"] or 0
+                fail_c = stats["failed_cnt"] or 0
+                run_c  = stats["running_cnt"] or 0
+                avg_s  = stats["avg_secs"]
+                success_rate = round(done_c / (done_c + fail_c) * 100) if (done_c + fail_c) > 0 else 0
+                avg_str = f"{avg_s // 60}м {avg_s % 60}с" if avg_s else "—"
+                summary_line = (
+                    f"\n✅ {done_c} завершено  ❌ {fail_c} с ошибкой"
+                    + (f"  🔄 {run_c} активно" if run_c else "")
+                    + f"\n📈 Success rate: {success_rate}%  ⏱ Avg: {avg_str}\n"
+                )
+        except Exception:
+            pass
+
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
     kb = InlineKeyboardBuilder()
     lines = []
@@ -1091,14 +1122,23 @@ async def cb_op_reports(
             progress = f"{op['done_items']}/{op['total_items']}"
         else:
             progress = "—"
-        lines.append(f"{emoji} <code>{dt}</code> {otype} [{progress}]")
+        duration = ""
+        if op["finished_at"] and op["created_at"]:
+            secs = int((op["finished_at"] - op["created_at"]).total_seconds())
+            if secs >= 60:
+                duration = f" {secs // 60}м"
+        lines.append(f"{emoji} <code>{dt}</code> {otype} [{progress}]{duration}")
         kb.button(
             text=f"🔍 #{op['id']} {otype}",
             callback_data=BmCb(action="op_detail", op_id=op["id"]),
         )
 
     total_pages = max(1, -(-total // limit))
-    text = f"<b>📊 Отчёты по операциям</b>  стр. {page + 1}/{total_pages}\n\n" + "\n".join(lines)
+    text = (
+        f"<b>📊 Отчёты по операциям</b>  стр. {page + 1}/{total_pages}"
+        + summary_line
+        + "\n".join(lines)
+    )
 
     kb.adjust(1)
     nav = []
