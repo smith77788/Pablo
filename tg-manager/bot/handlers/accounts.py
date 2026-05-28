@@ -147,11 +147,20 @@ def _cancel_markup():
     return kb.as_markup()
 
 
-# ── /accounts command ──────────────────────────────────────────────────────────
+# ── /accounts command (redirect to BotMother OS) ────────────────────────────
 
 @router.message(Command("accounts"))
-async def cmd_accounts(message: Message, pool: asyncpg.Pool) -> None:
-    await _show_accounts_menu(message, pool, message.from_user.id, edit=False)
+async def cmd_accounts(message: Message) -> None:
+    from bot.callbacks import BmCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    await message.answer(
+        "📱 <b>Аккаунты</b>\n\n"
+        "Откройте BotMother OS и перейдите в:\n"
+        "<code>BotMother → 🏗️ Infrastructure → 📱 Аккаунты</code>",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(AccCb.filter(F.action == "menu"))

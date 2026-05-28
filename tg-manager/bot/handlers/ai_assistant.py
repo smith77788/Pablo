@@ -487,39 +487,16 @@ async def _process_ai_turn(
 
 
 @router.message(Command("ai"))
-async def cmd_ai(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
-    if not await require_plan(pool, message.from_user.id, "starter"):
-        await message.answer(
-            "🔒 <b>AI-ассистент — STARTER</b>\n\n"
-            "AI-ассистент доступен с подпиской <b>STARTER</b> и выше.\n\n"
-            "Оформить: /subscription",
-            parse_mode="HTML",
-        )
-        return
-    await state.set_state(AiChat.chatting)
-    await state.update_data(messages=[], turns=0)
+async def cmd_ai(message: Message) -> None:
+    from bot.callbacks import BmCb
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
+    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
     await message.answer(
-        "🤖 <b>AI-ассистент TG Manager</b>\n\n"
-        "📌 <b>Что умею:</b>\n"
-        "• Анализировать данные ваших ботов и аудитории\n"
-        "• Давать рекомендации по росту и SEO\n"
-        "• Читать файлы и объяснять их содержимое\n"
-        "• <b>Запускать рассылки</b> по вашей аудитории\n"
-        "• <b>Обновлять профиль</b> ботов (имя, описание)\n"
-        "• <b>Публиковать посты</b> в ваши каналы\n\n"
-        "💡 <b>Примеры задач:</b>\n"
-        "• «Запусти рассылку для @mybot: Привет! Новые функции уже здесь»\n"
-        "• «Измени имя бота [id] на «Мой Магазин»»\n"
-        "• «Опубликуй в моём канале: Сегодня акция!»\n"
-        "• «Изучи этот файл и найди важные ошибки»\n"
-        "• «Как дела у моих ботов?»\n"
-        "• «Сколько холодных пользователей нужно реактивировать?»\n\n"
-        "⚠️ <i>Все действия требуют вашего подтверждения.</i>\n\n"
-        f"<i>Модель: {_get_model()}</i>",
-        parse_mode="HTML",
+        "🤖 <b>AI-ассистент</b>\n\n"
+        "Откройте BotMother OS и перейдите в:\n"
+        "<code>BotMother → 🤖 AI Assistant</code>",
         reply_markup=kb.as_markup(),
+        parse_mode="HTML",
     )
 
 

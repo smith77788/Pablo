@@ -192,41 +192,21 @@ async def _send_or_edit(msg_or_cb, text: str, kb, edit: bool = True) -> None:
         await target.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
-# ── /ops entry point ───────────────────────────────────────────────────────
+# ── /ops entry point (redirect to BotMother OS) ────────────────────────────
 
 @router.message(Command("ops"))
-async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
-    if not await require_plan(pool, message.from_user.id, _STARTER):
-        await message.answer(
-            "🔒 <b>Операции с аккаунтами — STARTER</b>\n\n"
-            "Доступно с подпиской STARTER и выше.\n\nОформить: /subscription",
-            parse_mode="HTML",
-        )
-        return
-    accounts = await _get_accounts(pool, message.from_user.id)
-    if not accounts:
-        await message.answer(
-            "⚠️ <b>Нет подключённых аккаунтов</b>\n\n"
-            "Сначала подключите аккаунт Telegram: /accounts",
-            parse_mode="HTML",
-        )
-        return
-    count = len(accounts)
-    active = sum(1 for a in accounts if a["is_active"])
+async def cmd_ops(message: Message) -> None:
+    from bot.callbacks import BmCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
     await message.answer(
-        f"📡 <b>Операции с аккаунтами</b>\n\n"
-        f"Подключено: <b>{count}</b> аккаунтов ({active} активных)\n\n"
-        "Выберите действие:\n"
-        "• Создать канал/группу — через ваш аккаунт\n"
-        "• Вступить / Выйти — управление подписками\n"
-        "• Опубликовать пост — от имени аккаунта\n"
-        "• Управление каналом — название, описание, ссылка\n"
-        "• Профиль — изменить имя, bio, username аккаунта\n"
-        "• ⚡ Массовые операции — одно действие на нескольких аккаунтах сразу\n\n"
-        "💡 Нет аккаунтов? Добавьте через 📱 Мои аккаунты",
+        "⚡ <b>Операции с аккаунтами</b>\n\n"
+        "Откройте BotMother OS и перейдите в:\n"
+        "<code>BotMother → 🏗️ Infrastructure → 📡 Каналы & операции</code>",
+        reply_markup=kb.as_markup(),
         parse_mode="HTML",
-        reply_markup=_main_menu_kb().as_markup(),
     )
+    return
 
 
 # ── Main menu callback ─────────────────────────────────────────────────────

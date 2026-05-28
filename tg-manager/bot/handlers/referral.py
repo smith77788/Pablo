@@ -76,12 +76,17 @@ def _dashboard_keyboard() -> object:
 
 
 @router.message(Command("referral"))
-async def cmd_referral(message: Message, pool: asyncpg.Pool) -> None:
-    uid = message.from_user.id
-    stats = await db.get_referral_stats(pool, uid)
-    me = await message.bot.get_me()
-    text = _build_dashboard(stats, me.username or "bot")
-    await message.answer(text, parse_mode="HTML", reply_markup=_dashboard_keyboard())
+async def cmd_referral(message: Message) -> None:
+    from bot.callbacks import BmCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    await message.answer(
+        "👥 <b>Реферальная программа</b>\n\n"
+        "Откройте BotMother OS и перейдите в:\n"
+        "<code>BotMother → 💳 Billing → 👥 Referral</code>",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(RefCb.filter(F.action == "menu"))

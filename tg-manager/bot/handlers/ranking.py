@@ -97,40 +97,16 @@ async def _has_active_account(pool: asyncpg.Pool, owner_id: int) -> bool:
 
 
 @router.message(Command("ranking"))
-async def cmd_ranking(message: Message, pool: asyncpg.Pool) -> None:
-    plan = await get_plan(pool, message.from_user.id)
-    if plan == "free":
-        await message.answer(
-            locked_text("Трекер позиций в поиске", "starter"),
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
-        )
-        return
-
-    bots = await db.get_bots(pool, message.from_user.id)
-    if not bots:
-        await message.answer(
-            "📊 <b>Трекер позиций</b>\n\nУ вас пока нет ботов. Добавьте первого через /start.",
-            parse_mode="HTML",
-        )
-        return
-
+async def cmd_ranking(message: Message) -> None:
+    from bot.callbacks import BmCb
     kb = InlineKeyboardBuilder()
-    kb.button(
-        text="📊 Дашборд позиций",
-        callback_data=RankCb(action="dashboard", bot_id=0),
-    )
-    for bot in bots:
-        label = f"@{bot['username']}" if bot["username"] else bot["first_name"]
-        kb.button(
-            text=f"🤖 {label}",
-            callback_data=RankCb(action="menu", bot_id=bot["bot_id"]),
-        )
-    kb.adjust(1)
+    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
     await message.answer(
-        "📊 <b>Трекер позиций в поиске</b>\n\nВыберите бота:",
-        parse_mode="HTML",
+        "📊 <b>Трекер позиций</b>\n\n"
+        "Откройте BotMother OS и перейдите в:\n"
+        "<code>BotMother → 👁️ Visibility → 📊 Позиции</code>",
         reply_markup=kb.as_markup(),
+        parse_mode="HTML",
     )
 
 
