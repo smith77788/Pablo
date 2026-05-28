@@ -1,4 +1,4 @@
-# CLAUDE.md — BotMother OS: Главный ориентир системы (v3.1)
+# CLAUDE.md — BotMother OS: Главный ориентир системы (v3.2)
 
 > Этот файл читается автоматически при каждой сессии Claude Code.
 > Он — авторитетный постоянный контекст проекта. Обновлять при каждой значимой итерации.
@@ -19,6 +19,15 @@
 8. `.botmother/22_FEATURE_PRIORITY_SCORING.md` — приоритизация задач
 9. `.botmother/23_TELEGRAM_UX_GOVERNANCE.md` — UX-правила для Telegram
 10. `.botmother/24_SELF_REVIEW_LOOP.md` — чеклист самопроверки перед коммитом
+11. `.botmother/26_AUTONOMOUS_IMPLEMENTATION_LOOP.md` — протокол автономного режима
+12. `.botmother/27_TASK_QUEUE_PROTOCOL.md` — протокол очереди задач
+
+**Для автономного режима также читать:**
+- `TASK_QUEUE.md` — активная очередь задач
+- `CURRENT_STATE.md` — текущее состояние проекта
+- `IMPLEMENTATION_LOG.md` — лог выполненных задач
+- `AUTONOMOUS_CLAUDE_PROMPT.md` — системный промпт автономного режима
+- `STOP_CONDITIONS.md` — условия остановки
 
 **Затем** читать этот файл (CLAUDE.md) для project-specific контекста.
 
