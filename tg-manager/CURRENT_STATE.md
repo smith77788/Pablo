@@ -76,7 +76,19 @@ Last commit: `feat: Global Presence Factory — создание Telegram-при
 - [x] Operation Reports — UI + новые функции статистики (027cf95)
 - [x] Search Memory drill-down — из behavioral_engine
 
-**P2 — Текущие приоритеты (эта сессия)**
+**P2 — Выполнено в сессии 2026-05-28 (r4)**
+- [x] trust_engine: исправлен критический баг `created_at` → `added_at`
+- [x] ranking_checker: исправлен `MANAGER_BOT_TOKEN` → `notify_if_enabled(bot)`
+- [x] schema_v36.sql: таблица account_trust_history (30-дневная история trust scores)
+- [x] health_dashboard: кнопка 📈 Тренд + cb_trust_trend с 7-дневной историей
+- [x] op_reports: сводная статистика (success rate, avg duration, counts)
+- [x] new_user уведомление: auto_responder → notify_if_enabled при is_new_user=True
+- [x] Behavioral dashboard: реальные имена (bot/channel/keyword) вместо #id
+- [x] Alerts: реальные имена аккаунтов/ботов вместо acc#id/bot#id
+- [x] op_worker: inline-кнопка «Детали операции» в уведомлениях done/failed
+- [x] notify_if_enabled: добавлен параметр reply_markup
+
+**P3 — Следующие приоритеты**
 - [ ] Global Presence Factory V2 — поддержка БОТОВ + пакеты
 - [ ] CSV import для списков городов/целей
 - [ ] UX improvements: описания для всех FSM-шагов
@@ -84,6 +96,6 @@ Last commit: `feat: Global Presence Factory — создание Telegram-при
 
 ### Проект
 - Stack: aiogram 3.13.1, asyncpg, Telethon, Railway
-- DB: 57+ таблиц, последняя схема v35
+- DB: 57+ таблиц, последняя схема v36
 - Handlers: 45+ файлов
 - Ветка: `claude/telegram-bot-services-xfAh6`
