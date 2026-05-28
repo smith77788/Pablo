@@ -17,7 +17,7 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
     """Recalculate trust_score for all active accounts."""
     rows = await pool.fetch("""
         SELECT id,
-               EXTRACT(EPOCH FROM (NOW() - created_at))/86400 AS age_days,
+               EXTRACT(EPOCH FROM (NOW() - added_at))/86400 AS age_days,
                flood_count_7d,
                cooldown_until
         FROM tg_accounts
