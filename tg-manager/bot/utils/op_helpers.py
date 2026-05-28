@@ -11,10 +11,13 @@ def _acc_label(acc: asyncpg.Record) -> str:
 
 async def _get_active_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT id, phone, first_name, username, session_str, is_active "
-        "FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE "
-        "ORDER BY trust_score DESC NULLS LAST, added_at",
+        """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
+                  a.device_model, a.system_version, a.app_version,
+                  p.proxy_url
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+           WHERE a.owner_id=$1 AND a.is_active=TRUE
+           ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
         owner_id,
     )
 

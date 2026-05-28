@@ -97,7 +97,9 @@ def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
     d = device or {}
-    proxy = _parse_proxy(TG_PROXY)
+    # Per-account proxy overrides global TG_PROXY env var
+    acc_proxy_url = d.get("proxy_url") or ""
+    proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else _parse_proxy(TG_PROXY)
     return TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),

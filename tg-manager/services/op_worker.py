@@ -98,14 +98,16 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     # Получить аккаунты
     if account_ids:
         accounts = await pool.fetch(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id = ANY($1) AND is_active=true",
+            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.id = ANY($1) AND a.is_active=true",
             [int(i) for i in account_ids],
         )
     else:
         accounts = await pool.fetch(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.is_active=true",
             owner_id,
         )
 
@@ -223,8 +225,9 @@ async def _exec_bulk_join(
         )
     else:
         accounts = await pool.fetch(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.is_active=true",
             owner_id,
         )
 
@@ -284,8 +287,9 @@ async def _exec_bulk_leave(
         )
     else:
         accounts = await pool.fetch(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.is_active=true",
             owner_id,
         )
 

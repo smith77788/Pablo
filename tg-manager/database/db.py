@@ -1588,7 +1588,10 @@ async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int) -> list:
 
 async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
     return await pool.fetchrow(
-        "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        """SELECT a.*, p.proxy_url, p.label AS proxy_label
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+           WHERE a.id=$1 AND a.owner_id=$2""",
         acc_id, owner_id,
     )
 

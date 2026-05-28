@@ -126,6 +126,8 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
               callback_data=AccCb(action="dialogs", acc_id=acc_id, chat_id=0))
     kb.button(text="✉️ Отправить",
               callback_data=AccCb(action="send_msg", acc_id=acc_id))
+    kb.button(text="🌐 Прокси",
+              callback_data=AccCb(action="set_proxy", acc_id=acc_id))
     toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
     kb.button(text=toggle_text,
               callback_data=AccCb(action="toggle", acc_id=acc_id))
@@ -133,7 +135,7 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 1, 1, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -814,6 +816,10 @@ async def cb_view_account(
     tg_id = acc.get("tg_user_id") or ""
     is_active = bool(acc.get("is_active", True))
 
+    proxy_url = acc.get("proxy_url") or ""
+    proxy_label = acc.get("proxy_label") or ""
+    proxy_line = f"🌐 {escape(proxy_label or proxy_url[:40])}" if proxy_url else "🌐 Без прокси"
+
     lines = ["👤 <b>Аккаунт</b>\n"]
     if name:
         lines.append(f"Имя: <b>{name}</b>")
@@ -824,12 +830,102 @@ async def cb_view_account(
     if tg_id:
         lines.append(f"Telegram ID: <code>{tg_id}</code>")
     lines.append(f"Статус: {'✅ Активен' if is_active else '⏸ Отключён'}")
+    lines.append(f"Прокси: {proxy_line}")
 
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=_acc_menu_markup(callback_data.acc_id, is_active=is_active),
     )
+
+
+# ── Proxy assignment ──────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "set_proxy"))
+async def cb_set_proxy(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    proxies = await pool.fetch(
+        "SELECT id, label, proxy_url, is_alive FROM user_proxies "
+        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY label",
+        callback.from_user.id,
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚫 Без прокси", callback_data=AccCb(action="assign_proxy", acc_id=acc_id, page=0))
+    for px in proxies[:10]:
+        alive = "✅" if px["is_alive"] else ("❓" if px["is_alive"] is None else "❌")
+        label = px["label"] or px["proxy_url"][:30]
+        kb.button(
+            text=f"{alive} {escape(label)}",
+            callback_data=AccCb(action="assign_proxy", acc_id=acc_id, page=px["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    if not proxies:
+        text = (
+            "🌐 <b>Назначение прокси</b>\n\n"
+            "У вас нет добавленных прокси.\n"
+            "Добавьте прокси через <b>🏗️ Infrastructure → 🌐 Прокси</b>."
+        )
+    else:
+        text = (
+            f"🌐 <b>Назначение прокси для аккаунта #{acc_id}</b>\n\n"
+            f"Выберите прокси (✅ живой, ❌ мёртвый, ❓ не проверен):\n"
+            f"Текущий прокси будет сохранён немедленно."
+        )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(AccCb.filter(F.action == "assign_proxy"))
+async def cb_assign_proxy(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    proxy_id = callback_data.page  # 0 = no proxy, >0 = proxy id
+    if proxy_id == 0:
+        await pool.execute(
+            "UPDATE tg_accounts SET proxy_id=NULL WHERE id=$1 AND owner_id=$2",
+            acc_id, callback.from_user.id,
+        )
+        await callback.answer("✅ Прокси снят", show_alert=True)
+    else:
+        # Verify proxy belongs to this user
+        px = await pool.fetchrow(
+            "SELECT id FROM user_proxies WHERE id=$1 AND owner_id=$2",
+            proxy_id, callback.from_user.id,
+        )
+        if not px:
+            await callback.answer("Прокси не найден", show_alert=True)
+            return
+        await pool.execute(
+            "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+            proxy_id, acc_id, callback.from_user.id,
+        )
+        await callback.answer("✅ Прокси назначен", show_alert=True)
+    # Refresh account view
+    acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
+    if acc:
+        is_active = bool(acc.get("is_active", True))
+        proxy_url = acc.get("proxy_url") or ""
+        proxy_label = acc.get("proxy_label") or ""
+        proxy_line = f"🌐 {escape(proxy_label or proxy_url[:40])}" if proxy_url else "🌐 Без прокси"
+        name = escape(acc.get("first_name") or "")
+        lines = ["👤 <b>Аккаунт</b>\n"]
+        if name:
+            lines.append(f"Имя: <b>{name}</b>")
+        lines.append(f"Статус: {'✅ Активен' if is_active else '⏸ Отключён'}")
+        lines.append(f"Прокси: {proxy_line}")
+        await callback.message.edit_text(
+            "\n".join(lines), parse_mode="HTML",
+            reply_markup=_acc_menu_markup(acc_id, is_active=is_active),
+        )
 
 
 # ── Channels / groups list ─────────────────────────────────────────────────────
