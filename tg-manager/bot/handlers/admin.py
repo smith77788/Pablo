@@ -46,6 +46,8 @@ def _admin_main_kb():
     kb.button(text="💳 Подписки & платежи",     callback_data="adm:subs")
     kb.button(text="🤖 Все боты & токены",       callback_data="adm:bots")
     kb.button(text="📊 Системная статистика",    callback_data="adm:stats")
+    kb.button(text="💰 Цены на подписки",        callback_data="adm:prices")
+    kb.button(text="⚙️ Методы оплаты",          callback_data="adm:pay_cfg")
     kb.button(text="📨 Рассылка всем юзерам",    callback_data="adm:broadcast")
     kb.button(text="🔔 Уведомления о новых",     callback_data="adm:notify_toggle")
     kb.button(text="🚫 Заблокировать юзера",     callback_data="adm:block_ask")
@@ -58,7 +60,7 @@ def _admin_main_kb():
     kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -156,15 +158,19 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
     ) or 0
 
     try:
+        total_users = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
+    except Exception:
+        pass  # total_users already set above as fallback
+    try:
         today_users = await pool.fetchval(
-            "SELECT COUNT(DISTINCT user_id) FROM platform_users "
-            "WHERE first_seen >= CURRENT_DATE"
+            "SELECT COUNT(*) FROM platform_users "
+            "WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE"
         ) or 0
     except Exception:
         today_users = 0
 
     text = (
-        "🛡 <b>Nano-Admin Panel</b>\n\n"
+        "🛡 <b>Admin Panel</b>\n\n"
         f"👥 Всего пользователей: <b>{total_users}</b> (+{today_users} сегодня)\n"
         f"🤖 Ботов в системе: <b>{total_bots}</b>\n"
         f"💳 Активных подписок: <b>{total_subs}</b>\n"
@@ -298,6 +304,19 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             callback.from_user.id,
         )
 
+    elif action == "prices":
+        await _adm_prices(callback)
+
+    elif action.startswith("price_edit:"):
+        plan = action.split(":", 1)[1]
+        await _adm_price_edit_ask(callback, pool, plan)
+
+    elif action == "pay_cfg":
+        from bot.handlers.subscription import _payment_settings_text, _payment_settings_kb
+        await callback.message.edit_text(
+            _payment_settings_text(), parse_mode="HTML", reply_markup=_payment_settings_kb(),
+        )
+
     elif action == "swarm_mode":
         await _adm_swarm_mode(callback, pool)
 
@@ -341,25 +360,48 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
 # ── Sub-screens ───────────────────────────────────────────────────────────────
 
 async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    rows = await pool.fetch(
-        """SELECT added_by as uid,
-                  COUNT(*) as bot_count,
-                  MAX(mb.added_at) as last_bot
-           FROM managed_bots mb
-           GROUP BY added_by
-           ORDER BY last_bot DESC
-           LIMIT 15"""
-    )
+    from bot.callbacks import AdminUserCb
+    _PLAN_EMO = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
+    try:
+        rows = await pool.fetch(
+            """SELECT pu.user_id, pu.username, pu.first_name,
+                      COALESCE(pu.current_plan, 'free') as current_plan,
+                      COALESCE(pu.is_banned, false) as is_banned,
+                      s.plan as sub_plan, s.expires_at as sub_exp
+               FROM platform_users pu
+               LEFT JOIN subscriptions s
+                 ON s.user_id=pu.user_id AND s.is_active=true AND s.expires_at > now()
+               ORDER BY COALESCE(pu.registered_at, pu.first_seen) DESC NULLS LAST
+               LIMIT 15"""
+        )
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ <code>{e}</code>", parse_mode="HTML", reply_markup=_back_kb()
+        )
+        return
+    total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
+    kb = InlineKeyboardBuilder()
     lines = []
     for r in rows:
-        lines.append(
-            f"<code>{r['uid']}</code> — {r['bot_count']} бот(ов) "
-            f"(посл. {r['last_bot'].strftime('%d.%m')})"
+        plan = r["sub_plan"] or r["current_plan"] or "free"
+        emo = _PLAN_EMO.get(plan, "❓")
+        ban = "🚫 " if r["is_banned"] else ""
+        name = f"@{r['username']}" if r["username"] else r["first_name"] or f"#{r['user_id']}"
+        exp = ""
+        if r["sub_exp"]:
+            exp = f" до {r['sub_exp'].strftime('%d.%m')}"
+        lines.append(f"{ban}{emo} {name} — {plan.upper()}{exp}")
+        kb.button(
+            text=f"{ban}{emo} {name[:22]}",
+            callback_data=AdminUserCb(action="user_actions", user_id=r["user_id"])
         )
-    body = "\n".join(lines) if lines else "Пользователей нет."
+    body = "\n".join(lines) if lines else "Нет зарегистрированных пользователей."
+    kb.button(text="📋 Полный список", callback_data=AdminUserCb(action="list"))
+    kb.button(text="◀️ Назад", callback_data="adm:main")
+    kb.adjust(1)
     await callback.message.edit_text(
-        f"👥 <b>Последние 15 пользователей платформы</b>\n\n{body}",
-        parse_mode="HTML", reply_markup=_back_kb(),
+        f"👥 <b>Пользователи платформы</b> (всего: <b>{total}</b>)\n\n{body}",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
 
@@ -476,6 +518,47 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     await callback.message.answer_document(
         file,
         caption=f"📋 Экспорт пользователей ({len(rows)} чел.) — {ts} UTC",
+    )
+
+
+async def _adm_prices(callback: CallbackQuery) -> None:
+    import config
+    kb = InlineKeyboardBuilder()
+    for plan, price in config.PLAN_PRICES_USD.items():
+        emo = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(plan, "")
+        kb.button(text=f"✏️ {emo} {plan.upper()} — ${price}/мес", callback_data=f"adm:price_edit:{plan}")
+    kb.button(text="◀️ Назад", callback_data="adm:main")
+    kb.adjust(1)
+    s = config.PLAN_PRICES_USD
+    await callback.message.edit_text(
+        "💰 <b>Цены на подписки</b>\n\n"
+        f"⭐ STARTER — <b>${s['starter']}/мес</b>\n"
+        f"🚀 PRO — <b>${s['pro']}/мес</b>\n"
+        f"👑 ENTERPRISE — <b>${s['enterprise']}/мес</b>\n\n"
+        "Нажмите на план чтобы изменить цену.\n"
+        "Новая цена применится сразу и сохранится в Railway.",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+async def _adm_price_edit_ask(
+    callback: CallbackQuery, pool: asyncpg.Pool, plan: str
+) -> None:
+    import config
+    emo = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(plan, "")
+    cur = config.PLAN_PRICES_USD.get(plan, 0)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Отмена", callback_data="adm:prices")
+    await callback.message.edit_text(
+        f"✏️ <b>Цена {emo} {plan.upper()}</b>\n\n"
+        f"Текущая цена: <b>${cur}/мес</b>\n\n"
+        "Отправьте новую цену в USD (только число, например <code>15</code>):",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+    await pool.execute(
+        "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
+        "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
+        callback.from_user.id, f"price_edit:{plan}",
     )
 
 
@@ -652,6 +735,28 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
+    elif state.startswith("price_edit:"):
+        plan = state.split(":", 1)[1]
+        try:
+            price = int(text.strip().replace("$", "").replace(" ", ""))
+            if price < 1 or price > 9999:
+                raise ValueError
+            import config
+            config.PLAN_PRICES_USD[plan] = price
+            os.environ[f"PRICE_{plan.upper()}"] = str(price)
+            try:
+                async with aiohttp.ClientSession() as tmp:
+                    await railway_api.set_variable(tmp, f"PRICE_{plan.upper()}", str(price))
+                note = "Сохранено в Railway."
+            except Exception:
+                note = "⚠️ Railway не настроен — цена активна до перезапуска."
+            await message.answer(
+                f"✅ Цена <b>{plan.upper()}</b> обновлена: <b>${price}/мес</b>\n\n{note}",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+        except ValueError:
+            await message.answer("❌ Введите целое число от 1 до 9999", reply_markup=_admin_main_kb())
+
     elif state.startswith("env_edit:"):
         key = state.split(":", 1)[1]
         async with aiohttp.ClientSession() as tmp_http:
@@ -807,9 +912,10 @@ async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
     admin_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
     if not _NOTIFY_NEW_USERS or not admin_ids:
         return
-    total = await pool.fetchval(
-        "SELECT COUNT(DISTINCT added_by) FROM managed_bots"
-    ) or 0
+    try:
+        total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
+    except Exception:
+        total = await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots") or 0
     label = f"@{username}" if username else first_name
     for admin_id in admin_ids:
         try:

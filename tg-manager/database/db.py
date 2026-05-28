@@ -2371,33 +2371,52 @@ async def register_or_update_user(
     pool: asyncpg.Pool, user_id: int, username: str = None, first_name: str = None
 ) -> None:
     """Регистрировать нового или обновить существующего пользователя."""
-    await pool.execute(
-        """INSERT INTO platform_users (user_id, username, first_name, last_seen)
-           VALUES ($1, $2, $3, now())
-           ON CONFLICT (user_id) DO UPDATE
-           SET username = COALESCE($2, platform_users.username),
-               first_name = COALESCE($3, platform_users.first_name),
-               last_seen = now()""",
-        user_id, username, first_name,
-    )
+    try:
+        await pool.execute(
+            """INSERT INTO platform_users (user_id, username, first_name, last_seen)
+               VALUES ($1, $2, $3, now())
+               ON CONFLICT (user_id) DO UPDATE
+               SET username = COALESCE($2, platform_users.username),
+                   first_name = COALESCE($3, platform_users.first_name),
+                   last_seen = now()""",
+            user_id, username, first_name,
+        )
+    except asyncpg.UndefinedColumnError:
+        # Совместимость: старая схема v14 использует last_active
+        await pool.execute(
+            """INSERT INTO platform_users (user_id, username, first_name, last_active)
+               VALUES ($1, $2, $3, now())
+               ON CONFLICT (user_id) DO UPDATE
+               SET username = COALESCE($2, platform_users.username),
+                   first_name = COALESCE($3, platform_users.first_name),
+                   last_active = now()""",
+            user_id, username, first_name,
+        )
 
 
 async def get_all_platform_users(
     pool: asyncpg.Pool, limit: int = 50, offset: int = 0, plan: str = None, is_banned: bool = None
 ) -> list[dict]:
     """Получить список всех пользователей с фильтрацией."""
-    query = "SELECT user_id, username, first_name, current_plan, plan_expires_at, is_banned, registered_at FROM platform_users WHERE 1=1"
+    query = (
+        "SELECT user_id, username, first_name, "
+        "COALESCE(current_plan, 'free') as current_plan, "
+        "plan_expires_at, "
+        "COALESCE(is_banned, false) as is_banned, "
+        "COALESCE(registered_at, first_seen, created_at) as registered_at "
+        "FROM platform_users WHERE 1=1"
+    )
     params = []
 
     if plan:
-        query += " AND current_plan=$" + str(len(params) + 1)
+        query += " AND COALESCE(current_plan,'free')=$" + str(len(params) + 1)
         params.append(plan)
 
     if is_banned is not None:
-        query += " AND is_banned=$" + str(len(params) + 1)
+        query += " AND COALESCE(is_banned,false)=$" + str(len(params) + 1)
         params.append(is_banned)
 
-    query += " ORDER BY registered_at DESC LIMIT $" + str(len(params) + 1) + " OFFSET $" + str(len(params) + 2)
+    query += " ORDER BY COALESCE(registered_at, first_seen) DESC NULLS LAST LIMIT $" + str(len(params) + 1) + " OFFSET $" + str(len(params) + 2)
     params.extend([limit, offset])
 
     rows = await pool.fetch(query, *params)
@@ -2407,33 +2426,50 @@ async def get_all_platform_users(
 async def grant_plan_to_user(
     pool: asyncpg.Pool, user_id: int, admin_id: int, plan: str, months: int
 ) -> None:
-    """Выдать план пользователю (админ-действие)."""
+    """Выдать план пользователю (админ-действие). Пишет в обе таблицы."""
     from datetime import datetime, timedelta
     expires = datetime.utcnow() + timedelta(days=30 * months)
 
+    # Обновить platform_users
     await pool.execute(
-        """UPDATE platform_users
-           SET current_plan=$1, plan_expires_at=$2
-           WHERE user_id=$3""",
+        """UPDATE platform_users SET current_plan=$1, plan_expires_at=$2 WHERE user_id=$3""",
         plan, expires, user_id,
     )
 
+    # Обновить subscriptions (именно здесь get_plan() проверяет доступ)
+    if plan == "free":
+        await pool.execute(
+            "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
+        )
+    else:
+        await pool.execute(
+            """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+               VALUES($1,$2,$3,true)
+               ON CONFLICT(user_id) DO UPDATE SET plan=$2, expires_at=$3, is_active=true""",
+            user_id, plan, expires,
+        )
+
     # Логировать действие
-    await pool.execute(
-        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
-           VALUES ($1, 'grant_plan', $2, $3)""",
-        admin_id, user_id,
-        '{"plan":"' + plan + '","months":' + str(months) + ',"expires_at":"' + expires.isoformat() + '"}',
-    )
+    try:
+        await pool.execute(
+            """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+               VALUES ($1, 'grant_plan', $2, $3)""",
+            admin_id, user_id,
+            '{"plan":"' + plan + '","months":' + str(months) + ',"expires_at":"' + expires.isoformat() + '"}',
+        )
+    except Exception:
+        pass
 
 
 async def revoke_plan_from_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
     """Забрать подписку у пользователя (вернуть на free)."""
     await pool.execute(
-        """UPDATE platform_users
-           SET current_plan='free', plan_expires_at=NULL
-           WHERE user_id=$1""",
+        "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
         user_id,
+    )
+    # Отключить в subscriptions (именно здесь get_plan() проверяет)
+    await pool.execute(
+        "UPDATE subscriptions SET is_active=false WHERE user_id=$1", user_id
     )
 
     # Логировать действие
