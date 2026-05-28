@@ -383,6 +383,7 @@ async def cb_mpub_confirm_send(
         parse_mode="HTML",
     )
 
+    forbidden_count = 0
     for idx, (acc, ch) in enumerate(pairs, 1):
         ch_id = ch["id"]
         access_hash = ch.get("access_hash", 0) or 0
@@ -391,6 +392,8 @@ async def cb_mpub_confirm_send(
         )
         if result.get("banned") or "error" in result:
             err += 1
+            if result.get("banned"):
+                forbidden_count += 1
         else:
             ok += 1
 
@@ -422,10 +425,18 @@ async def cb_mpub_confirm_send(
             await asyncio.sleep(actual_delay)
 
     elapsed = time.monotonic() - start_ts
+    hint = ""
+    if forbidden_count > 0:
+        hint = (
+            f"\n\n⚠️ <i>{forbidden_count} канал(ов) — нет прав публикации.\n"
+            "Аккаунт должен быть администратором канала с правом публикации.\n"
+            "Используйте: Управление каналом → 👑 Со-Администраторы</i>"
+        )
     await progress_msg.edit_text(
         f"📤 <b>Публикация завершена</b>\n\n"
         f"✅ Успешно: {ok} каналов\n"
-        f"❌ Ошибки: {err} канал(ов)\n"
+        f"❌ Ошибки: {err} канал(ов)"
+        f"{hint}\n"
         f"⏱️ Время: {_format_duration(elapsed)}",
         parse_mode="HTML",
         reply_markup=_back_menu_kb().as_markup(),
