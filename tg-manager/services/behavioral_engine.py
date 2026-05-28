@@ -21,13 +21,18 @@ _RESCORE_INTERVAL = 900  # 15 minutes
 # ── Background runner ─────────────────────────────────────────────────────
 
 async def run(pool: asyncpg.Pool) -> None:
-    """Main loop: periodically recompute behavioral scores."""
+    """Main loop: periodically recompute behavioral scores and detect anomalies."""
     log.info("behavioral_engine started")
+    cycle = 0
     while True:
         try:
             await _recompute_scores(pool)
+            # Anomaly detection every 12 cycles (~3 hours)
+            if cycle % 12 == 0:
+                await _detect_anomalies(pool)
+            cycle += 1
         except Exception:
-            log.exception("behavioral_engine recompute error")
+            log.exception("behavioral_engine error")
         await asyncio.sleep(_RESCORE_INTERVAL)
 
 
@@ -154,6 +159,88 @@ async def record_cross_nav(
         )
     except Exception:
         log.exception("record_cross_nav error")
+
+
+# ── Anomaly detection ────────────────────────────────────────────────────
+
+async def _detect_anomalies(pool: asyncpg.Pool) -> None:
+    """
+    Detect unusual behavioral patterns and log them as 'anomaly' events.
+    Currently detects:
+    - Sudden decay spike: entity that had high attention_score now has decay_rate > 0.8
+    - Search affinity drop: keyword not searched in 14+ days but had affinity > 50
+    - Reentry burst: 5+ reentries to same entity in 1 hour (unusual automation signal)
+    """
+    try:
+        # 1. Decay spikes — entities dropping fast
+        decay_anomalies = await pool.fetch(
+            """SELECT owner_id, entity_type, entity_id, decay_rate, attention_score
+               FROM entity_behavioral_score
+               WHERE decay_rate > 0.8
+                 AND attention_score > 30
+                 AND updated_at > now() - INTERVAL '3 hours'""",
+        )
+        for r in decay_anomalies:
+            await pool.execute(
+                "INSERT INTO behavioral_events"
+                "(owner_id, entity_type, entity_id, event_type, meta) "
+                "VALUES ($1, $2, $3, 'anomaly', $4) "
+                "ON CONFLICT DO NOTHING",
+                r["owner_id"], r["entity_type"], r["entity_id"],
+                json.dumps({
+                    "type": "decay_spike",
+                    "decay_rate": float(r["decay_rate"]),
+                    "attention_score": float(r["attention_score"]),
+                }),
+            )
+
+        # 2. Affinity dropout — keywords gone cold
+        cold_keywords = await pool.fetch(
+            """SELECT owner_id, keyword, affinity_score, last_searched
+               FROM search_memory
+               WHERE affinity_score > 50
+                 AND last_searched < now() - INTERVAL '14 days'""",
+        )
+        for r in cold_keywords:
+            await pool.execute(
+                "INSERT INTO behavioral_events"
+                "(owner_id, entity_type, entity_id, event_type, meta) "
+                "VALUES ($1, 'keyword', 0, 'anomaly', $2) "
+                "ON CONFLICT DO NOTHING",
+                r["owner_id"],
+                json.dumps({
+                    "type": "affinity_dropout",
+                    "keyword": r["keyword"],
+                    "affinity_score": float(r["affinity_score"]),
+                    "days_absent": (datetime.now(tz=timezone.utc) - r["last_searched"]).days,
+                }),
+            )
+
+        # 3. Reentry burst — more than 5 reentries to same entity in 1 hour
+        burst_rows = await pool.fetch(
+            """SELECT owner_id, entity_type, entity_id, COUNT(*) AS cnt
+               FROM behavioral_events
+               WHERE event_type = 'reentry'
+                 AND occurred_at > now() - INTERVAL '1 hour'
+               GROUP BY owner_id, entity_type, entity_id
+               HAVING COUNT(*) >= 5""",
+        )
+        for r in burst_rows:
+            await pool.execute(
+                "INSERT INTO behavioral_events"
+                "(owner_id, entity_type, entity_id, event_type, meta) "
+                "VALUES ($1, $2, $3, 'anomaly', $4)",
+                r["owner_id"], r["entity_type"], r["entity_id"],
+                json.dumps({"type": "reentry_burst", "count": int(r["cnt"])}),
+            )
+
+        if decay_anomalies or cold_keywords or burst_rows:
+            log.info(
+                "behavioral_engine anomaly scan: %d decay, %d cold kw, %d bursts",
+                len(decay_anomalies), len(cold_keywords), len(burst_rows),
+            )
+    except Exception:
+        log.debug("behavioral_engine anomaly detection skipped (table may not exist)")
 
 
 # ── Query helpers (used by dashboard) ────────────────────────────────────
