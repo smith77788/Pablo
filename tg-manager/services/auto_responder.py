@@ -38,7 +38,7 @@ async def _init_offset(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
 
 async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
-                       bot_id: int, token: str) -> None:
+                       bot_id: int, token: str, main_bot=None) -> None:
     try:
         offset = await db.get_update_offset(pool, bot_id)
         if offset == 0:
@@ -56,7 +56,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
         funnels = await db.get_active_funnels(pool, bot_id)
         automation_rules = await db.get_active_automation_rules(pool, bot_id)
         bot_row = await pool.fetchrow(
-            "SELECT bot_role, swarm_enabled, cluster FROM managed_bots WHERE bot_id=$1",
+            "SELECT bot_role, swarm_enabled, cluster, added_by, username, first_name "
+            "FROM managed_bots WHERE bot_id=$1",
             bot_id,
         )
         active_exp = await db.get_active_experiment(pool, bot_id, "start_message")
@@ -80,6 +81,14 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
             # Track user activity — returns True for first-ever message (new user)
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
+
+            # Notify bot owner about new user
+            if is_new_user and main_bot and bot_row and bot_row.get("added_by"):
+                owner_id = bot_row["added_by"]
+                bot_name = bot_row.get("username") or bot_row.get("first_name") or f"id{bot_id}"
+                user_name = from_user.get("username") or from_user.get("first_name") or f"id{chat_id}"
+                note = f"👤 <b>Новый пользователь</b> @{user_name} подписался на @{bot_name}"
+                asyncio.create_task(db.notify_if_enabled(pool, main_bot, owner_id, "new_user", note))
 
             # Register in bot_users so the user appears in broadcast audience
             from_user = msg.get("from") or {}
@@ -280,14 +289,14 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
         log.exception("Auto-responder error for bot %d", bot_id)
 
 
-async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
     asyncio.get_event_loop().create_task(run_inactivity_sweep(pool, http))
     while True:
         try:
             bots = await db.get_bots_for_polling(pool)
             if bots:
                 await asyncio.gather(
-                    *(_process_bot(pool, http, b["bot_id"], b["token"]) for b in bots),
+                    *(_process_bot(pool, http, b["bot_id"], b["token"], main_bot) for b in bots),
                     return_exceptions=True,
                 )
         except Exception:

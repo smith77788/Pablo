@@ -184,7 +184,7 @@ async def main() -> None:
     http = aiohttp.ClientSession(connector=connector)
     try:
         asyncio.create_task(scheduler.run(pool, http))
-        asyncio.create_task(auto_responder.run(pool, http))
+        asyncio.create_task(auto_responder.run(pool, http, bot))
         asyncio.create_task(relay_service.run(pool, http))
         asyncio.create_task(funnel_runner.run(pool, http))
         asyncio.create_task(payment_checker.run(pool, http, bot))
