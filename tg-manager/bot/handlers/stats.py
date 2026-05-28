@@ -20,7 +20,7 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
     stats = await db.get_bot_stats(pool, callback_data.bot_id)
-    label = f"@{row['username']}" if row["username"] else (row["first_name"] or str(row["bot_id"]))
+    label = f"@{row.get('username')}" if row.get("username") else (row.get("first_name") or str(row.get("bot_id", "")))
 
     completion_rate = (
         round(stats["funnel_completed"] / stats["funnel_total_subs"] * 100)

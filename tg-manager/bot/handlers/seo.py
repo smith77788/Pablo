@@ -149,7 +149,6 @@ async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     await callback.answer("⏳ Анализирую профиль...")
 
     token = row["token"]
