@@ -38,6 +38,7 @@ from bot.handlers import accounts as accounts_handler
 from bot.handlers import referral as referral_handler
 from bot.handlers import channel_ops as channel_ops_handler
 from bot.handlers import admin as admin_handler
+from bot.handlers import admin_users as admin_users_handler
 from bot.handlers import botmother_menu as bm_handler
 from bot.handlers import bot_factory as bot_factory_handler
 from bot.handlers import group_factory as group_factory_handler
@@ -166,6 +167,7 @@ async def main() -> None:
     dp.include_router(cluster_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
+    dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)
 

@@ -2363,3 +2363,176 @@ async def count_operation_errors(pool: asyncpg.Pool, op_id: int) -> int:
         op_id,
     )
     return count or 0
+
+
+# ── Platform Users Management (v39) ──────────────────────────────────────────
+
+async def register_or_update_user(
+    pool: asyncpg.Pool, user_id: int, username: str = None, first_name: str = None
+) -> None:
+    """Регистрировать нового или обновить существующего пользователя."""
+    await pool.execute(
+        """INSERT INTO platform_users (user_id, username, first_name, last_seen)
+           VALUES ($1, $2, $3, now())
+           ON CONFLICT (user_id) DO UPDATE
+           SET username = COALESCE($2, platform_users.username),
+               first_name = COALESCE($3, platform_users.first_name),
+               last_seen = now()""",
+        user_id, username, first_name,
+    )
+
+
+async def get_all_platform_users(
+    pool: asyncpg.Pool, limit: int = 50, offset: int = 0, plan: str = None, is_banned: bool = None
+) -> list[dict]:
+    """Получить список всех пользователей с фильтрацией."""
+    query = "SELECT user_id, username, first_name, current_plan, plan_expires_at, is_banned, registered_at FROM platform_users WHERE 1=1"
+    params = []
+
+    if plan:
+        query += " AND current_plan=$" + str(len(params) + 1)
+        params.append(plan)
+
+    if is_banned is not None:
+        query += " AND is_banned=$" + str(len(params) + 1)
+        params.append(is_banned)
+
+    query += " ORDER BY registered_at DESC LIMIT $" + str(len(params) + 1) + " OFFSET $" + str(len(params) + 2)
+    params.extend([limit, offset])
+
+    rows = await pool.fetch(query, *params)
+    return [dict(r) for r in rows]
+
+
+async def grant_plan_to_user(
+    pool: asyncpg.Pool, user_id: int, admin_id: int, plan: str, months: int
+) -> None:
+    """Выдать план пользователю (админ-действие)."""
+    from datetime import datetime, timedelta
+    expires = datetime.utcnow() + timedelta(days=30 * months)
+
+    await pool.execute(
+        """UPDATE platform_users
+           SET current_plan=$1, plan_expires_at=$2
+           WHERE user_id=$3""",
+        plan, expires, user_id,
+    )
+
+    # Логировать действие
+    await pool.execute(
+        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+           VALUES ($1, 'grant_plan', $2, $3)""",
+        admin_id, user_id,
+        '{"plan":"' + plan + '","months":' + str(months) + ',"expires_at":"' + expires.isoformat() + '"}',
+    )
+
+
+async def revoke_plan_from_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
+    """Забрать подписку у пользователя (вернуть на free)."""
+    await pool.execute(
+        """UPDATE platform_users
+           SET current_plan='free', plan_expires_at=NULL
+           WHERE user_id=$1""",
+        user_id,
+    )
+
+    # Логировать действие
+    await pool.execute(
+        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+           VALUES ($1, 'revoke_plan', $2, '{}')""",
+        admin_id, user_id,
+    )
+
+
+async def ban_user(pool: asyncpg.Pool, user_id: int, admin_id: int, reason: str = None) -> None:
+    """Забанить пользователя."""
+    await pool.execute(
+        """UPDATE platform_users
+           SET is_banned=true, ban_reason=$1, banned_at=now()
+           WHERE user_id=$2""",
+        reason, user_id,
+    )
+
+    # Логировать действие
+    await pool.execute(
+        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+           VALUES ($1, 'ban_user', $2, $3)""",
+        admin_id, user_id,
+        '{"reason":"' + (reason or "") + '"}',
+    )
+
+
+async def unban_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
+    """Разбанить пользователя."""
+    await pool.execute(
+        """UPDATE platform_users
+           SET is_banned=false, ban_reason=NULL, banned_at=NULL
+           WHERE user_id=$1""",
+        user_id,
+    )
+
+    # Логировать действие
+    await pool.execute(
+        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+           VALUES ($1, 'unban_user', $2, '{}')""",
+        admin_id, user_id,
+    )
+
+
+async def get_user_info(pool: asyncpg.Pool, user_id: int) -> dict:
+    """Получить полную информацию о пользователе."""
+    row = await pool.fetchrow(
+        "SELECT * FROM platform_users WHERE user_id=$1",
+        user_id,
+    )
+    return dict(row) if row else None
+
+
+async def log_security_violation(
+    pool: asyncpg.Pool, user_id: int, attempt_type: str, details: dict = None, ip_address: str = None
+) -> None:
+    """Логировать попытку несанкционированного доступа или подозрительную активность."""
+    await pool.execute(
+        """INSERT INTO security_violations (user_id, attempt_type, details, ip_address)
+           VALUES ($1, $2, $3, $4)""",
+        user_id, attempt_type, str(details or {}), ip_address,
+    )
+
+
+async def count_platform_users(pool: asyncpg.Pool, plan: str = None, is_banned: bool = None) -> int:
+    """Подсчитать количество пользователей с фильтрацией."""
+    query = "SELECT COUNT(*) FROM platform_users WHERE 1=1"
+    params = []
+
+    if plan:
+        query += " AND current_plan=$" + str(len(params) + 1)
+        params.append(plan)
+
+    if is_banned is not None:
+        query += " AND is_banned=$" + str(len(params) + 1)
+        params.append(is_banned)
+
+    count = await pool.fetchval(query, *params)
+    return count or 0
+
+
+async def get_admin_audit_log(
+    pool: asyncpg.Pool, admin_id: int = None, limit: int = 50, offset: int = 0
+) -> list[dict]:
+    """Получить лог админ-действий."""
+    if admin_id:
+        rows = await pool.fetch(
+            """SELECT id, admin_id, action, target_user_id, details, created_at
+               FROM admin_audit_log
+               WHERE admin_id=$1
+               ORDER BY created_at DESC LIMIT $2 OFFSET $3""",
+            admin_id, limit, offset,
+        )
+    else:
+        rows = await pool.fetch(
+            """SELECT id, admin_id, action, target_user_id, details, created_at
+               FROM admin_audit_log
+               ORDER BY created_at DESC LIMIT $1 OFFSET $2""",
+            limit, offset,
+        )
+    return [dict(r) for r in rows]

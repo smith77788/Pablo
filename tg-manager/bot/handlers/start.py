@@ -25,7 +25,7 @@ async def _record_reentry_safe(pool, uid: int, days_absent: float) -> None:
     except Exception as e:
         log.debug("record_reentry failed: %s", e)
 
-BUILD_VERSION = "2026.05.28-r6"
+BUILD_VERSION = "2026.05.28-r7"
 
 
 @router.message(Command("version"))
@@ -63,15 +63,10 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
 
     is_new = False
     try:
-        existing = await pool.fetchrow(
-            "SELECT last_active FROM platform_users WHERE user_id=$1", uid
-        )
+        existing = await db.get_user_info(pool, uid)
         is_new = existing is None
-        await pool.execute(
-            """INSERT INTO platform_users(user_id, username, first_name)
-               VALUES($1,$2,$3)
-               ON CONFLICT(user_id) DO UPDATE
-               SET username=$2, first_name=$3, last_active=now()""",
+        await db.register_or_update_user(
+            pool,
             uid,
             message.from_user.username,
             message.from_user.first_name or "",
