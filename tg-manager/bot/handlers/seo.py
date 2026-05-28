@@ -328,11 +328,13 @@ async def _ai_generate_seo(
         return None
 
     kw_hint = ", ".join(keywords[:10]) if keywords else "—"
-    # If channel already has a username, instruct AI to keep it unchanged
+    # If channel already has a username, instruct AI to keep it unchanged and use it in about
     if username:
         username_rule = f'- username: MUST return exactly "{username}" — do NOT change it'
+        about_rule = f'- about: 150-255 chars, include 3-5 keywords naturally, mention @{username} once naturally (e.g. in CTA), ends with CTA'
     else:
         username_rule = "- username: 5-20 chars, lowercase, letters/digits/underscores only, no leading digits"
+        about_rule = "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA"
     prompt = (
         f"You are a Telegram SEO expert. Optimize the following {entity_type} profile for maximum search visibility.\n\n"
         f"Current title: {title or '(empty)'}\n"
@@ -343,7 +345,7 @@ async def _ai_generate_seo(
         '{"title": "...", "about": "...", "username": "...", "reasoning": "..."}\n\n'
         "Rules:\n"
         "- title: max 50 chars, include main keyword, catchy\n"
-        "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA\n"
+        f"- {about_rule}\n"
         f"- {username_rule}\n"
         "- reasoning: 1-2 sentences explaining the strategy\n"
         "Write in the same language as the current profile (or Russian if empty)."
