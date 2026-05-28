@@ -1,158 +1,82 @@
-# Implementation Log
+# IMPLEMENTATION LOG
 
-Claude Code / Codex updates this file after every meaningful task.
+## 2026-05-28 — Global Presence Factory V1
 
----
+**Цель:** Реализовать полный guided FSM wizard для создания Telegram-присутствия по всему миру.
 
-## 2026-05-28 — TASK-001 — Operation Planner FSM
+**Изменённые файлы:**
+- `schema_v35.sql` (новый) — таблицы global_presence_plans + global_presence_targets
+- `services/geo_data.py` (новый) — 5 пресетов: EU (44), World (51), Tier-1 (50), DACH (20), LATAM (25)
+- `services/username_engine.py` (новый) — transliterate, slugify, generate_username_variants
+- `services/presence_planner.py` (новый) — render_pattern, build_targets, estimate_duration_minutes
+- `bot/handlers/global_presence.py` (новый) — FSM wizard 8 шагов + прогресс + retry + report
+- `services/op_worker.py` (изменён) — добавлен global_presence_channel handler
+- `database/db.py` (изменён) — 7 новых CRUD функций
+- `bot/callbacks.py` (изменён) — добавлен GeoPresenceCb(prefix="gp")
+- `bot/states.py` (изменён) — добавлен GlobalPresenceFSM
+- `bot/handlers/botmother_menu.py` (изменён) — кнопка 🌍 Global Presence в Operations
+- `main.py` (изменён) — роутер зарегистрирован
+- `bot/handlers/mass_publish.py` (изменён) — удалено дублирование _progress_text
 
-Goal: Реализовать FSM-wizard планирования операций с записью в operation_queue.scheduled_for
+**До:**
+- Global Presence Factory не существовал
+- Нет способа создать каналы во всех городах мира
 
-Changed Files:
-- bot/states.py — OpPlannerFSM (waiting_text, waiting_datetime)
-- bot/handlers/botmother_menu.py — полный wizard вместо заглушки
-- services/op_worker.py — _process_pending фильтрует scheduled_for <= now()
+**После:**
+- Полный wizard: тип актива → шаблон → название → username → гео → аккаунты → превью → подтверждение
+- 5 гео-пресетов из коробки
+- Placeholder engine: {{CITY}}, {{COUNTRY}}, {{CITY_SLUG}} и т.д.
+- Username engine с transliteration + fallback variants
+- Выполнение через op_worker с safe pacing (45-90с между созданиями)
+- FloodWait retry автоматически
+- Progress tracking, retry failed, final report
 
-Before: cb_op_planner была заглушкой. op_worker игнорировал scheduled_for.
+**Проверки:**
+- `python3 -c "import ast; ast.parse(open(f).read())"` — все файлы OK
+- Smoke test: slugify/render_pattern/build_targets работают корректно
+- eu_capitals count = 44 ✅
 
-After: Wizard: выбор типа → ввод текста → ввод времени → preview → confirm → INSERT с scheduled_for. op_worker уважает расписание.
+**Риски:**
+- set_channel_username требует сессию с доступом к только что созданному каналу — используем get_entity через имеющийся session string
+- При большом кол-ве городов (>44) — длительное выполнение (>2ч)
 
-Checks Run: ✅ ast.parse() все файлы
-
-Risks: _parse_datetime парсит как UTC. Приемлемо для MVP.
-
----
-
-## 2026-05-28 — TASK-002 — Notification Delivery
-
-Goal: Реальная доставка уведомлений согласно notification_settings.
-
-Changed Files:
-- database/db.py — get_notification_settings(), notify_if_enabled()
-- services/account_monitor.py — notify_if_enabled(flood_warning/restriction)
-- services/op_worker.py — notify_if_enabled(op_complete)
-- services/ranking_checker.py — проверка position_change перед отправкой
-
-Before: уведомления отправлялись всегда, настройки игнорировались.
-
-After: notify_if_enabled() читает настройки из БД, отправляет только если флаг True.
-
-Checks Run: ✅ ast.parse() все файлы
-
----
-
-## 2026-05-28 — TASK-003 — Post Template → Mass Publish auto-inject
-
-Goal: При apply post-шаблона автоматически подставлять текст.
-
-Changed Files:
-- bot/handlers/mass_publish.py — cb_mpub_start и cb_mpub_pick_account: проверка tpl_prefill
-
-Before: tpl_prefill сохранялся, но mass_publish его не проверял.
-
-After: Если в FSM state есть tpl_prefill.text → skip waiting_text, показать timing сразу.
-
-Checks Run: ✅ ast.parse()
+**Следующий шаг:**
+Operation Planner FSM — реализовать UI для scheduled_for в operation_queue
 
 ---
 
-## 2026-05-28 — TASK-004 — Behavioral Collectors Wiring
+## 2026-05-27 — Исправление инвайтинга, логина, отмена задач
 
-Goal: Подключить record_reentry и record_cross_nav к реальным событиям.
+**Цель:** Исправить критические баги в invite/login операциях.
 
-Changed Files:
-- bot/handlers/start.py — record_reentry при возврате через 7+ дней (ensure_future)
-- bot/handlers/botmother_menu.py — _fire_cross_nav в cb_infrastructure/visibility/operations
+**Изменённые файлы:**
+- `services/account_manager.py` — исправлен invite_users_to_channel (ChatAdminRequiredError, access_hash)
+- `bot/handlers/channel_ops.py` — _active_tasks registry, CancelledError handling, human delays
+- `bot/handlers/accounts.py` — cb_resend_sms: fresh SendCodeRequest при истёкшем code hash
+- `services/op_worker.py` — _is_cancelled helper, cancellation check в bulk_join/bulk_leave
+- `bot/handlers/mass_ops.py` — cancel для pending И running операций
 
-Before: коллекторы существовали, нигде не вызывались.
+**До:**
+- invite показывал "0 приглашено из 3734 контактов" (ChatAdminRequiredError тихо игнорировался)
+- Вход: "Неверный или истёкший код" (expired phone_code_hash)
+- Нельзя отменить запущенную задачу
 
-After: Reentry пишется при /start после 7+ дней отсутствия. Cross-nav при переходах в разделы.
-
-Checks Run: ✅ ast.parse() оба файла
-
----
-
-## 2026-05-28 — TASK-007 — Visibility Report CSV Export
-
-Goal: Кнопка "📥 Скачать CSV" в Visibility Reports.
-
-Changed Files:
-- bot/handlers/botmother_menu.py — кнопка + cb_vis_reports_csv handler
-
-Before: отчёт только в тексте сообщения.
-
-After: кнопка → файл visibility_report.csv (bot_username, keyword, position, checked_at), UTF-8 BOM.
-
-Checks Run: ✅ ast.parse()
+**После:**
+- Invite: ChatAdminRequiredError → немедленная остановка с сообщением об ошибке
+- Login: при ошибке resend → новый SendCodeRequest с новым hash
+- Отмена: кнопка "❌ Отменить" для запущенных задач + asyncio.Task.cancel()
 
 ---
 
-## 2026-05-28 — TASK-005 — BulkJoin Wizard
+## 2026-05-26 — Device Fingerprints, Behavioral Engine, Session Simulator
 
-Goal: FSM-wizard для массового вступления аккаунтов в каналы/группы.
+**Цель:** Добавить unique device fingerprints для аккаунтов, behavioral analytics, session simulator.
 
-Changed Files:
-- bot/handlers/mass_ops.py — 3-step wizard (paste links → pick accounts → confirm → enqueue)
-- bot/states.py — BulkJoinFSM (waiting_links, choosing_accounts)
-- services/op_worker.py — _exec_bulk_join с anti-flood задержкой 30-90s
+**Изменённые файлы:**
+- `schema_v23.sql` — device_model, system_version, app_version в tg_accounts
+- `services/account_manager.py` — _ANDROID_DEVICES, generate_device_fingerprint, _make_client c _acc
+- `database/db.py` — add_tg_account с device params
+- `services/behavioral_engine.py` (новый) — behavioral scores каждые 15 мин
+- `services/session_simulator.py` (новый) — human_delay, chaos_factor, typing_delay
 
-Before: op_worker не знал bulk_join, нет UI-wizard.
-
-After: Пользователь вставляет ссылки (до 50), выбирает аккаунты, операция ставится в очередь и выполняется с anti-flood задержками.
-
-Checks Run: ✅ ast.parse() все 3 файла
-
----
-
-## 2026-05-28 — TASK-006 — Experiment Conversion Tracking
-
-Goal: Вызывать record_experiment_conversion при ответе пользователя в рамках A/B эксперимента.
-
-Changed Files:
-- services/auto_responder.py — `elif not is_start and active_exp:` вызывает record_experiment_conversion
-
-Before: assign_experiment_variant вызывался на /start, но conversions не фиксировались.
-
-After: Любое не-/start сообщение от пользователя с активным экспериментом → запись конверсии (idempotent, converted=FALSE guard в SQL).
-
-Checks Run: ✅ ast.parse()
-
----
-
-## 2026-05-28 — TASK-008 — Search Memory Drill-Down
-
-Goal: Из Behavioral Dashboard → топ keywords → история позиций.
-
-Changed Files:
-- bot/handlers/botmother_menu.py — кнопки keyword в memory view + cb_mem_keyword_drilldown
-
-Before: keywords только в тексте, не кликабельны.
-
-After: Top 8 keywords — кнопки с BmCb(action="mem_kw"). Drill-down показывает историю позиций из search_rankings JOIN tracked_keywords в виде таблицы.
-
-Checks Run: ✅ ast.parse()
-
----
-
----
-
-## 2026-05-28 — TASK-005 (полная реализация) — Operation Builder FSM Wizard
-
-Goal: Полноценный builder операций: все 4 типа, unified menu, bulk_leave как новый тип.
-
-Changed Files:
-- bot/states.py — OpBuilderFSM (choosing_op_type), BulkLeaveFSM (waiting_channels, choosing_accounts)
-- bot/handlers/mass_ops.py — bulk_leave 3-step wizard (bl_*), меню переименовано в "Построитель операций"
-- services/op_worker.py — _exec_bulk_leave с 5-15s задержками
-
-Before: builder показывал 3 типа операций, bulk_leave отсутствовал.
-
-After: 4 типа операций (mass_publish, bulk_join, bulk_leave, bulk_bot_edit). Все через unified entry MassOpCb(action="menu"). OpBuilderFSM и BulkLeaveFSM добавлены в states.py.
-
-Checks Run: ✅ ast.parse() все 3 файла
-
----
-
-## Следующие задачи
-
-Все задачи из TASK_QUEUE.md (TASK-001 — TASK-009) выполнены. Очередь пуста.
+**Результат:** Каждый аккаунт имеет уникальный Android fingerprint. Human-like delays в bulk операциях.
