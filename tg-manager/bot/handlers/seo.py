@@ -328,6 +328,11 @@ async def _ai_generate_seo(
         return None
 
     kw_hint = ", ".join(keywords[:10]) if keywords else "—"
+    # If channel already has a username, instruct AI to keep it unchanged
+    if username:
+        username_rule = f'- username: MUST return exactly "{username}" — do NOT change it'
+    else:
+        username_rule = "- username: 5-20 chars, lowercase, letters/digits/underscores only, no leading digits"
     prompt = (
         f"You are a Telegram SEO expert. Optimize the following {entity_type} profile for maximum search visibility.\n\n"
         f"Current title: {title or '(empty)'}\n"
@@ -339,7 +344,7 @@ async def _ai_generate_seo(
         "Rules:\n"
         "- title: max 50 chars, include main keyword, catchy\n"
         "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA\n"
-        "- username: 5-20 chars, lowercase, letters/digits/underscores only, no leading digits\n"
+        f"- {username_rule}\n"
         "- reasoning: 1-2 sentences explaining the strategy\n"
         "Write in the same language as the current profile (or Russian if empty)."
     )
@@ -491,7 +496,11 @@ async def cb_seo_chan_analyze(
     kb.button(text="🔄 Обновить анализ", callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
     kb.button(text="◀️ Назад",           callback_data=SeoCb(action="chan_menu",  chan_id=chan_id, acc_id=acc_id))
     kb.adjust(1)
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    try:
+        await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            raise
 
 
 # ── AI SEO generation ─────────────────────────────────────────────
@@ -599,7 +608,11 @@ async def cb_seo_chan_ai(
         # Table may not exist yet — we'll handle inline via the message
         pass
 
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    try:
+        await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            raise
 
 
 # ── Apply optimizations ───────────────────────────────────────────
@@ -704,7 +717,11 @@ async def cb_seo_apply(
     kb.button(text="📊 Новый анализ", callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
     kb.button(text="◀️ Назад",        callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
     kb.adjust(1)
-    await callback.message.edit_text(
-        "<b>✏️ Результат применения SEO</b>\n\n" + "\n".join(results or ["Нечего применять."]),
-        parse_mode="HTML", reply_markup=kb.as_markup(),
-    )
+    try:
+        await callback.message.edit_text(
+            "<b>✏️ Результат применения SEO</b>\n\n" + "\n".join(results or ["Нечего применять."]),
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            raise

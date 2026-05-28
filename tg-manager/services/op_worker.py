@@ -491,11 +491,20 @@ async def _exec_global_presence_channel(
         username_error = None
         planned_username = target.get("planned_username")
         if planned_username and channel_id:
-            await asyncio.sleep(random.uniform(3, 8))
+            # Ждём дольше — каналу нужно время на propagation в Telegram
+            await asyncio.sleep(random.uniform(15, 25))
             err = await account_manager.set_channel_username(
                 acc["session_str"], channel_id, planned_username, _acc=acc
             )
             if err:
+                log.info("op_worker gp_channel: username '%s' failed (%s), trying variants", planned_username, err[:80])
+                # Если FLOOD_WAIT — подождать дольше
+                if "flood" in err.lower() or "FloodWait" in err:
+                    import re as _re
+                    m = _re.search(r"(\d+)", err)
+                    flood_wait = int(m.group(1)) + 5 if m else 60
+                    log.info("op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait)
+                    await asyncio.sleep(flood_wait)
                 # Попробовать варианты
                 from services.username_engine import generate_username_variants
                 geo = {
@@ -505,13 +514,15 @@ async def _exec_global_presence_channel(
                 }
                 variants = generate_username_variants(planned_username, geo)
                 for variant in variants[1:4]:
-                    await asyncio.sleep(random.uniform(2, 5))
+                    await asyncio.sleep(random.uniform(8, 15))
                     err2 = await account_manager.set_channel_username(
                         acc["session_str"], channel_id, variant, _acc=acc
                     )
                     if not err2:
+                        log.info("op_worker gp_channel: username variant '%s' accepted", variant)
                         err = None
                         break
+                    log.info("op_worker gp_channel: variant '%s' also failed: %s", variant, err2[:60])
                 username_error = err
 
         # Обновить цель как done

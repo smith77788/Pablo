@@ -39,6 +39,7 @@ from services.account_manager import (
     import_from_session_string,
     resend_code as resend_login_code,
     import_from_tdata,
+    scan_owned_assets,
     send_message,
     send_message_via_account,
     start_login,
@@ -116,6 +117,8 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Каналы/группы",
               callback_data=AccCb(action="channels", acc_id=acc_id))
+    kb.button(text="🔍 Сканировать активы",
+              callback_data=AccCb(action="scan_assets", acc_id=acc_id))
     kb.button(text="📤 Написать",
               callback_data=AccCb(action="post", acc_id=acc_id))
     kb.button(text="🔍 Проверить",
@@ -135,7 +138,7 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -1900,6 +1903,172 @@ async def _finalize_import(
         f"Username: {escape(uname)}\n"
         f"Телефон: <code>{escape(phone)}</code>\n"
         f"Telegram ID: <code>{info.get('tg_user_id', '?')}</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Asset Scanner ──────────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "scan_assets"))
+async def cb_scan_assets(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer()
+
+    await callback.message.edit_text(
+        "⏳ <b>Сканирую активы аккаунта…</b>\n\n"
+        "Ищу каналы и группы, где вы администратор или создатель.\n"
+        "Это может занять 15–30 секунд.",
+        parse_mode="HTML",
+    )
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+    result = await scan_owned_assets(session_str, _acc=acc)
+
+    if result.get("error"):
+        err = result["error"]
+        await callback.message.edit_text(
+            f"❌ Ошибка сканирования:\n<code>{escape(err)}</code>",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    channels = result["channels"]
+    groups = result["groups"]
+
+    if not channels and not groups:
+        await callback.message.edit_text(
+            "📭 <b>Активы не найдены</b>\n\n"
+            "Аккаунт не является администратором ни одного канала или группы.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    lines = [f"🔍 <b>Активы аккаунта</b> — найдено:\n"]
+    if channels:
+        lines.append(f"📢 <b>Каналы ({len(channels)}):</b>")
+        for ch in channels[:20]:
+            title = escape(ch["title"][:35] or "Без названия")
+            uname = f" @{ch['username']}" if ch.get("username") else ""
+            members = f" — {ch['members']:,} подп." if ch.get("members") else ""
+            crown = "👑" if ch.get("is_creator") else "🔧"
+            lines.append(f"  {crown} {title}{uname}{members}")
+        if len(channels) > 20:
+            lines.append(f"  … и ещё {len(channels) - 20}")
+
+    if groups:
+        lines.append(f"\n👥 <b>Группы ({len(groups)}):</b>")
+        for gr in groups[:20]:
+            title = escape(gr["title"][:35] or "Без названия")
+            uname = f" @{gr['username']}" if gr.get("username") else ""
+            members = f" — {gr['members']:,} уч." if gr.get("members") else ""
+            crown = "👑" if gr.get("is_creator") else "🔧"
+            lines.append(f"  {crown} {title}{uname}{members}")
+        if len(groups) > 20:
+            lines.append(f"  … и ещё {len(groups) - 20}")
+
+    lines.append("\n<i>👑 = создатель, 🔧 = администратор</i>")
+
+    kb = InlineKeyboardBuilder()
+    total = len(channels) + len(groups)
+    if total:
+        kb.button(
+            text=f"✅ Подключить все ({total})",
+            callback_data=AccCb(action="scan_connect_all", acc_id=callback_data.acc_id),
+        )
+    if channels:
+        kb.button(
+            text=f"📢 Только каналы ({len(channels)})",
+            callback_data=AccCb(action="scan_connect_ch", acc_id=callback_data.acc_id),
+        )
+    if groups:
+        kb.button(
+            text=f"👥 Только группы ({len(groups)})",
+            callback_data=AccCb(action="scan_connect_gr", acc_id=callback_data.acc_id),
+        )
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id))
+    kb.adjust(1)
+
+    # Store scan results temporarily in FSM or just re-scan on connect
+    # We encode the counts in the message; re-scan is acceptable (fast second scan)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(AccCb.filter(F.action.in_({"scan_connect_all", "scan_connect_ch", "scan_connect_gr"})))
+async def cb_scan_connect(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Подключаю…")
+
+    session_str = acc.get("session_str") or acc.get("session_string") or ""
+    result = await scan_owned_assets(session_str, _acc=acc)
+
+    if result.get("error"):
+        await callback.answer(f"Ошибка: {result['error'][:100]}", show_alert=True)
+        return
+
+    action = callback_data.action
+    to_connect: list[dict] = []
+    if action in ("scan_connect_all", "scan_connect_ch"):
+        to_connect.extend(result["channels"])
+    if action in ("scan_connect_all", "scan_connect_gr"):
+        to_connect.extend(result["groups"])
+
+    if not to_connect:
+        await callback.answer("Нечего подключать.", show_alert=True)
+        return
+
+    # Insert all selected into managed_channels (no delete, just upsert)
+    user_id = callback.from_user.id
+    acc_id = callback_data.acc_id
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
+               VALUES($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (owner_id, channel_id) DO UPDATE
+               SET title=EXCLUDED.title, username=EXCLUDED.username,
+                   acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
+            [
+                (user_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""), ch.get("access_hash", 0))
+                for ch in to_connect
+            ],
+        )
+
+    ch_count = len([c for c in to_connect if c in result["channels"]])
+    gr_count = len(to_connect) - ch_count
+
+    parts = []
+    if action in ("scan_connect_all", "scan_connect_ch"):
+        parts.append(f"📢 {len(result['channels'])} каналов")
+    if action in ("scan_connect_all", "scan_connect_gr"):
+        parts.append(f"👥 {len(result['groups'])} групп")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Мои каналы", callback_data=AccCb(action="channels", acc_id=acc_id))
+    kb.button(text="◀️ К аккаунту", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ <b>Подключено: {len(to_connect)} активов</b>\n\n"
+        + "\n".join(f"  • {p}" for p in parts)
+        + "\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

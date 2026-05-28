@@ -503,6 +503,51 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
             pass
 
 
+async def scan_owned_assets(
+    session_string: str, _acc: dict | None = None
+) -> dict:
+    """Scan account for channels/groups where it's admin or creator.
+
+    Returns {'channels': [...], 'groups': [...], 'error': str|None}
+    Each item: {id, title, username, members, is_creator, access_hash}
+    """
+    from telethon.tl.types import Channel, Chat
+    client = _make_client(session_string, _acc)
+    channels: list[dict] = []
+    groups: list[dict] = []
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        async for dialog in client.iter_dialogs(limit=300):
+            entity = dialog.entity
+            if isinstance(entity, Channel):
+                is_creator = getattr(entity, "creator", False)
+                admin_rights = getattr(entity, "admin_rights", None)
+                if not (is_creator or admin_rights is not None):
+                    continue
+                is_broadcast = getattr(entity, "broadcast", False)
+                item = {
+                    "id": entity.id,
+                    "title": entity.title or "",
+                    "username": getattr(entity, "username", "") or "",
+                    "members": getattr(entity, "participants_count", 0) or 0,
+                    "is_creator": is_creator,
+                    "access_hash": getattr(entity, "access_hash", 0) or 0,
+                }
+                if is_broadcast:
+                    channels.append(item)
+                else:
+                    groups.append(item)
+        return {"channels": channels, "groups": groups, "error": None}
+    except Exception as e:
+        log.exception("scan_owned_assets error: %s", e)
+        return {"channels": [], "groups": [], "error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def send_message_via_account(session_string: str, chat_id: int, text: str,
                                    _acc: dict | None = None) -> bool:
     """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
