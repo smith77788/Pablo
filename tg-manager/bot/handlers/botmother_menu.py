@@ -614,6 +614,8 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 _OP_TYPE_LABELS = {
     "mass_publish": "📤 Публикация во все каналы",
     "bulk_bot_edit": "✏️ Редактирование всех ботов",
+    "bulk_join": "🔗 Массовый вступ в каналы",
+    "bulk_leave": "🚪 Массовый выход из каналов",
 }
 
 
@@ -711,23 +713,32 @@ async def cb_plan_type(
         return
 
     await state.update_data(op_type=op_type)
+    kb_cancel = InlineKeyboardBuilder()
+    kb_cancel.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
 
     if op_type == "mass_publish":
         await state.set_state(OpPlannerFSM.waiting_text)
-        kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
         await callback.message.answer(
             "📝 <b>Текст публикации</b>\n\n"
             "Введите текст сообщения, которое будет опубликовано во все каналы.\n"
             "Поддерживается HTML-форматирование.",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=kb_cancel.as_markup(),
+        )
+    elif op_type in ("bulk_join", "bulk_leave"):
+        await state.set_state(OpPlannerFSM.waiting_links)
+        action_word = "вступить в" if op_type == "bulk_join" else "выйти из"
+        await callback.message.answer(
+            f"🔗 <b>Список каналов</b>\n\n"
+            f"Введите каналы, из которых нужно {action_word},\n"
+            f"по одному на строку:\n\n"
+            f"<code>@channel1\n@channel2\nhttps://t.me/...</code>",
+            parse_mode="HTML",
+            reply_markup=kb_cancel.as_markup(),
         )
     else:
-        # bulk_bot_edit и другие — сразу к выбору времени
+        # bulk_bot_edit — сразу к выбору времени
         await state.set_state(OpPlannerFSM.waiting_datetime)
-        kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
         await callback.message.answer(
             "🕐 <b>Когда выполнить?</b>\n\n"
             "Введите дату и время в формате:\n"
@@ -737,7 +748,7 @@ async def cb_plan_type(
             "• <code>25.06 14:30</code>  (текущий год)\n"
             "• <code>14:30</code>  (сегодня)",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=kb_cancel.as_markup(),
         )
 
 
@@ -752,6 +763,27 @@ async def fsm_plan_waiting_text(message: Message, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
     await message.answer(
+        "🕐 <b>Когда выполнить?</b>\n\n"
+        "Введите дату и время:\n"
+        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ДД.ММ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(OpPlannerFSM.waiting_links)
+async def fsm_plan_waiting_links(message: Message, state: FSMContext) -> None:
+    text = message.text or ""
+    links = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not links:
+        await message.answer("⚠️ Введите хотя бы одну ссылку или @username:")
+        return
+    await state.update_data(links=links)
+    await state.set_state(OpPlannerFSM.waiting_datetime)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
+    await message.answer(
+        f"✅ Добавлено {len(links)} каналов.\n\n"
         "🕐 <b>Когда выполнить?</b>\n\n"
         "Введите дату и время:\n"
         "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ДД.ММ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>",
@@ -820,6 +852,7 @@ async def fsm_plan_waiting_datetime(
     # Сохраняем распарсенное время в state
     await state.update_data(scheduled_for_iso=dt.isoformat())
 
+    links = sd.get("links", [])
     # Показываем preview + кнопки confirm/cancel
     preview_lines = [
         f"<b>⏱️ Подтверждение</b>\n",
@@ -828,6 +861,8 @@ async def fsm_plan_waiting_datetime(
     ]
     if publish_text:
         preview_lines.append(f"\nТекст публикации:\n<i>{html.escape(publish_text[:300])}</i>")
+    if links:
+        preview_lines.append(f"\nКаналов: <b>{len(links)}</b>")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запланировать", callback_data=BmCb(action="plan_confirm"))
@@ -864,9 +899,13 @@ async def cb_plan_confirm(
         await state.clear()
         return
 
+    links = sd.get("links", [])
     params: dict = {"source": "planner"}
     if publish_text:
         params["text"] = publish_text
+    if links:
+        params["links"] = links
+        params["channels"] = links  # used by bulk_leave executor
 
     try:
         op_id = await pool.fetchval(
