@@ -1,12 +1,18 @@
 # TASK QUEUE
 
-## P0 — Repository understanding
-- [ ] Inspect repository structure
-- [ ] Detect stack, bot framework, database, queues/workers
-- [ ] Update docs/ARCHITECTURE.md
-- [ ] Update docs/FEATURE_INVENTORY.md
-- [ ] Update docs/GAP_ANALYSIS.md
-- [ ] Update docs/ROADMAP.md
+## P0 — CRITICAL: BotMother OS consolidation
+- [ ] **IMMEDIATELY**: Убрать прямые команды: `/ai`, `/accounts`, `/ops`, `/ranking`, `/referral`, `/subscription`
+- [ ] Все функции ДОЛЖНЫ входиться только через BotMother OS меню
+- [ ] Дока: ARCHITECTURE_ISSUES.md (убедиться что все понимают проблему)
+- [ ] Заменить на redirect: `/ai` → "Откройте BotMother → 🤖 AI Assistant"
+
+## P0 — Repository understanding (СДЕЛАНО)
+- [x] Inspect repository structure
+- [x] Detect stack, bot framework, database, queues/workers
+- [x] Update docs/ARCHITECTURE.md
+- [x] Update docs/FEATURE_INVENTORY.md
+- [x] Update docs/GAP_ANALYSIS.md
+- [x] Update docs/ROADMAP.md
 
 ## P1 — Foundation
 - [ ] Identify or implement OperationPlan / OperationRun / OperationResult
