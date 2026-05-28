@@ -56,7 +56,16 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     try:
         # Уведомить пользователя о старте (всегда — это не op_complete, а старт)
         try:
-            await bot.send_message(owner_id, f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>", parse_mode="HTML")
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot.callbacks import BmCb
+            start_kb = InlineKeyboardBuilder()
+            start_kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
+            await bot.send_message(
+                owner_id,
+                f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>",
+                parse_mode="HTML",
+                reply_markup=start_kb.as_markup(),
+            )
         except Exception:
             pass
 
