@@ -1113,16 +1113,18 @@ async def promote_to_admin(
     """Promote a user to admin in a channel/group with specified rights.
 
     The calling account must be an admin with 'add admins' privilege.
+    The user must already be a member of the channel/group.
     Returns True on success.
     """
     from telethon.tl.functions.channels import EditAdminRequest
     from telethon.tl.types import ChatAdminRights
+    from telethon.errors import ChatAdminRequiredError, UserNotParticipantError
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         channel = await client.get_entity(channel_id)
-        user = await client.get_entity(user_id)
+
         rights = ChatAdminRights(
             post_messages=post_messages,
             edit_messages=False,
@@ -1137,8 +1139,17 @@ async def promote_to_admin(
             anonymous=False,
             manage_topics=False,
         )
-        await client(EditAdminRequest(channel=channel, user_id=user, admin_rights=rights, rank=""))
+
+        # Pass user_id directly (Telethon will handle it)
+        await client(EditAdminRequest(channel=channel, user_id=user_id, admin_rights=rights, rank=""))
+        log.info("promote_to_admin: user %s promoted in channel %s", user_id, channel_id)
         return True
+    except UserNotParticipantError:
+        log.warning("promote_to_admin: user %s is not a member of channel %s", user_id, channel_id)
+        return False
+    except ChatAdminRequiredError:
+        log.warning("promote_to_admin: calling account does not have admin rights in %s", channel_id)
+        return False
     except Exception as e:
         log.warning("promote_to_admin error for user %s in %s: %s", user_id, channel_id, e)
         return False

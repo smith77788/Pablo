@@ -3516,15 +3516,51 @@ async def _cinv_bg(
 
     chan_target = channel_id if channel_id else channel_identifier
 
-    # 0. Auto-promote co-accounts to admin using the first (primary) account
+    # 0. Auto-add co-accounts to channel, then promote to admin
+    # IMPORTANT: Accounts must be members before they can be promoted to admin
     if len(acc_rows) > 1 and pool is not None:
         primary = acc_rows[0]
         primary_dict = dict(primary)
+
+        # First, ensure all co-accounts are members by having them join the channel
+        # Use the primary account's username (@username) or generate invite link
+        join_identifier = None
+        if channel_identifier and channel_identifier.startswith("@"):
+            join_identifier = channel_identifier
+        else:
+            # Try to get invite link from primary account
+            try:
+                invite_result = await _am.get_channel_invite_link(
+                    primary["session_str"], chan_target, _acc=primary_dict
+                )
+                if invite_result and not invite_result.get("error"):
+                    join_identifier = invite_result.get("link")
+            except Exception as e:
+                log.warning("cinv get_invite_link: %s", e)
+
+        # Add each co-account to the channel
+        added_ok = 0
+        for other in acc_rows[1:]:
+            if join_identifier:
+                try:
+                    result = await _am.join_channel(
+                        other["session_str"], join_identifier, _acc=dict(other)
+                    )
+                    if not result.get("error"):
+                        added_ok += 1
+                        log.info("cinv: co-account %s joined %s", other["id"], chan_target)
+                except Exception as e:
+                    log.warning("cinv co-account join: %s", e)
+            await asyncio.sleep(1)
+
+        if added_ok > 0:
+            log.info("cinv: added %d co-accounts as members in %s", added_ok, chan_target)
+
+        # Now promote co-accounts to admin (they are members now)
         promo_ok = 0
         for other in acc_rows[1:]:
             tg_uid = other.get("tg_user_id")
             if not tg_uid:
-                # Try fetching tg_user_id from DB if not already in the row
                 try:
                     row = await pool.fetchrow(
                         "SELECT tg_user_id FROM tg_accounts WHERE id=$1", other["id"]
@@ -3539,6 +3575,7 @@ async def _cinv_bg(
                     )
                     if ok:
                         promo_ok += 1
+                        log.info("cinv: promoted co-account %s to admin", tg_uid)
                 except Exception as e:
                     log.warning("cinv auto-promote acc=%s: %s", other["id"], e)
             await asyncio.sleep(2)
