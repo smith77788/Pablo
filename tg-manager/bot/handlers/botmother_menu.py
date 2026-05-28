@@ -1233,9 +1233,51 @@ async def cb_op_detail(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📥 CSV лог операции", callback_data=BmCb(action="op_csv", op_id=op_id))
+    if op["status"] == "failed":
+        kb.button(text="🔄 Повторить операцию", callback_data=BmCb(action="op_retry", op_id=op_id))
     kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
     kb.adjust(1)
     await _edit(callback, "\n".join(lines), kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "op_retry"))
+async def cb_op_retry(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    op_id = callback_data.op_id
+    user_id = callback.from_user.id
+
+    row = await pool.fetchrow(
+        "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    if not row or row["status"] != "failed":
+        await callback.answer("Операция не найдена или не в статусе failed.", show_alert=True)
+        return
+
+    await pool.execute(
+        "UPDATE operation_queue SET status='pending', error_msg=NULL, started_at=NULL, finished_at=NULL "
+        "WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    await callback.answer(f"✅ Операция #{op_id} поставлена в очередь повторно.", show_alert=True)
+    # Refresh op_detail view
+    cb_new = BmCb(action="op_detail", op_id=op_id)
+    # Re-render by simulating op_detail callback
+    await pool.execute(
+        "UPDATE operation_queue SET done_items=0 WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Назад к отчётам", callback_data=BmCb(action="op_reports"))
+    await _edit(callback,
+        f"✅ <b>Операция #{op_id}</b> поставлена в очередь повторно.\n\n"
+        "Она будет выполнена в течение 15 секунд.",
+        kb.as_markup(),
+    )
 
 
 @router.callback_query(BmCb.filter(F.action == "op_csv"))
