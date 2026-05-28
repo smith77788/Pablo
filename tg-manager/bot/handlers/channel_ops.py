@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import random
 import aiohttp
 import asyncpg
 from aiogram import F, Router
@@ -3542,9 +3543,9 @@ async def _cinv_bg(
             except Exception as e:
                 log.warning("cinv get_invite_link: %s", e)
 
-        # Add each co-account to the channel
+        # Add each co-account to the channel (with human-like delays)
         added_ok = 0
-        for other in acc_rows[1:]:
+        for idx, other in enumerate(acc_rows[1:]):
             if join_identifier:
                 try:
                     result = await _am.join_channel(
@@ -3555,14 +3556,22 @@ async def _cinv_bg(
                         log.info("cinv: co-account %s joined %s", other["id"], chan_target)
                 except Exception as e:
                     log.warning("cinv co-account join: %s", e)
-            await asyncio.sleep(1)
+            # Human-like delay between joins: 30-120 sec (not uniform!)
+            if idx < len(acc_rows) - 2:  # not after last account
+                delay = random.uniform(30, 120) * session_simulator.chaos_factor()
+                await asyncio.sleep(delay)
 
         if added_ok > 0:
-            log.info("cinv: added %d co-accounts as members in %s", added_ok, chan_target)
+            log.info("cinv: added %d co-accounts as members in %s (took ~%ds per account)",
+                     added_ok, chan_target, int(added_ok * 75))
+
+        # Wait before promoting to admin (realistic: don't do it instantly)
+        if len(acc_rows) > 1:
+            await asyncio.sleep(random.uniform(15, 45))
 
         # Now promote co-accounts to admin (they are members now)
         promo_ok = 0
-        for other in acc_rows[1:]:
+        for idx, other in enumerate(acc_rows[1:]):
             tg_uid = other.get("tg_user_id")
             if not tg_uid:
                 try:
@@ -3582,7 +3591,10 @@ async def _cinv_bg(
                         log.info("cinv: promoted co-account %s to admin", tg_uid)
                 except Exception as e:
                     log.warning("cinv auto-promote acc=%s: %s", other["id"], e)
-            await asyncio.sleep(2)
+            # Human-like delay between promotions: 20-90 sec
+            if idx < len(acc_rows) - 2:
+                delay = random.uniform(20, 90) * session_simulator.chaos_factor()
+                await asyncio.sleep(delay)
 
         if promo_ok > 0:
             log.info("cinv: promoted %d co-accounts to admin in %s", promo_ok, chan_target)
@@ -3634,16 +3646,29 @@ async def _cinv_bg(
 
     total_invited = 0
     total_failed = 0
-    for acc, chunk in zip(acc_rows, chunks):
+
+    # Wait before starting invites (let the channel settle after admin promotions)
+    await asyncio.sleep(random.uniform(20, 60))
+
+    for idx, (acc, chunk) in enumerate(zip(acc_rows, chunks)):
         if not chunk:
             continue
         try:
+            log.info("cinv: account %s starting invite of %d users to %s", acc["id"], len(chunk), chan_target)
             res = await _am.invite_users_to_channel(acc["session_str"], chan_target, chunk, _acc=dict(acc))
             total_invited += res.get("invited", 0)
             total_failed += len(res.get("failed", []))
+            log.info("cinv: account %s invited %d, failed %d",
+                     acc["id"], res.get("invited", 0), len(res.get("failed", [])))
         except Exception as e:
             log.warning("cinv invite acc=%s: %s", acc["id"], e)
             total_failed += len(chunk)
+
+        # Human-like delay between different accounts inviting (don't hammer at once)
+        # Wait 2-8 minutes between accounts to avoid looking like a botnet
+        if idx < len(acc_rows) - 1:
+            delay = random.uniform(120, 480) * session_simulator.chaos_factor()
+            await asyncio.sleep(delay)
 
     # 4. Notify user
     try:
