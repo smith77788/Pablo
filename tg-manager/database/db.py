@@ -634,10 +634,10 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
            JOIN funnels f ON f.id=fs.funnel_id
            WHERE f.bot_id=$1""", bot_id
     )
-    # Relay sessions today
+    # Relay sessions today (used last_activity since relay_sessions has no created_at)
     relay_today = await pool.fetchval(
         """SELECT COUNT(*) FROM relay_sessions
-           WHERE bot_id=$1 AND created_at >= NOW() - INTERVAL '24 hours'""", bot_id
+           WHERE bot_id=$1 AND last_activity >= NOW() - INTERVAL '24 hours'""", bot_id
     )
     # Audience growth
     aud_total = await pool.fetchval(

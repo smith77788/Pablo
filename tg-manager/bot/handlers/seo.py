@@ -20,9 +20,21 @@ router = Router()
 
 
 def _seo_score(name: str, description: str, short_desc: str,
-               commands: list, audience: int) -> tuple[int, list[str]]:
+               commands: list, audience: int,
+               username: str = "") -> tuple[int, list[str]]:
     score = 0
     tips = []
+
+    # Username: 0–15 pts (key search signal for bots)
+    ulen = len(username) if username else 0
+    if username:
+        score += 8
+        if 5 <= ulen <= 20: score += 4
+        if not any(c.isdigit() for c in username): score += 3
+        if ulen > 25:
+            tips.append(f"🔗 Username длинный ({ulen} симв.) — короткий запоминается лучше")
+    else:
+        tips.append("🔗 Username не задан — он определяет вашу позицию в поиске Telegram по @имени")
 
     # Name: 0–20 pts
     name_len = len(name) if name else 0
@@ -106,15 +118,24 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
         await callback.answer("Бот не найден.", show_alert=True)
         return
     await callback.answer()
-    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    bot_uname = row.get("username") or ""
+    label = f"@{bot_uname}" if bot_uname else (row.get("first_name") or "бот")
+    uname_status = (
+        f"🔗 Username: <b>@{html.escape(bot_uname)}</b> — ключевой сигнал для поиска"
+        if bot_uname else
+        "⚠️ <b>Username не задан</b> — задайте через @BotFather → /setusername"
+    )
     await callback.message.edit_text(
         f"📈 <b>SEO — {label}</b>\n\n"
-        "📌 <b>Что это?</b>\n"
-        "SEO помогает вашему боту занимать более высокие места в поиске Telegram. Чем выше бот в поиске — тем больше людей его найдут и подпишутся.\n\n"
-        "💡 <b>Что вы можете здесь делать:</b>\n"
-        "• <b>Анализ профиля</b> — получите оценку от 0 до 100 и список конкретных улучшений\n"
-        "• <b>Ключевые слова</b> — посмотрите, что пишут ваши пользователи, и добавьте эти слова в описание\n"
-        "• <b>SEO-советы</b> — пошаговые инструкции по оптимизации",
+        f"{uname_status}\n\n"
+        "<b>Как Telegram находит ботов:</b>\n"
+        "1️⃣ <b>Username</b> (@botname) — прямой поиск по @имени\n"
+        "2️⃣ <b>Имя бота</b> — отображается в результатах, должно содержать ключевые слова\n"
+        "3️⃣ <b>Описание</b> — индексируется, влияет на релевантность\n"
+        "4️⃣ <b>Краткое описание</b> — показывается в поиске под именем\n\n"
+        "• <b>📊 Анализ профиля</b> — оценка 0–100 с конкретными советами\n"
+        "• <b>🔑 Ключевые слова</b> — что ищут ваши пользователи\n"
+        "• <b>💡 SEO-советы</b> — пошаговые инструкции",
         parse_mode="HTML",
         reply_markup=seo_menu(callback_data.bot_id),
     )
@@ -148,14 +169,22 @@ async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
     ) or 0
 
-    score, tips = _seo_score(name, description, short_desc, commands or [], int(audience))
+    bot_username = row.get("username") or ""
+    score, tips = _seo_score(name, description, short_desc, commands or [], int(audience),
+                             username=bot_username)
     bar = _score_bar(score)
 
-    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    label = f"@{bot_username}" if bot_username else (row.get("first_name") or str(row["bot_id"]))
+    uname_line = (
+        f"  🔗 Username: <b>@{html.escape(bot_username)}</b> ✅ — индексируется в поиске"
+        if bot_username else
+        "  🔗 Username: <b>⚠️ не задан</b> — задайте через @BotFather → /setusername"
+    )
     lines = [
         f"📈 <b>SEO-скор профиля — {label}</b>\n",
         f"<b>{bar}</b>\n",
         "<b>Параметры профиля:</b>",
+        uname_line,
         f"  📛 Имя: {len(name or '')} симв.",
         f"  📄 Описание: {len(description or '')} / 512 симв.",
         f"  📃 Краткое: {len(short_desc or '')} / 120 симв.",
@@ -415,13 +444,22 @@ async def cb_seo_chan_menu(
     kb.button(text="💡 SEO-советы",          callback_data=SeoCb(action="tips", bot_id=0))
     kb.button(text="◀️ Назад",               callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
+    has_username = bool(chan.get("username"))
+    username_hint = (
+        f"🔗 Username: <b>@{html.escape(chan['username'])}</b> — учитывается в поиске"
+        if has_username else
+        "⚠️ <b>Username не задан</b> — это снижает видимость в поиске Telegram"
+    )
     await callback.message.edit_text(
         f"📈 <b>SEO-оптимизация — {name}</b>\n\n"
-        "Telegram-поиск ранжирует каналы по названию, описанию и username.\n"
-        "Правильно оптимизированный канал находят в 3-5 раз чаще.\n\n"
-        "• <b>Анализ</b> — текущий SEO-скор с конкретными рекомендациями\n"
-        "• <b>AI-оптимизация</b> — ИИ напишет title/about/username под ваш контент\n"
-        "• <b>Применить</b> — обновить поля канала в один клик",
+        f"{username_hint}\n\n"
+        "<b>Как Telegram ранжирует каналы:</b>\n"
+        "1️⃣ <b>Username</b> (@handle) — прямое совпадение даёт топ-позицию\n"
+        "2️⃣ <b>Название</b> — индексируется как заголовок\n"
+        "3️⃣ <b>Описание</b> — ключевые слова повышают релевантность\n\n"
+        "• <b>📊 Анализ</b> — SEO-скор по 4 критериям + советы\n"
+        "• <b>🤖 AI-оптимизация</b> — ИИ напишет оптимальные title/about с вашим @username\n"
+        "• <b>✏️ Применить</b> — обновить поля канала через аккаунт-администратор",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -473,15 +511,25 @@ async def cb_seo_chan_analyze(
     bar = _score_bar(score)
 
     display = f"@{username}" if username else html.escape(title)
+    uname_line = (
+        f"  🔗 Username: <b>@{html.escape(username)}</b> ✅ — ключевой фактор поиска"
+        if username else
+        "  🔗 Username: <b>⚠️ не задан</b> — без него канал почти не виден в поиске"
+    )
     lines = [
         f"📊 <b>SEO-скор — {display}</b>\n",
         f"<b>{bar}</b>\n",
-        "<b>Параметры:</b>",
-        f"  📛 Название: <b>{html.escape(title)}</b>  ({len(title)} симв.)",
-        f"  📄 Описание: {len(about)} симв.",
-        f"  🔗 Username: {'@' + html.escape(username) if username else '⚠️ нет'}",
+        "<b>Параметры (влияние на ранжирование):</b>",
+        f"  📛 Название: <b>{html.escape(title)}</b>  ({len(title)}/50 симв.)",
+        f"  📄 Описание: {len(about)}/255 симв." + (" ✅" if len(about) >= 150 else " ⚠️ мало"),
+        uname_line,
         f"  👥 Подписчиков: {members:,}",
     ]
+    if not username:
+        lines.append(
+            "\n💡 <b>Username критичен для SEO:</b> пользователи ищут каналы по @username "
+            "и ключевым словам. Без username ваш канал не попадает в прямые результаты поиска."
+        )
     if tips:
         lines.append("\n<b>Что улучшить:</b>")
         for t in tips:
@@ -491,7 +539,7 @@ async def cb_seo_chan_analyze(
     elif score >= 50:
         lines.append("\n🟡 <b>Средний SEO.</b> Следуйте советам выше.")
     else:
-        lines.append("\n🔴 <b>Слабый SEO.</b> Начните с добавления описания и username.")
+        lines.append("\n🔴 <b>Слабый SEO.</b> Приоритет: задать username + расширить описание.")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 AI-оптимизация",  callback_data=SeoCb(action="chan_ai",    chan_id=chan_id, acc_id=acc_id))
