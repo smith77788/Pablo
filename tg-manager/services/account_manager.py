@@ -990,50 +990,80 @@ async def get_channel_members(
 
 async def invite_users_to_channel(
     session_string: str, channel_id: int, usernames: list[str], _acc: dict | None = None,
+    access_hash: int = 0,
 ) -> dict:
-    """Invite a list of users (@username or phone) to a group.
+    """Invite a list of users (@username or phone) to a channel/supergroup.
 
-    Returns {invited: int, failed: list[str]}.
-    Includes human-like delays between invites to avoid bot detection.
+    Returns {invited: int, failed: list[str], error?: str}.
+    Uses access_hash for reliable entity resolution without dialog cache.
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
+    from telethon.tl.types import InputPeerChannel
+    from telethon.errors import (
+        FloodWaitError, PeerFloodError, UserBannedInChannelError,
+        ChatAdminRequiredError, UserPrivacyRestrictedError,
+        UserNotMutualContactError, UserChannelsTooMuchError,
+    )
     from services import session_simulator
     client = _make_client(session_string, _acc)
     invited = 0
     failed = []
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_id)
-        attempt = 0
+
+        # Resolve channel entity — use access_hash when available (fastest, no cache needed)
+        if access_hash and isinstance(channel_id, int) and channel_id > 0:
+            channel_peer = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
+        else:
+            # Fallback: try to get entity (requires entity in Telethon cache)
+            try:
+                channel_peer = await client.get_entity(channel_id)
+            except Exception:
+                # Last resort: iterate dialogs to find the channel
+                channel_peer = None
+                async for dlg in client.iter_dialogs(limit=300):
+                    eid = getattr(dlg.entity, "id", None)
+                    if eid and abs(eid) == abs(int(channel_id)):
+                        ah = getattr(dlg.entity, "access_hash", 0)
+                        channel_peer = InputPeerChannel(channel_id=abs(eid), access_hash=ah)
+                        break
+                if not channel_peer:
+                    return {"invited": 0, "failed": [], "error": f"Канал {channel_id} не найден в диалогах аккаунта"}
+
         for idx, username in enumerate(usernames):
             try:
-                from telethon.errors import FloodWaitError, PeerFloodError, UserBannedInChannelError, ChatAdminRequiredError
                 user = await client.get_entity(username.strip())
-                await client(InviteToChannelRequest(channel=entity, users=[user]))
+                await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
                 invited += 1
-                attempt = 0  # reset on success
-                # Human-like delay between invites: 3-15 seconds (not bot-like uniform)
+                # Human-like delay between invites
                 if idx < len(usernames) - 1:
-                    delay = random.uniform(3, 15) * session_simulator.chaos_factor()
-                    await asyncio.sleep(delay)
-            except PeerFloodError as e:
-                return {"flood_wait": e.seconds if hasattr(e, 'seconds') else 0, "banned": False, "invited": invited, "failed": failed}
-            except (UserBannedInChannelError, ChatAdminRequiredError):
-                continue
+                    await asyncio.sleep(random.uniform(3, 15) * session_simulator.chaos_factor())
+            except ChatAdminRequiredError:
+                # Account has no invite_users right — no point continuing
+                return {
+                    "invited": invited, "failed": failed,
+                    "error": "Нет прав администратора для инвайта. Убедитесь что аккаунт назначен администратором с правом 'Добавление участников'.",
+                }
+            except PeerFloodError:
+                return {"invited": invited, "failed": failed,
+                        "error": "PeerFlood — аккаунт временно ограничен Telegram"}
+            except UserBannedInChannelError:
+                failed.append(f"{username}: забанен в канале")
+            except (UserPrivacyRestrictedError, UserNotMutualContactError):
+                failed.append(f"{username}: настройки конфиденциальности")
+            except UserChannelsTooMuchError:
+                failed.append(f"{username}: слишком много каналов")
+            except FloodWaitError as e:
+                log.warning("invite_users FloodWait %ds", e.seconds)
+                await asyncio.sleep(min(e.seconds, 300))
             except Exception as e:
-                from telethon.errors import FloodWaitError
-                if isinstance(e, FloodWaitError):
-                    log.warning("invite_users FloodWait %ds — sleeping", e.seconds)
-                    await asyncio.sleep(min(e.seconds, 300))
-                    continue
                 failed.append(f"{username}: {str(e)[:60]}")
-                # Slower recovery on error
                 await asyncio.sleep(random.uniform(5, 15))
-                attempt += 1
+
         return {"invited": invited, "failed": failed}
     except Exception as e:
-        log.exception("invite_users_to_channel error: %s", e)
-        return {"invited": invited, "failed": failed + [str(e)[:100]]}
+        log.exception("invite_users_to_channel outer error: %s", e)
+        return {"invited": invited, "failed": failed, "error": str(e)[:150]}
     finally:
         try:
             await client.disconnect()
@@ -1108,6 +1138,7 @@ async def promote_to_admin(
     channel_id: int,
     user_id: int,
     _acc: dict | None = None,
+    access_hash: int = 0,
     post_messages: bool = True,
     invite_users: bool = True,
     change_info: bool = False,
@@ -1116,20 +1147,24 @@ async def promote_to_admin(
     pin_messages: bool = False,
     manage_call: bool = False,
 ) -> bool:
-    """Promote a user to admin in a channel/group with specified rights.
+    """Promote a user to admin in a channel/group.
 
-    The calling account must be an admin with 'add admins' privilege.
-    The user must already be a member of the channel/group.
-    Returns True on success.
+    Requires calling account to be owner or admin with add_admins right.
+    User must already be a member. Returns True on success.
     """
     from telethon.tl.functions.channels import EditAdminRequest
-    from telethon.tl.types import ChatAdminRights, PeerUser
+    from telethon.tl.types import ChatAdminRights, InputPeerChannel, PeerUser
     from telethon.errors import ChatAdminRequiredError, UserNotParticipantError
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        channel = await client.get_entity(channel_id)
+
+        # Resolve channel with access_hash when available
+        if access_hash and isinstance(channel_id, int) and channel_id > 0:
+            channel = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
+        else:
+            channel = await client.get_entity(channel_id)
 
         rights = ChatAdminRights(
             post_messages=post_messages,
@@ -1145,20 +1180,18 @@ async def promote_to_admin(
             anonymous=False,
             manage_topics=False,
         )
-
-        # Create a PeerUser for the target user (more reliable than numeric ID)
-        peer = PeerUser(user_id=user_id)
-        await client(EditAdminRequest(channel=channel, user_id=peer, admin_rights=rights, rank=""))
+        await client(EditAdminRequest(channel=channel, user_id=PeerUser(user_id=user_id),
+                                      admin_rights=rights, rank=""))
         log.info("promote_to_admin: user %s promoted in channel %s", user_id, channel_id)
         return True
     except UserNotParticipantError:
-        log.warning("promote_to_admin: user %s is not a member of channel %s", user_id, channel_id)
+        log.warning("promote_to_admin: user %s not yet a member of %s", user_id, channel_id)
         return False
     except ChatAdminRequiredError:
-        log.warning("promote_to_admin: calling account does not have admin rights in %s", channel_id)
+        log.warning("promote_to_admin: calling account lacks add_admins right in %s", channel_id)
         return False
     except Exception as e:
-        log.warning("promote_to_admin error for user %s in %s: %s", user_id, channel_id, e)
+        log.warning("promote_to_admin error user=%s chan=%s: %s", user_id, channel_id, e)
         return False
     finally:
         try:

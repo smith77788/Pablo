@@ -3642,11 +3642,17 @@ async def _cinv_bg_inner(
             if tg_uid:
                 try:
                     ok = await _am.promote_to_admin(
-                        primary["session_str"], chan_target, tg_uid, _acc=primary_dict
+                        primary["session_str"],
+                        channel_id if channel_id else 0,
+                        tg_uid,
+                        _acc=primary_dict,
+                        access_hash=access_hash,
                     )
                     if ok:
                         promo_ok += 1
                         log.info("cinv: promoted co-account %s to admin", tg_uid)
+                    else:
+                        log.warning("cinv promote failed for user %s (no rights or not member)", tg_uid)
                 except Exception as e:
                     log.warning("cinv auto-promote acc=%s: %s", other["id"], e)
             # Human-like delay between promotions: 20-90 sec
@@ -3712,11 +3718,19 @@ async def _cinv_bg_inner(
         if not chunk:
             continue
         try:
-            log.info("cinv: account %s starting invite of %d users to %s", acc["id"], len(chunk), chan_target)
-            res = await _am.invite_users_to_channel(acc["session_str"], chan_target, chunk, _acc=dict(acc))
+            log.info("cinv: account %s inviting %d users to %s", acc["id"], len(chunk), chan_target)
+            res = await _am.invite_users_to_channel(
+                acc["session_str"], channel_id if channel_id else 0, chunk,
+                _acc=dict(acc), access_hash=access_hash,
+            )
             total_invited += res.get("invited", 0)
             total_failed += len(res.get("failed", []))
-            log.info("cinv: account %s invited %d, failed %d",
+            # Hard stop if account has no admin rights
+            if res.get("error"):
+                log.warning("cinv hard error acc=%s: %s", acc["id"], res["error"])
+                # Still try other accounts but log the issue
+                total_failed += max(0, len(chunk) - res.get("invited", 0))
+            log.info("cinv: account %s invited=%d failed=%d",
                      acc["id"], res.get("invited", 0), len(res.get("failed", [])))
         except Exception as e:
             log.warning("cinv invite acc=%s: %s", acc["id"], e)

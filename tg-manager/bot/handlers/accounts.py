@@ -374,12 +374,26 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
                 f"⏳ Слишком много запросов. Подождите <b>{wait} сек</b> и попробуйте снова.",
                 parse_mode="HTML",
             )
-        else:
+            return
+        # Code expired — restart login with a fresh SendCodeRequest
+        try:
+            new_hash, hint = await start_login(phone)
+            await state.update_data(phone_code_hash=new_hash)
+            kb = InlineKeyboardBuilder()
+            kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_login"))
+            kb.adjust(1)
             await callback.message.answer(
-                f"❌ Не удалось выслать SMS: <code>{escape(err[:200])}</code>",
+                f"📱 Код запрошен заново.\n{hint} на <code>{escape(phone)}</code>.\n\nВведите код (только цифры):",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+        except Exception as exc2:
+            await callback.message.answer(
+                f"❌ Не удалось выслать код: <code>{escape(str(exc2)[:200])}</code>",
                 parse_mode="HTML",
             )
-        return
+            return
 
     await state.update_data(phone_code_hash=new_hash)
 
