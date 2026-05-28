@@ -565,8 +565,46 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         text = text[:3900] + "\n\n<i>... (показаны первые результаты)</i>"
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="📥 Скачать CSV", callback_data=BmCb(action="vis_reports_csv"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    kb.adjust(1)
     await _edit(callback, text, kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "vis_reports_csv"))
+async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer("🔒 Требуется план STARTER", show_alert=True)
+        return
+    await callback.answer("⏳ Генерирую CSV…")
+
+    kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
+    if not kws:
+        await callback.answer("Нет данных для экспорта", show_alert=True)
+        return
+
+    import csv
+    import io
+    from aiogram.types import BufferedInputFile
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["bot_username", "keyword", "position", "checked_at"])
+    for kw in kws:
+        writer.writerow([
+            kw.get("bot_username") or f"id{kw['bot_id']}",
+            kw.get("keyword", ""),
+            kw.get("position") or "",
+            str(kw.get("checked_at") or ""),
+        ])
+
+    data = buf.getvalue().encode("utf-8-sig")  # utf-8-sig for Excel compatibility
+    file = BufferedInputFile(data, filename="visibility_report.csv")
+    await callback.message.answer_document(
+        file,
+        caption="📊 <b>Отчёт по позициям в поиске</b>",
+        parse_mode="HTML",
+    )
 
 
 # ── Operation Planner ─────────────────────────────────────────────────────
