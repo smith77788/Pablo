@@ -36,6 +36,7 @@ from bot.states import (
 from bot.utils.subscription import require_plan
 from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text
 from services import session_simulator
+from database import db
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -308,10 +309,7 @@ async def cb_create_account_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -408,10 +406,7 @@ async def cb_do_create(
             "⚠️ Сессия истекла. Начните заново: /ops", parse_mode="HTML"
         )
         return
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, acc_id, callback.from_user.id)
     if not acc:
         await callback.message.edit_text("⚠️ Аккаунт не найден.", parse_mode="HTML")
         return
@@ -745,10 +740,7 @@ async def cb_bulk_post_chans_acc(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer("⏳ Загружаю каналы...")
-    acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -869,10 +861,7 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
     channels = data.get("bpchans_channels", [])
     await state.clear()
 
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, message.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, acc_id, message.from_user.id)
     if not acc:
         await message.answer("❌ Аккаунт не найден.")
         return
@@ -958,10 +947,7 @@ async def cb_join_pick_account(
 async def cb_join_account_chosen(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1019,10 +1005,7 @@ async def cb_leave_show_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Загружаю список каналов...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
@@ -1054,10 +1037,7 @@ async def cb_do_leave(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Выхожу...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1101,10 +1081,7 @@ async def cb_post_show_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer("⏳ Загружаю каналы...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
@@ -1173,10 +1150,7 @@ async def cb_manage_show_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Загружаю каналы...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
@@ -1262,10 +1236,7 @@ async def fsm_edit_value(message: Message, state: FSMContext, pool: asyncpg.Pool
     value = (message.text or "").strip()
     data = await state.get_data()
     await state.clear()
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), message.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
     if not acc:
         await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
         return
@@ -1304,10 +1275,7 @@ async def cb_get_invite(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Получаю ссылку...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1353,10 +1321,7 @@ async def cb_do_delete(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Удаляю...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1398,10 +1363,7 @@ async def cb_members_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Загружаю каналы...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1445,10 +1407,7 @@ async def cb_members_view(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Загружаю участников...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
@@ -1505,10 +1464,7 @@ async def fsm_invite_usernames(message: Message, state: FSMContext, pool: asyncp
     if not usernames:
         await message.answer("⚠️ Список пуст. Начните заново: /ops")
         return
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), message.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
     if not acc:
         await message.answer("⚠️ Аккаунт не найден.")
         return
@@ -1553,10 +1509,7 @@ async def fsm_kick_user_id(message: Message, state: FSMContext, pool: asyncpg.Po
     except ValueError:
         await message.answer("⚠️ Введите числовой Telegram ID.")
         return
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), message.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
     if not acc:
         await message.answer("⚠️ Аккаунт не найден.")
         return
@@ -1845,10 +1798,7 @@ async def cb_react_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer("⏳ Загружаю каналы...")
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1912,10 +1862,7 @@ async def cb_do_react(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     emoji = parts[2] if len(parts) >= 3 else "👍"
     data = await state.get_data()
     await state.clear()
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), callback.from_user.id)
     if not acc:
         await callback.message.edit_text("⚠️ Аккаунт не найден.")
         return
@@ -1984,10 +1931,7 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
     reason = callback.data.split(":", 2)[2] if ":" in callback.data else "spam"
     data = await state.get_data()
     await state.clear()
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), callback.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), callback.from_user.id)
     if not acc:
         await callback.message.edit_text("⚠️ Аккаунт не найден.")
         return
@@ -2429,10 +2373,7 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
         acc_id = data.get("acc_id")
         ch_id = data.get("channel_id")
         await state.clear()
-        acc = await pool.fetchrow(
-            "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id, message.from_user.id,
-        )
+        acc = await db.get_account_for_telethon(pool, acc_id, message.from_user.id)
         if not acc:
             await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
             return
@@ -2520,10 +2461,7 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
         return
 
     # Single-account join
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        data.get("acc_id"), message.from_user.id,
-    )
+    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
     if not acc:
         await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
         return
@@ -2621,10 +2559,7 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
         lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
-        acc = await pool.fetchrow(
-            "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            data.get("acc_id"), message.from_user.id,
-        )
+        acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
         if not acc:
             await message.answer("⚠️ Аккаунт не найден.")
             return

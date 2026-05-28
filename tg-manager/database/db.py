@@ -1596,6 +1596,29 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
     )
 
 
+async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = None):
+    """Fetch account dict with device fingerprint + proxy_url for _make_client."""
+    if owner_id is not None:
+        return await pool.fetchrow(
+            """SELECT a.id, a.session_str, a.phone, a.first_name,
+                      a.device_model, a.system_version, a.app_version,
+                      p.proxy_url
+               FROM tg_accounts a
+               LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+               WHERE a.id=$1 AND a.owner_id=$2""",
+            acc_id, owner_id,
+        )
+    return await pool.fetchrow(
+        """SELECT a.id, a.session_str, a.phone, a.first_name,
+                  a.device_model, a.system_version, a.app_version,
+                  p.proxy_url
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+           WHERE a.id=$1""",
+        acc_id,
+    )
+
+
 async def add_tg_account(pool: asyncpg.Pool, owner_id: int, phone: str,
                          session_str: str, tg_user_id: int,
                          first_name: str, username: str,
