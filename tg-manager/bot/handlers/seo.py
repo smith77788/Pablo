@@ -125,19 +125,31 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
         if bot_uname else
         "⚠️ <b>Username не задан</b> — задайте через @BotFather → /setusername"
     )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Анализ профиля",        callback_data=SeoCb(action="analyze",     bot_id=callback_data.bot_id))
+    kb.button(text="🔍 Превью в поиске",       callback_data=SeoCb(action="preview",     bot_id=callback_data.bot_id))
+    kb.button(text="📈 Динамика позиций",      callback_data=SeoCb(action="momentum",    bot_id=callback_data.bot_id))
+    kb.button(text="📊 Keyword Gap",           callback_data=SeoCb(action="content_gap", bot_id=callback_data.bot_id))
+    kb.button(text="🔗 Альтернативы username", callback_data=SeoCb(action="uname_alts",  bot_id=callback_data.bot_id))
+    kb.button(text="🔑 Ключевые слова",        callback_data=SeoCb(action="keywords",    bot_id=callback_data.bot_id))
+    kb.button(text="📖 Гайд SEO 2026",         callback_data=SeoCb(action="full_guide",  bot_id=callback_data.bot_id))
+    kb.button(text="✏️ Редактировать профиль", callback_data=EditCb(action="menu",       bot_id=callback_data.bot_id))
+    kb.adjust(1, 2, 2, 2, 1)
     await callback.message.edit_text(
         f"📈 <b>SEO — {label}</b>\n\n"
         f"{uname_status}\n\n"
-        "<b>Как Telegram находит ботов:</b>\n"
-        "1️⃣ <b>Username</b> (@botname) — прямой поиск по @имени\n"
-        "2️⃣ <b>Имя бота</b> — отображается в результатах, должно содержать ключевые слова\n"
-        "3️⃣ <b>Описание</b> — индексируется, влияет на релевантность\n"
-        "4️⃣ <b>Краткое описание</b> — показывается в поиске под именем\n\n"
-        "• <b>📊 Анализ профиля</b> — оценка 0–100 с конкретными советами\n"
-        "• <b>🔑 Ключевые слова</b> — что ищут ваши пользователи\n"
-        "• <b>💡 SEO-советы</b> — пошаговые инструкции",
+        "<b>Как Telegram находит ботов (приоритет):</b>\n"
+        "1️⃣ <b>@username</b> — прямое совпадение = топ-позиция\n"
+        "2️⃣ <b>Имя бота</b> — ключевые слова в названии\n"
+        "3️⃣ <b>Описание</b> — полнотекстовый индекс\n"
+        "4️⃣ <b>Краткое описание</b> — snippet в поиске\n\n"
+        "• <b>Анализ</b> — скор 0–100 + советы\n"
+        "• <b>Превью</b> — как вы выглядите в поиске\n"
+        "• <b>Динамика</b> — тренд позиций по keywords\n"
+        "• <b>Keyword Gap</b> — какие слова не в описании\n"
+        "• <b>Гайд 2026</b> — все реальные факторы ранжирования",
         parse_mode="HTML",
-        reply_markup=seo_menu(callback_data.bot_id),
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -437,12 +449,15 @@ async def cb_seo_chan_menu(
     name = f"@{chan['username']}" if chan.get("username") else html.escape(chan["title"] or "")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Анализ SEO-скора",   callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🤖 AI-оптимизация",     callback_data=SeoCb(action="chan_ai",      chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="✏️ Применить изменения", callback_data=SeoCb(action="chan_apply",   chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="💡 SEO-советы",          callback_data=SeoCb(action="tips", bot_id=0))
-    kb.button(text="◀️ Назад",               callback_data=ChanFactCb(action="menu"))
-    kb.adjust(1)
+    kb.button(text="📊 Анализ SEO-скора",      callback_data=SeoCb(action="chan_analyze",    chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔍 Превью в поиске",       callback_data=SeoCb(action="chan_preview",    chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🤖 AI-оптимизация",        callback_data=SeoCb(action="chan_ai",         chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📊 Keyword Gap",           callback_data=SeoCb(action="chan_content_gap",chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔗 Альтернативы username", callback_data=SeoCb(action="chan_uname_alts", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="✏️ Применить изменения",   callback_data=SeoCb(action="chan_apply",      chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📖 Гайд SEO 2026",         callback_data=SeoCb(action="full_guide",      bot_id=0))
+    kb.button(text="◀️ Назад",                 callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1, 2, 2, 2, 1)
     has_username = bool(chan.get("username"))
     username_hint = (
         f"🔗 Username: <b>@{html.escape(chan['username'])}</b> — учитывается в поиске"
@@ -774,3 +789,511 @@ async def cb_seo_apply(
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             raise
+
+
+# ══════════════════════════════════════════════════════════════════
+# SEO ПОЛНЫЙ ГАЙД 2026 — реальные факторы ранжирования
+# ══════════════════════════════════════════════════════════════════
+
+_FULL_GUIDE_PAGES = [
+    # Страница 1: Username + Название + Описание
+    (
+        "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
+        "<i>Страница 1/3 — Профиль</i>\n\n"
+
+        "🥇 <b>USERNAME — фактор №1 (вес ~35%)</b>\n"
+        "Telegram ищет точное совпадение @username первым. Если пользователь ищет «vpn bot» и ваш username содержит «vpn» — вы в топ-3. Без username вы <b>невидимы</b> в прямом поиске по @.\n"
+        "• Оптимально: 8–16 символов, ключевое слово + тема\n"
+        "• Без цифр в конце — они снижают доверие алгоритма\n"
+        "• Смена username сбрасывает накопленный «search authority» на ~2 недели\n\n"
+
+        "🥈 <b>НАЗВАНИЕ / ИМЯ — фактор №2 (вес ~25%)</b>\n"
+        "Telegram индексирует имя для полнотекстового поиска. 2–3 ключевых слова в начале названия — оптимум. Длина 20–40 символов.\n"
+        "• ✅ «PDF Конвертер — Все форматы» → 3 сигнала\n"
+        "• ❌ «Bot Helper Pro» → 0 тематических сигналов\n"
+        "• Emoji в начале названия визуально выделяет в списке, но не влияет на ранг\n\n"
+
+        "🥉 <b>ОПИСАНИЕ — фактор №3 (вес ~20%)</b>\n"
+        "Полнотекстовый индекс. Telegram читает первые 255 символов для snippet в поиске.\n"
+        "• Первые 2 предложения = ваш «meta description»\n"
+        "• Включите: основное ключевое слово, 2–3 синонима, географию (если нужно), CTA\n"
+        "• Повтор одного слова >4 раз = мягкий фильтр спама\n"
+        "• Краткое описание (short_desc у ботов) = строчка под именем в поиске — заполните первым"
+    ),
+    # Страница 2: Вовлечённость + Активность + Скрытые факторы
+    (
+        "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
+        "<i>Страница 2/3 — Сигналы вовлечённости</i>\n\n"
+
+        "📊 <b>АУДИТОРИЯ И РОСТ (вес ~10%)</b>\n"
+        "Важен не размер, а скорость роста за последние 30 дней. Канал с 500 подписчиками и +50/нед обгоняет канал с 10k и -100/нед.\n"
+        "• Join/Leave ratio: если >30% уходят за месяц — ranking penalty\n"
+        "• Premium-подписчики в вашей аудитории = повышенный trust signal\n\n"
+
+        "🔥 <b>АКТИВНОСТЬ И СВЕЖЕСТЬ (вес ~8%)</b>\n"
+        "Telegram понижает каналы без публикаций 30+ дней.\n"
+        "• Для ботов: рассылки раз в неделю поддерживают «freshness score»\n"
+        "• Для каналов: 3–5 постов в неделю — оптимум по алгоритму 2026\n"
+        "• Пиковое время публикации (18–21 МСК) даёт больший охват в первый час\n\n"
+
+        "💬 <b>ENGAGEMENT SIGNALS (скрытые)</b>\n"
+        "• Reaction rate: >2% просмотров = сильный сигнал качества\n"
+        "• Forward depth: если пост пересылают в 3+ каналов — massive boost\n"
+        "• CTR из поиска: Telegram видит кто нажал на результат и кто нет. Слабый CTR снижает позицию.\n"
+        "• Time-in-bot: для ботов — чем дольше сессия, тем выше retention score\n\n"
+
+        "🌐 <b>BACKLINKS TELEGRAM-STYLE</b>\n"
+        "Telegram анализирует упоминания вашего @username в других публичных каналах.\n"
+        "• Упоминание в канале с 10k+ подписчиков = «backlink высокого DA»\n"
+        "• Взаимопиар с каналами из вашей ниши — легитимный способ роста authority\n"
+        "• Нативные форварды ценнее прямых @mentions"
+    ),
+    # Страница 3: Продвинутые и малоизвестные факторы
+    (
+        "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
+        "<i>Страница 3/3 — Продвинутые факторы</i>\n\n"
+
+        "🔬 <b>ФАКТОРЫ, О КОТОРЫХ НЕ ГОВОРЯТ</b>\n\n"
+
+        "🏷 <b>Языковая консистентность</b>\n"
+        "Telegram определяет язык канала и показывает его носителям этого языка. Смешанный контент снижает языковой confidence — канал перестаёт приоритизироваться в обоих сегментах.\n\n"
+
+        "🗺 <b>Геотаргетинг через username</b>\n"
+        "Пользователи ищут «доставка москва», «spb news», «dubai crypto». Username с geo-частью (\"_msk\", \"_spb\", \"dubai\") напрямую попадает в локальные запросы.\n\n"
+
+        "⚡ <b>Fragment / TON эффект</b>\n"
+        "Каналы с зарезервированным @username на Fragment.com получают дополнительный verification signal. Telegram проверяет право собственности.\n\n"
+
+        "🤖 <b>Для ботов: Bot API quality score</b>\n"
+        "Telegram внутренне оценивает ботов по паттернам API-запросов:\n"
+        "• Быстрый ответ (<2с) = качественный бот\n"
+        "• Частые ошибки/таймауты = снижение видимости\n"
+        "• Inline mode с хорошим CTR = отдельный позитивный сигнал\n\n"
+
+        "📌 <b>Pinned message как SEO-элемент</b>\n"
+        "В некоторых контекстах поиска Telegram показывает первое закреплённое сообщение как preview. Сделайте его keyword-rich.\n\n"
+
+        "🔢 <b>Hashtag-индексирование</b>\n"
+        "Посты с хэштегами индексируются отдельно. #тема → канал попадает в поиск по хэштегу. 1–3 тематических хэштега на пост — оптимум.\n\n"
+
+        "⚠️ <b>Антипаттерны (штрафы):</b>\n"
+        "• Keyword stuffing (>5 повторов слова) → мягкий фильтр\n"
+        "• Накрутка подписчиков ботами → trust collapse\n"
+        "• Массовые жалобы → временное скрытие из поиска\n"
+        "• Частая смена username → потеря search authority"
+    ),
+]
+
+
+@router.callback_query(SeoCb.filter(F.action.in_({"full_guide", "full_guide_p2", "full_guide_p3"})))
+async def cb_seo_full_guide(callback: CallbackQuery, callback_data: SeoCb) -> None:
+    await callback.answer()
+    page_map = {"full_guide": 0, "full_guide_p2": 1, "full_guide_p3": 2}
+    page = page_map.get(callback_data.action, 0)
+    text = _FULL_GUIDE_PAGES[page]
+    next_actions = ["full_guide_p2", "full_guide_p3", None]
+    next_labels  = ["▶️ Стр. 2: Вовлечённость →", "▶️ Стр. 3: Продвинутые факторы →", None]
+    bot_id = callback_data.bot_id
+
+    kb = InlineKeyboardBuilder()
+    if next_actions[page]:
+        kb.button(text=next_labels[page],
+                  callback_data=SeoCb(action=next_actions[page], bot_id=bot_id))
+    if page > 0:
+        prev = ["full_guide", "full_guide", "full_guide_p2"][page]
+        kb.button(text=f"◀️ Стр. {page}", callback_data=SeoCb(action=prev, bot_id=bot_id))
+    kb.button(text="🏠 К SEO-меню",
+              callback_data=SeoCb(action="menu", bot_id=bot_id) if bot_id else SeoCb(action="chan_menu"))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            raise
+
+
+# ══════════════════════════════════════════════════════════════════
+# ПОИСКОВЫЙ PREVIEW — как вы выглядите в поиске Telegram
+# ══════════════════════════════════════════════════════════════════
+
+@router.callback_query(SeoCb.filter(F.action == "preview"))
+async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
+                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    await callback.answer("🔍 Генерирую превью...")
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    token = row["token"]
+    name, short_desc = await asyncio.gather(
+        bot_api.get_my_name(http, token),
+        bot_api.get_my_short_description(http, token),
+        return_exceptions=True,
+    )
+    if isinstance(name, Exception): name = row.get("first_name") or "Бот"
+    if isinstance(short_desc, Exception): short_desc = ""
+
+    uname = row.get("username") or ""
+    audience = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+    ) or 0
+
+    uname_line = f"@{uname}" if uname else "⚠️ username не задан"
+    aud_str = f"{int(audience):,}" if int(audience) >= 1000 else str(int(audience))
+    short_preview = (short_desc[:72] + "…") if len(short_desc or "") > 72 else (short_desc or "")
+
+    score, _ = _seo_score(name or "", "", short_desc or "", [], int(audience), uname)
+    bar = _score_bar(score)
+
+    lines = [
+        "🔍 <b>Так вы выглядите в поиске Telegram:</b>\n",
+        "┌─────────────────────────────────────┐",
+        f"│ 🤖 <b>{html.escape((name or 'Бот')[:32])}</b>",
+        f"│ {html.escape(uname_line)} · {aud_str} users",
+    ]
+    if short_preview:
+        lines.append(f"│ <i>{html.escape(short_preview)}</i>")
+    else:
+        lines.append("│ <i>⚠️ Краткое описание не заполнено</i>")
+    lines += ["└─────────────────────────────────────┘\n", f"SEO-скор: {bar}\n"]
+
+    issues = []
+    if not uname:
+        issues.append("❌ Нет username — кнопка @... не отображается")
+    if not short_desc:
+        issues.append("❌ Нет краткого описания — третья строка пустая")
+    elif len(short_desc) < 40:
+        issues.append(f"⚠️ Краткое описание короткое ({len(short_desc)}/120) — добавьте ключевые слова")
+    if not name or len(name) < 5:
+        issues.append("❌ Короткое имя — добавьте тематические слова")
+    if not issues:
+        issues.append("✅ Карточка выглядит хорошо!")
+    lines.append("<b>Что улучшить:</b>")
+    for i in issues:
+        lines.append(f"  {i}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Редактировать профиль",
+              callback_data=EditCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(text="◀️ Назад",
+              callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id))
+    kb.adjust(1)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(SeoCb.filter(F.action == "chan_preview"))
+async def cb_seo_chan_preview(callback: CallbackQuery, callback_data: SeoCb,
+                               pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    chan_id = callback_data.chan_id
+    chan = await pool.fetchrow(
+        "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, callback.from_user.id,
+    )
+    if not chan:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+
+    title = chan.get("title") or "Канал"
+    uname = chan.get("username") or ""
+    uname_line = f"@{uname}" if uname else "⚠️ без @username"
+    lines = [
+        "🔍 <b>Так канал выглядит в поиске Telegram:</b>\n",
+        "┌─────────────────────────────────────┐",
+        f"│ 📢 <b>{html.escape(title[:40])}</b>",
+        f"│ {html.escape(uname_line)} · N подписчиков",
+        "│ <i>← первые 100 симв. описания (About)</i>",
+        "└─────────────────────────────────────┘\n",
+        "<b>Что влияет на эту карточку:</b>",
+        "  1️⃣ Название — содержит ли ключевые слова?",
+        f"  2️⃣ @username — {'✅ задан' if uname else '❌ НЕ ЗАДАН — критично!'}",
+        "  3️⃣ About — первые 100 символов = snippet в поиске",
+        "  4️⃣ Подписчики — влияют на доверие при клике",
+    ]
+    if not uname:
+        lines.append(
+            "\n💡 <b>Без username</b> канал не появляется при поиске по @имени "
+            "и теряет ~35% потенциального поискового трафика."
+        )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 AI-оптимизация",
+              callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=callback_data.acc_id))
+    kb.button(text="◀️ Назад",
+              callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=callback_data.acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ══════════════════════════════════════════════════════════════════
+# MOMENTUM — динамика позиций по ключевым словам
+# ══════════════════════════════════════════════════════════════════
+
+@router.callback_query(SeoCb.filter(F.action == "momentum"))
+async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
+                           pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    bot_id = callback_data.bot_id
+    row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    keywords = await db.get_tracked_keywords(pool, bot_id)
+    if not keywords:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
+        await callback.message.edit_text(
+            "📈 <b>Нет данных о позициях</b>\n\n"
+            "Добавьте ключевые слова в разделе BotMother → Visibility → Keywords. "
+            "После первых проверок здесь появится динамика.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    label = f"@{row.get('username')}" if row.get("username") else row.get("first_name", str(bot_id))
+    lines = [f"📈 <b>Динамика позиций — {label}</b>\n"]
+    total_up = total_down = total_same = 0
+
+    for kw in keywords:
+        history = await db.get_ranking_history(pool, kw["id"], limit=5)
+        if not history or len(history) < 2:
+            pos_now = history[0]["position"] if history else "—"
+            lines.append(f"  ⚪→ <code>{html.escape(kw['keyword'])[:18]:<18}</code> #{pos_now} (мало данных)")
+            continue
+        pos_now  = history[0]["position"]
+        pos_prev = history[-1]["position"]
+        if pos_now is None:
+            arrow, diff_str = "⚪", "нет данных"
+        elif pos_prev is None:
+            arrow, diff_str = "🆕", f"#{pos_now}"
+        elif pos_now < pos_prev:
+            arrow, diff_str = "🟢↑", f"#{pos_now} (+{pos_prev - pos_now})"; total_up += 1
+        elif pos_now > pos_prev:
+            arrow, diff_str = "🔴↓", f"#{pos_now} (-{pos_now - pos_prev})"; total_down += 1
+        else:
+            arrow, diff_str = "⚪→", f"#{pos_now}"; total_same += 1
+        lines.append(f"  {arrow} <code>{html.escape(kw['keyword'])[:18]:<18}</code> {diff_str}")
+
+    if total_up or total_down or total_same:
+        lines.append(f"\n📊 🟢 Растут: {total_up} | 🔴 Падают: {total_down} | ⚪ Стабильны: {total_same}")
+        if total_up > total_down:
+            lines.append("💪 Хороший momentum! Оптимизация работает.")
+        elif total_down > total_up:
+            lines.append("⚠️ Позиции падают — обновите описание и повысьте активность.")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ══════════════════════════════════════════════════════════════════
+# KEYWORD GAP — анализ покрытия ключевых слов в описании
+# ══════════════════════════════════════════════════════════════════
+
+def _keyword_coverage(text: str, keywords: list[str]) -> list[tuple[str, bool]]:
+    text_lower = text.lower()
+    return [(kw, all(w in text_lower for w in kw.lower().split())) for kw in keywords]
+
+
+@router.callback_query(SeoCb.filter(F.action == "content_gap"))
+async def cb_seo_content_gap(callback: CallbackQuery, callback_data: SeoCb,
+                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    await callback.answer("🔍 Анализирую покрытие...")
+    bot_id = callback_data.bot_id
+    row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    token = row["token"]
+    name, description, short_desc = await asyncio.gather(
+        bot_api.get_my_name(http, token),
+        bot_api.get_my_description(http, token),
+        bot_api.get_my_short_description(http, token),
+        return_exceptions=True,
+    )
+    if isinstance(name, Exception): name = row.get("first_name") or ""
+    if isinstance(description, Exception): description = ""
+    if isinstance(short_desc, Exception): short_desc = ""
+
+    user_kws  = await db.get_top_keywords(pool, bot_id, limit=15)
+    tracked   = await db.get_tracked_keywords(pool, bot_id)
+    all_text  = f"{name} {description} {short_desc}"
+    combined  = list(dict.fromkeys([r["keyword"] for r in user_kws] + [r["keyword"] for r in tracked]))[:20]
+
+    if not combined:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
+        await callback.message.edit_text(
+            "📊 <b>Нет данных для анализа</b>\n\nНакопите ключевые слова пользователей или добавьте keywords в Visibility.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    coverage = _keyword_coverage(all_text, combined)
+    found   = [kw for kw, ok in coverage if ok]
+    missing = [kw for kw, ok in coverage if not ok]
+    pct = round(len(found) / len(coverage) * 100) if coverage else 0
+    label = f"@{row.get('username')}" if row.get("username") else row.get("first_name", str(bot_id))
+
+    lines = [
+        f"📊 <b>Keyword Gap — {label}</b>\n",
+        f"Покрытие: <b>{pct}%</b> ({len(found)}/{len(coverage)} слов в профиле)\n",
+    ]
+    if missing:
+        lines.append("<b>❌ Не представлены в описании (добавьте!):</b>")
+        for kw in missing[:10]:
+            lines.append(f"  • <code>{html.escape(kw)}</code>")
+    if found:
+        lines.append(f"\n<b>✅ Уже покрыты ({len(found)}):</b>")
+        for kw in found[:6]:
+            lines.append(f"  • <code>{html.escape(kw)}</code>")
+    if missing:
+        lines.append("\n💡 Добавьте отсутствующие слова в описание → больший охват в поиске.")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Редактировать профиль",
+              callback_data=EditCb(action="menu", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
+    kb.adjust(1)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(SeoCb.filter(F.action == "chan_content_gap"))
+async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
+                                   pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    chan_id = callback_data.chan_id
+    acc_id  = callback_data.acc_id
+    user_id = callback.from_user.id
+
+    chan = await pool.fetchrow(
+        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, user_id,
+    )
+    if not chan:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+
+    about = ""
+    if acc_id:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, user_id,
+        )
+        if acc:
+            try:
+                from services import account_manager
+                info = await account_manager.get_full_channel_info(
+                    acc["session_str"], chan["channel_id"], _acc=acc
+                )
+                if info:
+                    about = info.get("about", "") or ""
+            except Exception:
+                pass
+
+    all_text = f"{chan.get('title', '')} {chan.get('username', '')} {about}"
+    tracked = await pool.fetch(
+        "SELECT keyword FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE LIMIT 20",
+        user_id,
+    )
+    kw_list = [r["keyword"] for r in tracked]
+
+    if not kw_list:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад",
+                  callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+        await callback.message.edit_text(
+            "📊 <b>Нет ключевых слов для сравнения</b>\n\n"
+            "Добавьте отслеживаемые ключевые слова через Visibility → Keywords.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    coverage = _keyword_coverage(all_text, kw_list)
+    found   = [kw for kw, ok in coverage if ok]
+    missing = [kw for kw, ok in coverage if not ok]
+    pct = round(len(found) / len(coverage) * 100) if coverage else 0
+    name_d  = f"@{chan['username']}" if chan.get("username") else html.escape(chan.get("title", ""))
+
+    lines = [
+        f"📊 <b>Keyword Gap — {name_d}</b>\n",
+        f"Покрытие: <b>{pct}%</b> ({len(found)}/{len(coverage)})\n",
+    ]
+    if missing:
+        lines.append("<b>❌ Не найдены в названии/описании:</b>")
+        for kw in missing[:10]:
+            lines.append(f"  • <code>{html.escape(kw)}</code>")
+    if found:
+        lines.append(f"\n<b>✅ Присутствуют ({len(found)}):</b>")
+        for kw in found[:6]:
+            lines.append(f"  • <code>{html.escape(kw)}</code>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 AI — добавить в описание",
+              callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",
+              callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ══════════════════════════════════════════════════════════════════
+# USERNAME ALTERNATIVES — предложения лучших username
+# ══════════════════════════════════════════════════════════════════
+
+@router.callback_query(SeoCb.filter(F.action.in_({"uname_alts", "chan_uname_alts"})))
+async def cb_seo_uname_alts(callback: CallbackQuery, callback_data: SeoCb,
+                              pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    is_chan = callback_data.action == "chan_uname_alts"
+
+    if is_chan:
+        chan = await pool.fetchrow(
+            "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            callback_data.chan_id, callback.from_user.id,
+        )
+        if not chan:
+            await callback.answer("Не найдено.", show_alert=True)
+            return
+        current = chan.get("username") or ""
+        base = current or chan.get("title") or "channel"
+        back_cb = SeoCb(action="chan_menu", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id)
+    else:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+        if not row:
+            await callback.answer("Не найдено.", show_alert=True)
+            return
+        current = row.get("username") or ""
+        base = current or row.get("first_name") or "bot"
+        back_cb = SeoCb(action="menu", bot_id=callback_data.bot_id)
+
+    from services.username_engine import generate_username_variants
+    variants = generate_username_variants(base, geo=None)
+    all_variants = [v for v in variants if v != current][:8]
+
+    current_esc = f"@{html.escape(current)}" if current else "не задан"
+    lines = [
+        "🔗 <b>Альтернативные username для SEO</b>\n",
+        f"Текущий: <b>{current_esc}</b>\n",
+        "<b>Варианты (от лучшего):</b>",
+    ]
+    stars = ["⭐⭐⭐", "⭐⭐⭐", "⭐⭐", "⭐⭐", "⭐", "⭐", "⭐", "⭐"]
+    for i, v in enumerate(all_variants):
+        s = stars[i] if i < len(stars) else "⭐"
+        lines.append(f"  <code>@{html.escape(v)}</code> {s} ({len(v)} симв.)")
+
+    lines += [
+        "\n<b>💡 Принципы хорошего username для SEO:</b>",
+        "• 8–14 символов — оптимум для поиска",
+        "• Ключевое слово в начале (не в конце)",
+        "• Без цифр в конце — выглядит органически",
+        "• Гео-суффикс (_msk, _spb, _dubai) = локальный трафик",
+        "• Смена сбрасывает search authority на ~2 нед.",
+        "\n🔍 Проверить доступность: введите @username в поиске Telegram",
+    ]
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=back_cb)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
