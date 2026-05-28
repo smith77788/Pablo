@@ -20,7 +20,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb
-from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM
+from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
 
 log = logging.getLogger(__name__)
@@ -60,17 +60,19 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
 async def cb_mass_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Массовая публикация",        callback_data=MassOpCb(action="mass_publish"))
-    kb.button(text="🔗 Массовый join каналов",      callback_data=MassOpCb(action="bulk_join"))
-    kb.button(text="🔍 Предпросмотр (Dry Run)",     callback_data=MassOpCb(action="dry_run"))
-    kb.button(text="📋 Очередь операций",           callback_data=MassOpCb(action="queue"))
+    kb.button(text="📤 Массовая публикация",           callback_data=MassOpCb(action="mass_publish"))
+    kb.button(text="🔗 Массовый join каналов",         callback_data=MassOpCb(action="bulk_join"))
+    kb.button(text="🚪 Массовый выход из каналов",     callback_data=MassOpCb(action="bulk_leave"))
     kb.button(text="✏️ Массовое редактирование ботов", callback_data=MassOpCb(action="bulk_bot_edit"))
-    kb.button(text="◀️ Назад",                      callback_data="main_menu")
+    kb.button(text="🔍 Предпросмотр (Dry Run)",        callback_data=MassOpCb(action="dry_run"))
+    kb.button(text="📋 Очередь операций",              callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Назад",                         callback_data="main_menu")
     kb.adjust(1)
     await callback.message.edit_text(
-        "⚡ <b>Массовые операции</b>\n\n"
+        "🛠️ <b>Построитель операций</b>\n\n"
         "📤 <b>Публикация</b> — отправить пост во все каналы\n"
-        "🔗 <b>Массовый join</b> — вступить в список каналов/групп несколькими аккаунтами\n"
+        "🔗 <b>Join</b> — вступить в список каналов/групп несколькими аккаунтами\n"
+        "🚪 <b>Leave</b> — выйти из каналов/групп несколькими аккаунтами\n"
         "✏️ <b>Редактирование ботов</b> — изменить имя/описание всех ботов сразу\n\n"
         "Выберите тип операции:",
         parse_mode="HTML",
@@ -1028,6 +1030,178 @@ async def cb_bulk_join_confirm(
         f"Тип: 🔗 Массовый join\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
         f"Каналов: <b>{len(links)}</b>\n\n"
+        f"Воркер запустит её автоматически.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# BULK LEAVE WIZARD
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(MassOpCb.filter(F.action == "bulk_leave"))
+async def cb_bulk_leave_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    from bot.utils.subscription import require_plan
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            "🔒 <b>Массовый leave — STARTER+</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    await state.set_state(BulkLeaveFSM.waiting_channels)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    await callback.message.edit_text(
+        "🚪 <b>Массовый leave — Шаг 1/3</b>\n\n"
+        "Введите юзернеймы или ID каналов/групп — <b>по одному на строку</b>:\n\n"
+        "<code>@channel_name\n"
+        "-1001234567890\n"
+        "username</code>\n\n"
+        "Аккаунты выйдут из всех указанных каналов.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkLeaveFSM.waiting_channels)
+async def fsm_bulk_leave_channels(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    raw = message.text or ""
+    channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not channels:
+        await message.answer("⚠️ Введите хотя бы один юзернейм или ID канала:")
+        return
+    if len(channels) > 50:
+        await message.answer("⚠️ Максимум 50 каналов за одну операцию.")
+        return
+
+    await state.update_data(bl_channels=channels)
+    await state.set_state(BulkLeaveFSM.choosing_accounts)
+
+    accounts = await _get_active_accounts(pool, message.from_user.id)
+    if not accounts:
+        await state.clear()
+        await message.answer("⚠️ Нет активных аккаунтов. Добавьте через /accounts.")
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
+    for acc in accounts[:10]:
+        kb.button(
+            text=f"👤 {_acc_label(acc)}",
+            callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]),
+        )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"🚪 <b>Массовый leave — Шаг 2/3</b>\n\n"
+        f"Каналов/групп: <b>{len(channels)}</b>\n\n"
+        "Выберите аккаунты для выхода:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassOpCb.filter(F.action == "bl_accs"))
+async def cb_bulk_leave_accs(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    channels = sd.get("bl_channels", [])
+    if not channels:
+        await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    uid = callback.from_user.id
+    if callback_data.op_type == "all":
+        accounts = await _get_active_accounts(pool, uid)
+        acc_ids = [a["id"] for a in accounts]
+        acc_label = f"все ({len(acc_ids)})"
+    else:
+        acc_ids = [callback_data.op_id]
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.op_id, uid,
+        )
+        acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
+
+    if not acc_ids:
+        await callback.answer("Нет активных аккаунтов", show_alert=True)
+        return
+
+    ch_preview = "\n".join(f"• {html.escape(ch)}" for ch in channels[:5])
+    if len(channels) > 5:
+        ch_preview += f"\n… и ещё {len(channels) - 5}"
+
+    await state.update_data(bl_acc_ids=acc_ids)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"🚪 <b>Массовый leave — Шаг 3/3 (Подтверждение)</b>\n\n"
+        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Каналов/групп: <b>{len(channels)}</b>\n\n"
+        f"<b>Список:</b>\n{ch_preview}\n\n"
+        f"⚠️ Задержка между выходами: 5–15 сек\n"
+        f"Примерное время: {len(channels) * len(acc_ids) // 4 + 1}–{len(channels) * len(acc_ids) // 2 + 1} мин",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassOpCb.filter(F.action == "bl_confirm"))
+async def cb_bulk_leave_confirm(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    channels = sd.get("bl_channels", [])
+    acc_ids = sd.get("bl_acc_ids", [])
+
+    if not channels or not acc_ids:
+        await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    params = {"channels": channels, "account_ids": acc_ids}
+    try:
+        op_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
+               VALUES($1, 'bulk_leave', 'pending', $2::jsonb, $3)
+               RETURNING id""",
+            callback.from_user.id,
+            json.dumps(params),
+            len(channels) * len(acc_ids),
+        )
+    except Exception as e:
+        log.error("bulk_leave confirm error: %s", e)
+        await callback.answer("Ошибка создания операции", show_alert=True)
+        return
+
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Меню", callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
+        f"Тип: 🚪 Массовый leave\n"
+        f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
+        f"Каналов: <b>{len(channels)}</b>\n\n"
         f"Воркер запустит её автоматически.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

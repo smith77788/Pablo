@@ -342,3 +342,12 @@ class OpPlannerFSM(StatesGroup):
 class BulkJoinFSM(StatesGroup):
     waiting_links = State()     # ссылки/юзернеймы каналов (по одному на строку)
     choosing_accounts = State() # выбор аккаунтов
+
+
+class BulkLeaveFSM(StatesGroup):
+    waiting_channels = State()  # юзернеймы/ID каналов для выхода (по одному на строку)
+    choosing_accounts = State() # выбор аккаунтов
+
+
+class OpBuilderFSM(StatesGroup):
+    choosing_op_type = State()  # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit

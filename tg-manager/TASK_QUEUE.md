@@ -115,7 +115,7 @@ Notes:
 
 ## TASK-005 — Operation Builder FSM Wizard
 
-Status: TODO
+Status: DONE
 Priority: P1
 Area: operation-engine / telegram-ux
 Risk: medium

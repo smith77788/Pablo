@@ -134,6 +134,25 @@ Checks Run: ✅ ast.parse()
 
 ---
 
+---
+
+## 2026-05-28 — TASK-005 (полная реализация) — Operation Builder FSM Wizard
+
+Goal: Полноценный builder операций: все 4 типа, unified menu, bulk_leave как новый тип.
+
+Changed Files:
+- bot/states.py — OpBuilderFSM (choosing_op_type), BulkLeaveFSM (waiting_channels, choosing_accounts)
+- bot/handlers/mass_ops.py — bulk_leave 3-step wizard (bl_*), меню переименовано в "Построитель операций"
+- services/op_worker.py — _exec_bulk_leave с 5-15s задержками
+
+Before: builder показывал 3 типа операций, bulk_leave отсутствовал.
+
+After: 4 типа операций (mass_publish, bulk_join, bulk_leave, bulk_bot_edit). Все через unified entry MassOpCb(action="menu"). OpBuilderFSM и BulkLeaveFSM добавлены в states.py.
+
+Checks Run: ✅ ast.parse() все 3 файла
+
+---
+
 ## Следующие задачи
 
 Все задачи из TASK_QUEUE.md (TASK-001 — TASK-009) выполнены. Очередь пуста.
