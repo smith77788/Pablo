@@ -1676,8 +1676,10 @@ async def get_active_account_for_owner(pool: asyncpg.Pool, owner_id: int) -> dic
     Всегда фильтруется по owner_id — пользователь видит только свои аккаунты.
     """
     row = await pool.fetchrow(
-        "SELECT * FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "ORDER BY last_used DESC NULLS LAST, added_at DESC LIMIT 1",
+        "SELECT a.*, p.proxy_url FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+        "ORDER BY a.last_used DESC NULLS LAST, a.added_at DESC LIMIT 1",
         owner_id,
     )
     return dict(row) if row else None
@@ -2132,10 +2134,12 @@ async def get_trusted_accounts(
 ) -> list[asyncpg.Record]:
     """Return active accounts not in cooldown, ordered by trust_score DESC."""
     return await pool.fetch(
-        """SELECT * FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=true
-             AND (cooldown_until IS NULL OR cooldown_until < NOW())
-           ORDER BY trust_score DESC NULLS LAST, last_used ASC NULLS FIRST""",
+        """SELECT a.*, p.proxy_url
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+           WHERE a.owner_id=$1 AND a.is_active=true
+             AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
+           ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST""",
         owner_id,
     )
 
