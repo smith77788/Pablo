@@ -337,3 +337,8 @@ class CreateClusterFSM(StatesGroup):
 class OpPlannerFSM(StatesGroup):
     waiting_text = State()      # текст для mass_publish
     waiting_datetime = State()  # дата и время запуска
+
+
+class BulkJoinFSM(StatesGroup):
+    waiting_links = State()     # ссылки/юзернеймы каналов (по одному на строку)
+    choosing_accounts = State() # выбор аккаунтов

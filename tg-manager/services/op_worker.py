@@ -58,6 +58,8 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
             result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
         elif op_type == "bulk_bot_edit":
             result = await _exec_bulk_bot_edit(pool, bot, op_id, owner_id, params)
+        elif op_type == "bulk_join":
+            result = await _exec_bulk_join(pool, bot, op_id, owner_id, params)
         else:
             result = {"status": "skipped", "reason": f"unknown op_type: {op_type}"}
 
@@ -198,4 +200,65 @@ async def _exec_bulk_bot_edit(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id
         "ok": ok_count,
         "failed": fail_count,
         "summary": f"Обновлено: {ok_count} ботов, ошибок: {fail_count}",
+    }
+
+
+async def _exec_bulk_join(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Вступить в список каналов/групп несколькими аккаунтами."""
+    from services import account_manager
+    import random
+
+    links = params.get("links", [])
+    account_ids = params.get("account_ids") or []
+
+    if account_ids:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, phone, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id = ANY($1) AND owner_id=$2 AND is_active=true",
+            [int(i) for i in account_ids], owner_id,
+        )
+    else:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, phone, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=true",
+            owner_id,
+        )
+
+    ok_count = 0
+    fail_count = 0
+    step = 0
+
+    for acc in accounts:
+        acc_dict = dict(acc)
+        for link in links:
+            step += 1
+            try:
+                await account_manager.join_channel(acc["session_str"], link, _acc=acc_dict)
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'ok','joined')",
+                    op_id, step, link,
+                )
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+            except Exception as e:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                    "VALUES($1,$2,$3,'error',$4)",
+                    op_id, step, link, str(e)[:200],
+                )
+            # Anti-flood delay between joins
+            delay = random.uniform(30, 90)
+            await asyncio.sleep(delay)
+
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "failed": fail_count,
+        "summary": f"Вступлено: {ok_count}, ошибок: {fail_count}",
     }

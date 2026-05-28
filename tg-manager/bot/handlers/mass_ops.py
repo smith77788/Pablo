@@ -20,7 +20,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb
-from bot.states import MassPublishFSM, BulkBotEditFSM
+from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
 
 log = logging.getLogger(__name__)
@@ -60,14 +60,19 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
 async def cb_mass_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Массовая публикация",  callback_data=MassOpCb(action="mass_publish"))
-    kb.button(text="🔍 Предпросмотр (Dry Run)", callback_data=MassOpCb(action="dry_run"))
-    kb.button(text="📋 Очередь операций",     callback_data=MassOpCb(action="queue"))
+    kb.button(text="📤 Массовая публикация",        callback_data=MassOpCb(action="mass_publish"))
+    kb.button(text="🔗 Массовый join каналов",      callback_data=MassOpCb(action="bulk_join"))
+    kb.button(text="🔍 Предпросмотр (Dry Run)",     callback_data=MassOpCb(action="dry_run"))
+    kb.button(text="📋 Очередь операций",           callback_data=MassOpCb(action="queue"))
     kb.button(text="✏️ Массовое редактирование ботов", callback_data=MassOpCb(action="bulk_bot_edit"))
-    kb.button(text="◀️ Назад",               callback_data="main_menu")
+    kb.button(text="◀️ Назад",                      callback_data="main_menu")
     kb.adjust(1)
     await callback.message.edit_text(
-        "⚡ <b>Массовые операции</b>\n\nВыберите тип операции:",
+        "⚡ <b>Массовые операции</b>\n\n"
+        "📤 <b>Публикация</b> — отправить пост во все каналы\n"
+        "🔗 <b>Массовый join</b> — вступить в список каналов/групп несколькими аккаунтами\n"
+        "✏️ <b>Редактирование ботов</b> — изменить имя/описание всех ботов сразу\n\n"
+        "Выберите тип операции:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -851,3 +856,179 @@ async def _finish_op_record(
         )
     except Exception:
         pass
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# BULK JOIN WIZARD
+# ══════════════════════════════════════════════════════════════════════════
+
+@router.callback_query(MassOpCb.filter(F.action == "bulk_join"))
+async def cb_bulk_join_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    from bot.utils.subscription import require_plan
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            "🔒 <b>Массовый join — STARTER+</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    await state.set_state(BulkJoinFSM.waiting_links)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    await callback.message.edit_text(
+        "🔗 <b>Массовый join — Шаг 1/3</b>\n\n"
+        "Введите ссылки или юзернеймы каналов/групп — <b>по одному на строку</b>:\n\n"
+        "<code>@channel_name\n"
+        "https://t.me/channel_name\n"
+        "https://t.me/+InviteHash</code>\n\n"
+        "Поддерживаются публичные каналы, группы и приватные ссылки-инвайты.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkJoinFSM.waiting_links)
+async def fsm_bulk_join_links(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    raw = message.text or ""
+    links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not links:
+        await message.answer("⚠️ Введите хотя бы одну ссылку или юзернейм:")
+        return
+    if len(links) > 50:
+        await message.answer("⚠️ Максимум 50 ссылок за одну операцию.")
+        return
+
+    await state.update_data(bj_links=links)
+    await state.set_state(BulkJoinFSM.choosing_accounts)
+
+    accounts = await _get_active_accounts(pool, message.from_user.id)
+    if not accounts:
+        await state.clear()
+        await message.answer(
+            "⚠️ Нет активных аккаунтов. Добавьте через /accounts.",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
+    for acc in accounts[:10]:
+        kb.button(
+            text=f"👤 {_acc_label(acc)}",
+            callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]),
+        )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"🔗 <b>Массовый join — Шаг 2/3</b>\n\n"
+        f"Каналов/групп: <b>{len(links)}</b>\n\n"
+        "Выберите аккаунты для вступления:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassOpCb.filter(F.action == "bj_accs"))
+async def cb_bulk_join_accs(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    links = sd.get("bj_links", [])
+    if not links:
+        await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    uid = callback.from_user.id
+    if callback_data.op_type == "all":
+        accounts = await _get_active_accounts(pool, uid)
+        acc_ids = [a["id"] for a in accounts]
+        acc_label = f"все ({len(acc_ids)})"
+    else:
+        acc_ids = [callback_data.op_id]
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.op_id, uid,
+        )
+        acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
+
+    if not acc_ids:
+        await callback.answer("Нет активных аккаунтов", show_alert=True)
+        return
+
+    # Show preview and confirm
+    link_preview = "\n".join(f"• {html.escape(ln)}" for ln in links[:5])
+    if len(links) > 5:
+        link_preview += f"\n… и ещё {len(links) - 5}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+
+    await state.update_data(bj_acc_ids=acc_ids)
+    await callback.message.edit_text(
+        f"🔗 <b>Массовый join — Шаг 3/3 (Подтверждение)</b>\n\n"
+        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Каналов/групп: <b>{len(links)}</b>\n\n"
+        f"<b>Список:</b>\n{link_preview}\n\n"
+        f"⚠️ Задержка между вступлениями: 30–90 сек\n"
+        f"Примерное время: {len(links) * len(acc_ids) * 1}–{len(links) * len(acc_ids) * 2} мин",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassOpCb.filter(F.action == "bj_confirm"))
+async def cb_bulk_join_confirm(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    links = sd.get("bj_links", [])
+    acc_ids = sd.get("bj_acc_ids", [])
+
+    if not links or not acc_ids:
+        await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    params = {"links": links, "account_ids": acc_ids}
+    try:
+        op_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
+               VALUES($1, 'bulk_join', 'pending', $2::jsonb, $3)
+               RETURNING id""",
+            callback.from_user.id,
+            json.dumps(params),
+            len(links) * len(acc_ids),
+        )
+    except Exception as e:
+        log.error("bulk_join confirm error: %s", e)
+        await callback.answer("Ошибка создания операции", show_alert=True)
+        return
+
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Меню", callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
+        f"Тип: 🔗 Массовый join\n"
+        f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
+        f"Каналов: <b>{len(links)}</b>\n\n"
+        f"Воркер запустит её автоматически.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
