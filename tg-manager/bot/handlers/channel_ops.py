@@ -3530,11 +3530,11 @@ async def _cinv_bg(
         else:
             # Try to get invite link from primary account
             try:
-                invite_result = await _am.get_channel_invite_link(
+                invite_link = await _am.get_channel_invite_link(
                     primary["session_str"], chan_target, _acc=primary_dict
                 )
-                if invite_result and not invite_result.get("error"):
-                    join_identifier = invite_result.get("link")
+                if invite_link:
+                    join_identifier = invite_link
             except Exception as e:
                 log.warning("cinv get_invite_link: %s", e)
 
