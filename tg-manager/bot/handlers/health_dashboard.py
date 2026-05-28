@@ -80,9 +80,10 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📱 Аккаунты",  callback_data=HealthCb(action="accounts"))
     kb.button(text="🤖 Боты",      callback_data=HealthCb(action="bots_health"))
     kb.button(text="🌊 Flood log", callback_data=HealthCb(action="flood_log"))
+    kb.button(text="📈 Тренд",     callback_data=HealthCb(action="trust_trend"))
     kb.button(text="🔄 Обновить",  callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",     callback_data=BotCb(action="main"))
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 2)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -234,6 +235,59 @@ async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             op = row["operation"] or "—"
             secs = row["flood_seconds"] or 0
             lines.append(f"<code>{dt}</code> | {phone} | {op} | ⏱ {secs}s")
+
+    kb = _back_kb()
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ── Trust score trends ─────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "trust_trend"))
+async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT ta.phone, ta.first_name, ta.username,
+                   ROUND(AVG(h.trust_score)::numeric, 2) AS avg_7d,
+                   ROUND(MIN(h.trust_score)::numeric, 2) AS min_7d,
+                   ta.trust_score AS current_score
+            FROM account_trust_history h
+            JOIN tg_accounts ta ON ta.id = h.account_id
+            WHERE ta.owner_id=$1
+              AND h.recorded_at > now() - INTERVAL '7 days'
+            GROUP BY ta.id, ta.phone, ta.first_name, ta.username, ta.trust_score
+            ORDER BY ta.trust_score DESC
+            """,
+            user_id,
+        )
+        table_ok = True
+    except Exception:
+        rows = []
+        table_ok = False
+
+    lines = ["📈 <b>Тренд доверия аккаунтов (7 дней)</b>\n"]
+    if not table_ok:
+        lines.append("ℹ️ История ещё накапливается. Данные появятся через 30 минут.")
+    elif not rows:
+        lines.append("Нет данных за последние 7 дней.")
+    else:
+        for r in rows:
+            name = r["username"] or r["first_name"] or r["phone"] or "—"
+            cur = float(r["current_score"] or 0)
+            avg = float(r["avg_7d"] or 0)
+            mn = float(r["min_7d"] or 0)
+            trend = "↗️" if cur >= avg else ("↘️" if cur < avg * 0.9 else "→")
+            bar = "█" * int(cur * 5) + "░" * (5 - int(cur * 5))
+            lines.append(
+                f"{trend} @{name}  [{bar}] {cur:.2f} "
+                f"<i>(avg {avg:.2f}, min {mn:.2f})</i>"
+            )
 
     kb = _back_kb()
     kb.adjust(1)
