@@ -73,6 +73,12 @@ log = logging.getLogger(__name__)
 async def _global_error_handler(event: ErrorEvent) -> None:
     """Catch any unhandled exception and show it to the user."""
     exc = event.exception
+
+    # Silently ignore "message is not modified" — happens when refresh yields same content
+    exc_str = str(exc).lower()
+    if "message is not modified" in exc_str or "not modified" in exc_str:
+        return
+
     log.exception("Unhandled error in update %s", event.update, exc_info=exc)
     update = event.update
     try:
