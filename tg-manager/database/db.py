@@ -2304,3 +2304,61 @@ async def link_plan_to_operation(pool: asyncpg.Pool, plan_id: int, op_id: int) -
         "UPDATE global_presence_plans SET op_id=$1, status='queued', updated_at=now() WHERE id=$2",
         op_id, plan_id,
     )
+
+
+# ── Operation Reports and Statistics ──────────────────────────────────────
+
+async def get_operation_stats(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
+    """Получить полную статистику выполненной операции."""
+    op = await pool.fetchrow(
+        "SELECT id, op_type, status, total_items, done_items, params, created_at, updated_at "
+        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        op_id, owner_id,
+    )
+    if not op:
+        return {}
+
+    logs = await pool.fetch(
+        "SELECT step_num, target, status, message FROM operation_log "
+        "WHERE op_id=$1 ORDER BY step_num",
+        op_id,
+    )
+
+    errors = [l for l in logs if l["status"] != "ok"]
+    success_count = len([l for l in logs if l["status"] == "ok"])
+
+    return {
+        "id": op["id"],
+        "type": op["op_type"],
+        "status": op["status"],
+        "total": op["total_items"],
+        "done": op["done_items"],
+        "success": success_count,
+        "errors": len(errors),
+        "created_at": op["created_at"],
+        "updated_at": op["updated_at"],
+        "duration_seconds": (op["updated_at"] - op["created_at"]).total_seconds() if op["updated_at"] else 0,
+        "error_details": errors[:10],  # top 10 errors
+    }
+
+
+async def get_user_operation_history(
+    pool: asyncpg.Pool, owner_id: int, limit: int = 20
+) -> list[dict]:
+    """Получить историю операций пользователя."""
+    rows = await pool.fetch(
+        "SELECT id, op_type, status, total_items, done_items, created_at "
+        "FROM operation_queue WHERE owner_id=$1 "
+        "ORDER BY created_at DESC LIMIT $2",
+        owner_id, limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def count_operation_errors(pool: asyncpg.Pool, op_id: int) -> int:
+    """Сколько ошибок в логе операции."""
+    count = await pool.fetchval(
+        "SELECT COUNT(*) FROM operation_log WHERE op_id=$1 AND status != 'ok'",
+        op_id,
+    )
+    return count or 0
