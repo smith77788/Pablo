@@ -1,4 +1,5 @@
 """A/B experiment management."""
+import math
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -22,6 +23,31 @@ def _html_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _z_test_two_proportions(n_a: int, c_a: int, n_b: int, c_b: int) -> tuple[float, str]:
+    """
+    Z-test for two proportions. Returns (z_score, confidence_label).
+    Uses pooled proportion. Requires n >= 5 and at least some conversions.
+    """
+    if n_a < 5 or n_b < 5 or (c_a + c_b) == 0:
+        return 0.0, "⚪ Мало данных"
+    p_a = c_a / n_a
+    p_b = c_b / n_b
+    p_pool = (c_a + c_b) / (n_a + n_b)
+    denom = math.sqrt(p_pool * (1 - p_pool) * (1 / n_a + 1 / n_b))
+    if denom == 0:
+        return 0.0, "⚪ Нет вариации"
+    z = abs(p_a - p_b) / denom
+    if z >= 2.576:
+        label = "🟢 Значимо (99%)"
+    elif z >= 1.96:
+        label = "🟡 Значимо (95%)"
+    elif z >= 1.645:
+        label = "🟠 Слабая знач. (90%)"
+    else:
+        label = "⚪ Недостаточно данных"
+    return z, label
+
+
 async def _exp_text(exp, variants: list) -> str:
     status_label = {"draft": "📝 Черновик", "active": "🟢 Активен", "paused": "⏸ Пауза", "completed": "✅ Завершён"}
     type_label = {"start_message": "/start сообщение", "auto_reply": "Авто-ответ", "funnel": "Воронка"}
@@ -34,12 +60,41 @@ async def _exp_text(exp, variants: list) -> str:
         "",
         "<b>Варианты:</b>",
     ]
+    ctrs = []
     for v in variants:
-        ctr = round(v["conversions"]/v["impressions"]*100, 1) if v["impressions"] else 0
+        ctr = round(v["conversions"] / v["impressions"] * 100, 1) if v["impressions"] else 0
+        ctrs.append((v, ctr))
+
+    # Find best variant by CTR
+    if ctrs:
+        best_ctr = max(c for _, c in ctrs)
+    else:
+        best_ctr = 0
+
+    for v, ctr in ctrs:
         winner_mark = " 🏆" if exp.get("winner_variant_id") == v["id"] else ""
+        best_mark = " ⭐" if ctr == best_ctr and ctr > 0 and not winner_mark else ""
         safe_vname = _html_escape(v['name'])
-        lines.append(f"  • <b>{safe_vname}{winner_mark}</b>: {v['impressions']} показов, {v['conversions']} конверсий ({ctr}%)")
+        lines.append(
+            f"  • <b>{safe_vname}{winner_mark}{best_mark}</b>: "
+            f"{v['impressions']} показов, {v['conversions']} конв. ({ctr}%)"
+        )
         lines.append(f"    {_html_escape((v.get('content') or '')[:80])}…")
+
+    # Statistical significance (only for exactly 2 variants with data)
+    if len(variants) == 2:
+        v0, v1 = variants[0], variants[1]
+        n0, c0 = int(v0["impressions"] or 0), int(v0["conversions"] or 0)
+        n1, c1 = int(v1["impressions"] or 0), int(v1["conversions"] or 0)
+        _, sig_label = _z_test_two_proportions(n0, c0, n1, c1)
+        lines.append(f"\n<b>Статистическая значимость:</b> {sig_label}")
+        if n0 + n1 > 0:
+            total = n0 + n1
+            lines.append(
+                f"Всего показов: {total} | "
+                f"Нужно для 95% уверенности: ~{max(0, 200 - total)} ещё"
+            )
+
     return "\n".join(lines)
 
 
