@@ -48,10 +48,6 @@ _TIMING_OPTIONS = {
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _progress_text(done: int, total: int, ok: int, err: int) -> str:
-    """Thin wrapper that fixes the title for mass-publish progress messages."""
-    return _progress_text_base("Публикация...", done, total, ok, err)
-
 
 def _back_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
@@ -379,7 +375,7 @@ async def cb_mpub_confirm_send(
     err = 0
     start_ts = time.monotonic()
     progress_msg = await callback.message.edit_text(
-        _progress_text(0, total, 0, 0),
+        _progress_text_base("Публикация...", 0, total, 0, 0),
         parse_mode="HTML",
     )
 
@@ -399,7 +395,7 @@ async def cb_mpub_confirm_send(
 
         try:
             await progress_msg.edit_text(
-                _progress_text(idx, total, ok, err),
+                _progress_text_base("Публикация...", idx, total, ok, err),
                 parse_mode="HTML",
             )
         except Exception:

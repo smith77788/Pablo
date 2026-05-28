@@ -351,3 +351,15 @@ class BulkLeaveFSM(StatesGroup):
 
 class OpBuilderFSM(StatesGroup):
     choosing_op_type = State()  # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit
+
+
+class GlobalPresenceFSM(StatesGroup):
+    choosing_asset_type = State()
+    choosing_template = State()
+    entering_name_pattern = State()
+    entering_username_pattern = State()
+    choosing_geo = State()
+    entering_custom_geo = State()
+    choosing_accounts = State()
+    previewing = State()
+    confirming = State()

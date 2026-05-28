@@ -22,6 +22,7 @@ from bot.callbacks import (
     ChanCb,
     ClustMCb,
     CompCb,
+    GeoPresenceCb,
     GroupFCb,
     HealthCb,
     MassOpCb,
@@ -111,6 +112,7 @@ def _visibility_kb():
 
 def _operations_kb():
     kb = InlineKeyboardBuilder()
+    kb.button(text="🌍 Global Presence",   callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
     kb.button(text="🛠️ Построитель",      callback_data=MassOpCb(action="menu"))
     kb.button(text="📋 Очередь",           callback_data=MassOpCb(action="queue"))
@@ -118,7 +120,7 @@ def _operations_kb():
     kb.button(text="📄 Шаблоны",           callback_data=AssetTplCb(action="menu"))
     kb.button(text="📊 Отчёты",            callback_data=BmCb(action="op_reports"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(1, 2, 2, 2, 1)
     return kb.as_markup()
 
 

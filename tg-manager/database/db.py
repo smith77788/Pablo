@@ -2202,3 +2202,105 @@ async def notify_if_enabled(
         await bot.send_message(user_id, text, parse_mode="HTML")
     except Exception:
         pass
+
+
+# ── Global Presence Factory ────────────────────────────────────────────────
+
+async def create_global_presence_plan(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    asset_type: str,
+    name_pattern: str,
+    username_pattern: str | None,
+    geo_selection: dict,
+    account_selection: dict,
+    template_id: int | None = None,
+) -> int:
+    """Create a plan and return its id."""
+    import json
+    return await pool.fetchval(
+        """INSERT INTO global_presence_plans
+               (owner_id, asset_type, name_pattern, username_pattern,
+                geo_selection, account_selection, template_id, status)
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,'queued')
+           RETURNING id""",
+        owner_id, asset_type, name_pattern, username_pattern,
+        json.dumps(geo_selection), json.dumps(account_selection), template_id,
+    )
+
+
+async def create_global_presence_targets(
+    pool: asyncpg.Pool, plan_id: int, targets: list[dict]
+) -> int:
+    """Bulk-insert targets for a plan. Returns count inserted."""
+    if not targets:
+        return 0
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO global_presence_targets
+                   (plan_id, country, country_code, region, city, city_slug,
+                    language, timezone, asset_type, planned_name, planned_username,
+                    selected_account_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
+            [
+                (
+                    plan_id,
+                    t.get("country"), t.get("country_code"), t.get("region"),
+                    t.get("city"), t.get("city_slug"), t.get("language"), t.get("timezone"),
+                    t.get("asset_type", "channel"),
+                    t.get("planned_name"), t.get("planned_username"),
+                    t.get("selected_account_id"),
+                )
+                for t in targets
+            ],
+        )
+    return len(targets)
+
+
+async def get_global_presence_plan(
+    pool: asyncpg.Pool, plan_id: int, owner_id: int
+) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        plan_id, owner_id,
+    )
+
+
+async def get_global_presence_plans(
+    pool: asyncpg.Pool, owner_id: int, limit: int = 10, offset: int = 0
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM global_presence_plans WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        owner_id, limit, offset,
+    )
+
+
+async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
+    row = await pool.fetchrow(
+        """SELECT
+               COUNT(*) FILTER (WHERE status='pending')  AS pending,
+               COUNT(*) FILTER (WHERE status='done')     AS done,
+               COUNT(*) FILTER (WHERE status='failed')   AS failed,
+               COUNT(*) FILTER (WHERE status='running')  AS running,
+               COUNT(*) AS total
+           FROM global_presence_targets WHERE plan_id=$1""",
+        plan_id,
+    )
+    return dict(row) if row else {"pending": 0, "done": 0, "failed": 0, "running": 0, "total": 0}
+
+
+async def reset_failed_targets(pool: asyncpg.Pool, plan_id: int) -> int:
+    """Reset failed+retryable targets to pending for retry. Returns count reset."""
+    result = await pool.execute(
+        "UPDATE global_presence_targets SET status='pending', error_message=NULL "
+        "WHERE plan_id=$1 AND status='failed' AND retryable=TRUE",
+        plan_id,
+    )
+    return int(result.split()[-1]) if result else 0
+
+
+async def link_plan_to_operation(pool: asyncpg.Pool, plan_id: int, op_id: int) -> None:
+    await pool.execute(
+        "UPDATE global_presence_plans SET op_id=$1, status='queued', updated_at=now() WHERE id=$2",
+        op_id, plan_id,
+    )

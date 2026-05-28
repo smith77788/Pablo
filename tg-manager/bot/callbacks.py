@@ -265,3 +265,10 @@ class ClustMCb(CallbackData, prefix="clm"):
     cluster_name: Optional[str] = None
     bot_id: int = 0
     page: int = 0
+
+
+class GeoPresenceCb(CallbackData, prefix="gp"):
+    action: str
+    plan_id: int = 0
+    page: int = 0
+    item: Optional[str] = None
