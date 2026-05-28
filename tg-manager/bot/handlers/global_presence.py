@@ -78,7 +78,7 @@ async def cb_gp_menu(
     await state.set_state(GlobalPresenceFSM.choosing_asset_type)
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 Каналы", callback_data=GeoPresenceCb(action="asset", item="channel"))
-    kb.button(text="👥 Группы 🔜", callback_data=GeoPresenceCb(action="asset", item="v2"))
+    kb.button(text="👥 Группы", callback_data=GeoPresenceCb(action="asset", item="group"))
     kb.button(text="🤖 Боты 🔜", callback_data=GeoPresenceCb(action="asset", item="v2"))
     kb.button(text="📦 Пакет 🔜", callback_data=GeoPresenceCb(action="asset", item="v2"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
@@ -101,25 +101,29 @@ async def cb_gp_asset(
 ) -> None:
     asset = callback_data.item or "channel"
     if asset == "v2":
-        await callback.answer("🔜 Будет в V2. Сейчас доступны только Каналы.", show_alert=True)
+        await callback.answer("🔜 Боты и пакеты будут в V2.1. Группы уже доступны.", show_alert=True)
+        return
+    if asset not in ("channel", "group"):
+        await callback.answer("Неподдерживаемый тип", show_alert=True)
         return
     await callback.answer()
     await state.update_data(asset_type=asset)
     await state.set_state(GlobalPresenceFSM.choosing_template)
-    await _show_template_step(callback, state, pool, page=0)
+    await _show_template_step(callback, state, pool, asset_type=asset, page=0)
 
 
 # ── Step 2: Template ────────────────────────────────────────────────────────
 
 async def _show_template_step(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, page: int = 0
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    asset_type: str = "channel", page: int = 0,
 ) -> None:
     user_id = callback.from_user.id
     offset = page * _TPL_PAGE_SIZE
     templates = await pool.fetch(
-        "SELECT id, name FROM asset_templates WHERE owner_id=$1 AND asset_type='channel' "
-        "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-        user_id, _TPL_PAGE_SIZE + 1, offset,
+        "SELECT id, name FROM asset_templates WHERE owner_id=$1 AND asset_type=$2 "
+        "ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+        user_id, asset_type, _TPL_PAGE_SIZE + 1, offset,
     )
     has_more = len(templates) > _TPL_PAGE_SIZE
     templates = templates[:_TPL_PAGE_SIZE]
@@ -149,10 +153,12 @@ async def _show_template_step(
     header = f"📋 Найдено шаблонов: {tpl_count}+" if has_more else (
         f"📋 Найдено шаблонов: {len(templates) + offset}"
     )
+
+    asset_label = "группы" if asset_type == "group" else "канала"
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"
-        f"<b>Шаг 2/8 — Шаблон канала</b>\n"
+        f"<b>Шаг 2/8 — Шаблон {asset_label}</b>\n"
         f"Шаблон задаёт описание, аватар и первый пост.\n\n"
         f"{header}\n"
         f"(Шаблоны создаются в: BotMother → Операции → Шаблоны)",
@@ -165,7 +171,9 @@ async def cb_gp_tpl_page(
     callback: CallbackQuery, callback_data: GeoPresenceCb,
     state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
-    await _show_template_step(callback, state, pool, page=callback_data.page)
+    sd = await state.get_data()
+    asset_type = sd.get("asset_type", "channel")
+    await _show_template_step(callback, state, pool, asset_type=asset_type, page=callback_data.page)
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "sel_tpl"), GlobalPresenceFSM.choosing_template)

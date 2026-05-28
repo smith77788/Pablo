@@ -355,13 +355,21 @@ async def _exec_bulk_leave(
 async def _exec_global_presence_channel(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Создать каналы для всех ожидающих целей плана global_presence."""
+    """Создать каналы или группы для всех ожидающих целей плана global_presence."""
     from services import account_manager, session_simulator
     import random
 
     plan_id = params.get("plan_id")
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
+
+    # Получить тип актива (channel или group)
+    plan = await pool.fetchrow("SELECT asset_type FROM global_presence_plans WHERE id=$1", plan_id)
+    if not plan:
+        return {"status": "failed", "reason": "План не найден"}
+
+    asset_type = plan.get("asset_type", "channel")
+    is_group = asset_type == "group"
 
     # Обновить статус плана на running
     await pool.execute(
@@ -426,20 +434,25 @@ async def _exec_global_presence_channel(
             "UPDATE global_presence_targets SET status='running' WHERE id=$1", target["id"]
         )
 
-        title = target["planned_name"] or f"Channel {i + 1}"
+        title = target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
 
-        # Создать канал
+        # Создать канал или группу
         result = await account_manager.create_channel(
-            acc["session_str"], title, about="", megagroup=False, _acc=acc
+            acc["session_str"], title, about="", megagroup=is_group, _acc=acc
         )
 
         # Обработка FloodWait — один повтор
         if result.get("error") and result.get("flood_wait"):
             wait_time = min(int(result["flood_wait"]) + 15, 300)
-            log.info("op_worker gp_channel: flood wait %ds for target %d", wait_time, target["id"])
+            log.info(
+                "op_worker gp_%s: flood wait %ds for target %d",
+                "group" if is_group else "channel",
+                wait_time,
+                target["id"],
+            )
             await asyncio.sleep(wait_time)
             result = await account_manager.create_channel(
-                acc["session_str"], title, about="", megagroup=False, _acc=acc
+                acc["session_str"], title, about="", megagroup=is_group, _acc=acc
             )
 
         if result.get("error"):
