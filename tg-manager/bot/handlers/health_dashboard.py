@@ -77,13 +77,14 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📱 Аккаунты",  callback_data=HealthCb(action="accounts"))
-    kb.button(text="🤖 Боты",      callback_data=HealthCb(action="bots_health"))
-    kb.button(text="🌊 Flood log", callback_data=HealthCb(action="flood_log"))
-    kb.button(text="📈 Тренд",     callback_data=HealthCb(action="trust_trend"))
-    kb.button(text="🔄 Обновить",  callback_data=HealthCb(action="menu"))
-    kb.button(text="◀️ Назад",     callback_data=BotCb(action="main"))
-    kb.adjust(2, 2, 2)
+    kb.button(text="📱 Аккаунты",       callback_data=HealthCb(action="accounts"))
+    kb.button(text="🤖 Боты",           callback_data=HealthCb(action="bots_health"))
+    kb.button(text="🌊 Flood log",      callback_data=HealthCb(action="flood_log"))
+    kb.button(text="📈 Тренд",          callback_data=HealthCb(action="trust_trend"))
+    kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
+    kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
+    kb.button(text="◀️ Назад",          callback_data=BotCb(action="main"))
+    kb.adjust(2, 2, 2, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -245,6 +246,7 @@ async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Trust score trends ─────────────────────────────────────────────────────────
 
+
 @router.callback_query(HealthCb.filter(F.action == "trust_trend"))
 async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
@@ -294,3 +296,103 @@ async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
     )
+
+
+# ── Recommendations ────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "recommendations"))
+async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
+
+    accounts = await pool.fetch(
+        "SELECT id, phone, first_name, username, trust_score, cooldown_until, flood_count_7d, is_active "
+        "FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score ASC NULLS LAST LIMIT 20",
+        user_id,
+    )
+    try:
+        flood_7d_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM account_flood_log afl "
+            "JOIN tg_accounts ta ON ta.id=afl.account_id "
+            "WHERE ta.owner_id=$1 AND afl.created_at > now() - interval '7 days'",
+            user_id,
+        ) or 0
+    except Exception:
+        flood_7d_total = 0
+
+    recs: list[str] = []
+    critical_count = 0
+
+    for acc in accounts:
+        trust = float(acc["trust_score"] or 1.0)
+        name = acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}"
+        flood_cnt = int(acc["flood_count_7d"] or 0)
+        in_cooldown = bool(acc["cooldown_until"] and acc["cooldown_until"].replace(tzinfo=timezone.utc) > now)
+
+        if not acc["is_active"]:
+            recs.append(f"🔴 <b>{name}</b> — деактивирован. Проверьте сессию и переподключите.")
+            critical_count += 1
+        elif in_cooldown:
+            until = acc["cooldown_until"].strftime("%H:%M")
+            recs.append(
+                f"🟠 <b>{name}</b> — кулдаун до {until}.\n"
+                "   ↳ Не запускайте операции через этот аккаунт до снятия ограничений."
+            )
+            critical_count += 1
+        elif trust < 0.3:
+            recs.append(
+                f"🔴 <b>{name}</b> — trust {trust:.2f} (критично).\n"
+                "   ↳ Дайте аккаунту отдохнуть 48-72ч без операций.\n"
+                "   ↳ Проверьте аккаунт вручную — возможно ограничение от Telegram."
+            )
+            critical_count += 1
+        elif trust < 0.6:
+            recs.append(
+                f"🟡 <b>{name}</b> — trust {trust:.2f} (низкий).\n"
+                "   ↳ Снизьте интенсивность операций на 50%.\n"
+                "   ↳ Используйте аккаунт только для чтения 24ч."
+            )
+        elif flood_cnt > 5:
+            recs.append(
+                f"🟡 <b>{name}</b> — {flood_cnt} flood-событий за 7 дней.\n"
+                "   ↳ Увеличьте задержки между операциями (min 60-90s).\n"
+                "   ↳ Чередуйте с другими аккаунтами."
+            )
+
+    general: list[str] = []
+    if len(accounts) == 0:
+        general.append("ℹ️ Нет подключённых аккаунтов. Добавьте через Infrastructure → Аккаунты.")
+    elif critical_count == 0 and not recs:
+        general.append("✅ <b>Все аккаунты в норме</b> — проблем не обнаружено.")
+    if flood_7d_total > 20:
+        general.append(
+            f"⚠️ <b>Высокая flood-активность</b>: {flood_7d_total} событий за неделю.\n"
+            "   ↳ Рекомендуется снизить параллельность операций.\n"
+            "   ↳ Проверьте интервалы в расписаниях."
+        )
+    active_count = sum(1 for a in accounts if a["is_active"])
+    low_trust = sum(1 for a in accounts if float(a["trust_score"] or 1) < 0.5)
+    if active_count > 0 and low_trust / active_count > 0.5:
+        general.append(
+            "🔴 <b>Критическая ситуация</b>: более 50% аккаунтов имеют низкий trust.\n"
+            "   ↳ Приостановите все bulk-операции на 48 часов.\n"
+            "   ↳ Проверьте прокси — возможно, они скомпрометированы."
+        )
+
+    lines = ["💡 <b>Рекомендации по здоровью аккаунтов</b>\n"]
+    if general:
+        lines.extend(general)
+    if recs:
+        if general:
+            lines.append("")
+        lines.extend(recs)
+
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... и другие аккаунты</i>"
+
+    kb = _back_kb()
+    kb.button(text="🔄 Обновить", callback_data=HealthCb(action="recommendations"))
+    kb.adjust(1)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())

@@ -437,13 +437,115 @@ async def cb_gp_geo_custom(callback: CallbackQuery, state: FSMContext) -> None:
     await _edit(
         callback,
         "🌍 <b>Global Presence Factory</b>\n\n"
-        "<b>Шаг 5/8 — Кастомные города</b>\n"
-        "Введите города, по одному на строку:\n\n"
+        "<b>Шаг 5/8 — Кастомные города</b>\n\n"
+        "Введите города, по одному на строку:\n"
         "<code>Berlin\nParis\nMadrid\nTokyo</code>\n\n"
-        "Можно указать детали через запятую:\n"
-        "<code>Berlin, Germany, de</code>",
+        "Или с деталями через запятую:\n"
+        "<code>Berlin, Germany, de</code>\n\n"
+        "📎 <b>Или загрузите CSV-файл</b> с городами.\n"
+        "Формат: <code>city, country, country_code</code> (первые 3 колонки).",
         markup=kb.as_markup(),
     )
+
+
+async def _parse_geo_from_text_or_file(text: str) -> list[dict]:
+    """Parse geo list from plain text (city per line or CSV format)."""
+    return parse_custom_geo_list(text)
+
+
+async def _parse_geo_csv_bytes(raw: bytes) -> list[dict] | None:
+    """Parse CSV bytes → list of geo dicts. Returns None on decode error."""
+    import csv
+    import io
+    for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return None
+
+    # Try to detect delimiter
+    sample = text[:2000]
+    delimiter = "," if sample.count(",") >= sample.count(";") else ";"
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    lines: list[str] = []
+    for row in reader:
+        if not row:
+            continue
+        # Skip header rows
+        first = row[0].strip().lower()
+        if first in ("city", "город", "name", "название", "#", ""):
+            continue
+        # Rebuild as comma-separated for parse_custom_geo_list
+        lines.append(", ".join(c.strip() for c in row[:3] if c.strip()))
+    return parse_custom_geo_list("\n".join(lines)) if lines else None
+
+
+@router.message(GlobalPresenceFSM.entering_custom_geo, F.document)
+async def msg_gp_custom_geo_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool,
+) -> None:
+    """Handle CSV / TXT file upload for city list."""
+    doc = message.document
+    if not doc:
+        await _reply(message, "⚠️ Документ не получен.", _cancel_kb())
+        return
+    filename = (doc.file_name or "").lower()
+    if not (filename.endswith(".csv") or filename.endswith(".txt")):
+        await _reply(message, "⚠️ Поддерживаются только .csv и .txt файлы.", _cancel_kb())
+        return
+    if doc.file_size and doc.file_size > 512_000:
+        await _reply(message, "⚠️ Файл слишком большой (максимум 512 КБ).", _cancel_kb())
+        return
+
+    wait_msg = await message.answer("⏳ Читаю файл…")
+    try:
+        file = await message.bot.get_file(doc.file_id)
+        raw = await message.bot.download_file(file.file_path)
+        content = raw.read() if hasattr(raw, "read") else bytes(raw)
+    except Exception as e:
+        await wait_msg.delete()
+        await _reply(message, f"⚠️ Не удалось скачать файл: {e}", _cancel_kb())
+        return
+
+    await wait_msg.delete()
+
+    if filename.endswith(".csv"):
+        geo_list = await _parse_geo_csv_bytes(content)
+    else:
+        try:
+            text = content.decode("utf-8-sig", errors="replace")
+        except Exception:
+            text = content.decode("latin-1", errors="replace")
+        geo_list = parse_custom_geo_list(text)
+
+    if not geo_list:
+        await _reply(
+            message,
+            "⚠️ Не удалось распознать города из файла.\n\n"
+            "Ожидаемый формат (одна строка = один город):\n"
+            "<code>Berlin, Germany, de\nParis, France, fr</code>",
+            _cancel_kb(),
+        )
+        return
+
+    await state.update_data(geo_preset="custom", geo_list=geo_list)
+    await state.set_state(GlobalPresenceFSM.choosing_accounts)
+
+    await message.answer(
+        f"✅ <b>Загружено {len(geo_list)} городов из файла</b>\n"
+        f"Первые 5: {', '.join(g['city'] for g in geo_list[:5])}{'…' if len(geo_list) > 5 else ''}",
+        parse_mode="HTML",
+    )
+
+    class FakeCallback:
+        from_user = message.from_user
+        message = message
+        async def answer(self, *a, **kw): pass
+
+    await _show_accounts_step(FakeCallback(), state, pool, page=0, send_new=True, original_message=message)
 
 
 @router.message(GlobalPresenceFSM.entering_custom_geo)
