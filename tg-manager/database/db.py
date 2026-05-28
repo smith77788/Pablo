@@ -2137,3 +2137,38 @@ async def record_flood_event(
            VALUES($1, $2, $3)""",
         account_id, operation, flood_seconds,
     )
+
+
+async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
+    """Return notification preferences for a user. Defaults to all True if no record."""
+    row = await pool.fetchrow(
+        "SELECT new_user, flood_warning, position_change, op_complete, restriction "
+        "FROM notification_settings WHERE user_id=$1",
+        user_id,
+    )
+    if row:
+        return dict(row)
+    return {
+        "new_user": True,
+        "flood_warning": True,
+        "position_change": True,
+        "op_complete": True,
+        "restriction": True,
+    }
+
+
+async def notify_if_enabled(
+    pool: asyncpg.Pool,
+    bot,
+    user_id: int,
+    pref: str,
+    text: str,
+) -> None:
+    """Send a notification to user only if the given preference flag is True."""
+    try:
+        settings = await get_notification_settings(pool, user_id)
+        if not settings.get(pref, True):
+            return
+        await bot.send_message(user_id, text, parse_mode="HTML")
+    except Exception:
+        pass

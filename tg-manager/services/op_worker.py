@@ -5,6 +5,7 @@ import logging
 import aiohttp
 import asyncpg
 from aiogram import Bot
+from database import db
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 15  # секунд между проверками очереди
@@ -27,6 +28,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         """SELECT id, owner_id, op_type, params
            FROM operation_queue
            WHERE status = 'pending'
+             AND (scheduled_for IS NULL OR scheduled_for <= now())
            ORDER BY created_at ASC
            LIMIT 1
            FOR UPDATE SKIP LOCKED"""
@@ -46,7 +48,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     )
 
     try:
-        # Уведомить пользователя
+        # Уведомить пользователя о старте (всегда — это не op_complete, а старт)
         try:
             await bot.send_message(owner_id, f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>", parse_mode="HTML")
         except Exception:
@@ -63,14 +65,11 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
             "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
             json.dumps(result), op_id,
         )
-        try:
-            await bot.send_message(
-                owner_id,
-                f"✅ <b>Операция #{op_id}</b> завершена\n{result.get('summary', '')}",
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
+        summary = result.get("summary", "")
+        await db.notify_if_enabled(
+            pool, bot, owner_id, "op_complete",
+            f"✅ <b>Операция #{op_id}</b> завершена\n{summary}",
+        )
 
     except Exception as e:
         log.exception("op_worker: op %d failed: %s", op_id, e)
@@ -78,10 +77,10 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
             "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
             str(e)[:500], op_id,
         )
-        try:
-            await bot.send_message(owner_id, f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n<code>{str(e)[:200]}</code>", parse_mode="HTML")
-        except Exception:
-            pass
+        await db.notify_if_enabled(
+            pool, bot, owner_id, "op_complete",
+            f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n<code>{str(e)[:200]}</code>",
+        )
 
 
 async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:

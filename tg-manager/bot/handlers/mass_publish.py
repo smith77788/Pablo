@@ -125,6 +125,11 @@ async def cb_mpub_start(
 
     target_type = callback_data.target_type or ""
 
+    # Check for template prefill from asset_templates apply
+    sd = await state.get_data()
+    prefill = sd.get("tpl_prefill") or {}
+    prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+
     if target_type == "all":
         # Skip account selection — use all active accounts
         accounts = await _get_active_accounts(pool, callback.from_user.id)
@@ -139,9 +144,27 @@ async def cb_mpub_start(
             target_type="all",
             target_acc_ids=[a["id"] for a in accounts],
             dry_run=False,
+            tpl_prefill=None,
         )
-        await state.set_state(MassPublishFSM2.waiting_text)
-        await _ask_post_text(callback, edit=True)
+        if prefill_text:
+            # Auto-inject text from template, skip text input step
+            await state.update_data(post_text=prefill_text)
+            await state.set_state(MassPublishFSM2.choosing_timing)
+            kb = InlineKeyboardBuilder()
+            for key, (label, _) in _TIMING_OPTIONS.items():
+                kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
+            kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+            kb.adjust(2, 2, 1)
+            preview = prefill_text[:200] + ("…" if len(prefill_text) > 200 else "")
+            await callback.message.edit_text(
+                f"📝 <b>Текст из шаблона:</b>\n<i>{preview}</i>\n\n"
+                "⏱️ <b>Задержка между постами:</b>",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        else:
+            await state.set_state(MassPublishFSM2.waiting_text)
+            await _ask_post_text(callback, edit=True)
 
     else:
         # Show account picker
@@ -162,7 +185,7 @@ async def cb_mpub_start(
         kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
         kb.adjust(1)
         await state.set_state(MassPublishFSM2.choosing_target)
-        await state.update_data(target_type="account", dry_run=False)
+        await state.update_data(target_type="account", dry_run=False, tpl_prefill=None)
         await callback.message.edit_text(
             "👤 <b>Выберите аккаунт</b>\n\nПубликация будет только в каналы этого аккаунта:",
             parse_mode="HTML",
@@ -175,9 +198,30 @@ async def cb_mpub_pick_account(
     callback: CallbackQuery, callback_data: MassPubCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(target_acc_ids=[callback_data.target_id])
-    await state.set_state(MassPublishFSM2.waiting_text)
-    await _ask_post_text(callback, edit=True)
+    sd = await state.get_data()
+    prefill = sd.get("tpl_prefill") or {}
+    prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+
+    await state.update_data(target_acc_ids=[callback_data.target_id], tpl_prefill=None)
+
+    if prefill_text:
+        await state.update_data(post_text=prefill_text)
+        await state.set_state(MassPublishFSM2.choosing_timing)
+        kb = InlineKeyboardBuilder()
+        for key, (label, _) in _TIMING_OPTIONS.items():
+            kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
+        kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+        kb.adjust(2, 2, 1)
+        preview = prefill_text[:200] + ("…" if len(prefill_text) > 200 else "")
+        await callback.message.edit_text(
+            f"📝 <b>Текст из шаблона:</b>\n<i>{preview}</i>\n\n"
+            "⏱️ <b>Задержка между постами:</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await state.set_state(MassPublishFSM2.waiting_text)
+        await _ask_post_text(callback, edit=True)
 
 
 async def _ask_post_text(event, edit: bool = True) -> None:

@@ -337,6 +337,14 @@ async def _check_visibility_alerts(
             f"Порог роста: #{rise_thr}"
         )
 
+    # Check user's notification preference before sending
+    try:
+        settings = await db.get_notification_settings(pool, owner_id)
+        if not settings.get("position_change", True):
+            return
+    except Exception:
+        pass
+
     try:
         from aiogram import Bot as _Bot
         import os

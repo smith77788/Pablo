@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 import asyncpg
 from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -33,6 +36,7 @@ from bot.callbacks import (
     SubCb,
     AutoReplyCb,
 )
+from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
@@ -542,22 +546,318 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Operation Planner ─────────────────────────────────────────────────────
 
+_OP_TYPE_LABELS = {
+    "mass_publish": "📤 Публикация во все каналы",
+    "bulk_bot_edit": "✏️ Редактирование всех ботов",
+}
+
+
+async def _show_planner_menu(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    """Главный экран планировщика — список запланированных операций."""
+    await state.clear()
+    uid = callback.from_user.id
+    try:
+        rows = await pool.fetch(
+            """SELECT id, op_type, scheduled_for, status
+               FROM operation_queue
+               WHERE owner_id=$1
+                 AND scheduled_for IS NOT NULL
+                 AND status = 'pending'
+               ORDER BY scheduled_for ASC
+               LIMIT 10""",
+            uid,
+        )
+    except Exception:
+        rows = []
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Запланировать операцию", callback_data=BmCb(action="plan_new"))
+    kb.button(text="📅 Расписание рассылок", callback_data=BmCb(action="schedules"))
+
+    if rows:
+        lines = ["<b>⏱️ Планировщик операций</b>\n\n<b>Запланировано:</b>"]
+        for r in rows:
+            label = _OP_TYPE_LABELS.get(r["op_type"], r["op_type"])
+            ts = r["scheduled_for"]
+            ts_str = ts.strftime("%d.%m %H:%M") if ts else "—"
+            lines.append(f"• {label} — <b>{ts_str}</b>  [#{r['id']}]")
+            kb.button(
+                text=f"🗑 Отменить #{r['id']}",
+                callback_data=BmCb(action="plan_cancel", sub=str(r["id"])),
+            )
+        text = "\n".join(lines)
+    else:
+        text = (
+            "<b>⏱️ Планировщик операций</b>\n\n"
+            "Нет запланированных операций.\n\n"
+            "Нажмите <b>➕ Запланировать</b> чтобы поставить массовую операцию "
+            "на конкретное время — она выполнится автоматически."
+        )
+
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    kb.adjust(1)
+    await _edit(callback, text, kb.as_markup())
+
+
 @router.callback_query(BmCb.filter(F.action == "op_planner"))
-async def cb_op_planner(callback: CallbackQuery) -> None:
+async def cb_op_planner(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    await _show_planner_menu(callback, pool, state)
+
+
+@router.callback_query(BmCb.filter(F.action == "plan_new"))
+async def cb_plan_new(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚡ Массовые операции", callback_data=MassOpCb(action="menu"))
-    kb.button(text="📅 Расписание рассылок", callback_data=BmCb(action="schedules"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    for op_type, label in _OP_TYPE_LABELS.items():
+        kb.button(text=label, callback_data=BmCb(action="plan_type", sub=op_type))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="op_planner"))
     kb.adjust(1)
     await _edit(
         callback,
-        "<b>⏱️ Планировщик</b>\n\n"
-        "Выберите, что хотите запланировать:\n\n"
-        "• <b>Массовые операции</b> — редактирование ботов, каналов, аккаунтов\n"
-        "• <b>Расписание рассылок</b> — отложенная отправка сообщений подписчикам",
+        "<b>➕ Новая запланированная операция</b>\n\n"
+        "Выберите тип операции:",
         kb.as_markup(),
     )
+
+
+@router.callback_query(BmCb.filter(F.action == "plan_type"))
+async def cb_plan_type(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    op_type = callback_data.sub
+    if op_type not in _OP_TYPE_LABELS:
+        await callback.answer("Неизвестный тип операции", show_alert=True)
+        return
+
+    await state.update_data(op_type=op_type)
+
+    if op_type == "mass_publish":
+        await state.set_state(OpPlannerFSM.waiting_text)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
+        await callback.message.answer(
+            "📝 <b>Текст публикации</b>\n\n"
+            "Введите текст сообщения, которое будет опубликовано во все каналы.\n"
+            "Поддерживается HTML-форматирование.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        # bulk_bot_edit и другие — сразу к выбору времени
+        await state.set_state(OpPlannerFSM.waiting_datetime)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
+        await callback.message.answer(
+            "🕐 <b>Когда выполнить?</b>\n\n"
+            "Введите дату и время в формате:\n"
+            "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ДД.ММ ЧЧ:ММ</code>\n\n"
+            "Примеры:\n"
+            "• <code>25.06.2026 14:30</code>\n"
+            "• <code>25.06 14:30</code>  (текущий год)\n"
+            "• <code>14:30</code>  (сегодня)",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+@router.message(OpPlannerFSM.waiting_text)
+async def fsm_plan_waiting_text(message: Message, state: FSMContext) -> None:
+    text = message.text or message.caption or ""
+    if not text.strip():
+        await message.answer("⚠️ Текст не может быть пустым. Введите сообщение:")
+        return
+    await state.update_data(publish_text=text.strip())
+    await state.set_state(OpPlannerFSM.waiting_datetime)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
+    await message.answer(
+        "🕐 <b>Когда выполнить?</b>\n\n"
+        "Введите дату и время:\n"
+        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ДД.ММ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+def _parse_datetime(text: str) -> datetime | None:
+    """Парсим дату/время из ввода пользователя. Возвращает UTC datetime или None."""
+    text = text.strip()
+    now = datetime.now()
+    formats = [
+        ("%d.%m.%Y %H:%M", text),
+        ("%d.%m %H:%M", text),
+    ]
+    # Только время — сегодня
+    if len(text) <= 5 and ":" in text:
+        formats.append(("%H:%M", text))
+
+    for fmt, val in formats:
+        try:
+            if fmt == "%H:%M":
+                dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                parts = val.split(":")
+                dt = dt.replace(hour=int(parts[0]), minute=int(parts[1]))
+            elif "%Y" not in fmt:
+                dt = datetime.strptime(f"{val}.{now.year}", f"{fmt}.%Y")
+            else:
+                dt = datetime.strptime(val, fmt)
+            # Возвращаем как UTC-aware
+            return dt.replace(tzinfo=timezone.utc)
+        except (ValueError, IndexError):
+            continue
+    return None
+
+
+@router.message(OpPlannerFSM.waiting_datetime)
+async def fsm_plan_waiting_datetime(
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    dt = _parse_datetime(message.text or "")
+    if dt is None:
+        await message.answer(
+            "⚠️ Не удалось распознать дату. Используйте формат:\n"
+            "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    now_utc = datetime.now(timezone.utc)
+    if dt <= now_utc:
+        await message.answer(
+            "⚠️ Время должно быть в будущем. Попробуйте ещё раз:"
+        )
+        return
+
+    sd = await state.get_data()
+    op_type = sd.get("op_type", "")
+    publish_text = sd.get("publish_text", "")
+    label = _OP_TYPE_LABELS.get(op_type, op_type)
+    ts_str = dt.strftime("%d.%m.%Y %H:%M")
+
+    # Сохраняем распарсенное время в state
+    await state.update_data(scheduled_for_iso=dt.isoformat())
+
+    # Показываем preview + кнопки confirm/cancel
+    preview_lines = [
+        f"<b>⏱️ Подтверждение</b>\n",
+        f"Операция: <b>{label}</b>",
+        f"Время: <b>{ts_str} UTC</b>",
+    ]
+    if publish_text:
+        preview_lines.append(f"\nТекст публикации:\n<i>{html.escape(publish_text[:300])}</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запланировать", callback_data=BmCb(action="plan_confirm"))
+    kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
+    kb.adjust(2)
+    await message.answer(
+        "\n".join(preview_lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BmCb.filter(F.action == "plan_confirm"))
+async def cb_plan_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    op_type = sd.get("op_type", "")
+    publish_text = sd.get("publish_text", "")
+    scheduled_for_iso = sd.get("scheduled_for_iso", "")
+
+    if not op_type or not scheduled_for_iso:
+        await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    try:
+        scheduled_for = datetime.fromisoformat(scheduled_for_iso)
+    except ValueError:
+        await callback.answer("Ошибка времени. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    params: dict = {"source": "planner"}
+    if publish_text:
+        params["text"] = publish_text
+
+    try:
+        op_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id, op_type, status, params, scheduled_for)
+               VALUES($1, $2, 'pending', $3::jsonb, $4)
+               RETURNING id""",
+            callback.from_user.id,
+            op_type,
+            json.dumps(params),
+            scheduled_for,
+        )
+    except Exception as e:
+        log.error("plan_confirm insert error: %s", e)
+        await callback.answer("Ошибка при создании задачи. Попробуйте снова.", show_alert=True)
+        return
+
+    await state.clear()
+    label = _OP_TYPE_LABELS.get(op_type, op_type)
+    ts_str = scheduled_for.strftime("%d.%m.%Y %H:%M")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Планировщик", callback_data=BmCb(action="op_planner"))
+    kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
+    kb.adjust(1)
+    await callback.message.answer(
+        f"✅ <b>Операция #{op_id} запланирована!</b>\n\n"
+        f"Тип: {label}\n"
+        f"Время: <b>{ts_str} UTC</b>\n\n"
+        f"Система запустит её автоматически.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BmCb.filter(F.action == "plan_cancel"))
+async def cb_plan_cancel(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    try:
+        op_id = int(callback_data.sub or "0")
+    except (ValueError, TypeError):
+        await callback.answer("Неверный ID операции", show_alert=True)
+        return
+
+    uid = callback.from_user.id
+    updated = await pool.fetchval(
+        """UPDATE operation_queue SET status='cancelled'
+           WHERE id=$1 AND owner_id=$2 AND status='pending'
+           RETURNING id""",
+        op_id, uid,
+    )
+    if updated:
+        await callback.answer(f"✅ Операция #{op_id} отменена", show_alert=True)
+    else:
+        await callback.answer("Операция не найдена или уже выполнена", show_alert=True)
+
+    await _show_planner_menu(callback, pool, state)
 
 
 # ── Operation Reports ─────────────────────────────────────────────────────

@@ -332,3 +332,8 @@ class AddProxyFSM(StatesGroup):
 class CreateClusterFSM(StatesGroup):
     waiting_name = State()
     waiting_description = State()
+
+
+class OpPlannerFSM(StatesGroup):
+    waiting_text = State()      # текст для mass_publish
+    waiting_datetime = State()  # дата и время запуска

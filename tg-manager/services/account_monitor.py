@@ -6,6 +6,7 @@ import logging
 
 import asyncpg
 from aiogram import Bot
+from database import db
 
 log = logging.getLogger(__name__)
 
@@ -31,18 +32,15 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
     for row in rows:
         owner_id = row["owner_id"]
         active_count = row["active_count"]
-        try:
-            await bot.send_message(
-                owner_id,
-                f"⚠️ <b>Внимание: мало активных аккаунтов</b>\n\n"
-                f"У вас осталось активных TG-аккаунтов: <b>{active_count}</b>\n"
-                f"Рекомендуется иметь минимум {_MIN_ACCOUNTS} активных аккаунта "
-                f"для корректной работы сервиса.\n\n"
-                f"Добавьте аккаунты в разделе <b>Аккаунты</b>.",
-            )
-            log.info("account_monitor: alerted owner=%s (active=%s)", owner_id, active_count)
-        except Exception as exc:
-            log.warning("account_monitor: failed to alert owner=%s: %s", owner_id, exc)
+        await db.notify_if_enabled(
+            pool, bot, owner_id, "flood_warning",
+            f"⚠️ <b>Внимание: мало активных аккаунтов</b>\n\n"
+            f"У вас осталось активных TG-аккаунтов: <b>{active_count}</b>\n"
+            f"Рекомендуется иметь минимум {_MIN_ACCOUNTS} активных аккаунта "
+            f"для корректной работы сервиса.\n\n"
+            f"Добавьте аккаунты в разделе <b>Аккаунты</b>.",
+        )
+        log.info("account_monitor: alerted owner=%s (active=%s)", owner_id, active_count)
 
 
 async def check_owner_now(pool: asyncpg.Pool, bot: Bot, owner_id: int) -> None:
@@ -53,17 +51,14 @@ async def check_owner_now(pool: asyncpg.Pool, bot: Bot, owner_id: int) -> None:
     )
     cnt = row["cnt"] if row else 0
     if cnt < _MIN_ACCOUNTS:
-        try:
-            await bot.send_message(
-                owner_id,
-                f"⚠️ <b>Аккаунт деактивирован</b>\n\n"
-                f"Один из ваших TG-аккаунтов был автоматически деактивирован "
-                f"(получен PeerFlood или бан).\n"
-                f"Активных аккаунтов осталось: <b>{cnt}</b>.\n\n"
-                f"Добавьте новые аккаунты в разделе <b>Аккаунты</b>.",
-            )
-        except Exception as exc:
-            log.warning("account_monitor.check_owner_now: failed for owner=%s: %s", owner_id, exc)
+        await db.notify_if_enabled(
+            pool, bot, owner_id, "restriction",
+            f"⚠️ <b>Аккаунт деактивирован</b>\n\n"
+            f"Один из ваших TG-аккаунтов был автоматически деактивирован "
+            f"(получен PeerFlood или бан).\n"
+            f"Активных аккаунтов осталось: <b>{cnt}</b>.\n\n"
+            f"Добавьте новые аккаунты в разделе <b>Аккаунты</b>.",
+        )
 
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
