@@ -483,7 +483,7 @@ async def cb_cancel_op(
         else:
             progress = f"{total} элементов"
         lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
-        if status == "pending":
+        if status in ("pending", "running"):
             kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
     await callback.message.edit_text(
         "\n".join(lines),
@@ -600,7 +600,7 @@ async def cb_queue(
 
         lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
 
-        if status == "pending":
+        if status in ("pending", "running"):
             kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
 
     await callback.message.edit_text(
