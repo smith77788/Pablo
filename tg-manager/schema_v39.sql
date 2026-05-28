@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS platform_users (
     notes TEXT
 );
 
--- Add missing columns if table already exists
+-- Add missing columns if table already exists (schema_v14 had last_active/first_seen/is_blocked)
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT now();
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ DEFAULT now();
 ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS current_plan TEXT DEFAULT 'free';
 ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ;
 ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT false;
@@ -24,6 +26,10 @@ ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
 ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
 ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS referrer_id BIGINT REFERENCES platform_users(user_id) ON DELETE SET NULL;
 ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Backfill from old column names if they exist
+UPDATE platform_users SET last_seen = last_active WHERE last_seen IS NULL AND last_active IS NOT NULL;
+UPDATE platform_users SET registered_at = first_seen WHERE registered_at IS NULL AND first_seen IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_platform_users_plan ON platform_users(current_plan);
 CREATE INDEX IF NOT EXISTS idx_platform_users_registered ON platform_users(registered_at DESC);

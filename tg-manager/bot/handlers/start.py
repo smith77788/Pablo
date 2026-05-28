@@ -77,9 +77,9 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
                 message.from_user.username,
                 message.from_user.first_name or "",
             )
-        elif existing and existing["last_active"]:
+        elif existing and (existing.get("last_seen") or existing.get("last_active")):
             # Record reentry if user was absent 7+ days
-            last = existing["last_active"]
+            last = existing.get("last_seen") or existing.get("last_active")
             if last.tzinfo is None:
                 last = last.replace(tzinfo=timezone.utc)
             days_absent = (datetime.now(timezone.utc) - last).total_seconds() / 86400
