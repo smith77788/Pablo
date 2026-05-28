@@ -275,3 +275,16 @@ class GeoPresenceCb(CallbackData, prefix="gp"):
     plan_id: int = 0
     page: int = 0
     item: Optional[str] = None
+
+
+class TplBotApplyCb(CallbackData, prefix="tba"):
+    tpl_id: int = 0           # 0 = preset, >0 = user template id
+    bot_id: int = 0           # target managed bot
+    preset_key: Optional[str] = None   # 'asset_type:preset_id' for library presets
+
+
+class LibCb(CallbackData, prefix="lib"):
+    action: str
+    asset_type: Optional[str] = None
+    preset_key: Optional[str] = None  # 'channel:news_channel'
+    page: int = 0
