@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS platform_users (
     first_name TEXT,
     registered_at TIMESTAMPTZ DEFAULT now(),
     last_seen TIMESTAMPTZ DEFAULT now(),
-    current_plan TEXT DEFAULT 'free',  -- free|starter|pro|enterprise
+    current_plan TEXT DEFAULT 'free',
     plan_expires_at TIMESTAMPTZ,
     is_banned BOOLEAN DEFAULT false,
     ban_reason TEXT,
@@ -15,6 +15,15 @@ CREATE TABLE IF NOT EXISTS platform_users (
     referrer_id BIGINT REFERENCES platform_users(user_id) ON DELETE SET NULL,
     notes TEXT
 );
+
+-- Add missing columns if table already exists
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS current_plan TEXT DEFAULT 'free';
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ;
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT false;
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS referrer_id BIGINT REFERENCES platform_users(user_id) ON DELETE SET NULL;
+ALTER TABLE platform_users ADD COLUMN IF NOT EXISTS notes TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_platform_users_plan ON platform_users(current_plan);
 CREATE INDEX IF NOT EXISTS idx_platform_users_registered ON platform_users(registered_at DESC);
