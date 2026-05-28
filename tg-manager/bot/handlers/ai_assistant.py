@@ -61,6 +61,9 @@ _FALLBACK_MODELS = [
     "openai/gpt-4o-mini",
     "openai/gpt-4o",
     "google/gemini-flash-1.5",
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
 ]
 
 
@@ -339,8 +342,16 @@ async def _call_openrouter(
     tools = _openai_tools()
     primary_model = _get_model()
     models_to_try = _get_models_to_try()
+    # (model, max_tokens) pairs — при 402 пробуем меньше токенов у той же модели
+    attempts: list[tuple[str, int]] = [(m, 1500) for m in models_to_try]
+    attempts += [(m, 600) for m in models_to_try]  # fallback с меньшим контекстом
 
-    for model in models_to_try:
+    seen: set[tuple[str, int]] = set()
+
+    for model, max_tokens in attempts:
+        if (model, max_tokens) in seen:
+            continue
+        seen.add((model, max_tokens))
         current_messages = list(base_messages)
         try:
             pending_action_data = None
@@ -350,7 +361,7 @@ async def _call_openrouter(
                     messages=current_messages,
                     tools=tools,
                     tool_choice="auto",
-                    max_tokens=1500,
+                    max_tokens=max_tokens,
                 )
                 choice = response.choices[0]
                 msg = choice.message
@@ -419,14 +430,22 @@ async def _call_openrouter(
             should_retry = any(x in err_str for x in (
                 "rate", "limit", "429", "quota", "overloaded", "timeout",
                 "model_not_found", "not found", "404", "invalid model",
+                "402", "credits", "payment", "billing", "insufficient",
             ))
             if should_retry:
-                log.warning("Model %s failed (%s), trying next", model, type(e).__name__)
+                log.warning("Model %s (max_tokens=%d) failed (%s), trying next", model, max_tokens, type(e).__name__)
                 continue
             log.exception("OpenRouter API error with model %s: %s", model, e)
             return f"⚠️ Ошибка AI-ассистента ({model}): {type(e).__name__}: {str(e)[:120]}"
 
-    return "⚠️ Все модели недоступны. Попробуйте позже или смените OPENROUTER_MODEL."
+    return (
+        "⚠️ <b>AI-ассистент временно недоступен</b>\n\n"
+        "Все модели недоступны. Возможные причины:\n"
+        "• Недостаточно кредитов на OpenRouter — пополните счёт\n"
+        "• Временная перегрузка серверов — попробуйте через несколько минут\n"
+        "• Неверный ключ <code>OPENROUTER_API_KEY</code>\n\n"
+        "Сменить модель можно через Admin → ⚙️ Системный режим."
+    )
 
 
 async def _process_ai_turn(
