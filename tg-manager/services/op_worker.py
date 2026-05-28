@@ -444,9 +444,10 @@ async def _exec_global_presence_channel(
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
     accounts_rows = await pool.fetch(
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, a.trust_score, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.id = ANY($1) AND a.is_active=true",
+        "WHERE a.id = ANY($1) AND a.is_active=true "
+        "ORDER BY a.trust_score DESC NULLS LAST",
         acc_ids,
     )
     acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
@@ -479,11 +480,41 @@ async def _exec_global_presence_channel(
             await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             continue
 
+        # ── Проверка trust_score аккаунта перед использованием ──
+        trust_score = acc.get("trust_score") or 0.5
+        if trust_score < 0.3:
+            log.warning(
+                "op_worker gp_%s: skipping account %s with low trust_score=%.2f",
+                "group" if is_group else "channel",
+                acc["phone"], trust_score,
+            )
+            # Попробовать найти альтернативный аккаунт с лучшим trust_score
+            alt_acc = None
+            for a in accounts_rows:
+                if a["id"] != acc_id and (a.get("trust_score") or 0.5) >= 0.5:
+                    alt_acc = dict(a)
+                    log.info("op_worker gp: switching to account %s with trust=%.2f", a["phone"], a.get("trust_score"))
+                    break
+
+            if not alt_acc:
+                await pool.execute(
+                    "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
+                    f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})", target["id"],
+                )
+                failed_count += 1
+                await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                continue
+
+            acc = alt_acc
+
         await pool.execute(
             "UPDATE global_presence_targets SET status='running' WHERE id=$1", target["id"]
         )
 
         title = target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
+
+        # ── Умная задержка перед созданием ──
+        await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
 
         result = await account_manager.create_channel(
             acc["session_str"], title, about="", megagroup=is_group, _acc=acc
@@ -517,7 +548,9 @@ async def _exec_global_presence_channel(
         username_error = None
         planned_username = target.get("planned_username")
         if planned_username and channel_id:
-            await asyncio.sleep(random.uniform(15, 25))
+            # ── Умная пауза перед установкой username ──
+            pause = random.uniform(15, 25) * session_simulator.chaos_factor()
+            await asyncio.sleep(pause)
             err = await account_manager.set_channel_username(
                 acc["session_str"], channel_id, planned_username, _acc=acc
             )
@@ -574,13 +607,19 @@ async def _exec_global_presence_channel(
                 pass
 
         if i < total - 1:
-            tod_factor = session_simulator.time_of_day_factor()
+            # ── Почитай daily rhythm и избегай ночных часов пиков ──
+            tod_factor = session_simulator.time_of_day_factor()  # 2-5x at night, 0.75x at peak
+            chaos = session_simulator.chaos_factor()  # 0.7-1.3
+            jitter = session_simulator.micro_jitter()  # ±10% микро-шум
+
             if i % 5 == 4:
-                cooldown = random.uniform(300, 600) * session_simulator.chaos_factor() * tod_factor
-                log.info("op_worker gp_channel: cooldown %.0fs after %d items", cooldown, i + 1)
+                # Длинная пауза каждые 5 операций (имитация человеческого перерыва)
+                cooldown = random.uniform(300, 600) * chaos * tod_factor * jitter
+                log.info("op_worker gp_channel: cooldown %.0fs after %d items (tod_factor=%.2f)", cooldown, i + 1, tod_factor)
                 await asyncio.sleep(cooldown)
             else:
-                delay = random.uniform(45, 90) * session_simulator.chaos_factor() * tod_factor
+                # Короткая пауза между операциями
+                delay = random.uniform(45, 90) * chaos * tod_factor * jitter
                 await asyncio.sleep(delay)
 
     final_status = "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
