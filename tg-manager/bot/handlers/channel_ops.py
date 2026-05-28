@@ -3470,6 +3470,7 @@ async def cb_cinv_run(
         channel_identifier=channel_identifier,
         access_hash=access_hash,
         channel_display=channel_display,
+        pool=pool,
     ))
 
 
@@ -3488,9 +3489,46 @@ async def _get_managed_channels_cached(pool: asyncpg.Pool, owner_id: int) -> lis
 async def _cinv_bg(
     bot, user_id: int, acc_rows: list,
     channel_id: int, channel_identifier: str, access_hash: int, channel_display: str,
+    pool=None,
 ) -> None:
-    """Background task: collect contacts from accounts and invite to channel."""
+    """Background task: collect contacts from accounts and invite to channel.
+
+    The first account in acc_rows is treated as the primary (channel admin).
+    It auto-promotes all other accounts to admin before distributing invite work.
+    """
     from services import account_manager as _am
+
+    chan_target = channel_id if channel_id else channel_identifier
+
+    # 0. Auto-promote co-accounts to admin using the first (primary) account
+    if len(acc_rows) > 1 and pool is not None:
+        primary = acc_rows[0]
+        primary_dict = dict(primary)
+        promo_ok = 0
+        for other in acc_rows[1:]:
+            tg_uid = other.get("tg_user_id")
+            if not tg_uid:
+                # Try fetching tg_user_id from DB if not already in the row
+                try:
+                    row = await pool.fetchrow(
+                        "SELECT tg_user_id FROM tg_accounts WHERE id=$1", other["id"]
+                    )
+                    tg_uid = row["tg_user_id"] if row else None
+                except Exception:
+                    pass
+            if tg_uid:
+                try:
+                    ok = await _am.promote_to_admin(
+                        primary["session_str"], chan_target, tg_uid, _acc=primary_dict
+                    )
+                    if ok:
+                        promo_ok += 1
+                except Exception as e:
+                    log.warning("cinv auto-promote acc=%s: %s", other["id"], e)
+            await asyncio.sleep(2)
+
+        if promo_ok > 0:
+            log.info("cinv: promoted %d co-accounts to admin in %s", promo_ok, chan_target)
 
     # 1. Collect and deduplicate contacts
     contacts_map: dict[int, dict] = {}
@@ -3534,7 +3572,6 @@ async def _cinv_bg(
         return
 
     # 3. Split list among accounts (round-robin distribution)
-    chan_target = channel_id if channel_id else channel_identifier
     n = len(acc_rows)
     chunks = [identifiers[i::n] for i in range(n)]
 
