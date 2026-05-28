@@ -3416,8 +3416,10 @@ async def cb_cinv_proceed(
     )
     from services import account_manager as _am
     acc_rows = await pool.fetch(
-        "SELECT id, session_str, first_name, username, device_model, system_version, app_version FROM tg_accounts "
-        "WHERE id = ANY($1::int[]) AND owner_id=$2 AND is_active=true",
+        "SELECT a.id, a.session_str, a.first_name, a.username, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
         selected_accs, callback.from_user.id,
     )
     unique_ids: set[int] = set()
