@@ -220,10 +220,40 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "main"))
-async def cb_main(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     log.info("BotMother cb_main from user %s", callback.from_user.id)
     await callback.answer()
-    await _edit(callback, _MAIN_MENU_TEXT, _main_menu_kb())
+    user_id = callback.from_user.id
+
+    # Append live system status indicator
+    status_line = ""
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                COUNT(*) FILTER (WHERE oq.status='running') AS running_ops,
+                COUNT(*) FILTER (WHERE ta.cooldown_until > now()) AS in_cooldown,
+                COUNT(*) FILTER (WHERE re.id IS NOT NULL) AS new_alerts
+            FROM (SELECT 1) x
+            LEFT JOIN operation_queue oq ON oq.owner_id=$1 AND oq.status='running'
+            LEFT JOIN tg_accounts ta ON ta.owner_id=$1 AND ta.is_active=true
+            LEFT JOIN restriction_events re ON re.owner_id=$1
+                AND re.created_at > now() - INTERVAL '24 hours'""",
+            user_id,
+        )
+        if row:
+            parts = []
+            if (row["running_ops"] or 0) > 0:
+                parts.append(f"⚙️ {row['running_ops']} активных оп.")
+            if (row["in_cooldown"] or 0) > 0:
+                parts.append(f"⏳ {row['in_cooldown']} в кулдауне")
+            if (row["new_alerts"] or 0) > 0:
+                parts.append(f"🔔 {row['new_alerts']} новых алертов")
+            if parts:
+                status_line = "\n\n<i>📊 " + " · ".join(parts) + "</i>"
+    except Exception:
+        pass
+
+    await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
 
 
 # ── Infrastructure ────────────────────────────────────────────────────────
@@ -1235,6 +1265,8 @@ async def cb_op_detail(
     kb.button(text="📥 CSV лог операции", callback_data=BmCb(action="op_csv", op_id=op_id))
     if op["status"] == "failed":
         kb.button(text="🔄 Повторить операцию", callback_data=BmCb(action="op_retry", op_id=op_id))
+    if op["status"] == "running":
+        kb.button(text="🔄 Обновить прогресс", callback_data=BmCb(action="op_detail", op_id=op_id))
     kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
     kb.adjust(1)
     await _edit(callback, "\n".join(lines), kb.as_markup())
