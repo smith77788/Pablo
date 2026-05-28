@@ -539,6 +539,44 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
+    # Fetch 7-day position history for trend analysis
+    kw_ids = [kw["keyword_id"] for kw in kws if kw.get("keyword_id")]
+    trend_map: dict[int, dict] = {}
+    if kw_ids:
+        try:
+            hist_rows = await pool.fetch(
+                """SELECT keyword_id,
+                          MAX(position) FILTER (WHERE position IS NOT NULL) AS worst_7d,
+                          MIN(position) FILTER (WHERE position IS NOT NULL) AS best_7d,
+                          (array_agg(position ORDER BY checked_at DESC))[1] AS latest,
+                          (array_agg(position ORDER BY checked_at DESC))[2] AS prev
+                   FROM search_rankings
+                   WHERE keyword_id = ANY($1)
+                     AND checked_at > now() - INTERVAL '7 days'
+                   GROUP BY keyword_id""",
+                kw_ids,
+            )
+            for r in hist_rows:
+                kid = r["keyword_id"]
+                latest = r["latest"]
+                prev = r["prev"]
+                if latest is not None and prev is not None:
+                    if latest < prev:
+                        arrow = "↗️"
+                    elif latest > prev:
+                        arrow = "↘️"
+                    else:
+                        arrow = "→"
+                else:
+                    arrow = "—"
+                trend_map[kid] = {
+                    "best": r["best_7d"],
+                    "worst": r["worst_7d"],
+                    "arrow": arrow,
+                }
+        except Exception:
+            pass
+
     by_bot: dict[str, list] = {}
     for kw in kws:
         bot_u = kw["bot_username"] or f"id{kw['bot_id']}"
@@ -549,6 +587,8 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         lines.append(f"\n<b>@{html.escape(bot_u)}</b>")
         for kw in items:
             pos = kw["position"]
+            kid = kw.get("keyword_id")
+            td = trend_map.get(kid, {})
             if pos is None:
                 pos_str = "—"
             elif pos <= 3:
@@ -560,7 +600,11 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             else:
                 pos_str = f"🔴 #{pos}"
             kw_text = html.escape(kw["keyword"])
-            lines.append(f"  • {kw_text}: {pos_str}")
+            arrow = td.get("arrow", "")
+            best = td.get("best")
+            trend_suffix = f" {arrow}" if arrow and arrow != "—" else ""
+            best_suffix = f" <i>(лучш. #{best})</i>" if best and best != pos else ""
+            lines.append(f"  • {kw_text}: {pos_str}{trend_suffix}{best_suffix}")
 
     text = "<b>📋 Отчёт по позициям в поиске</b>" + "\n".join(lines)
     if len(text) > 4000:
