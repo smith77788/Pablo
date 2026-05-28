@@ -78,9 +78,14 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
             json.dumps(result), op_id,
         )
         summary = result.get("summary", "")
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
         await db.notify_if_enabled(
             pool, bot, owner_id, "op_complete",
             f"✅ <b>Операция #{op_id}</b> завершена\n{summary}",
+            reply_markup=kb.as_markup(),
         )
 
     except Exception as e:
@@ -89,9 +94,14 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
             "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
             str(e)[:500], op_id,
         )
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
         await db.notify_if_enabled(
             pool, bot, owner_id, "op_complete",
             f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n<code>{str(e)[:200]}</code>",
+            reply_markup=kb.as_markup(),
         )
 
 

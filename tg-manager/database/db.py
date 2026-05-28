@@ -2193,13 +2193,14 @@ async def notify_if_enabled(
     user_id: int,
     pref: str,
     text: str,
+    reply_markup=None,
 ) -> None:
     """Send a notification to user only if the given preference flag is True."""
     try:
         settings = await get_notification_settings(pool, user_id)
         if not settings.get(pref, True):
             return
-        await bot.send_message(user_id, text, parse_mode="HTML")
+        await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=reply_markup)
     except Exception:
         pass
 
