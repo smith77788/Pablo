@@ -3460,7 +3460,7 @@ async def cb_cinv_run(
     await callback.answer()
     await state.clear()
     acc_rows = await pool.fetch(
-        "SELECT a.id, a.session_str, a.first_name, a.username, a.phone, "
+        "SELECT a.id, a.session_str, a.tg_user_id, a.first_name, a.username, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
         "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
@@ -3473,8 +3473,10 @@ async def cb_cinv_run(
         f"🚀 <b>Инвайт запущен в фоне</b>\n\n"
         f"Канал: <b>{channel_display}</b>\n"
         f"Аккаунтов: <b>{len(acc_rows)}</b>\n\n"
-        "⚠️ <i>Все участвующие аккаунты должны быть администраторами канала.\n"
-        "Используйте: Управление каналом → 👑 Со-Администраторы</i>\n\n"
+        "<i>Система автоматически подготовит аккаунты к инвайту:\n"
+        "1️⃣ Добавит их в канал\n"
+        "2️⃣ Сделает администраторами\n"
+        "3️⃣ Распределит контакты для инвайта</i>\n\n"
         "Уведомление придёт когда всё завершится.",
         parse_mode="HTML", reply_markup=_back_kb().as_markup(),
     )
