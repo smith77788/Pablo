@@ -962,6 +962,7 @@ async def cb_op_reports(
         return
 
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    kb = InlineKeyboardBuilder()
     lines = []
     for op in ops:
         emoji = status_emoji.get(op["status"], "❓")
@@ -972,11 +973,15 @@ async def cb_op_reports(
         else:
             progress = "—"
         lines.append(f"{emoji} <code>{dt}</code> {otype} [{progress}]")
+        kb.button(
+            text=f"🔍 #{op['id']} {otype}",
+            callback_data=BmCb(action="op_detail", op_id=op["id"]),
+        )
 
     total_pages = max(1, -(-total // limit))
     text = f"<b>📊 Отчёты по операциям</b>  стр. {page + 1}/{total_pages}\n\n" + "\n".join(lines)
 
-    kb = InlineKeyboardBuilder()
+    kb.adjust(1)
     nav = []
     if page > 0:
         nav.append(kb.button(text="◀️", callback_data=BmCb(action="op_reports", page=page - 1)))
@@ -986,6 +991,74 @@ async def cb_op_reports(
         kb.adjust(len(nav))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     await _edit(callback, text, kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "op_detail"))
+async def cb_op_detail(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    op_id = callback_data.op_id
+
+    op = await pool.fetchrow(
+        "SELECT id, op_type, status, params, result, error_msg, "
+        "total_items, done_items, created_at, started_at, finished_at "
+        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    if not op:
+        await callback.answer("Операция не найдена.", show_alert=True)
+        return
+
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    emoji = status_emoji.get(op["status"], "❓")
+    dt_created = op["created_at"].strftime("%d.%m.%Y %H:%M")
+    dt_finished = op["finished_at"].strftime("%d.%m.%Y %H:%M") if op["finished_at"] else "—"
+
+    lines = [
+        f"<b>📋 Операция #{op_id}</b>\n",
+        f"Тип: <code>{html.escape(op['op_type'])}</code>",
+        f"Статус: {emoji} {op['status']}",
+        f"Создана: <code>{dt_created}</code>",
+        f"Завершена: <code>{dt_finished}</code>",
+    ]
+    if op["total_items"]:
+        pct = round(100 * op["done_items"] / op["total_items"]) if op["total_items"] else 0
+        lines.append(f"Прогресс: {op['done_items']}/{op['total_items']} ({pct}%)")
+
+    if op["error_msg"]:
+        lines.append(f"\n❌ <b>Ошибка:</b>\n<code>{html.escape(op['error_msg'][:300])}</code>")
+
+    if op["result"]:
+        import json as _json
+        try:
+            res = op["result"] if isinstance(op["result"], dict) else _json.loads(op["result"])
+            summary = res.get("summary", "")
+            if summary:
+                lines.append(f"\n✅ <b>Итог:</b> {html.escape(summary)}")
+        except Exception:
+            pass
+
+    # Last 5 steps from operation_log
+    steps = await pool.fetch(
+        "SELECT step_num, target, status, message FROM operation_log "
+        "WHERE op_id=$1 ORDER BY step_num DESC LIMIT 5",
+        op_id,
+    )
+    if steps:
+        lines.append("\n<b>Последние шаги:</b>")
+        for s in reversed(steps):
+            st_emoji = "✅" if s["status"] == "ok" else "❌"
+            tgt = html.escape((s["target"] or "")[:30])
+            msg = html.escape((s["message"] or "")[:50])
+            lines.append(f"  {st_emoji} #{s['step_num']} {tgt}" + (f" — {msg}" if msg else ""))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
+    await _edit(callback, "\n".join(lines), kb.as_markup())
 
 
 # ── Schedules (bot picker → ScheduleCb) ──────────────────────────────────

@@ -192,6 +192,7 @@ class BmCb(CallbackData, prefix="bm"):
     action: str
     sub: Optional[str] = None
     page: int = 0
+    op_id: int = 0
 
 
 class AssetTplCb(CallbackData, prefix="atpl"):
