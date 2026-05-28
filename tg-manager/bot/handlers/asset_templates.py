@@ -19,8 +19,8 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 
-from bot.callbacks import AssetTplCb, ChanFactCb, GroupFCb, MassPubCb
-from bot.states import AssetTemplateFSM, ChannelFactoryFSM, CreateGroupFSM
+from bot.callbacks import AssetTplCb, ChanFactCb, GroupFCb, MassPubCb, MassOpCb
+from bot.states import AssetTemplateFSM, ChannelFactoryFSM, CreateGroupFSM, BulkJoinFSM, BulkLeaveFSM
 from bot.utils.op_helpers import _get_active_accounts
 from database import db
 
@@ -30,10 +30,11 @@ router = Router()
 # ── Asset type metadata ────────────────────────────────────────────────────────
 
 _TYPE_LABELS = {
-    "bot":     "🤖 Бот",
-    "channel": "📡 Канал",
-    "group":   "👥 Группа",
-    "post":    "📝 Пост",
+    "bot":       "🤖 Бот",
+    "channel":   "📡 Канал",
+    "group":     "👥 Группа",
+    "post":      "📝 Пост",
+    "operation": "⚙️ Операция",
 }
 
 _TYPE_PROMPTS = {
@@ -63,6 +64,16 @@ _TYPE_PROMPTS = {
         "<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
         "<code>&lt;a href=...&gt;</code> и т.д.)."
     ),
+    "operation": (
+        "⚙️ <b>Шаблон операции — параметры</b>\n\n"
+        "Формат: <code>тип;;;параметр</code>\n\n"
+        "Типы и примеры:\n"
+        "• <code>mass_publish;;;Текст поста</code>\n"
+        "• <code>bulk_join;;;@channel1\n@channel2</code>\n"
+        "• <code>bulk_leave;;;@channel1\n@channel2</code>\n"
+        "• <code>bulk_bot_edit;;;name;;;Новое имя</code>\n\n"
+        "Для bulk_bot_edit поле: <code>name</code>, <code>desc</code>, <code>short_desc</code>"
+    ),
 }
 
 
@@ -70,13 +81,14 @@ _TYPE_PROMPTS = {
 
 def _menu_kb() -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Шаблоны ботов",    callback_data=AssetTplCb(action="list", asset_type="bot"))
-    kb.button(text="📡 Шаблоны каналов",  callback_data=AssetTplCb(action="list", asset_type="channel"))
-    kb.button(text="👥 Шаблоны групп",    callback_data=AssetTplCb(action="list", asset_type="group"))
-    kb.button(text="📝 Шаблоны постов",   callback_data=AssetTplCb(action="list", asset_type="post"))
-    kb.button(text="➕ Создать",           callback_data=AssetTplCb(action="create"))
-    kb.button(text="◀️ Назад",            callback_data=AssetTplCb(action="back"))
-    kb.adjust(2, 2, 2)
+    kb.button(text="🤖 Шаблоны ботов",      callback_data=AssetTplCb(action="list", asset_type="bot"))
+    kb.button(text="📡 Шаблоны каналов",    callback_data=AssetTplCb(action="list", asset_type="channel"))
+    kb.button(text="👥 Шаблоны групп",      callback_data=AssetTplCb(action="list", asset_type="group"))
+    kb.button(text="📝 Шаблоны постов",     callback_data=AssetTplCb(action="list", asset_type="post"))
+    kb.button(text="⚙️ Шаблоны операций",  callback_data=AssetTplCb(action="list", asset_type="operation"))
+    kb.button(text="➕ Создать",             callback_data=AssetTplCb(action="create"))
+    kb.button(text="◀️ Назад",              callback_data=AssetTplCb(action="back"))
+    kb.adjust(2, 2, 1, 2)
     return kb.as_markup()
 
 
@@ -102,12 +114,13 @@ def _list_kb(templates: list, asset_type: str) -> object:
 
 def _type_choice_kb() -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Бот",      callback_data=AssetTplCb(action="choose_type", asset_type="bot"))
-    kb.button(text="📡 Канал",    callback_data=AssetTplCb(action="choose_type", asset_type="channel"))
-    kb.button(text="👥 Группа",   callback_data=AssetTplCb(action="choose_type", asset_type="group"))
-    kb.button(text="📝 Пост",     callback_data=AssetTplCb(action="choose_type", asset_type="post"))
-    kb.button(text="◀️ Отмена",   callback_data=AssetTplCb(action="menu"))
-    kb.adjust(2, 2, 1)
+    kb.button(text="🤖 Бот",         callback_data=AssetTplCb(action="choose_type", asset_type="bot"))
+    kb.button(text="📡 Канал",       callback_data=AssetTplCb(action="choose_type", asset_type="channel"))
+    kb.button(text="👥 Группа",      callback_data=AssetTplCb(action="choose_type", asset_type="group"))
+    kb.button(text="📝 Пост",        callback_data=AssetTplCb(action="choose_type", asset_type="post"))
+    kb.button(text="⚙️ Операция",   callback_data=AssetTplCb(action="choose_type", asset_type="operation"))
+    kb.button(text="◀️ Отмена",     callback_data=AssetTplCb(action="menu"))
+    kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -321,6 +334,33 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
     # Parse input into a template dict
     if asset_type == "post":
         template = {"text": raw}
+    elif asset_type == "operation":
+        parts = [p.strip() for p in raw.split(";;;")]
+        op_type = parts[0] if parts else "mass_publish"
+        if op_type == "mass_publish":
+            template = {"op_type": op_type, "text": parts[1] if len(parts) > 1 else ""}
+        elif op_type == "bulk_join":
+            links = [ln.strip() for ln in (parts[1] if len(parts) > 1 else "").splitlines() if ln.strip()]
+            template = {"op_type": op_type, "links": links}
+        elif op_type == "bulk_leave":
+            channels = [ln.strip() for ln in (parts[1] if len(parts) > 1 else "").splitlines() if ln.strip()]
+            template = {"op_type": op_type, "channels": channels}
+        elif op_type == "bulk_bot_edit":
+            template = {
+                "op_type": op_type,
+                "field": parts[1] if len(parts) > 1 else "",
+                "value": parts[2] if len(parts) > 2 else "",
+            }
+        else:
+            template = {"op_type": op_type}
+        if not op_type or op_type not in ("mass_publish", "bulk_join", "bulk_leave", "bulk_bot_edit"):
+            await message.answer(
+                "❌ Неверный тип операции. Используйте: "
+                "<code>mass_publish</code>, <code>bulk_join</code>, "
+                "<code>bulk_leave</code>, <code>bulk_bot_edit</code>",
+                parse_mode="HTML",
+            )
+            return
     else:
         parts = [p.strip() for p in raw.split(";;;")]
         if asset_type == "bot":
@@ -456,6 +496,71 @@ async def cb_apply(
             f"📝 <b>Шаблон поста «{html.escape(tpl_name)}»</b>\n\n"
             f"<i>Превью:</i>\n{preview}\n\n"
             "Нажмите «Создать рассылку» — текст будет подставлен автоматически.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+    elif asset_type == "operation":
+        op_type = data.get("op_type", "")
+        _OP_LABELS = {
+            "mass_publish": "📤 Массовая публикация",
+            "bulk_join": "🔗 Массовый join",
+            "bulk_leave": "🚪 Массовый leave",
+            "bulk_bot_edit": "✏️ Редактирование ботов",
+        }
+        op_label = _OP_LABELS.get(op_type, op_type)
+
+        lines = [f"⚙️ <b>Шаблон операции «{html.escape(tpl_name)}»</b>\n", f"Тип: {op_label}"]
+        if op_type == "mass_publish":
+            text_val = data.get("text", "")
+            lines.append(f"Текст: <i>{html.escape(text_val[:200])}</i>")
+            await state.update_data(tpl_prefill=data)
+            kb = InlineKeyboardBuilder()
+            kb.button(text="📤 Запустить публикацию", callback_data=MassPubCb(action="start"))
+            kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
+            kb.adjust(1)
+        elif op_type == "bulk_join":
+            links = data.get("links", [])
+            lines.append(f"Каналов: {len(links)}")
+            for ln in links[:5]:
+                lines.append(f"  • {html.escape(ln)}")
+            await state.update_data(bj_links=links)
+            await state.set_state(BulkJoinFSM.choosing_accounts)
+            accounts = await _get_active_accounts(pool, callback.from_user.id)
+            kb = InlineKeyboardBuilder()
+            kb.button(text="👥 Все аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
+            for acc in accounts[:8]:
+                from bot.utils.op_helpers import _acc_label
+                kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]))
+            kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
+            kb.adjust(1)
+        elif op_type == "bulk_leave":
+            channels = data.get("channels", [])
+            lines.append(f"Каналов: {len(channels)}")
+            for ch in channels[:5]:
+                lines.append(f"  • {html.escape(ch)}")
+            await state.update_data(bl_channels=channels)
+            await state.set_state(BulkLeaveFSM.choosing_accounts)
+            accounts = await _get_active_accounts(pool, callback.from_user.id)
+            kb = InlineKeyboardBuilder()
+            kb.button(text="👥 Все аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
+            for acc in accounts[:8]:
+                from bot.utils.op_helpers import _acc_label
+                kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]))
+            kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
+            kb.adjust(1)
+        else:  # bulk_bot_edit
+            field = data.get("field", "")
+            value = data.get("value", "")
+            lines.append(f"Поле: <code>{html.escape(field)}</code>")
+            lines.append(f"Значение: <i>{html.escape(value[:200])}</i>")
+            kb = InlineKeyboardBuilder()
+            kb.button(text="✏️ Перейти к редактированию", callback_data=MassOpCb(action="bulk_bot_edit"))
+            kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
+            kb.adjust(1)
+
+        await callback.message.edit_text(
+            "\n".join(lines),
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
