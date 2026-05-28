@@ -1481,12 +1481,36 @@ async def cb_behavioral(
         if not rows:
             text = f"<b>{title}</b>\n\nДанных ещё нет. Поведенческие оценки обновляются каждые 15 минут."
         else:
+            # Resolve entity names: batch-query bots, channels, keywords
+            bot_ids = [r["entity_id"] for r in rows if r["entity_type"] == "bot"]
+            chan_ids = [r["entity_id"] for r in rows if r["entity_type"] == "channel"]
+            kw_ids  = [r["entity_id"] for r in rows if r["entity_type"] == "keyword"]
+            names: dict[tuple, str] = {}
+            if bot_ids:
+                bname_rows = await pool.fetch(
+                    "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm "
+                    "FROM managed_bots WHERE bot_id = ANY($1)", bot_ids)
+                for b in bname_rows:
+                    names[("bot", b["bot_id"])] = f"@{b['nm']}"
+            if chan_ids:
+                cname_rows = await pool.fetch(
+                    "SELECT channel_id, COALESCE(username, title, channel_id::text) AS nm "
+                    "FROM managed_channels WHERE channel_id = ANY($1)", chan_ids)
+                for c in cname_rows:
+                    names[("channel", c["channel_id"])] = c["nm"]
+            if kw_ids:
+                kwname_rows = await pool.fetch(
+                    "SELECT id, keyword FROM tracked_keywords WHERE id = ANY($1)", kw_ids)
+                for k in kwname_rows:
+                    names[("keyword", k["id"])] = k["keyword"]
+
             lines = [f"<b>{title}</b>\n"]
             for r in rows:
                 etype = r["entity_type"]
                 eid = r["entity_id"]
                 score_val = r.get(label, 0) or 0
-                lines.append(f"• {etype} #{eid} — {score_val:.1f}")
+                entity_name = names.get((etype, eid), f"{etype} #{eid}")
+                lines.append(f"• {html.escape(entity_name)} — {score_val:.1f}")
             text = "\n".join(lines)
 
     await _edit(callback, text, _behavioral_kb(sub))
