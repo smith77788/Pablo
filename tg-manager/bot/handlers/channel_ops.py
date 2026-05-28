@@ -600,14 +600,18 @@ async def cb_do_bulk_create(
     await state.clear()
     if selected_ids:
         accounts = await pool.fetch(
-            "SELECT id, session_str, first_name, phone FROM tg_accounts "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
             callback.from_user.id, selected_ids,
         )
     else:
         accounts = await pool.fetch(
-            "SELECT id, session_str, first_name, phone FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE",
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.is_active=TRUE",
             callback.from_user.id,
         )
     from services import account_manager
@@ -1787,8 +1791,10 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
         selected_ids = [data["acc_id"]]
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        "SELECT a.id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
         message.from_user.id, selected_ids,
     )
     if not accounts:
@@ -2363,8 +2369,10 @@ async def fsm_bulk_channel_id(message: Message, state: FSMContext, pool: asyncpg
     await state.clear()
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        "SELECT a.id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
         message.from_user.id, selected_ids,
     ) if selected_ids else []
 
@@ -2444,8 +2452,10 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
         channel_ref = data.get("channel_id_ref", "")
         await state.clear()
         accounts = await pool.fetch(
-            "SELECT session_str, first_name, phone FROM tg_accounts "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
             message.from_user.id, selected_ids,
         )
         if not accounts:
@@ -2545,8 +2555,10 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
 
     if is_bulk:
         accounts = await pool.fetch(
-            "SELECT id, session_str, first_name, phone FROM tg_accounts "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
             message.from_user.id, selected_ids,
         )
         if not accounts:
@@ -2632,8 +2644,10 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
 
     if is_bulk:
         accounts = await pool.fetch(
-            "SELECT session_str, first_name, phone FROM tg_accounts "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
             message.from_user.id, selected_ids,
         )
         if not accounts:
@@ -2791,8 +2805,10 @@ async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Po
         return
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE",
+        "SELECT a.id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE",
         message.from_user.id, selected_ids,
     )
     if not accounts:
