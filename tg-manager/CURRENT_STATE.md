@@ -1,18 +1,42 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-28
+Обновлено: 2026-05-28 (r3)
 
 ## Статус: АКТИВНАЯ РАЗРАБОТКА
 
-### ✅ ИСПРАВЛЕНО: BotMother OS теперь единственная точка входа
+### ✅ КОНСОЛИДАЦИЯ: BotMother OS — единственная точка входа
 
-Были множественные команды вне меню (`/ai`, `/accounts`, `/ops` и т.д.).
-**Все заменены на redirect в BotMother OS.**
+Все 6 прямых команд заменены на redirect в BotMother OS:
+- `/ai` → BotMother → 🤖 AI Assistant
+- `/accounts` → BotMother → 🏗️ Infrastructure → 📱 Аккаунты
+- `/ops` → BotMother → 🏗️ Infrastructure → 📡 Каналы & операции
+- `/ranking` → BotMother → 👁️ Visibility → 📊 Позиции
+- `/referral` → BotMother → 💳 Billing → 👥 Referral
+- `/subscription` → BotMother → 💳 Billing
 
-Теперь ВСЕ основные функции доступны ТОЛЬКО через BotMother OS меню.
+**Коммиты:** 9ddf27f (основная) + 549a339 (deploy trigger)
 
 ### ✅ Выполнено в текущей сессии
 
+#### Спринт 1: Консолидация и V2
+1. **BotMother OS consolidation** — ВСЕ команды → меню
+   - Коммит: 9ddf27f (основной) + 549a339 (deploy trigger v2026.05.28-r3)
+   - Все 6 команд переведены на redirect с понятным объяснением
+
+2. **Global Presence Factory V2** — поддержка ГРУПП
+   - Коммит: f7719f0
+   - Включена кнопка 👥 Группы в меню выбора типа актива
+   - Универсальная функция _exec_global_presence_channel поддерживает оба типа
+   - Параметр megagroup=True для групп, megagroup=False для каналов
+   - Динамический текст FSM-шагов в зависимости от типа
+
+3. **Operation Reports Enhancement** — улучшенная статистика
+   - Коммит: 027cf95
+   - Функции: get_operation_stats(), get_user_operation_history(), count_operation_errors()
+   - Operation Reports UI уже был реализован в botmother_menu.py
+   - Детальный анализ ошибок и производительности
+
+#### Спринт 0: Исходная реализация (V1)
 1. **Global Presence Factory V1** — ПОЛНОСТЬЮ РЕАЛИЗОВАН
    - `schema_v35.sql` — таблицы `global_presence_plans` + `global_presence_targets`
    - `services/geo_data.py` — 5 гео-пресетов (EU 44, World 51, Tier-1 50, DACH 20, LATAM 25 городов)
@@ -40,17 +64,23 @@ Last commit: `feat: Global Presence Factory — создание Telegram-при
 
 ### 🔜 Следующие приоритеты
 
-**P0 — Высокий приоритет**:
-1. Operation Planner FSM — UI для scheduled_for в operation_queue (сейчас заглушка)
-2. Notification Delivery — реальная отправка уведомлений через notification_settings
-3. Post Template → Mass Publish auto-prefill
-4. Behavioral collectors — record_reentry в start.py, record_cross_nav в nav
+**P0 — ГОТОВО** ✅
+- [x] Operation Planner FSM — полная реализация с datetime-парсингом
+- [x] Notification Delivery — UI в Settings + вызовы в account_monitor/ranking_checker
+- [x] Post Template → Mass Publish auto-prefill — работает через tpl_prefill
+- [x] Behavioral collectors — record_reentry в start.py, record_cross_nav в botmother_menu.py
 
-**P1 — Средний**:
-5. Global Presence Factory V2 (группы/боты/пакеты, полная гео-база, CSV import)
-6. Operation Builder FSM — полноценный wizard
-7. Visibility Report CSV export
-8. Search Memory drill-down
+**P1 — ГОТОВО** ✅
+- [x] Global Presence Factory V2 — поддержка ГРУПП (f7719f0)
+- [x] Operation Builder FSM — полная реализация с 4 типами операций
+- [x] Operation Reports — UI + новые функции статистики (027cf95)
+- [x] Search Memory drill-down — из behavioral_engine
+
+**P2 — Текущие приоритеты (эта сессия)**
+- [ ] Global Presence Factory V2 — поддержка БОТОВ + пакеты
+- [ ] CSV import для списков городов/целей
+- [ ] UX improvements: описания для всех FSM-шагов
+- [ ] Улучшения reliability: retry-логика для failed операций
 
 ### Проект
 - Stack: aiogram 3.13.1, asyncpg, Telethon, Railway
