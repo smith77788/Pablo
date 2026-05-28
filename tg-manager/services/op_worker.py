@@ -22,6 +22,12 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         await asyncio.sleep(_POLL_INTERVAL)
 
 
+async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
+    """Check if operation was cancelled by user."""
+    row = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
+    return row and row["status"] == "cancelled"
+
+
 async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     # Взять одну pending операцию (LIMIT 1 чтобы не перегружать)
     row = await pool.fetchrow(
@@ -235,12 +241,19 @@ async def _exec_bulk_join(
     fail_count = 0
     step = 0
 
+    from services import session_simulator
     for acc in accounts:
         acc_dict = dict(acc)
-        for link in links:
+        for i, link in enumerate(links):
+            # Check for cancellation before each step
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
+                        "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}"}
             step += 1
             try:
-                await account_manager.join_channel(acc["session_str"], link, _acc=acc_dict)
+                res = await account_manager.join_channel(acc["session_str"], link, _acc=acc_dict)
+                if res.get("error"):
+                    raise Exception(res["error"])
                 ok_count += 1
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
@@ -257,9 +270,11 @@ async def _exec_bulk_join(
                     "VALUES($1,$2,$3,'error',$4)",
                     op_id, step, link, str(e)[:200],
                 )
-            # Anti-flood delay between joins
-            delay = random.uniform(30, 90)
-            await asyncio.sleep(delay)
+            # Human-like anti-flood: 45-120s between joins, extra cooldown every 5
+            if i % 5 == 4:
+                await asyncio.sleep(random.uniform(180, 360) * session_simulator.chaos_factor())
+            else:
+                await asyncio.sleep(random.uniform(45, 120) * session_simulator.chaos_factor())
 
     return {
         "status": "done",
@@ -297,9 +312,14 @@ async def _exec_bulk_leave(
     fail_count = 0
     step = 0
 
+    from services import session_simulator
     for acc in accounts:
         acc_dict = dict(acc)
-        for channel in channels:
+        for i, channel in enumerate(channels):
+            # Check for cancellation before each step
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
+                        "summary": f"Отменено. Вышли: {ok_count}, ошибок: {fail_count}"}
             step += 1
             try:
                 await account_manager.leave_channel(acc["session_str"], channel, _acc=acc_dict)
@@ -319,8 +339,8 @@ async def _exec_bulk_leave(
                     "VALUES($1,$2,$3,'error',$4)",
                     op_id, step, str(channel), str(e)[:200],
                 )
-            delay = random.uniform(5, 15)
-            await asyncio.sleep(delay)
+            # Human-like delay: 15-45s between leaves
+            await asyncio.sleep(random.uniform(15, 45) * session_simulator.chaos_factor())
 
     return {
         "status": "done",

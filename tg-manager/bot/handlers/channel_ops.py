@@ -42,6 +42,9 @@ from database import db
 log = logging.getLogger(__name__)
 router = Router()
 
+# Store active background tasks for cancellation: (user_id, task_type) → Task
+_active_tasks: dict[tuple[int, str], asyncio.Task] = {}
+
 _STARTER = "starter"
 _PRO = "pro"
 
@@ -3472,6 +3475,10 @@ async def cb_cinv_run(
     if not acc_rows:
         await callback.message.edit_text("⚠️ Аккаунты не найдены или деактивированы.")
         return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отменить", callback_data=ContactInvCb(action="cancel_invite"))
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="contact_invite"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🚀 <b>Инвайт запущен в фоне</b>\n\n"
         f"Канал: <b>{channel_display}</b>\n"
@@ -3481,9 +3488,10 @@ async def cb_cinv_run(
         "2️⃣ Сделает администраторами\n"
         "3️⃣ Распределит контакты для инвайта</i>\n\n"
         "Уведомление придёт когда всё завершится.",
-        parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        parse_mode="HTML", reply_markup=kb.as_markup(),
     )
-    asyncio.create_task(_cinv_bg(
+    # Create and store task for cancellation
+    task = asyncio.create_task(_cinv_bg(
         bot=callback.bot,
         user_id=callback.from_user.id,
         acc_rows=list(acc_rows),
@@ -3493,6 +3501,7 @@ async def cb_cinv_run(
         channel_display=channel_display,
         pool=pool,
     ))
+    _active_tasks[(callback.from_user.id, "cinv")] = task
 
 
 @router.callback_query(ContactInvCb.filter(F.action == "cancel"))
@@ -3500,6 +3509,23 @@ async def cb_cinv_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.answer("Отменено.")
     await callback.message.edit_text("❌ Инвайт отменён.", reply_markup=_back_kb().as_markup())
+
+
+@router.callback_query(ContactInvCb.filter(F.action == "cancel_invite"))
+async def cb_cinv_cancel_running(callback: CallbackQuery) -> None:
+    """Отменить уже запущенный фоновый инвайт."""
+    key = (callback.from_user.id, "cinv")
+    task = _active_tasks.get(key)
+    if task and not task.done():
+        task.cancel()
+        _active_tasks.pop(key, None)
+        await callback.answer("✅ Инвайт отменяется...")
+        await callback.message.edit_text(
+            "❌ <b>Инвайт отменён</b>\n\nОперация прервана. Уже приглашённые контакты останутся в канале.",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
+    else:
+        await callback.answer("Нет активного инвайта для отмены.", show_alert=True)
 
 
 async def _get_managed_channels_cached(pool: asyncpg.Pool, owner_id: int) -> list:
@@ -3516,9 +3542,41 @@ async def _cinv_bg(
 
     The first account in acc_rows is treated as the primary (channel admin).
     It auto-promotes all other accounts to admin before distributing invite work.
+    Supports cancellation via asyncio.Task.cancel().
     """
     from services import account_manager as _am
+    try:
+        await _cinv_bg_inner(bot, user_id, acc_rows, channel_id, channel_identifier,
+                             access_hash, channel_display, pool, _am)
+    except asyncio.CancelledError:
+        try:
+            await bot.send_message(
+                user_id,
+                "❌ <b>Инвайт отменён</b>\n\nОперация прервана пользователем.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        log.info("_cinv_bg: cancelled by user %s", user_id)
+    except Exception as exc:
+        try:
+            await bot.send_message(
+                user_id,
+                f"⚠️ <b>Ошибка инвайта</b>\n\n<code>{html.escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        log.exception("_cinv_bg error user=%s: %s", user_id, exc)
+    finally:
+        _active_tasks.pop((user_id, "cinv"), None)
 
+
+async def _cinv_bg_inner(
+    bot, user_id: int, acc_rows: list,
+    channel_id: int, channel_identifier: str, access_hash: int, channel_display: str,
+    pool, _am,
+) -> None:
     chan_target = channel_id if channel_id else channel_identifier
 
     # 0. Auto-add co-accounts to channel, then promote to admin
@@ -3676,7 +3734,7 @@ async def _cinv_bg(
             user_id,
             f"✅ <b>Инвайт завершён!</b>\n\n"
             f"Канал: <b>{html.escape(channel_display)}</b>\n"
-            f"Всего контактов: <b>{len(identifiers):,}</b>\n"
+            f"Контактов обработано: <b>{len(identifiers):,}</b>\n"
             f"Приглашено: <b>{total_invited}</b>\n"
             f"Не удалось: <b>{total_failed}</b>",
             parse_mode="HTML",

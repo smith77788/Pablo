@@ -433,10 +433,15 @@ async def cb_cancel_op(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    await pool.execute(
-        "UPDATE operation_queue SET status='cancelled' WHERE id=$1 AND owner_id=$2 AND status IN ('pending')",
+    # Cancel both pending and running operations
+    result = await pool.execute(
+        "UPDATE operation_queue SET status='cancelled', finished_at=now() "
+        "WHERE id=$1 AND owner_id=$2 AND status IN ('pending','running')",
         callback_data.op_id, callback.from_user.id,
     )
+    if result == "UPDATE 0":
+        await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
+        return
     # Refresh queue view
     rows = await pool.fetch(
         "SELECT id, op_type, status, done_items, total_items, created_at "
