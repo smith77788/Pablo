@@ -1184,13 +1184,14 @@ async def cb_manage_channel_menu(
     acc_id = callback_data.acc_id
     ch_id = callback_data.channel_id
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Изменить название",   callback_data=ChanCb(action="edit_title",  acc_id=acc_id, channel_id=ch_id))
-    kb.button(text="📄 Изменить описание",    callback_data=ChanCb(action="edit_about",  acc_id=acc_id, channel_id=ch_id))
-    kb.button(text="🔤 Установить username",  callback_data=ChanCb(action="edit_uname",  acc_id=acc_id, channel_id=ch_id))
-    kb.button(text="🔗 Ссылка-приглашение",  callback_data=ChanCb(action="get_invite",  acc_id=acc_id, channel_id=ch_id))
-    kb.button(text="🗑 Удалить канал",        callback_data=ChanCb(action="del_channel", acc_id=acc_id, channel_id=ch_id))
+    kb.button(text="✏️ Изменить название",   callback_data=ChanCb(action="edit_title",    acc_id=acc_id, channel_id=ch_id))
+    kb.button(text="📄 Изменить описание",    callback_data=ChanCb(action="edit_about",    acc_id=acc_id, channel_id=ch_id))
+    kb.button(text="🔤 Установить username",  callback_data=ChanCb(action="edit_uname",    acc_id=acc_id, channel_id=ch_id))
+    kb.button(text="🔗 Ссылка-приглашение",  callback_data=ChanCb(action="get_invite",    acc_id=acc_id, channel_id=ch_id))
+    kb.button(text="👑 Со-Администраторы",   callback_data=ChanCb(action="manage_admins", acc_id=acc_id, channel_id=ch_id))
+    kb.button(text="🗑 Удалить канал",        callback_data=ChanCb(action="del_channel",   acc_id=acc_id, channel_id=ch_id))
     kb.button(text="◀️ Назад",               callback_data=ChanCb(action="manage_pick"))
-    kb.adjust(2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1)
     await callback.message.edit_text(
         f"✏️ <b>Управление каналом</b>\n\nID: <code>{ch_id}</code>",
         parse_mode="HTML", reply_markup=kb.as_markup(),
@@ -1295,6 +1296,136 @@ async def cb_get_invite(
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
+
+
+@router.callback_query(ChanCb.filter(F.action == "manage_admins"))
+async def cb_manage_admins(
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
+) -> None:
+    """Show managed accounts and let owner promote them to admin in the channel."""
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    ch_id = callback_data.channel_id
+    owner_id = callback.from_user.id
+
+    accounts = await pool.fetch(
+        "SELECT id, phone, first_name, username, tg_user_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2 "
+        "ORDER BY trust_score DESC NULLS LAST",
+        owner_id, acc_id,
+    )
+
+    kb = InlineKeyboardBuilder()
+    lines = [
+        "👑 <b>Со-Администраторы</b>\n",
+        "Выберите аккаунты для промоции в администраторы канала.\n",
+        f"Канал ID: <code>{ch_id}</code>\n",
+    ]
+
+    if not accounts:
+        lines.append("<i>Нет других активных аккаунтов с известным Telegram ID.</i>")
+    else:
+        lines.append(f"Доступно {len(accounts)} аккаунтов:")
+        for acc in accounts:
+            name = (acc["first_name"] or "").strip()
+            uname = f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
+            label = f"{name} ({uname})" if name else uname
+            kb.button(
+                text=f"👑 Промовать: {label}",
+                callback_data=ChanCb(action="do_promote", acc_id=acc_id, channel_id=ch_id, page=acc["id"]),
+            )
+        kb.button(
+            text="👑 Промовать ВСЕХ",
+            callback_data=ChanCb(action="promote_all", acc_id=acc_id, channel_id=ch_id),
+        )
+
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="manage_channel", acc_id=acc_id, channel_id=ch_id))
+    kb.adjust(1)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ChanCb.filter(F.action == "do_promote"))
+async def cb_do_promote(
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
+) -> None:
+    """Promote a single account to admin using the owner's account."""
+    await callback.answer("⏳ Промовую в администраторы...")
+    acc_id = callback_data.acc_id      # owner account (has admin rights)
+    target_db_id = callback_data.page  # target account db id
+    ch_id = callback_data.channel_id
+    owner_id = callback.from_user.id
+
+    owner_acc = await db.get_account_for_telethon(pool, acc_id, owner_id)
+    if not owner_acc:
+        await callback.answer("Аккаунт-администратор не найден.", show_alert=True)
+        return
+
+    target = await pool.fetchrow(
+        "SELECT id, phone, first_name, tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        target_db_id, owner_id,
+    )
+    if not target or not target["tg_user_id"]:
+        await callback.answer("Целевой аккаунт не найден или нет Telegram ID.", show_alert=True)
+        return
+
+    from services import account_manager
+    ok = await account_manager.promote_to_admin(
+        owner_acc["session_str"], ch_id, target["tg_user_id"], _acc=owner_acc
+    )
+    name = (target["first_name"] or target["phone"] or f"id{target['id']}")
+    if ok:
+        await callback.answer(f"✅ {name} теперь администратор!", show_alert=True)
+    else:
+        await callback.answer(f"❌ Не удалось промовать {name}. Проверьте: аккаунт должен быть участником канала.", show_alert=True)
+
+
+@router.callback_query(ChanCb.filter(F.action == "promote_all"))
+async def cb_promote_all(
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
+) -> None:
+    """Promote all managed accounts to admin using the owner's account."""
+    await callback.answer("⏳ Промовую всех аккаунтов...")
+    acc_id = callback_data.acc_id
+    ch_id = callback_data.channel_id
+    owner_id = callback.from_user.id
+
+    owner_acc = await db.get_account_for_telethon(pool, acc_id, owner_id)
+    if not owner_acc:
+        await callback.answer("Аккаунт-администратор не найден.", show_alert=True)
+        return
+
+    accounts = await pool.fetch(
+        "SELECT id, phone, first_name, tg_user_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
+        owner_id, acc_id,
+    )
+
+    from services import account_manager
+    ok_count = 0
+    fail_count = 0
+    for acc in accounts:
+        try:
+            ok = await account_manager.promote_to_admin(
+                owner_acc["session_str"], ch_id, acc["tg_user_id"], _acc=owner_acc
+            )
+            if ok:
+                ok_count += 1
+            else:
+                fail_count += 1
+        except Exception:
+            fail_count += 1
+        await asyncio.sleep(2)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="manage_admins", acc_id=acc_id, channel_id=ch_id))
+    await callback.message.edit_text(
+        f"👑 <b>Промоция завершена</b>\n\n"
+        f"✅ Успешно: <b>{ok_count}</b>\n"
+        f"❌ Ошибки: <b>{fail_count}</b>\n\n"
+        f"<i>Аккаунты должны быть участниками канала перед промоцией.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(ChanCb.filter(F.action == "del_channel"))
@@ -3313,8 +3444,10 @@ async def cb_cinv_run(
     await callback.answer()
     await state.clear()
     acc_rows = await pool.fetch(
-        "SELECT id, session_str, first_name, username, device_model, system_version, app_version FROM tg_accounts "
-        "WHERE id = ANY($1::int[]) AND owner_id=$2 AND is_active=true",
+        "SELECT a.id, a.session_str, a.first_name, a.username, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
         selected_accs, callback.from_user.id,
     )
     if not acc_rows:
@@ -3324,6 +3457,8 @@ async def cb_cinv_run(
         f"🚀 <b>Инвайт запущен в фоне</b>\n\n"
         f"Канал: <b>{channel_display}</b>\n"
         f"Аккаунтов: <b>{len(acc_rows)}</b>\n\n"
+        "⚠️ <i>Все участвующие аккаунты должны быть администраторами канала.\n"
+        "Используйте: Управление каналом → 👑 Со-Администраторы</i>\n\n"
         "Уведомление придёт когда всё завершится.",
         parse_mode="HTML", reply_markup=_back_kb().as_markup(),
     )

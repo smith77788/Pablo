@@ -1097,6 +1097,58 @@ async def kick_from_channel(
             pass
 
 
+async def promote_to_admin(
+    session_string: str,
+    channel_id: int,
+    user_id: int,
+    _acc: dict | None = None,
+    post_messages: bool = True,
+    invite_users: bool = True,
+    change_info: bool = False,
+    delete_messages: bool = False,
+    ban_users: bool = False,
+    pin_messages: bool = False,
+    manage_call: bool = False,
+) -> bool:
+    """Promote a user to admin in a channel/group with specified rights.
+
+    The calling account must be an admin with 'add admins' privilege.
+    Returns True on success.
+    """
+    from telethon.tl.functions.channels import EditAdminRequest
+    from telethon.tl.types import ChatAdminRights
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        channel = await client.get_entity(channel_id)
+        user = await client.get_entity(user_id)
+        rights = ChatAdminRights(
+            post_messages=post_messages,
+            edit_messages=False,
+            delete_messages=delete_messages,
+            ban_users=ban_users,
+            invite_users=invite_users,
+            pin_messages=pin_messages,
+            add_admins=False,
+            manage_call=manage_call,
+            other=False,
+            change_info=change_info,
+            anonymous=False,
+            manage_topics=False,
+        )
+        await client(EditAdminRequest(channel=channel, user_id=user, admin_rights=rights, rank=""))
+        return True
+    except Exception as e:
+        log.warning("promote_to_admin error for user %s in %s: %s", user_id, channel_id, e)
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTENT OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════
