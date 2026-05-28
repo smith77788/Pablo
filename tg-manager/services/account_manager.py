@@ -994,8 +994,10 @@ async def invite_users_to_channel(
     """Invite a list of users (@username or phone) to a group.
 
     Returns {invited: int, failed: list[str]}.
+    Includes human-like delays between invites to avoid bot detection.
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
+    from services import session_simulator
     client = _make_client(session_string, _acc)
     invited = 0
     failed = []
@@ -1003,13 +1005,17 @@ async def invite_users_to_channel(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
         attempt = 0
-        for username in usernames:
+        for idx, username in enumerate(usernames):
             try:
                 from telethon.errors import FloodWaitError, PeerFloodError, UserBannedInChannelError, ChatAdminRequiredError
                 user = await client.get_entity(username.strip())
                 await client(InviteToChannelRequest(channel=entity, users=[user]))
                 invited += 1
-                await asyncio.sleep(_backoff(attempt))
+                attempt = 0  # reset on success
+                # Human-like delay between invites: 3-15 seconds (not bot-like uniform)
+                if idx < len(usernames) - 1:
+                    delay = random.uniform(3, 15) * session_simulator.chaos_factor()
+                    await asyncio.sleep(delay)
             except PeerFloodError as e:
                 return {"flood_wait": e.seconds if hasattr(e, 'seconds') else 0, "banned": False, "invited": invited, "failed": failed}
             except (UserBannedInChannelError, ChatAdminRequiredError):
@@ -1021,9 +1027,9 @@ async def invite_users_to_channel(
                     await asyncio.sleep(min(e.seconds, 300))
                     continue
                 failed.append(f"{username}: {str(e)[:60]}")
-                await asyncio.sleep(2)
-            finally:
-                attempt = 0 if attempt >= 5 else attempt + 1
+                # Slower recovery on error
+                await asyncio.sleep(random.uniform(5, 15))
+                attempt += 1
         return {"invited": invited, "failed": failed}
     except Exception as e:
         log.exception("invite_users_to_channel error: %s", e)
