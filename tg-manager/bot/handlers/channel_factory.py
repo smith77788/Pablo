@@ -23,7 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ChanFactCb
+from bot.callbacks import ChanFactCb, SeoCb
 from bot.states import (
     BulkChannelCreateFSM,
     ChannelFactoryFSM,
@@ -81,9 +81,10 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="✏️ Редактировать",          callback_data=ChanFactCb(action="bulk_edit"))
     kb.button(text="📤 Массовая публикация",    callback_data=ChanFactCb(action="mass_pub_redirect"))
     kb.button(text="📊 Статистика каналов",     callback_data=ChanFactCb(action="stats"))
+    kb.button(text="📈 SEO-оптимизация",        callback_data=ChanFactCb(action="seo_pick"))
     kb.button(text="🔗 Генерация ссылок",       callback_data=ChanFactCb(action="gen_links"))
     kb.button(text="◀️ Назад",                 callback_data=ChanFactCb(action="back_to_ops"))
-    kb.adjust(2, 1, 2, 2, 1)
+    kb.adjust(2, 1, 2, 2, 2, 1)
     return kb
 
 
@@ -1298,3 +1299,100 @@ async def cb_chanf_stats_chan(
     kb.adjust(1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── SEO Pick (account → channel picker → SeoCb) ────────────────────────────
+
+_SEO_PAGE = 8
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "seo_pick"))
+async def cb_chanf_seo_pick_acc(
+    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    accounts = await _get_active_accounts(pool, user_id)
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\nДобавьте аккаунт в разделе 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+    if len(accounts) == 1:
+        # Skip account picker if only one account
+        await _show_seo_chan_picker(callback, pool, accounts[0]["id"], user_id, page=0)
+        return
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        kb.button(
+            text=_acc_label(acc),
+            callback_data=ChanFactCb(action="seo_acc", acc_id=acc["id"]),
+        )
+    kb.adjust(1)
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
+    await callback.message.edit_text(
+        "📈 <b>SEO-оптимизация канала</b>\n\nВыберите аккаунт, которому принадлежит канал:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "seo_acc"))
+async def cb_chanf_seo_acc(
+    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await _show_seo_chan_picker(callback, pool, callback_data.acc_id, callback.from_user.id, page=0)
+
+
+@router.callback_query(ChanFactCb.filter(F.action == "seo_chan_page"))
+async def cb_chanf_seo_chan_page(
+    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await _show_seo_chan_picker(callback, pool, callback_data.acc_id, callback.from_user.id, page=callback_data.page)
+
+
+async def _show_seo_chan_picker(
+    callback: CallbackQuery, pool: asyncpg.Pool, acc_id: int, user_id: int, page: int
+) -> None:
+    offset = page * _SEO_PAGE
+    channels = await pool.fetch(
+        "SELECT id, title, username FROM managed_channels "
+        "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title LIMIT $3 OFFSET $4",
+        user_id, acc_id, _SEO_PAGE + 1, offset,
+    )
+    if not channels and page == 0:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="seo_pick"))
+        await callback.message.edit_text(
+            "⚠️ Нет каналов для этого аккаунта. Импортируйте каналы сначала.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+    has_more = len(channels) > _SEO_PAGE
+    channels = channels[:_SEO_PAGE]
+
+    kb = InlineKeyboardBuilder()
+    for ch in channels:
+        label = f"@{ch['username']}" if ch.get("username") else ch["title"] or f"id{ch['id']}"
+        kb.button(
+            text=f"📡 {label[:35]}",
+            callback_data=SeoCb(action="chan_menu", chan_id=ch["id"], acc_id=acc_id),
+        )
+    kb.adjust(1)
+
+    nav = InlineKeyboardBuilder()
+    if page > 0:
+        nav.button(text="◀️", callback_data=ChanFactCb(action="seo_chan_page", acc_id=acc_id, page=page - 1))
+    if has_more:
+        nav.button(text="▶️", callback_data=ChanFactCb(action="seo_chan_page", acc_id=acc_id, page=page + 1))
+    if page > 0 or has_more:
+        nav.adjust(2)
+        kb.attach(nav)
+
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="seo_pick"))
+    await callback.message.edit_text(
+        "📈 <b>SEO-оптимизация — выберите канал:</b>",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )

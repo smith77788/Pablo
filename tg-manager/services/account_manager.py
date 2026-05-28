@@ -662,6 +662,36 @@ async def get_channel_members_count(session_string: str, channel_username: str,
             pass
 
 
+async def get_full_channel_info(
+    session_string: str,
+    channel_id: int | str,
+    _acc: dict | None = None,
+) -> dict | None:
+    """Возвращает {'about', 'members_count', 'username', 'title'} для канала/группы."""
+    from telethon.tl.functions.channels import GetFullChannelRequest
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(int(channel_id) if str(channel_id).lstrip("-").isdigit() else channel_id)
+        full = await client(GetFullChannelRequest(entity))
+        about = getattr(full.full_chat, "about", "") or ""
+        members = getattr(full.full_chat, "participants_count", 0) or 0
+        return {
+            "about": about,
+            "members_count": members,
+            "username": getattr(entity, "username", "") or "",
+            "title": getattr(entity, "title", "") or "",
+        }
+    except Exception as e:
+        log.debug("get_full_channel_info error: %s", e)
+        return None
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def get_recent_messages(
     session_string: str,
     channel_username: str,

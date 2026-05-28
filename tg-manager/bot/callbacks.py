@@ -125,6 +125,9 @@ class EngageCb(CallbackData, prefix="eng"):
 class SeoCb(CallbackData, prefix="seo"):
     action: str
     bot_id: int = 0
+    chan_id: int = 0          # channel/group ID from managed_channels
+    acc_id: int = 0           # account to use for Telethon edits
+    etype: Optional[str] = None  # 'bot' | 'channel' | 'group'
 
 
 class NetworkCb(CallbackData, prefix="net"):

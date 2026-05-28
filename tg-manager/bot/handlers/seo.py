@@ -1,17 +1,21 @@
-"""SEO score analyzer and keyword analytics for managed bots."""
+"""SEO score analyzer and optimizer for bots, channels and groups."""
 from __future__ import annotations
 import asyncio
+import html
+import json
+import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import SeoCb, EditCb
+from bot.callbacks import SeoCb, EditCb, ChanFactCb
 from bot.keyboards import seo_menu, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 
+log = logging.getLogger(__name__)
 router = Router()
 
 
@@ -251,3 +255,456 @@ async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
         reply_markup=kb.as_markup(),
     )
     await callback.answer()
+
+
+# ══════════════════════════════════════════════════════════════════
+# SEO OPTIMIZER — CHANNELS & GROUPS
+# ══════════════════════════════════════════════════════════════════
+
+def _chan_seo_score(title: str, about: str, username: str, members: int) -> tuple[int, list[str]]:
+    """Calculate SEO score 0-100 for a channel or group."""
+    score = 0
+    tips: list[str] = []
+
+    # Title: 0-25 pts
+    tlen = len(title) if title else 0
+    if tlen >= 5:    score += 8
+    if tlen >= 15:   score += 10
+    if tlen <= 35:   score += 7
+    if tlen < 5:
+        tips.append("📛 Название слишком короткое — добавьте ключевые слова")
+    elif tlen > 50:
+        tips.append("📛 Название слишком длинное (>50 симв.) — Telegram обрежет в поиске")
+    elif tlen < 15:
+        tips.append(f"📛 Название можно расширить ({tlen}/50 симв.) — добавьте тематику")
+
+    # About/description: 0-35 pts
+    alen = len(about) if about else 0
+    if alen >= 30:    score += 10
+    if alen >= 150:   score += 12
+    if alen >= 300:   score += 13
+    if not about:
+        tips.append("📄 Описание пустое — это критично! Добавьте описание с ключевыми словами")
+    elif alen < 100:
+        tips.append(f"📄 Описание короткое ({alen}/255 симв.) — расширьте до 150+ символов")
+    elif alen < 200:
+        tips.append(f"📄 Описание можно улучшить ({alen}/255 симв.) — используйте всё пространство")
+
+    # Username: 0-20 pts
+    if username:
+        ulen = len(username)
+        score += 10
+        if 5 <= ulen <= 20:  score += 5
+        if not any(c.isdigit() for c in username):  score += 5
+        if ulen > 25:
+            tips.append(f"🔗 Username длинный ({ulen} симв.) — короткий username запоминается лучше")
+    else:
+        tips.append("🔗 Нет username — без него канал значительно хуже ранжируется в поиске")
+
+    # Members: 0-20 pts
+    if members >= 100:    score += 5
+    if members >= 1_000:  score += 5
+    if members >= 10_000: score += 5
+    if members >= 50_000: score += 5
+    if members < 100:
+        tips.append(f"👥 Мало подписчиков ({members}) — используйте массовые инвайты и кросс-промо")
+    elif members < 1_000:
+        tips.append(f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {members:,})")
+
+    return min(score, 100), tips
+
+
+async def _ai_generate_seo(
+    http: aiohttp.ClientSession,
+    title: str, about: str, username: str,
+    entity_type: str, keywords: list[str],
+) -> dict | None:
+    """Generate SEO-optimized title, description, username via OpenRouter."""
+    try:
+        from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
+        if not OPENROUTER_API_KEY:
+            return None
+    except ImportError:
+        return None
+
+    kw_hint = ", ".join(keywords[:10]) if keywords else "—"
+    prompt = (
+        f"You are a Telegram SEO expert. Optimize the following {entity_type} profile for maximum search visibility.\n\n"
+        f"Current title: {title or '(empty)'}\n"
+        f"Current description: {about[:200] if about else '(empty)'}\n"
+        f"Current username: @{username if username else '(none)'}\n"
+        f"Top user keywords: {kw_hint}\n\n"
+        "Return ONLY valid JSON with these keys:\n"
+        '{"title": "...", "about": "...", "username": "...", "reasoning": "..."}\n\n'
+        "Rules:\n"
+        "- title: max 50 chars, include main keyword, catchy\n"
+        "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA\n"
+        "- username: 5-20 chars, lowercase, letters/digits/underscores only, no leading digits\n"
+        "- reasoning: 1-2 sentences explaining the strategy\n"
+        "Write in the same language as the current profile (or Russian if empty)."
+    )
+
+    try:
+        async with http.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 400,
+                "temperature": 0.7,
+            },
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            raw = data["choices"][0]["message"]["content"].strip()
+            # Strip markdown code fences if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            return json.loads(raw.strip())
+    except Exception as e:
+        log.warning("AI SEO generate error: %s", e)
+        return None
+
+
+# ── Channel/Group SEO menu ────────────────────────────────────────
+
+@router.callback_query(SeoCb.filter(F.action == "chan_menu"))
+async def cb_seo_chan_menu(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO-оптимизация канала", "starter"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
+    await callback.answer()
+    chan_id = callback_data.chan_id
+    acc_id  = callback_data.acc_id
+
+    chan = await pool.fetchrow(
+        "SELECT title, username, access_hash FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, callback.from_user.id,
+    )
+    if not chan:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+
+    name = f"@{chan['username']}" if chan.get("username") else html.escape(chan["title"] or "")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Анализ SEO-скора",   callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🤖 AI-оптимизация",     callback_data=SeoCb(action="chan_ai",      chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="✏️ Применить изменения", callback_data=SeoCb(action="chan_apply",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="💡 SEO-советы",          callback_data=SeoCb(action="tips", bot_id=0))
+    kb.button(text="◀️ Назад",               callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📈 <b>SEO-оптимизация — {name}</b>\n\n"
+        "Telegram-поиск ранжирует каналы по названию, описанию и username.\n"
+        "Правильно оптимизированный канал находят в 3-5 раз чаще.\n\n"
+        "• <b>Анализ</b> — текущий SEO-скор с конкретными рекомендациями\n"
+        "• <b>AI-оптимизация</b> — ИИ напишет title/about/username под ваш контент\n"
+        "• <b>Применить</b> — обновить поля канала в один клик",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Channel SEO analysis ──────────────────────────────────────────
+
+@router.callback_query(SeoCb.filter(F.action == "chan_analyze"))
+async def cb_seo_chan_analyze(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Анализирую...")
+    chan_id = callback_data.chan_id
+    acc_id  = callback_data.acc_id
+    user_id = callback.from_user.id
+
+    chan = await pool.fetchrow(
+        "SELECT id, title, username, access_hash, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, user_id,
+    )
+    if not chan:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+
+    # Try to get full about from Telethon
+    about = ""
+    members = 0
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, user_id,
+    ) if acc_id else None
+
+    if acc:
+        try:
+            from services import account_manager
+            info = await account_manager.get_full_channel_info(
+                acc["session_str"], chan["channel_id"], _acc=acc
+            )
+            if info:
+                about = info.get("about", "")
+                members = info.get("members_count", 0) or 0
+        except Exception as e:
+            log.debug("chan seo get_full_channel_info: %s", e)
+
+    title = chan["title"] or ""
+    username = chan["username"] or ""
+    score, tips = _chan_seo_score(title, about, username, members)
+    bar = _score_bar(score)
+
+    display = f"@{username}" if username else html.escape(title)
+    lines = [
+        f"📊 <b>SEO-скор — {display}</b>\n",
+        f"<b>{bar}</b>\n",
+        "<b>Параметры:</b>",
+        f"  📛 Название: <b>{html.escape(title)}</b>  ({len(title)} симв.)",
+        f"  📄 Описание: {len(about)} симв.",
+        f"  🔗 Username: {'@' + html.escape(username) if username else '⚠️ нет'}",
+        f"  👥 Подписчиков: {members:,}",
+    ]
+    if tips:
+        lines.append("\n<b>Что улучшить:</b>")
+        for t in tips:
+            lines.append(f"  • {t}")
+    if score >= 80:
+        lines.append("\n✅ <b>Отличный SEO!</b> Канал хорошо виден в поиске.")
+    elif score >= 50:
+        lines.append("\n🟡 <b>Средний SEO.</b> Следуйте советам выше.")
+    else:
+        lines.append("\n🔴 <b>Слабый SEO.</b> Начните с добавления описания и username.")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🤖 AI-оптимизация",  callback_data=SeoCb(action="chan_ai",    chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔄 Обновить анализ", callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",           callback_data=SeoCb(action="chan_menu",  chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── AI SEO generation ─────────────────────────────────────────────
+
+@router.callback_query(SeoCb.filter(F.action == "chan_ai"))
+async def cb_seo_chan_ai(
+    callback: CallbackQuery, callback_data: SeoCb,
+    pool: asyncpg.Pool, http: aiohttp.ClientSession,
+) -> None:
+    await callback.answer("🤖 Генерирую SEO-текст...")
+    chan_id = callback_data.chan_id
+    acc_id  = callback_data.acc_id
+    user_id = callback.from_user.id
+
+    chan = await pool.fetchrow(
+        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, user_id,
+    )
+    if not chan:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+
+    # Get current about
+    about = ""
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, user_id,
+    ) if acc_id else None
+
+    if acc:
+        try:
+            from services import account_manager
+            info = await account_manager.get_full_channel_info(
+                acc["session_str"], chan["channel_id"], _acc=acc
+            )
+            if info:
+                about = info.get("about", "")
+        except Exception:
+            pass
+
+    # Get top keywords from tracked_keywords + search_memory
+    kw_rows = await pool.fetch(
+        """SELECT keyword FROM search_memory WHERE owner_id=$1
+           ORDER BY search_count DESC LIMIT 10""",
+        user_id,
+    )
+    keywords = [r["keyword"] for r in kw_rows]
+
+    result = await _ai_generate_seo(
+        http,
+        title=chan["title"] or "",
+        about=about,
+        username=chan["username"] or "",
+        entity_type="Telegram channel",
+        keywords=keywords,
+    )
+
+    if not result:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+        await callback.message.edit_text(
+            "⚠️ <b>AI-генерация недоступна</b>\n\n"
+            "Для работы AI-оптимизации нужен OPENROUTER_API_KEY в настройках Railway.\n\n"
+            "Вы можете применить изменения вручную через кнопку «✏️ Применить».",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    new_title    = result.get("title", "")
+    new_about    = result.get("about", "")
+    new_username = result.get("username", "")
+    reasoning    = result.get("reasoning", "")
+
+    # Save to FSM-like temp storage in pool (simple approach: store in state via message edit + buttons)
+    lines = [
+        "🤖 <b>AI-предложение по SEO</b>\n",
+        f"📛 <b>Название:</b> {html.escape(new_title)}",
+        f"📄 <b>Описание:</b>\n<i>{html.escape(new_about)}</i>",
+        f"🔗 <b>Username:</b> @{html.escape(new_username)}",
+    ]
+    if reasoning:
+        lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Применить всё",     callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📛 Только название",   callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📄 Только описание",   callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔗 Только username",   callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔄 Перегенерировать",  callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",             callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(1, 3, 2)
+
+    # Store suggestions in DB via pool temp table or encode in message — use temp pool execute
+    try:
+        await pool.execute(
+            """INSERT INTO seo_ai_suggestions(owner_id, chan_id, title, about, username, created_at)
+               VALUES($1,$2,$3,$4,$5,now())
+               ON CONFLICT(owner_id, chan_id) DO UPDATE
+               SET title=$3, about=$4, username=$5, created_at=now()""",
+            user_id, chan_id, new_title, new_about, new_username,
+        )
+    except Exception:
+        # Table may not exist yet — we'll handle inline via the message
+        pass
+
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Apply optimizations ───────────────────────────────────────────
+
+async def _get_seo_suggestion(pool: asyncpg.Pool, user_id: int, chan_id: int) -> dict:
+    """Retrieve last AI suggestion for a channel."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT title, about, username FROM seo_ai_suggestions WHERE owner_id=$1 AND chan_id=$2",
+            user_id, chan_id,
+        )
+        return dict(row) if row else {}
+    except Exception:
+        return {}
+
+
+async def _apply_chan_field(
+    pool: asyncpg.Pool, user_id: int, chan_id: int, acc_id: int,
+    field: str, value: str,
+) -> tuple[bool, str]:
+    """Apply a single field change to channel via Telethon."""
+    chan = await pool.fetchrow(
+        "SELECT channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, user_id,
+    )
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, user_id,
+    ) if acc_id else None
+
+    if not chan or not acc:
+        return False, "Канал или аккаунт не найден"
+
+    from services import account_manager
+    tg_chan_id = chan["channel_id"]
+
+    if field == "title":
+        ok = await account_manager.edit_channel_title(acc["session_str"], tg_chan_id, value, _acc=acc)
+        if ok:
+            await pool.execute(
+                "UPDATE managed_channels SET title=$1 WHERE id=$2", value, chan_id
+            )
+        return ok, "" if ok else "Ошибка обновления названия"
+    elif field == "about":
+        ok = await account_manager.edit_channel_about(acc["session_str"], tg_chan_id, value, _acc=acc)
+        return ok, "" if ok else "Ошибка обновления описания"
+    elif field == "username":
+        err = await account_manager.set_channel_username(acc["session_str"], tg_chan_id, value, _acc=acc)
+        if not err:
+            await pool.execute(
+                "UPDATE managed_channels SET username=$1 WHERE id=$2", value, chan_id
+            )
+        return not bool(err), err
+    return False, "Неизвестное поле"
+
+
+@router.callback_query(SeoCb.filter(F.action.in_({"apply_all", "apply_title", "apply_about", "apply_uname", "chan_apply"})))
+async def cb_seo_apply(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Применяю...")
+    chan_id = callback_data.chan_id
+    acc_id  = callback_data.acc_id
+    user_id = callback.from_user.id
+    action  = callback_data.action
+
+    if action == "chan_apply":
+        # Show manual edit prompt: pick what to change
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📛 Изменить название",  callback_data=SeoCb(action="edit_title", chan_id=chan_id, acc_id=acc_id))
+        kb.button(text="📄 Изменить описание",  callback_data=SeoCb(action="edit_about", chan_id=chan_id, acc_id=acc_id))
+        kb.button(text="🔗 Изменить username",  callback_data=SeoCb(action="edit_uname", chan_id=chan_id, acc_id=acc_id))
+        kb.button(text="◀️ Назад",              callback_data=SeoCb(action="chan_menu",  chan_id=chan_id, acc_id=acc_id))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "✏️ <b>Применить SEO-изменения</b>\n\n"
+            "Выберите что изменить прямо сейчас:",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    suggestion = await _get_seo_suggestion(pool, user_id, chan_id)
+    if not suggestion:
+        await callback.answer("Сначала запустите AI-оптимизацию.", show_alert=True)
+        return
+
+    results = []
+    if action in ("apply_all", "apply_title") and suggestion.get("title"):
+        ok, err = await _apply_chan_field(pool, user_id, chan_id, acc_id, "title", suggestion["title"])
+        results.append(f"📛 Название: {'✅' if ok else '❌ ' + err}")
+
+    if action in ("apply_all", "apply_about") and suggestion.get("about"):
+        ok, err = await _apply_chan_field(pool, user_id, chan_id, acc_id, "about", suggestion["about"])
+        results.append(f"📄 Описание: {'✅' if ok else '❌ ' + err}")
+
+    if action in ("apply_all", "apply_uname") and suggestion.get("username"):
+        ok, err = await _apply_chan_field(pool, user_id, chan_id, acc_id, "username", suggestion["username"])
+        results.append(f"🔗 Username: {'✅' if ok else '❌ ' + err}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Новый анализ", callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",        callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "<b>✏️ Результат применения SEO</b>\n\n" + "\n".join(results or ["Нечего применять."]),
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )

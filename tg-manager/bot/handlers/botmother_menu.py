@@ -20,6 +20,7 @@ from bot.callbacks import (
     BmCb,
     BotCb,
     ChanCb,
+    ChanFactCb,
     ClustMCb,
     CompCb,
     GeoPresenceCb,
@@ -103,24 +104,26 @@ def _visibility_kb():
     kb.button(text="🔍 Ключевые слова", callback_data=BmCb(action="pick_bot_for", sub="rank"))
     kb.button(text="📊 Позиции",        callback_data=BmCb(action="pick_bot_for", sub="rank"))
     kb.button(text="🏆 Конкуренты",     callback_data=CompCb(action="menu"))
+    kb.button(text="📈 SEO-оптимизация",callback_data=ChanFactCb(action="seo_pick"))
     kb.button(text="🔔 Алерты",         callback_data=BmCb(action="alerts"))
     kb.button(text="📋 Отчёты",         callback_data=BmCb(action="vis_reports"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
 def _operations_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌍 Global Presence",   callback_data=GeoPresenceCb(action="menu"))
-    kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
-    kb.button(text="🛠️ Построитель",      callback_data=MassOpCb(action="menu"))
-    kb.button(text="📋 Очередь",           callback_data=MassOpCb(action="queue"))
-    kb.button(text="⏱️ Планировщик",       callback_data=BmCb(action="op_planner"))
-    kb.button(text="📄 Шаблоны",           callback_data=AssetTplCb(action="menu"))
-    kb.button(text="📊 Отчёты",            callback_data=BmCb(action="op_reports"))
-    kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(1, 2, 2, 2, 1)
+    kb.button(text="🌍 Присутствие в мире", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="🗺️ Мои планы",          callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="⚡ Массовые действия",   callback_data=BmCb(action="bulk_ops"))
+    kb.button(text="🛠️ Построитель",        callback_data=MassOpCb(action="menu"))
+    kb.button(text="📋 Очередь",             callback_data=MassOpCb(action="queue"))
+    kb.button(text="⏱️ Планировщик",         callback_data=BmCb(action="op_planner"))
+    kb.button(text="📄 Шаблоны",             callback_data=AssetTplCb(action="menu"))
+    kb.button(text="📊 Отчёты",              callback_data=BmCb(action="op_reports"))
+    kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
+    kb.adjust(2, 1, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -174,8 +177,8 @@ _MAIN_MENU_TEXT = (
     "Это операционная система для управления Telegram-активами.\n"
     "Выберите раздел:\n\n"
     "🏗️ <b>Infrastructure</b> — аккаунты, боты, каналы, группы\n"
-    "👁️ <b>Visibility</b> — позиции в поиске, конкуренты\n"
-    "⚙️ <b>Operations</b> — массовые действия и планировщик\n"
+    "👁️ <b>Visibility</b> — позиции в поиске, SEO, конкуренты\n"
+    "⚙️ <b>Operations</b> — массовые действия, 🌍 присутствие в мире\n"
     "📢 <b>Broadcasts</b> — рассылки пользователям ботов\n"
     "💬 <b>Inbox</b> — ответы на входящие сообщения\n"
     "🤖 <b>AI</b> — ИИ-помощник для контента\n"
