@@ -1117,7 +1117,7 @@ async def promote_to_admin(
     Returns True on success.
     """
     from telethon.tl.functions.channels import EditAdminRequest
-    from telethon.tl.types import ChatAdminRights
+    from telethon.tl.types import ChatAdminRights, PeerUser
     from telethon.errors import ChatAdminRequiredError, UserNotParticipantError
 
     client = _make_client(session_string, _acc)
@@ -1140,8 +1140,9 @@ async def promote_to_admin(
             manage_topics=False,
         )
 
-        # Pass user_id directly (Telethon will handle it)
-        await client(EditAdminRequest(channel=channel, user_id=user_id, admin_rights=rights, rank=""))
+        # Create a PeerUser for the target user (more reliable than numeric ID)
+        peer = PeerUser(user_id=user_id)
+        await client(EditAdminRequest(channel=channel, user_id=peer, admin_rights=rights, rank=""))
         log.info("promote_to_admin: user %s promoted in channel %s", user_id, channel_id)
         return True
     except UserNotParticipantError:
