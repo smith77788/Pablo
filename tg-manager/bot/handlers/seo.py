@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import SeoCb, EditCb, ChanFactCb
+from bot.callbacks import SeoCb, EditCb, ChanFactCb, BmCb
 from bot.keyboards import seo_menu, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from bot.states import SeoFSM
@@ -112,7 +112,7 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
         await callback.answer()
         await callback.message.edit_text(
             locked_text("SEO и аналитика поиска", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -450,7 +450,7 @@ async def cb_seo_chan_menu(
         await callback.answer()
         await callback.message.edit_text(
             locked_text("SEO-оптимизация канала", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
     await callback.answer()

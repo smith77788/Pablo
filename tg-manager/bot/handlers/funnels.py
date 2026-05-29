@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import FunnelCb
+from bot.callbacks import FunnelCb, BmCb
 from bot.keyboards import funnels_list, funnel_view, funnel_trigger_menu, back_to_bot, funnel_copy_target, subscription_locked_markup
 from bot.states import CreateFunnel, FunnelBroadcast
 from bot.utils.subscription import require_plan, locked_text
@@ -60,7 +60,7 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
         await callback.answer()
         await callback.message.edit_text(
             locked_text("Цепочки сообщений", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="settings")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)

@@ -2,7 +2,7 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import asyncpg
-from bot.callbacks import SwarmCb
+from bot.callbacks import SwarmCb, BmCb
 from bot.keyboards import swarm_menu, back_to_bot, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -24,7 +24,7 @@ async def cb_swarm_menu(callback: CallbackQuery, callback_data: SwarmCb,
         await callback.answer()
         await callback.message.edit_text(
             locked_text("Swarm (умный роутинг трафика)", "enterprise"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)

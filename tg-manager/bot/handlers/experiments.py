@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 import asyncpg
-from bot.callbacks import ExperimentCb
+from bot.callbacks import ExperimentCb, BmCb
 from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -106,7 +106,7 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
         await callback.answer()
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
