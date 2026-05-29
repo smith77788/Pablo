@@ -95,9 +95,9 @@ async def cb_mass_publish_start(
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
-    if not await require_plan(pool, callback.from_user.id, "starter"):
+    if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
-            "🔒 <b>Массовая публикация — Starter+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовая публикация — PRO+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -978,9 +978,9 @@ async def cb_bulk_join_start(
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
-    if not await require_plan(pool, callback.from_user.id, "starter"):
+    if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
-            "🔒 <b>Массовый join — STARTER+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовый join — PRO+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1154,9 +1154,9 @@ async def cb_bulk_leave_start(
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
-    if not await require_plan(pool, callback.from_user.id, "starter"):
+    if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
-            "🔒 <b>Массовый leave — STARTER+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовый leave — PRO+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

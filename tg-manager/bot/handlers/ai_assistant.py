@@ -538,9 +538,9 @@ async def cmd_ai(message: Message) -> None:
 @router.callback_query(AiCb.filter(F.action == "start"))
 async def cb_ai_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "starter"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            "🔒 <b>AI-ассистент — STARTER</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>AI-ассистент — ENTERPRISE</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
         )
         return

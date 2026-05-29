@@ -95,10 +95,10 @@ async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
 async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Аналитика сети", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Аналитика сети", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     ov = await db.get_network_overview(pool, callback.from_user.id)
@@ -308,10 +308,10 @@ async def cb_cluster_assign_confirm(callback: CallbackQuery, callback_data: Clus
 async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Рейтинг ботов", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Рейтинг ботов", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     bots = await db.get_bot_ranking(pool, callback.from_user.id)
@@ -343,10 +343,10 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Веса роутинга", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Веса роутинга", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     weights = await db.get_routing_weights_for_user(pool, callback.from_user.id)
@@ -447,10 +447,10 @@ async def cb_reset_weights(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_net_health(callback: CallbackQuery, pool: asyncpg.Pool,
                          http: aiohttp.ClientSession) -> None:
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Здоровье сети", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Здоровье сети", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     bots = await db.get_network_health(pool, callback.from_user.id)
@@ -701,10 +701,10 @@ async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb
 async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Пересечение аудиторий", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Пересечение аудиторий", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     stats = await db.get_bot_overlap_stats(pool, callback.from_user.id)

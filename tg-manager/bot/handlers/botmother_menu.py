@@ -1576,9 +1576,9 @@ async def cb_behavioral(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
-        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro", back_callback=BmCb(action="main")))
+        await _edit(callback, locked_text("Поведенческая аналитика", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="main")))
         return
     await callback.answer()
     sub = callback_data.sub or "attention"
@@ -1694,9 +1694,9 @@ async def cb_mem_keyword_drilldown(
     pool: asyncpg.Pool,
 ) -> None:
     """Drill-down по keyword: search_memory + behavioral_events + история позиций."""
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
-        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro", back_callback=BmCb(action="behavioral")))
+        await _edit(callback, locked_text("Поведенческая аналитика", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="behavioral")))
         return
     await callback.answer()
     keyword = callback_data.sub or ""

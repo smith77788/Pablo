@@ -34,11 +34,11 @@ def _heatmap_chart(data: list[dict]) -> str:
 async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
                           pool: asyncpg.Pool) -> None:
 
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("Активность и реактивация", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Активность и реактивация", "enterprise"), parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)

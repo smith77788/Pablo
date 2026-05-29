@@ -53,9 +53,9 @@ async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
 
 @router.callback_query(DmCb.filter(F.action == "menu"))
 async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
-        await _edit(callback, locked_text("DM-кампании", "pro"), subscription_locked_markup("pro", back_callback=BmCb(action="main")))
+        await _edit(callback, locked_text("DM-кампании", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="main")))
         return
     await callback.answer()
 

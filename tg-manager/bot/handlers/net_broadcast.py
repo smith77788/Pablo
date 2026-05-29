@@ -21,11 +21,11 @@ router = Router()
 async def cb_net_bc_target(callback: CallbackQuery, callback_data: NetBcCb,
                             pool: asyncpg.Pool) -> None:
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Сетевая рассылка v2", "pro"),
+            locked_text("Сетевая рассылка v2", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     bots = await db.get_bots(pool, callback.from_user.id)

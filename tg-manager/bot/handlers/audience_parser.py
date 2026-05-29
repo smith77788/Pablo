@@ -65,9 +65,9 @@ def _menu_kb() -> InlineKeyboardBuilder:
 async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
 
-    if not await require_plan(pool, callback.from_user.id, "starter"):
+    if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
-            "🔒 <b>Парсер аудитории — STARTER</b>\n\nДля доступа оформите подписку: /subscription",
+            "🔒 <b>Парсер аудитории — PRO</b>\n\nДля доступа оформите подписку: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -102,8 +102,8 @@ async def cb_parser_start(
 ) -> None:
     await callback.answer()
 
-    if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer("🔒 Требуется STARTER", show_alert=True)
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer("🔒 Требуется PRO", show_alert=True)
         return
 
     parse_type = "members" if callback_data.action == "start_members" else "active"

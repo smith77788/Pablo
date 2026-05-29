@@ -66,11 +66,11 @@ async def cb_gp_menu(
     callback: CallbackQuery, callback_data: GeoPresenceCb,
     state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "pro"):
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("Global Presence Factory", "pro"),
-            reply_markup=subscription_locked_markup("pro"),
+            locked_text("Global Presence Factory", "enterprise"),
+            reply_markup=subscription_locked_markup("enterprise"),
         )
         return
     await callback.answer()

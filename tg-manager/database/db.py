@@ -10,20 +10,36 @@ log = logging.getLogger(__name__)
 async def create_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)
     async with pool.acquire() as conn:
-        # Run all schema migration files in order (schema.sql, schema_v2.sql, ..., schema_v11.sql)
+        # Run all schema migration files in order — search both root and database/ subdir
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        schema_files = sorted(
-            glob.glob(os.path.join(base_dir, "schema*.sql")),
-            key=lambda p: (
-                0 if os.path.basename(p) == "schema.sql"
-                else int("".join(filter(str.isdigit, os.path.basename(p))) or "0")
-            ),
+        db_dir = os.path.join(base_dir, "database")
+        all_paths = (
+            glob.glob(os.path.join(base_dir, "schema*.sql")) +
+            glob.glob(os.path.join(db_dir, "schema*.sql"))
         )
+        # Sort by version number, deduplicate by basename
+        def _version_key(p: str) -> int:
+            name = os.path.basename(p)
+            if name == "schema.sql":
+                return 0
+            digits = "".join(filter(str.isdigit, name))
+            return int(digits) if digits else 0
+        all_paths.sort(key=_version_key)
+        seen: set[str] = set()
+        schema_files = []
+        for p in all_paths:
+            bn = os.path.basename(p)
+            if bn not in seen:
+                seen.add(bn)
+                schema_files.append(p)
         for path in schema_files:
             with open(path) as f:
                 sql = f.read().strip()
             if sql:
-                await conn.execute(sql)
+                try:
+                    await conn.execute(sql)
+                except Exception as exc:
+                    log.warning("Schema %s failed (may already exist): %s", os.path.basename(path), exc)
     return pool
 
 
