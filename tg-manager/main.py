@@ -215,7 +215,7 @@ async def main() -> None:
         asyncio.create_task(trust_engine.run(pool))
         asyncio.create_task(shadowban_monitor.run(pool, bot))
         asyncio.create_task(op_worker.run(pool, bot))
-        asyncio.create_task(behavioral_engine.run(pool))
+        asyncio.create_task(behavioral_engine.run(pool, bot))
         asyncio.create_task(account_warmer.run_warmup_loop(pool))
         asyncio.create_task(account_health.run_health_check_loop(pool))
         asyncio.create_task(payment_webhook.run(pool, bot))

@@ -20,7 +20,7 @@ _RESCORE_INTERVAL = 900  # 15 minutes
 
 # ── Background runner ─────────────────────────────────────────────────────
 
-async def run(pool: asyncpg.Pool) -> None:
+async def run(pool: asyncpg.Pool, bot=None) -> None:
     """Main loop: periodically recompute behavioral scores and detect anomalies."""
     log.info("behavioral_engine started")
     cycle = 0
@@ -32,7 +32,7 @@ async def run(pool: asyncpg.Pool) -> None:
                 await _detect_anomalies(pool)
             # Auto-pause winning A/B experiments every 4 cycles (~1 hour)
             if cycle % 4 == 0:
-                await _auto_conclude_experiments(pool)
+                await _auto_conclude_experiments(pool, bot)
             cycle += 1
         except Exception:
             log.exception("behavioral_engine error")
@@ -300,7 +300,7 @@ def _z_test(n_a: int, c_a: int, n_b: int, c_b: int) -> float:
     return abs(p_a - p_b) / denom
 
 
-async def _auto_conclude_experiments(pool: asyncpg.Pool) -> None:
+async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
     """
     Check active 2-variant experiments. If z-score >= 1.96 (95% significance)
     AND total impressions >= 200, mark the winner and complete the experiment.
@@ -348,6 +348,22 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool) -> None:
                 "behavioral_engine: auto-concluded experiment %d, winner variant %d (z=%.2f)",
                 exp["id"], winner_id, z,
             )
+            if bot:
+                try:
+                    owner = await pool.fetchval(
+                        "SELECT added_by FROM managed_bots WHERE bot_id=$1", exp["bot_id"]
+                    )
+                    if owner:
+                        await bot.send_message(
+                            owner,
+                            f"🧪 <b>A/B эксперимент #{exp['id']} завершён</b>\n\n"
+                            f"🏆 Победитель: вариант #{winner_id}\n"
+                            f"📊 Z-score: {z:.2f} (95% значимость)\n"
+                            f"📈 Показов: {total}",
+                            parse_mode="HTML",
+                        )
+                except Exception:
+                    pass
         except Exception as exc:
             log.debug("auto_conclude exp %d: %s", exp["id"], exc)
 
