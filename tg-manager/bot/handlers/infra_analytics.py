@@ -64,6 +64,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     ) or 0
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="🗂️ Реестр ассетов",         callback_data=InfraCb(action="asset_registry"))
     kb.button(text="❤️ Здоровье аккаунтов",    callback_data=InfraCb(action="health"))
     kb.button(text="⚡ Flood Intelligence",      callback_data=InfraCb(action="flood"))
     kb.button(text="📋 Лог операций",            callback_data=InfraCb(action="audit"))
@@ -387,4 +388,138 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
         "Для точной проверки используйте «🔍 Проверить все» в разделе Аккаунты.</i>",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
+    )
+
+
+# ── Unified Asset Registry ─────────────────────────────────────────────────────
+
+@router.callback_query(InfraCb.filter(F.action == "asset_registry"))
+async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Единый реестр всех ассетов пользователя с агрегированной статистикой."""
+    await callback.answer()
+    uid = callback.from_user.id
+
+    # Parallel aggregation queries
+    acc_row = await pool.fetchrow(
+        """SELECT COUNT(*) AS total,
+                  COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                  COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
+                  ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust
+           FROM tg_accounts WHERE owner_id=$1""",
+        uid,
+    )
+    bot_row = await pool.fetchrow(
+        """SELECT COUNT(*) AS total,
+                  COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                  COALESCE(SUM(u.cnt), 0) AS total_users
+           FROM managed_bots b
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+           ) u ON u.bot_id = b.bot_id
+           WHERE b.added_by=$1""",
+        uid,
+    )
+
+    # Channels and groups via account-linked data
+    try:
+        chan_total = await pool.fetchval(
+            "SELECT COUNT(DISTINCT channel_id) FROM channel_access WHERE owner_id=$1", uid
+        ) or 0
+    except Exception:
+        chan_total = 0
+
+    try:
+        group_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_groups WHERE owner_id=$1 AND is_active=TRUE", uid
+        ) or 0
+    except Exception:
+        group_total = 0
+
+    try:
+        cluster_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM clusters WHERE owner_id=$1", uid
+        ) or 0
+    except Exception:
+        cluster_total = 0
+
+    try:
+        funnel_total = await pool.fetchval(
+            """SELECT COUNT(*) FROM funnels f
+               JOIN managed_bots b ON b.bot_id=f.bot_id
+               WHERE b.added_by=$1 AND f.is_active=TRUE""",
+            uid,
+        ) or 0
+    except Exception:
+        funnel_total = 0
+
+    try:
+        keyword_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE", uid
+        ) or 0
+    except Exception:
+        keyword_total = 0
+
+    try:
+        proxy_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM proxies WHERE owner_id=$1", uid
+        ) or 0
+    except Exception:
+        proxy_total = 0
+
+    try:
+        template_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1", uid
+        ) or 0
+    except Exception:
+        template_total = 0
+
+    acc = acc_row or {}
+    bot = bot_row or {}
+
+    lines = [
+        "🗂️ <b>Unified Asset Registry</b>\n",
+        "<b>📱 Аккаунты</b>",
+        f"   Всего: <b>{acc.get('total', 0)}</b>  |  "
+        f"Активных: <b>{acc.get('active', 0)}</b>  |  "
+        f"Кулдаун: <b>{acc.get('in_cooldown', 0)}</b>",
+        f"   Avg trust: <b>{acc.get('avg_trust', 0)}</b>",
+        "",
+        "<b>🤖 Боты</b>",
+        f"   Всего: <b>{bot.get('total', 0)}</b>  |  "
+        f"Активных: <b>{bot.get('active', 0)}</b>",
+        f"   Аудитория: <b>{int(bot.get('total_users', 0)):,}</b> пользователей",
+        "",
+        "<b>📡 Каналы</b>",
+        f"   Подключено: <b>{chan_total}</b>",
+        "",
+        "<b>👥 Группы</b>",
+        f"   Активных: <b>{group_total}</b>",
+        "",
+        "<b>📊 Другие активы</b>",
+        f"   🔗 Кластеры: <b>{cluster_total}</b>  |  "
+        f"🌐 Прокси: <b>{proxy_total}</b>",
+        f"   🔄 Воронки: <b>{funnel_total}</b>  |  "
+        f"📋 Шаблоны: <b>{template_total}</b>",
+        f"   🔍 Ключевых слов: <b>{keyword_total}</b>",
+    ]
+
+    from bot.callbacks import (
+        AccCb, BotCb, ChanCb, GroupFCb,
+        ClustMCb, ProxyCb, FunnelCb, AssetTplCb,
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Аккаунты",     callback_data=AccCb(action="menu"))
+    kb.button(text="🤖 Боты",         callback_data=BotCb(action="list", page=0))
+    kb.button(text="📡 Каналы",       callback_data=ChanCb(action="menu"))
+    kb.button(text="👥 Группы",       callback_data=GroupFCb(action="menu"))
+    kb.button(text="🔗 Кластеры",     callback_data=ClustMCb(action="menu"))
+    kb.button(text="🌐 Прокси",       callback_data=ProxyCb(action="menu"))
+    kb.button(text="📋 Шаблоны",      callback_data=AssetTplCb(action="menu"))
+    kb.button(text="◀️ Назад",        callback_data=InfraCb(action="menu"))
+    kb.adjust(2, 2, 2, 1, 1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
