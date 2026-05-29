@@ -717,65 +717,42 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         return
     await callback.answer("⏳ Генерирую CSV…")
 
-    kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
-    if not kws:
-        await callback.answer("Нет данных для экспорта", show_alert=True)
-        return
-
     import csv
     import io
     from aiogram.types import BufferedInputFile
 
-    # Fetch 7-day history for all keywords
-    kw_ids = [kw["keyword_id"] for kw in kws if kw.get("keyword_id")]
-    hist_csv: dict[int, dict] = {}
-    if kw_ids:
-        try:
-            hist_rows = await pool.fetch(
-                """SELECT keyword_id,
-                          MIN(position) FILTER (WHERE position IS NOT NULL) AS best_7d,
-                          MAX(position) FILTER (WHERE position IS NOT NULL) AS worst_7d,
-                          COUNT(*) AS checks_7d
-                   FROM search_rankings
-                   WHERE keyword_id = ANY($1)
-                     AND checked_at > now() - INTERVAL '7 days'
-                   GROUP BY keyword_id""",
-                kw_ids,
-            )
-            for r in hist_rows:
-                hist_csv[r["keyword_id"]] = {
-                    "best_7d": r["best_7d"],
-                    "worst_7d": r["worst_7d"],
-                    "checks_7d": r["checks_7d"],
-                }
-        except Exception:
-            pass
+    rows = await pool.fetch(
+        """SELECT k.keyword, b.username AS bot_username, sr.position, sr.checked_at
+           FROM search_rankings sr
+           JOIN tracked_keywords k ON k.id = sr.keyword_id
+           JOIN managed_bots b ON b.bot_id = k.bot_id
+           WHERE k.owner_id = $1
+           ORDER BY sr.checked_at DESC
+           LIMIT 500""",
+        callback.from_user.id,
+    )
+
+    if not rows:
+        await callback.answer("Нет данных для экспорта", show_alert=True)
+        return
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow([
-        "bot_username", "keyword", "current_position",
-        "best_7d", "worst_7d", "checks_7d", "checked_at",
-    ])
-    for kw in kws:
-        kid = kw.get("keyword_id")
-        hd = hist_csv.get(kid, {})
+    writer.writerow(["keyword", "bot", "position", "checked_at"])
+    for r in rows:
         writer.writerow([
-            kw.get("bot_username") or f"id{kw['bot_id']}",
-            kw.get("keyword", ""),
-            kw.get("position") or "",
-            hd.get("best_7d") or "",
-            hd.get("worst_7d") or "",
-            hd.get("checks_7d") or "",
-            str(kw.get("checked_at") or ""),
+            r["keyword"],
+            r["bot_username"] or "",
+            r["position"] if r["position"] is not None else "",
+            str(r["checked_at"]) if r["checked_at"] else "",
         ])
 
-    data = buf.getvalue().encode("utf-8-sig")  # utf-8-sig for Excel compatibility
-    file = BufferedInputFile(data, filename="visibility_report.csv")
+    data = buf.getvalue().encode("utf-8-sig")  # utf-8-sig для совместимости с Excel
+    file = BufferedInputFile(data, filename="rankings.csv")
     await callback.message.answer_document(
         file,
-        caption="📊 <b>Отчёт по позициям</b>\n"
-                "<i>current_position, best_7d, worst_7d, checks за 7 дней</i>",
+        caption="📊 <b>Отчёт по позициям в поиске</b>\n"
+                "<i>keyword, bot, position, checked_at — последние 500 записей</i>",
         parse_mode="HTML",
     )
 
@@ -1730,7 +1707,7 @@ async def cb_mem_keyword_drilldown(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    """Показать историю позиций по конкретному keyword из поисковой памяти."""
+    """Drill-down по keyword: search_memory + behavioral_events + история позиций."""
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
         await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro", back_callback=BmCb(action="behavioral")))
@@ -1739,13 +1716,33 @@ async def cb_mem_keyword_drilldown(
     keyword = callback_data.sub or ""
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
+    # Данные из search_memory
+    mem_row = await pool.fetchrow(
+        """SELECT search_count, affinity_score, last_searched_at, first_searched_at
+           FROM search_memory
+           WHERE owner_id = $1 AND keyword = $2""",
+        user_id, keyword,
+    )
+
+    # Поведенческие события (последние 10)
+    behav_rows = await pool.fetch(
+        """SELECT event_type, occurred_at, meta
+           FROM behavioral_events
+           WHERE owner_id = $1
+             AND meta::text ILIKE $2
+           ORDER BY occurred_at DESC
+           LIMIT 10""",
+        user_id, f"%{keyword}%",
+    )
+
+    # История позиций из search_rankings
+    rank_rows = await pool.fetch(
         """SELECT sr.position, sr.checked_at
            FROM search_rankings sr
            JOIN tracked_keywords tk ON tk.id = sr.keyword_id
            WHERE tk.owner_id = $1 AND tk.keyword = $2
            ORDER BY sr.checked_at DESC
-           LIMIT 20""",
+           LIMIT 15""",
         user_id, keyword,
     )
 
@@ -1753,20 +1750,71 @@ async def cb_mem_keyword_drilldown(
     kb.button(text="◀️ Поисковая память", callback_data=BmCb(action="behavioral", sub="memory"))
     kb.adjust(1)
 
-    if not rows:
-        text = (
-            f"<b>🔍 История позиций: {html.escape(keyword)}</b>\n\n"
-            "Данных ещё нет. Позиции появятся после первой проверки."
-        )
+    lines = [f"<b>🔍 Keyword: {html.escape(keyword)}</b>\n"]
+
+    # Блок search_memory
+    if mem_row:
+        total_searches = mem_row["search_count"] or 0
+        affinity = int(mem_row["affinity_score"] or 0)
+        bar = "█" * (affinity // 20) + "░" * (5 - affinity // 20)
+        first_dt = mem_row["first_searched_at"]
+        last_dt = mem_row["last_searched_at"]
+        first_str = first_dt.strftime("%d.%m.%Y") if first_dt else "—"
+        last_str = last_dt.strftime("%d.%m.%Y %H:%M") if last_dt else "—"
+        lines.append("📊 <b>Статистика поиска:</b>")
+        lines.append(f"  Всего поисков: <b>{total_searches}</b>")
+        lines.append(f"  Affinity: [{bar}] <b>{affinity}/100</b>")
+        lines.append(f"  Первый поиск: <code>{first_str}</code>")
+        lines.append(f"  Последний: <code>{last_str}</code>")
     else:
-        lines = [f"<b>🔍 История позиций: {html.escape(keyword)}</b>\n"]
-        lines.append(f"{'Дата':<19} {'Позиция':>8}")
-        lines.append("─" * 28)
-        for r in rows:
-            dt = r["checked_at"].strftime("%Y-%m-%d %H:%M") if r["checked_at"] else "—"
-            pos = r["position"] if r["position"] else "—"
-            lines.append(f"{dt:<19} {str(pos):>8}")
-        text = "<pre>" + "\n".join(lines) + "</pre>"
+        lines.append("📊 <b>Статистика поиска:</b> данных нет")
+
+    # Тренд позиций
+    if rank_rows and len(rank_rows) >= 2:
+        latest_pos = rank_rows[0]["position"]
+        prev_pos = rank_rows[1]["position"]
+        if latest_pos is not None and prev_pos is not None:
+            if latest_pos < prev_pos:
+                trend = f"↗️ Рост ({prev_pos} → {latest_pos})"
+            elif latest_pos > prev_pos:
+                trend = f"↘️ Падение ({prev_pos} → {latest_pos})"
+            else:
+                trend = f"→ Без изменений (#{latest_pos})"
+        else:
+            trend = "— нет данных"
+    elif rank_rows:
+        pos = rank_rows[0]["position"]
+        trend = f"— только одна точка (#{pos})" if pos else "— нет данных"
+    else:
+        trend = "— нет данных"
+
+    lines.append(f"\n📈 <b>Тренд:</b> {trend}")
+
+    # История позиций
+    if rank_rows:
+        lines.append("\n<b>История позиций (последние 15):</b>")
+        lines.append("<pre>")
+        lines.append(f"{'Дата':<16} {'#':>5}")
+        lines.append("─" * 22)
+        for r in rank_rows:
+            dt = r["checked_at"].strftime("%d.%m %H:%M") if r["checked_at"] else "—"
+            pos = str(r["position"]) if r["position"] is not None else "—"
+            lines.append(f"{dt:<16} {pos:>5}")
+        lines.append("</pre>")
+    else:
+        lines.append("\n<i>История позиций: нет данных.</i>")
+
+    # Поведенческие события
+    if behav_rows:
+        lines.append(f"\n<b>Поведенческие события ({len(behav_rows)}):</b>")
+        for ev in behav_rows[:5]:
+            dt = ev["occurred_at"].strftime("%d.%m %H:%M") if ev["occurred_at"] else "—"
+            etype = html.escape(ev["event_type"] or "")
+            lines.append(f"  • <code>{dt}</code> {etype}")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3900] + "\n<i>...</i>"
 
     await _edit(callback, text, kb.as_markup())
 
