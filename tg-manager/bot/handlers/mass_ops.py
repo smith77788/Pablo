@@ -20,7 +20,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb, BmCb
-from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM
+from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
 
 log = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.answer()
     kb = InlineKeyboardBuilder()
+    kb.button(text="🛠️ Построитель операций",         callback_data=MassOpCb(action="build"))
     kb.button(text="📤 Массовая публикация",           callback_data=MassOpCb(action="mass_publish"))
     kb.button(text="🔗 Массовый join каналов",         callback_data=MassOpCb(action="bulk_join"))
     kb.button(text="🚪 Массовый выход из каналов",     callback_data=MassOpCb(action="bulk_leave"))
@@ -71,6 +72,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb.adjust(1)
     await callback.message.edit_text(
         "🛠️ <b>Построитель операций</b>\n\n"
+        "🛠️ <b>Построитель</b> — пошаговый wizard для создания любой операции\n"
         "📤 <b>Публикация</b> — отправить пост во все каналы\n"
         "🔗 <b>Join</b> — вступить в список каналов/групп несколькими аккаунтами\n"
         "🚪 <b>Leave</b> — выйти из каналов/групп несколькими аккаунтами\n"
