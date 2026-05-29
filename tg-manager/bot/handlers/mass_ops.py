@@ -57,7 +57,8 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
 # ── Main menu ────────────────────────────────────────────────────────────────
 
 @router.callback_query(MassOpCb.filter(F.action == "menu"))
-async def cb_mass_menu(callback: CallbackQuery) -> None:
+async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
     await callback.answer()
     kb = InlineKeyboardBuilder()
     kb.button(text="📤 Массовая публикация",           callback_data=MassOpCb(action="mass_publish"))
@@ -492,6 +493,84 @@ async def cb_cancel_op(
     )
 
 
+@router.callback_query(MassOpCb.filter(F.action == "retry_op"))
+async def cb_retry_op(
+    callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    result = await pool.execute(
+        "UPDATE operation_queue SET status='pending', last_error=NULL, retry_count=0, "
+        "finished_at=NULL WHERE id=$1 AND owner_id=$2 AND status='failed'",
+        callback_data.op_id, callback.from_user.id,
+    )
+    if result == "UPDATE 0":
+        await callback.answer("Операция не найдена или уже выполнена.", show_alert=True)
+        return
+    # Re-render queue view
+    try:
+        rows = await pool.fetch(
+            "SELECT id, op_type, status, done_items, total_items, created_at, "
+            "last_error, retry_count, max_retries, finished_at "
+            "FROM operation_queue "
+            "WHERE owner_id=$1 "
+            "ORDER BY created_at DESC LIMIT 10",
+            callback.from_user.id,
+        )
+    except Exception as e:
+        log.warning("Queue fetch error after retry: %s", e)
+        rows = []
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    if not rows:
+        await callback.message.edit_text(
+            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    _STATUS_ICONS = {
+        "pending":   "⏳",
+        "running":   "🔄",
+        "done":      "✅",
+        "failed":    "❌",
+        "cancelled": "🚫",
+    }
+    lines = ["📋 <b>Очередь операций</b>\n"]
+    for i, r in enumerate(rows, 1):
+        icon = _STATUS_ICONS.get(r["status"], "❓")
+        op_type = html.escape(r["op_type"])
+        status = r["status"]
+        done = r["done_items"] or 0
+        total = r["total_items"] or 0
+        created = r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "—"
+        retry_count = r["retry_count"] or 0
+        max_retries = r["max_retries"] or 0
+        last_error = r["last_error"] or ""
+        if status == "running":
+            progress = f"{done}/{total} ✓"
+        elif status == "done":
+            progress = created
+        elif status == "failed":
+            progress = f"{total} элементов (попытка {retry_count}/{max_retries})"
+        else:
+            progress = f"{total} элементов"
+        lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
+        if status == "failed" and last_error:
+            err_preview = html.escape(last_error[:60])
+            lines.append(f"   ⚠️ <i>{err_preview}</i>")
+        if status in ("pending", "running"):
+            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+        elif status == "failed":
+            kb.button(text=f"🔁 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # DRY RUN PREVIEW
 # ══════════════════════════════════════════════════════════════════════════
@@ -550,7 +629,8 @@ async def cb_queue(
 
     try:
         rows = await pool.fetch(
-            "SELECT id, op_type, status, done_items, total_items, created_at "
+            "SELECT id, op_type, status, done_items, total_items, created_at, "
+            "last_error, retry_count, max_retries, finished_at "
             "FROM operation_queue "
             "WHERE owner_id=$1 "
             "ORDER BY created_at DESC LIMIT 10",
@@ -590,18 +670,29 @@ async def cb_queue(
         done = r["done_items"] or 0
         total = r["total_items"] or 0
         created = r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "—"
+        retry_count = r["retry_count"] or 0
+        max_retries = r["max_retries"] or 0
+        last_error = r["last_error"] or ""
 
         if status == "running":
             progress = f"{done}/{total} ✓"
         elif status == "done":
             progress = created
+        elif status == "failed":
+            progress = f"{total} элементов (попытка {retry_count}/{max_retries})"
         else:
             progress = f"{total} элементов"
 
         lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
 
+        if status == "failed" and last_error:
+            err_preview = html.escape(last_error[:60])
+            lines.append(f"   ⚠️ <i>{err_preview}</i>")
+
         if status in ("pending", "running"):
             kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+        elif status == "failed":
+            kb.button(text=f"🔁 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
 
     await callback.message.edit_text(
         "\n".join(lines),

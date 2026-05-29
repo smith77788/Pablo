@@ -77,17 +77,21 @@ async def cb_gp_menu(
     await state.clear()
     await state.set_state(GlobalPresenceFSM.choosing_asset_type)
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Каналы", callback_data=GeoPresenceCb(action="asset", item="channel"))
-    kb.button(text="👥 Группы", callback_data=GeoPresenceCb(action="asset", item="group"))
-    kb.button(text="🤖 Боты 🔜", callback_data=GeoPresenceCb(action="asset", item="v2"))
-    kb.button(text="📦 Пакет 🔜", callback_data=GeoPresenceCb(action="asset", item="v2"))
-    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    kb.button(text="📡 Каналы",          callback_data=GeoPresenceCb(action="asset", item="channel"))
+    kb.button(text="👥 Группы",          callback_data=GeoPresenceCb(action="asset", item="group"))
+    kb.button(text="🤖 Боты",            callback_data=GeoPresenceCb(action="asset", item="bot"))
+    kb.button(text="📦 Пакет (кан+гр)", callback_data=GeoPresenceCb(action="asset", item="package"))
+    kb.button(text="❌ Отмена",          callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2, 2, 1)
     await callback.message.edit_text(
         "🌍 <b>Global Presence Factory</b>\n\n"
         "Создайте Telegram-присутствие в любом городе мира за несколько шагов — "
-        "каналы, группы или боты для выбранных стран и регионов с вашими шаблонами.\n\n"
+        "каналы, группы, боты или пакеты для выбранных стран и регионов.\n\n"
         "<b>Шаг 1/8 — Тип актива</b>\n"
+        "• <b>Каналы</b> — создать каналы под каждый город\n"
+        "• <b>Группы</b> — создать супергруппы\n"
+        "• <b>Боты</b> — зарегистрировать ботов через BotFather\n"
+        "• <b>Пакет</b> — канал + группа на каждый город\n\n"
         "Что создаём?",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
@@ -100,10 +104,7 @@ async def cb_gp_asset(
     state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
     asset = callback_data.item or "channel"
-    if asset == "v2":
-        await callback.answer("🔜 Боты и пакеты будут в V2.1. Группы уже доступны.", show_alert=True)
-        return
-    if asset not in ("channel", "group"):
+    if asset not in ("channel", "group", "bot", "package"):
         await callback.answer("Неподдерживаемый тип", show_alert=True)
         return
     await callback.answer()
@@ -154,7 +155,8 @@ async def _show_template_step(
         f"📋 Найдено шаблонов: {len(templates) + offset}"
     )
 
-    asset_label = "группы" if asset_type == "group" else "канала"
+    _asset_label_map = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы"}
+    asset_label = _asset_label_map.get(asset_type, "актива")
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"
@@ -211,6 +213,10 @@ async def cb_gp_skip_tpl(
 async def _show_name_pattern_step(
     callback: CallbackQuery, state: FSMContext, prefill: str | None
 ) -> None:
+    sd = await state.get_data()
+    asset_type = sd.get("asset_type", "channel")
+    _asset_noun = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы"}
+    asset_noun = _asset_noun.get(asset_type, "актива")
     examples = [
         "Crypto News {{CITY}}",
         "AI Jobs {{CITY}}",
@@ -218,18 +224,21 @@ async def _show_name_pattern_step(
         "Trading {{COUNTRY_CODE}} {{CITY}}",
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
+    bot_note = ("\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>" if asset_type == "bot" else "")
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"
         f"<b>Шаг 3/8 — Паттерн названия</b>\n"
-        f"Введите шаблон для названия канала.\n\n"
+        f"Введите шаблон для названия {asset_noun}.\n\n"
         f"Доступные плейсхолдеры:\n"
         f"  <code>{{{{CITY}}}}</code> — город\n"
         f"  <code>{{{{COUNTRY}}}}</code> — страна\n"
         f"  <code>{{{{COUNTRY_CODE}}}}</code> — код страны (DE, FR…)\n"
         f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг города\n"
         f"  <code>{{{{INDEX}}}}</code> — порядковый номер\n\n"
-        f"Примеры:\n{ex_text}\n\n"
+        f"Примеры:\n{ex_text}"
+        + bot_note
+        + "\n\n"
         + (f"💡 Последний ввод: <code>{prefill}</code>\n\n" if prefill else "")
         + f"Введите паттерн:",
         markup=_cancel_kb(),
@@ -754,15 +763,21 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
     if len(acc_phones) > 5:
         accs_text += f" (+{len(acc_phones) - 5})"
 
-    asset_emoji = {"channel": "📡", "group": "👥", "bot": "🤖"}.get(asset_type, "📦")
+    asset_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦"}.get(asset_type, "📦")
+    _asset_label = {"channel": "Каналы", "group": "Группы", "bot": "Боты (BotFather)", "package": "Пакет (Канал+Группа)"}
+    _asset_count_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов (×2 актива)"}
+    asset_type_label = _asset_label.get(asset_type, asset_type.capitalize())
+    count_label = _asset_count_label.get(asset_type, "активов")
     hours = estimated // 60
     mins = estimated % 60
     duration_str = f"{hours}ч {mins}м" if hours else f"{mins}м"
+    bot_note = "\n💡 <i>Username ботов должен заканчиваться на _bot</i>" if asset_type == "bot" else ""
+    pkg_note = "\n📦 <i>Пакет создаст канал И группу для каждого города</i>" if asset_type == "package" else ""
 
     text = (
         f"🌍 <b>Global Presence Plan — Предпросмотр</b>\n"
         f"{'─' * 28}\n"
-        f"{asset_emoji} Тип: Каналы\n"
+        f"{asset_emoji} Тип: {asset_type_label}\n"
         f"📍 Гео: {geo_label}\n"
         f"🗺️ Охват: {n_countries} стран / {n_cities} городов\n"
         f"📋 Шаблон: {template_name}\n"
@@ -771,7 +786,9 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
         f"👤 Аккаунты: {accs_text} (round-robin)\n"
         f"⏱️ Длительность: ~{duration_str} (safe mode)\n\n"
         f"Примеры:\n{preview_text}\n\n"
-        f"⚠️ Это создаст <b>{n_cities} каналов</b> в Telegram."
+        f"⚠️ Это создаст <b>{n_cities} {count_label}</b> в Telegram."
+        + bot_note
+        + pkg_note
     )
 
     kb = InlineKeyboardBuilder()
@@ -836,14 +853,26 @@ async def cb_gp_launch(
         await state.clear()
         return
 
-    # Build targets
-    targets = build_targets(geo_list, asset_type, name_pattern, username_pattern, selected_acc_ids)
+    # Determine op_type
+    if asset_type == "bot":
+        _op_type = "global_presence_bot"
+        _effective_asset = "bot"
+    elif asset_type == "package":
+        _op_type = "global_presence_package"
+        _effective_asset = "package"
+    else:
+        _op_type = "global_presence_channel"
+        _effective_asset = asset_type  # "channel" or "group"
+
+    # Build targets (for package: channel targets first)
+    targets = build_targets(geo_list, "channel" if asset_type == "package" else _effective_asset,
+                            name_pattern, username_pattern, selected_acc_ids)
 
     # Create plan in DB
     plan_id = await db.create_global_presence_plan(
         pool,
         owner_id=callback.from_user.id,
-        asset_type=asset_type,
+        asset_type=_effective_asset,
         name_pattern=name_pattern,
         username_pattern=username_pattern,
         geo_selection={"preset": geo_preset, "count": len(geo_list)},
@@ -854,11 +883,12 @@ async def cb_gp_launch(
     # Insert targets
     await db.create_global_presence_targets(pool, plan_id, targets)
 
-    # Queue the operation
+    # Queue the primary operation
     op_id = await pool.fetchval(
         "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-        "VALUES($1,'global_presence_channel','pending',$2::jsonb,$3) RETURNING id",
+        "VALUES($1,$2,'pending',$3::jsonb,$4) RETURNING id",
         callback.from_user.id,
+        _op_type,
         json.dumps({"plan_id": plan_id}),
         len(targets),
     )
@@ -866,7 +896,38 @@ async def cb_gp_launch(
     # Link operation to plan
     await db.link_plan_to_operation(pool, plan_id, op_id)
 
+    # For package: also queue group creation as second operation
+    op_id2 = None
+    if asset_type == "package":
+        grp_targets = build_targets(geo_list, "group", name_pattern, username_pattern, selected_acc_ids)
+        plan_id2 = await db.create_global_presence_plan(
+            pool,
+            owner_id=callback.from_user.id,
+            asset_type="group",
+            name_pattern=name_pattern,
+            username_pattern=username_pattern,
+            geo_selection={"preset": geo_preset, "count": len(geo_list)},
+            account_selection={"account_ids": selected_acc_ids},
+            template_id=template_id,
+        )
+        await db.create_global_presence_targets(pool, plan_id2, grp_targets)
+        op_id2 = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
+            "VALUES($1,'global_presence_channel','pending',$2::jsonb,$3) RETURNING id",
+            callback.from_user.id,
+            json.dumps({"plan_id": plan_id2}),
+            len(grp_targets),
+        )
+        await db.link_plan_to_operation(pool, plan_id2, op_id2)
+
     await state.clear()
+
+    # Build result message
+    _type_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦"}
+    _type_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов"}
+    emoji = _type_emoji.get(asset_type, "📦")
+    label = _type_label.get(asset_type, "активов")
+    pkg_line = f"\n👥 + Группы в очереди: #{op_id2}" if op_id2 else ""
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
@@ -876,8 +937,8 @@ async def cb_gp_launch(
     await _edit(
         callback,
         f"✅ <b>Global Presence Plan #{plan_id} запущен!</b>\n\n"
-        f"📡 Каналов для создания: {len(targets)}\n"
-        f"🔢 Операция в очереди: #{op_id}\n\n"
+        f"{emoji} {label.capitalize()} для создания: {len(targets)}\n"
+        f"🔢 Операция в очереди: #{op_id}{pkg_line}\n\n"
         f"Вы получите уведомление по завершении.\n"
         f"Нажмите «Прогресс» для отслеживания.",
         markup=kb.as_markup(),

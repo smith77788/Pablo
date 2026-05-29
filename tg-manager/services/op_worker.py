@@ -190,6 +190,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
         elif op_type == "global_presence_channel":
             result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+        elif op_type == "global_presence_bot":
+            result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
         else:
             result = {"status": "skipped", "reason": f"unknown op_type: {op_type}"}
 
@@ -764,4 +766,136 @@ async def _exec_global_presence_channel(
         "failed": failed_count,
         "plan_id": plan_id,
         "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+    }
+
+
+async def _exec_global_presence_bot(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Создать ботов через BotFather для каждой цели плана global_presence."""
+    from services import account_manager, session_simulator
+
+    plan_id = params.get("plan_id")
+    if not plan_id:
+        return {"status": "failed", "reason": "no plan_id in params"}
+
+    plan = await pool.fetchrow("SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, owner_id)
+    if not plan:
+        return {"status": "failed", "reason": f"plan {plan_id} not found"}
+
+    account_selection = plan["account_selection"] or {}
+    selected_acc_ids = account_selection.get("account_ids") or []
+
+    accounts = []
+    if selected_acc_ids:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, phone, first_name, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id = ANY($1) AND is_active=TRUE",
+            selected_acc_ids,
+        )
+
+    if not accounts:
+        await pool.execute(
+            "UPDATE global_presence_plans SET status='failed', updated_at=now() WHERE id=$1", plan_id
+        )
+        return {"status": "failed", "reason": "no active accounts found"}
+
+    targets = await pool.fetch(
+        "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
+        plan_id,
+    )
+    if not targets:
+        await pool.execute("UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1", plan_id)
+        return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
+
+    await pool.execute("UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1", plan_id)
+
+    created_count = 0
+    failed_count = 0
+    acc_idx = 0
+    total = len(targets)
+
+    for i, target in enumerate(targets):
+        cancelled = await pool.fetchval(
+            "SELECT status FROM operation_queue WHERE id=$1", op_id
+        )
+        if cancelled == "cancelled":
+            await pool.execute("UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1", plan_id)
+            return {"status": "cancelled"}
+
+        acc = dict(accounts[acc_idx % len(accounts)])
+        acc_idx += 1
+
+        bot_name = target["planned_name"] or f"Bot {i + 1}"
+        bot_username = (target["planned_username"] or "").lstrip("@")
+        # Ensure bot username ends with _bot
+        if bot_username and not bot_username.lower().endswith("bot"):
+            bot_username = bot_username + "_bot"
+
+        await pool.execute("UPDATE global_presence_targets SET status='running' WHERE id=$1", target["id"])
+        await session_simulator.typing_delay(bot_name)
+
+        result = await account_manager.create_bot_via_botfather(
+            acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
+        )
+
+        if result.get("error"):
+            await pool.execute(
+                "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
+                str(result["error"])[:500], target["id"],
+            )
+            failed_count += 1
+            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await asyncio.sleep(random.uniform(15, 30))
+            continue
+
+        token = result.get("token", "")
+        actual_username = result.get("username", bot_username)
+
+        # Save bot to managed_bots (token format: "{bot_id}:{hash}")
+        try:
+            from database import db as _db
+            if token and ":" in token:
+                bot_id_int = int(token.split(":")[0])
+                await _db.add_bot(pool, token, bot_id_int, actual_username, bot_name, owner_id)
+        except Exception as e:
+            log.warning("op_worker gp_bot: managed_bots insert failed: %s", e)
+
+        await pool.execute(
+            "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
+        )
+        await pool.execute(
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+            op_id, created_count + failed_count + 1,
+            f"{target.get('city', '?')} → @{actual_username}",
+            f"bot created: @{actual_username}",
+        )
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        created_count += 1
+
+        if created_count % 5 == 0:
+            try:
+                await bot.send_message(
+                    owner_id,
+                    f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
+                    f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        # Humanized delay between BotFather interactions
+        await asyncio.sleep(random.uniform(60, 120) * session_simulator.chaos_factor())
+
+    final_status = "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
+    await pool.execute(
+        "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
+        final_status, plan_id,
+    )
+    return {
+        "status": "done",
+        "created": created_count,
+        "failed": failed_count,
+        "plan_id": plan_id,
+        "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
     }
