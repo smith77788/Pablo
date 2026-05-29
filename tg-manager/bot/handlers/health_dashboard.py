@@ -82,9 +82,10 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🌊 Flood log",      callback_data=HealthCb(action="flood_log"))
     kb.button(text="📈 Тренд",          callback_data=HealthCb(action="trust_trend"))
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
+    kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="infrastructure"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -487,4 +488,77 @@ async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "Trust score восстановится со временем при отсутствии операций.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+# ── CSV Export ─────────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "export_csv"))
+async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Export account health data as CSV file."""
+    await callback.answer("⏳ Генерирую CSV...")
+    user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
+
+    accounts = await pool.fetch(
+        """SELECT phone, first_name, username, trust_score, is_active,
+                  cooldown_until, flood_count_7d, device_model, added_at
+           FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score DESC NULLS LAST""",
+        user_id,
+    )
+    if not accounts:
+        await callback.answer("Нет аккаунтов для экспорта", show_alert=True)
+        return
+
+    try:
+        flood_map: dict[str, int] = {}
+        flood_rows = await pool.fetch(
+            """SELECT ta.phone, COUNT(afl.id) AS cnt
+               FROM account_flood_log afl
+               JOIN tg_accounts ta ON ta.id = afl.account_id
+               WHERE ta.owner_id=$1 AND afl.created_at > now() - interval '7 days'
+               GROUP BY ta.phone""",
+            user_id,
+        )
+        for r in flood_rows:
+            flood_map[r["phone"] or ""] = int(r["cnt"])
+    except Exception:
+        flood_map = {}
+
+    import csv
+    import io
+    from aiogram.types import BufferedInputFile
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "phone", "first_name", "username", "trust_score", "status",
+        "cooldown_until", "flood_events_7d", "device_model", "added_at",
+    ])
+    for acc in accounts:
+        cd = acc["cooldown_until"]
+        in_cooldown = bool(cd and cd.replace(tzinfo=timezone.utc) > now)
+        status = "cooldown" if in_cooldown else ("active" if acc["is_active"] else "inactive")
+        writer.writerow([
+            acc["phone"] or "",
+            acc["first_name"] or "",
+            acc["username"] or "",
+            f"{float(acc['trust_score'] or 0):.2f}",
+            status,
+            cd.strftime("%Y-%m-%d %H:%M") if cd else "",
+            flood_map.get(acc["phone"] or "", 0),
+            acc["device_model"] or "",
+            acc["added_at"].strftime("%Y-%m-%d") if acc.get("added_at") else "",
+        ])
+
+    data = buf.getvalue().encode("utf-8-sig")
+    file = BufferedInputFile(data, filename="account_health.csv")
+    await callback.message.answer_document(
+        file,
+        caption=(
+            "📥 <b>Экспорт здоровья аккаунтов</b>\n"
+            f"Всего: {len(accounts)} аккаунтов\n"
+            "<i>trust_score, status, flood за 7 дней, device_model</i>"
+        ),
+        parse_mode="HTML",
     )

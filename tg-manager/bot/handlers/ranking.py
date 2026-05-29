@@ -1027,7 +1027,8 @@ async def vis_dashboard(
     kb.button(text="➕ Добавить слово",    callback_data=VisCb(action="add_keyword"))
     kb.button(text="📈 Тренды",            callback_data=VisCb(action="trends"))
     kb.button(text="🔔 Настройки алертов", callback_data=VisCb(action="alerts"))
-    kb.button(text="◀️ Назад",             callback_data=RankCb(action="dashboard", bot_id=0))
+    from bot.callbacks import BmCb as _BmCb
+    kb.button(text="◀️ Назад",             callback_data=_BmCb(action="visibility"))
     kb.adjust(2, 2, 1, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
