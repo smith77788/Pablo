@@ -393,6 +393,98 @@ async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool)
         text = text[:3750] + "\n\n<i>... и другие аккаунты</i>"
 
     kb = _back_kb()
+    kb.button(text="🔄 Авто-ротация", callback_data=HealthCb(action="auto_rotate_confirm"))
     kb.button(text="🔄 Обновить", callback_data=HealthCb(action="recommendations"))
     kb.adjust(1)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Auto-rotation ──────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "auto_rotate_confirm"))
+async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Show confirmation before auto-rotating unhealthy accounts."""
+    await callback.answer()
+    user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
+
+    critical = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND trust_score < 0.3",
+        user_id,
+    ) or 0
+    low = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6",
+        user_id,
+    ) or 0
+    cooldown = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > now()",
+        user_id,
+    ) or 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить авто-ротацию", callback_data=HealthCb(action="auto_rotate"))
+    kb.button(text="❌ Отмена", callback_data=HealthCb(action="recommendations"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
+        "Система проверит все аккаунты и применит защитные меры:\n\n"
+        f"🔴 Критически низкий trust (<0.3): <b>{critical}</b> акк.\n"
+        "   → Поставить кулдаун 72 часа\n"
+        f"🟡 Низкий trust (0.3–0.6): <b>{low}</b> акк.\n"
+        "   → Поставить кулдаун 24 часа\n"
+        f"🌊 Уже в кулдауне: <b>{cooldown}</b> акк.\n"
+        "   → Пропустить\n\n"
+        "⚠️ Аккаунты в кулдауне не будут использоваться для операций автоматически.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(HealthCb.filter(F.action == "auto_rotate"))
+async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Execute auto-rotation: apply cooldowns to low-trust accounts."""
+    await callback.answer("⏳ Ротирую аккаунты...")
+    user_id = callback.from_user.id
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+
+    # Critical: trust < 0.3 → 72h cooldown
+    critical_updated = await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until = $1 "
+        "WHERE owner_id=$2 AND is_active=TRUE AND trust_score < 0.3 "
+        "AND (cooldown_until IS NULL OR cooldown_until < now())",
+        now + timedelta(hours=72), user_id,
+    )
+    # Low: trust 0.3–0.6 → 24h cooldown
+    low_updated = await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until = $1 "
+        "WHERE owner_id=$2 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6 "
+        "AND (cooldown_until IS NULL OR cooldown_until < now())",
+        now + timedelta(hours=24), user_id,
+    )
+
+    def _count(pg_result: str) -> int:
+        try:
+            return int(pg_result.split()[-1])
+        except Exception:
+            return 0
+
+    crit_n = _count(critical_updated)
+    low_n = _count(low_updated)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❤️ К панели здоровья", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "✅ <b>Авто-ротация выполнена</b>\n\n"
+        f"🔴 Критических → 72ч кулдаун: <b>{crit_n}</b>\n"
+        f"🟡 С низким trust → 24ч кулдаун: <b>{low_n}</b>\n\n"
+        "Эти аккаунты не будут использоваться в операциях до окончания кулдауна.\n"
+        "Trust score восстановится со временем при отсутствии операций.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )

@@ -43,6 +43,7 @@ from bot.callbacks import (
     SubCb,
     AutoReplyCb,
     DmCb,
+    VisCb,
     WarmupCb,
 )
 from bot.states import OpPlannerFSM
@@ -113,7 +114,7 @@ def _infrastructure_kb():
 def _visibility_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🔍 Ключевые слова", callback_data=BmCb(action="pick_bot_for", sub="rank"))
-    kb.button(text="📊 Позиции",        callback_data=BmCb(action="pick_bot_for", sub="rank"))
+    kb.button(text="📊 Позиции (все)",  callback_data=VisCb(action="dashboard"))
     kb.button(text="🏆 Конкуренты",     callback_data=CompCb(action="menu"))
     kb.button(text="📈 SEO-оптимизация",callback_data=ChanFactCb(action="seo_pick"))
     kb.button(text="🔔 Алерты",         callback_data=BmCb(action="alerts"))
@@ -184,7 +185,7 @@ def _bulk_ops_kb():
     kb.button(text="🤖 Боты (массово)",           callback_data=NetworkCb(action="menu"))
     kb.button(text="📡 Каналы (bulk join/leave)",  callback_data=ChanCb(action="bulk_menu"))
     kb.button(text="📤 Публикация в каналы",       callback_data=MassPubCb(action="menu"))
-    kb.button(text="📱 Аккаунты (профиль, bulk)",  callback_data=ChanCb(action="bulk_menu"))
+    kb.button(text="📱 Аккаунты (профиль, bulk)",  callback_data=MassOpCb(action="menu"))
     kb.button(text="◀️ Назад",                    callback_data=BmCb(action="operations"))
     kb.adjust(1, 1, 1, 1, 1)
     return kb.as_markup()

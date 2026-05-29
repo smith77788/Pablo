@@ -707,8 +707,18 @@ async def cb_queue(
 
 @router.callback_query(MassOpCb.filter(F.action == "bulk_bot_edit"))
 async def cb_bulk_bot_edit_start(
-    callback: CallbackQuery, state: FSMContext
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    from bot.utils.subscription import require_plan
+    from bot.keyboards import subscription_locked_markup
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await state.set_state(BulkBotEditFSM.choosing_field)
 
