@@ -716,7 +716,7 @@ async def cb_bulk_bot_edit_start(
         await callback.message.edit_text(
             "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="operations")),
         )
         return
     await callback.answer()

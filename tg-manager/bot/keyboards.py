@@ -68,9 +68,15 @@ def network_ops_menu() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def subscription_locked_markup(required_plan: str) -> InlineKeyboardMarkup:
+def subscription_locked_markup(
+    required_plan: str,
+    back_callback=None,
+) -> InlineKeyboardMarkup:
+    """Lock screen markup. Pass back_callback to add a working Back button."""
     kb = InlineKeyboardBuilder()
     kb.button(text="💳 Оформить подписку", callback_data=SubCb(action="menu"))
+    if back_callback is not None:
+        kb.button(text="◀️ Назад", callback_data=back_callback)
     kb.adjust(1)
     return kb.as_markup()
 

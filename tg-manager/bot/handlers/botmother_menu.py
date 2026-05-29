@@ -616,7 +616,7 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Отчёты по позициям", "starter"), subscription_locked_markup("starter"))
+        await _edit(callback, locked_text("Отчёты по позициям", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="visibility")))
         return
     await callback.answer()
     kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
@@ -849,7 +849,7 @@ async def cb_op_planner(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Планировщик операций", "starter"), subscription_locked_markup("starter"))
+        await _edit(callback, locked_text("Планировщик операций", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="operations")))
         return
     await callback.answer()
     await _show_planner_menu(callback, pool, state)
@@ -1165,7 +1165,7 @@ async def cb_plan_cancel(
 async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Прогноз нагрузки", "starter"), subscription_locked_markup("starter"))
+        await _edit(callback, locked_text("Прогноз нагрузки", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="operations")))
         return
     await callback.answer()
 
@@ -1220,7 +1220,7 @@ async def cb_op_reports(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Отчёты по операциям", "starter"), subscription_locked_markup("starter"))
+        await _edit(callback, locked_text("Отчёты по операциям", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="operations")))
         return
     await callback.answer()
     page = callback_data.page
@@ -1615,7 +1615,7 @@ async def cb_behavioral(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
-        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro"))
+        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro", back_callback=BmCb(action="main")))
         return
     await callback.answer()
     sub = callback_data.sub or "attention"
@@ -1733,7 +1733,7 @@ async def cb_mem_keyword_drilldown(
     """Показать историю позиций по конкретному keyword из поисковой памяти."""
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
-        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro"))
+        await _edit(callback, locked_text("Поведенческая аналитика", "pro"), subscription_locked_markup("pro", back_callback=BmCb(action="behavioral")))
         return
     await callback.answer()
     keyword = callback_data.sub or ""
@@ -1778,7 +1778,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Текстовая карта связей: кластеры → боты → каналы."""
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Карта инфраструктуры", "starter"), subscription_locked_markup("starter"))
+        await _edit(callback, locked_text("Карта инфраструктуры", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="infrastructure")))
         return
     await callback.answer("⏳ Строю карту...")
     uid = callback.from_user.id

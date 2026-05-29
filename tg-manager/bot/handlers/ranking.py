@@ -13,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import RankCb, VisCb
+from bot.callbacks import RankCb, VisCb, BmCb
 from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
 from bot.utils.subscription import get_plan, locked_text
@@ -125,7 +125,7 @@ async def cb_rank_menu(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
 
@@ -158,7 +158,7 @@ async def cb_rank_add(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
 
@@ -660,7 +660,7 @@ async def cb_rank_dashboard(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
 
@@ -859,7 +859,7 @@ async def _show_rank_menu(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
 
