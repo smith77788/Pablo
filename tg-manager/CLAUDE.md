@@ -221,7 +221,7 @@ tg-manager/
 ### 3.3 Авто-миграция БД
 
 `create_pool()` автоматически выполняет все `schema_v*.sql` в порядке версии.
-Текущая последняя версия: **v40**
+Текущая последняя версия: **v43**
 
 Правило: новая схема → новый файл `schema_v{N+1}.sql` в корне `tg-manager/`.
 
@@ -354,14 +354,15 @@ await pool.execute(f"UPDATE tg WHERE id={item_id}")
 
 ---
 
-## 5. ВСЕ CALLBACK-ПРЕФИКСЫ (46 штук, все уникальны)
+## 5. ВСЕ CALLBACK-ПРЕФИКСЫ (52 штуки, все уникальны)
 
 ```
 bot  edit  aud  wh   bc   bulk  cmd  tpl  sch  mg
 ar   rl    fn   st   note sw    crm  au   exp  dl
 eng  seo   net  cl   sub  ai    nbc  acc  rank chan
 cinv ref   bm   atpl grpf mop   btf  chanf mpub comp
-vis  hlth  prx  clm  alrt notif
+vis  hlth  prx  clm  gp   tba   lib  prs  wu   infra
+cln  dm
 ```
 
 **Правило:** новый CallbackData → новый уникальный prefix в `bot/callbacks.py`.
