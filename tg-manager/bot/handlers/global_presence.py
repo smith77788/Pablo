@@ -119,6 +119,7 @@ async def _show_template_step(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
     asset_type: str = "channel", page: int = 0,
 ) -> None:
+    from services.preset_templates import get_presets
     user_id = callback.from_user.id
     offset = page * _TPL_PAGE_SIZE
     templates = await pool.fetch(
@@ -130,6 +131,19 @@ async def _show_template_step(
     templates = templates[:_TPL_PAGE_SIZE]
 
     kb = InlineKeyboardBuilder()
+
+    # Library presets on first page (top-3)
+    lib_count = 0
+    if page == 0:
+        lib_atype = asset_type if asset_type != "package" else "channel"
+        lib_presets = get_presets(lib_atype)[:3]
+        for p in lib_presets:
+            kb.button(
+                text=f"📚 {p['name'][:28]}",
+                callback_data=GeoPresenceCb(action="sel_tpl", item=f"lib__{lib_atype}__{p['id']}"),
+            )
+        lib_count = len(lib_presets)
+
     for tpl in templates:
         kb.button(
             text=f"📋 {tpl['name'][:30]}",
@@ -147,13 +161,19 @@ async def _show_template_step(
         kb.attach(nav)
 
     kb.button(text="⏭️ Без шаблона", callback_data=GeoPresenceCb(action="skip_tpl"))
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
-    tpl_count = len(templates) + offset
-    header = f"📋 Найдено шаблонов: {tpl_count}+" if has_more else (
-        f"📋 Найдено шаблонов: {len(templates) + offset}"
-    )
+    user_tpl_count = len(templates) + offset
+    header_parts = []
+    if lib_count and page == 0:
+        header_parts.append(f"📚 Готовых в библиотеке: {lib_count}")
+    if user_tpl_count > 0:
+        header_parts.append(f"📋 Ваших шаблонов: {user_tpl_count}{'+'  if has_more else ''}")
+    elif page == 0 and not lib_count:
+        header_parts.append("📋 Ваших шаблонов: 0 (создайте в BotMother → Операции → Шаблоны)")
+    header = "\n".join(header_parts) if header_parts else "📚 Доступны готовые шаблоны из библиотеки"
 
     _asset_label_map = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы"}
     asset_label = _asset_label_map.get(asset_type, "актива")
@@ -162,8 +182,7 @@ async def _show_template_step(
         f"🌍 <b>Global Presence Factory</b>\n\n"
         f"<b>Шаг 2/8 — Шаблон {asset_label}</b>\n"
         f"Шаблон задаёт описание, аватар и первый пост.\n\n"
-        f"{header}\n"
-        f"(Шаблоны создаются в: BotMother → Операции → Шаблоны)",
+        f"{header}",
         markup=kb.as_markup(),
     )
 
@@ -183,16 +202,39 @@ async def cb_gp_sel_tpl(
     callback: CallbackQuery, callback_data: GeoPresenceCb,
     state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
-    tpl_id = int(callback_data.item or 0)
-    tpl = await pool.fetchrow(
-        "SELECT id, name, template FROM asset_templates WHERE id=$1 AND owner_id=$2",
-        tpl_id, callback.from_user.id,
-    )
-    if not tpl:
-        await callback.answer("Шаблон не найден", show_alert=True)
-        return
-    await callback.answer()
-    await state.update_data(template_id=tpl_id, template_name=tpl["name"])
+    item = callback_data.item or ""
+
+    if item.startswith("lib__"):
+        # Library preset: item = "lib__<atype>__<preset_id>"
+        from services.preset_templates import get_preset
+        parts = item.split("__", 2)
+        if len(parts) != 3:
+            await callback.answer("Шаблон не найден", show_alert=True)
+            return
+        lib_atype, preset_id = parts[1], parts[2]
+        preset = get_preset(lib_atype, preset_id)
+        if not preset:
+            await callback.answer("Шаблон не найден", show_alert=True)
+            return
+        await callback.answer()
+        import json as _json
+        await state.update_data(
+            template_id=None,
+            template_name=preset["name"],
+            template_data=_json.dumps(preset["template"]),
+        )
+    else:
+        tpl_id = int(item) if item.isdigit() else 0
+        tpl = await pool.fetchrow(
+            "SELECT id, name, template FROM asset_templates WHERE id=$1 AND owner_id=$2",
+            tpl_id, callback.from_user.id,
+        )
+        if not tpl:
+            await callback.answer("Шаблон не найден", show_alert=True)
+            return
+        await callback.answer()
+        await state.update_data(template_id=tpl_id, template_name=tpl["name"])
+
     await state.set_state(GlobalPresenceFSM.entering_name_pattern)
     await _show_name_pattern_step(callback, state, prefill=None)
 

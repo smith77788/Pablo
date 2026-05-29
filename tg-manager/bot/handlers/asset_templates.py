@@ -675,7 +675,7 @@ async def cb_apply_bot_exec(
     # Load template data
     if preset_key:
         from services.preset_templates import get_preset_by_key
-        parts = preset_key.split(":", 1)
+        parts = preset_key.split("__", 1)
         preset = get_preset_by_key(preset_key)
         data = preset["template"] if preset else {}
         tpl_name = preset["name"] if preset else "preset"
@@ -720,6 +720,23 @@ async def cb_apply_bot_exec(
         except Exception:
             ok = False
         results.append(f"🤖 Команды ({len(cmds)} шт.): {'✅' if ok else '❌'}")
+
+    # Create funnel if template has funnel_steps
+    if data.get("funnel_steps"):
+        steps = data["funnel_steps"]
+        try:
+            funnel_id = await db.create_funnel(
+                pool, bot_id,
+                f"{tpl_name} — Автоворонка",
+                "join", None,
+            )
+            for i, step in enumerate(steps):
+                delay_minutes = int(step.get("delay_hours", 0) * 60)
+                await db.add_funnel_step(pool, funnel_id, i, step["message"], delay_minutes)
+            results.append(f"🔄 Воронка: ✅ ({len(steps)} шагов)")
+        except Exception as e:
+            log.warning("Failed to create funnel from template: %s", e)
+            results.append("🔄 Воронка: ⚠️ не удалось создать")
 
     bot_display = f"@{bot_row['username']}" if bot_row.get("username") else bot_row.get("first_name") or f"id{bot_id}"
 
@@ -776,7 +793,7 @@ async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
     for p in presets:
         kb.button(
             text=p["name"],
-            callback_data=LibCb(action="preview", asset_type=atype, preset_key=f"{atype}:{p['id']}"),
+            callback_data=LibCb(action="preview", asset_type=atype, preset_key=f"{atype}__{p['id']}"),
         )
     kb.adjust(1)
     kb.button(text="◀️ Библиотека", callback_data=LibCb(action="menu"))
@@ -799,7 +816,7 @@ async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: as
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
 
-    atype = callback_data.asset_type or key.split(":")[0]
+    atype = callback_data.asset_type or key.split("__")[0]
     tdata = preset["template"]
 
     lines = [f"📄 <b>{preset['name']}</b>", f"<i>{preset['description']}</i>\n"]
@@ -850,7 +867,7 @@ async def cb_lib_clone(callback: CallbackQuery, callback_data: LibCb, pool: asyn
     if not preset:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
-    atype = callback_data.asset_type or key.split(":")[0]
+    atype = callback_data.asset_type or key.split("__")[0]
 
     tpl_id = await _save_template(pool, callback.from_user.id, atype, preset["name"], preset["template"])
 
@@ -882,7 +899,7 @@ async def cb_lib_apply(
     if not preset:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
-    atype = callback_data.asset_type or key.split(":")[0]
+    atype = callback_data.asset_type or key.split("__")[0]
     data = preset["template"]
     tpl_name = preset["name"]
 
