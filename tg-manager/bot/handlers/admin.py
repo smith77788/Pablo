@@ -46,6 +46,7 @@ def _admin_main_kb():
     kb.button(text="💳 Подписки & платежи",     callback_data="adm:subs")
     kb.button(text="🤖 Все боты & токены",       callback_data="adm:bots")
     kb.button(text="📊 Системная статистика",    callback_data="adm:stats")
+    kb.button(text="📈 Операции платформы",      callback_data="adm:platform_ops")
     kb.button(text="💰 Цены на подписки",        callback_data="adm:prices")
     kb.button(text="⚙️ Методы оплаты",          callback_data="adm:pay_cfg")
     kb.button(text="📨 Рассылка всем юзерам",    callback_data="adm:broadcast")
@@ -54,13 +55,15 @@ def _admin_main_kb():
     kb.button(text="✅ Разблокировать юзера",    callback_data="adm:unblock_ask")
     kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")
     kb.button(text="💰 Выдать подписку",         callback_data="adm:grant_ask")
+    kb.button(text="💰 Bulk-выдача подписок",    callback_data="adm:bulk_grant_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
     kb.button(text="📋 Экспорт юзеров (CSV)",   callback_data="adm:users_csv")
     kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
     kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
+    kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -349,6 +352,42 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         await db.set_system_mode(pool, mode)
         await callback.answer(f"✅ Режим: {mode.upper()}", show_alert=True)
         await _adm_swarm_mode(callback, pool)
+
+    elif action == "bulk_grant_ask":
+        await callback.message.edit_text(
+            "💰 <b>Массовая выдача подписок</b>\n\n"
+            "Отправьте список пользователей и план:\n\n"
+            "<code>USER_ID план месяцев</code> — по одному на строку\n\n"
+            "Пример:\n"
+            "<code>123456 pro 3\n789012 starter 1\n345678 enterprise 6</code>\n\n"
+            "Планы: <code>starter</code>, <code>pro</code>, <code>enterprise</code>",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'bulk_grant','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='bulk_grant',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "platform_ops":
+        await _adm_platform_ops(callback, pool)
+
+    elif action == "cleanup_ask":
+        await callback.message.edit_text(
+            "🧹 <b>Очистка устаревших данных</b>\n\n"
+            "Это удалит старые записи, освободив место в БД:\n"
+            "• Лог флудов старше 30 дней\n"
+            "• Завершённые операции старше 7 дней\n"
+            "• Аудит операций старше 30 дней\n\n"
+            "⚠️ <b>Действие необратимо!</b>\n\n"
+            "Введите <code>CLEAN</code> для подтверждения:",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'cleanup','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='cleanup',data=''",
+            callback.from_user.id,
+        )
 
     elif action == "exit":
         await callback.message.edit_text(
@@ -735,6 +774,87 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
+    elif state == "bulk_grant":
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        ok_list, fail_list = [], []
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 2:
+                fail_list.append(f"⚠️ Формат: {line[:30]}")
+                continue
+            try:
+                uid = int(parts[0])
+                plan = parts[1].lower()
+                months = int(parts[2]) if len(parts) > 2 else 1
+                months = max(1, min(months, 1200))
+                if plan not in ("starter", "pro", "enterprise"):
+                    raise ValueError("bad plan")
+                expires = datetime.utcnow() + timedelta(days=30 * months)
+                await pool.execute(
+                    """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+                       VALUES($1,$2,$3,true)
+                       ON CONFLICT(user_id) DO UPDATE
+                       SET plan=$2, expires_at=$3, is_active=true""",
+                    uid, plan, expires,
+                )
+                ok_list.append(f"✅ {uid} → {plan.upper()} {months}м.")
+                try:
+                    await message.bot.send_message(
+                        uid,
+                        f"🎁 <b>Подарок!</b> Вам активирована подписка <b>{plan.upper()}</b> "
+                        f"на {months} мес.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            except (ValueError, IndexError) as e:
+                fail_list.append(f"❌ {line[:30]}: {e}")
+        result_lines = ok_list[:20] + fail_list[:10]
+        await message.answer(
+            f"💰 <b>Массовая выдача завершена</b>\n\n"
+            f"Успешно: <b>{len(ok_list)}</b>, ошибок: <b>{len(fail_list)}</b>\n\n"
+            + "\n".join(result_lines),
+            parse_mode="HTML", reply_markup=_admin_main_kb(),
+        )
+
+    elif state == "cleanup":
+        if text.strip().upper() != "CLEAN":
+            await message.answer("❌ Отменено (введите CLEAN для подтверждения).", reply_markup=_admin_main_kb())
+            return
+        try:
+            flood_del = await pool.fetchval(
+                "DELETE FROM account_flood_log WHERE created_at < now() - INTERVAL '30 days' RETURNING COUNT(*)"
+            ) or 0
+        except Exception:
+            flood_del = 0
+        try:
+            ops_del = await pool.fetchval(
+                "DELETE FROM operation_queue WHERE status IN ('done','failed') "
+                "AND finished_at < now() - INTERVAL '7 days' RETURNING COUNT(*)"
+            ) or 0
+        except Exception:
+            ops_del = 0
+        try:
+            audit_del = await pool.fetchval(
+                "DELETE FROM operation_audit WHERE occurred_at < now() - INTERVAL '30 days' RETURNING COUNT(*)"
+            ) or 0
+        except Exception:
+            audit_del = 0
+        try:
+            dm_del = await pool.fetchval(
+                "DELETE FROM dm_campaign_log WHERE sent_at < now() - INTERVAL '90 days' RETURNING COUNT(*)"
+            ) or 0
+        except Exception:
+            dm_del = 0
+        await message.answer(
+            f"🧹 <b>Очистка завершена</b>\n\n"
+            f"• Флуд-логов удалено: <b>{flood_del}</b>\n"
+            f"• Операций удалено: <b>{ops_del}</b>\n"
+            f"• Аудит-записей удалено: <b>{audit_del}</b>\n"
+            f"• DM-логов удалено: <b>{dm_del}</b>",
+            parse_mode="HTML", reply_markup=_admin_main_kb(),
+        )
+
     elif state.startswith("price_edit:"):
         plan = state.split(":", 1)[1]
         try:
@@ -901,6 +1021,70 @@ async def _adm_env_delete(
         await _adm_env_list(callback, http)
     except Exception as e:
         await callback.answer(f"❌ {e}", show_alert=True)
+
+
+# ── Platform operations analytics ────────────────────────────────────────────
+
+async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Платформенная аналитика по операциям всех пользователей."""
+    try:
+        total_ops = await pool.fetchval("SELECT COUNT(*) FROM operation_queue") or 0
+        running = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE status='running'"
+        ) or 0
+        pending = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE status='pending'"
+        ) or 0
+        done_today = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE status='done' "
+            "AND finished_at > now() - INTERVAL '24 hours'"
+        ) or 0
+        failed_today = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE status='failed' "
+            "AND finished_at > now() - INTERVAL '24 hours'"
+        ) or 0
+        top_ops = await pool.fetch(
+            """SELECT op_type, COUNT(*) AS cnt
+               FROM operation_queue
+               WHERE created_at > now() - INTERVAL '7 days'
+               GROUP BY op_type ORDER BY cnt DESC LIMIT 5"""
+        )
+        total_floods = await pool.fetchval(
+            "SELECT COUNT(*) FROM account_flood_log WHERE created_at > now() - INTERVAL '24 hours'"
+        ) or 0
+        active_accounts = await pool.fetchval(
+            "SELECT COUNT(DISTINCT owner_id) FROM tg_accounts WHERE is_active=true"
+        ) or 0
+        dm_sent = await pool.fetchval(
+            "SELECT COUNT(*) FROM dm_campaign_log WHERE status='sent' "
+            "AND sent_at > now() - INTERVAL '24 hours'"
+        ) or 0
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ Ошибка получения данных: {e}", parse_mode="HTML", reply_markup=_back_kb()
+        )
+        return
+
+    lines = [
+        "📈 <b>Платформенная аналитика операций</b>\n",
+        f"🔵 Активных операций: <b>{running}</b>",
+        f"⏳ В очереди: <b>{pending}</b>",
+        f"✅ Завершено за 24ч: <b>{done_today}</b>",
+        f"❌ Ошибок за 24ч: <b>{failed_today}</b>",
+        f"⚡ Всего операций: <b>{total_ops}</b>",
+        "",
+        f"📊 Флудов за 24ч: <b>{total_floods}</b>",
+        f"👤 Активных владельцев: <b>{active_accounts}</b>",
+        f"📨 DM-сообщений за 24ч: <b>{dm_sent}</b>",
+    ]
+    if top_ops:
+        lines.append("\n🔝 <b>Топ операций (7 дней):</b>")
+        for row in top_ops:
+            lines.append(f"• {row['op_type']}: <b>{row['cnt']}</b>")
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb()
+    )
 
 
 # ── New user tracker (called from start.py or inline) ─────────────────────────
