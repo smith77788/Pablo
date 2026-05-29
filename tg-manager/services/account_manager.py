@@ -1455,6 +1455,99 @@ async def report_peer(
             pass
 
 
+async def report_peer_deep(
+    session_string: str,
+    peer_username: str,
+    reason: str,
+    message: str = "",
+    msg_messages: list[str] | None = None,
+    max_msg_reports: int = 10,
+    block_after: bool = True,
+    _acc: dict | None = None,
+) -> dict:
+    """Комплексная атака на нелегальный ресурс за одно подключение:
+    1. Жалоба на весь канал/пользователя (ReportPeerRequest)
+    2. Жалобы на последние N сообщений (messages.ReportRequest)
+    3. Блокировка ресурса (contacts.BlockRequest)
+
+    Возвращает dict: {peer_reported, msg_reported, blocked}
+    """
+    from telethon.tl.functions.account import ReportPeerRequest
+    from telethon.tl.functions.messages import ReportRequest as MsgReportRequest
+    from telethon.tl.functions.contacts import BlockRequest
+    from telethon.tl.types import (
+        InputReportReasonSpam, InputReportReasonViolence,
+        InputReportReasonPornography, InputReportReasonChildAbuse,
+        InputReportReasonCopyright, InputReportReasonOther,
+        Channel,
+    )
+    reason_map = {
+        "spam":        InputReportReasonSpam(),
+        "violence":    InputReportReasonViolence(),
+        "pornography": InputReportReasonPornography(),
+        "childabuse":  InputReportReasonChildAbuse(),
+        "copyright":   InputReportReasonCopyright(),
+        "other":       InputReportReasonOther(),
+    }
+    tg_reason = reason_map.get(reason, InputReportReasonOther())
+    result = {"peer_reported": False, "msg_reported": 0, "blocked": False}
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(peer_username.lstrip("@"))
+
+        # 1. Жалоба на сам ресурс
+        try:
+            await client(ReportPeerRequest(peer=entity, reason=tg_reason, message=message))
+            result["peer_reported"] = True
+        except Exception as e:
+            log.warning("report_peer_deep: peer report failed: %s", e)
+
+        # 2. Жалобы на последние сообщения (только для каналов/чатов)
+        if isinstance(entity, Channel):
+            try:
+                msgs = await client.get_messages(entity, limit=max_msg_reports)
+                msg_ids = [m.id for m in msgs if m and m.id]
+                if msg_ids:
+                    # Выбираем текст жалобы для сообщений из переданного пула
+                    msg_pool = msg_messages or [message]
+                    chunks = [msg_ids[i:i+5] for i in range(0, len(msg_ids), 5)]
+                    for idx, chunk in enumerate(chunks):
+                        chunk_msg = msg_pool[idx % len(msg_pool)]
+                        try:
+                            await client(MsgReportRequest(
+                                peer=entity,
+                                id=chunk,
+                                reason=tg_reason,
+                                message=chunk_msg,
+                            ))
+                            result["msg_reported"] += len(chunk)
+                        except Exception as e:
+                            log.warning("report_peer_deep: msg report chunk failed: %s", e)
+                        await asyncio.sleep(0.8)
+            except Exception as e:
+                log.warning("report_peer_deep: get_messages failed: %s", e)
+
+        # 3. Блокировка ресурса
+        if block_after:
+            try:
+                await client(BlockRequest(id=entity))
+                result["blocked"] = True
+            except Exception as e:
+                log.warning("report_peer_deep: block failed: %s", e)
+
+    except Exception as e:
+        log.exception("report_peer_deep error: %s", e)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    return result
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ACCOUNT PROFILE
 # ══════════════════════════════════════════════════════════════════════════════

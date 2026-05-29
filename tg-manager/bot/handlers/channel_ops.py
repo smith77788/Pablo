@@ -2508,14 +2508,17 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     msg_pool = _REPORT_MESSAGES.get(reason, _REPORT_MESSAGES["other"])
 
     total_ops = len(peers) * len(chosen)
-    sent = 0
+    peer_sent = 0
+    msg_reported = 0
+    blocked = 0
     failed = 0
     done = 0
 
     status_msg = await callback.message.edit_text(
-        f"🚨 <b>Отправка жалоб...</b>\n"
+        f"🚨 <b>Комплексная атака на ресурс...</b>\n"
         f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
         f"Причина: {label}\n\n"
+        f"Каждый аккаунт: жалоба на канал + жалобы на сообщения + блокировка\n\n"
         f"{_progress_bar(0, total_ops)} 0/{total_ops}",
         parse_mode="HTML",
     )
@@ -2523,20 +2526,31 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     for peer in peers:
         for i, acc in enumerate(chosen):
             report_msg = msg_pool[done % len(msg_pool)]
-            ok = await account_manager.report_peer(
-                acc["session_str"], peer, reason, message=report_msg, _acc=acc
+            res = await account_manager.report_peer_deep(
+                acc["session_str"], peer, reason,
+                message=report_msg,
+                msg_messages=msg_pool,
+                max_msg_reports=10,
+                block_after=True,
+                _acc=acc,
             )
-            if ok:
-                sent += 1
+            if res["peer_reported"]:
+                peer_sent += 1
             else:
                 failed += 1
+            msg_reported += res.get("msg_reported", 0)
+            if res.get("blocked"):
+                blocked += 1
             done += 1
-            if done % 5 == 0 or done == total_ops:
+            if done % 3 == 0 or done == total_ops:
                 try:
                     await status_msg.edit_text(
-                        f"🚨 <b>Отправка жалоб...</b>\n"
+                        f"🚨 <b>Комплексная атака на ресурс...</b>\n"
                         f"Текущий: <code>{html.escape(peer)}</code>\n"
                         f"Причина: {label}\n\n"
+                        f"📌 Жалоб на канал: <b>{peer_sent}</b>\n"
+                        f"📨 Жалоб на сообщения: <b>{msg_reported}</b>\n"
+                        f"🚫 Заблокировано: <b>{blocked}</b>\n\n"
                         f"{_progress_bar(done, total_ops)} {done}/{total_ops}",
                         parse_mode="HTML",
                     )
@@ -2544,19 +2558,21 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
                     pass
             if i < len(chosen) - 1:
                 await asyncio.sleep(random.uniform(6.0, 15.0) * session_simulator.chaos_factor())
-        # Пауза между разными ресурсами
         if peer != peers[-1]:
             await asyncio.sleep(random.uniform(10.0, 25.0))
 
+    total_signals = peer_sent + msg_reported + blocked
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
     await status_msg.edit_text(
-        f"🚨 <b>Жалобы отправлены</b>\n\n"
-        f"Ресурсов: <b>{len(peers)}</b>\n"
+        f"🚨 <b>Атака завершена</b>\n\n"
+        f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
         f"Причина: {label}\n\n"
-        f"✅ Успешно: <b>{sent}</b>\n"
-        f"❌ Ошибок: <b>{failed}</b>\n"
-        f"📊 Всего операций: <b>{total_ops}</b> ({len(chosen)} акк × {len(peers)} ресурс)",
+        f"📌 Жалоб на каналы: <b>{peer_sent}</b>\n"
+        f"📨 Жалоб на сообщения: <b>{msg_reported}</b>\n"
+        f"🚫 Заблокировано: <b>{blocked}</b>\n"
+        f"❌ Ошибок: <b>{failed}</b>\n\n"
+        f"📊 Всего сигналов Telegram: <b>{total_signals}</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
