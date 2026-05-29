@@ -26,6 +26,7 @@ from bot.callbacks import (
     GeoPresenceCb,
     GroupFCb,
     HealthCb,
+    InfraCb,
     MassOpCb,
     MassPubCb,
     NetBcCb,
@@ -98,8 +99,9 @@ def _infrastructure_kb():
     kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
     kb.button(text="🌡 Разогрев аккаунтов", callback_data=WarmupCb(action="menu"))
     kb.button(text="🔍 Парсер аудитории",  callback_data=ParserCb(action="menu"))
+    kb.button(text="📊 Аналитика инфры",   callback_data=InfraCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 3, 1)
     return kb.as_markup()
 
 
