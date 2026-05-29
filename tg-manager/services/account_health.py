@@ -153,11 +153,11 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
                COALESCE(a.acc_status, 'active') AS acc_status,
                EXTRACT(DAY FROM NOW() - a.added_at)::int AS days_active,
                COUNT(DISTINCT fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '7d') AS floods_7d,
-               COUNT(DISTINCT ol.id) FILTER (WHERE ol.status='success') AS ops_ok,
-               COUNT(DISTINCT ol.id) FILTER (WHERE ol.status!='success') AS ops_fail
+               COUNT(DISTINCT oa.id) FILTER (WHERE oa.result='success') AS ops_ok,
+               COUNT(DISTINCT oa.id) FILTER (WHERE oa.result!='success' AND oa.result IS NOT NULL) AS ops_fail
            FROM tg_accounts a
            LEFT JOIN account_flood_log fl ON fl.account_id = a.id
-           LEFT JOIN operation_log ol ON ol.account_id = a.id
+           LEFT JOIN operation_audit oa ON oa.account_id = a.id
            WHERE a.owner_id = $1
            GROUP BY a.id, a.trust_score, a.flood_count_7d, a.acc_status, a.added_at""",
         owner_id,

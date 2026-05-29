@@ -399,7 +399,7 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
 # ── Sub-screens ───────────────────────────────────────────────────────────────
 
 async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    from bot.callbacks import AdminUserCb
+    from bot.handlers.admin_users import AdminUserCb
     _PLAN_EMO = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
     try:
         rows = await pool.fetch(
