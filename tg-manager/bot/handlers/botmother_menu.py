@@ -129,10 +129,11 @@ def _operations_kb():
     kb.button(text="🛠️ Построитель",        callback_data=MassOpCb(action="menu"))
     kb.button(text="📋 Очередь",             callback_data=MassOpCb(action="queue"))
     kb.button(text="⏱️ Планировщик",         callback_data=BmCb(action="op_planner"))
+    kb.button(text="📈 Прогноз нагрузки",   callback_data=BmCb(action="capacity"))
     kb.button(text="📄 Шаблоны",             callback_data=AssetTplCb(action="menu"))
     kb.button(text="📊 Отчёты",              callback_data=BmCb(action="op_reports"))
     kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
-    kb.adjust(2, 1, 2, 2, 2, 1)
+    kb.adjust(2, 1, 2, 2, 1, 2, 1)
     return kb.as_markup()
 
 
@@ -1002,6 +1003,26 @@ async def fsm_plan_waiting_datetime(
     if links:
         preview_lines.append(f"\nКаналов: <b>{len(links)}</b>")
 
+    # Capacity plan preview
+    try:
+        from services.capacity_planner import plan_operation
+        op_map = {
+            "bulk_join": "join", "bulk_leave": "leave",
+            "mass_publish": "post", "bulk_bot_edit": "edit",
+        }
+        cap_op = op_map.get(op_type, op_type)
+        total_items = len(links) if links else 20
+        plan = await plan_operation(pool, message.from_user.id, cap_op, total_items)
+        preview_lines.append(
+            f"\n⏱️ Ожидаемое время: ~<b>{plan.estimated_minutes:.0f} мин</b> "
+            f"| Риск: {'🟢' if plan.risk_level == 'low' else '🟡' if plan.risk_level == 'medium' else '🔴'}"
+        )
+        if plan.warnings:
+            for w in plan.warnings[:2]:
+                preview_lines.append(f"⚠️ {w}")
+    except Exception:
+        pass
+
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запланировать", callback_data=BmCb(action="plan_confirm"))
     kb.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
@@ -1104,6 +1125,57 @@ async def cb_plan_cancel(
         await callback.answer("Операция не найдена или уже выполнена", show_alert=True)
 
     await _show_planner_menu(callback, pool, state)
+
+
+# ── Capacity Planner Dashboard ────────────────────────────────────────────────
+
+@router.callback_query(BmCb.filter(F.action == "capacity"))
+async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await _edit(callback, locked_text("Прогноз нагрузки", "starter"), subscription_locked_markup("starter"))
+        return
+    await callback.answer()
+
+    from services.capacity_planner import plan_operation
+    from services.geo_router import get_geo_distribution
+
+    uid = callback.from_user.id
+    lines = ["<b>📈 Прогноз нагрузки</b>\n"]
+
+    # Гео-распределение аккаунтов
+    try:
+        geo = await get_geo_distribution(pool, uid)
+        if geo:
+            lines.append("🌍 <b>Аккаунты по регионам:</b>")
+            for country, cnt in list(geo.items())[:6]:
+                flag = "🏳️" if country == "UNKNOWN" else "📍"
+                lines.append(f"{flag} {country}: <b>{cnt}</b>")
+            lines.append("")
+    except Exception:
+        pass
+
+    # Прогнозы для типичных операций
+    scenarios = [
+        ("join", 50, "Вступить в 50 каналов"),
+        ("post", 100, "Публикация в 100 каналов"),
+        ("dm", 200, "200 DM-сообщений"),
+    ]
+    lines.append("⏱️ <b>Оценочное время операций:</b>")
+    for op_type, count, label in scenarios:
+        try:
+            plan = await plan_operation(pool, uid, op_type, count)
+            risk_icon = "🟢" if plan.risk_level == "low" else "🟡" if plan.risk_level == "medium" else "🔴"
+            mins = plan.estimated_minutes
+            time_str = f"{mins:.0f} мин" if mins < 60 else f"{mins/60:.1f} ч"
+            lines.append(f"{risk_icon} {label}: ~<b>{time_str}</b> ({plan.account_count} акк.)")
+        except Exception:
+            lines.append(f"• {label}: н/д")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад к операциям", callback_data=BmCb(action="operations"))
+    kb.adjust(1)
+    await _edit(callback, "\n".join(lines), kb.as_markup())
 
 
 # ── Operation Reports ─────────────────────────────────────────────────────
