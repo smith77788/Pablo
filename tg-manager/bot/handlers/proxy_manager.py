@@ -5,6 +5,7 @@ Entry point: ProxyCb(action="menu")
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -31,11 +32,12 @@ _PROXY_RE = re.compile(
 
 def _menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить прокси",  callback_data=ProxyCb(action="add"))
-    kb.button(text="📋 Мой список",        callback_data=ProxyCb(action="list"))
-    kb.button(text="✅ Проверить все",     callback_data=ProxyCb(action="check_all"))
-    kb.button(text="◀️ Назад",             callback_data=BotCb(action="main"))
-    kb.adjust(2, 1, 1)
+    kb.button(text="➕ Добавить прокси",   callback_data=ProxyCb(action="add"))
+    kb.button(text="📋 Мой список",         callback_data=ProxyCb(action="list"))
+    kb.button(text="✅ Проверить + пинг",  callback_data=ProxyCb(action="check_all"))
+    kb.button(text="🌍 Определить гео",    callback_data=ProxyCb(action="detect_geo"))
+    kb.button(text="◀️ Назад",              callback_data=BotCb(action="main"))
+    kb.adjust(2, 2, 1)
     return kb
 
 
@@ -51,22 +53,52 @@ def _cancel_kb() -> InlineKeyboardBuilder:
     return kb
 
 
-async def _check_proxy_alive(proxy_url: str) -> bool:
-    """Try connecting to api.telegram.org:443 through the proxy."""
+async def _check_proxy_alive(proxy_url: str) -> dict:
+    """Check proxy reachability via api.telegram.org. Returns {alive, latency_ms}."""
+    import time as _time
     try:
         import aiohttp
         from aiohttp_socks import ProxyConnector  # type: ignore
 
         connector = ProxyConnector.from_url(proxy_url)
+        t0 = _time.monotonic()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(
                 "https://api.telegram.org",
-                timeout=aiohttp.ClientTimeout(total=8),
+                timeout=aiohttp.ClientTimeout(total=10),
                 ssl=False,
             ) as resp:
-                return resp.status < 500
+                latency_ms = int((_time.monotonic() - t0) * 1000)
+                return {"alive": resp.status < 500, "latency_ms": latency_ms}
     except Exception:
-        return False
+        return {"alive": False, "latency_ms": None}
+
+
+async def _detect_proxy_geo(proxy_url: str) -> dict:
+    """Attempt to detect geo country/city via ip-api.com through the proxy."""
+    try:
+        import aiohttp
+        from aiohttp_socks import ProxyConnector  # type: ignore
+
+        # Extract IP from proxy URL for geo lookup
+        import re
+        m = re.search(r'[@/](\d+\.\d+\.\d+\.\d+)[:$]', proxy_url)
+        if not m:
+            return {}
+        ip = m.group(1)
+
+        connector = ProxyConnector.from_url(proxy_url)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(
+                f"http://ip-api.com/json/{ip}?fields=country,city",
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {"geo_country": data.get("country"), "geo_city": data.get("city")}
+    except Exception:
+        pass
+    return {}
 
 
 # ── Menu ───────────────────────────────────────────────────────────────────────
@@ -90,12 +122,11 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     user_id = callback.from_user.id
 
     rows = await pool.fetch(
-        """
-        SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive
-        FROM user_proxies
-        WHERE owner_id=$1
-        ORDER BY created_at DESC
-        """,
+        """SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive,
+                  latency_avg_ms, geo_country, geo_city, success_rate
+           FROM user_proxies
+           WHERE owner_id=$1
+           ORDER BY COALESCE(success_rate, 100) DESC, created_at DESC""",
         user_id,
     )
 
@@ -113,11 +144,13 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             else:
                 status = "❓"
 
-            label = row["label"] or row["proxy_url"]
+            label = row["label"] or row["proxy_url"][:30]
             ptype = row["proxy_type"] or "socks5"
-            lines.append(f"{status} <code>{label}</code> [{ptype}]")
+            lat = f" {row['latency_avg_ms']}ms" if row.get("latency_avg_ms") else ""
+            geo = f" [{row['geo_country']}]" if row.get("geo_country") else ""
+            lines.append(f"{status} <code>{html.escape(label)}</code> [{ptype}]{lat}{geo}")
             kb.button(
-                text=f"🗑 Удалить {label[:20]}",
+                text=f"🗑 {html.escape(label[:22])}",
                 callback_data=ProxyCb(action="delete", proxy_id=row["id"]),
             )
 
@@ -242,7 +275,7 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     user_id = callback.from_user.id
 
     rows = await pool.fetch(
-        "SELECT id, proxy_url FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+        "SELECT id, proxy_url, label FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
         user_id,
     )
 
@@ -253,32 +286,96 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
+    progress_msg = await callback.message.edit_text(
+        f"⏳ Проверяю {len(rows)} прокси...",
+        parse_mode="HTML",
+    )
+
     tasks = [_check_proxy_alive(r["proxy_url"]) for r in rows]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     ok_count = 0
     fail_count = 0
     now = datetime.now(timezone.utc)
+    lines = ["✅ <b>Проверка прокси завершена</b>\n"]
 
     async with pool.acquire() as conn:
         for row, result in zip(rows, results):
-            alive = isinstance(result, bool) and result
+            if isinstance(result, dict):
+                alive = result.get("alive", False)
+                latency_ms = result.get("latency_ms")
+            else:
+                alive = False
+                latency_ms = None
+
             if alive:
                 ok_count += 1
+                lat_str = f" — {latency_ms}ms" if latency_ms else ""
+                lines.append(f"✅ {html.escape(row['label'] or row['proxy_url'][:30])}{lat_str}")
             else:
                 fail_count += 1
-            await conn.execute(
-                "UPDATE user_proxies SET is_alive=$1, last_check=$2 WHERE id=$3",
-                alive, now, row["id"],
-            )
+                lines.append(f"❌ {html.escape(row['label'] or row['proxy_url'][:30])}")
 
-    await callback.message.edit_text(
-        f"✅ Проверка завершена\n\n"
-        f"✅ Рабочих: <b>{ok_count}</b>\n"
-        f"❌ Нерабочих: <b>{fail_count}</b>",
+            await conn.execute(
+                """UPDATE user_proxies
+                   SET is_alive=$1, last_check=$2,
+                       latency_avg_ms=CASE WHEN $3::int IS NOT NULL THEN $3::int
+                                           ELSE latency_avg_ms END,
+                       last_checked_at=$2
+                   WHERE id=$4""",
+                alive, now, latency_ms, row["id"],
+            )
+            # Log to proxy_health_log
+            try:
+                await conn.execute(
+                    """INSERT INTO proxy_health_log(proxy_id, owner_id, is_reachable, latency_ms)
+                       VALUES($1,$2,$3,$4)""",
+                    row["id"], user_id, alive, latency_ms,
+                )
+            except Exception:
+                pass
+
+    lines.append(f"\n✅ Рабочих: <b>{ok_count}</b> | ❌ Нерабочих: <b>{fail_count}</b>")
+    await progress_msg.edit_text(
+        "\n".join(lines),
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
     )
+
+
+# ── Geo detection ─────────────────────────────────────────────────────────────
+
+@router.callback_query(ProxyCb.filter(F.action == "detect_geo"))
+async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer("🌍 Определяю гео прокси...")
+    user_id = callback.from_user.id
+    rows = await pool.fetch(
+        "SELECT id, proxy_url, label FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+        user_id,
+    )
+    if not rows:
+        await callback.message.edit_text("📋 Нет активных прокси.", reply_markup=_menu_kb().as_markup())
+        return
+
+    updated = 0
+    lines = ["🌍 <b>Гео прокси</b>\n"]
+    for row in rows:
+        geo = await _detect_proxy_geo(row["proxy_url"])
+        label = html.escape(row["label"] or row["proxy_url"][:30])
+        if geo:
+            country = geo.get("geo_country") or "?"
+            city = geo.get("geo_city") or "?"
+            lines.append(f"• {label} → {country}, {city}")
+            await pool.execute(
+                "UPDATE user_proxies SET geo_country=$1, geo_city=$2 WHERE id=$3",
+                geo.get("geo_country"), geo.get("geo_city"), row["id"],
+            )
+            updated += 1
+        else:
+            lines.append(f"• {label} → ❓ не определено")
+
+    lines.append(f"\nОпределено: {updated}/{len(rows)}")
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_menu_kb().as_markup())
 
 
 # ── Delete ─────────────────────────────────────────────────────────────────────

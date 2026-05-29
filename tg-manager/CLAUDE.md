@@ -787,7 +787,7 @@ asyncio.create_task(my_service.run(pool))
 - **Ветка:** `claude/telegram-bot-services-xfAh6` → auto-deploy при пуше
 - **Build:** `pip install -r requirements.txt && python main.py`
 - **Проверка после деплоя:** `/version` или `/menu` в боте
-- **Текущая build:** `2026.05.29-r9`
+- **Текущая build:** `2026.05.29-r10`
 - **Логи:** Railway dashboard → Deployments → Latest
 
 ---
@@ -807,5 +807,5 @@ asyncio.create_task(my_service.run(pool))
 
 ---
 
-_Последнее обновление: 2026-05-29 (r9)_
-_Следующий build-номер: r10_
+_Последнее обновление: 2026-05-29 (r10)_
+_Следующий build-номер: r11_

@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-29 (r9)
+Обновлено: 2026-05-29 (r10)
 
 ## Статус: АКТИВНАЯ РАЗРАБОТКА
 
@@ -87,6 +87,20 @@ Last commit: `refactor: UX channel_ops + accounts`
   - manage_dialogs: сначала из БД (managed_channels), потом кнопка «Загрузить из Telegram»
   - manage_dialogs_live: scan_owned_assets (только admin/creator), сохраняет в managed_channels
   - username каналов видны прямо в списке
+
+**Infrastructure OS Layer (r10 — gap analysis implementation):**
+- docs/COMPETITOR_GAP_ANALYSIS_TELE_RAPTOR.md: полный анализ разрыва с TeleRaptor
+- services/flood_engine.py: Flood Intelligence Engine (in-memory state, adaptive delays, risk scoring)
+- services/session_pool.py: Session Orchestrator (SessionState enum, warm/bulk_warm, registry)
+- services/account_health.py: Account Health Engine (health/load scoring, warmup state, sorting)
+- services/parser.py: Audience Parser (members/active, CSV export, dedup, progress)
+- services/account_warmer.py: Account Warming (gentle/standard/aggressive plans, daily simulation)
+- schema_v41.sql: proxy_health_log, account_warmup_plans/log, parsed_audiences, parser_runs, operation_audit, account_capabilities, account_daily_stats
+- bot/handlers/audience_parser.py: полный UI парсера с историей и CSV-экспортом
+- bot/handlers/account_warmup.py: UI управления планами разогрева
+- bot/handlers/proxy_manager.py: Proxy Intelligence — измерение латентности, geo-определение, scoring
+- bot/handlers/seo.py: CRITICAL FIX — SEO AI теперь принимает текстовый фидбек (SeoFSM), спрашивает username перед генерацией, не навязывает username если его нет
+- botmother_menu.py: добавлены 🌡 Разогрев + 🔍 Парсер в Infrastructure
 
 **Bulk Channel Operations (r9):**
 - channel_ops.py: добавлены bulk-операции для управления каналами
