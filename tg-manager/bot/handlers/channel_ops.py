@@ -57,6 +57,7 @@ REPORT_REASONS = {
     "other": "📋 Другое",
 }
 
+
 REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "😮", "😢", "👎", "💯", "🤔", "🤩"]
 
 
@@ -2124,6 +2125,7 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
+
 
 
 # ══════════════════════════════════════════════════════════════════════════
