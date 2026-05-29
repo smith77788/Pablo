@@ -307,3 +307,8 @@ class InfraCb(CallbackData, prefix="infra"):
     action: str
     account_id: int = 0
     page: int = 0
+
+
+class CleanerCb(CallbackData, prefix="cln"):
+    action: str
+    account_id: int = 0

@@ -54,6 +54,7 @@ from bot.handlers import cluster_manager as cluster_handler
 from bot.handlers import audience_parser as audience_parser_handler
 from bot.handlers import account_warmup as account_warmup_handler
 from bot.handlers import infra_analytics as infra_analytics_handler
+from bot.handlers import account_cleaner as account_cleaner_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -173,6 +174,7 @@ async def main() -> None:
     dp.include_router(audience_parser_handler.router)
     dp.include_router(account_warmup_handler.router)
     dp.include_router(infra_analytics_handler.router)
+    dp.include_router(account_cleaner_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)

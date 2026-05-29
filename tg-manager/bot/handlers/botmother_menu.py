@@ -21,6 +21,7 @@ from bot.callbacks import (
     BotCb,
     ChanCb,
     ChanFactCb,
+    CleanerCb,
     ClustMCb,
     CompCb,
     GeoPresenceCb,
@@ -100,8 +101,9 @@ def _infrastructure_kb():
     kb.button(text="🌡 Разогрев аккаунтов", callback_data=WarmupCb(action="menu"))
     kb.button(text="🔍 Парсер аудитории",  callback_data=ParserCb(action="menu"))
     kb.button(text="📊 Аналитика инфры",   callback_data=InfraCb(action="menu"))
+    kb.button(text="🧹 Очиститель",        callback_data=CleanerCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 3, 1)
+    kb.adjust(2, 2, 2, 3, 1, 1)
     return kb.as_markup()
 
 
@@ -282,7 +284,8 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: 
         "👥 <b>Группы</b> — создание и управление группами\n"
         "🔗 <b>Кластеры</b> — объединить ботов в сеть\n"
         "🌐 <b>Прокси</b> — прокси для аккаунтов\n"
-        "❤️ <b>Здоровье</b> — статус аккаунтов и ботов",
+        "❤️ <b>Здоровье</b> — статус аккаунтов и ботов\n"
+        "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением",
         _infrastructure_kb(),
     )
 
