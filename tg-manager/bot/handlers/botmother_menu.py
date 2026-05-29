@@ -43,6 +43,7 @@ from bot.callbacks import (
     SubCb,
     AutoReplyCb,
     DmCb,
+    StrikeCb,
     VisCb,
     WarmupCb,
 )
@@ -87,10 +88,11 @@ def _main_menu_kb():
     kb.button(text="🤖 AI Assistant",     callback_data=BmCb(action="ai_assistant"))
     kb.button(text="🧠 Аналитика",        callback_data=BmCb(action="behavioral"))
     kb.button(text="🗺️ Карта инфры",      callback_data=BmCb(action="topology"))
+    kb.button(text="⚔️ Strike",           callback_data=StrikeCb(action="menu"))
     kb.button(text="💳 Billing",          callback_data=BmCb(action="billing"))
     kb.button(text="👥 Referral",         callback_data=BmCb(action="referral"))
     kb.button(text="⚙️ Settings",         callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -162,22 +164,14 @@ def _inbox_kb():
 
 def _settings_kb():
     kb = InlineKeyboardBuilder()
-    # ── Бот-настройки ─────────────────────────────────────
+    # ── Настройки ботов ───────────────────────────────────
     kb.button(text="📢 Авто-ответы",        callback_data=BmCb(action="pick_bot_for", sub="ar"))
     kb.button(text="🔗 Воронки",            callback_data=BmCb(action="pick_bot_for", sub="fn"))
     kb.button(text="🤖 Команды бота",       callback_data=BmCb(action="pick_bot_for", sub="cmd"))
     kb.button(text="🔔 Уведомления",        callback_data=BmCb(action="notifications"))
-    # ── Аккаунты ──────────────────────────────────────────
-    kb.button(text="🌐 Прокси",             callback_data=ProxyCb(action="list"))
-    kb.button(text="♨️ Прогрев",           callback_data=WarmupCb(action="menu"))
-    kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
-    kb.button(text="🧹 Очиститель",         callback_data=CleanerCb(action="menu"))
-    # ── Данные ────────────────────────────────────────────
-    kb.button(text="📋 Шаблоны ассетов",    callback_data=AssetTplCb(action="menu"))
-    kb.button(text="🔍 Парсер аудитории",   callback_data=ParserCb(action="list"))
     # ── Навигация ─────────────────────────────────────────
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
@@ -436,20 +430,12 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     await _edit(
         callback,
-        "⚙️ <b>Settings — настройки</b>\n\n"
-        "<b>🤖 Настройки ботов:</b>\n"
+        "⚙️ <b>Settings — настройки ботов</b>\n\n"
         "• 📢 Авто-ответы — триггер по ключевым словам\n"
         "• 🔗 Воронки — автоматические цепочки сообщений\n"
         "• 🤖 Команды — /start, /help и другие команды бота\n"
         "• 🔔 Уведомления — флуд, позиции, ошибки\n\n"
-        "<b>📱 Настройки аккаунтов:</b>\n"
-        "• 🌐 Прокси — привязка прокси к аккаунтам\n"
-        "• ♨️ Прогрев — планы прогрева новых аккаунтов\n"
-        "• ❤️ Здоровье — мониторинг ограничений\n"
-        "• 🧹 Очиститель — массовая очистка действий\n\n"
-        "<b>💾 Данные:</b>\n"
-        "• 📋 Шаблоны — готовые шаблоны ботов/каналов/постов\n"
-        "• 🔍 Парсер — сбор аудитории из каналов",
+        "<i>Настройки аккаунтов (Прокси, Прогрев, Здоровье) — в разделе 🏗️ Infrastructure</i>",
         _settings_kb(),
     )
 

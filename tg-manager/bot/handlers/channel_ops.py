@@ -197,10 +197,9 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="👥 Инвайт из контактов", callback_data=ChanCb(action="contact_invite"))
     kb.button(text="👍 Реакция на пост",     callback_data=ChanCb(action="react_pick"))
     kb.button(text="🚨 Жалоба (1 акк)",      callback_data=ChanCb(action="report_pick"))
-    kb.button(text="🚨 Жалоба (мульти-акк)", callback_data=ChanCb(action="bulk_report"))
     # ── Нижний ряд
     kb.button(text="⚡ Массовые операции",   callback_data=ChanCb(action="bulk_menu"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb
 
 
@@ -2225,6 +2224,25 @@ async def cb_bulk_report_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    # Проверка доступа к Strike Module
+    has_strike = await pool.fetchrow(
+        "SELECT 1 FROM strike_access WHERE user_id=$1", callback.from_user.id
+    )
+    if not has_strike:
+        from bot.callbacks import StrikeCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⚔️ Купить Strike Module — $250 USDT",
+                  callback_data=StrikeCb(action="buy"))
+        kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "⚔️ <b>Strike Module</b>\n\n"
+            "Функция многоаккаунтной зачистки нелегального контента "
+            "доступна по отдельной лицензии.\n\n"
+            "💰 Стоимость: <b>$250 USDT</b> · Пожизненный доступ",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
