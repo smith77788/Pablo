@@ -58,6 +58,16 @@ REPORT_REASONS = {
     "other": "📋 Другое",
 }
 
+# Быстрые пресеты для типовых незаконных ресурсов
+_REPORT_PRESETS = {
+    "drugs":     ("other",       "🟣 Наркотики"),
+    "terrorism": ("violence",    "💣 Терроризм"),
+    "fraud":     ("spam",        "💸 Мошенничество"),
+    "csam":      ("childabuse",  "🚨 CSAM"),
+    "weapons":   ("violence",    "🔫 Оружие"),
+    "darknet":   ("other",       "🕸 Даркнет-услуги"),
+}
+
 
 REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "😮", "😢", "👎", "💯", "🤔", "🤩"]
 
@@ -79,7 +89,7 @@ def _human_delay(min_s: float, max_s: float) -> float:
 
 async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT id, phone, first_name, username, is_active FROM tg_accounts "
+        "SELECT id, session_str, phone, first_name, username, is_active FROM tg_accounts "
         "WHERE owner_id=$1 ORDER BY added_at",
         owner_id,
     )
@@ -2145,40 +2155,128 @@ async def cb_bulk_report_start(
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
-    await state.set_state(BulkReportFSM.waiting_peer)
     await state.update_data(active_ids=[a["id"] for a in active])
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    kb.button(text="👤 Один ресурс",          callback_data=ChanCb(action="br_mode_single"))
+    kb.button(text="📋 Список ресурсов",       callback_data=ChanCb(action="br_mode_batch"))
+    kb.button(text="❌ Отмена",                callback_data=ChanCb(action="menu"))
+    kb.adjust(2, 1)
     await callback.message.edit_text(
         f"🚨 <b>Жалоба с нескольких аккаунтов</b>\n\n"
         f"Доступно аккаунтов: <b>{len(active)}</b>\n\n"
-        "Введите username или ссылку на объект жалобы:\n"
-        "<code>@username</code> или <code>https://t.me/username</code>",
+        "Выберите режим:\n"
+        "• <b>Один ресурс</b> — жалоба на один канал/бот\n"
+        "• <b>Список ресурсов</b> — вставить несколько username сразу",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
 
-@router.message(BulkReportFSM.waiting_peer)
-async def fsm_bulk_report_peer(message: Message, state: FSMContext) -> None:
-    peer = (message.text or "").strip()
-    if not peer:
-        await message.answer("⚠️ Введите username.")
-        return
-    # Нормализуем ссылку t.me/xxx → @xxx
-    if peer.startswith("https://t.me/"):
-        peer = "@" + peer.split("t.me/")[-1].split("?")[0].rstrip("/")
-    elif not peer.startswith("@"):
-        peer = "@" + peer.lstrip("@")
-    await state.update_data(peer=peer)
-    await state.set_state(BulkReportFSM.choosing_reason)
+@router.callback_query(ChanCb.filter(F.action == "br_mode_single"))
+async def cb_br_mode_single(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(BulkReportFSM.waiting_peer)
     kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    await callback.message.edit_text(
+        "🚨 <b>Жалоба — один ресурс</b>\n\n"
+        "Введите username или ссылку:\n"
+        "<code>@username</code>\n"
+        "<code>https://t.me/username</code>",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanCb.filter(F.action == "br_mode_batch"))
+async def cb_br_mode_batch(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(BulkReportFSM.waiting_peers_batch)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    await callback.message.edit_text(
+        "🚨 <b>Жалоба — список ресурсов</b>\n\n"
+        "Вставьте список через новую строку или запятую:\n\n"
+        "<code>@drugs_channel\n"
+        "@scam_bot\n"
+        "https://t.me/illegal_shop</code>\n\n"
+        "Каждый ресурс получит жалобы от всех выбранных аккаунтов.",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+def _normalize_peer(p: str) -> str:
+    p = p.strip().rstrip("/")
+    if p.startswith("https://t.me/"):
+        p = "@" + p.split("t.me/")[-1].split("?")[0].rstrip("/")
+    elif not p.startswith("@"):
+        p = "@" + p.lstrip("@")
+    return p
+
+
+def _reason_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    # Быстрые пресеты
+    for key, (reason, label) in _REPORT_PRESETS.items():
+        kb.button(text=label, callback_data=f"chan:br_preset:{key}")
+    # Стандартные причины TG
     for key, label in REPORT_REASONS.items():
         kb.button(text=label, callback_data=f"chan:br_reason:{key}")
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(3, 3, 2, 2, 2, 1)
+    return kb
+
+
+@router.message(BulkReportFSM.waiting_peer)
+async def fsm_bulk_report_peer(message: Message, state: FSMContext) -> None:
+    peer = _normalize_peer(message.text or "")
+    if not peer or peer == "@":
+        await message.answer("⚠️ Введите username.")
+        return
+    await state.update_data(peer=peer, peers=[peer])
+    await state.set_state(BulkReportFSM.choosing_reason)
     await message.answer(
-        f"🚨 Жалоба на: <code>{html.escape(peer)}</code>\n\nВыберите причину:",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        f"🚨 Жалоба на: <code>{html.escape(peer)}</code>\n\n"
+        "Выберите тип нарушения:",
+        parse_mode="HTML", reply_markup=_reason_kb().as_markup(),
+    )
+
+
+@router.message(BulkReportFSM.waiting_peers_batch)
+async def fsm_bulk_report_peers_batch(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").replace(",", "\n")
+    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+    if not lines:
+        await message.answer("⚠️ Введите хотя бы один username.")
+        return
+    peers = [_normalize_peer(l) for l in lines if l]
+    peers = list(dict.fromkeys(p for p in peers if len(p) > 1))  # дедупликация
+    await state.update_data(peer=peers[0], peers=peers)
+    await state.set_state(BulkReportFSM.choosing_reason)
+    preview = "\n".join(f"• <code>{html.escape(p)}</code>" for p in peers[:5])
+    if len(peers) > 5:
+        preview += f"\n<i>...и ещё {len(peers) - 5}</i>"
+    await message.answer(
+        f"🚨 Жалоба на <b>{len(peers)}</b> ресурс(ов):\n{preview}\n\n"
+        "Выберите тип нарушения:",
+        parse_mode="HTML", reply_markup=_reason_kb().as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("chan:br_preset:"))
+async def cb_br_preset(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    preset_key = callback.data.split(":", 2)[2]
+    reason, _ = _REPORT_PRESETS.get(preset_key, ("other", ""))
+    await state.update_data(reason=reason)
+    await state.set_state(BulkReportFSM.selecting_accounts)
+    data = await state.get_data()
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    selected = [a["id"] for a in active]
+    await state.update_data(selected_ids=selected)
+    peers = data.get("peers", [data.get("peer", "")])
+    await _show_bulk_report_account_picker(
+        callback.message, active, selected, peers[0], reason, edit=True,
+        extra_info=f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
     )
 
 
@@ -2194,20 +2292,28 @@ async def cb_bulk_report_reason(
 
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
-    # По умолчанию — все выбраны
     selected = [a["id"] for a in active]
     await state.update_data(selected_ids=selected)
 
-    await _show_bulk_report_account_picker(callback.message, active, selected, data["peer"], reason, edit=True)
+    peers = data.get("peers", [data.get("peer", "")])
+    await _show_bulk_report_account_picker(
+        callback.message, active, selected, peers[0], reason, edit=True,
+        extra_info=f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
+    )
 
 
 async def _show_bulk_report_account_picker(
-    message, accounts: list, selected: list, peer: str, reason: str, edit: bool = False
+    message, accounts: list, selected: list, peer: str, reason: str,
+    edit: bool = False, extra_info: str | None = None
 ) -> None:
     label = REPORT_REASONS.get(reason, reason)
     lines = [
         f"🚨 <b>Выберите аккаунты для жалобы</b>",
         f"Объект: <code>{html.escape(peer)}</code>",
+    ]
+    if extra_info:
+        lines.append(extra_info)
+    lines += [
         f"Причина: {label}",
         f"Выбрано: <b>{len(selected)}/{len(accounts)}</b>\n",
     ]
@@ -2254,8 +2360,10 @@ async def cb_br_toggle(callback: CallbackQuery, state: FSMContext, pool: asyncpg
     await state.update_data(selected_ids=selected)
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    peers = data.get("peers", [data.get("peer", "")])
+    extra = f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
     await _show_bulk_report_account_picker(
-        callback.message, active, selected, data["peer"], data["reason"], edit=True
+        callback.message, active, selected, data["peer"], data["reason"], edit=True, extra_info=extra
     )
 
 
@@ -2267,8 +2375,10 @@ async def cb_br_selall(callback: CallbackQuery, state: FSMContext, pool: asyncpg
     selected = [a["id"] for a in active]
     await state.update_data(selected_ids=selected)
     data = await state.get_data()
+    peers = data.get("peers", [data.get("peer", "")])
+    extra = f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
     await _show_bulk_report_account_picker(
-        callback.message, active, selected, data["peer"], data["reason"], edit=True
+        callback.message, active, selected, data["peer"], data["reason"], edit=True, extra_info=extra
     )
 
 
@@ -2279,8 +2389,10 @@ async def cb_br_selno(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     active = [a for a in accounts if a["is_active"]]
     await state.update_data(selected_ids=[])
     data = await state.get_data()
+    peers = data.get("peers", [data.get("peer", "")])
+    extra = f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
     await _show_bulk_report_account_picker(
-        callback.message, active, [], data["peer"], data["reason"], edit=True
+        callback.message, active, [], data["peer"], data["reason"], edit=True, extra_info=extra
     )
 
 
@@ -2300,7 +2412,8 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     data = await state.get_data()
     await state.clear()
 
-    peer = data.get("peer", "")
+    peers = data.get("peers") or [data.get("peer", "")]
+    peers = [p for p in peers if p]
     reason = data.get("reason", "spam")
     selected_ids = data.get("selected_ids", [])
     label = REPORT_REASONS.get(reason, reason)
@@ -2314,7 +2427,6 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     from services import account_manager
 
-    # Стандартный текст жалобы по причине
     reason_messages = {
         "spam":        "This account distributes spam.",
         "violence":    "This content contains violent material.",
@@ -2325,45 +2437,55 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     }
     report_msg = reason_messages.get(reason, "")
 
+    total_ops = len(peers) * len(chosen)
     sent = 0
     failed = 0
+    done = 0
+
     status_msg = await callback.message.edit_text(
         f"🚨 <b>Отправка жалоб...</b>\n"
-        f"Объект: <code>{html.escape(peer)}</code> · {label}\n\n"
-        f"{_progress_bar(0, len(chosen))} 0/{len(chosen)}",
+        f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
+        f"Причина: {label}\n\n"
+        f"{_progress_bar(0, total_ops)} 0/{total_ops}",
         parse_mode="HTML",
     )
 
-    for i, acc in enumerate(chosen):
-        ok = await account_manager.report_peer(
-            acc["session_str"], peer, reason, message=report_msg, _acc=acc
-        )
-        if ok:
-            sent += 1
-        else:
-            failed += 1
-        if (i + 1) % 3 == 0 or (i + 1) == len(chosen):
-            try:
-                await status_msg.edit_text(
-                    f"🚨 <b>Отправка жалоб...</b>\n"
-                    f"Объект: <code>{html.escape(peer)}</code> · {label}\n\n"
-                    f"{_progress_bar(i + 1, len(chosen))} {i + 1}/{len(chosen)}",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-        if i < len(chosen) - 1:
-            await asyncio.sleep(random.uniform(8.0, 18.0) * session_simulator.chaos_factor())
+    for peer in peers:
+        for i, acc in enumerate(chosen):
+            ok = await account_manager.report_peer(
+                acc["session_str"], peer, reason, message=report_msg, _acc=acc
+            )
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+            done += 1
+            if done % 5 == 0 or done == total_ops:
+                try:
+                    await status_msg.edit_text(
+                        f"🚨 <b>Отправка жалоб...</b>\n"
+                        f"Текущий: <code>{html.escape(peer)}</code>\n"
+                        f"Причина: {label}\n\n"
+                        f"{_progress_bar(done, total_ops)} {done}/{total_ops}",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            if i < len(chosen) - 1:
+                await asyncio.sleep(random.uniform(6.0, 15.0) * session_simulator.chaos_factor())
+        # Пауза между разными ресурсами
+        if peer != peers[-1]:
+            await asyncio.sleep(random.uniform(10.0, 25.0))
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
     await status_msg.edit_text(
         f"🚨 <b>Жалобы отправлены</b>\n\n"
-        f"Объект: <code>{html.escape(peer)}</code>\n"
+        f"Ресурсов: <b>{len(peers)}</b>\n"
         f"Причина: {label}\n\n"
         f"✅ Успешно: <b>{sent}</b>\n"
         f"❌ Ошибок: <b>{failed}</b>\n"
-        f"📊 Использовано аккаунтов: <b>{len(chosen)}</b>",
+        f"📊 Всего операций: <b>{total_ops}</b> ({len(chosen)} акк × {len(peers)} ресурс)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

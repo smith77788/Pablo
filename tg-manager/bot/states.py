@@ -187,7 +187,8 @@ class ReportFSM(StatesGroup):
 
 
 class BulkReportFSM(StatesGroup):
-    waiting_peer = State()
+    waiting_peer = State()        # одиночный target
+    waiting_peers_batch = State() # список targets (batch mode)
     choosing_reason = State()
     selecting_accounts = State()
 
