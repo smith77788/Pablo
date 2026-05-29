@@ -70,6 +70,7 @@ from services import op_worker
 from services import behavioral_engine
 from services import account_warmer
 from services import account_health
+from services import payment_webhook
 
 logging.basicConfig(
     level=logging.INFO,
@@ -217,6 +218,7 @@ async def main() -> None:
         asyncio.create_task(behavioral_engine.run(pool))
         asyncio.create_task(account_warmer.run_warmup_loop(pool))
         asyncio.create_task(account_health.run_health_check_loop(pool))
+        asyncio.create_task(payment_webhook.run(pool, bot))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:
