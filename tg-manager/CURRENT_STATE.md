@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-28 (r5)
+Обновлено: 2026-05-29 (r8)
 
 ## Статус: АКТИВНАЯ РАЗРАБОТКА
 
@@ -60,42 +60,48 @@
 
 ### 🔄 Текущая ветка
 `claude/telegram-bot-services-xfAh6`
-Last commit: `feat: Global Presence Factory — создание Telegram-присутствия по всему миру`
+Last commit: `refactor: UX channel_ops + accounts`
+
+### ✅ Выполнено в сессии 2026-05-29 (r6-r8)
+
+**Критические исправления:**
+- schema_v39.sql: полный backfill last_seen/registered_at из старых колонок (fix crash UndefinedColumnError)
+- start.py: compat last_seen/last_active
+- config.py: цены из env vars PRICE_STARTER/PRO/ENTERPRISE
+- db.py: grant_plan + revoke_plan пишут в subscriptions table (get_plan читает subscriptions, не platform_users.current_plan)
+- db.py: get_all_platform_users с COALESCE для обратной совместимости
+- admin.py: правильный счётчик юзеров из platform_users, кнопки «Цены» и «Методы оплаты»
+- subscription.py: /subscription сразу открывает меню биллинга
+
+**Новые фичи:**
+- schema_v40.sql: acc_status, status_checked_at, status_reason в tg_accounts
+- account_manager.py: check_account_status_full (active/banned/spamblock/cooldown/session_expired + SpamBot check)
+- accounts.py: статус-emoji ✅⏳⚠️❌💀🔑📦, фильтры (Все/Активные/Проблемные)
+  - «🔍 Проверить все» — bulk check всех аккаунтов с обновлением БД
+  - «🔎 Найти ресурсы» — scan_owned_assets по всем аккаунтам → импорт в managed_channels
+  - ACC_LIMITS исправлены: free=2, starter=5, pro=15, enterprise=∞
+- group_factory.py: subscription gates (create→PRO, announce→STARTER)
+
+**UX-рефакторинг:**
+- channel_ops.py: переструктурировано меню (без дублирования «Пост в каналы» vs «Опубликовать пост»)
+  - manage_dialogs: сначала из БД (managed_channels), потом кнопка «Загрузить из Telegram»
+  - manage_dialogs_live: scan_owned_assets (только admin/creator), сохраняет в managed_channels
+  - username каналов видны прямо в списке
 
 ### 🔜 Следующие приоритеты
 
-**P0 — ГОТОВО** ✅
-- [x] Operation Planner FSM — полная реализация с datetime-парсингом
-- [x] Notification Delivery — UI в Settings + вызовы в account_monitor/ranking_checker
-- [x] Post Template → Mass Publish auto-prefill — работает через tpl_prefill
-- [x] Behavioral collectors — record_reentry в start.py, record_cross_nav в botmother_menu.py
+**P1:**
+- [ ] Global Presence Factory — поддержка ботов + пакеты
+- [ ] Bulk actions: настройки задержки, выбор аккаунтов, preview перед запуском
+- [ ] AI Assistant: реальное выполнение команд (создание каналов/ботов/групп через BotMother API)
 
-**P1 — ГОТОВО** ✅
-- [x] Global Presence Factory V2 — поддержка ГРУПП (f7719f0)
-- [x] Operation Builder FSM — полная реализация с 4 типами операций
-- [x] Operation Reports — UI + новые функции статистики (027cf95)
-- [x] Search Memory drill-down — из behavioral_engine
-
-**P2 — Выполнено в сессии 2026-05-28 (r4)**
-- [x] trust_engine: исправлен критический баг `created_at` → `added_at`
-- [x] ranking_checker: исправлен `MANAGER_BOT_TOKEN` → `notify_if_enabled(bot)`
-- [x] schema_v36.sql: таблица account_trust_history (30-дневная история trust scores)
-- [x] health_dashboard: кнопка 📈 Тренд + cb_trust_trend с 7-дневной историей
-- [x] op_reports: сводная статистика (success rate, avg duration, counts)
-- [x] new_user уведомление: auto_responder → notify_if_enabled при is_new_user=True
-- [x] Behavioral dashboard: реальные имена (bot/channel/keyword) вместо #id
-- [x] Alerts: реальные имена аккаунтов/ботов вместо acc#id/bot#id
-- [x] op_worker: inline-кнопка «Детали операции» в уведомлениях done/failed
-- [x] notify_if_enabled: добавлен параметр reply_markup
-
-**P3 — Следующие приоритеты**
-- [ ] Global Presence Factory V2 — поддержка БОТОВ + пакеты
-- [ ] CSV import для списков городов/целей
-- [ ] UX improvements: описания для всех FSM-шагов
-- [ ] Улучшения reliability: retry-логика для failed операций
+**P2:**
+- [ ] UX cleanup: ещё много кнопок без ясного назначения → аудит всех меню
+- [ ] CSV import для bulk operations
+- [ ] Webhook для платежей (вместо polling)
 
 ### Проект
 - Stack: aiogram 3.13.1, asyncpg, Telethon, Railway
-- DB: 57+ таблиц, последняя схема v36
+- DB: 58+ таблиц (v40 schema), последняя схема v40
 - Handlers: 45+ файлов
 - Ветка: `claude/telegram-bot-services-xfAh6`

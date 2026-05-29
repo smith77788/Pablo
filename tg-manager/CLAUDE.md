@@ -221,7 +221,7 @@ tg-manager/
 ### 3.3 Авто-миграция БД
 
 `create_pool()` автоматически выполняет все `schema_v*.sql` в порядке версии.
-Текущая последняя версия: **v36**
+Текущая последняя версия: **v40**
 
 Правило: новая схема → новый файл `schema_v{N+1}.sql` в корне `tg-manager/`.
 
@@ -787,7 +787,7 @@ asyncio.create_task(my_service.run(pool))
 - **Ветка:** `claude/telegram-bot-services-xfAh6` → auto-deploy при пуше
 - **Build:** `pip install -r requirements.txt && python main.py`
 - **Проверка после деплоя:** `/version` или `/menu` в боте
-- **Текущая build:** `2026.05.28-r5`
+- **Текущая build:** `2026.05.29-r8`
 - **Логи:** Railway dashboard → Deployments → Latest
 
 ---
@@ -807,5 +807,5 @@ asyncio.create_task(my_service.run(pool))
 
 ---
 
-_Последнее обновление: 2026-05-28 (r5)_
-_Следующий build-номер: r6_
+_Последнее обновление: 2026-05-29 (r8)_
+_Следующий build-номер: r9_
