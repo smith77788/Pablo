@@ -381,11 +381,11 @@ vis  hlth  prx  clm  alrt notif
 
 ---
 
-## 7. ФОНОВЫЕ СЕРВИСЫ (12 штук в main.py)
+## 7. ФОНОВЫЕ СЕРВИСЫ (16 штук в main.py)
 
 ```python
 asyncio.create_task(scheduler.run(pool, http))
-asyncio.create_task(auto_responder.run(pool, http))
+asyncio.create_task(auto_responder.run(pool, http, bot))
 asyncio.create_task(relay_service.run(pool, http))
 asyncio.create_task(funnel_runner.run(pool, http))
 asyncio.create_task(payment_checker.run(pool, http, bot))
@@ -396,6 +396,9 @@ asyncio.create_task(trust_engine.run(pool))
 asyncio.create_task(shadowban_monitor.run(pool, bot))
 asyncio.create_task(op_worker.run(pool, bot))
 asyncio.create_task(behavioral_engine.run(pool))
+asyncio.create_task(account_warmer.run_warmup_loop(pool))
+asyncio.create_task(account_health.run_health_check_loop(pool))
+asyncio.create_task(payment_webhook.run(pool, bot))  # HTTP :8080
 ```
 
 ---
@@ -639,27 +642,25 @@ if not await require_plan(pool, callback.from_user.id, "starter"):
 
 ## 13. GAP-АНАЛИЗ (что ещё не реализовано)
 
-### 🔴 Критические пробелы
+### ✅ ВСЕ КРИТИЧЕСКИЕ ПРОБЕЛЫ ЗАКРЫТЫ (r11)
 
-| Пробел | Статус | Файл |
-|--------|--------|------|
-| Operation Planner FSM | ❌ заглушка | botmother_menu.py→op_planner |
-| Operation Builder FSM | ⚠️ частично | mass_ops.py (есть queue, нет wizard) |
-| `record_reentry` в start.py | ❌ не вызывается | behavioral_engine.py |
-| `record_cross_nav` при навигации | ❌ не вызывается | botmother_menu.py handlers |
-| Notification delivery | ❌ не реализована | нет отправки уведомлений согласно settings |
-| Post template prefill в mass_publish | ⚠️ redirect без auto-inject | mass_publish.py |
-
-### 🟡 Средние пробелы
-
-| Пробел | Статус | Файл |
-|--------|--------|------|
-| Search Memory drill-down | ❌ только список | behavioral_engine.py dashboard |
-| Export CSV для visibility reports | ❌ нет | ranking.py |
-| Webhook для платежей | ❌ polling | payment_checker.py |
-| Admin bulk tools | ❌ нет | admin.py |
-| Experiment conversion tracking | ❌ не вызывается | auto_responder.py |
-| Referral integration в relay/funnel | ❌ | relay.py, funnel_runner.py |
+| Функция | Статус | Файл |
+|---------|--------|------|
+| Operation Planner FSM | ✅ | botmother_menu.py |
+| record_reentry в start.py | ✅ | start.py |
+| record_cross_nav при навигации | ✅ | botmother_menu.py |
+| Notification delivery | ✅ | db.notify_if_enabled → account_monitor/ranking |
+| Post template prefill | ✅ | mass_publish.py |
+| DM-кампании | ✅ | dm_campaigns.py + dm_engine.py |
+| Retry Intelligence | ✅ | op_worker.py _classify_op_error + _maybe_requeue |
+| Invite Distribution Engine | ✅ | services/invite_engine.py |
+| Geo Router | ✅ | services/geo_router.py |
+| Capacity Planner | ✅ | services/capacity_planner.py |
+| Admin bulk tools | ✅ | admin.py (bulk grant + cleanup + platform ops) |
+| Payment Webhook | ✅ | services/payment_webhook.py (port 8080) |
+| Funnel referral conversions | ✅ | funnel_runner.py |
+| Session Converter | ✅ | services/session_converter.py |
+| Account Cleaner | ✅ | services/account_cleaner.py + handler |
 
 ### 🟢 Низкий приоритет (nice to have)
 
@@ -669,7 +670,6 @@ if not await require_plan(pool, callback.from_user.id, "starter"):
 | Unified Asset Registry UI | Единый список всех активов с фильтрами |
 | RBAC / Multi-user workspaces | Несколько пользователей в одной организации |
 | Approval workflows | Подтверждение перед критическими bulk-операциями |
-| Operation dry-run (везде) | Сейчас только в mass_publish |
 | Topology map | Граф связей ботов/каналов/аккаунтов |
 
 ---
@@ -787,7 +787,7 @@ asyncio.create_task(my_service.run(pool))
 - **Ветка:** `claude/telegram-bot-services-xfAh6` → auto-deploy при пуше
 - **Build:** `pip install -r requirements.txt && python main.py`
 - **Проверка после деплоя:** `/version` или `/menu` в боте
-- **Текущая build:** `2026.05.29-r10`
+- **Текущая build:** `2026.05.29-r11`
 - **Логи:** Railway dashboard → Deployments → Latest
 
 ---
@@ -807,5 +807,5 @@ asyncio.create_task(my_service.run(pool))
 
 ---
 
-_Последнее обновление: 2026-05-29 (r10)_
-_Следующий build-номер: r11_
+_Последнее обновление: 2026-05-29 (r11)_
+_Следующий build-номер: r12_
