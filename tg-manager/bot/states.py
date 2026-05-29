@@ -209,6 +209,11 @@ class BulkChanFSM(StatesGroup):
     waiting_value = State()   # ожидаем username-шаблон или текст описания
 
 
+class SeoFSM(StatesGroup):
+    waiting_feedback   = State()   # ждём правки к AI-предложению
+    waiting_username   = State()   # ждём желаемый username от пользователя
+
+
 class MyChannelsFSM(StatesGroup):
     choosing_account = State()
     browsing = State()

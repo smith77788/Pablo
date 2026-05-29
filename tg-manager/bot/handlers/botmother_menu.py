@@ -30,6 +30,7 @@ from bot.callbacks import (
     MassPubCb,
     NetBcCb,
     NetworkCb,
+    ParserCb,
     ProxyCb,
     RankCb,
     RefCb,
@@ -37,6 +38,7 @@ from bot.callbacks import (
     ScheduleCb,
     SubCb,
     AutoReplyCb,
+    WarmupCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -94,8 +96,10 @@ def _infrastructure_kb():
     kb.button(text="🔗 Кластеры",          callback_data=ClustMCb(action="menu"))
     kb.button(text="🌐 Прокси",            callback_data=ProxyCb(action="menu"))
     kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
+    kb.button(text="🌡 Разогрев аккаунтов", callback_data=WarmupCb(action="menu"))
+    kb.button(text="🔍 Парсер аудитории",  callback_data=ParserCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

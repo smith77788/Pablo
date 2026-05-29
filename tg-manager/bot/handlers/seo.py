@@ -5,13 +5,15 @@ import html
 import json
 import logging
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import SeoCb, EditCb, ChanFactCb
 from bot.keyboards import seo_menu, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
+from bot.states import SeoFSM
 from database import db
 from services import bot_api
 
@@ -358,8 +360,14 @@ async def _ai_generate_seo(
     http: aiohttp.ClientSession,
     title: str, about: str, username: str,
     entity_type: str, keywords: list[str],
+    user_feedback: str = "",
+    preferred_username: str = "",
 ) -> dict | None:
-    """Generate SEO-optimized title, description, username via OpenRouter."""
+    """Generate SEO-optimized title, description, username via OpenRouter.
+
+    user_feedback — правки от пользователя к предыдущему варианту.
+    preferred_username — желаемый username (если пользователь указал).
+    """
     try:
         from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
         if not OPENROUTER_API_KEY:
@@ -368,26 +376,37 @@ async def _ai_generate_seo(
         return None
 
     kw_hint = ", ".join(keywords[:10]) if keywords else "—"
-    # If channel already has a username, instruct AI to keep it unchanged and use it in about
-    if username:
-        username_rule = f'- username: MUST return exactly "{username}" — do NOT change it'
-        about_rule = f'- about: 150-255 chars, include 3-5 keywords naturally, mention @{username} once naturally (e.g. in CTA), ends with CTA'
+
+    # Логика для username:
+    # 1. Если пользователь указал конкретный — использовать его
+    # 2. Если у канала уже есть username — не менять
+    # 3. Если username нет — AI предлагает (но пользователь решит сам)
+    actual_username = preferred_username or username
+    if actual_username:
+        username_rule = f'- username: MUST return exactly "{actual_username.lstrip("@")}" — do NOT change it'
+        about_rule = f'- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA'
     else:
-        username_rule = "- username: 5-20 chars, lowercase, letters/digits/underscores only, no leading digits"
+        username_rule = '- username: return empty string "" — do NOT suggest a username, user will set it separately'
         about_rule = "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA"
+
+    feedback_section = ""
+    if user_feedback:
+        feedback_section = f"\nIMPORTANT USER CORRECTION: {user_feedback}\nYou MUST incorporate this feedback into the new version.\n"
+
     prompt = (
         f"You are a Telegram SEO expert. Optimize the following {entity_type} profile for maximum search visibility.\n\n"
         f"Current title: {title or '(empty)'}\n"
         f"Current description: {about[:200] if about else '(empty)'}\n"
         f"Current username: @{username if username else '(none)'}\n"
-        f"Top user keywords: {kw_hint}\n\n"
+        f"Top user keywords: {kw_hint}\n"
+        f"{feedback_section}\n"
         "Return ONLY valid JSON with these keys:\n"
         '{"title": "...", "about": "...", "username": "...", "reasoning": "..."}\n\n'
         "Rules:\n"
         "- title: max 50 chars, include main keyword, catchy\n"
         f"- {about_rule}\n"
         f"- {username_rule}\n"
-        "- reasoning: 1-2 sentences explaining the strategy\n"
+        "- reasoning: 1-2 sentences explaining the strategy (in the same language as the profile)\n"
         "Write in the same language as the current profile (or Russian if empty)."
     )
 
@@ -572,7 +591,7 @@ async def cb_seo_chan_analyze(
 @router.callback_query(SeoCb.filter(F.action == "chan_ai"))
 async def cb_seo_chan_ai(
     callback: CallbackQuery, callback_data: SeoCb,
-    pool: asyncpg.Pool, http: aiohttp.ClientSession,
+    pool: asyncpg.Pool, http: aiohttp.ClientSession, state: FSMContext,
 ) -> None:
     await callback.answer("🤖 Генерирую SEO-текст...")
     chan_id = callback_data.chan_id
@@ -587,7 +606,7 @@ async def cb_seo_chan_ai(
         await callback.answer("Канал не найден.", show_alert=True)
         return
 
-    # Get current about
+    # Берём текущее описание через Telethon
     about = ""
     acc = await pool.fetchrow(
         "SELECT session_str, device_model, system_version, app_version "
@@ -606,13 +625,17 @@ async def cb_seo_chan_ai(
         except Exception:
             pass
 
-    # Get top keywords from tracked_keywords + search_memory
+    # Ключевые слова из поисковой памяти
     kw_rows = await pool.fetch(
-        """SELECT keyword FROM search_memory WHERE owner_id=$1
-           ORDER BY search_count DESC LIMIT 10""",
+        "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
         user_id,
     )
     keywords = [r["keyword"] for r in kw_rows]
+
+    # Получаем сохранённый фидбек и preferred_username из FSM (если это перегенерация)
+    fsm_data = await state.get_data()
+    user_feedback = fsm_data.get("seo_feedback", "") if fsm_data.get("seo_chan_id") == chan_id else ""
+    preferred_username = fsm_data.get("seo_preferred_username", "") if fsm_data.get("seo_chan_id") == chan_id else ""
 
     result = await _ai_generate_seo(
         http,
@@ -621,6 +644,8 @@ async def cb_seo_chan_ai(
         username=chan["username"] or "",
         entity_type="Telegram channel",
         keywords=keywords,
+        user_feedback=user_feedback,
+        preferred_username=preferred_username,
     )
 
     if not result:
@@ -628,8 +653,7 @@ async def cb_seo_chan_ai(
         kb.button(text="◀️ Назад", callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
         await callback.message.edit_text(
             "⚠️ <b>AI-генерация недоступна</b>\n\n"
-            "Для работы AI-оптимизации нужен OPENROUTER_API_KEY в настройках Railway.\n\n"
-            "Вы можете применить изменения вручную через кнопку «✏️ Применить».",
+            "Для работы AI-оптимизации нужен OPENROUTER_API_KEY в настройках Railway.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -637,29 +661,10 @@ async def cb_seo_chan_ai(
 
     new_title    = result.get("title", "")
     new_about    = result.get("about", "")
-    new_username = result.get("username", "")
+    new_username = result.get("username", "")  # Будет пустой если у канала нет username
     reasoning    = result.get("reasoning", "")
 
-    # Save to FSM-like temp storage in pool (simple approach: store in state via message edit + buttons)
-    lines = [
-        "🤖 <b>AI-предложение по SEO</b>\n",
-        f"📛 <b>Название:</b> {html.escape(new_title)}",
-        f"📄 <b>Описание:</b>\n<i>{html.escape(new_about)}</i>",
-        f"🔗 <b>Username:</b> @{html.escape(new_username)}",
-    ]
-    if reasoning:
-        lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Применить всё",     callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📛 Только название",   callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📄 Только описание",   callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔗 Только username",   callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔄 Перегенерировать",  callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",             callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
-    kb.adjust(1, 3, 2)
-
-    # Store suggestions in DB via pool temp table or encode in message — use temp pool execute
+    # Сохраняем предложение в БД
     try:
         await pool.execute(
             """INSERT INTO seo_ai_suggestions(owner_id, chan_id, title, about, username, created_at)
@@ -669,14 +674,301 @@ async def cb_seo_chan_ai(
             user_id, chan_id, new_title, new_about, new_username,
         )
     except Exception:
-        # Table may not exist yet — we'll handle inline via the message
         pass
+
+    # Сохраняем контекст в FSM для возможных правок
+    await state.update_data(
+        seo_chan_id=chan_id,
+        seo_acc_id=acc_id,
+        seo_feedback="",  # Сбрасываем после применения
+    )
+    await state.set_state(SeoFSM.waiting_feedback)
+
+    # Формируем текст предложения
+    lines = ["🤖 <b>AI-предложение по SEO</b>\n"]
+    lines.append(f"📛 <b>Название:</b> {html.escape(new_title)}")
+    lines.append(f"📄 <b>Описание:</b>\n<i>{html.escape(new_about)}</i>")
+    if new_username:
+        lines.append(f"🔗 <b>Username:</b> @{html.escape(new_username)}")
+    else:
+        lines.append("🔗 <b>Username:</b> <i>не изменится</i>")
+    if reasoning:
+        lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
+    lines.append("\n✏️ <i>Напишите правки текстом — я учту их при перегенерации</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Применить всё",     callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📛 Только название",   callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📄 Только описание",   callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
+    if new_username:
+        kb.button(text="🔗 Только username",  callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔤 Задать username",   callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔄 Перегенерировать",  callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",             callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    if new_username:
+        kb.adjust(1, 3, 2)
+    else:
+        kb.adjust(1, 2, 2)
 
     try:
         await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             raise
+
+
+# ── FSM: текстовый фидбек к AI-предложению ───────────────────────
+
+@router.message(SeoFSM.waiting_feedback)
+async def fsm_seo_feedback(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    """Пользователь написал правку — сохраняем и перегенерируем."""
+    feedback = (message.text or "").strip()
+    if not feedback:
+        await message.answer("⚠️ Введите текст правки:")
+        return
+
+    data = await state.get_data()
+    chan_id = data.get("seo_chan_id")
+    acc_id  = data.get("seo_acc_id", 0)
+
+    if not chan_id:
+        await state.clear()
+        await message.answer("⚠️ Сессия SEO истекла. Откройте меню заново.")
+        return
+
+    # Накапливаем фидбек
+    prev_feedback = data.get("seo_feedback", "")
+    combined_feedback = (prev_feedback + "; " + feedback).strip("; ")
+    await state.update_data(seo_feedback=combined_feedback)
+
+    # Запускаем перегенерацию через callback simulation
+    thinking = await message.answer("🔄 <b>Обновляю SEO-предложение с учётом ваших правок...</b>", parse_mode="HTML")
+
+    # Получаем данные канала
+    chan = await pool.fetchrow(
+        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, message.from_user.id,
+    )
+    if not chan:
+        await thinking.edit_text("⚠️ Канал не найден. Откройте меню заново.")
+        return
+
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, message.from_user.id,
+    ) if acc_id else None
+
+    about = ""
+    if acc:
+        try:
+            from services import account_manager
+            info = await account_manager.get_full_channel_info(acc["session_str"], chan["channel_id"], _acc=acc)
+            if info:
+                about = info.get("about", "")
+        except Exception:
+            pass
+
+    kw_rows = await pool.fetch(
+        "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
+        message.from_user.id,
+    )
+    keywords = [r["keyword"] for r in kw_rows]
+    preferred_username = data.get("seo_preferred_username", "")
+
+    result = await _ai_generate_seo(
+        http,
+        title=chan["title"] or "",
+        about=about,
+        username=chan["username"] or "",
+        entity_type="Telegram channel",
+        keywords=keywords,
+        user_feedback=combined_feedback,
+        preferred_username=preferred_username,
+    )
+
+    if not result:
+        await thinking.edit_text("⚠️ AI недоступен. Проверьте OPENROUTER_API_KEY.")
+        return
+
+    new_title    = result.get("title", "")
+    new_about    = result.get("about", "")
+    new_username = result.get("username", "")
+    reasoning    = result.get("reasoning", "")
+
+    try:
+        await pool.execute(
+            """INSERT INTO seo_ai_suggestions(owner_id, chan_id, title, about, username, created_at)
+               VALUES($1,$2,$3,$4,$5,now())
+               ON CONFLICT(owner_id, chan_id) DO UPDATE
+               SET title=$3, about=$4, username=$5, created_at=now()""",
+            message.from_user.id, chan_id, new_title, new_about, new_username,
+        )
+    except Exception:
+        pass
+
+    lines = [
+        "🤖 <b>AI-предложение (обновлено)</b>\n",
+        f"📛 <b>Название:</b> {html.escape(new_title)}",
+        f"📄 <b>Описание:</b>\n<i>{html.escape(new_about)}</i>",
+    ]
+    if new_username:
+        lines.append(f"🔗 <b>Username:</b> @{html.escape(new_username)}")
+    else:
+        lines.append("🔗 <b>Username:</b> <i>не изменится</i>")
+    if reasoning:
+        lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
+    lines.append("\n✏️ <i>Ещё правки? Напишите их текстом</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Применить всё",    callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📛 Только название",  callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📄 Только описание",  callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
+    if new_username:
+        kb.button(text="🔗 Только username", callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔤 Задать username",  callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔄 Перегенерировать", callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",            callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(1, 2, 2)
+
+    await thinking.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Задать желаемый username ───────────────────────────────────────
+
+@router.callback_query(SeoCb.filter(F.action == "ask_username"))
+async def cb_seo_ask_username(
+    callback: CallbackQuery, callback_data: SeoCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.update_data(seo_chan_id=callback_data.chan_id, seo_acc_id=callback_data.acc_id)
+    await state.set_state(SeoFSM.waiting_username)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=SeoCb(action="chan_ai", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
+    await callback.message.edit_text(
+        "🔤 <b>Желаемый username для канала</b>\n\n"
+        "Введите username который хотите установить:\n"
+        "<code>@my_channel</code> или <code>my_channel</code>\n\n"
+        "Символ @ необязателен. Username должен:\n"
+        "• Начинаться с буквы\n"
+        "• Содержать только a–z, 0–9, _\n"
+        "• Быть от 5 до 32 символов\n\n"
+        "Если нажмёте «Пропустить» — AI не будет предлагать username.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SeoFSM.waiting_username)
+async def fsm_seo_username(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
+    import re
+    uname = (message.text or "").strip().lstrip("@")
+    if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]{4,31}$', uname):
+        await message.answer(
+            "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:"
+        )
+        return
+
+    data = await state.get_data()
+    await state.update_data(seo_preferred_username=uname)
+    await state.set_state(SeoFSM.waiting_feedback)
+
+    chan_id = data.get("seo_chan_id", 0)
+    acc_id  = data.get("seo_acc_id", 0)
+
+    await message.answer(
+        f"✅ Username <code>@{html.escape(uname)}</code> запомнен.\n\n"
+        "Перегенерирую предложение...",
+        parse_mode="HTML",
+    )
+
+    # Имитируем нажатие кнопки "Перегенерировать"
+    chan = await pool.fetchrow(
+        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, message.from_user.id,
+    )
+    if not chan:
+        await message.answer("⚠️ Канал не найден.")
+        return
+
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, message.from_user.id,
+    ) if acc_id else None
+    about = ""
+    if acc:
+        try:
+            from services import account_manager
+            info = await account_manager.get_full_channel_info(acc["session_str"], chan["channel_id"], _acc=acc)
+            if info:
+                about = info.get("about", "")
+        except Exception:
+            pass
+
+    kw_rows = await pool.fetch(
+        "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
+        message.from_user.id,
+    )
+    keywords = [r["keyword"] for r in kw_rows]
+    user_feedback = (await state.get_data()).get("seo_feedback", "")
+
+    result = await _ai_generate_seo(
+        http,
+        title=chan["title"] or "",
+        about=about,
+        username=chan["username"] or "",
+        entity_type="Telegram channel",
+        keywords=keywords,
+        user_feedback=user_feedback,
+        preferred_username=uname,
+    )
+
+    if not result:
+        await message.answer("⚠️ AI недоступен. Проверьте OPENROUTER_API_KEY.")
+        return
+
+    new_title    = result.get("title", "")
+    new_about    = result.get("about", "")
+    reasoning    = result.get("reasoning", "")
+
+    try:
+        await pool.execute(
+            """INSERT INTO seo_ai_suggestions(owner_id, chan_id, title, about, username, created_at)
+               VALUES($1,$2,$3,$4,$5,now())
+               ON CONFLICT(owner_id, chan_id) DO UPDATE
+               SET title=$3, about=$4, username=$5, created_at=now()""",
+            message.from_user.id, chan_id, new_title, new_about, uname,
+        )
+    except Exception:
+        pass
+
+    lines = [
+        f"🤖 <b>AI-предложение (username: @{html.escape(uname)})</b>\n",
+        f"📛 <b>Название:</b> {html.escape(new_title)}",
+        f"📄 <b>Описание:</b>\n<i>{html.escape(new_about)}</i>",
+        f"🔗 <b>Username:</b> @{html.escape(uname)}",
+    ]
+    if reasoning:
+        lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
+    lines.append("\n✏️ <i>Ещё правки? Напишите их текстом</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Применить всё",    callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📛 Только название",  callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📄 Только описание",  callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔗 Только username",  callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔤 Изменить username", callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔄 Перегенерировать", callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",            callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(1, 3, 2)
+
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Apply optimizations ───────────────────────────────────────────

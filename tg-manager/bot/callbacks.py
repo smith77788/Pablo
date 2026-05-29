@@ -288,3 +288,22 @@ class LibCb(CallbackData, prefix="lib"):
     asset_type: Optional[str] = None
     preset_key: Optional[str] = None  # 'channel:news_channel'
     page: int = 0
+
+
+class ParserCb(CallbackData, prefix="prs"):
+    action: str
+    run_id: int = 0
+    source_id: int = 0
+    page: int = 0
+
+
+class WarmupCb(CallbackData, prefix="wu"):
+    action: str
+    account_id: int = 0
+    plan_id: int = 0
+
+
+class InfraCb(CallbackData, prefix="infra"):
+    action: str
+    account_id: int = 0
+    page: int = 0
