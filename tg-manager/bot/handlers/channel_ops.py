@@ -2516,6 +2516,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     peers = data.get("peers") or [data.get("peer", "")]
     peers = [p for p in peers if p]
     reason = data.get("reason", "spam")
+    preset = data.get("preset") or None
     selected_ids = data.get("selected_ids", [])
     label = REPORT_REASONS.get(reason, reason)
 
@@ -2526,153 +2527,183 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
         await callback.message.edit_text("⚠️ Нет выбранных аккаунтов.", parse_mode="HTML")
         return
 
-    from services import account_manager
+    from services import strike_engine
 
-    msg_pool = _REPORT_MESSAGES.get(reason, _REPORT_MESSAGES["other"])
-
-    # Для пресетов (наркотики / CSAM / терроризм / даркнет) — полный режим
-    is_preset = bool(data.get("preset"))
-
-    total_ops = len(peers) * len(chosen)
-    stat = {
-        "peer": 0, "multi": 0, "photo": 0, "pinned": 0,
-        "msgs": 0, "spam": 0, "reacts": 0,
-        "admins": 0, "linked_grp": 0, "bots": 0,
-        "fwd": 0, "blocked": 0, "failed": 0,
-    }
-    done = 0
-
-    mode_label = "🔥 МАКСИМУМ"
+    # ═══════════════════════════════════════════════════════════════════════
+    # ФАЗА 0: РАЗВЕДКА — одним аккаунтом карту цели
+    # ═══════════════════════════════════════════════════════════════════════
     status_msg = await callback.message.edit_text(
-        f"⚔️ <b>Strike — 12-векторная атака</b> [{mode_label}]\n"
-        f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
-        f"Причина: {label}\n\n"
-        f"{_progress_bar(0, total_ops)} 0/{total_ops}",
+        f"⚔️ <b>Strike инициализирован</b>\n\n"
+        f"🔍 <b>Фаза 0: Разведка цели...</b>\n"
+        f"Цели: <b>{len(peers)}</b> · Аккаунтов в ударной группе: <b>{len(chosen)}</b>\n"
+        f"Маппинг: администраторы, связанные каналы, боты, сообщения...",
         parse_mode="HTML",
     )
 
+    all_intel: dict[str, dict] = {}
     for peer in peers:
-        for i, acc in enumerate(chosen):
-            report_msg = msg_pool[done % len(msg_pool)]
-            res = await account_manager.report_peer_deep(
-                acc["session_str"], peer, reason,
-                message=report_msg,
-                msg_messages=msg_pool,
-                max_msg_reports=50,
-                block_after=True,
-                multi_reason=True,
-                join_first=True,
-                negative_react=True,
-                report_admins=True,
-                report_linked_bots=True,
-                forward_to_bot=True,
-                report_photo=True,
-                report_pinned=True,
-                report_linked_group=True,
-                _acc=acc,
+        try:
+            from services import account_manager
+            intel = await account_manager.strike_map_target(
+                chosen[0]["session_str"], peer, _acc=chosen[0]
             )
-            if res.get("peer_reported"):
-                stat["peer"] += 1
-            else:
-                stat["failed"] += 1
-            stat["multi"]      += res.get("multi_reason_sent", 0)
-            stat["photo"]      += 1 if res.get("photo_reported") else 0
-            stat["pinned"]     += res.get("pinned_reported", 0)
-            stat["msgs"]       += res.get("msg_reported", 0)
-            stat["spam"]       += res.get("spam_signaled", 0)
-            stat["reacts"]     += res.get("reactions_sent", 0)
-            stat["admins"]     += res.get("admins_reported", 0)
-            stat["linked_grp"] += 1 if res.get("linked_group_reported") else 0
-            stat["bots"]       += res.get("bots_reported", 0)
-            stat["fwd"]        += res.get("forwarded", 0)
-            if res.get("blocked"):
-                stat["blocked"] += 1
-            done += 1
+        except Exception as e:
+            intel = {"error": str(e)[:100], "admin_ids": [], "mentioned_usernames": [],
+                     "bot_usernames": [], "pinned_msg_ids": [], "latest_msg_ids": [],
+                     "title": peer, "members": 0, "linked_group_id": None}
+        all_intel[peer] = intel
 
-            if done % 2 == 0 or done == total_ops:
-                try:
-                    lines = [
-                        f"⚔️ <b>Strike — 12-векторная атака</b> [{mode_label}]",
-                        f"Цель: <code>{html.escape(peer)}</code>",
-                        f"Причина: {label}",
-                        "",
-                        f"① Жалоб на ресурс: <b>{stat['peer']}</b>"
-                        + (f" (+{stat['multi']} причин)" if stat['multi'] else ""),
-                        f"② Фото профиля: <b>{stat['photo']}</b>",
-                        f"③ Закреплённых: <b>{stat['pinned']}</b>",
-                        f"④ Сообщений: <b>{stat['msgs']}</b>",
-                    ]
-                    if stat["spam"]:
-                        lines.append(f"⑤ Спам-сигналов: <b>{stat['spam']}</b>")
-                    if stat["reacts"]:
-                        lines.append(f"⑥ Реакций 👎💩: <b>{stat['reacts']}</b>")
-                    if stat["admins"]:
-                        lines.append(f"⑦ Жалоб на админов: <b>{stat['admins']}</b>")
-                    if stat["linked_grp"]:
-                        lines.append(f"⑧ Связанных групп: <b>{stat['linked_grp']}</b>")
-                    if stat["bots"]:
-                        lines.append(f"⑨ Жалоб на боты: <b>{stat['bots']}</b>")
-                    if stat["fwd"]:
-                        lines.append(f"⑩ Переслано в T&S: <b>{stat['fwd']}</b>")
-                    lines.extend([
-                        f"⑪ Заблокировано: <b>{stat['blocked']}</b>",
-                        "",
-                        f"{_progress_bar(done, total_ops)} {done}/{total_ops}",
-                    ])
-                    await status_msg.edit_text(
-                        "\n".join(lines), parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
+    # Показываем результат разведки
+    intel_lines = [f"⚔️ <b>Strike — Разведка завершена</b>\n"]
+    for peer, intel in all_intel.items():
+        nodes = (
+            len(intel.get("admin_ids", []))
+            + len(intel.get("mentioned_usernames", []))
+            + len(intel.get("bot_usernames", []))
+            + (1 if intel.get("linked_group_id") else 0)
+        )
+        intel_lines.append(
+            f"🎯 <code>{html.escape(peer)}</code>\n"
+            f"   📋 {intel.get('title', '?')} · {intel.get('members', 0):,} подписчиков\n"
+            f"   👤 Администраторов: <b>{len(intel.get('admin_ids', []))}</b>\n"
+            f"   🔗 Связанных узлов сети: <b>{nodes}</b>\n"
+            f"   📌 Закреплённых: <b>{len(intel.get('pinned_msg_ids', []))}</b> · "
+            f"Сообщений в очереди: <b>{len(intel.get('latest_msg_ids', []))}</b>"
+        )
+    intel_lines.append(f"\n⚡ <b>Фаза 1: Параллельная атака {len(chosen)} аккаунтами...</b>")
+    try:
+        await status_msg.edit_text("\n".join(intel_lines), parse_mode="HTML")
+    except Exception:
+        pass
 
-            if i < len(chosen) - 1:
-                await asyncio.sleep(random.uniform(6.0, 15.0) * session_simulator.chaos_factor())
-        if peer != peers[-1]:
-            await asyncio.sleep(random.uniform(10.0, 25.0))
+    # ═══════════════════════════════════════════════════════════════════════
+    # ФАЗА 1: ПАРАЛЛЕЛЬНАЯ АТАКА — все аккаунты одновременно
+    # ═══════════════════════════════════════════════════════════════════════
+    all_stat: dict = {
+        "peer": 0, "multi": 0, "photo": 0, "pinned": 0,
+        "msgs": 0, "spam": 0, "reacts": 0, "admins": 0,
+        "linked_grp": 0, "bots": 0, "fwd": 0, "blocked": 0, "failed": 0,
+    }
+    nodes_total = 0
+    nodes_reports = 0
 
+    for peer_idx, peer in enumerate(peers):
+        intel = all_intel.get(peer, {})
+
+        # Параллельная атака по главной цели
+        results = await strike_engine.parallel_strike(chosen, peer, intel, reason, preset)
+        wave_stat = strike_engine.aggregate_results(results)
+        for k in all_stat:
+            all_stat[k] += wave_stat.get(k, 0)
+
+        # Промежуточный статус
+        _total_now = sum(v for k, v in all_stat.items() if k != "failed")
+        try:
+            await status_msg.edit_text(
+                f"⚔️ <b>Strike — Фаза 1 / цель {peer_idx+1}/{len(peers)}</b>\n"
+                f"🎯 <code>{html.escape(peer)}</code> — атакована {len(chosen)} аккаунтами\n\n"
+                f"① Жалоб на канал: <b>{all_stat['peer']}</b>"
+                + (f" (+{all_stat['multi']} причин)" if all_stat['multi'] else "") + "\n"
+                f"② Фото: <b>{all_stat['photo']}</b>  "
+                f"③ Закреплённых: <b>{all_stat['pinned']}</b>  "
+                f"④ Сообщений: <b>{all_stat['msgs']}</b>\n"
+                f"⑥ Реакций: <b>{all_stat['reacts']}</b>  "
+                f"⑦ Админов: <b>{all_stat['admins']}</b>  "
+                f"⑩ Форвард: <b>{all_stat['fwd']}</b>\n\n"
+                f"📊 Сигналов отправлено: <b>{_total_now}</b>\n"
+                f"⚡ <b>Фаза 2: Уничтожение сети (узлы)...</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+        # ═══════════════════════════════════════════════════════════════════
+        # ФАЗА 2: УНИЧТОЖЕНИЕ СЕТИ — атака всех обнаруженных узлов
+        # ═══════════════════════════════════════════════════════════════════
+        net = await strike_engine.strike_network_nodes(chosen, intel, reason, preset)
+        nodes_total += net.get("nodes_attacked", 0)
+        nodes_reports += net.get("total_reports", 0)
+
+        if peer_idx < len(peers) - 1:
+            await asyncio.sleep(random.uniform(3.0, 7.0))
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ФАЗА 3: ВНЕШНЯЯ ЭСКАЛАЦИЯ — официальная форма Telegram
+    # ═══════════════════════════════════════════════════════════════════════
+    try:
+        await status_msg.edit_text(
+            f"⚔️ <b>Strike — Фаза 3: Внешняя эскалация...</b>\n"
+            f"📡 Отправка официальных форм в Telegram Trust &amp; Safety...",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    abuse_ok = 0
+    for peer in peers:
+        intel = all_intel.get(peer, {})
+        res = await strike_engine.submit_abuse_form(
+            peer, preset or reason,
+            title=intel.get("title", ""),
+            members=intel.get("members", 0),
+        )
+        if res.get("ok"):
+            abuse_ok += 1
+        await asyncio.sleep(1.5)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ИТОГ
+    # ═══════════════════════════════════════════════════════════════════════
     total_signals = (
-        stat["peer"] + stat["multi"] + stat["photo"] + stat["pinned"]
-        + stat["msgs"] + stat["spam"] + stat["reacts"]
-        + stat["admins"] + stat["linked_grp"] + stat["bots"]
-        + stat["fwd"] + stat["blocked"]
+        all_stat["peer"] + all_stat["multi"] + all_stat["photo"] + all_stat["pinned"]
+        + all_stat["msgs"] + all_stat["spam"] + all_stat["reacts"]
+        + all_stat["admins"] + all_stat["linked_grp"] + all_stat["bots"]
+        + all_stat["fwd"] + all_stat["blocked"] + nodes_reports
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
-    summary_lines = [
-        f"⚔️ <b>Strike завершён</b> [{mode_label}]",
-        "",
-        f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>",
-        f"Причина: {label}",
-        "",
-        f"① Жалоб на ресурс: <b>{stat['peer']}</b>"
-        + (f" (+{stat['multi']} причин)" if stat['multi'] else ""),
-        f"② Фото профиля: <b>{stat['photo']}</b>",
-        f"③ Закреплённых постов: <b>{stat['pinned']}</b>",
-        f"④ Сообщений: <b>{stat['msgs']}</b>",
+    summary = [
+        f"⚔️ <b>Strike завершён — 3 фазы</b>",
+        f"",
+        f"🎯 Целей: <b>{len(peers)}</b>  👥 Аккаунтов: <b>{len(chosen)}</b>",
+        f"📋 Причина: {label}",
+        f"",
+        f"<b>— Фаза 1: Главные цели —</b>",
+        f"① Жалоб на канал: <b>{all_stat['peer']}</b>"
+        + (f" (+{all_stat['multi']} причин)" if all_stat["multi"] else ""),
+        f"② Фото профиля: <b>{all_stat['photo']}</b>",
+        f"③ Закреплённых: <b>{all_stat['pinned']}</b>",
+        f"④ Сообщений: <b>{all_stat['msgs']}</b>",
     ]
-    if stat["spam"]:
-        summary_lines.append(f"⑤ Спам-сигналов: <b>{stat['spam']}</b>")
-    if stat["reacts"]:
-        summary_lines.append(f"⑥ Реакций 👎💩: <b>{stat['reacts']}</b>")
-    if stat["admins"]:
-        summary_lines.append(f"⑦ Жалоб на админов: <b>{stat['admins']}</b>")
-    if stat["linked_grp"]:
-        summary_lines.append(f"⑧ Связанных групп: <b>{stat['linked_grp']}</b>")
-    if stat["bots"]:
-        summary_lines.append(f"⑨ Жалоб на боты: <b>{stat['bots']}</b>")
-    if stat["fwd"]:
-        summary_lines.append(f"⑩ Переслано в Trust &amp; Safety: <b>{stat['fwd']}</b>")
-    summary_lines.extend([
-        f"⑪ Заблокировано: <b>{stat['blocked']}</b>",
-        f"❌ Ошибок: <b>{stat['failed']}</b>",
-        "",
-        f"📊 <b>Всего сигналов Telegram: {total_signals}</b>",
-        "",
-        "<i>⚠️ Результат зависит от решения Telegram Trust &amp; Safety. "
-        "Strike Module не гарантирует удаление или блокировку ресурса.</i>",
+    if all_stat["spam"]:
+        summary.append(f"⑤ Спам-сигналов: <b>{all_stat['spam']}</b>")
+    if all_stat["reacts"]:
+        summary.append(f"⑥ Реакций 👎💩: <b>{all_stat['reacts']}</b>")
+    if all_stat["admins"]:
+        summary.append(f"⑦ Жалоб на админов: <b>{all_stat['admins']}</b>")
+    if all_stat["linked_grp"]:
+        summary.append(f"⑧ Связанных групп: <b>{all_stat['linked_grp']}</b>")
+    if all_stat["bots"] or all_stat["fwd"]:
+        summary.append(f"⑨ Ботов / форвардов T&S: <b>{all_stat['bots']}</b> / <b>{all_stat['fwd']}</b>")
+    summary.extend([
+        f"⑩ Заблокировано: <b>{all_stat['blocked']}</b>",
+        f"",
+        f"<b>— Фаза 2: Сеть —</b>",
+        f"🕸 Узлов сети атаковано: <b>{nodes_total}</b>  "
+        f"Сигналов: <b>{nodes_reports}</b>",
+        f"",
+        f"<b>— Фаза 3: Официальные каналы —</b>",
+        f"📡 Форм Telegram T&S: <b>{abuse_ok}/{len(peers)}</b>",
+        f"",
+        f"━━━━━━━━━━━━━━━━━━━━━",
+        f"📊 <b>ВСЕГО сигналов: {total_signals}</b>",
+        f"❌ Ошибок: <b>{all_stat['failed']}</b>",
+        f"",
+        f"<i>⚠️ Результат зависит от решения Telegram T&S. "
+        f"Strike не гарантирует удаление ресурса.</i>",
     ])
     await status_msg.edit_text(
-        "\n".join(summary_lines),
+        "\n".join(summary),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

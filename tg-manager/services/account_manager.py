@@ -1843,6 +1843,112 @@ async def report_peer_deep(
     return result
 
 
+async def strike_map_target(
+    session_string: str,
+    peer_username: str,
+    _acc: dict | None = None,
+) -> dict:
+    """Разведка перед атакой: полная карта цели за одно подключение.
+
+    Возвращает:
+      channel_id, title, description, members, access_hash,
+      admin_ids[], linked_group_id, pinned_msg_ids[], latest_msg_ids[],
+      mentioned_usernames[], bot_usernames[], error
+    """
+    import re as _re
+    from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantsRequest
+    from telethon.tl.functions.messages import GetPinnedMessagesRequest
+    from telethon.tl.types import Channel, ChannelParticipantsAdmins, InputMessagesFilterPinned
+
+    intel: dict = {
+        "channel_id": 0, "title": "", "description": "", "members": 0,
+        "access_hash": 0, "admin_ids": [], "linked_group_id": None,
+        "pinned_msg_ids": [], "latest_msg_ids": [],
+        "mentioned_usernames": [], "bot_usernames": [], "error": None,
+    }
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        entity = await client.get_entity(peer_username.lstrip("@"))
+        if not isinstance(entity, Channel):
+            intel["error"] = "not_a_channel"
+            return intel
+
+        intel["channel_id"]  = entity.id
+        intel["title"]       = getattr(entity, "title", "") or ""
+        intel["access_hash"] = getattr(entity, "access_hash", 0) or 0
+        intel["members"]     = getattr(entity, "participants_count", 0) or 0
+
+        # Полная инфо о канале (описание, linked_chat_id)
+        try:
+            full = await client(GetFullChannelRequest(entity))
+            fc = full.full_chat
+            intel["description"]    = (getattr(fc, "about", "") or "")[:500]
+            intel["linked_group_id"] = getattr(fc, "linked_chat_id", None)
+        except Exception:
+            pass
+
+        # Все администраторы (до 200)
+        try:
+            adm = await client(GetParticipantsRequest(
+                channel=entity,
+                filter=ChannelParticipantsAdmins(),
+                offset=0, limit=200, hash=0,
+            ))
+            intel["admin_ids"] = [u.id for u in getattr(adm, "users", [])]
+        except Exception:
+            pass
+
+        # Закреплённые сообщения
+        try:
+            pinned = await client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=20)
+            intel["pinned_msg_ids"] = [m.id for m in pinned if m and m.id]
+        except Exception:
+            pass
+
+        # Последние 100 сообщений
+        try:
+            msgs = await client.get_messages(entity, limit=100)
+            intel["latest_msg_ids"] = [m.id for m in msgs if m and m.id]
+        except Exception:
+            pass
+
+        # Упомянутые @usernames и @botы из описания + последних постов
+        scan_text = intel["description"]
+        try:
+            msgs_text = await client.get_messages(entity, limit=15)
+            for m in msgs_text:
+                if m and m.text:
+                    scan_text += " " + m.text
+        except Exception:
+            pass
+        _bot_re    = _re.compile(r'@([A-Za-z]\w{3,31}[Bb]ot)\b')
+        _chan_re   = _re.compile(r't\.me/([A-Za-z][A-Za-z0-9_]{3,31})\b')
+        _at_re    = _re.compile(r'@([A-Za-z][A-Za-z0-9_]{3,31})\b')
+        intel["bot_usernames"]        = list(set(_bot_re.findall(scan_text)))[:8]
+        intel["mentioned_usernames"]  = list({
+            m for m in _at_re.findall(scan_text)
+            if m.lower() not in {"stopca", "notoscam", "spambot"}
+        })[:10]
+        # t.me/... ссылки
+        intel["mentioned_usernames"] += [
+            u for u in _chan_re.findall(scan_text)
+            if u not in intel["mentioned_usernames"]
+        ][:5]
+
+    except Exception as e:
+        intel["error"] = str(e)[:200]
+        log.warning("strike_map_target error for %s: %s", peer_username, e)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    return intel
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ACCOUNT PROFILE
 # ══════════════════════════════════════════════════════════════════════════════
