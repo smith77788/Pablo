@@ -1445,9 +1445,8 @@ async def cb_scan_all_resources(
                 "SELECT id, session_str, device_model, system_version, app_version "
                 "FROM tg_accounts WHERE id=$1", acc["id"]
             )
-            dialogs = await account_manager.get_dialogs(session_str, limit=200, _acc=dict(acc_dict) if acc_dict else None) or []
-            # Filter owned/admin channels and groups
-            owned = [d for d in dialogs if d.get("is_creator") or d.get("is_admin")]
+            result = await account_manager.scan_owned_assets(session_str, _acc=dict(acc_dict) if acc_dict else None)
+            owned = result.get("channels", []) + result.get("groups", [])
             if owned:
                 imported = await db.upsert_managed_channels(pool, uid, acc["id"], owned)
                 total_imported += imported

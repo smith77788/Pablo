@@ -91,36 +91,46 @@ def _back_kb(acc_id: int = 0) -> InlineKeyboardBuilder:
 
 def _main_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📢 Создать канал",      callback_data=ChanCb(action="create_channel"))
-    kb.button(text="👥 Создать группу",     callback_data=ChanCb(action="create_group"))
-    kb.button(text="🔗 Вступить в канал",   callback_data=ChanCb(action="join"))
-    kb.button(text="🚪 Выйти из канала",    callback_data=ChanCb(action="leave_pick"))
-    kb.button(text="📤 Опубликовать пост",  callback_data=ChanCb(action="post_pick"))
-    kb.button(text="✏️ Управление каналом", callback_data=ChanCb(action="manage_pick"))
-    kb.button(text="👥 Участники",          callback_data=ChanCb(action="members_pick"))
-    kb.button(text="🙋 Профиль аккаунта",   callback_data=ChanCb(action="profile_pick"))
-    kb.button(text="👍 Реакция на пост",    callback_data=ChanCb(action="react_pick"))
-    kb.button(text="🚨 Пожаловаться",       callback_data=ChanCb(action="report_pick"))
-    kb.button(text="🤖 Создать бота",       callback_data=ChanCb(action="botfather_pick"))
-    kb.button(text="⚡ Массовые операции",  callback_data=ChanCb(action="bulk_menu"))
-    kb.button(text="📋 Мои каналы/чаты",   callback_data=ChanCb(action="my_chans"))
+    # ── Каналы и группы
+    kb.button(text="📢 Создать канал",        callback_data=ChanCb(action="create_channel"))
+    kb.button(text="👥 Создать группу",       callback_data=ChanCb(action="create_group"))
+    kb.button(text="🔗 Вступить",             callback_data=ChanCb(action="join"))
+    kb.button(text="🚪 Выйти",               callback_data=ChanCb(action="leave_pick"))
+    # ── Управление
+    kb.button(text="✏️ Управление каналом",   callback_data=ChanCb(action="manage_pick"))
+    kb.button(text="📋 Мои каналы/чаты",     callback_data=ChanCb(action="my_chans"))
+    # ── Публикация
+    kb.button(text="📤 Опубликовать пост",    callback_data=ChanCb(action="post_pick"))
+    kb.button(text="👥 Участники",            callback_data=ChanCb(action="members_pick"))
+    # ── Аккаунт
+    kb.button(text="🙋 Профиль аккаунта",    callback_data=ChanCb(action="profile_pick"))
+    kb.button(text="🤖 Создать бота",        callback_data=ChanCb(action="botfather_pick"))
+    # ── Прочее
     kb.button(text="👥 Инвайт из контактов", callback_data=ChanCb(action="contact_invite"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2)
+    kb.button(text="👍 Реакция на пост",     callback_data=ChanCb(action="react_pick"))
+    # ── Нижний ряд
+    kb.button(text="⚡ Массовые операции",   callback_data=ChanCb(action="bulk_menu"))
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb
 
 
 def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✉️ Рассылка по username-списку", callback_data=ChanCb(action="bulk_dm"))
-    kb.button(text="📢 Создать канал/группу",  callback_data=ChanCb(action="bulk_create"))
-    kb.button(text="🔗 Вступить в канал",      callback_data=ChanCb(action="bulk_join"))
-    kb.button(text="🚪 Выйти из канала",       callback_data=ChanCb(action="bulk_leave"))
-    kb.button(text="📤 Пост в каналы",         callback_data=ChanCb(action="bulk_post_chans"))
-    kb.button(text="📤 Опубликовать пост",     callback_data=ChanCb(action="bulk_post"))
-    kb.button(text="✏️ Имя аккаунта",         callback_data=ChanCb(action="bulk_prof_name"))
-    kb.button(text="📝 Bio аккаунта",          callback_data=ChanCb(action="bulk_prof_bio"))
-    kb.button(text="🔤 Username аккаунта",     callback_data=ChanCb(action="bulk_prof_uname"))
-    kb.button(text="◀️ Назад",                callback_data=ChanCb(action="menu"))
+    # ── Создание
+    kb.button(text="📢 Создать канал/группу (bulk)",    callback_data=ChanCb(action="bulk_create"))
+    # ── Вступление / выход
+    kb.button(text="🔗 Вступить в каналы (список)",    callback_data=ChanCb(action="bulk_join"))
+    kb.button(text="🚪 Выйти из каналов (список)",     callback_data=ChanCb(action="bulk_leave"))
+    # ── Публикация
+    kb.button(text="📢 Пост во все каналы аккаунта",   callback_data=ChanCb(action="bulk_post_chans"))
+    kb.button(text="📤 Пост с нескольких аккаунтов",   callback_data=ChanCb(action="bulk_post"))
+    # ── Рассылка
+    kb.button(text="✉️ DM по username-списку",         callback_data=ChanCb(action="bulk_dm"))
+    # ── Профиль аккаунтов
+    kb.button(text="✏️ Имя аккаунта (bulk)",           callback_data=ChanCb(action="bulk_prof_name"))
+    kb.button(text="📝 Bio аккаунта (bulk)",            callback_data=ChanCb(action="bulk_prof_bio"))
+    kb.button(text="🔤 Username аккаунта (bulk)",       callback_data=ChanCb(action="bulk_prof_uname"))
+    kb.button(text="◀️ Назад",                         callback_data=ChanCb(action="menu"))
     kb.adjust(1)
     return kb
 
@@ -228,15 +238,14 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     active = sum(1 for a in accounts if a["is_active"])
     await callback.message.edit_text(
         f"📡 <b>Операции с аккаунтами</b>\n\n"
-        f"Подключено: <b>{count}</b> аккаунтов ({active} активных)\n\n"
-        "Выберите действие:\n"
-        "• Создать канал/группу — через ваш аккаунт\n"
-        "• Вступить / Выйти — управление подписками\n"
-        "• Опубликовать пост — от имени аккаунта\n"
-        "• Управление каналом — название, описание, ссылка\n"
-        "• Профиль — изменить имя, bio, username аккаунта\n"
-        "• ⚡ Массовые операции — одно действие на нескольких аккаунтах сразу\n\n"
-        "💡 Нет аккаунтов? Добавьте через 📱 Мои аккаунты",
+        f"Аккаунтов: <b>{count}</b> ({active} активных)\n\n"
+        "• <b>Управление каналом</b> → название / описание / <b>username</b> / ссылка\n"
+        "• <b>Создать</b> → новый канал или группу\n"
+        "• <b>Вступить / Выйти</b> → управление подписками\n"
+        "• <b>Опубликовать пост</b> → от имени аккаунта\n"
+        "• <b>Профиль аккаунта</b> → имя, bio, username аккаунта\n"
+        "• <b>⚡ Массовые операции</b> → одно действие на всех аккаунтах\n\n"
+        "💡 Нет аккаунтов? 📱 /accounts",
         parse_mode="HTML",
         reply_markup=_main_menu_kb().as_markup(),
     )
@@ -1137,29 +1146,69 @@ async def cb_manage_pick_account(
 async def cb_manage_show_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю каналы...")
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    uid = callback.from_user.id
+
+    # First try managed_channels from DB (instant)
+    db_chans = await pool.fetch(
+        "SELECT channel_id, title, username FROM managed_channels "
+        "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title",
+        uid, acc_id,
+    )
+
+    kb = InlineKeyboardBuilder()
+    if db_chans:
+        for ch in db_chans[:25]:
+            uname_tag = f" @{ch['username']}" if ch.get("username") else " (без username)"
+            title = (ch["title"] or f"ID {ch['channel_id']}")[:28]
+            kb.button(
+                text=f"✏️ {title}{uname_tag}",
+                callback_data=ChanCb(action="manage_channel", acc_id=acc_id, channel_id=ch["channel_id"]),
+            )
+        kb.button(text="🔄 Загрузить из Telegram", callback_data=ChanCb(action="manage_dialogs_live", acc_id=acc_id))
+    else:
+        kb.button(text="📥 Загрузить из Telegram", callback_data=ChanCb(action="manage_dialogs_live", acc_id=acc_id))
+
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+    kb.adjust(1)
+    header = f"✏️ <b>Каналы/группы аккаунта</b>\nНайдено в базе: {len(db_chans)}\n\n" if db_chans else "✏️ <b>Нет сохранённых каналов</b>\n\nЗагрузите из Telegram:\n"
+    await callback.message.edit_text(header, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ChanCb.filter(F.action == "manage_dialogs_live"))
+async def cb_manage_show_dialogs_live(
+    callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Загружаю из Telegram...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
-    dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
-    if not dialogs:
+    result = await account_manager.scan_owned_assets(acc["session_str"], _acc=acc)
+    all_items = result.get("channels", []) + result.get("groups", [])
+    # Save to DB for future use
+    if all_items:
+        await db.upsert_managed_channels(pool, callback.from_user.id, callback_data.acc_id, all_items)
+    if not all_items:
         await callback.message.edit_text(
-            "ℹ️ Нет доступных каналов/групп.", reply_markup=_back_kb().as_markup()
+            "ℹ️ Нет каналов/групп с правами администратора.",
+            reply_markup=_back_kb().as_markup()
         )
         return
     kb = InlineKeyboardBuilder()
-    for d in dialogs[:20]:
-        label = f"{'📢' if d['type'] == 'channel' else '👥'} {d['title'][:30]}"
+    for d in all_items[:25]:
+        uname_tag = f" @{d['username']}" if d.get("username") else " (без username)"
+        title = (d["title"] or f"ID {d['id']}")[:28]
         kb.button(
-            text=label,
+            text=f"✏️ {title}{uname_tag}",
             callback_data=ChanCb(action="manage_channel", acc_id=callback_data.acc_id, channel_id=d["id"]),
         )
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        "✏️ <b>Выберите канал:</b>",
+        f"✏️ <b>Ваши каналы/группы:</b> {len(all_items)}",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
