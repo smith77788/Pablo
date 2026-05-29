@@ -396,6 +396,16 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
 @router.callback_query(InfraCb.filter(F.action == "asset_registry"))
 async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Единый реестр всех ассетов пользователя с агрегированной статистикой."""
+    from bot.utils.subscription import require_plan
+    from bot.keyboards import subscription_locked_markup
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            "🔒 <b>Реестр ассетов — Starter+</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     uid = callback.from_user.id
 
