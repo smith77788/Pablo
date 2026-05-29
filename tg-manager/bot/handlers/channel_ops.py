@@ -28,7 +28,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ChanCb, ContactInvCb
+from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb
 from bot.states import (
     BulkChanFSM, BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, ContactInviteFSM, CreateBotFSM,
     CreateChannelFSM, EditChannelFSM, InviteUsersFSM, JoinChannelFSM, MyChannelsFSM,
@@ -230,12 +230,16 @@ async def cmd_ops(message: Message) -> None:
 async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
+        _lock_kb = InlineKeyboardBuilder()
+        _lock_kb.button(text="💳 Оформить подписку", callback_data=SubCb(action="menu"))
+        _lock_kb.button(text="◀️ Назад", callback_data=BmCb(action="infrastructure"))
+        _lock_kb.adjust(1)
         await callback.message.edit_text(
             "🔒 <b>Операции с аккаунтами — STARTER</b>\n\n"
             "Для доступа нужна подписка STARTER или выше.\n\n"
             "Оформить: /subscription",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=_lock_kb.as_markup(),
         )
         return
     accounts = await _get_accounts(pool, callback.from_user.id)

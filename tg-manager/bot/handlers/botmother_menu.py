@@ -1807,7 +1807,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     try:
         channels = await pool.fetch(
-            "SELECT channel_id, title, username FROM channel_access WHERE owner_id=$1 LIMIT 10", uid
+            "SELECT DISTINCT channel_id, title, username FROM managed_channels WHERE owner_id=$1 ORDER BY title LIMIT 20", uid
         )
     except Exception:
         channels = []
