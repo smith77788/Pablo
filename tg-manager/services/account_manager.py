@@ -540,8 +540,13 @@ async def scan_owned_assets(
         return {"channels": channels, "groups": groups, "error": None}
     except Exception as e:
         err_str = str(e)
-        if "auth" in err_str.lower() or "AuthKey" in err_str or "Unauthorized" in err_str:
-            log.warning("scan_owned_assets session error: %s", e)
+        err_low = err_str.lower()
+        _is_session = any(x in err_low for x in (
+            "auth", "authkey", "unauthorized", "key is not registered",
+            "registered in the system", "auth_key",
+        ))
+        if _is_session:
+            log.warning("scan_owned_assets session dead: %s", e)
         else:
             log.exception("scan_owned_assets error: %s", e)
         return {"channels": [], "groups": [], "error": err_str[:200]}
@@ -723,8 +728,10 @@ async def check_account_status_full(
     except Exception as e:
         err = str(e)
         etype = type(e).__name__
-        if "AuthKeyUnregisteredError" in etype or "AUTH_KEY_UNREGISTERED" in err:
-            return {"status": "session_expired", "reason": "Сессия отозвана — требуется повторный вход.", "display_name": ""}
+        err_low = err.lower()
+        if ("AuthKeyUnregisteredError" in etype or "AUTH_KEY_UNREGISTERED" in err
+                or "key is not registered" in err_low or "registered in the system" in err_low):
+            return {"status": "session_expired", "reason": "Ключ сессии отозван Telegram — требуется переавторизация.", "display_name": ""}
         if "UserDeactivatedBanError" in etype or "USER_DEACTIVATED_BAN" in err:
             return {"status": "banned", "reason": "Аккаунт заблокирован Telegram.", "display_name": ""}
         if "UserDeactivatedError" in etype or "USER_DEACTIVATED" in err:

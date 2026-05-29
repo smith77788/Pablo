@@ -1460,6 +1460,7 @@ async def cb_scan_all_resources(
     from services import account_manager
     total_imported = 0
     acc_results: list[str] = []
+    dead_acc_ids: list[int] = []
 
     for acc in accounts:
         session_str = acc.get("session_str") or ""
@@ -1478,8 +1479,13 @@ async def cb_scan_all_resources(
                 acc_results.append(f"✅ {name}: {len(owned)} ресурсов ({imported} новых)")
             elif err:
                 _err_low = err.lower()
-                if "auth" in _err_low or "session" in _err_low or "unauthorized" in _err_low:
-                    acc_results.append(f"🔑 {name}: сессия истекла — переавторизуйтесь")
+                _is_dead = any(x in _err_low for x in (
+                    "auth", "session", "unauthorized", "key is not registered",
+                    "registered in the system", "authkey", "auth_key",
+                ))
+                if _is_dead:
+                    dead_acc_ids.append(acc["id"])
+                    acc_results.append(f"🔑 {name}: ключ сессии отозван — нужна переавторизация")
                 elif "flood" in _err_low:
                     acc_results.append(f"⏳ {name}: FloodWait — попробуйте позже")
                 else:
@@ -1487,14 +1493,27 @@ async def cb_scan_all_resources(
             else:
                 acc_results.append(f"ℹ️ {name}: нет каналов/групп с правами admin/creator")
         except Exception as exc:
-            acc_results.append(f"❌ {name}: ошибка — {escape(str(exc)[:60])}")
+            exc_s = str(exc).lower()
+            if any(x in exc_s for x in ("auth", "key is not registered", "registered in the system")):
+                dead_acc_ids.append(acc["id"])
+                acc_results.append(f"🔑 {name}: ключ сессии отозван — нужна переавторизация")
+            else:
+                acc_results.append(f"❌ {name}: ошибка — {escape(str(exc)[:60])}")
 
-    lines = [
-        f"🔎 <b>Сканирование завершено!</b>\n",
-        f"Импортировано новых ресурсов: <b>{total_imported}</b>\n",
-    ] + acc_results
+    dead_count = len(dead_acc_ids)
+    header = [f"🔎 <b>Сканирование завершено!</b>"]
+    if dead_count:
+        header.append(f"🔑 Мёртвых сессий: <b>{dead_count}</b> — ключи отозваны Telegram")
+        header.append(f"💡 Удалите их и добавьте заново через «Добавить аккаунт»")
+    header.append(f"Импортировано новых ресурсов: <b>{total_imported}</b>\n")
+    lines = header + acc_results
 
     kb = InlineKeyboardBuilder()
+    if dead_count:
+        kb.button(
+            text=f"🗑 Удалить {dead_count} мёртвых аккаунтов",
+            callback_data=AccCb(action="del_dead"),
+        )
     kb.button(text="📡 Перейти к каналам", callback_data="chan:menu")
     kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
@@ -1503,6 +1522,68 @@ async def cb_scan_all_resources(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+# ── Delete dead (session_expired) accounts ────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "del_dead"))
+async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.answer("Нет аккаунтов.", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "🔍 <b>Проверяю статус сессий...</b>\nЭто займёт ~30 сек.",
+        parse_mode="HTML",
+    )
+
+    from services import account_manager
+    dead_ids: list[int] = []
+    for acc in accounts:
+        session_str = acc.get("session_str") or ""
+        if not session_str:
+            dead_ids.append(acc["id"])
+            continue
+        try:
+            result = await account_manager.check_account_status_full(
+                session_str, _acc=acc, check_spambot=False
+            )
+            if result.get("status") == "session_expired":
+                dead_ids.append(acc["id"])
+        except Exception as e:
+            if any(x in str(e).lower() for x in ("auth", "key is not registered", "registered in the system")):
+                dead_ids.append(acc["id"])
+
+    if not dead_ids:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+        await callback.message.edit_text(
+            "✅ <b>Мёртвых сессий не найдено</b>\n\nВсе аккаунты активны.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    for acc_id in dead_ids:
+        try:
+            await pool.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
+            )
+        except Exception:
+            pass
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🗑 <b>Удалено {len(dead_ids)} мёртвых аккаунтов</b>\n\n"
+        f"Ключи сессий были отозваны Telegram.\n"
+        f"Добавьте аккаунты заново через QR-код или номер телефона.",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
 
