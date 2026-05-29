@@ -13,7 +13,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import HealthCb, BotCb
+from bot.callbacks import HealthCb, BotCb, BmCb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -83,7 +83,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📈 Тренд",          callback_data=HealthCb(action="trust_trend"))
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
-    kb.button(text="◀️ Назад",          callback_data=BotCb(action="main"))
+    kb.button(text="◀️ Назад",          callback_data=BmCb(action="infrastructure"))
     kb.adjust(2, 2, 2, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())

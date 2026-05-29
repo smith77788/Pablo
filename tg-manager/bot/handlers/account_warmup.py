@@ -14,7 +14,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import WarmupCb
+from bot.callbacks import WarmupCb, BmCb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -46,6 +46,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="➕ Создать план разогрева",   callback_data=WarmupCb(action="create_list"))
     kb.button(text="📋 Активные планы",            callback_data=WarmupCb(action="active_plans"))
     kb.button(text="▶️ Запустить сейчас",          callback_data=WarmupCb(action="run_now"))
+    kb.button(text="◀️ Назад",                     callback_data=BmCb(action="infrastructure"))
     kb.adjust(1)
 
     await callback.message.edit_text(

@@ -23,7 +23,9 @@ from bot.callbacks import (
     ChanFactCb,
     CleanerCb,
     ClustMCb,
+    CommandsCb,
     CompCb,
+    FunnelCb,
     GeoPresenceCb,
     GroupFCb,
     HealthCb,
@@ -158,10 +160,22 @@ def _inbox_kb():
 
 def _settings_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="📢 Авто-ответы",   callback_data=BmCb(action="pick_bot_for", sub="ar"))
-    kb.button(text="🔔 Уведомления",   callback_data=BmCb(action="notifications"))
-    kb.button(text="◀️ Назад",         callback_data=BmCb(action="main"))
-    kb.adjust(2, 1)
+    # ── Бот-настройки ─────────────────────────────────────
+    kb.button(text="📢 Авто-ответы",        callback_data=BmCb(action="pick_bot_for", sub="ar"))
+    kb.button(text="🔗 Воронки",            callback_data=BmCb(action="pick_bot_for", sub="fn"))
+    kb.button(text="🤖 Команды бота",       callback_data=BmCb(action="pick_bot_for", sub="cmd"))
+    kb.button(text="🔔 Уведомления",        callback_data=BmCb(action="notifications"))
+    # ── Аккаунты ──────────────────────────────────────────
+    kb.button(text="🌐 Прокси",             callback_data=ProxyCb(action="list"))
+    kb.button(text="♨️ Прогрев",           callback_data=WarmupCb(action="menu"))
+    kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
+    kb.button(text="🧹 Очиститель",         callback_data=CleanerCb(action="menu"))
+    # ── Данные ────────────────────────────────────────────
+    kb.button(text="📋 Шаблоны ассетов",    callback_data=AssetTplCb(action="menu"))
+    kb.button(text="🔍 Парсер аудитории",   callback_data=ParserCb(action="list"))
+    # ── Навигация ─────────────────────────────────────────
+    kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -421,9 +435,19 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
     await _edit(
         callback,
         "⚙️ <b>Settings — настройки</b>\n\n"
-        "📢 <b>Авто-ответы</b> — автоматически отвечать на ключевые слова\n"
-        "🔔 <b>Уведомления</b> — какие события присылать вам\n\n"
-        "<i>Авто-ответы настраиваются отдельно для каждого бота.</i>",
+        "<b>🤖 Настройки ботов:</b>\n"
+        "• 📢 Авто-ответы — триггер по ключевым словам\n"
+        "• 🔗 Воронки — автоматические цепочки сообщений\n"
+        "• 🤖 Команды — /start, /help и другие команды бота\n"
+        "• 🔔 Уведомления — флуд, позиции, ошибки\n\n"
+        "<b>📱 Настройки аккаунтов:</b>\n"
+        "• 🌐 Прокси — привязка прокси к аккаунтам\n"
+        "• ♨️ Прогрев — планы прогрева новых аккаунтов\n"
+        "• ❤️ Здоровье — мониторинг ограничений\n"
+        "• 🧹 Очиститель — массовая очистка действий\n\n"
+        "<b>💾 Данные:</b>\n"
+        "• 📋 Шаблоны — готовые шаблоны ботов/каналов/постов\n"
+        "• 🔍 Парсер — сбор аудитории из каналов",
         _settings_kb(),
     )
 
@@ -453,6 +477,8 @@ _PICK_META = {
     "rank":  ("🔍 Трекер позиций",    "visibility"),
     "relay": ("💬 Входящие диалоги",  "inbox"),
     "ar":    ("📢 Авто-ответы",       "settings"),
+    "fn":    ("🔗 Воронки",           "settings"),
+    "cmd":   ("🤖 Команды бота",      "settings"),
 }
 
 
@@ -484,6 +510,10 @@ async def cb_pick_bot_for(
             cd = RankCb(action="menu", bot_id=bot["bot_id"])
         elif sub == "relay":
             cd = RelayCb(action="menu", bot_id=bot["bot_id"])
+        elif sub == "fn":
+            cd = FunnelCb(action="list", bot_id=bot["bot_id"])
+        elif sub == "cmd":
+            cd = CommandsCb(action="list", bot_id=bot["bot_id"])
         else:  # ar
             cd = AutoReplyCb(action="list", bot_id=bot["bot_id"])
         kb.button(text=f"🤖 @{name}", callback_data=cd)

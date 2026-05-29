@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import CleanerCb
+from bot.callbacks import CleanerCb, BmCb
 from bot.states import CleanerFSM
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🚪 Выйти из всех чатов",   callback_data=CleanerCb(action="leave_all"))
     kb.button(text="👥 Удалить контакты",        callback_data=CleanerCb(action="del_contacts"))
     kb.button(text="📋 Список чатов аккаунта",   callback_data=CleanerCb(action="list_chats"))
+    kb.button(text="◀️ Назад",                   callback_data=BmCb(action="infrastructure"))
     kb.adjust(1)
 
     await callback.message.edit_text(

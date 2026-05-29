@@ -16,7 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ProxyCb, BotCb
+from bot.callbacks import ProxyCb, BotCb, BmCb
 from bot.states import AddProxyFSM
 
 log = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📋 Мой список",         callback_data=ProxyCb(action="list"))
     kb.button(text="✅ Проверить + пинг",  callback_data=ProxyCb(action="check_all"))
     kb.button(text="🌍 Определить гео",    callback_data=ProxyCb(action="detect_geo"))
-    kb.button(text="◀️ Назад",              callback_data=BotCb(action="main"))
+    kb.button(text="◀️ Назад",              callback_data=BmCb(action="infrastructure"))
     kb.adjust(2, 2, 1)
     return kb
 
