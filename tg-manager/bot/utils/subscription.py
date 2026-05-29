@@ -7,9 +7,9 @@ BOT_LIMITS: dict[str, int] = {"free": 3, "starter": 10, "pro": 30, "enterprise":
 PLAN_PRICES = {"starter": "$9", "pro": "$25", "enterprise": "$69"}
 PLAN_EMOJIS = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
 PLAN_FEATURES = {
-    "starter": "Inbox, CRM, автоматизация, цепочки, расписание, диплинки, SEO",
-    "pro": "A/B тесты, активность, мультигео, массовые операции, аналитика сети",
-    "enterprise": "Swarm, роутинг, кластеры, сетевая рассылка, клонирование, AI-ассистент",
+    "starter": "10 ботов, CRM, воронки, диплинки, SEO, парсер аудитории, 1 аккаунт",
+    "pro": "30 ботов, Фабрики каналов/групп, массовые операции, аналитика, 3 аккаунта",
+    "enterprise": "∞ ботов, ∞ аккаунтов, DM-кампании, AI-ассистент, Swarm, скидка 50% на Strike",
 }
 
 
@@ -62,10 +62,18 @@ def locked_text(feature: str, required_plan: str) -> str:
     emoji = PLAN_EMOJIS.get(required_plan, "🔒")
     price = PLAN_PRICES.get(required_plan, "")
     features = PLAN_FEATURES.get(required_plan, "")
+    upsell = ""
+    if required_plan == "enterprise":
+        upsell = "\n💡 <i>Enterprise = лучшее предложение: всё включено, без лимитов, скидка 50% на Strike Module ($125 вместо $250)</i>"
+    elif required_plan == "pro":
+        upsell = "\n💡 <i>PRO: 30 ботов, Фабрики, массовые операции, 3 аккаунта</i>"
+    elif required_plan == "starter":
+        upsell = "\n💡 <i>STARTER: за $9/мес — CRM, воронки, диплинки, SEO и многое другое</i>"
     return (
-        f"🔒 <b>{feature} — {required_plan.upper()}</b>\n\n"
-        f"Эта функция доступна с подпиской <b>{required_plan.upper()}</b>.\n\n"
+        f"🔒 <b>{feature}</b>\n\n"
+        f"Эта функция доступна с планом {emoji} <b>{required_plan.upper()}</b>.\n\n"
         f"{emoji} {required_plan.upper()} — {price}/мес\n"
-        f"<i>{features}</i>\n\n"
-        f"Оформить: /subscription"
+        f"<i>{features}</i>"
+        f"{upsell}\n\n"
+        f"Оформить подписку: /subscription"
     )

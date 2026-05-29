@@ -21,6 +21,16 @@ from bot.callbacks import StrikeCb, ChanCb, BmCb
 router = Router(name="strike")
 
 _PRICE_USD = 250
+_table_ok = False
+
+_CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS strike_access (
+    user_id      BIGINT PRIMARY KEY,
+    purchased_at TIMESTAMPTZ DEFAULT now(),
+    payment_ref  TEXT,
+    granted_by   BIGINT
+)
+"""
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -33,7 +43,16 @@ def _gen_ref() -> str:
     return "STK-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
 
 
+async def _ensure_table(pool: asyncpg.Pool) -> None:
+    global _table_ok
+    if _table_ok:
+        return
+    await pool.execute(_CREATE_TABLE)
+    _table_ok = True
+
+
 async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
+    await _ensure_table(pool)
     row = await pool.fetchrow("SELECT 1 FROM strike_access WHERE user_id=$1", user_id)
     return row is not None
 
@@ -235,6 +254,7 @@ async def cb_strike_admin_grant(
         await callback.answer("Нет прав.", show_alert=True)
         return
     target_id = callback_data.page  # page поле используется как target_user_id
+    await _ensure_table(pool)
     await pool.execute(
         "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
         "ON CONFLICT (user_id) DO NOTHING",

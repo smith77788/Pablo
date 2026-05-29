@@ -2225,6 +2225,11 @@ async def cb_bulk_report_start(
 ) -> None:
     await callback.answer()
     # Проверка доступа к Strike Module
+    await pool.execute(
+        "CREATE TABLE IF NOT EXISTS strike_access "
+        "(user_id BIGINT PRIMARY KEY, purchased_at TIMESTAMPTZ DEFAULT now(), "
+        "payment_ref TEXT, granted_by BIGINT)"
+    )
     has_strike = await pool.fetchrow(
         "SELECT 1 FROM strike_access WHERE user_id=$1", callback.from_user.id
     )

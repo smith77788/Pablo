@@ -177,6 +177,11 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
     user_id = payment["user_id"]
     if payment["plan"] == "strike":
         await pool.execute(
+            "CREATE TABLE IF NOT EXISTS strike_access "
+            "(user_id BIGINT PRIMARY KEY, purchased_at TIMESTAMPTZ DEFAULT now(), "
+            "payment_ref TEXT, granted_by BIGINT)"
+        )
+        await pool.execute(
             """INSERT INTO strike_access (user_id, payment_ref)
                VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING""",
             user_id, payment["reference"],

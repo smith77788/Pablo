@@ -6,9 +6,8 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from bot.callbacks import ScheduleCb, BmCb
-from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list, subscription_locked_markup
+from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list
 from bot.states import ScheduleBroadcast
-from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -24,13 +23,6 @@ _DT_HINT = (
 async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
                             pool: asyncpg.Pool) -> None:
 
-    if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
-        await callback.message.edit_text(
-            locked_text("Расписание рассылок", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="broadcasts")),
-        )
-        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
