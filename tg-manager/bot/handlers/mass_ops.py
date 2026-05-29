@@ -19,7 +19,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import MassOpCb
+from bot.callbacks import MassOpCb, BmCb
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
 
@@ -67,7 +67,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="✏️ Массовое редактирование ботов", callback_data=MassOpCb(action="bulk_bot_edit"))
     kb.button(text="🔍 Предпросмотр (Dry Run)",        callback_data=MassOpCb(action="dry_run"))
     kb.button(text="📋 Очередь операций",              callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад",                         callback_data="main_menu")
+    kb.button(text="◀️ Назад",                         callback_data=BmCb(action="operations"))
     kb.adjust(1)
     await callback.message.edit_text(
         "🛠️ <b>Построитель операций</b>\n\n"

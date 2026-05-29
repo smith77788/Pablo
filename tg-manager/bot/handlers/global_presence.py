@@ -955,7 +955,7 @@ async def cb_gp_launch(
         await db.create_global_presence_targets(pool, plan_id2, grp_targets)
         op_id2 = await pool.fetchval(
             "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-            "VALUES($1,'global_presence_channel','pending',$2::jsonb,$3) RETURNING id",
+            "VALUES($1,'global_presence_group','pending',$2::jsonb,$3) RETURNING id",
             callback.from_user.id,
             json.dumps({"plan_id": plan_id2}),
             len(grp_targets),

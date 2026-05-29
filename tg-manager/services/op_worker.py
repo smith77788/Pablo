@@ -190,6 +190,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
         elif op_type == "global_presence_channel":
             result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+        elif op_type == "global_presence_group":
+            result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
         elif op_type == "global_presence_bot":
             result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
         else:
