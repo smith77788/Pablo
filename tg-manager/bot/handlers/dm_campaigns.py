@@ -132,12 +132,18 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
     await state.set_state(DmCampaignFSM.choosing_target)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Подписчики бота",  callback_data=DmCb(action="target_type", campaign_id=0))
-    kb.button(text="👥 CRM-контакты",      callback_data=DmCb(action="target_crm"))
-    kb.button(text="❌ Отмена",            callback_data=DmCb(action="menu"))
+    kb.button(text="🤖 Все подписчики бота", callback_data=DmCb(action="target_type", campaign_id=0))
+    kb.button(text="🎯 По когорте (активность)", callback_data=DmCb(action="target_cohort_bot"))
+    kb.button(text="👥 CRM-контакты",           callback_data=DmCb(action="target_crm"))
+    kb.button(text="❌ Отмена",                 callback_data=DmCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        "👥 <b>Выберите аудиторию</b>:",
+        "👥 <b>Выберите аудиторию</b>:\n\n"
+        "🎯 <b>По когорте</b> — отправить только активным/неактивным пользователям:\n"
+        "  • 🔥 Hot — активны за последние 24ч\n"
+        "  • 🟡 Warm — активны 1-7 дней назад\n"
+        "  • 🧊 Cold — активны 7-30 дней назад\n"
+        "  • 💀 Lost — неактивны более 30 дней",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -187,6 +193,113 @@ async def cb_dm_target_bot_selected(
     await _show_dm_preview(callback, state, pool)
 
 
+# ── Create — Step 3c: Cohort targeting ───────────────────────────────────────
+
+@router.callback_query(DmCb.filter(F.action == "target_cohort_bot"))
+async def cb_dm_target_cohort_bot(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Step 1: pick bot for cohort targeting."""
+    await callback.answer()
+    bots = await pool.fetch(
+        "SELECT bot_id, first_name, username FROM managed_bots "
+        "WHERE added_by=$1 AND is_active=true ORDER BY first_name LIMIT 20",
+        callback.from_user.id,
+    )
+    if not bots:
+        await callback.message.edit_text(
+            "⚠️ У вас нет активных ботов.",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for b in bots:
+        label = b.get("first_name") or b.get("username") or f"bot_{b['bot_id']}"
+        kb.button(
+            text=f"🤖 {label[:28]}",
+            callback_data=DmCb(action="target_cohort_pick", campaign_id=b["bot_id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🎯 <b>Когортное таргетирование</b>\n\nВыберите бот:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(DmCb.filter(F.action == "target_cohort_pick"))
+async def cb_dm_target_cohort_pick(
+    callback: CallbackQuery,
+    callback_data: DmCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Step 2: pick cohort type (hot/warm/cold/lost)."""
+    await callback.answer()
+    bot_id = callback_data.campaign_id
+    await state.update_data(dm_target_type="cohort", dm_target_id=bot_id)
+
+    # Count each cohort size
+    try:
+        from database import db as _db
+        cohort_stats = await _db.get_user_cohorts(pool, bot_id)
+    except Exception:
+        cohort_stats = {"hot": 0, "warm": 0, "cold": 0, "lost": 0}
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"🔥 Hot (24ч): {cohort_stats.get('hot', 0)} чел.",
+        callback_data=DmCb(action="target_cohort_set", campaign_id=0),
+    )
+    kb.button(
+        text=f"🟡 Warm (7д): {cohort_stats.get('warm', 0)} чел.",
+        callback_data=DmCb(action="target_cohort_set", campaign_id=1),
+    )
+    kb.button(
+        text=f"🧊 Cold (30д): {cohort_stats.get('cold', 0)} чел.",
+        callback_data=DmCb(action="target_cohort_set", campaign_id=2),
+    )
+    kb.button(
+        text=f"💀 Lost (30д+): {cohort_stats.get('lost', 0)} чел.",
+        callback_data=DmCb(action="target_cohort_set", campaign_id=3),
+    )
+    kb.button(text="◀️ Назад", callback_data=DmCb(action="target_cohort_bot"))
+    kb.adjust(1)
+
+    bot_row = await pool.fetchrow(
+        "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", bot_id
+    )
+    bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(bot_id)) if bot_row else str(bot_id)
+
+    await callback.message.edit_text(
+        f"🎯 <b>Выберите когорту</b> для бота @{html.escape(bot_label)}:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+_COHORT_TYPES = {0: "hot", 1: "warm", 2: "cold", 3: "lost"}
+_COHORT_LABELS = {"hot": "🔥 Hot", "warm": "🟡 Warm", "cold": "🧊 Cold", "lost": "💀 Lost"}
+
+
+@router.callback_query(DmCb.filter(F.action == "target_cohort_set"))
+async def cb_dm_target_cohort_set(
+    callback: CallbackQuery,
+    callback_data: DmCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Step 3: cohort selected — store and go to preview."""
+    await callback.answer()
+    cohort_type = _COHORT_TYPES.get(callback_data.campaign_id, "warm")
+    await state.update_data(dm_cohort_type=cohort_type)
+    await _show_dm_preview(callback, state, pool)
+
+
 # ── Create — Step 3b: CRM ─────────────────────────────────────────────────────
 
 @router.callback_query(DmCb.filter(F.action == "target_crm"))
@@ -213,6 +326,8 @@ async def _show_dm_preview(
     target_type = sd.get("dm_target_type", "bot_users")
     target_id = sd.get("dm_target_id")
 
+    cohort_type = sd.get("dm_cohort_type", "")
+
     # Подсчитать аудиторию
     if target_type == "bot_users" and target_id:
         count_row = await pool.fetchrow(
@@ -224,7 +339,27 @@ async def _show_dm_preview(
             target_id,
         )
         bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(target_id)) if bot_row else str(target_id)
-        audience_str = f"Подписчики @{bot_label}: <b>{count_row['cnt']}</b>"
+        audience_str = f"Все подписчики @{bot_label}: <b>{count_row['cnt']}</b>"
+    elif target_type == "cohort" and target_id:
+        cohort_sql = {
+            "hot":  "last_seen >= now() - INTERVAL '1 day'",
+            "warm": "last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
+            "cold": "last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
+            "lost": "last_seen < now() - INTERVAL '30 days'",
+        }.get(cohort_type, "last_seen >= now() - INTERVAL '7 days'")
+        try:
+            cnt = await pool.fetchval(
+                f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
+                target_id,
+            ) or 0
+        except Exception:
+            cnt = 0
+        bot_row = await pool.fetchrow(
+            "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", target_id
+        )
+        bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(target_id)) if bot_row else str(target_id)
+        cohort_label = _COHORT_LABELS.get(cohort_type, cohort_type)
+        audience_str = f"{cohort_label} когорта @{bot_label}: <b>{cnt}</b>"
     else:
         count_row = await pool.fetchrow(
             "SELECT COUNT(DISTINCT tg_user_id) AS cnt FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
@@ -264,13 +399,20 @@ async def cb_dm_launch_or_draft(
     text = sd.get("dm_text", "")
     target_type = sd.get("dm_target_type", "bot_users")
     target_id = sd.get("dm_target_id")
+    cohort_type = sd.get("dm_cohort_type", "")
     status = "draft" if callback_data.action == "save_draft" else "running"
+
+    import json as _json
+    params_dict = {}
+    if cohort_type:
+        params_dict["cohort_type"] = cohort_type
 
     initial_status = "draft"  # всегда создаём как draft, потом меняем
     campaign_id = await pool.fetchval(
-        "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status) "
-        "VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+        "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, params) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id",
         callback.from_user.id, name, text, target_type, target_id, initial_status,
+        _json.dumps(params_dict) if params_dict else "{}",
     )
     await state.clear()
 

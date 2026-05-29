@@ -130,6 +130,27 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[int]:
             campaign["owner_id"],
         )
         return [r["tg_user_id"] for r in rows if r["tg_user_id"] not in sent_ids]
+    elif target_type == "cohort" and target_id:
+        # target_id = bot_id, params.cohort_type = hot|warm|cold|lost
+        import json as _json
+        params = campaign.get("params") or {}
+        if isinstance(params, str):
+            try:
+                params = _json.loads(params)
+            except Exception:
+                params = {}
+        cohort = params.get("cohort_type", "warm")
+        cohort_sql = {
+            "hot":  "last_seen >= now() - INTERVAL '1 day'",
+            "warm": "last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
+            "cold": "last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
+            "lost": "last_seen < now() - INTERVAL '30 days'",
+        }.get(cohort, "last_seen >= now() - INTERVAL '7 days'")
+        rows = await pool.fetch(
+            f"SELECT user_id FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
+            target_id,
+        )
+        return [r["user_id"] for r in rows if r["user_id"] not in sent_ids]
     return []
 
 
