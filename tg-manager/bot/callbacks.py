@@ -320,3 +320,8 @@ class DmCb(CallbackData, prefix="dm"):
     page: int = 0
 
 
+class StrikeCb(CallbackData, prefix="strk"):
+    action: str
+    page: int = 0
+
+

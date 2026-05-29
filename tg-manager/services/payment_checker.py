@@ -175,6 +175,12 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         return  # already confirmed or expired
 
     user_id = payment["user_id"]
+    if payment["plan"] == "strike":
+        await pool.execute(
+            """INSERT INTO strike_access (user_id, payment_ref)
+               VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING""",
+            user_id, payment["reference"],
+        )
     await _activate_subscription(pool, user_id, payment["plan"], payment["period_months"])
     log.info(
         "Payment confirmed: user=%s plan=%s months=%s ref=%s tx=%s",
@@ -202,13 +208,23 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         log.warning("Referral paid hook error: %s", e)
 
     try:
-        em = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(payment["plan"], "💳")
+        em = {"starter": "⭐", "pro": "🚀", "enterprise": "👑", "strike": "⚔️"}.get(payment["plan"], "💳")
+        if payment["plan"] == "strike":
+            msg = (
+                "⚔️ <b>Strike Module активирован!</b>\n\n"
+                "Вы получили пожизненный доступ к модулю массовой зачистки нелегального контента.\n\n"
+                "Перейти: /menu → ⚔️ Strike"
+            )
+        else:
+            msg = (
+                f"🎉 <b>Оплата подтверждена!</b>\n\n"
+                f"{em} Подписка <b>{payment['plan'].upper()}</b> на "
+                f"{payment['period_months']} мес. активирована!\n\n"
+                f"Управление: /subscription"
+            )
         await bot.send_message(
             payment["user_id"],
-            f"🎉 <b>Оплата подтверждена!</b>\n\n"
-            f"{em} Подписка <b>{payment['plan'].upper()}</b> на "
-            f"{payment['period_months']} мес. активирована!\n\n"
-            f"Управление: /subscription",
+            msg,
             parse_mode="HTML",
         )
     except Exception:
