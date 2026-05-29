@@ -30,6 +30,9 @@ async def run(pool: asyncpg.Pool) -> None:
             # Anomaly detection every 12 cycles (~3 hours)
             if cycle % 12 == 0:
                 await _detect_anomalies(pool)
+            # Auto-pause winning A/B experiments every 4 cycles (~1 hour)
+            if cycle % 4 == 0:
+                await _auto_conclude_experiments(pool)
             cycle += 1
         except Exception:
             log.exception("behavioral_engine error")
@@ -277,3 +280,76 @@ async def get_search_memory(
         "ORDER BY affinity_score DESC, search_count DESC LIMIT $2",
         owner_id, limit,
     )
+
+
+# ── A/B Experiment auto-conclusion ────────────────────────────────────────
+
+import math as _math
+
+
+def _z_test(n_a: int, c_a: int, n_b: int, c_b: int) -> float:
+    """Return z-score for two proportions."""
+    if n_a < 5 or n_b < 5 or (c_a + c_b) == 0:
+        return 0.0
+    p_a = c_a / n_a
+    p_b = c_b / n_b
+    p_pool = (c_a + c_b) / (n_a + n_b)
+    denom = _math.sqrt(p_pool * (1 - p_pool) * (1 / n_a + 1 / n_b))
+    if denom == 0:
+        return 0.0
+    return abs(p_a - p_b) / denom
+
+
+async def _auto_conclude_experiments(pool: asyncpg.Pool) -> None:
+    """
+    Check active 2-variant experiments. If z-score >= 1.96 (95% significance)
+    AND total impressions >= 200, mark the winner and complete the experiment.
+    """
+    try:
+        exps = await pool.fetch(
+            "SELECT id, bot_id FROM ab_experiments WHERE status='active'"
+        )
+    except Exception:
+        return
+
+    concluded = 0
+    for exp in exps:
+        try:
+            variants = await pool.fetch(
+                "SELECT id, name, impressions, conversions FROM experiment_variants "
+                "WHERE experiment_id=$1 ORDER BY id",
+                exp["id"],
+            )
+            if len(variants) != 2:
+                continue
+            v0, v1 = variants[0], variants[1]
+            n0 = int(v0["impressions"] or 0)
+            c0 = int(v0["conversions"] or 0)
+            n1 = int(v1["impressions"] or 0)
+            c1 = int(v1["conversions"] or 0)
+            total = n0 + n1
+            if total < 200:
+                continue
+            z = _z_test(n0, c0, n1, c1)
+            if z < 1.96:
+                continue
+
+            # Determine winner
+            ctr0 = c0 / max(1, n0)
+            ctr1 = c1 / max(1, n1)
+            winner_id = v0["id"] if ctr0 >= ctr1 else v1["id"]
+
+            await pool.execute(
+                "UPDATE ab_experiments SET status='completed', winner_variant_id=$1 WHERE id=$2",
+                winner_id, exp["id"],
+            )
+            concluded += 1
+            log.info(
+                "behavioral_engine: auto-concluded experiment %d, winner variant %d (z=%.2f)",
+                exp["id"], winner_id, z,
+            )
+        except Exception as exc:
+            log.debug("auto_conclude exp %d: %s", exp["id"], exc)
+
+    if concluded:
+        log.info("behavioral_engine: auto-concluded %d experiments", concluded)
