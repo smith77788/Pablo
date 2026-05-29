@@ -10,24 +10,15 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
-from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.callbacks import CleanerCb
+from bot.states import CleanerFSM
+
 log = logging.getLogger(__name__)
 router = Router()
-
-
-class CleanerCb(CallbackData, prefix="cln"):
-    action: str
-    account_id: int = 0
-
-
-class CleanerFSM(StatesGroup):
-    choosing_account = State()
-    confirm_action   = State()
 
 
 def _back_kb() -> InlineKeyboardBuilder:

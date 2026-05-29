@@ -380,3 +380,8 @@ class DmCampaignFSM(StatesGroup):
     waiting_text       = State()   # текст с spintax
     choosing_target    = State()   # выбор типа аудитории (bot_users/crm)
     choosing_bot       = State()   # выбор бота (для bot_users)
+
+
+class CleanerFSM(StatesGroup):
+    choosing_account = State()
+    confirm_action   = State()
