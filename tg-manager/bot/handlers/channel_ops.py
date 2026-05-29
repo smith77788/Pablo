@@ -69,6 +69,82 @@ _REPORT_PRESETS = {
 }
 
 
+# Многоязычные тексты жалоб — каждая отправка использует следующий вариант по кругу
+_REPORT_MESSAGES: dict[str, list[str]] = {
+    "spam": [
+        "This channel is distributing illegal drugs and controlled substances.",
+        "Этот канал распространяет наркотики и запрещённые вещества.",
+        "Dieser Kanal vertreibt illegale Drogen und Betäubungsmittel.",
+        "Ce canal distribue des drogues illégales et des substances contrôlées.",
+        "Este canal distribuye drogas ilegales y sustancias controladas.",
+        "Цей канал поширює наркотики та заборонені речовини.",
+        "Questo canale distribuisce droghe illegali e sostanze controllate.",
+        "Este canal distribui drogas ilegais e substâncias controladas.",
+        "Bu kanal yasadışı uyuşturucu ve kontrollü madde dağıtıyor.",
+        "このチャンネルは違法薬物を販売しています。",
+    ],
+    "violence": [
+        "This channel promotes terrorism and incites violence against civilians.",
+        "Этот канал пропагандирует терроризм и призывает к насилию.",
+        "Dieser Kanal fördert Terrorismus und Gewalt gegen Zivilisten.",
+        "Cette chaîne promeut le terrorisme et incite à la violence.",
+        "Este canal promueve el terrorismo y la violencia contra civiles.",
+        "Цей канал пропагує тероризм та насильство проти мирних жителів.",
+        "Questo canale promuove il terrorismo e la violenza.",
+        "Este canal promove terrorismo e incita à violência.",
+        "Bu kanal terörizmi ve şiddeti teşvik ediyor.",
+        "このチャンネルはテロリズムと暴力を促進しています。",
+    ],
+    "pornography": [
+        "This channel distributes illegal adult content without age verification.",
+        "Этот канал распространяет незаконный контент для взрослых.",
+        "Dieser Kanal verbreitet illegale pornografische Inhalte.",
+        "Ce canal diffuse du contenu pornographique illégal.",
+        "Este canal distribuye contenido pornográfico ilegal.",
+        "Цей канал поширює незаконний контент для дорослих.",
+        "Questo canale distribuisce contenuto pornografico illegale.",
+        "Este canal distribui conteúdo pornográfico ilegal.",
+        "Bu kanal yasadışı pornografik içerik yayıyor.",
+        "このチャンネルは違法なアダルトコンテンツを配布しています。",
+    ],
+    "childabuse": [
+        "Child sexual abuse material detected. Immediate action required.",
+        "Обнаружены материалы сексуального насилия над детьми. Требуется немедленная реакция.",
+        "Kindesmissbrauchsmaterial entdeckt. Sofortiges Handeln erforderlich.",
+        "Matériel d'abus sexuel sur enfants. Action immédiate requise.",
+        "Material de abuso sexual infantil. Se requiere acción inmediata.",
+        "Виявлено матеріали сексуального насилля над дітьми. Потрібне негайне реагування.",
+        "Rilevato materiale di abuso sessuale su minori. Azione immediata richiesta.",
+        "Material de abuso sexual infantil detectado. Ação imediata necessária.",
+        "Çocuk cinsel istismar materyali tespit edildi. Acil müdahale gerekli.",
+        "児童性的虐待素材が検出されました。即座の対応が必要です。",
+    ],
+    "copyright": [
+        "This channel systematically violates copyright and distributes pirated content.",
+        "Этот канал систематически нарушает авторские права и распространяет пиратский контент.",
+        "Dieser Kanal verletzt systematisch Urheberrechte.",
+        "Ce canal viole systématiquement les droits d'auteur.",
+        "Este canal viola sistemáticamente los derechos de autor.",
+        "Цей канал систематично порушує авторські права.",
+        "Questo canale viola sistematicamente i diritti d'autore.",
+        "Este canal viola sistematicamente direitos autorais.",
+        "Bu kanal sistematik olarak telif haklarını ihlal ediyor.",
+        "このチャンネルは著作権を組織的に侵害しています。",
+    ],
+    "other": [
+        "This channel offers illegal darknet services and prohibited goods.",
+        "Этот канал предлагает незаконные даркнет-услуги и запрещённые товары.",
+        "Dieser Kanal bietet illegale Darknet-Dienste und verbotene Waren an.",
+        "Ce canal propose des services darknet illégaux et des produits interdits.",
+        "Este canal ofrece servicios darknet ilegales y bienes prohibidos.",
+        "Цей канал пропонує незаконні даркнет-послуги та заборонені товари.",
+        "Questo canale offre servizi darknet illegali e merci vietate.",
+        "Este canal oferece serviços darknet ilegais e bens proibidos.",
+        "Bu kanal yasadışı darknet hizmetleri ve yasaklı ürünler sunuyor.",
+        "このチャンネルは違法なダークネットサービスを提供しています。",
+    ],
+}
+
 REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "😮", "😢", "👎", "💯", "🤔", "🤩"]
 
 
@@ -2129,7 +2205,9 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
         await callback.message.edit_text("⚠️ Аккаунт не найден.")
         return
     from services import account_manager
-    ok = await account_manager.report_peer(acc["session_str"], data["peer"], reason, _acc=acc)
+    msg_pool = _REPORT_MESSAGES.get(reason, _REPORT_MESSAGES["other"])
+    report_msg = random.choice(msg_pool)
+    ok = await account_manager.report_peer(acc["session_str"], data["peer"], reason, message=report_msg, _acc=acc)
     label = REPORT_REASONS.get(reason, reason)
     await callback.message.edit_text(
         f"✅ <b>Жалоба отправлена!</b>\n\nПричина: {label}\nОбъект: <code>{html.escape(data['peer'])}</code>"
@@ -2427,15 +2505,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     from services import account_manager
 
-    reason_messages = {
-        "spam":        "This account distributes spam.",
-        "violence":    "This content contains violent material.",
-        "pornography": "Adult content violating platform rules.",
-        "childabuse":  "Child abuse material. Immediate review required.",
-        "copyright":   "Copyright infringement.",
-        "other":       "Violation of Telegram Terms of Service.",
-    }
-    report_msg = reason_messages.get(reason, "")
+    msg_pool = _REPORT_MESSAGES.get(reason, _REPORT_MESSAGES["other"])
 
     total_ops = len(peers) * len(chosen)
     sent = 0
@@ -2452,6 +2522,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     for peer in peers:
         for i, acc in enumerate(chosen):
+            report_msg = msg_pool[done % len(msg_pool)]
             ok = await account_manager.report_peer(
                 acc["session_str"], peer, reason, message=report_msg, _acc=acc
             )
