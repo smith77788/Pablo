@@ -2507,18 +2507,22 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     msg_pool = _REPORT_MESSAGES.get(reason, _REPORT_MESSAGES["other"])
 
+    # Для пресетов (наркотики / CSAM / терроризм / даркнет) — полный режим
+    is_preset = bool(data.get("preset"))
+
     total_ops = len(peers) * len(chosen)
-    peer_sent = 0
-    msg_reported = 0
-    blocked = 0
-    failed = 0
+    stat = {
+        "peer": 0, "multi": 0, "msgs": 0,
+        "reacts": 0, "admins": 0, "bots": 0,
+        "fwd": 0, "blocked": 0, "failed": 0,
+    }
     done = 0
 
+    mode_label = "🔥 МАКС" if is_preset else "⚡ Стандарт"
     status_msg = await callback.message.edit_text(
-        f"🚨 <b>Комплексная атака на ресурс...</b>\n"
+        f"🚨 <b>Атака на нелегальный ресурс</b> [{mode_label}]\n"
         f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
         f"Причина: {label}\n\n"
-        f"Каждый аккаунт: жалоба на канал + жалобы на сообщения + блокировка\n\n"
         f"{_progress_bar(0, total_ops)} 0/{total_ops}",
         parse_mode="HTML",
     )
@@ -2532,47 +2536,94 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
                 msg_messages=msg_pool,
                 max_msg_reports=10,
                 block_after=True,
+                multi_reason=is_preset,
+                join_first=is_preset,
+                negative_react=is_preset,
+                report_admins=is_preset,
+                report_linked_bots=is_preset,
+                forward_to_bot=is_preset,
                 _acc=acc,
             )
-            if res["peer_reported"]:
-                peer_sent += 1
+            if res.get("peer_reported"):
+                stat["peer"] += 1
             else:
-                failed += 1
-            msg_reported += res.get("msg_reported", 0)
+                stat["failed"] += 1
+            stat["multi"]   += res.get("multi_reason_sent", 0)
+            stat["msgs"]    += res.get("msg_reported", 0)
+            stat["reacts"]  += res.get("reactions_sent", 0)
+            stat["admins"]  += res.get("admins_reported", 0)
+            stat["bots"]    += res.get("bots_reported", 0)
+            stat["fwd"]     += res.get("forwarded", 0)
             if res.get("blocked"):
-                blocked += 1
+                stat["blocked"] += 1
             done += 1
-            if done % 3 == 0 or done == total_ops:
+
+            if done % 2 == 0 or done == total_ops:
                 try:
-                    await status_msg.edit_text(
-                        f"🚨 <b>Комплексная атака на ресурс...</b>\n"
-                        f"Текущий: <code>{html.escape(peer)}</code>\n"
-                        f"Причина: {label}\n\n"
-                        f"📌 Жалоб на канал: <b>{peer_sent}</b>\n"
-                        f"📨 Жалоб на сообщения: <b>{msg_reported}</b>\n"
-                        f"🚫 Заблокировано: <b>{blocked}</b>\n\n"
+                    lines = [
+                        f"🚨 <b>Атака на нелегальный ресурс</b> [{mode_label}]",
+                        f"Цель: <code>{html.escape(peer)}</code>",
+                        f"Причина: {label}",
+                        "",
+                        f"📌 Жалоб на канал: <b>{stat['peer']}</b>"
+                        + (f" (+{stat['multi']} причин)" if stat['multi'] else ""),
+                        f"📨 Жалоб на сообщения: <b>{stat['msgs']}</b>",
+                    ]
+                    if stat["reacts"]:
+                        lines.append(f"👎 Реакций: <b>{stat['reacts']}</b>")
+                    if stat["admins"]:
+                        lines.append(f"👤 Жалоб на админов: <b>{stat['admins']}</b>")
+                    if stat["bots"]:
+                        lines.append(f"🤖 Жалоб на боты: <b>{stat['bots']}</b>")
+                    if stat["fwd"]:
+                        lines.append(f"📤 Переслано модераторам: <b>{stat['fwd']}</b>")
+                    lines.extend([
+                        f"🚫 Заблокировано: <b>{stat['blocked']}</b>",
+                        "",
                         f"{_progress_bar(done, total_ops)} {done}/{total_ops}",
-                        parse_mode="HTML",
+                    ])
+                    await status_msg.edit_text(
+                        "\n".join(lines), parse_mode="HTML"
                     )
                 except Exception:
                     pass
+
             if i < len(chosen) - 1:
                 await asyncio.sleep(random.uniform(6.0, 15.0) * session_simulator.chaos_factor())
         if peer != peers[-1]:
             await asyncio.sleep(random.uniform(10.0, 25.0))
 
-    total_signals = peer_sent + msg_reported + blocked
+    total_signals = (stat["peer"] + stat["multi"] + stat["msgs"]
+                     + stat["reacts"] + stat["admins"] + stat["bots"]
+                     + stat["fwd"] + stat["blocked"])
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+    summary_lines = [
+        f"🚨 <b>Атака завершена</b> [{mode_label}]",
+        "",
+        f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>",
+        f"Причина: {label}",
+        "",
+        f"📌 Жалоб на каналы: <b>{stat['peer']}</b>"
+        + (f" (+{stat['multi']} причин)" if stat['multi'] else ""),
+        f"📨 Жалоб на сообщения: <b>{stat['msgs']}</b>",
+    ]
+    if stat["reacts"]:
+        summary_lines.append(f"👎 Реакций: <b>{stat['reacts']}</b>")
+    if stat["admins"]:
+        summary_lines.append(f"👤 Жалоб на админов: <b>{stat['admins']}</b>")
+    if stat["bots"]:
+        summary_lines.append(f"🤖 Жалоб на боты: <b>{stat['bots']}</b>")
+    if stat["fwd"]:
+        summary_lines.append(f"📤 Переслано в @stopCA / @notoscam: <b>{stat['fwd']}</b>")
+    summary_lines.extend([
+        f"🚫 Заблокировано: <b>{stat['blocked']}</b>",
+        f"❌ Ошибок: <b>{stat['failed']}</b>",
+        "",
+        f"📊 <b>Всего сигналов Telegram: {total_signals}</b>",
+    ])
     await status_msg.edit_text(
-        f"🚨 <b>Атака завершена</b>\n\n"
-        f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
-        f"Причина: {label}\n\n"
-        f"📌 Жалоб на каналы: <b>{peer_sent}</b>\n"
-        f"📨 Жалоб на сообщения: <b>{msg_reported}</b>\n"
-        f"🚫 Заблокировано: <b>{blocked}</b>\n"
-        f"❌ Ошибок: <b>{failed}</b>\n\n"
-        f"📊 Всего сигналов Telegram: <b>{total_signals}</b>",
+        "\n".join(summary_lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
