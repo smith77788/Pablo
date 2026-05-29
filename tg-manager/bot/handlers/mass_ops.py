@@ -1314,3 +1314,374 @@ async def cb_bulk_leave_confirm(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# OPERATION BUILDER FSM WIZARD
+# Пошаговый мастер: тип → цели → параметры → preview → подтверждение
+# ══════════════════════════════════════════════════════════════════════════
+
+_OP_TYPE_META = {
+    "mass_publish": {
+        "icon": "📤",
+        "label": "Массовая публикация",
+        "desc": "Отправить пост во все каналы/группы",
+        "plan": "starter",
+    },
+    "bulk_join": {
+        "icon": "🔗",
+        "label": "Массовый join",
+        "desc": "Вступить в каналы/группы несколькими аккаунтами",
+        "plan": "starter",
+    },
+    "bulk_leave": {
+        "icon": "🚪",
+        "label": "Массовый leave",
+        "desc": "Выйти из каналов/групп несколькими аккаунтами",
+        "plan": "starter",
+    },
+    "bulk_bot_edit": {
+        "icon": "✏️",
+        "label": "Массовое редактирование ботов",
+        "desc": "Изменить имя/описание/команды всех ботов сразу",
+        "plan": "pro",
+    },
+}
+
+
+# ── Шаг 1: Выбор типа операции ────────────────────────────────────────────
+
+@router.callback_query(MassOpCb.filter(F.action == "build"))
+async def cb_build_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await state.clear()
+    await state.set_state(OpBuilderFSM.choosing_op_type)
+
+    kb = InlineKeyboardBuilder()
+    for op_key, meta in _OP_TYPE_META.items():
+        kb.button(
+            text=f"{meta['icon']} {meta['label']}",
+            callback_data=MassOpCb(action="ob_type", op_type=op_key),
+        )
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🛠️ <b>Построитель операций</b>\n\n"
+        "Шаг 1/4: Выберите тип операции\n\n"
+        "📤 <b>Публикация</b> — разослать пост по каналам\n"
+        "🔗 <b>Join</b> — вступить в каналы (STARTER+)\n"
+        "🚪 <b>Leave</b> — выйти из каналов (STARTER+)\n"
+        "✏️ <b>Редактирование ботов</b> — обновить профиль ботов (PRO)\n",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Шаг 2: Выбор целей ────────────────────────────────────────────────────
+
+@router.callback_query(MassOpCb.filter(F.action == "ob_type"))
+async def cb_ob_type_chosen(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    from bot.utils.subscription import require_plan
+    from bot.keyboards import subscription_locked_markup
+
+    op_type = callback_data.op_type or ""
+    meta = _OP_TYPE_META.get(op_type)
+    if not meta:
+        await callback.answer("Неизвестный тип операции", show_alert=True)
+        return
+
+    # Проверка подписки
+    required_plan = meta["plan"]
+    if not await require_plan(pool, callback.from_user.id, required_plan):
+        await callback.answer()
+        plan_label = "PRO" if required_plan == "pro" else "STARTER+"
+        await callback.message.edit_text(
+            f"🔒 <b>{meta['label']} — {plan_label}</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(required_plan, back_callback=MassOpCb(action="build")),
+        )
+        return
+
+    await callback.answer()
+    await state.update_data(ob_op_type=op_type)
+    await state.set_state(OpBuilderFSM.choosing_targets)
+
+    kb = InlineKeyboardBuilder()
+
+    if op_type == "mass_publish":
+        kb.button(text="📢 Каналы",              callback_data=MassOpCb(action="ob_target", op_type="channels"))
+        kb.button(text="👥 Группы",              callback_data=MassOpCb(action="ob_target", op_type="groups"))
+        kb.button(text="📢+👥 Каналы и группы", callback_data=MassOpCb(action="ob_target", op_type="both"))
+        kb.button(text="◀️ Назад",               callback_data=MassOpCb(action="build"))
+        kb.adjust(2, 1, 1)
+        await callback.message.edit_text(
+            f"🛠️ <b>Построитель: {meta['icon']} {meta['label']}</b>\n\n"
+            "Шаг 2/4: Выберите тип целей для публикации:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+    elif op_type in ("bulk_join", "bulk_leave"):
+        # Для join/leave — сразу просим ввести ссылки/каналы
+        await state.set_state(OpBuilderFSM.entering_params)
+        action_word = "вступления" if op_type == "bulk_join" else "выхода"
+        example = (
+            "<code>@channel_name\nhttps://t.me/channel_name\nhttps://t.me/+InviteHash</code>"
+            if op_type == "bulk_join"
+            else "<code>@channel_name\n-1001234567890\nusername</code>"
+        )
+        kb.button(text="◀️ Назад", callback_data=MassOpCb(action="build"))
+        await callback.message.edit_text(
+            f"🛠️ <b>Построитель: {meta['icon']} {meta['label']}</b>\n\n"
+            f"Шаг 2/4: Введите каналы/группы для {action_word} — по одному на строку:\n\n"
+            f"{example}\n\n"
+            "Максимум 50 записей.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+    elif op_type == "bulk_bot_edit":
+        kb.button(text="✏️ Имя бота",         callback_data=MassOpCb(action="ob_target", op_type="name"))
+        kb.button(text="📄 Описание",         callback_data=MassOpCb(action="ob_target", op_type="desc"))
+        kb.button(text="📝 Краткое описание", callback_data=MassOpCb(action="ob_target", op_type="short_desc"))
+        kb.button(text="⌨️ Команды",          callback_data=MassOpCb(action="ob_target", op_type="commands"))
+        kb.button(text="◀️ Назад",            callback_data=MassOpCb(action="build"))
+        kb.adjust(2, 2, 1)
+        await callback.message.edit_text(
+            f"🛠️ <b>Построитель: {meta['icon']} {meta['label']}</b>\n\n"
+            "Шаг 2/4: Выберите поле для массового редактирования:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+# ── Шаг 2b: Выбор целей mass_publish и bulk_bot_edit ─────────────────────
+
+@router.callback_query(MassOpCb.filter(F.action == "ob_target"))
+async def cb_ob_target_chosen(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    target = callback_data.op_type or ""
+    await state.update_data(ob_target=target)
+    sd = await state.get_data()
+    op_type = sd.get("ob_op_type", "")
+    meta = _OP_TYPE_META.get(op_type, {})
+
+    await state.set_state(OpBuilderFSM.entering_params)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="ob_type", op_type=op_type))
+
+    if op_type == "mass_publish":
+        target_label = _TARGET_LABELS.get(target, target)
+        await callback.message.edit_text(
+            f"🛠️ <b>Построитель: {meta.get('icon','')} {meta.get('label','')}</b>\n"
+            f"Цели: <b>{target_label}</b>\n\n"
+            "Шаг 3/4: Введите текст поста (поддерживается HTML):",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    elif op_type == "bulk_bot_edit":
+        _FIELD_LABELS_OB = {
+            "name":       "имя бота",
+            "desc":       "описание",
+            "short_desc": "краткое описание",
+            "commands":   "команды (формат: /cmd - описание, по одному на строку)",
+        }
+        field_label = _FIELD_LABELS_OB.get(target, target)
+        await callback.message.edit_text(
+            f"🛠️ <b>Построитель: {meta.get('icon','')} {meta.get('label','')}</b>\n"
+            f"Поле: <b>{field_label}</b>\n\n"
+            f"Шаг 3/4: Введите новое значение для всех ботов:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
+
+# ── Шаг 3: Ввод параметров (текстовые сообщения) ─────────────────────────
+
+@router.message(OpBuilderFSM.entering_params)
+async def fsm_ob_entering_params(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("⚠️ Введите значение:")
+        return
+
+    sd = await state.get_data()
+    op_type = sd.get("ob_op_type", "")
+    meta = _OP_TYPE_META.get(op_type, {})
+
+    if op_type in ("bulk_join", "bulk_leave"):
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if not lines:
+            await message.answer("⚠️ Введите хотя бы одну запись:")
+            return
+        if len(lines) > 50:
+            await message.answer("⚠️ Максимум 50 записей за одну операцию.")
+            return
+        await state.update_data(ob_links=lines)
+    else:
+        await state.update_data(ob_param=text)
+
+    await state.set_state(OpBuilderFSM.confirming)
+
+    # Собираем preview
+    await _ob_show_preview(message, state, pool, meta, op_type, edit=False)
+
+
+async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dict, op_type: str, edit: bool = False) -> None:
+    """Показать preview и кнопку подтверждения."""
+    sd = await state.get_data()
+    target = sd.get("ob_target", "")
+    ob_param = sd.get("ob_param", "")
+    ob_links = sd.get("ob_links", [])
+
+    target_label = _TARGET_LABELS.get(target, target) if op_type == "mass_publish" else target
+
+    # Считаем количество аккаунтов/целей
+    uid = msg.from_user.id if hasattr(msg, "from_user") else msg.chat.id
+    acc_count = 0
+    try:
+        accounts = await _get_active_accounts(pool, uid)
+        acc_count = len(accounts)
+    except Exception:
+        pass
+
+    lines = []
+    lines.append(f"🛠️ <b>Построитель — Предпросмотр операции</b>")
+    lines.append("")
+    lines.append(f"Тип: {meta.get('icon', '')} <b>{meta.get('label', op_type)}</b>")
+
+    if op_type == "mass_publish":
+        lines.append(f"Цели: <b>{target_label}</b>")
+        preview_text = html.escape(ob_param[:200])
+        lines.append(f"Аккаунтов: <b>{acc_count}</b>")
+        lines.append(f"\nТекст поста:\n<i>{preview_text}</i>")
+    elif op_type in ("bulk_join", "bulk_leave"):
+        action_word = "вступления" if op_type == "bulk_join" else "выхода"
+        link_preview = "\n".join(f"• {html.escape(ln)}" for ln in ob_links[:5])
+        if len(ob_links) > 5:
+            link_preview += f"\n… и ещё {len(ob_links) - 5}"
+        lines.append(f"Каналов/групп: <b>{len(ob_links)}</b>")
+        lines.append(f"Аккаунтов для {action_word}: <b>{acc_count}</b>")
+        lines.append(f"\n<b>Список:</b>\n{link_preview}")
+    elif op_type == "bulk_bot_edit":
+        _FIELD_LABELS_OB = {
+            "name": "Имя", "desc": "Описание",
+            "short_desc": "Краткое описание", "commands": "Команды",
+        }
+        field_label = _FIELD_LABELS_OB.get(target, target)
+        preview_val = html.escape(ob_param[:200])
+        lines.append(f"Поле: <b>{field_label}</b>")
+        lines.append(f"\nЗначение:\n<i>{preview_val}</i>")
+
+    lines.append("")
+    lines.append("Шаг 4/4: Подтвердить запуск операции?")
+
+    preview_text_full = "\n".join(lines)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Подтвердить и поставить в очередь", callback_data=MassOpCb(action="ob_confirm"))
+    kb.button(text="❌ Отмена",                            callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+
+    if edit:
+        try:
+            await msg.edit_text(preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup())
+            return
+        except Exception:
+            pass
+    await msg.answer(preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Шаг 4: Подтверждение и запись в operation_queue ──────────────────────
+
+@router.callback_query(MassOpCb.filter(F.action == "ob_confirm"))
+async def cb_ob_confirm(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Создаю операцию...")
+    sd = await state.get_data()
+    await state.clear()
+
+    op_type = sd.get("ob_op_type", "")
+    target = sd.get("ob_target", "")
+    ob_param = sd.get("ob_param", "")
+    ob_links = sd.get("ob_links", [])
+    uid = callback.from_user.id
+    meta = _OP_TYPE_META.get(op_type, {})
+
+    # Формируем params для operation_queue
+    if op_type == "mass_publish":
+        params = {
+            "target": target,
+            "filter": "all",
+            "text": ob_param,
+            "delay": 30,
+            "source": "builder",
+        }
+        total_items = 1  # воркер посчитает реальное кол-во каналов при запуске
+    elif op_type == "bulk_join":
+        accounts = await _get_active_accounts(pool, uid)
+        acc_ids = [a["id"] for a in accounts]
+        params = {"links": ob_links, "account_ids": acc_ids, "source": "builder"}
+        total_items = len(ob_links) * max(1, len(acc_ids))
+    elif op_type == "bulk_leave":
+        accounts = await _get_active_accounts(pool, uid)
+        acc_ids = [a["id"] for a in accounts]
+        params = {"channels": ob_links, "account_ids": acc_ids, "source": "builder"}
+        total_items = len(ob_links) * max(1, len(acc_ids))
+    elif op_type == "bulk_bot_edit":
+        params = {"field": target, "value": ob_param, "source": "builder"}
+        total_items = 1  # воркер посчитает реальное кол-во ботов при запуске
+    else:
+        await callback.message.edit_text(
+            "⚠️ Неизвестный тип операции.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    try:
+        op_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
+               VALUES($1, $2, 'pending', $3::jsonb, $4)
+               RETURNING id""",
+            uid,
+            op_type,
+            json.dumps(params),
+            total_items,
+        )
+    except Exception as e:
+        log.error("ob_confirm insert error: %s", e)
+        await callback.message.edit_text(
+            "⚠️ Ошибка создания операции. Попробуйте ещё раз.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    icon = meta.get("icon", "")
+    label = meta.get("label", op_type)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Меню",             callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
+        f"Тип: {icon} <b>{label}</b>\n"
+        f"Статус: ⏳ Ожидает выполнения\n\n"
+        f"Воркер запустит операцию автоматически.\n"
+        f"Следить за прогрессом: <b>Очередь операций</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
