@@ -1461,7 +1461,7 @@ async def report_peer_deep(
     reason: str,
     message: str = "",
     msg_messages: list[str] | None = None,
-    max_msg_reports: int = 10,
+    max_msg_reports: int = 50,
     block_after: bool = True,
     multi_reason: bool = True,
     join_first: bool = True,
@@ -1469,18 +1469,25 @@ async def report_peer_deep(
     report_admins: bool = True,
     report_linked_bots: bool = True,
     forward_to_bot: bool = True,
+    report_photo: bool = True,
+    report_pinned: bool = True,
+    report_linked_group: bool = True,
     _acc: dict | None = None,
 ) -> dict:
-    """8-вектоная атака на нелегальный ресурс за одно подключение.
+    """12-векторная атака на нелегальный ресурс за одно подключение.
 
-    1. ReportPeerRequest (primary reason + все вторичные)
-    2. JoinChannelRequest → отчёты изнутри весят больше
-    3. messages.ReportRequest на последние 10 сообщений
-    4. SendReactionRequest 👎 на последние посты
-    5. GetParticipants(admins) → ReportPeer на каждого
-    6. Парсинг описания/постов → ReportPeer на linked боты
-    7. Forward evidence → @stopCA / @notoscam
-    8. BlockRequest + LeaveChannelRequest
+    1.  ReportPeer — все доступные причины по кругу (primary + все вторичные)
+    2.  ReportProfilePhoto — жалоба на фото профиля канала
+    3.  JoinChannel — войти для отчётов изнутри (весят больше)
+    4.  Pinned Messages — ReportRequest (закреплённые = приоритет для модераторов)
+    5.  Regular Messages — ReportRequest на 50 последних (чанки по 5, все причины)
+    6.  channels.ReportSpam — дополнительный спам-сигнал
+    7.  Negative Reactions 👎💩 на все доступные посты (до 20)
+    8.  Admins — ReportPeer на ВСЕХ администраторов
+    9.  Linked Group — ReportPeer на связанную группу обсуждений
+    10. Linked Bots — ReportPeer на боты из описания/постов
+    11. Forward Evidence → @stopCA / @notoscam
+    12. Block + Mute + Leave
     """
     import re as _re
 
@@ -1489,6 +1496,7 @@ async def report_peer_deep(
     from telethon.tl.functions.contacts import BlockRequest
     from telethon.tl.functions.channels import (
         JoinChannelRequest, LeaveChannelRequest, GetParticipantsRequest,
+        GetFullChannelRequest,
     )
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import (
@@ -1496,9 +1504,28 @@ async def report_peer_deep(
         InputReportReasonPornography, InputReportReasonChildAbuse,
         InputReportReasonCopyright, InputReportReasonOther,
         Channel, ChannelParticipantsAdmins, ReactionEmoji,
+        InputMessagesFilterPinned,
     )
 
-    reason_map = {
+    # Optional imports — newer TL layers / Telethon versions
+    _has_photo_report = False
+    try:
+        from telethon.tl.functions.account import ReportProfilePhotoRequest
+        _has_photo_report = True
+    except ImportError:
+        pass
+
+    _has_chan_spam = False
+    ChanSpamRequest = None
+    try:
+        from telethon.tl.functions.channels import ReportSpamRequest as _CSR
+        ChanSpamRequest = _CSR
+        _has_chan_spam = True
+    except ImportError:
+        pass
+
+    # Build reason map — try to include newer TL types
+    reason_map: dict = {
         "spam":        InputReportReasonSpam(),
         "violence":    InputReportReasonViolence(),
         "pornography": InputReportReasonPornography(),
@@ -1506,36 +1533,61 @@ async def report_peer_deep(
         "copyright":   InputReportReasonCopyright(),
         "other":       InputReportReasonOther(),
     }
-    # Вторичные причины для multi-reason атаки
-    _escalation = {
-        "childabuse": ["pornography", "violence", "other"],
-        "violence":   ["spam", "other"],
-        "other":      ["spam", "violence"],
-        "spam":       ["other", "violence"],
-        "pornography":["spam", "other"],
-        "copyright":  ["spam"],
+    for _type_name, _key in [
+        ("InputReportReasonIllegalDrugs", "drugs"),
+        ("InputReportReasonPersonalDetails", "personal"),
+        ("InputReportReasonFake", "fake"),
+        ("InputReportReasonGeoIrrelevant", "geo"),
+    ]:
+        try:
+            import telethon.tl.types as _tlt
+            reason_map[_key] = getattr(_tlt, _type_name)()
+        except Exception:
+            pass
+
+    # Escalation: primary → all applicable secondary reasons
+    _escalation: dict[str, list[str]] = {
+        "childabuse":  ["pornography", "violence", "drugs", "spam", "other"],
+        "drugs":       ["childabuse", "violence", "spam", "other"],
+        "violence":    ["childabuse", "spam", "drugs", "fake", "other"],
+        "pornography": ["childabuse", "spam", "other", "violence"],
+        "spam":        ["other", "violence", "personal", "fake"],
+        "other":       ["spam", "violence", "pornography", "drugs"],
+        "copyright":   ["spam", "other"],
     }
-    # Официальные боты Telegram для пересылки доказательств
-    _report_bots = {
+
+    _report_bots: dict[str, str] = {
         "childabuse": "stopCA",
+        "drugs":      "stopCA",
         "violence":   "notoscam",
         "other":      "notoscam",
         "spam":       "notoscam",
+        "pornography": "notoscam",
     }
 
     tg_reason = reason_map.get(reason, InputReportReasonOther())
+    # Build ordered reason cycle: primary first, then all secondary
+    all_reasons_cycle = [tg_reason]
+    for sec_key in _escalation.get(reason, []):
+        if sec_key in reason_map:
+            all_reasons_cycle.append(reason_map[sec_key])
+
     result = {
-        "peer_reported": False,
-        "multi_reason_sent": 0,
-        "msg_reported": 0,
-        "reactions_sent": 0,
-        "admins_reported": 0,
-        "bots_reported": 0,
-        "forwarded": 0,
-        "blocked": False,
-        "joined": False,
+        "peer_reported":          False,
+        "multi_reason_sent":      0,
+        "photo_reported":         False,
+        "pinned_reported":        0,
+        "msg_reported":           0,
+        "spam_signaled":          0,
+        "reactions_sent":         0,
+        "admins_reported":        0,
+        "linked_group_reported":  False,
+        "bots_reported":          0,
+        "forwarded":              0,
+        "blocked":                False,
+        "joined":                 False,
     }
-    msg_pool = msg_messages or [message]
+    msg_pool = msg_messages or [message] or [""]
 
     client = _make_client(session_string, _acc)
     try:
@@ -1543,140 +1595,227 @@ async def report_peer_deep(
         entity = await client.get_entity(peer_username.lstrip("@"))
         is_channel = isinstance(entity, Channel)
 
-        # ── 1. Жалоба на сам ресурс (primary reason) ──────────────────────
-        try:
-            await client(ReportPeerRequest(peer=entity, reason=tg_reason, message=message))
-            result["peer_reported"] = True
-        except Exception as e:
-            log.warning("report_peer_deep[1/peer]: %s", e)
-
-        # ── 1b. Multi-reason: все вторичные причины ────────────────────────
-        if multi_reason:
-            for sec in _escalation.get(reason, [])[:2]:
-                try:
-                    await asyncio.sleep(0.4)
-                    await client(ReportPeerRequest(
-                        peer=entity,
-                        reason=reason_map.get(sec, InputReportReasonOther()),
-                        message=msg_pool[result["multi_reason_sent"] % len(msg_pool)],
-                    ))
+        # ── 1. ReportPeer — все причины по кругу ──────────────────────────
+        for idx, r_obj in enumerate(all_reasons_cycle if multi_reason else [tg_reason]):
+            try:
+                if idx > 0:
+                    await asyncio.sleep(0.35)
+                await client(ReportPeerRequest(
+                    peer=entity,
+                    reason=r_obj,
+                    message=msg_pool[idx % len(msg_pool)],
+                ))
+                if idx == 0:
+                    result["peer_reported"] = True
+                else:
                     result["multi_reason_sent"] += 1
-                except Exception as e:
-                    log.warning("report_peer_deep[1b/multi]: %s", e)
+            except Exception as e:
+                log.warning("report_peer_deep[1/peer idx=%d]: %s", idx, e)
 
-        # ── 2. Вступить в канал для утяжелённых отчётов изнутри ───────────
+        # ── 2. Report Profile Photo ────────────────────────────────────────
+        if report_photo and _has_photo_report:
+            try:
+                from telethon.tl.functions.account import ReportProfilePhotoRequest as _RPP
+                photos = await client.get_profile_photos(entity, limit=1)
+                if photos:
+                    await client(_RPP(
+                        peer=entity,
+                        photo_id=client._get_input_photo(photos[0]),
+                        reason=tg_reason,
+                        message=msg_pool[0],
+                    ))
+                    result["photo_reported"] = True
+            except Exception as e:
+                log.warning("report_peer_deep[2/photo]: %s", e)
+
+        # ── 3. Вступить в канал для утяжелённых отчётов ───────────────────
         if join_first and is_channel:
             try:
                 await client(JoinChannelRequest(entity))
                 result["joined"] = True
-                await asyncio.sleep(random.uniform(1.5, 3.5))
+                await asyncio.sleep(random.uniform(2.0, 4.5))
             except Exception as e:
-                log.warning("report_peer_deep[2/join]: %s", e)
+                log.warning("report_peer_deep[3/join]: %s", e)
 
-        # ── 3. Жалобы на последние сообщения ─────────────────────────────
-        msgs = []
+        # Get full channel info (linked group, about text)
+        full_chat = None
+        try:
+            full_result = await client(GetFullChannelRequest(entity))
+            full_chat = full_result.full_chat
+        except Exception:
+            pass
+
+        # ── 4. Pinned messages — высший приоритет для модераторов ─────────
+        pinned_msgs = []
+        if report_pinned and is_channel:
+            try:
+                pinned_msgs = await client.get_messages(
+                    entity, filter=InputMessagesFilterPinned(), limit=20
+                )
+                pinned_ids = [m.id for m in pinned_msgs if m and m.id]
+                for idx_p, pid in enumerate(pinned_ids):
+                    r_obj = all_reasons_cycle[idx_p % len(all_reasons_cycle)]
+                    try:
+                        await client(MsgReportRequest(
+                            peer=entity, id=[pid],
+                            reason=r_obj,
+                            message=msg_pool[idx_p % len(msg_pool)],
+                        ))
+                        result["pinned_reported"] += 1
+                        await asyncio.sleep(0.4)
+                    except Exception as e:
+                        log.warning("report_peer_deep[4/pinned %d]: %s", pid, e)
+            except Exception as e:
+                log.warning("report_peer_deep[4/get_pinned]: %s", e)
+
+        # ── 5. Жалобы на последние 50 сообщений (все причины по кругу) ────
+        msgs: list = []
         if is_channel:
             try:
                 msgs = await client.get_messages(entity, limit=max_msg_reports)
                 msg_ids = [m.id for m in msgs if m and m.id]
-                if msg_ids:
-                    chunks = [msg_ids[i:i+5] for i in range(0, len(msg_ids), 5)]
-                    for idx, chunk in enumerate(chunks):
-                        chunk_msg = msg_pool[idx % len(msg_pool)]
-                        try:
-                            await client(MsgReportRequest(
-                                peer=entity, id=chunk,
-                                reason=tg_reason, message=chunk_msg,
-                            ))
-                            result["msg_reported"] += len(chunk)
-                        except Exception as e:
-                            log.warning("report_peer_deep[3/msg_chunk]: %s", e)
-                        await asyncio.sleep(0.7)
+                chunks = [msg_ids[i:i+5] for i in range(0, len(msg_ids), 5)]
+                for chunk_idx, chunk in enumerate(chunks):
+                    r_obj = all_reasons_cycle[chunk_idx % len(all_reasons_cycle)]
+                    chunk_msg = msg_pool[chunk_idx % len(msg_pool)]
+                    try:
+                        await client(MsgReportRequest(
+                            peer=entity, id=chunk,
+                            reason=r_obj, message=chunk_msg,
+                        ))
+                        result["msg_reported"] += len(chunk)
+                    except Exception as e:
+                        log.warning("report_peer_deep[5/msg_chunk %d]: %s", chunk_idx, e)
+                    await asyncio.sleep(0.55)
             except Exception as e:
-                log.warning("report_peer_deep[3/get_msgs]: %s", e)
+                log.warning("report_peer_deep[5/get_msgs]: %s", e)
 
-        # ── 4. Негативные реакции 👎 на последние посты ───────────────────
+        # ── 6. channels.ReportSpam (отдельный спам-сигнал) ────────────────
+        if _has_chan_spam and ChanSpamRequest and msgs and is_channel:
+            spam_ids = [m.id for m in msgs[:10] if m and m.id]
+            if spam_ids:
+                try:
+                    await client(ChanSpamRequest(
+                        channel=entity,
+                        participant=entity,
+                        id=spam_ids,
+                    ))
+                    result["spam_signaled"] += len(spam_ids)
+                except Exception as e:
+                    log.warning("report_peer_deep[6/chan_spam]: %s", e)
+
+        # ── 7. Негативные реакции на все доступные посты ──────────────────
         if negative_react and msgs:
-            recent_ids = [m.id for m in msgs[:5] if m and m.id]
-            for mid in recent_ids:
+            reaction_emojis = ["👎", "💩", "🤮"]
+            for r_idx, m in enumerate(msgs[:20]):
+                if not (m and m.id):
+                    continue
+                emoji = reaction_emojis[r_idx % len(reaction_emojis)]
                 try:
                     await client(SendReactionRequest(
                         peer=entity,
-                        msg_id=mid,
-                        reaction=[ReactionEmoji(emoticon="👎")],
+                        msg_id=m.id,
+                        reaction=[ReactionEmoji(emoticon=emoji)],
                     ))
                     result["reactions_sent"] += 1
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(0.2)
                 except Exception as e:
-                    log.warning("report_peer_deep[4/react]: %s", e)
+                    log.warning("report_peer_deep[7/react]: %s", e)
 
-        # ── 5. Жалобы на администраторов канала ───────────────────────────
+        # ── 8. Жалобы на ВСЕХ администраторов ────────────────────────────
         if report_admins and is_channel:
             try:
                 admins_result = await client(GetParticipantsRequest(
                     channel=entity,
                     filter=ChannelParticipantsAdmins(),
-                    offset=0, limit=10, hash=0,
+                    offset=0, limit=50, hash=0,
                 ))
                 admin_users = getattr(admins_result, "users", [])
-                for usr in admin_users[:4]:
+                for a_idx, usr in enumerate(admin_users):
                     try:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.4)
+                        r_obj = all_reasons_cycle[a_idx % len(all_reasons_cycle)]
                         await client(ReportPeerRequest(
                             peer=usr,
-                            reason=tg_reason,
-                            message=msg_pool[result["admins_reported"] % len(msg_pool)],
+                            reason=r_obj,
+                            message=msg_pool[a_idx % len(msg_pool)],
                         ))
                         result["admins_reported"] += 1
                     except Exception as e:
-                        log.warning("report_peer_deep[5/admin]: %s", e)
+                        log.warning("report_peer_deep[8/admin]: %s", e)
             except Exception as e:
-                log.warning("report_peer_deep[5/get_admins]: %s", e)
+                log.warning("report_peer_deep[8/get_admins]: %s", e)
 
-        # ── 6. Парсинг и жалобы на связанные боты ────────────────────────
+        # ── 9. Linked discussion group ────────────────────────────────────
+        if report_linked_group and full_chat:
+            linked_id = getattr(full_chat, "linked_chat_id", None)
+            if linked_id:
+                try:
+                    linked_entity = await client.get_entity(int(linked_id))
+                    for idx_lg, r_obj in enumerate(all_reasons_cycle[:3]):
+                        try:
+                            await asyncio.sleep(0.5)
+                            await client(ReportPeerRequest(
+                                peer=linked_entity,
+                                reason=r_obj,
+                                message=msg_pool[idx_lg % len(msg_pool)],
+                            ))
+                            result["linked_group_reported"] = True
+                        except Exception as e:
+                            log.warning("report_peer_deep[9/linked reason %d]: %s", idx_lg, e)
+                except Exception as e:
+                    log.warning("report_peer_deep[9/get_linked]: %s", e)
+
+        # ── 10. Linked bots → ReportPeer ──────────────────────────────────
         if report_linked_bots and is_channel:
             bot_re = _re.compile(r'@([A-Za-z]\w{4,31}[Bb]ot)\b')
             scan_text = ""
-            try:
-                from telethon.tl.functions.channels import GetFullChannelRequest
-                full = await client(GetFullChannelRequest(entity))
-                scan_text += (getattr(full.full_chat, "about", "") or "") + " "
-            except Exception:
-                pass
+            if full_chat:
+                scan_text += (getattr(full_chat, "about", "") or "") + " "
             for m in msgs[:5]:
                 if m and m.text:
                     scan_text += m.text + " "
-            found_bots = list(set(bot_re.findall(scan_text)))[:3]
-            for bot_uname in found_bots:
+            found_bots = list(set(bot_re.findall(scan_text)))[:5]
+            for b_idx, bot_uname in enumerate(found_bots):
                 try:
                     bot_entity = await client.get_entity(bot_uname)
+                    r_obj = all_reasons_cycle[b_idx % len(all_reasons_cycle)]
                     await client(ReportPeerRequest(
-                        peer=bot_entity, reason=tg_reason,
-                        message=msg_pool[result["bots_reported"] % len(msg_pool)],
+                        peer=bot_entity, reason=r_obj,
+                        message=msg_pool[b_idx % len(msg_pool)],
                     ))
                     result["bots_reported"] += 1
-                    await asyncio.sleep(0.6)
+                    await asyncio.sleep(0.5)
                 except Exception as e:
-                    log.warning("report_peer_deep[6/bot %s]: %s", bot_uname, e)
+                    log.warning("report_peer_deep[10/bot %s]: %s", bot_uname, e)
 
-        # ── 7. Пересылка доказательств в официальные боты Telegram ────────
+        # ── 11. Forward evidence → @stopCA / @notoscam ─────────────────────
         if forward_to_bot and msgs:
-            bot_username = _report_bots.get(reason)
-            if bot_username:
-                try:
-                    bot_ent = await client.get_entity(bot_username)
-                    evidence_msgs = [m for m in msgs[:3] if m and not m.service]
-                    for em in evidence_msgs:
-                        try:
-                            await client.forward_messages(bot_ent, em)
-                            result["forwarded"] += 1
-                            await asyncio.sleep(0.5)
-                        except Exception as e:
-                            log.warning("report_peer_deep[7/fwd]: %s", e)
-                except Exception as e:
-                    log.warning("report_peer_deep[7/get_bot]: %s", e)
+            bot_username = _report_bots.get(reason, "notoscam")
+            try:
+                bot_ent = await client.get_entity(bot_username)
+                evidence_msgs = [m for m in msgs[:5] if m and not m.service]
+                for em in evidence_msgs:
+                    try:
+                        await client.forward_messages(bot_ent, em)
+                        result["forwarded"] += 1
+                        await asyncio.sleep(0.4)
+                    except Exception as e:
+                        log.warning("report_peer_deep[11/fwd]: %s", e)
+            except Exception as e:
+                log.warning("report_peer_deep[11/get_bot]: %s", e)
 
-        # ── 8. Выйти из канала + заблокировать ────────────────────────────
+        # ── 12. Mute + Block + Leave ───────────────────────────────────────
+        try:
+            from telethon.tl.functions.account import UpdateNotifySettingsRequest
+            from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+            await client(UpdateNotifySettingsRequest(
+                peer=InputNotifyPeer(peer=entity),
+                settings=InputPeerNotifySettings(mute_until=2_147_483_647),
+            ))
+        except Exception:
+            pass
+
         if result["joined"]:
             try:
                 await client(LeaveChannelRequest(entity))
@@ -1687,7 +1826,7 @@ async def report_peer_deep(
                 await client(BlockRequest(id=entity))
                 result["blocked"] = True
             except Exception as e:
-                log.warning("report_peer_deep[8/block]: %s", e)
+                log.warning("report_peer_deep[12/block]: %s", e)
 
     except Exception as e:
         log.exception("report_peer_deep error: %s", e)

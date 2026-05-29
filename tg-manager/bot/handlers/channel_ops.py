@@ -2535,15 +2535,16 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     total_ops = len(peers) * len(chosen)
     stat = {
-        "peer": 0, "multi": 0, "msgs": 0,
-        "reacts": 0, "admins": 0, "bots": 0,
+        "peer": 0, "multi": 0, "photo": 0, "pinned": 0,
+        "msgs": 0, "spam": 0, "reacts": 0,
+        "admins": 0, "linked_grp": 0, "bots": 0,
         "fwd": 0, "blocked": 0, "failed": 0,
     }
     done = 0
 
-    mode_label = "🔥 МАКС" if is_preset else "⚡ Стандарт"
+    mode_label = "🔥 МАКСИМУМ"
     status_msg = await callback.message.edit_text(
-        f"🚨 <b>Атака на нелегальный ресурс</b> [{mode_label}]\n"
+        f"⚔️ <b>Strike — 12-векторная атака</b> [{mode_label}]\n"
         f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>\n"
         f"Причина: {label}\n\n"
         f"{_progress_bar(0, total_ops)} 0/{total_ops}",
@@ -2557,26 +2558,33 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
                 acc["session_str"], peer, reason,
                 message=report_msg,
                 msg_messages=msg_pool,
-                max_msg_reports=10,
+                max_msg_reports=50,
                 block_after=True,
-                multi_reason=is_preset,
-                join_first=is_preset,
-                negative_react=is_preset,
-                report_admins=is_preset,
-                report_linked_bots=is_preset,
-                forward_to_bot=is_preset,
+                multi_reason=True,
+                join_first=True,
+                negative_react=True,
+                report_admins=True,
+                report_linked_bots=True,
+                forward_to_bot=True,
+                report_photo=True,
+                report_pinned=True,
+                report_linked_group=True,
                 _acc=acc,
             )
             if res.get("peer_reported"):
                 stat["peer"] += 1
             else:
                 stat["failed"] += 1
-            stat["multi"]   += res.get("multi_reason_sent", 0)
-            stat["msgs"]    += res.get("msg_reported", 0)
-            stat["reacts"]  += res.get("reactions_sent", 0)
-            stat["admins"]  += res.get("admins_reported", 0)
-            stat["bots"]    += res.get("bots_reported", 0)
-            stat["fwd"]     += res.get("forwarded", 0)
+            stat["multi"]      += res.get("multi_reason_sent", 0)
+            stat["photo"]      += 1 if res.get("photo_reported") else 0
+            stat["pinned"]     += res.get("pinned_reported", 0)
+            stat["msgs"]       += res.get("msg_reported", 0)
+            stat["spam"]       += res.get("spam_signaled", 0)
+            stat["reacts"]     += res.get("reactions_sent", 0)
+            stat["admins"]     += res.get("admins_reported", 0)
+            stat["linked_grp"] += 1 if res.get("linked_group_reported") else 0
+            stat["bots"]       += res.get("bots_reported", 0)
+            stat["fwd"]        += res.get("forwarded", 0)
             if res.get("blocked"):
                 stat["blocked"] += 1
             done += 1
@@ -2584,24 +2592,30 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
             if done % 2 == 0 or done == total_ops:
                 try:
                     lines = [
-                        f"🚨 <b>Атака на нелегальный ресурс</b> [{mode_label}]",
+                        f"⚔️ <b>Strike — 12-векторная атака</b> [{mode_label}]",
                         f"Цель: <code>{html.escape(peer)}</code>",
                         f"Причина: {label}",
                         "",
-                        f"📌 Жалоб на канал: <b>{stat['peer']}</b>"
+                        f"① Жалоб на ресурс: <b>{stat['peer']}</b>"
                         + (f" (+{stat['multi']} причин)" if stat['multi'] else ""),
-                        f"📨 Жалоб на сообщения: <b>{stat['msgs']}</b>",
+                        f"② Фото профиля: <b>{stat['photo']}</b>",
+                        f"③ Закреплённых: <b>{stat['pinned']}</b>",
+                        f"④ Сообщений: <b>{stat['msgs']}</b>",
                     ]
+                    if stat["spam"]:
+                        lines.append(f"⑤ Спам-сигналов: <b>{stat['spam']}</b>")
                     if stat["reacts"]:
-                        lines.append(f"👎 Реакций: <b>{stat['reacts']}</b>")
+                        lines.append(f"⑥ Реакций 👎💩: <b>{stat['reacts']}</b>")
                     if stat["admins"]:
-                        lines.append(f"👤 Жалоб на админов: <b>{stat['admins']}</b>")
+                        lines.append(f"⑦ Жалоб на админов: <b>{stat['admins']}</b>")
+                    if stat["linked_grp"]:
+                        lines.append(f"⑧ Связанных групп: <b>{stat['linked_grp']}</b>")
                     if stat["bots"]:
-                        lines.append(f"🤖 Жалоб на боты: <b>{stat['bots']}</b>")
+                        lines.append(f"⑨ Жалоб на боты: <b>{stat['bots']}</b>")
                     if stat["fwd"]:
-                        lines.append(f"📤 Переслано модераторам: <b>{stat['fwd']}</b>")
+                        lines.append(f"⑩ Переслано в T&S: <b>{stat['fwd']}</b>")
                     lines.extend([
-                        f"🚫 Заблокировано: <b>{stat['blocked']}</b>",
+                        f"⑪ Заблокировано: <b>{stat['blocked']}</b>",
                         "",
                         f"{_progress_bar(done, total_ops)} {done}/{total_ops}",
                     ])
@@ -2616,34 +2630,46 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
         if peer != peers[-1]:
             await asyncio.sleep(random.uniform(10.0, 25.0))
 
-    total_signals = (stat["peer"] + stat["multi"] + stat["msgs"]
-                     + stat["reacts"] + stat["admins"] + stat["bots"]
-                     + stat["fwd"] + stat["blocked"])
+    total_signals = (
+        stat["peer"] + stat["multi"] + stat["photo"] + stat["pinned"]
+        + stat["msgs"] + stat["spam"] + stat["reacts"]
+        + stat["admins"] + stat["linked_grp"] + stat["bots"]
+        + stat["fwd"] + stat["blocked"]
+    )
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
     summary_lines = [
-        f"🚨 <b>Атака завершена</b> [{mode_label}]",
+        f"⚔️ <b>Strike завершён</b> [{mode_label}]",
         "",
         f"Ресурсов: <b>{len(peers)}</b> · Аккаунтов: <b>{len(chosen)}</b>",
         f"Причина: {label}",
         "",
-        f"📌 Жалоб на каналы: <b>{stat['peer']}</b>"
+        f"① Жалоб на ресурс: <b>{stat['peer']}</b>"
         + (f" (+{stat['multi']} причин)" if stat['multi'] else ""),
-        f"📨 Жалоб на сообщения: <b>{stat['msgs']}</b>",
+        f"② Фото профиля: <b>{stat['photo']}</b>",
+        f"③ Закреплённых постов: <b>{stat['pinned']}</b>",
+        f"④ Сообщений: <b>{stat['msgs']}</b>",
     ]
+    if stat["spam"]:
+        summary_lines.append(f"⑤ Спам-сигналов: <b>{stat['spam']}</b>")
     if stat["reacts"]:
-        summary_lines.append(f"👎 Реакций: <b>{stat['reacts']}</b>")
+        summary_lines.append(f"⑥ Реакций 👎💩: <b>{stat['reacts']}</b>")
     if stat["admins"]:
-        summary_lines.append(f"👤 Жалоб на админов: <b>{stat['admins']}</b>")
+        summary_lines.append(f"⑦ Жалоб на админов: <b>{stat['admins']}</b>")
+    if stat["linked_grp"]:
+        summary_lines.append(f"⑧ Связанных групп: <b>{stat['linked_grp']}</b>")
     if stat["bots"]:
-        summary_lines.append(f"🤖 Жалоб на боты: <b>{stat['bots']}</b>")
+        summary_lines.append(f"⑨ Жалоб на боты: <b>{stat['bots']}</b>")
     if stat["fwd"]:
-        summary_lines.append(f"📤 Переслано в @stopCA / @notoscam: <b>{stat['fwd']}</b>")
+        summary_lines.append(f"⑩ Переслано в Trust &amp; Safety: <b>{stat['fwd']}</b>")
     summary_lines.extend([
-        f"🚫 Заблокировано: <b>{stat['blocked']}</b>",
+        f"⑪ Заблокировано: <b>{stat['blocked']}</b>",
         f"❌ Ошибок: <b>{stat['failed']}</b>",
         "",
         f"📊 <b>Всего сигналов Telegram: {total_signals}</b>",
+        "",
+        "<i>⚠️ Результат зависит от решения Telegram Trust &amp; Safety. "
+        "Strike Module не гарантирует удаление или блокировку ресурса.</i>",
     ])
     await status_msg.edit_text(
         "\n".join(summary_lines),
