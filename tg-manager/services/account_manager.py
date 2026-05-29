@@ -539,8 +539,12 @@ async def scan_owned_assets(
                     groups.append(item)
         return {"channels": channels, "groups": groups, "error": None}
     except Exception as e:
-        log.exception("scan_owned_assets error: %s", e)
-        return {"channels": [], "groups": [], "error": str(e)[:200]}
+        err_str = str(e)
+        if "auth" in err_str.lower() or "AuthKey" in err_str or "Unauthorized" in err_str:
+            log.warning("scan_owned_assets session error: %s", e)
+        else:
+            log.exception("scan_owned_assets error: %s", e)
+        return {"channels": [], "groups": [], "error": err_str[:200]}
     finally:
         try:
             await client.disconnect()

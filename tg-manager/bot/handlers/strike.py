@@ -59,6 +59,12 @@ async def _ensure_table(pool: asyncpg.Pool) -> None:
 
 
 async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
+    from bot.utils.subscription import is_platform_admin, get_plan
+    if is_platform_admin(user_id):
+        return True
+    plan = await get_plan(pool, user_id)
+    if plan == "enterprise":
+        return True
     await _ensure_table(pool)
     row = await pool.fetchrow("SELECT 1 FROM strike_access WHERE user_id=$1", user_id)
     return row is not None
@@ -70,10 +76,12 @@ def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
         kb.button(text="🚨 Одиночная цель",    callback_data=ChanCb(action="br_mode_single"))
         kb.button(text="📋 Список целей",       callback_data=ChanCb(action="br_mode_batch"))
         kb.button(text="⚙️ Настройки атаки",   callback_data=StrikeCb(action="settings"))
+        kb.button(text="◀️ Назад",              callback_data=BmCb(action="main"))
+        kb.adjust(2, 1, 1)
     else:
         kb.button(text="💳 Купить за $250 USDT", callback_data=StrikeCb(action="buy"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 1) if has_access else kb.adjust(1, 1)
+        kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
+        kb.adjust(1, 1)
     return kb
 
 

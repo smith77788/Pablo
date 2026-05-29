@@ -1305,19 +1305,37 @@ async def cb_check_health(
     except Exception as exc:
         result = {"ok": False, "reason": f"Ошибка: {escape(str(exc)[:200])}"}
 
-    if result["ok"]:
+    status = result.get("status", "")
+    if result.get("ok") or status == "active":
         status_icon = "✅"
         status_title = "Аккаунт в порядке"
+    elif status == "session_expired":
+        status_icon = "🔑"
+        status_title = "Сессия истекла"
+    elif status == "spamblock":
+        status_icon = "🚫"
+        status_title = "Спам-блокировка"
+    elif status == "cooldown":
+        status_icon = "⏳"
+        status_title = "FloodWait — временные ограничения"
+    elif status == "banned":
+        status_icon = "💀"
+        status_title = "Аккаунт заблокирован Telegram"
     else:
         status_icon = "❌"
         status_title = "Проблема с аккаунтом"
 
     reason = escape(result.get("reason", ""))
+    extra = ""
+    if status == "session_expired":
+        extra = "\n\n💡 <i>Удалите этот аккаунт и добавьте заново через «Добавить аккаунт».</i>"
+
+    kb = _acc_menu_markup(callback_data.acc_id)
     await callback.message.edit_text(
         f"{status_icon} <b>{status_title}</b>\n\n"
-        f"{reason}",
+        f"{reason}{extra}",
         parse_mode="HTML",
-        reply_markup=_acc_menu_markup(callback_data.acc_id),
+        reply_markup=kb,
     )
 
 
@@ -1383,10 +1401,16 @@ async def cb_check_all_accounts(
     for _, st, _ in results:
         status_counts[st] = status_counts.get(st, 0) + 1
 
+    expired_count = status_counts.get("session_expired", 0)
     lines = ["✅ <b>Проверка завершена!</b>\n"]
     for st, cnt in sorted(status_counts.items(), key=lambda x: x[0]):
         emoji = _STATUS_EMOJI.get(st, "•")
-        lines.append(f"{emoji} {st}: <b>{cnt}</b>")
+        label = {"session_expired": "🔑 сессия истекла", "active": "активен", "spamblock": "спам-блок", "banned": "заблокирован", "cooldown": "FloodWait"}.get(st, st)
+        lines.append(f"{emoji} {label}: <b>{cnt}</b>")
+
+    if expired_count:
+        lines.append(f"\n⚠️ <b>{expired_count} аккаунт(ов) с истёкшей сессией</b>")
+        lines.append("Удалите и добавьте их заново через «Добавить аккаунт».")
 
     lines.append("\n<b>Детали:</b>")
     for name, st, reason in results:
@@ -1446,13 +1470,22 @@ async def cb_scan_all_resources(
                 "FROM tg_accounts WHERE id=$1", acc["id"]
             )
             result = await account_manager.scan_owned_assets(session_str, _acc=dict(acc_dict) if acc_dict else None)
+            err = result.get("error")
             owned = result.get("channels", []) + result.get("groups", [])
             if owned:
                 imported = await db.upsert_managed_channels(pool, uid, acc["id"], owned)
                 total_imported += imported
                 acc_results.append(f"✅ {name}: {len(owned)} ресурсов ({imported} новых)")
+            elif err:
+                _err_low = err.lower()
+                if "auth" in _err_low or "session" in _err_low or "unauthorized" in _err_low:
+                    acc_results.append(f"🔑 {name}: сессия истекла — переавторизуйтесь")
+                elif "flood" in _err_low:
+                    acc_results.append(f"⏳ {name}: FloodWait — попробуйте позже")
+                else:
+                    acc_results.append(f"❌ {name}: {escape(err[:80])}")
             else:
-                acc_results.append(f"ℹ️ {name}: нет ресурсов с правами")
+                acc_results.append(f"ℹ️ {name}: нет каналов/групп с правами admin/creator")
         except Exception as exc:
             acc_results.append(f"❌ {name}: ошибка — {escape(str(exc)[:60])}")
 

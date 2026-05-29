@@ -61,6 +61,7 @@ def _admin_main_kb():
     kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")
     kb.button(text="💰 Выдать подписку",         callback_data="adm:grant_ask")
     kb.button(text="💰 Bulk-выдача подписок",    callback_data="adm:bulk_grant_ask")
+    kb.button(text="⚔️ Выдать Strike доступ",   callback_data="adm:strike_grant_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
     kb.button(text="📋 Экспорт юзеров (CSV)",   callback_data="adm:users_csv")
     kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
@@ -68,7 +69,7 @@ def _admin_main_kb():
     kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -357,6 +358,21 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         await db.set_system_mode(pool, mode)
         await callback.answer(f"✅ Режим: {mode.upper()}", show_alert=True)
         await _adm_swarm_mode(callback, pool)
+
+    elif action == "strike_grant_ask":
+        await callback.message.edit_text(
+            "⚔️ <b>Выдать Strike доступ</b>\n\n"
+            "Отправьте Telegram ID пользователя:\n"
+            "<code>USER_ID</code>\n\n"
+            "Пример: <code>123456789</code>\n\n"
+            "Доступ будет активирован немедленно.",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_grant','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='strike_grant',data=''",
+            callback.from_user.id,
+        )
 
     elif action == "bulk_grant_ask":
         await callback.message.edit_text(
@@ -821,6 +837,34 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             + "\n".join(result_lines),
             parse_mode="HTML", reply_markup=_admin_main_kb(),
         )
+
+    elif state == "strike_grant":
+        try:
+            target_uid = int(text.strip())
+            from bot.handlers.strike import _ensure_table
+            await _ensure_table(pool)
+            await pool.execute(
+                "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
+                "ON CONFLICT (user_id) DO NOTHING",
+                target_uid, message.from_user.id,
+            )
+            await message.answer(
+                f"⚔️ <b>Strike доступ активирован</b>\n\n"
+                f"Пользователь <code>{target_uid}</code> теперь имеет доступ к Strike Module.",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+            try:
+                await message.bot.send_message(
+                    target_uid,
+                    "⚔️ <b>Strike Module активирован!</b>\n\n"
+                    "Администратор предоставил вам доступ к Strike Module.\n"
+                    "Откройте меню для использования.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
     elif state == "cleanup":
         if text.strip().upper() != "CLEAN":
