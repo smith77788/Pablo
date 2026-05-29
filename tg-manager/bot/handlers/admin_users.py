@@ -6,6 +6,15 @@ from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import CallbackData
 from bot.utils.subscription import is_platform_admin
+
+
+def _is_admin(uid: int) -> bool:
+    """Check admin status using both env ADMIN_IDS and session admins."""
+    try:
+        from bot.handlers.admin import is_admin
+        return is_admin(uid)
+    except Exception:
+        return is_platform_admin(uid)
 from database import db
 
 router = Router()
@@ -61,7 +70,7 @@ async def _users_list_text(pool: asyncpg.Pool, page: int = 0, items_per_page: in
 @router.callback_query(AdminUserCb.filter(F.action == "list"))
 async def cb_users_list(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
     """Показать список пользователей."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Только администратор", show_alert=True)
         return
 
@@ -93,7 +102,7 @@ async def cb_users_list(callback: CallbackQuery, callback_data: AdminUserCb, poo
 @router.callback_query(AdminUserCb.filter(F.action == "filter_plan"))
 async def cb_filter_plan(callback: CallbackQuery) -> None:
     """Меню фильтра по плану."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -116,7 +125,7 @@ async def cb_filter_plan(callback: CallbackQuery) -> None:
 @router.callback_query(AdminUserCb.filter(F.action == "plan_list"))
 async def cb_plan_list(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
     """Показать пользователей с конкретным планом."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -155,7 +164,7 @@ async def cb_plan_list(callback: CallbackQuery, callback_data: AdminUserCb, pool
 @router.callback_query(AdminUserCb.filter(F.action == "banned_list"))
 async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Показать забаненных пользователей."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -181,7 +190,7 @@ async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(AdminUserCb.filter(F.action == "user_actions"))
 async def cb_user_actions(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
     """Показать действия над пользователем."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -225,7 +234,7 @@ async def cb_user_actions(callback: CallbackQuery, callback_data: AdminUserCb, p
 @router.callback_query(AdminUserCb.filter(F.action == "grant_plan"))
 async def cb_grant_plan(callback: CallbackQuery, callback_data: AdminUserCb, state: FSMContext) -> None:
     """Меню выбора плана для выдачи."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -252,7 +261,7 @@ async def cb_grant_plan(callback: CallbackQuery, callback_data: AdminUserCb, sta
 @router.callback_query(AdminUserCb.filter(F.action == "plan_months"))
 async def cb_plan_months(callback: CallbackQuery, callback_data: AdminUserCb, state: FSMContext) -> None:
     """Меню выбора срока подписки."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -278,7 +287,7 @@ async def cb_plan_months(callback: CallbackQuery, callback_data: AdminUserCb, st
 @router.callback_query(AdminUserCb.filter(F.action == "confirm_grant"))
 async def cb_confirm_grant(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool, state: FSMContext) -> None:
     """Подтвердить выдачу плана."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -300,7 +309,7 @@ async def cb_confirm_grant(callback: CallbackQuery, callback_data: AdminUserCb, 
 @router.callback_query(AdminUserCb.filter(F.action == "revoke_plan"))
 async def cb_revoke_plan(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
     """Забрать подписку у пользователя."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -318,7 +327,7 @@ async def cb_revoke_plan(callback: CallbackQuery, callback_data: AdminUserCb, po
 @router.callback_query(AdminUserCb.filter(F.action == "ban"))
 async def cb_ban(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
     """Забанить пользователя."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -330,7 +339,7 @@ async def cb_ban(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyn
 @router.callback_query(AdminUserCb.filter(F.action == "unban"))
 async def cb_unban(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
     """Разбанить пользователя."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
@@ -342,7 +351,7 @@ async def cb_unban(callback: CallbackQuery, callback_data: AdminUserCb, pool: as
 @router.callback_query(AdminUserCb.filter(F.action == "main_menu"))
 async def cb_main_menu(callback: CallbackQuery) -> None:
     """Вернуться в админ-меню."""
-    if not is_platform_admin(callback.from_user.id):
+    if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 

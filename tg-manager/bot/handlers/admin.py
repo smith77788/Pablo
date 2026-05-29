@@ -38,6 +38,11 @@ def _is_admin(uid: int) -> bool:
     return bool(ids) and uid in ids
 
 
+def is_admin(uid: int) -> bool:
+    """Public alias for _is_admin — checks both env ADMIN_IDS and session admins."""
+    return _is_admin(uid)
+
+
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
 def _admin_main_kb():
