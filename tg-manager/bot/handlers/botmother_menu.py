@@ -86,10 +86,11 @@ def _main_menu_kb():
     kb.button(text="💬 Inbox / Relay",    callback_data=BmCb(action="inbox"))
     kb.button(text="🤖 AI Assistant",     callback_data=BmCb(action="ai_assistant"))
     kb.button(text="🧠 Аналитика",        callback_data=BmCb(action="behavioral"))
+    kb.button(text="🗺️ Карта инфры",      callback_data=BmCb(action="topology"))
     kb.button(text="💳 Billing",          callback_data=BmCb(action="billing"))
     kb.button(text="👥 Referral",         callback_data=BmCb(action="referral"))
     kb.button(text="⚙️ Settings",         callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2, 2, 2)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -1768,3 +1769,95 @@ async def cb_mem_keyword_drilldown(
         text = "<pre>" + "\n".join(lines) + "</pre>"
 
     await _edit(callback, text, kb.as_markup())
+
+
+# ── Topology Map ──────────────────────────────────────────────────────────────
+
+@router.callback_query(BmCb.filter(F.action == "topology"))
+async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Текстовая карта связей: кластеры → боты → каналы."""
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await _edit(callback, locked_text("Карта инфраструктуры", "starter"), subscription_locked_markup("starter"))
+        return
+    await callback.answer("⏳ Строю карту...")
+    uid = callback.from_user.id
+
+    try:
+        clusters = await pool.fetch(
+            "SELECT id, name FROM clusters WHERE owner_id=$1 ORDER BY name LIMIT 10", uid
+        )
+    except Exception:
+        clusters = []
+
+    try:
+        bots = await pool.fetch(
+            """SELECT b.bot_id, b.username, b.first_name, b.cluster,
+                      b.swarm_enabled, b.bot_role,
+                      COUNT(u.user_id) FILTER (WHERE u.user_id IS NOT NULL) AS user_count
+               FROM managed_bots b
+               LEFT JOIN bot_users u ON u.bot_id = b.bot_id AND u.is_active = TRUE
+               WHERE b.added_by=$1 AND b.is_active=TRUE
+               GROUP BY b.bot_id
+               ORDER BY user_count DESC LIMIT 30""",
+            uid,
+        )
+    except Exception:
+        bots = []
+
+    try:
+        channels = await pool.fetch(
+            "SELECT channel_id, title, username FROM channel_access WHERE owner_id=$1 LIMIT 10", uid
+        )
+    except Exception:
+        channels = []
+
+    lines = ["🗺️ <b>Карта инфраструктуры</b>\n"]
+
+    cluster_map: dict[str, list] = {"default": []}
+    cluster_names: dict[str, str] = {"default": "🔘 Без кластера"}
+    for c in clusters:
+        cluster_map[str(c["id"])] = []
+        cluster_names[str(c["id"])] = f"🔗 {html.escape(c['name'])}"
+
+    for bot in bots:
+        cluster_key = str(bot["cluster"] or "default") if bot.get("cluster") else "default"
+        if cluster_key not in cluster_map:
+            cluster_map[cluster_key] = []
+        cluster_map[cluster_key].append(bot)
+
+    role_icons = {"entry": "🚪", "conversion": "💰", "retention": "🔄", "general": "⚙️"}
+
+    for ck, blist in cluster_map.items():
+        if not blist:
+            continue
+        cname = cluster_names.get(ck, f"Кластер {ck}")
+        lines.append(f"\n<b>{cname}</b>")
+        for b in blist:
+            bname = f"@{b['username']}" if b.get("username") else (b.get("first_name") or f"id{b['bot_id']}")
+            users = int(b.get("user_count") or 0)
+            swarm = "🧬" if b.get("swarm_enabled") else "  "
+            role_icon = role_icons.get(b.get("bot_role", "general"), "⚙️")
+            lines.append(f"  {swarm}{role_icon} {html.escape(bname)} ({users:,} польз.)")
+
+    if channels:
+        lines.append("\n<b>📡 Каналы</b>")
+        for ch in channels:
+            cname = html.escape(ch.get("title") or ch.get("username") or str(ch["channel_id"]))
+            uname = f" @{html.escape(ch['username'])}" if ch.get("username") else ""
+            lines.append(f"  📡 {cname}{uname}")
+
+    lines.append(
+        f"\n<i>Итого: {len(bots)} ботов · {len(channels)} каналов · "
+        f"{len([b for b in bots if b.get('swarm_enabled')])} в Swarm</i>"
+    )
+
+    topo_text = "\n".join(lines)
+    if len(topo_text) > 4000:
+        topo_text = topo_text[:3900] + "\n\n<i>... (показаны первые результаты)</i>"
+
+    topo_kb = InlineKeyboardBuilder()
+    topo_kb.button(text="🔄 Обновить", callback_data=BmCb(action="topology"))
+    topo_kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    topo_kb.adjust(2)
+    await _edit(callback, topo_text, topo_kb.as_markup())
