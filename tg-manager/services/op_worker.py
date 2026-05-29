@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import aiohttp
 import asyncpg
@@ -11,6 +12,73 @@ from database import db
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10   # секунд между проверками очереди
 _MAX_PARALLEL = 3     # максимум параллельных операций
+
+
+# ── Retry Intelligence ─────────────────────────────────────────────────────────
+
+_RETRYABLE_ERRORS = {
+    "TimeoutError", "ConnectionError", "NetworkError",
+    "ConnectionResetError", "ServerError", "OSError",
+    "asyncio.TimeoutError", "TelegramNetworkError",
+}
+_FATAL_ERRORS = {
+    "AuthKeyUnregisteredError", "SessionRevokedError",
+    "UserDeactivatedBan", "BotKicked", "PhoneNumberBanned",
+}
+_FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
+
+
+def _classify_op_error(exc: Exception) -> str:
+    """Классифицирует ошибку операции: 'retry' | 'flood' | 'fatal' | 'skip'."""
+    name = type(exc).__name__
+    msg = str(exc)
+    if name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg:
+        return "fatal"
+    if _FLOOD_PATTERNS.search(msg) or _FLOOD_PATTERNS.search(name):
+        return "flood"
+    if name in _RETRYABLE_ERRORS or "timeout" in msg.lower() or "connection" in msg.lower():
+        return "retry"
+    if "CHANNEL_PRIVATE" in msg or "CHAT_ADMIN_REQUIRED" in msg or "ChatAdminRequired" in name:
+        return "skip"
+    return "retry"
+
+
+async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool:
+    """
+    Если ошибка ретраевая и retry_count < max_retries — сбросить операцию в pending.
+    Возвращает True если операция поставлена на повторную попытку.
+    """
+    kind = _classify_op_error(exc)
+    if kind == "fatal":
+        return False
+
+    row = await pool.fetchrow(
+        "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1", op_id
+    )
+    if not row:
+        return False
+    retry_count = (row["retry_count"] or 0) + 1
+    max_retries = row["max_retries"] or 3
+
+    if retry_count > max_retries:
+        return False
+
+    # Exponential backoff: 30s, 60s, 120s, ...
+    backoff = min(30 * (2 ** (retry_count - 1)), 600)
+    scheduled_for = f"now() + interval '{backoff} seconds'"
+
+    await pool.execute(
+        f"""UPDATE operation_queue
+            SET status='pending',
+                retry_count=$1,
+                last_error=$2,
+                scheduled_for={scheduled_for},
+                started_at=NULL
+            WHERE id=$3""",
+        retry_count, str(exc)[:300], op_id,
+    )
+    log.info("op_worker: op %d queued for retry %d/%d in %ds", op_id, retry_count, max_retries, backoff)
+    return True
 
 
 async def _audit(
@@ -150,19 +218,29 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
     except Exception as e:
         log.exception("op_worker: op %d failed: %s", op_id, e)
-        await pool.execute(
-            "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
-            str(e)[:500], op_id,
-        )
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
-        kb = InlineKeyboardBuilder()
-        kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
-        await db.notify_if_enabled(
-            pool, bot, owner_id, "op_complete",
-            f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n<code>{str(e)[:200]}</code>",
-            reply_markup=kb.as_markup(),
-        )
+        # Попытаться поставить на повтор перед тем как помечать как failed
+        requeued = await _maybe_requeue(pool, op_id, e)
+        if not requeued:
+            await pool.execute(
+                "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
+                str(e)[:500], op_id,
+            )
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot.callbacks import BmCb
+            kb = InlineKeyboardBuilder()
+            kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+            retry_row = await pool.fetchrow(
+                "SELECT retry_count FROM operation_queue WHERE id=$1", op_id
+            )
+            retry_info = ""
+            if retry_row and (retry_row["retry_count"] or 0) > 0:
+                retry_info = f"\nПопыток: {retry_row['retry_count']}"
+            await db.notify_if_enabled(
+                pool, bot, owner_id, "op_complete",
+                f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n"
+                f"<code>{str(e)[:200]}</code>{retry_info}",
+                reply_markup=kb.as_markup(),
+            )
 
     finally:
         async with _active_lock:

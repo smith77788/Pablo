@@ -40,6 +40,7 @@ from bot.callbacks import (
     ScheduleCb,
     SubCb,
     AutoReplyCb,
+    DmCb,
     WarmupCb,
 )
 from bot.states import OpPlannerFSM
@@ -140,8 +141,9 @@ def _broadcasts_kb():
     kb.button(text="📢 Рассылка по боту",  callback_data=BotCb(action="list", page=0))
     kb.button(text="🌐 Сетевая рассылка",  callback_data=NetBcCb(action="choose_target"))
     kb.button(text="📅 Расписание",        callback_data=BmCb(action="schedules"))
+    kb.button(text="📨 DM-кампании",       callback_data=DmCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 1, 1, 1)
     return kb.as_markup()
 
 

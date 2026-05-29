@@ -312,3 +312,9 @@ class InfraCb(CallbackData, prefix="infra"):
 class CleanerCb(CallbackData, prefix="cln"):
     action: str
     account_id: int = 0
+
+
+class DmCb(CallbackData, prefix="dm"):
+    action: str
+    campaign_id: int = 0
+    page: int = 0
