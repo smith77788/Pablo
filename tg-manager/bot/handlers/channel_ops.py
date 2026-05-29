@@ -25,12 +25,13 @@ import asyncpg
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb
 from bot.states import (
-    BulkChanFSM, BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, ContactInviteFSM, CreateBotFSM,
+    BulkChanFSM, BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, BulkReportFSM,
+    ContactInviteFSM, CreateBotFSM,
     CreateChannelFSM, EditChannelFSM, InviteUsersFSM, JoinChannelFSM, MyChannelsFSM,
     PostToChannelFSM, ReportFSM, SendReactionFSM, UpdateProfileFSM,
 )
@@ -109,9 +110,11 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     # ── Прочее
     kb.button(text="👥 Инвайт из контактов", callback_data=ChanCb(action="contact_invite"))
     kb.button(text="👍 Реакция на пост",     callback_data=ChanCb(action="react_pick"))
+    kb.button(text="🚨 Жалоба (1 акк)",      callback_data=ChanCb(action="report_pick"))
+    kb.button(text="🚨 Жалоба (мульти-акк)", callback_data=ChanCb(action="bulk_report"))
     # ── Нижний ряд
     kb.button(text="⚡ Массовые операции",   callback_data=ChanCb(action="bulk_menu"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return kb
 
 
@@ -2126,6 +2129,244 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
         reply_markup=_back_kb().as_markup(),
     )
 
+
+# ── Bulk Report — multi-account ───────────────────────────────────────────
+
+@router.callback_query(ChanCb.filter(F.action == "bulk_report"))
+async def cb_bulk_report_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    if not active:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов. Добавьте: /accounts",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
+        return
+    await state.set_state(BulkReportFSM.waiting_peer)
+    await state.update_data(active_ids=[a["id"] for a in active])
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    await callback.message.edit_text(
+        f"🚨 <b>Жалоба с нескольких аккаунтов</b>\n\n"
+        f"Доступно аккаунтов: <b>{len(active)}</b>\n\n"
+        "Введите username или ссылку на объект жалобы:\n"
+        "<code>@username</code> или <code>https://t.me/username</code>",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkReportFSM.waiting_peer)
+async def fsm_bulk_report_peer(message: Message, state: FSMContext) -> None:
+    peer = (message.text or "").strip()
+    if not peer:
+        await message.answer("⚠️ Введите username.")
+        return
+    # Нормализуем ссылку t.me/xxx → @xxx
+    if peer.startswith("https://t.me/"):
+        peer = "@" + peer.split("t.me/")[-1].split("?")[0].rstrip("/")
+    elif not peer.startswith("@"):
+        peer = "@" + peer.lstrip("@")
+    await state.update_data(peer=peer)
+    await state.set_state(BulkReportFSM.choosing_reason)
+    kb = InlineKeyboardBuilder()
+    for key, label in REPORT_REASONS.items():
+        kb.button(text=label, callback_data=f"chan:br_reason:{key}")
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    kb.adjust(2, 2, 2, 1)
+    await message.answer(
+        f"🚨 Жалоба на: <code>{html.escape(peer)}</code>\n\nВыберите причину:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("chan:br_reason:"))
+async def cb_bulk_report_reason(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    reason = callback.data.split(":", 2)[2]
+    data = await state.get_data()
+    await state.update_data(reason=reason)
+    await state.set_state(BulkReportFSM.selecting_accounts)
+
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    # По умолчанию — все выбраны
+    selected = [a["id"] for a in active]
+    await state.update_data(selected_ids=selected)
+
+    await _show_bulk_report_account_picker(callback.message, active, selected, data["peer"], reason, edit=True)
+
+
+async def _show_bulk_report_account_picker(
+    message, accounts: list, selected: list, peer: str, reason: str, edit: bool = False
+) -> None:
+    label = REPORT_REASONS.get(reason, reason)
+    lines = [
+        f"🚨 <b>Выберите аккаунты для жалобы</b>",
+        f"Объект: <code>{html.escape(peer)}</code>",
+        f"Причина: {label}",
+        f"Выбрано: <b>{len(selected)}/{len(accounts)}</b>\n",
+    ]
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        acc_id = acc["id"]
+        is_sel = acc_id in selected
+        phone = acc.get("phone", "")[-4:] if acc.get("phone") else "????"
+        name = acc.get("first_name") or f"acc{acc_id}"
+        mark = "✅" if is_sel else "☐"
+        kb.button(
+            text=f"{mark} {html.escape(name)} ···{phone}",
+            callback_data=f"chan:br_toggle:{acc_id}",
+        )
+    kb.adjust(1)
+    kb.row(
+        InlineKeyboardButton(text="✅ Выбрать все",  callback_data="chan:br_selall"),
+        InlineKeyboardButton(text="☐ Снять все",    callback_data="chan:br_selno"),
+    )
+    if selected:
+        kb.row(InlineKeyboardButton(
+            text=f"🚀 Отправить жалобы ({len(selected)} акк)",
+            callback_data="chan:br_confirm",
+        ))
+    kb.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"chan:br_cancel"))
+
+    text = "\n".join(lines)
+    if edit:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    else:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("chan:br_toggle:"))
+async def cb_br_toggle(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    acc_id = int(callback.data.split(":")[-1])
+    data = await state.get_data()
+    selected = list(data.get("selected_ids", []))
+    if acc_id in selected:
+        selected.remove(acc_id)
+    else:
+        selected.append(acc_id)
+    await state.update_data(selected_ids=selected)
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    await _show_bulk_report_account_picker(
+        callback.message, active, selected, data["peer"], data["reason"], edit=True
+    )
+
+
+@router.callback_query(F.data == "chan:br_selall")
+async def cb_br_selall(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    selected = [a["id"] for a in active]
+    await state.update_data(selected_ids=selected)
+    data = await state.get_data()
+    await _show_bulk_report_account_picker(
+        callback.message, active, selected, data["peer"], data["reason"], edit=True
+    )
+
+
+@router.callback_query(F.data == "chan:br_selno")
+async def cb_br_selno(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    await state.update_data(selected_ids=[])
+    data = await state.get_data()
+    await _show_bulk_report_account_picker(
+        callback.message, active, [], data["peer"], data["reason"], edit=True
+    )
+
+
+@router.callback_query(F.data == "chan:br_cancel")
+async def cb_br_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.answer("Отменено")
+    await callback.message.edit_text(
+        "❌ Жалоба отменена.",
+        reply_markup=_back_kb().as_markup(),
+    )
+
+
+@router.callback_query(F.data == "chan:br_confirm")
+async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    await state.clear()
+
+    peer = data.get("peer", "")
+    reason = data.get("reason", "spam")
+    selected_ids = data.get("selected_ids", [])
+    label = REPORT_REASONS.get(reason, reason)
+
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    chosen = [a for a in accounts if a["id"] in selected_ids and a["is_active"]]
+
+    if not chosen:
+        await callback.message.edit_text("⚠️ Нет выбранных аккаунтов.", parse_mode="HTML")
+        return
+
+    from services import account_manager
+
+    # Стандартный текст жалобы по причине
+    reason_messages = {
+        "spam":        "This account distributes spam.",
+        "violence":    "This content contains violent material.",
+        "pornography": "Adult content violating platform rules.",
+        "childabuse":  "Child abuse material. Immediate review required.",
+        "copyright":   "Copyright infringement.",
+        "other":       "Violation of Telegram Terms of Service.",
+    }
+    report_msg = reason_messages.get(reason, "")
+
+    sent = 0
+    failed = 0
+    status_msg = await callback.message.edit_text(
+        f"🚨 <b>Отправка жалоб...</b>\n"
+        f"Объект: <code>{html.escape(peer)}</code> · {label}\n\n"
+        f"{_progress_bar(0, len(chosen))} 0/{len(chosen)}",
+        parse_mode="HTML",
+    )
+
+    for i, acc in enumerate(chosen):
+        ok = await account_manager.report_peer(
+            acc["session_str"], peer, reason, message=report_msg, _acc=acc
+        )
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+        if (i + 1) % 3 == 0 or (i + 1) == len(chosen):
+            try:
+                await status_msg.edit_text(
+                    f"🚨 <b>Отправка жалоб...</b>\n"
+                    f"Объект: <code>{html.escape(peer)}</code> · {label}\n\n"
+                    f"{_progress_bar(i + 1, len(chosen))} {i + 1}/{len(chosen)}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        if i < len(chosen) - 1:
+            await asyncio.sleep(random.uniform(8.0, 18.0) * session_simulator.chaos_factor())
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+    await status_msg.edit_text(
+        f"🚨 <b>Жалобы отправлены</b>\n\n"
+        f"Объект: <code>{html.escape(peer)}</code>\n"
+        f"Причина: {label}\n\n"
+        f"✅ Успешно: <b>{sent}</b>\n"
+        f"❌ Ошибок: <b>{failed}</b>\n"
+        f"📊 Использовано аккаунтов: <b>{len(chosen)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════

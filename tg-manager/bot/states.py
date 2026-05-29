@@ -186,6 +186,12 @@ class ReportFSM(StatesGroup):
     waiting_comment = State()
 
 
+class BulkReportFSM(StatesGroup):
+    waiting_peer = State()
+    choosing_reason = State()
+    selecting_accounts = State()
+
+
 class BulkCreateFSM(StatesGroup):
     waiting_title = State()
     waiting_about = State()
@@ -360,7 +366,10 @@ class BulkLeaveFSM(StatesGroup):
 
 
 class OpBuilderFSM(StatesGroup):
-    choosing_op_type = State()  # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit
+    choosing_op_type = State()   # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit
+    choosing_targets = State()   # выбор целей (каналы/аккаунты/ссылки)
+    entering_params = State()    # ввод дополнительных параметров (текст поста / ссылки)
+    confirming = State()         # финальное подтверждение перед записью в operation_queue
 
 
 class GlobalPresenceFSM(StatesGroup):
