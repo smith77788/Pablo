@@ -205,6 +205,10 @@ class BulkDmFSM(StatesGroup):
     waiting_text = State()
 
 
+class BulkChanFSM(StatesGroup):
+    waiting_value = State()   # ожидаем username-шаблон или текст описания
+
+
 class MyChannelsFSM(StatesGroup):
     choosing_account = State()
     browsing = State()

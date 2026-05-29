@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-29 (r8)
+Обновлено: 2026-05-29 (r9)
 
 ## Статус: АКТИВНАЯ РАЗРАБОТКА
 
@@ -62,7 +62,7 @@
 `claude/telegram-bot-services-xfAh6`
 Last commit: `refactor: UX channel_ops + accounts`
 
-### ✅ Выполнено в сессии 2026-05-29 (r6-r8)
+### ✅ Выполнено в сессии 2026-05-29 (r6-r9)
 
 **Критические исправления:**
 - schema_v39.sql: полный backfill last_seen/registered_at из старых колонок (fix crash UndefinedColumnError)
@@ -87,6 +87,14 @@ Last commit: `refactor: UX channel_ops + accounts`
   - manage_dialogs: сначала из БД (managed_channels), потом кнопка «Загрузить из Telegram»
   - manage_dialogs_live: scan_owned_assets (только admin/creator), сохраняет в managed_channels
   - username каналов видны прямо в списке
+
+**Bulk Channel Operations (r9):**
+- channel_ops.py: добавлены bulk-операции для управления каналами
+  - `bulk_chan_uname` — массовая установка username каналам (шаблон + порядковый номер)
+  - `bulk_chan_about` — массовая установка описания всем каналам аккаунтов
+  - FSM: BulkChanFSM.waiting_value → валидация → прогресс → отчёт
+  - Автоматическое обновление DB cache (managed_channels.username)
+- states.py: добавлен BulkChanFSM
 
 ### 🔜 Следующие приоритеты
 

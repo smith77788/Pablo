@@ -30,7 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanCb, ContactInvCb
 from bot.states import (
-    BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, ContactInviteFSM, CreateBotFSM,
+    BulkChanFSM, BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, ContactInviteFSM, CreateBotFSM,
     CreateChannelFSM, EditChannelFSM, InviteUsersFSM, JoinChannelFSM, MyChannelsFSM,
     PostToChannelFSM, ReportFSM, SendReactionFSM, UpdateProfileFSM,
 )
@@ -126,6 +126,9 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📤 Пост с нескольких аккаунтов",   callback_data=ChanCb(action="bulk_post"))
     # ── Рассылка
     kb.button(text="✉️ DM по username-списку",         callback_data=ChanCb(action="bulk_dm"))
+    # ── Массовое управление каналами
+    kb.button(text="🔤 Username каналам (bulk)",        callback_data=ChanCb(action="bulk_chan_uname"))
+    kb.button(text="📄 Описание каналам (bulk)",        callback_data=ChanCb(action="bulk_chan_about"))
     # ── Профиль аккаунтов
     kb.button(text="✏️ Имя аккаунта (bulk)",           callback_data=ChanCb(action="bulk_prof_name"))
     kb.button(text="📝 Bio аккаунта (bulk)",            callback_data=ChanCb(action="bulk_prof_bio"))
@@ -145,15 +148,17 @@ def _make_title(base: str, mode: str, global_idx: int, acc_label: str) -> str:
 
 # OP label map for display
 _BULK_OP_LABELS = {
-    "create":     "📢 Создать канал/группу",
-    "botfather":  "🤖 Создать бота через @BotFather",
-    "dm":         "✉️ Рассылка по username-списку",
-    "join":       "🔗 Вступить в канал",
-    "leave":      "🚪 Выйти из канала",
-    "post":       "📤 Опубликовать пост",
-    "prof_name":  "✏️ Изменить имя",
-    "prof_bio":   "📝 Изменить bio",
-    "prof_uname": "🔤 Изменить username",
+    "create":      "📢 Создать канал/группу",
+    "botfather":   "🤖 Создать бота через @BotFather",
+    "dm":          "✉️ Рассылка по username-списку",
+    "join":        "🔗 Вступить в канал",
+    "leave":       "🚪 Выйти из канала",
+    "post":        "📤 Опубликовать пост",
+    "prof_name":   "✏️ Изменить имя",
+    "prof_bio":    "📝 Изменить bio",
+    "prof_uname":  "🔤 Изменить username",
+    "chan_uname":  "🔤 Username каналам (bulk)",
+    "chan_about":  "📄 Описание каналам (bulk)",
 }
 
 
@@ -2211,7 +2216,8 @@ async def _show_bulk_select(
 # Entry point for each bulk operation — shows account picker with all accounts pre-selected
 @router.callback_query(ChanCb.filter(F.action.in_({"bulk_dm", "bulk_join", "bulk_leave",
                                                     "bulk_post", "bulk_prof_name",
-                                                    "bulk_prof_bio", "bulk_prof_uname"})))
+                                                    "bulk_prof_bio", "bulk_prof_uname",
+                                                    "bulk_chan_uname", "bulk_chan_about"})))
 async def cb_bulk_start_op(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
@@ -2224,6 +2230,8 @@ async def cb_bulk_start_op(
         "bulk_prof_name":  "prof_name",
         "bulk_prof_bio":   "prof_bio",
         "bulk_prof_uname": "prof_uname",
+        "bulk_chan_uname":  "chan_uname",
+        "bulk_chan_about":  "chan_about",
     }
     op = op_map[callback_data.action]
     accounts = await pool.fetch(
@@ -2387,6 +2395,35 @@ async def cb_bulk_confirm_selection(
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
         await callback.message.edit_text(
             f"{prompt}\n\n<i>Выбрано аккаунтов: {len(selected_ids)}</i>",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+
+    elif op == "chan_uname":
+        await state.update_data(bulk_op=op)
+        await state.set_state(BulkChanFSM.waiting_value)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        await callback.message.edit_text(
+            f"🔤 <b>Массовая установка username каналов</b>\n\n"
+            f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
+            "Система выберет все каналы из выбранных аккаунтов и установит им username по шаблону.\n\n"
+            "Введите <b>базовый username</b> (цифра будет добавлена автоматически):\n\n"
+            "<code>mychannel</code> → <code>mychannel1</code>, <code>mychannel2</code>…\n\n"
+            "⚠️ Username должен содержать только буквы, цифры и _\n"
+            "⚠️ Канал должен быть публичным для установки username",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+
+    elif op == "chan_about":
+        await state.update_data(bulk_op=op)
+        await state.set_state(BulkChanFSM.waiting_value)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        await callback.message.edit_text(
+            f"📄 <b>Массовое обновление описания каналов</b>\n\n"
+            f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
+            "Система выберет все каналы из выбранных аккаунтов и установит им одинаковое описание.\n\n"
+            "Введите <b>текст описания</b> (до 255 символов):",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
 
@@ -2925,6 +2962,144 @@ async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Po
     final_text = header + error_section
     await progress_msg.edit_text(
         final_text,
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
+    )
+
+
+# ── FSM: bulk channel username / about input ──────────────────────────────
+
+@router.message(BulkChanFSM.waiting_value)
+async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    from services import account_manager
+
+    value = (message.text or "").strip()
+    if not value:
+        await message.answer("⚠️ Значение не может быть пустым. Введите текст:")
+        return
+
+    data = await state.get_data()
+    op = data.get("bulk_op", "")
+    selected_ids = data.get("bulk_selected", [])
+    await state.clear()
+
+    if not selected_ids:
+        await message.answer("⚠️ Данные операции устарели. Начните заново: /ops")
+        return
+
+    # Validate username pattern
+    if op == "chan_uname":
+        import re
+        base_uname = value.lstrip("@")
+        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]{3,}$', base_uname):
+            await message.answer(
+                "⚠️ Username должен начинаться с буквы, содержать только a–z, 0–9, _ и быть длиной 5+ символов.\n"
+                "Введите базовый username заново:"
+            )
+            await state.set_state(BulkChanFSM.waiting_value)
+            await state.update_data(bulk_op=op, bulk_selected=selected_ids)
+            return
+    elif op == "chan_about" and len(value) > 255:
+        value = value[:255]
+
+    # Fetch account sessions with acc data
+    accounts = await pool.fetch(
+        "SELECT a.id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE",
+        message.from_user.id, selected_ids,
+    )
+    if not accounts:
+        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+        return
+
+    # Fetch all channels for selected accounts from DB cache
+    channels = await pool.fetch(
+        "SELECT mc.channel_id, mc.title, mc.username, mc.acc_id, mc.access_hash "
+        "FROM managed_channels mc "
+        "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[]) "
+        "ORDER BY mc.acc_id, mc.title",
+        message.from_user.id, selected_ids,
+    )
+
+    if not channels:
+        await message.answer(
+            "⚠️ Нет каналов в базе для выбранных аккаунтов.\n\n"
+            "Сначала загрузите каналы через <b>🔎 Мои каналы → Загрузить из Telegram</b>.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    total = len(channels)
+    op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
+    progress_msg = await message.answer(
+        f"⏳ <b>{op_label} каналам (bulk)</b>\n\n"
+        f"Каналов: <b>{total}</b> | Аккаунтов: <b>{len(accounts)}</b>\n\n"
+        f"⏳ 0 / {total}",
+        parse_mode="HTML",
+    )
+
+    # Build acc_id → acc dict for fast lookup
+    acc_by_id = {acc["id"]: dict(acc) for acc in accounts}
+
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    uname_counter = 1
+
+    for idx, chan in enumerate(channels):
+        chan_title = html.escape(chan["title"] or str(chan["channel_id"]))
+        acc = acc_by_id.get(chan["acc_id"])
+        if not acc:
+            err_list.append(f"❌ {chan_title}: аккаунт не найден")
+            continue
+
+        if op == "chan_uname":
+            candidate = f"{base_uname}{uname_counter}"
+            uname_counter += 1
+            err = await account_manager.set_channel_username(
+                acc["session_str"], chan["channel_id"], candidate, _acc=acc
+            )
+            if err:
+                err_list.append(f"❌ {chan_title}: {html.escape(err[:60])}")
+            else:
+                ok_list.append(f"✅ {chan_title}: @{candidate}")
+                # Update DB cache
+                await pool.execute(
+                    "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
+                    candidate, message.from_user.id, chan["channel_id"],
+                )
+
+        elif op == "chan_about":
+            ok = await account_manager.edit_channel_about(
+                acc["session_str"], chan["channel_id"], value, _acc=acc
+            )
+            if ok:
+                ok_list.append(f"✅ {chan_title}")
+            else:
+                err_list.append(f"❌ {chan_title}: ошибка обновления")
+
+        if (idx + 1) % 3 == 0 or idx + 1 == total:
+            try:
+                await progress_msg.edit_text(
+                    _progress_text(f"{op_label} каналам...", idx + 1, total, len(ok_list), len(err_list)),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(_backoff(idx % 5, base=2.0, cap=20.0))
+
+    header = (
+        f"📊 <b>{op_label} каналам — завершено</b>\n\n"
+        f"Всего: <b>{total}</b> | ✅ Успешно: <b>{len(ok_list)}</b> | ❌ Ошибок: <b>{len(err_list)}</b>\n\n"
+    )
+    detail = "\n".join((ok_list + err_list)[:40])
+    if len(ok_list) + len(err_list) > 40:
+        detail += f"\n<i>...и ещё {len(ok_list) + len(err_list) - 40} строк</i>"
+    await progress_msg.edit_text(
+        header + detail,
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
