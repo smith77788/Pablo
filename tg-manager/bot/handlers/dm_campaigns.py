@@ -266,20 +266,21 @@ async def cb_dm_launch_or_draft(
     target_id = sd.get("dm_target_id")
     status = "draft" if callback_data.action == "save_draft" else "running"
 
+    initial_status = "draft"  # всегда создаём как draft, потом меняем
     campaign_id = await pool.fetchval(
         "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status) "
         "VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-        callback.from_user.id, name, text, target_type, target_id, "draft",
+        callback.from_user.id, name, text, target_type, target_id, initial_status,
     )
     await state.clear()
 
     if status == "running":
-        # Запустить асинхронно
-        asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
         await pool.execute(
             "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
             campaign_id,
         )
+        # Запустить асинхронно уже после установки статуса
+        asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
         await _edit(
             callback,
             f"🚀 Кампания <b>«{html.escape(name)}»</b> запущена!\n\n"
