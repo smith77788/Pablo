@@ -659,28 +659,78 @@ async def check_account_health(session_string: str, _acc: dict | None = None) ->
 
     Возвращает {"ok": bool, "reason": str}.
     """
+    result = await check_account_status_full(session_string, _acc=_acc, check_spambot=False)
+    return {"ok": result["status"] == "active", "reason": result["reason"]}
+
+
+async def check_account_status_full(
+    session_string: str,
+    _acc: dict | None = None,
+    check_spambot: bool = True,
+) -> dict:
+    """Детальная проверка состояния аккаунта.
+
+    Возвращает {
+        "status": "active"|"cooldown"|"spamblock"|"banned"|"deactivated"|"session_expired",
+        "reason": str,
+        "display_name": str,
+    }
+    """
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await client.get_me()
         if me is None:
-            return {"ok": False, "reason": "Аккаунт не авторизован или сессия истекла."}
-        return {"ok": True, "reason": f"Аккаунт активен: {me.first_name or me.username or me.id}"}
-    except Exception as e:
-        err = str(e)
-        if "AuthKeyUnregisteredError" in type(e).__name__ or "AUTH_KEY_UNREGISTERED" in err:
-            return {"ok": False, "reason": "Сессия отозвана — требуется повторный вход."}
-        if "UserDeactivatedBanError" in type(e).__name__ or "USER_DEACTIVATED_BAN" in err:
-            return {"ok": False, "reason": "Аккаунт заблокирован Telegram."}
-        if "UserDeactivatedError" in type(e).__name__ or "USER_DEACTIVATED" in err:
-            return {"ok": False, "reason": "Аккаунт удалён или деактивирован."}
-        log.exception("check_account_health error: %s", e)
-        return {"ok": False, "reason": f"Ошибка проверки: {err[:200]}"}
-    finally:
+            return {"status": "session_expired", "reason": "Аккаунт не авторизован или сессия истекла.", "display_name": ""}
+
+        display_name = me.first_name or (f"@{me.username}" if me.username else str(me.id))
+
+        if not check_spambot:
+            return {"status": "active", "reason": f"Аккаунт активен", "display_name": display_name}
+
+        # Check SpamBot for spamblock detection
         try:
-            await client.disconnect()
+            from telethon.tl.types import User
+            spam_bot = await asyncio.wait_for(client.get_entity("@SpamBot"), timeout=8.0)
+            await asyncio.wait_for(
+                client.send_message(spam_bot, "/start"),
+                timeout=8.0,
+            )
+            await asyncio.sleep(2.5)
+            msgs = await asyncio.wait_for(
+                client.get_messages(spam_bot, limit=1),
+                timeout=8.0,
+            )
+            if msgs:
+                reply_text = msgs[0].text or ""
+                reply_lower = reply_text.lower()
+                if any(kw in reply_lower for kw in ("no limits", "no complaints", "good standing",
+                                                      "нет ограничений", "нет жалоб", "не было жалоб")):
+                    return {"status": "active", "reason": "Аккаунт активен, ограничений нет", "display_name": display_name}
+                if any(kw in reply_lower for kw in ("limited", "spam", "restricted", "ограничен", "спам", "ограничения")):
+                    return {"status": "spamblock", "reason": f"SpamBot: {reply_text[:120]}", "display_name": display_name}
+        except asyncio.TimeoutError:
+            pass
         except Exception:
             pass
+
+        return {"status": "active", "reason": "Аккаунт активен", "display_name": display_name}
+
+    except Exception as e:
+        err = str(e)
+        etype = type(e).__name__
+        if "AuthKeyUnregisteredError" in etype or "AUTH_KEY_UNREGISTERED" in err:
+            return {"status": "session_expired", "reason": "Сессия отозвана — требуется повторный вход.", "display_name": ""}
+        if "UserDeactivatedBanError" in etype or "USER_DEACTIVATED_BAN" in err:
+            return {"status": "banned", "reason": "Аккаунт заблокирован Telegram.", "display_name": ""}
+        if "UserDeactivatedError" in etype or "USER_DEACTIVATED" in err:
+            return {"status": "deactivated", "reason": "Аккаунт удалён или деактивирован.", "display_name": ""}
+        if "FloodWaitError" in etype or "FLOOD_WAIT" in err:
+            return {"status": "cooldown", "reason": f"FloodWait: {err[:80]}", "display_name": ""}
+        if "PeerFloodError" in etype or "PEER_FLOOD" in err:
+            return {"status": "spamblock", "reason": "PeerFlood — массовые ограничения.", "display_name": ""}
+        log.exception("check_account_status_full error: %s", e)
+        return {"status": "active", "reason": f"Нет данных: {err[:120]}", "display_name": ""}
 
 
 async def get_channel_members_count(session_string: str, channel_username: str,

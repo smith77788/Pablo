@@ -157,17 +157,9 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
 
 
 @router.message(Command("subscription"))
-async def cmd_subscription(message: Message) -> None:
-    from bot.callbacks import BmCb
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
-    await message.answer(
-        "💳 <b>Подписка и оплата</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 💳 Billing</code>",
-        reply_markup=kb.as_markup(),
-        parse_mode="HTML",
-    )
+async def cmd_subscription(message: Message, pool: asyncpg.Pool) -> None:
+    text, markup = await _build_menu_text_and_kb(pool, message.from_user.id)
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
 @router.callback_query(SubCb.filter(F.action == "menu"))

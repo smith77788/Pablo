@@ -26,6 +26,7 @@ from config import TG_API_ID, TG_API_HASH
 from database import db
 from services.account_manager import (
     check_account_health,
+    check_account_status_full,
     cleanup_pending,
     cleanup_qr_pending,
     confirm_2fa,
@@ -52,10 +53,20 @@ router = Router()
 # ── Plan limits ────────────────────────────────────────────────────────────────
 
 ACC_LIMITS: dict[str, int] = {
-    "free": 0,
-    "starter": 1,
-    "pro": 3,
+    "free": 2,
+    "starter": 5,
+    "pro": 15,
     "enterprise": 9999,
+}
+
+_STATUS_EMOJI: dict[str, str] = {
+    "active":          "✅",
+    "cooldown":        "⏳",
+    "spamblock":       "⚠️",
+    "banned":          "❌",
+    "deactivated":     "💀",
+    "session_expired": "🔑",
+    "archived":        "📦",
 }
 
 # ── FSM States ─────────────────────────────────────────────────────────────────
@@ -167,9 +178,11 @@ async def cmd_accounts(message: Message) -> None:
 
 
 @router.callback_query(AccCb.filter(F.action == "menu"))
-async def cb_accounts_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_accounts_menu(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    await _show_accounts_menu(callback.message, pool, callback.from_user.id, edit=True)
+    # chat_id field used as status filter: 0=all, 1=active, 2=problem
+    status_filter = {0: "all", 1: "active", 2: "problem"}.get(callback_data.chat_id, "all")
+    await _show_accounts_menu(callback.message, pool, callback.from_user.id, edit=True, status_filter=status_filter)
 
 
 async def _show_accounts_menu(
@@ -178,72 +191,92 @@ async def _show_accounts_menu(
     user_id: int,
     *,
     edit: bool,
+    status_filter: str = "all",
 ) -> None:
+    from aiogram.types import InlineKeyboardButton
     plan, limit = await _get_account_limit(pool, user_id)
+    all_accounts = await db.get_tg_accounts(pool, user_id)
+    total = len(all_accounts) if all_accounts else 0
 
-    if limit == 0:
-        text = locked_text("Личные аккаунты Telegram", "starter")
-        markup = subscription_locked_markup("starter")
-        if edit:
-            await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-        else:
-            await message.answer(text, parse_mode="HTML", reply_markup=markup)
-        return
+    # Filter display
+    if status_filter == "active":
+        shown = [a for a in all_accounts if (a.get("acc_status") or "active") == "active" and a.get("is_active", True)]
+    elif status_filter == "problem":
+        shown = [a for a in all_accounts if (a.get("acc_status") or "active") != "active" or not a.get("is_active", True)]
+    else:
+        shown = list(all_accounts)
 
-    accounts = await db.get_tg_accounts(pool, user_id)
     kb = InlineKeyboardBuilder()
 
-    if accounts:
-        lines = [
-            "📱 <b>Личные Telegram-аккаунты</b>\n",
-            "Аккаунты используются для создания каналов/групп, "
-            "вступления, публикаций и других операций в Telegram.\n",
-            "👤 <b>Подключённые аккаунты:</b>\n",
-        ]
-        for acc in accounts:
+    # Account list buttons (1 per row)
+    if shown:
+        filter_label = {"all": "Все", "active": "Активные", "problem": "Проблемные"}.get(status_filter, "Все")
+        lines = [f"📱 <b>Telegram-аккаунты</b> · {filter_label}: {len(shown)}\n"]
+        for acc in shown:
             name = escape(acc["first_name"] or "")
             uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
             phone = escape(acc.get("phone", ""))
             label = name or uname or phone or f"ID {acc['id']}"
             display = f"{label} ({phone})" if phone and name else label
-            status = "✅" if acc.get("is_active") else "⛔"
-            lines.append(f"  {status} {display}")
-            kb.button(
-                text=f"{status} {display}",
-                callback_data=AccCb(action="view", acc_id=acc["id"]),
-            )
+            acc_status = acc.get("acc_status") or "active"
+            if not acc.get("is_active", True):
+                acc_status = "archived"
+            st_emoji = _STATUS_EMOJI.get(acc_status, "✅")
+            lines.append(f"  {st_emoji} {display}")
+            kb.button(text=f"{st_emoji} {display}", callback_data=AccCb(action="view", acc_id=acc["id"]))
         text = "\n".join(lines)
     else:
-        text = (
-            "📱 <b>Личные Telegram-аккаунты</b>\n\n"
-            "Здесь подключаются личные аккаунты Telegram (не боты).\n"
-            "Они нужны для:\n"
-            "• Создания каналов и групп\n"
-            "• Вступления/выхода из каналов\n"
-            "• Публикации постов от имени аккаунта\n"
-            "• Создания ботов через @BotFather\n\n"
-            "Добавьте первый аккаунт ↓"
-        )
-
-    kb.adjust(1)
+        if status_filter == "problem":
+            text = "📱 <b>Telegram-аккаунты</b>\n\n✅ Проблемных аккаунтов нет!"
+        elif status_filter == "active":
+            text = "📱 <b>Telegram-аккаунты</b>\n\n⚠️ Нет активных аккаунтов."
+        else:
+            text = (
+                "📱 <b>Личные Telegram-аккаунты</b>\n\n"
+                "Здесь подключаются личные аккаунты Telegram (не боты).\n"
+                "Они нужны для:\n"
+                "• Создания каналов и групп\n"
+                "• Вступления/выхода из каналов\n"
+                "• Публикации постов от имени аккаунта\n"
+                "• Создания ботов через @BotFather\n\n"
+                "Добавьте первый аккаунт ↓"
+            )
 
     limit_label = "∞" if limit >= 9999 else str(limit)
-    used = len(accounts) if accounts else 0
-    text += f"\n\n<i>Использовано: {used} / {limit_label}</i>"
+    text += f"\n\n<i>Использовано: {total} / {limit_label}</i>"
 
-    if used < limit:
-        kb.button(text="🔲 Добавить (QR-код)",
-                  callback_data=AccCb(action="qr_login"))
-        kb.button(text="☎️ Добавить (номер телефона)",
-                  callback_data=AccCb(action="add"))
-        kb.button(text="📥 Импорт сессии",
-                  callback_data=AccCb(action="import_menu"))
-
-    kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
-    kb.button(text="⚡ Массовые операции",     callback_data=ChanCb(action="bulk_menu"))
-    kb.button(text="◀️ Главное меню",
-              callback_data=BotCb(action="main"))
+    # All buttons so far are 1 per row
     kb.adjust(1)
+
+    # Filter tabs in one explicit row
+    if total > 0:
+        kb.row(
+            InlineKeyboardButton(
+                text="📋 Все" + (" ◀" if status_filter == "all" else ""),
+                callback_data=AccCb(action="menu", chat_id=0).pack(),
+            ),
+            InlineKeyboardButton(
+                text="✅ Актив." + (" ◀" if status_filter == "active" else ""),
+                callback_data=AccCb(action="menu", chat_id=1).pack(),
+            ),
+            InlineKeyboardButton(
+                text="⚠️ Пробл." + (" ◀" if status_filter == "problem" else ""),
+                callback_data=AccCb(action="menu", chat_id=2).pack(),
+            ),
+        )
+
+    # Action buttons (1 per row)
+    if total < limit:
+        kb.row(InlineKeyboardButton(text="🔲 Добавить (QR-код)", callback_data=AccCb(action="qr_login").pack()))
+        kb.row(InlineKeyboardButton(text="☎️ Добавить (номер)", callback_data=AccCb(action="add").pack()))
+        kb.row(InlineKeyboardButton(text="📥 Импорт сессии", callback_data=AccCb(action="import_menu").pack()))
+
+    if total > 0:
+        kb.row(InlineKeyboardButton(text="🔍 Проверить все", callback_data=AccCb(action="check_all").pack()))
+        kb.row(InlineKeyboardButton(text="🔎 Найти ресурсы в аккаунтах", callback_data=AccCb(action="scan_all").pack()))
+
+    kb.row(InlineKeyboardButton(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu").pack()))
+    kb.row(InlineKeyboardButton(text="◀️ Главное меню", callback_data=BotCb(action="main").pack()))
 
     if edit:
         await message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
@@ -1285,6 +1318,159 @@ async def cb_check_health(
         f"{reason}",
         parse_mode="HTML",
         reply_markup=_acc_menu_markup(callback_data.acc_id),
+    )
+
+
+# ── Check all accounts status ─────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "check_all"))
+async def cb_check_all_accounts(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.message.edit_text(
+            "📱 Нет аккаунтов для проверки.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Назад", callback_data=AccCb(action="menu")
+            ).as_markup(),
+        )
+        return
+
+    total = len(accounts)
+    await callback.message.edit_text(
+        f"🔍 <b>Проверка аккаунтов...</b>\n\n"
+        f"Проверяю {total} аккаунт(ов). Это займёт ~{total * 5} сек.",
+        parse_mode="HTML",
+    )
+
+    results: list[tuple[str, str, str]] = []
+    for idx, acc in enumerate(accounts):
+        session_str = acc.get("session_str") or ""
+        name_raw = acc.get("first_name") or acc.get("username") or acc.get("phone") or f"ID {acc['id']}"
+        name = escape(str(name_raw))
+        try:
+            acc_dict = await pool.fetchrow(
+                "SELECT id, session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1", acc["id"]
+            )
+            result = await check_account_status_full(session_str, _acc=dict(acc_dict) if acc_dict else None, check_spambot=True)
+            status = result["status"]
+            reason = result.get("reason", "")
+        except Exception as exc:
+            status = "active"
+            reason = f"Ошибка: {str(exc)[:80]}"
+
+        await db.update_acc_status(pool, acc["id"], status, reason)
+        results.append((name, status, reason))
+
+        # Update progress every 3 accounts
+        if (idx + 1) % 3 == 0 or (idx + 1) == total:
+            try:
+                await callback.message.edit_text(
+                    f"🔍 <b>Проверка...</b> {idx+1}/{total}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    # Build summary
+    status_counts: dict[str, int] = {}
+    for _, st, _ in results:
+        status_counts[st] = status_counts.get(st, 0) + 1
+
+    lines = ["✅ <b>Проверка завершена!</b>\n"]
+    for st, cnt in sorted(status_counts.items(), key=lambda x: x[0]):
+        emoji = _STATUS_EMOJI.get(st, "•")
+        lines.append(f"{emoji} {st}: <b>{cnt}</b>")
+
+    lines.append("\n<b>Детали:</b>")
+    for name, st, reason in results:
+        emoji = _STATUS_EMOJI.get(st, "•")
+        reason_short = escape(reason[:60]) if reason else ""
+        lines.append(f"{emoji} {name} — {reason_short}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ Показать проблемные", callback_data=AccCb(action="menu", chat_id=2))
+    kb.button(text="◀️ Все аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Scan all accounts for owned resources ─────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "scan_all"))
+async def cb_scan_all_resources(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.message.edit_text(
+            "📱 Нет аккаунтов для сканирования.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Назад", callback_data=AccCb(action="menu")
+            ).as_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"🔎 <b>Сканирование ресурсов...</b>\n\n"
+        f"Ищу каналы/группы с правами создателя/администратора.\n"
+        f"Аккаунтов: {len(accounts)}. Это займёт ~{len(accounts) * 8} сек.",
+        parse_mode="HTML",
+    )
+
+    from services import account_manager
+    total_imported = 0
+    acc_results: list[str] = []
+
+    for acc in accounts:
+        session_str = acc.get("session_str") or ""
+        name = escape(str(acc.get("first_name") or acc.get("username") or acc.get("phone") or f"ID {acc['id']}"))
+        try:
+            acc_dict = await pool.fetchrow(
+                "SELECT id, session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1", acc["id"]
+            )
+            dialogs = await account_manager.get_dialogs(session_str, limit=200, _acc=dict(acc_dict) if acc_dict else None) or []
+            # Filter owned/admin channels and groups
+            owned = [d for d in dialogs if d.get("is_creator") or d.get("is_admin")]
+            if owned:
+                imported = await db.upsert_managed_channels(pool, uid, acc["id"], owned)
+                total_imported += imported
+                acc_results.append(f"✅ {name}: {len(owned)} ресурсов ({imported} новых)")
+            else:
+                acc_results.append(f"ℹ️ {name}: нет ресурсов с правами")
+        except Exception as exc:
+            acc_results.append(f"❌ {name}: ошибка — {escape(str(exc)[:60])}")
+
+    lines = [
+        f"🔎 <b>Сканирование завершено!</b>\n",
+        f"Импортировано новых ресурсов: <b>{total_imported}</b>\n",
+    ] + acc_results
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📡 Перейти к каналам", callback_data="chan:menu")
+    kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

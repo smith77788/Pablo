@@ -1578,11 +1578,21 @@ async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
 
 # ── Telegram user accounts ──────────────────────────────────────────────────
 
-async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int) -> list:
-    return await pool.fetch(
-        "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active "
-        "FROM tg_accounts WHERE owner_id=$1 ORDER BY added_at DESC",
-        owner_id,
+async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int, status_filter: str | None = None) -> list:
+    base = (
+        "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active, "
+        "COALESCE(acc_status, 'active') AS acc_status, status_checked_at, status_reason "
+        "FROM tg_accounts WHERE owner_id=$1"
+    )
+    if status_filter and status_filter != "all":
+        return await pool.fetch(base + " AND COALESCE(acc_status,'active')=$2 ORDER BY added_at DESC", owner_id, status_filter)
+    return await pool.fetch(base + " ORDER BY added_at DESC", owner_id)
+
+
+async def update_acc_status(pool: asyncpg.Pool, acc_id: int, status: str, reason: str = "") -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET acc_status=$1, status_reason=$2, status_checked_at=now() WHERE id=$3",
+        status, reason, acc_id,
     )
 
 

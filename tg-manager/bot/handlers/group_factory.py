@@ -18,8 +18,10 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import GroupFCb
+from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
+from bot.utils.subscription import locked_text, require_plan
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -62,6 +64,13 @@ async def cb_group_menu(callback: CallbackQuery) -> None:
 async def cb_group_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Создание групп", "pro"),
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
@@ -654,6 +663,13 @@ async def cb_group_import_all(
 async def cb_group_announce_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Объявление во все группы", "starter"),
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
