@@ -329,6 +329,56 @@ async def action_post_to_channel(
 
 # ── EXECUTOR (runs confirmed actions) ─────────────────────────────────────────
 
+async def action_create_channel(
+    pool: asyncpg.Pool, user_id: int,
+    title: str, about: str = "", username: str = "",
+    is_group: bool = False,
+) -> dict:
+    acc_row = await pool.fetchrow(
+        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+        user_id,
+    )
+    if not acc_row:
+        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+    kind = "группу" if is_group else "канал"
+    uname_str = f", username: @{username}" if username else ""
+    return {
+        "pending_action": "create_channel",
+        "acc_id": acc_row["id"],
+        "title": title,
+        "about": about,
+        "username": username,
+        "is_group": is_group,
+        "preview": f"Создать {kind} «{title}» через @{acc_row['phone']}{uname_str}\nОписание: {about[:60] if about else '(нет)'}",
+    }
+
+
+async def action_schedule_broadcast(
+    pool: asyncpg.Pool, user_id: int,
+    bot_id: int, text: str, when_minutes: int = 60,
+) -> dict:
+    row = await pool.fetchrow(
+        "SELECT bot_id, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+        bot_id, user_id,
+    )
+    if not row:
+        return {"error": "Бот не найден или не принадлежит вам"}
+    audience = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE", bot_id,
+    ) or 0
+    name = f"@{row['username']}" if row["username"] else row["first_name"]
+    return {
+        "pending_action": "schedule_broadcast",
+        "bot_id": bot_id,
+        "bot_name": name,
+        "text": text,
+        "when_minutes": when_minutes,
+        "audience": int(audience),
+        "preview": f"Запланировать рассылку для {name} через {when_minutes} мин.\nПолучателей: {audience}\nТекст: {text[:80]}...",
+    }
+
+
 async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, http=None) -> str:
     """Execute a confirmed pending action. Returns result string."""
     name = action_data.get("pending_action")
@@ -409,6 +459,62 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
         if "msg_id" in result:
             return f"✅ Пост опубликован! ID сообщения: {result['msg_id']}"
         return f"❌ Ошибка публикации: {result.get('error', 'неизвестная ошибка')}"
+
+    elif name == "create_channel":
+        acc_id = action_data["acc_id"]
+        title = action_data["title"]
+        about = action_data.get("about", "")
+        username = action_data.get("username", "")
+        is_group = action_data.get("is_group", False)
+        acc_row = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone "
+            "FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
+            user_id, acc_id,
+        )
+        if not acc_row:
+            return "❌ Аккаунт не найден или не активен"
+        from services import account_manager
+        if is_group:
+            result = await account_manager.create_group(acc_row["session_str"], title, about=about, _acc=dict(acc_row))
+        else:
+            result = await account_manager.create_channel(acc_row["session_str"], title, about=about, _acc=dict(acc_row))
+        if isinstance(result, dict) and result.get("id"):
+            ch_id = result["id"]
+            # Save to managed_channels
+            await pool.execute(
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                user_id, acc_id, ch_id, title, username or None,
+            )
+            # Set username if provided
+            if username:
+                err = await account_manager.set_channel_username(acc_row["session_str"], ch_id, username, _acc=dict(acc_row))
+                if err:
+                    return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан (ID: {ch_id})\n⚠️ Username не удалось установить: {err}"
+                return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан! ID: {ch_id}, @{username}"
+            return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан! ID: {ch_id}"
+        err_msg = result if isinstance(result, str) else str(result)
+        return f"❌ Ошибка создания: {err_msg[:200]}"
+
+    elif name == "schedule_broadcast":
+        import datetime
+        bot_id = action_data["bot_id"]
+        text = action_data["text"]
+        when_minutes = int(action_data.get("when_minutes", 60))
+        scheduled_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=when_minutes)
+        row = await pool.fetchrow(
+            "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id, user_id,
+        )
+        if not row:
+            return "❌ Бот не найден"
+        sched_id = await pool.fetchval(
+            """INSERT INTO scheduled_broadcasts(bot_id, owner_id, text, scheduled_at)
+               VALUES($1,$2,$3,$4) RETURNING id""",
+            bot_id, user_id, text, scheduled_at,
+        )
+        return f"✅ Рассылка запланирована на {scheduled_at.strftime('%d.%m %H:%M')} UTC (через {when_minutes} мин). ID: {sched_id}"
 
     return "❌ Неизвестное действие"
 
@@ -537,6 +643,42 @@ TOOL_DEFINITIONS = [
             "required": ["channel_id", "text"],
         },
     },
+    {
+        "name": "create_channel",
+        "description": (
+            "ДЕЙСТВИЕ: Создать новый канал или группу в Telegram через подключённый аккаунт. "
+            "Требует подтверждения пользователя. "
+            "Используй для создания Telegram-присутствия: новых каналов, групп, сетей. "
+            "Для группы передай is_group=true."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название канала или группы"},
+                "about": {"type": "string", "description": "Описание (опционально)"},
+                "username": {"type": "string", "description": "Username без @ (опционально, только a-z, 0-9, _)"},
+                "is_group": {"type": "boolean", "description": "true = создать группу, false = канал"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "schedule_broadcast",
+        "description": (
+            "ДЕЙСТВИЕ: Запланировать рассылку для бота на заданное время. "
+            "Требует подтверждения пользователя. "
+            "when_minutes — через сколько минут запустить рассылку."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bot_id": {"type": "integer", "description": "ID бота"},
+                "text": {"type": "string", "description": "Текст рассылки"},
+                "when_minutes": {"type": "integer", "description": "Через сколько минут запустить (по умолчанию 60)", "default": 60},
+            },
+            "required": ["bot_id", "text"],
+        },
+    },
 ]
 
 
@@ -572,6 +714,21 @@ async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, ht
             )
         elif name == "post_to_channel":
             result = await action_post_to_channel(pool, user_id, inputs["channel_id"], inputs["text"])
+        elif name == "create_channel":
+            result = await action_create_channel(
+                pool, user_id,
+                title=inputs["title"],
+                about=inputs.get("about", ""),
+                username=inputs.get("username", ""),
+                is_group=inputs.get("is_group", False),
+            )
+        elif name == "schedule_broadcast":
+            result = await action_schedule_broadcast(
+                pool, user_id,
+                bot_id=inputs["bot_id"],
+                text=inputs["text"],
+                when_minutes=inputs.get("when_minutes", 60),
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
         return json.dumps(result, ensure_ascii=False, default=str)
