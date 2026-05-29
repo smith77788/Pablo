@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import time
 import aiohttp
 import asyncpg
 from aiogram import Bot
@@ -10,6 +11,32 @@ from database import db
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10   # секунд между проверками очереди
 _MAX_PARALLEL = 3     # максимум параллельных операций
+
+
+async def _audit(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    action: str,
+    result: str,
+    operation_id: int | None = None,
+    account_id: int | None = None,
+    target: str | None = None,
+    error_msg: str | None = None,
+    flood_wait_s: int | None = None,
+    duration_ms: int | None = None,
+) -> None:
+    """Записать событие в operation_audit. Никогда не бросает исключений."""
+    try:
+        await pool.execute(
+            """INSERT INTO operation_audit(
+                   owner_id, operation_id, account_id, action, target,
+                   result, error_msg, flood_wait_s, duration_ms
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+            owner_id, operation_id, account_id, action, target,
+            result, error_msg, flood_wait_s, duration_ms,
+        )
+    except Exception as e:
+        log.debug("audit write failed: %s", e)
 
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
@@ -304,11 +331,13 @@ async def _exec_bulk_join(
                 return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
                         "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}"}
             step += 1
+            t0 = time.monotonic()
             try:
                 res = await account_manager.join_channel(acc["session_str"], link, _acc=acc_dict)
                 if res.get("error"):
                     raise Exception(res["error"])
                 ok_count += 1
+                dur_ms = int((time.monotonic() - t0) * 1000)
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','joined')",
@@ -317,13 +346,36 @@ async def _exec_bulk_join(
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
+                await _audit(pool, owner_id, "join", "success",
+                             operation_id=op_id, account_id=acc["id"],
+                             target=link, duration_ms=dur_ms)
+                try:
+                    from services.flood_engine import record_success
+                    await record_success(acc["id"], "join")
+                except Exception:
+                    pass
             except Exception as e:
                 fail_count += 1
+                err_str = str(e)[:200]
+                flood_wait = 0
+                if "FloodWait" in err_str or "flood_wait" in err_str.lower():
+                    try:
+                        flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])))
+                    except Exception:
+                        flood_wait = 60
+                    try:
+                        from services.flood_engine import record_flood
+                        await record_flood(pool, acc["id"], flood_wait, "join", op_id)
+                    except Exception:
+                        pass
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, step, link, str(e)[:200],
+                    op_id, step, link, err_str,
                 )
+                await _audit(pool, owner_id, "join", "flood_wait" if flood_wait else "error",
+                             operation_id=op_id, account_id=acc["id"],
+                             target=link, error_msg=err_str, flood_wait_s=flood_wait or None)
             # Human-like anti-flood
             if i % 5 == 4:
                 pause = random.uniform(180, 360) * session_simulator.chaos_factor()
