@@ -1557,6 +1557,7 @@ _BEHAV_VIEWS = {
     "decay":     "📉 Угасающие ресурсы",
     "ecosystem": "🌐 Экосистемные узлы",
     "memory":    "🔍 Поисковая память",
+    "anomalies": "⚠️ Аномалии",
 }
 
 
@@ -1585,6 +1586,54 @@ async def cb_behavioral(
     user_id = callback.from_user.id
 
     from services import behavioral_engine
+
+    if sub == "anomalies":
+        import json as _json
+        rows = await pool.fetch(
+            "SELECT entity_type, entity_id, meta, occurred_at "
+            "FROM behavioral_events "
+            "WHERE owner_id=$1 AND event_type='anomaly' "
+            "ORDER BY occurred_at DESC LIMIT 20",
+            user_id,
+        )
+        if not rows:
+            text = "<b>⚠️ Аномалии</b>\n\nАномалий не обнаружено. Сканирование выполняется каждые 15 минут."
+        else:
+            lines = ["<b>⚠️ Аномалии поведенческого слоя</b>\n"]
+            _anom_icon = {
+                "decay_spike":      "📉",
+                "affinity_dropout": "🔍",
+                "reentry_burst":    "🔁",
+            }
+            for r in rows:
+                try:
+                    meta = _json.loads(r["meta"]) if r["meta"] else {}
+                except Exception:
+                    meta = {}
+                atype = meta.get("type", "unknown")
+                icon = _anom_icon.get(atype, "⚠️")
+                ts = r["occurred_at"].strftime("%m-%d %H:%M") if r["occurred_at"] else "—"
+                if atype == "decay_spike":
+                    etype = r["entity_type"]
+                    eid = r["entity_id"]
+                    dr = meta.get("decay_rate", 0)
+                    at = meta.get("attention_score", 0)
+                    lines.append(f"{icon} <b>Угасание</b> {etype}#{eid}  dr={dr:.2f} att={at:.1f}  <i>{ts}</i>")
+                elif atype == "affinity_dropout":
+                    kw = html.escape(meta.get("keyword", "?"))
+                    days = meta.get("days_absent", 0)
+                    aff = meta.get("affinity_score", 0)
+                    lines.append(f"{icon} <b>Брошенный поиск</b> «{kw}»  {days}д без поиска  aff={aff:.1f}  <i>{ts}</i>")
+                elif atype == "reentry_burst":
+                    cnt = meta.get("count", 0)
+                    etype = r["entity_type"]
+                    eid = r["entity_id"]
+                    lines.append(f"{icon} <b>Бурст</b> {etype}#{eid}  ×{cnt} за час  <i>{ts}</i>")
+                else:
+                    lines.append(f"{icon} {atype}  <i>{ts}</i>")
+            text = "\n".join(lines)
+        await _edit(callback, text, _behavioral_kb(sub))
+        return
 
     if sub == "memory":
         rows = await behavioral_engine.get_search_memory(pool, user_id)
