@@ -24,8 +24,8 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
-def _edit(cb: CallbackQuery, text: str, markup=None):
-    return cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+async def _edit(cb: CallbackQuery, text: str, markup=None):
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
 
 
 # ── Pack List ──────────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ async def cb_pack_create(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     await _edit(
         callback,
-        "🗂 <b>Presence Pack</b> — Шаг 1/5\n\n"
+        "🗂 <b>Presence Pack</b> — Шаг 1/6\n\n"
         "Введите <b>название пакета</b> (например: «Магазин Москва», «Support Pack EU»):",
         markup=kb.as_markup(),
     )
@@ -83,12 +83,49 @@ async def cb_pack_create(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(PresencePackFSM.entering_name)
 async def fsm_pack_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     name = (message.text or "").strip()[:80]
+    if not name:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
+        await message.answer("❌ Название не может быть пустым. Введите название пакета:", reply_markup=kb.as_markup())
+        return
     await state.update_data(pack_name=name)
+    await state.set_state(PresencePackFSM.entering_description)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=PackCb(action="skip_description"))
+    kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
+    kb.adjust(1)
+    await message.answer(
+        "🗂 <b>Presence Pack</b> — Шаг 2/6\n\n"
+        "Введите <b>описание пакета</b> (будет добавлено в посевные посты):\n"
+        "Например: «Всё о криптовалютах и DeFi — новости, обзоры, сигналы»\n\n"
+        "Или нажмите «⏭ Пропустить»",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(PackCb.filter(F.action == "skip_description"), PresencePackFSM.entering_description)
+async def cb_pack_skip_description(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await _go_to_bot_step(callback, state, pool)
+
+
+@router.message(PresencePackFSM.entering_description)
+async def fsm_pack_description(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    desc = (message.text or "").strip()[:300]
+    await state.update_data(pack_description=desc)
+    await _go_to_bot_step(message, state, pool)
+
+
+async def _go_to_bot_step(target: Message | CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await state.set_state(PresencePackFSM.selecting_bot)
+    is_msg = isinstance(target, Message)
+    uid = target.from_user.id
 
     bots = await pool.fetch(
         "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE LIMIT 20",
-        message.from_user.id,
+        uid,
     )
     kb = InlineKeyboardBuilder()
     for b in bots:
@@ -97,14 +134,17 @@ async def fsm_pack_name(message: Message, state: FSMContext, pool: asyncpg.Pool)
     kb.button(text="⏭ Без бота", callback_data=PackCb(action="pick_bot", pack_id=0))
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(1)
-    await message.answer(
-        "🗂 <b>Presence Pack</b> — Шаг 2/5\n\n"
-        "Выберите <b>бот</b> для управления пользователями в пакете:",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+    text = (
+        "🗂 <b>Presence Pack</b> — Шаг 3/6\n\n"
+        "Выберите <b>бот</b> для управления пользователями в пакете:"
     )
+    if is_msg:
+        await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    else:
+        await target.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
-# ── Step 2: Bot ────────────────────────────────────────────────────────────
+# ── Step 3: Bot ────────────────────────────────────────────────────────────
 
 @router.callback_query(PackCb.filter(F.action == "pick_bot"), PresencePackFSM.selecting_bot)
 async def cb_pack_pick_bot(
@@ -143,7 +183,7 @@ async def _render_channel_step(
     kb.adjust(2)
     await _edit(
         callback,
-        f"🗂 <b>Presence Pack</b> — Шаг 3/5\n\n"
+        f"🗂 <b>Presence Pack</b> — Шаг 4/6\n\n"
         f"Выберите <b>каналы</b> для пакета (выбрано: {len(selected)}):",
         markup=kb.as_markup(),
     )
@@ -197,7 +237,7 @@ async def _render_group_step(
     kb.adjust(2)
     await _edit(
         callback,
-        f"🗂 <b>Presence Pack</b> — Шаг 4/5\n\n"
+        f"🗂 <b>Presence Pack</b> — Шаг 5/6\n\n"
         f"Выберите <b>группы/чаты</b> для пакета (выбрано: {len(selected)}):",
         markup=kb.as_markup(),
     )
@@ -231,7 +271,7 @@ async def cb_pack_groups_done(callback: CallbackQuery, state: FSMContext) -> Non
     kb.adjust(1)
     await _edit(
         callback,
-        "🗂 <b>Presence Pack</b> — Шаг 5/5\n\n"
+        "🗂 <b>Presence Pack</b> — Шаг 6/6\n\n"
         "Введите <b>целевой ресурс</b> — ссылку или @username главного канала/бота/сайта.\n\n"
         "Формат — две строки:\n"
         "<code>@my_channel\nГлавный магазин</code>\n\n"
@@ -262,23 +302,29 @@ async def cb_pack_skip_target(callback: CallbackQuery, state: FSMContext) -> Non
 
 async def _build_preview_text(sd: dict) -> str:
     name = sd.get("pack_name") or "—"
+    description = sd.get("pack_description") or ""
     bot_username = sd.get("pack_bot_username") or "—"
     ch_ids = sd.get("pack_channel_ids") or []
     gr_ids = sd.get("pack_group_ids") or []
     target_url = sd.get("pack_target_url") or "—"
     target_label = sd.get("pack_target_label") or ""
-    return (
-        f"🗂 <b>Presence Pack — Предпросмотр</b>\n\n"
-        f"<b>Название:</b> {escape(name)}\n"
-        f"<b>Бот:</b> @{escape(str(bot_username))}\n"
-        f"<b>Каналов:</b> {len(ch_ids)}\n"
-        f"<b>Групп:</b> {len(gr_ids)}\n"
-        f"<b>Целевой ресурс:</b> {escape(target_label or target_url)}\n\n"
-        f"После создания вы сможете:\n"
-        f"• 🌱 Посеять начальные посты с взаимными ссылками\n"
-        f"• 👑 Назначить бота администратором каналов\n"
-        f"• 🔄 Синхронизировать настройки между зеркалами"
-    )
+    lines = [
+        f"🗂 <b>Presence Pack — Предпросмотр</b>\n",
+        f"<b>Название:</b> {escape(name)}",
+    ]
+    if description:
+        lines.append(f"<b>Описание:</b> {escape(description[:100])}")
+    lines += [
+        f"<b>Бот:</b> @{escape(str(bot_username))}",
+        f"<b>Каналов:</b> {len(ch_ids)}",
+        f"<b>Групп:</b> {len(gr_ids)}",
+        f"<b>Целевой ресурс:</b> {escape(target_label or target_url)}\n",
+        f"После создания вы сможете:",
+        f"• 🌱 Посеять начальные посты с взаимными ссылками",
+        f"• 👑 Назначить бота администратором каналов",
+        f"• 🔄 Синхронизировать настройки между зеркалами",
+    ]
+    return "\n".join(lines)
 
 
 def _preview_kb() -> InlineKeyboardBuilder:
@@ -314,6 +360,7 @@ async def cb_pack_confirm_create(
     pack_id = await db.create_presence_pack(
         pool, owner_id,
         name=sd.get("pack_name") or "Pack",
+        description=sd.get("pack_description"),
         target_url=sd.get("pack_target_url"),
         target_label=sd.get("pack_target_label"),
         bot_id=sd.get("pack_bot_id"),

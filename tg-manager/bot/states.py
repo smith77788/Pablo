@@ -399,9 +399,10 @@ class CleanerFSM(StatesGroup):
 
 
 class PresencePackFSM(StatesGroup):
-    entering_name      = State()
-    selecting_bot      = State()
-    selecting_channels = State()
-    selecting_groups   = State()
-    entering_target    = State()
-    previewing         = State()
+    entering_name        = State()
+    entering_description = State()
+    selecting_bot        = State()
+    selecting_channels   = State()
+    selecting_groups     = State()
+    entering_target      = State()
+    previewing           = State()
