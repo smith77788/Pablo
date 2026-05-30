@@ -674,7 +674,6 @@ async def cb_pack_cancel_fsm(callback: CallbackQuery, state: FSMContext, pool: a
 async def cb_bot_admin_panel(
     callback: CallbackQuery, callback_data: BotAdminCb, pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id
 
@@ -685,6 +684,7 @@ async def cb_bot_admin_panel(
     if not bot_row:
         await callback.answer("Бот не найден", show_alert=True)
         return
+    await callback.answer()
 
     user_count = await pool.fetchval(
         "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id

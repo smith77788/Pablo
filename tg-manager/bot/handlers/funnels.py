@@ -418,7 +418,6 @@ async def cb_fn_copy_confirm(callback: CallbackQuery, callback_data: FunnelCb,
     if not src_bot or not dst_bot:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     copied = await db.copy_funnels(pool, callback_data.target_bot_id, callback_data.bot_id)
     dst_label = f"@{dst_bot['username']}" if dst_bot["username"] else dst_bot["first_name"]
     src_label = f"@{src_bot['username']}" if src_bot["username"] else src_bot["first_name"]

@@ -126,13 +126,13 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
     if not text and not photo_file_id:
         await callback.answer("Текст рассылки пуст.", show_alert=True)
         return
-    await callback.answer()
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await state.clear()
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     segment_user_ids = data.get("segment_user_ids")
     if segment_user_ids:
@@ -168,7 +168,6 @@ async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
     if not text and not photo_file_id:
         await callback.answer("Текст рассылки пуст.", show_alert=True)
         return
-    await callback.answer()
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
