@@ -130,9 +130,10 @@ def _visibility_kb():
 
 
 def _operations_kb():
+    from bot.callbacks import PackCb
     kb = InlineKeyboardBuilder()
     kb.button(text="🌍 Присутствие в мире", callback_data=GeoPresenceCb(action="menu"))
-    kb.button(text="🗺️ Мои планы",          callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="🗂 Presence Packs",     callback_data=PackCb(action="menu"))
     kb.button(text="⚡ Массовые действия",   callback_data=BmCb(action="bulk_ops"))
     kb.button(text="🛠️ Построитель",        callback_data=MassOpCb(action="menu"))
     kb.button(text="📋 Очередь",             callback_data=MassOpCb(action="queue"))

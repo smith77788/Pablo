@@ -2598,3 +2598,87 @@ async def get_admin_audit_log(
             limit, offset,
         )
     return [dict(r) for r in rows]
+
+
+# ══════════════════════════════════════════════════════════════════
+# BOT ADMIN SESSIONS
+# ══════════════════════════════════════════════════════════════════
+
+async def upsert_bot_admin_session(pool: asyncpg.Pool, bot_id: int, owner_id: int, token: str) -> None:
+    await pool.execute(
+        "INSERT INTO bot_admin_sessions(bot_id,owner_id,token) VALUES($1,$2,$3) "
+        "ON CONFLICT(bot_id) DO UPDATE SET token=$3, owner_id=$2",
+        bot_id, owner_id, token,
+    )
+
+
+async def get_bot_admin_session_by_token(pool: asyncpg.Pool, token: str):
+    return await pool.fetchrow(
+        "SELECT bot_id, owner_id FROM bot_admin_sessions WHERE token=$1", token
+    )
+
+
+async def get_bot_admin_token(pool: asyncpg.Pool, bot_id: int) -> str | None:
+    row = await pool.fetchrow("SELECT token FROM bot_admin_sessions WHERE bot_id=$1", bot_id)
+    return row["token"] if row else None
+
+
+# ══════════════════════════════════════════════════════════════════
+# PRESENCE PACKS
+# ══════════════════════════════════════════════════════════════════
+
+async def create_presence_pack(
+    pool: asyncpg.Pool, owner_id: int, name: str,
+    description: str | None = None, target_url: str | None = None,
+    target_label: str | None = None, bot_id: int | None = None,
+    bot_username: str | None = None,
+) -> int:
+    return await pool.fetchval(
+        "INSERT INTO presence_packs(owner_id,name,description,target_url,target_label,bot_id,bot_username) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+        owner_id, name, description, target_url, target_label, bot_id, bot_username,
+    )
+
+
+async def get_presence_pack(pool: asyncpg.Pool, pack_id: int, owner_id: int):
+    return await pool.fetchrow(
+        "SELECT * FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, owner_id
+    )
+
+
+async def get_presence_packs(pool: asyncpg.Pool, owner_id: int, limit: int = 15):
+    return await pool.fetch(
+        "SELECT * FROM presence_packs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
+        owner_id, limit,
+    )
+
+
+async def update_presence_pack_channels(
+    pool: asyncpg.Pool, pack_id: int, owner_id: int,
+    channel_ids: list[int], group_ids: list[int],
+) -> None:
+    import json
+    await pool.execute(
+        "UPDATE presence_packs SET channel_ids=$3, group_ids=$4 WHERE id=$1 AND owner_id=$2",
+        pack_id, owner_id, json.dumps(channel_ids), json.dumps(group_ids),
+    )
+
+
+async def mark_presence_pack_seeded(pool: asyncpg.Pool, pack_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "UPDATE presence_packs SET seed_posted=TRUE WHERE id=$1 AND owner_id=$2",
+        pack_id, owner_id,
+    )
+
+
+async def mark_presence_pack_promoted(pool: asyncpg.Pool, pack_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "UPDATE presence_packs SET bot_promoted=TRUE WHERE id=$1 AND owner_id=$2",
+        pack_id, owner_id,
+    )
+
+
+async def delete_presence_pack(pool: asyncpg.Pool, pack_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, owner_id
+    )

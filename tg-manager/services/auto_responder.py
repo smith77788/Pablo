@@ -115,6 +115,37 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             if not text.startswith("/"):
                 await db.record_message_keywords(pool, bot_id, text)
 
+            # Bot admin panel: /admin TOKEN (owner only)
+            if text.strip().lower().startswith("/admin ") and bot_row and bot_row.get("added_by"):
+                admin_token = text.strip()[7:].strip()
+                if admin_token:
+                    admin_row = await db.get_bot_admin_session_by_token(pool, admin_token)
+                    if (admin_row and admin_row["bot_id"] == bot_id
+                            and chat_id == admin_row["owner_id"]):
+                        user_count = await pool.fetchval(
+                            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id
+                        ) or 0
+                        reply_count = await pool.fetchval(
+                            "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
+                        ) or 0
+                        funnel_count = await pool.fetchval(
+                            "SELECT COUNT(*) FROM funnel_sequences WHERE bot_id=$1 AND is_active=TRUE", bot_id
+                        ) or 0
+                        panel_text = (
+                            "🔧 <b>Панель управления ботом</b>\n\n"
+                            f"👥 Пользователей: {user_count}\n"
+                            f"💬 Авто-ответов: {reply_count}\n"
+                            f"🔄 Активных воронок: {funnel_count}\n\n"
+                            "📌 Управление через BotMother:\n"
+                            "• Авто-ответы: Настройки → Авто-ответы\n"
+                            "• Рассылка: Broadcasts\n"
+                            "• Воронки: Настройки → Воронки\n"
+                            "• CRM и пользователи: Inbox / Relay\n\n"
+                            "<i>Авторизация подтверждена ✅</i>"
+                        )
+                        await bot_api.send_message(http, token, chat_id, panel_text)
+                        continue  # skip normal auto_replies
+
             # Auto-replies (first match wins)
             for rule in rules:
                 if _match_rule(rule, text):

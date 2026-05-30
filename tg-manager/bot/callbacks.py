@@ -337,3 +337,15 @@ class TopoCb(CallbackData, prefix="topo"):
     page: int = 0
 
 
+class PackCb(CallbackData, prefix="ppk"):
+    action: str        # "menu","create","view","seed","promote","mirror","delete","confirm_delete"
+    pack_id: int = 0
+    page: int = 0
+
+
+class BotAdminCb(CallbackData, prefix="badm"):
+    action: str        # "panel","edit_reply","list_replies","stats","sync_mirrors"
+    bot_id: int = 0
+    reply_id: int = 0
+
+

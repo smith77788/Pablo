@@ -396,3 +396,12 @@ class DmCampaignFSM(StatesGroup):
 class CleanerFSM(StatesGroup):
     choosing_account = State()
     confirm_action   = State()
+
+
+class PresencePackFSM(StatesGroup):
+    entering_name      = State()
+    selecting_bot      = State()
+    selecting_channels = State()
+    selecting_groups   = State()
+    entering_target    = State()
+    previewing         = State()

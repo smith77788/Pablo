@@ -750,13 +750,35 @@ async def cb_apply_bot_exec(
             log.warning("Failed to create funnel from template: %s", e)
             results.append("🔄 Воронка: ⚠️ не удалось создать")
 
+    # Generate admin access token for this bot
+    from services.presence_setup import generate_admin_token
+    from bot.callbacks import BotAdminCb
+    admin_token = generate_admin_token()
+    try:
+        await db.upsert_bot_admin_session(pool, bot_id, user_id, admin_token)
+        results.append(f"🔑 Токен управления: создан")
+    except Exception as e:
+        log.warning("Failed to create admin token for bot %s: %s", bot_id, e)
+        admin_token = None
+
     bot_display = f"@{bot_row['username']}" if bot_row.get("username") else bot_row.get("first_name") or f"id{bot_id}"
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="🔧 Admin панель бота", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
     kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
+    kb.adjust(1)
+
+    token_line = ""
+    if admin_token:
+        token_line = (
+            f"\n\n🔑 <b>Команда управления ботом</b> (введите в боте):\n"
+            f"<code>/admin {admin_token}</code>"
+        )
+
     await callback.message.edit_text(
         f"🤖 <b>Шаблон «{html.escape(tpl_name)}» применён к {html.escape(bot_display)}</b>\n\n"
-        + "\n".join(results or ["Нечего применять."]),
+        + "\n".join(results or ["Нечего применять."])
+        + token_line,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
