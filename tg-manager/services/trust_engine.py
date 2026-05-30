@@ -1,7 +1,16 @@
-"""Background service: compute and maintain account trust scores."""
+"""Background service: compute and maintain account trust scores.
+
+Features:
+- Recalculates trust_score every 30 min
+- Auto-rotation: автоматически ставит кулдауны low-trust аккаунтам (каждые 6ч)
+- Expires cooldowns, decays flood counts
+- Writes trust_score history snapshots
+"""
 from __future__ import annotations
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
+
 import asyncpg
 
 log = logging.getLogger(__name__)
@@ -11,6 +20,13 @@ _COOLDOWN_HOURS = 2       # cooldown after flood event
 _FLOOD_PENALTY = 0.15     # score penalty per flood in last 7 days
 _AGE_BONUS_PER_DAY = 0.005
 _AGE_BONUS_CAP = 0.30
+
+# Auto-rotation thresholds
+_ROTATE_CRITICAL_THRESHOLD = 0.3   # trust < 0.3 → 72h cooldown
+_ROTATE_LOW_THRESHOLD = 0.6        # trust 0.3–0.6 → 24h cooldown
+_ROTATE_CRITICAL_HOURS = 72
+_ROTATE_LOW_HOURS = 24
+_ROTATE_INTERVAL_CYCLES = 12       # every 12 cycles (6 hours)
 
 
 async def _recalculate_scores(pool: asyncpg.Pool) -> None:
@@ -82,8 +98,83 @@ async def _cleanup_old_history(pool: asyncpg.Pool) -> None:
         log.debug("trust_engine history cleanup skipped: %s", exc)
 
 
-async def run(pool: asyncpg.Pool) -> None:
-    """Background loop."""
+async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
+    """Автоматически ставит кулдауны аккаунтам с низким trust_score.
+
+    Возвращает dict с количеством обработанных аккаунтов для логирования.
+    Уведомляет владельцев через bot если передан.
+    """
+    from database.db import notify_if_enabled
+
+    now = datetime.now(timezone.utc)
+    result = {"critical": 0, "low": 0, "notified_owners": set()}
+
+    # Аккаунты с критически низким trust — 72h кулдаун
+    critical_updated = await pool.execute(
+        """UPDATE tg_accounts SET cooldown_until = $1
+           WHERE is_active = TRUE
+             AND trust_score < $2
+             AND (cooldown_until IS NULL OR cooldown_until < now())""",
+        now + timedelta(hours=_ROTATE_CRITICAL_HOURS),
+        _ROTATE_CRITICAL_THRESHOLD,
+    )
+    # Аккаунты с низким trust — 24h кулдаун
+    low_updated = await pool.execute(
+        """UPDATE tg_accounts SET cooldown_until = $1
+           WHERE is_active = TRUE
+             AND trust_score >= $2 AND trust_score < $3
+             AND (cooldown_until IS NULL OR cooldown_until < now())""",
+        now + timedelta(hours=_ROTATE_LOW_HOURS),
+        _ROTATE_CRITICAL_THRESHOLD,
+        _ROTATE_LOW_THRESHOLD,
+    )
+
+    def _count(pg_result) -> int:
+        try:
+            return int(str(pg_result).split()[-1])
+        except Exception:
+            return 0
+
+    crit_n = _count(critical_updated)
+    low_n = _count(low_updated)
+    result["critical"] = crit_n
+    result["low"] = low_n
+
+    if crit_n > 0 or low_n > 0:
+        # Найти владельцев затронутых аккаунтов и уведомить
+        owners = await pool.fetch(
+            """SELECT DISTINCT owner_id FROM tg_accounts
+               WHERE is_active = TRUE
+                 AND (cooldown_until IS NOT NULL AND cooldown_until > now())
+                 AND trust_score < $1""",
+            _ROTATE_LOW_THRESHOLD,
+        )
+        for row in owners:
+            owner_id = row["owner_id"]
+            result["notified_owners"].add(owner_id)
+            if bot:
+                try:
+                    await notify_if_enabled(
+                        pool, bot, owner_id, "flood_warning",
+                        "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
+                        f"🔴 Критических (trust &lt; {_ROTATE_CRITICAL_THRESHOLD}) → {_ROTATE_CRITICAL_HOURS}ч кулдаун: <b>{crit_n}</b>\n"
+                        f"🟡 Низкий trust ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{low_n}</b>\n\n"
+                        "Аккаунты не будут использоваться для операций до окончания кулдауна.\n"
+                        "Trust score восстановится со временем при отсутствии операций.",
+                    )
+                except Exception:
+                    pass
+
+        log.info(
+            "trust_engine auto-rotate: %d critical (72h), %d low (24h), notified %d owners",
+            crit_n, low_n, len(result["notified_owners"]),
+        )
+
+    return result
+
+
+async def run(pool: asyncpg.Pool, bot=None) -> None:
+    """Background loop: recalculate trust scores, auto-rotate, cleanup."""
     await asyncio.sleep(120)  # startup delay
     cycle = 0
     while True:
@@ -91,6 +182,9 @@ async def run(pool: asyncpg.Pool) -> None:
             await _release_expired_cooldowns(pool)
             await _decay_flood_counts(pool)
             await _recalculate_scores(pool)
+            # Auto-rotate каждые 6 часов (12 циклов × 30min)
+            if cycle % _ROTATE_INTERVAL_CYCLES == 0:
+                await _auto_rotate(pool, bot)
             # Cleanup old history once per day (48 cycles × 30min = 24h)
             if cycle % 48 == 0:
                 await _cleanup_old_history(pool)

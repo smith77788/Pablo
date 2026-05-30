@@ -107,7 +107,7 @@
 `claude/telegram-bot-services-xfAh6`
 Last commit: `4b816f6 feat: превью аккаунтов в bulk_join/bulk_leave`
 
-### 🔜 Следующие приоритеты (2026-05-30)
+### ✅ Выполнено в r13 (2026-05-30)
 
 **P1 — Этот спринт:**
 - [x] AI Assistant: реальное выполнение команд (create_channel/bot/group/post — уже реализовано)
@@ -125,12 +125,13 @@ Last commit: `4b816f6 feat: превью аккаунтов в bulk_join/bulk_le
 - [ ] Import Center: CSV импорт аккаунтов батчами
 - [ ] Drift Detection (мониторинг изменений, алерты)
 - [ ] Telegram Mini App для аналитики
-- [ ] Topology map (граф связей)
+- [ ] Approval workflows для критических bulk-операций
+- [ ] RBAC / Multi-user workspaces
 
 ### Проект
 - Stack: aiogram 3.13.1, asyncpg, Telethon, Railway
-- DB: 60+ таблиц (v44 schema), последняя схема v44
+- DB: 60+ таблиц (v45 schema), последняя схема v45
 - Handlers: 47+ файлов
 - Services: 20+ фоновых сервисов
 - Ветка: `claude/telegram-bot-services-xfAh6`
-- Build: `2026.05.30-r12`
+- Build: `2026.05.30-r14`

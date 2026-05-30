@@ -169,10 +169,12 @@ async def record_cross_nav(
 async def _detect_anomalies(pool: asyncpg.Pool) -> None:
     """
     Detect unusual behavioral patterns and log them as 'anomaly' events.
-    Currently detects:
-    - Sudden decay spike: entity that had high attention_score now has decay_rate > 0.8
-    - Search affinity drop: keyword not searched in 14+ days but had affinity > 50
-    - Reentry burst: 5+ reentries to same entity in 1 hour (unusual automation signal)
+    Detects:
+    - Decay spike: entity that had high attention_score now has decay_rate > 0.8
+    - Affinity dropout: keyword not searched in 14+ days but had affinity > 50
+    - Reentry burst: 5+ reentries to same entity in 1 hour (automation signal)
+    - Velocity anomaly: события в последний час > 3× от среднего за 7 дней
+    - Pattern deviation: attention/ecosystem отклонение > 50% от 7-дневного baseline
     """
     try:
         # 1. Decay spikes — entities dropping fast
@@ -241,6 +243,110 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
             log.info(
                 "behavioral_engine anomaly scan: %d decay, %d cold kw, %d bursts",
                 len(decay_anomalies), len(cold_keywords), len(burst_rows),
+            )
+
+        # 4. Velocity anomaly — events in last hour vs 7-day hourly average
+        velocity_anomalies = await pool.fetch(
+            """WITH hourly_now AS (
+                   SELECT owner_id, entity_type, entity_id, COUNT(*) AS cnt
+                   FROM behavioral_events
+                   WHERE occurred_at > now() - INTERVAL '1 hour'
+                     AND event_type NOT IN ('anomaly', 'cross_nav')
+                   GROUP BY owner_id, entity_type, entity_id
+               ), hourly_avg AS (
+                   SELECT owner_id, entity_type, entity_id,
+                          COUNT(*)::float / GREATEST(1,
+                              EXTRACT(EPOCH FROM (now() - MIN(occurred_at))) / 3600
+                          ) AS avg_per_hour
+                   FROM behavioral_events
+                   WHERE occurred_at > now() - INTERVAL '7 days'
+                     AND event_type NOT IN ('anomaly', 'cross_nav')
+                   GROUP BY owner_id, entity_type, entity_id
+               )
+               SELECT h.owner_id, h.entity_type, h.entity_id, h.cnt AS current_hour,
+                      ROUND(a.avg_per_hour::numeric, 2) AS avg_hourly
+               FROM hourly_now h
+               JOIN hourly_avg a ON a.owner_id=h.owner_id
+                   AND a.entity_type=h.entity_type AND a.entity_id=h.entity_id
+               WHERE h.cnt > 10
+                 AND h.cnt > a.avg_per_hour * 3
+                 AND a.avg_per_hour > 1""",
+        )
+        for r in velocity_anomalies:
+            await pool.execute(
+                "INSERT INTO behavioral_events"
+                "(owner_id, entity_type, entity_id, event_type, meta) "
+                "VALUES ($1, $2, $3, 'anomaly', $4) "
+                "ON CONFLICT DO NOTHING",
+                r["owner_id"], r["entity_type"], r["entity_id"],
+                json.dumps({
+                    "type": "velocity_spike",
+                    "current_hour": int(r["current_hour"]),
+                    "avg_hourly": float(r["avg_hourly"]),
+                    "ratio": round(float(r["current_hour"]) / max(1, float(r["avg_hourly"])), 1),
+                }),
+            )
+
+        # 5. Pattern deviation — current scores deviate >50% from 7-day baseline
+        deviation_anomalies = await pool.fetch(
+            """WITH baseline AS (
+                   SELECT owner_id, entity_type, entity_id,
+                          AVG(attention_score) AS avg_att,
+                          AVG(ecosystem_score) AS avg_eco,
+                          STDDEV(attention_score) AS std_att,
+                          STDDEV(ecosystem_score) AS std_eco
+                   FROM entity_behavioral_score
+                   WHERE updated_at > now() - INTERVAL '7 days'
+                     AND updated_at < now() - INTERVAL '3 hours'
+                   GROUP BY owner_id, entity_type, entity_id
+               ), current AS (
+                   SELECT DISTINCT ON (owner_id, entity_type, entity_id)
+                          owner_id, entity_type, entity_id,
+                          attention_score, ecosystem_score
+                   FROM entity_behavioral_score
+                   WHERE updated_at > now() - INTERVAL '3 hours'
+                   ORDER BY owner_id, entity_type, entity_id, updated_at DESC
+               )
+               SELECT c.owner_id, c.entity_type, c.entity_id,
+                      c.attention_score, c.ecosystem_score,
+                      ROUND(b.avg_att::numeric, 2) AS baseline_att,
+                      ROUND(b.avg_eco::numeric, 2) AS baseline_eco
+               FROM current c
+               JOIN baseline b ON b.owner_id=c.owner_id
+                   AND b.entity_type=c.entity_type AND b.entity_id=c.entity_id
+               WHERE b.avg_att > 10
+                 AND (ABS(c.attention_score - b.avg_att) > b.avg_att * 0.5
+                      OR ABS(c.ecosystem_score - b.avg_eco) > GREATEST(b.avg_eco * 0.5, 15))""",
+        )
+        for r in deviation_anomalies:
+            dev_type = []
+            att_diff = float(r["attention_score"]) - float(r["baseline_att"] or 0)
+            eco_diff = float(r["ecosystem_score"]) - float(r["baseline_eco"] or 0)
+            if abs(att_diff) > float(r["baseline_att"] or 1) * 0.5:
+                dev_type.append("attention_shift")
+            if abs(eco_diff) > max(float(r["baseline_eco"] or 0) * 0.5, 15):
+                dev_type.append("ecosystem_shift")
+
+            await pool.execute(
+                "INSERT INTO behavioral_events"
+                "(owner_id, entity_type, entity_id, event_type, meta) "
+                "VALUES ($1, $2, $3, 'anomaly', $4) "
+                "ON CONFLICT DO NOTHING",
+                r["owner_id"], r["entity_type"], r["entity_id"],
+                json.dumps({
+                    "type": "pattern_deviation",
+                    "subtypes": dev_type,
+                    "current_attention": float(r["attention_score"]),
+                    "baseline_attention": float(r["baseline_att"] or 0),
+                    "current_ecosystem": float(r["ecosystem_score"]),
+                    "baseline_ecosystem": float(r["baseline_eco"] or 0),
+                }),
+            )
+
+        if velocity_anomalies or deviation_anomalies:
+            log.info(
+                "behavioral_engine velocity/deviation scan: %d velocity, %d deviations",
+                len(velocity_anomalies), len(deviation_anomalies),
             )
     except Exception:
         log.debug("behavioral_engine anomaly detection skipped (table may not exist)")

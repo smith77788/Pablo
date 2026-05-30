@@ -1,6 +1,6 @@
 # TASK QUEUE
 
-Обновлено: 2026-05-30 (r12)
+Обновлено: 2026-05-30 (r14)
 
 ## P0 — CRITICAL: BotMother OS consolidation
 - [x] **IMMEDIATELY**: Убрать прямые команды: `/ai`, `/accounts`, `/ops`, `/ranking`, `/referral`, `/subscription`
@@ -54,7 +54,7 @@
 - [ ] Add template validation
 - [ ] Add drift/template compare plan if existing structures support it
 
-## P4 — Global Presence Factory (ГОТОВО V1 + V2)
+## P4 — Global Presence Factory (ГОТОВО V1 + V2 + V3)
 - [x] Add Global Presence menu entry (🌍 Global Presence в Operations)
 - [x] Implement guided flow: asset type → template → name → username → geo → accounts → preview → confirm
 - [x] Add geo seed/preset system (5 пресетов: EU 44, World 51, Tier-1 50, DACH 20, LATAM 25)
@@ -63,7 +63,7 @@
 - [x] Execute through Operation Engine (op_worker with safe pacing 45-90s)
 - [x] Add progress, retry failed, report
 - [x] Support for groups (V2: megagroup=True, f7719f0)
-- [ ] Поддержка ботов + пакеты (V3)
+- [x] Поддержка ботов + пакеты (V3, e695b82)
 
 ## P5 — Advanced (ЧАСТИЧНО)
 - [x] Visibility Reports CSV export (519f357)
@@ -83,6 +83,11 @@
 - [x] Bulk Channel Operations — массовый username/about (r9)
 - [x] Payment Webhook (services/payment_webhook.py, port 8080)
 - [x] Admin bulk tools (grant + cleanup + platform ops)
+- [x] AI Assistant — реальное выполнение команд (r13, dcb90e6)
+- [x] Bulk pacing — настройки темпа (r13, b1a351b, c1d8f5d)
+- [x] Account Health Dashboard V2 — тренды, health_score, рекомендации (r14)
+- [x] Auto-rotation аккаунтов — автоматические кулдауны (r14)
+- [x] Behavioral Engine — velocity anomaly + pattern deviation (r14)
 - [ ] Import center improvements (CSV import для bulk operations)
 - [ ] Drift detection foundation
 - [ ] Telegram Mini App для аналитики
@@ -134,12 +139,12 @@
    - [ ] Массовый импорт аккаунтов из CSV батчами
    - [ ] Валидация перед импортом (проверка session strings)
 
-8. **Drift Detection**
+9. **Drift Detection**
    - [ ] Мониторинг изменений в каналах/ботах
    - [ ] Алерты при неожиданных изменениях
    - [ ] Сравнение с шаблонами
 
-9. **Web UI / Telegram Mini App**
-   - [ ] Дашборд для больших таблиц/графиков
-   - [ ] Топологические карты
-   - [ ] Расширенные фильтры
+10. **UX cleanup — завершение**
+    - [ ] Полный аудит ВСЕХ меню на button dumps
+    - [ ] Cancel/Help консистентность
+    - [ ] Inline help для сложных полей

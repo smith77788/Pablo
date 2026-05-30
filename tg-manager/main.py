@@ -231,7 +231,7 @@ async def main() -> None:
         asyncio.create_task(_resilient("ranking_checker",  ranking_checker.run, pool, bot))
         asyncio.create_task(_resilient("search_observer",  search_observer.run_confirmation_loop, pool, bot))
         asyncio.create_task(_resilient("account_monitor",  account_monitor.run, pool, bot))
-        asyncio.create_task(_resilient("trust_engine",     trust_engine.run, pool))
+        asyncio.create_task(_resilient("trust_engine",     trust_engine.run, pool, bot))
         asyncio.create_task(_resilient("shadowban_monitor",shadowban_monitor.run, pool, bot))
         asyncio.create_task(_resilient("op_worker",        op_worker.run, pool, bot))
         asyncio.create_task(_resilient("behavioral_engine",behavioral_engine.run, pool, bot))

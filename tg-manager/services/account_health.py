@@ -254,15 +254,100 @@ def get_health_summary(account_ids: list[int]) -> list[dict]:
     return sorted(result, key=lambda x: -x["health_score"])
 
 
+async def _persist_health_snapshots(pool: asyncpg.Pool) -> int:
+    """Сохраняет текущие health_score из in-memory кеша в account_health_history."""
+    if not _health_cache:
+        return 0
+
+    import json as _json
+    batch = []
+    for acc_id, health in _health_cache.items():
+        batch.append((
+            acc_id,
+            0,  # owner_id будет заполнен из БД через ON CONFLICT или отдельным запросом
+            round(health.health_score, 2),
+            round(health.load_score, 2),
+            0.0,  # trust_score — заполнится ниже
+            health.flood_events_7d,
+            health.success_ops,
+            health.fail_ops,
+            health.warmup_state.value,
+            _json.dumps(health.suitability),
+        ))
+
+    if not batch:
+        return 0
+
+    # Получаем owner_id и trust_score для аккаунтов одним запросом
+    acc_ids = [b[0] for b in batch]
+    acc_info = await pool.fetch(
+        "SELECT id, owner_id, trust_score FROM tg_accounts WHERE id = ANY($1::int[])",
+        acc_ids,
+    )
+    info_map: dict[int, tuple[int, float]] = {}
+    for row in acc_info:
+        info_map[row["id"]] = (row["owner_id"], float(row["trust_score"] or 0))
+
+    written = 0
+    for item in batch:
+        acc_id = item[0]
+        if acc_id not in info_map:
+            continue
+        owner_id, trust_score = info_map[acc_id]
+        try:
+            await pool.execute(
+                """INSERT INTO account_health_history
+                       (account_id, owner_id, health_score, load_score, trust_score,
+                        flood_events_7d, success_ops, fail_ops, warmup_state, suitability)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)""",
+                acc_id, owner_id, item[2], item[3], trust_score,
+                item[5], item[6], item[7], item[8], item[9],
+            )
+            written += 1
+        except Exception:
+            pass  # таблица может ещё не существовать
+
+    return written
+
+
+async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:
+    """Удаляет health-снапшоты старше 30 дней."""
+    try:
+        deleted = await pool.fetchval(
+            "DELETE FROM account_health_history "
+            "WHERE recorded_at < NOW() - INTERVAL '30 days' "
+            "RETURNING COUNT(*)"
+        )
+        return int(deleted or 0)
+    except Exception:
+        return 0
+
+
 async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> None:
-    """Фоновый цикл: каждый час пересчитывает здоровье всех аккаунтов."""
+    """Фоновый цикл: каждый час пересчитывает здоровье и сохраняет снапшоты."""
+    cycle = 0
     while True:
         try:
             owners = await pool.fetch(
                 "SELECT DISTINCT owner_id FROM tg_accounts WHERE is_active=TRUE"
             )
+            total_loaded = 0
             for row in owners:
-                await load_from_db(pool, row["owner_id"])
+                total_loaded += await load_from_db(pool, row["owner_id"])
+
+            # Сохраняем снапшоты health_score в БД для трендов
+            if total_loaded > 0:
+                written = await _persist_health_snapshots(pool)
+                if written:
+                    log.debug("account_health: persisted %d snapshots", written)
+
+            # Чистка старых снапшотов раз в сутки (24 цикла)
+            if cycle % 24 == 0:
+                cleaned = await _cleanup_old_health_history(pool)
+                if cleaned:
+                    log.debug("account_health: cleaned %d old snapshots", cleaned)
+
+            cycle += 1
         except Exception as e:
             log.warning("account_health loop error: %s", e)
         await asyncio.sleep(interval_s)
