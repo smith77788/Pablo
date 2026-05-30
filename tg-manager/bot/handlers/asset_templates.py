@@ -320,9 +320,12 @@ async def msg_waiting_name(message: Message, state: FSMContext) -> None:
     prompt = _TYPE_PROMPTS.get(asset_type, "Введите параметры шаблона:")
     label = _TYPE_LABELS.get(asset_type, asset_type)
 
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
     await message.answer(
         f"➕ <b>Шаблон {label} — шаг 2/2</b>\n\n{prompt}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

@@ -13,6 +13,24 @@ from database import db
 router = Router()
 
 
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _ar_cancel_kb(bot_id: int) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    return kb.as_markup()
+
+
+def _ar_back_cancel_kb(bot_id: int, back_action: str) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AutoReplyCb(action=back_action, bot_id=bot_id))
+    kb.button(text="❌ Отмена", callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+# ── Handlers ────────────────────────────────────────────────────────────────
+
 @router.callback_query(AutoReplyCb.filter(F.action == "menu"))
 async def cb_ar_menu(callback: CallbackQuery, callback_data: AutoReplyCb,
                      pool: asyncpg.Pool) -> None:
@@ -58,6 +76,7 @@ async def cb_trig_start(callback: CallbackQuery, callback_data: AutoReplyCb,
     await callback.message.edit_text(
         "▶️ Триггер: <b>/start</b>\n\nВведите текст ответа (HTML-форматирование поддерживается):",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
@@ -70,6 +89,7 @@ async def cb_trig_keyword(callback: CallbackQuery, callback_data: AutoReplyCb,
     await callback.message.edit_text(
         "🔑 Триггер: <b>Ключевое слово</b>\n\nВведите ключевое слово (регистр не важен):",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
@@ -82,28 +102,44 @@ async def cb_trig_any(callback: CallbackQuery, callback_data: AutoReplyCb,
     await callback.message.edit_text(
         "💬 Триггер: <b>Любое сообщение</b>\n\nВведите текст ответа (HTML-форматирование поддерживается):",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
 
 @router.message(AddAutoReply.waiting_keyword, F.text)
 async def msg_ar_keyword(message: Message, state: FSMContext) -> None:
-    await state.update_data(keyword=message.text.strip())
+    keyword = message.text.strip()
+    if not keyword:
+        data = await state.get_data()
+        await message.answer("⚠️ Ключевое слово не может быть пустым. Введите снова:", reply_markup=_ar_cancel_kb(data.get("bot_id", 0)))
+        return
+    if len(keyword) > 100:
+        await message.answer("⚠️ Слишком длинное ключевое слово (макс. 100 символов). Введите снова:", reply_markup=_ar_cancel_kb((await state.get_data()).get("bot_id", 0)))
+        return
+    await state.update_data(keyword=keyword)
     await state.set_state(AddAutoReply.waiting_text)
+    data = await state.get_data()
     await message.answer(
-        f"🔑 Ключевое слово: <code>{message.text.strip()}</code>\n\n"
+        f"🔑 Ключевое слово: <code>{keyword}</code>\n\n"
         "Введите текст ответа (HTML-форматирование поддерживается):",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(data.get("bot_id", 0)),
     )
 
 
 @router.message(AddAutoReply.waiting_text, F.text)
 async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    text = message.text.strip()
+    if not text:
+        data = await state.get_data()
+        await message.answer("⚠️ Текст ответа не может быть пустым. Введите снова:", reply_markup=_ar_cancel_kb(data.get("bot_id", 0)))
+        return
     data = await state.get_data()
     await state.clear()
     await db.add_auto_reply(
         pool, data["bot_id"], data["trigger_type"],
-        data.get("keyword"), message.text,
+        data.get("keyword"), text,
     )
     trigger_label = {
         "start": "/start",
@@ -257,6 +293,7 @@ async def cb_trig_inactivity(callback: CallbackQuery, callback_data: AutoCb,
         "⏳ <b>Триггер: Неактивность</b>\n\n"
         "Введите количество дней неактивности пользователя (например: <code>3</code>):",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
 
 
@@ -269,8 +306,9 @@ async def msg_inactivity_days(message: Message, state: FSMContext) -> None:
         if days < 1:
             raise ValueError("must be positive")
     except (ValueError, TypeError):
+        data = await state.get_data()
         await message.answer("❌ Введите целое положительное число (например: <code>3</code>).",
-                             parse_mode="HTML")
+                             parse_mode="HTML", reply_markup=_ar_cancel_kb(data.get("bot_id", 0)))
         return
     await state.update_data(trigger_value=str(days))
     await state.set_state(AddAutoRuleExt.waiting_action_value)
@@ -279,8 +317,9 @@ async def msg_inactivity_days(message: Message, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="💬 Отправить сообщение", callback_data=AutoCb(action="ext_act_send", bot_id=bot_id))
     kb.button(text="🔗 Webhook", callback_data=AutoCb(action="ext_act_webhook", bot_id=bot_id))
-    kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
-    kb.adjust(1)
+    kb.button(text="◀️ Назад", callback_data=AutoCb(action="trig_inactivity", bot_id=bot_id))
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    kb.adjust(2, 2)
     await message.answer(
         f"⏳ Неактивность: <b>{days} дн.</b>\n\n"
         "<b>Шаг 2/3</b> — Выберите действие:",
@@ -301,6 +340,7 @@ async def cb_act_webhook(callback: CallbackQuery, callback_data: AutoCb,
         "<b>Шаг 3/3</b> — Введите URL для POST-запроса:\n"
         "Пример: <code>https://your-service.com/webhook</code>",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
 
 
@@ -315,6 +355,7 @@ async def cb_ext_act_webhook(callback: CallbackQuery, callback_data: AutoCb,
         "Введите URL для POST-запроса:\n"
         "Пример: <code>https://your-service.com/webhook</code>",
         parse_mode="HTML",
+        reply_markup=_ar_back_cancel_kb(callback_data.bot_id, "trig_inactivity"),
     )
 
 
@@ -328,6 +369,7 @@ async def cb_ext_act_send(callback: CallbackQuery, callback_data: AutoCb,
         "💬 <b>Действие: Отправить сообщение</b>\n\n"
         "Введите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
+        reply_markup=_ar_back_cancel_kb(callback_data.bot_id, "trig_inactivity"),
     )
 
 
@@ -343,16 +385,24 @@ async def cb_act_ai_reply(callback: CallbackQuery, callback_data: AutoCb,
         "<b>Шаг 3/3</b> — Введите системный промпт (описание персонажа/роли AI):\n"
         "Пример: <code>Ты вежливый менеджер по продажам компании X.</code>",
         parse_mode="HTML",
+        reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
 
 
 @router.message(AddAutoRuleExt.waiting_action_value, F.text)
 async def msg_ext_action_value(message: Message, state: FSMContext) -> None:
     """Receive webhook URL or AI system prompt or message text, then ask for rule name."""
-    await state.update_data(action_value=message.text.strip())
+    value = message.text.strip()
+    if not value:
+        data = await state.get_data()
+        await message.answer("⚠️ Значение не может быть пустым. Введите снова:", reply_markup=_ar_cancel_kb(data.get("bot_id", 0)))
+        return
+    await state.update_data(action_value=value)
     await state.set_state(AddAutoRuleExt.waiting_name)
+    data = await state.get_data()
     await message.answer(
         "✅ Значение сохранено!\n\nВведите название для этого правила (для вашего удобства):",
+        reply_markup=_ar_cancel_kb(data.get("bot_id", 0)),
     )
 
 
@@ -360,6 +410,11 @@ async def msg_ext_action_value(message: Message, state: FSMContext) -> None:
 async def msg_ext_rule_name(message: Message, state: FSMContext,
                              pool: asyncpg.Pool) -> None:
     """Save the new automation rule with extended action/trigger types."""
+    rule_name = message.text.strip()
+    if not rule_name:
+        data = await state.get_data()
+        await message.answer("⚠️ Название не может быть пустым. Введите снова:", reply_markup=_ar_cancel_kb(data.get("bot_id", 0)))
+        return
     data = await state.get_data()
     await state.clear()
     bot_id = data["bot_id"]
@@ -367,7 +422,6 @@ async def msg_ext_rule_name(message: Message, state: FSMContext,
     trigger_value = data.get("trigger_value")
     action_type = data["action_type"]
     action_value = data.get("action_value", "")
-    rule_name = message.text.strip()
 
     await db.add_automation_rule(
         pool, bot_id, rule_name,

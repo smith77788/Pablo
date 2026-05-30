@@ -10,8 +10,25 @@ from bot.states import CreateFunnel, FunnelBroadcast
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import broadcaster
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
+
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _fn_cancel_kb(bot_id: int) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=FunnelCb(action="list", bot_id=bot_id))
+    return kb.as_markup()
+
+
+def _fn_back_cancel_kb(bot_id: int, back_action: str) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=FunnelCb(action=back_action, bot_id=bot_id))
+    kb.button(text="❌ Отмена", callback_data=FunnelCb(action="list", bot_id=bot_id))
+    kb.adjust(2)
+    return kb.as_markup()
 
 
 async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
@@ -102,16 +119,25 @@ async def cb_fn_create(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.message.edit_text(
         "➕ <b>Новая цепочка</b>\n\nВведите название цепочки:",
         parse_mode="HTML",
+        reply_markup=_fn_cancel_kb(callback_data.bot_id),
     )
 
 
 @router.message(CreateFunnel.waiting_name, F.text)
 async def msg_fn_name(message: Message, state: FSMContext) -> None:
+    name = message.text.strip()
+    if not name:
+        data = await state.get_data()
+        await message.answer("⚠️ Название не может быть пустым. Введите снова:", reply_markup=_fn_cancel_kb(data.get("bot_id", 0)))
+        return
+    if len(name) > 200:
+        await message.answer("⚠️ Слишком длинное название (макс. 200 символов). Введите снова:", reply_markup=_fn_cancel_kb((await state.get_data()).get("bot_id", 0)))
+        return
     data = await state.get_data()
-    await state.update_data(funnel_name=message.text.strip())
+    await state.update_data(funnel_name=name)
     await state.set_state(CreateFunnel.waiting_trigger)
     await message.answer(
-        f"📝 Название: <b>{message.text.strip()}</b>\n\nВыберите тип триггера:",
+        f"📝 Название: <b>{name}</b>\n\nВыберите тип триггера:",
         parse_mode="HTML",
         reply_markup=funnel_trigger_menu(data["bot_id"]),
     )
@@ -136,6 +162,7 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
         "Цепочка создана! Теперь добавьте первый шаг.\n\n"
         "Введите текст сообщения для шага 1:",
         parse_mode="HTML",
+        reply_markup=_fn_cancel_kb(bot_id),
     )
 
 
@@ -143,11 +170,13 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
 async def cb_fn_trig_keyword(callback: CallbackQuery, callback_data: FunnelCb,
                               state: FSMContext) -> None:
     data = await state.get_data()
-    await state.update_data(bot_id=callback_data.bot_id or data.get("bot_id", 0))
+    bot_id = callback_data.bot_id or data.get("bot_id", 0)
+    await state.update_data(bot_id=bot_id)
     await state.set_state(CreateFunnel.waiting_keyword)
     await callback.message.edit_text(
         "🔑 Триггер: <b>Ключевое слово</b>\n\nВведите ключевое слово (регистр не важен):",
         parse_mode="HTML",
+        reply_markup=_fn_back_cancel_kb(bot_id, "create"),
     )
     await callback.answer()
 
@@ -156,6 +185,12 @@ async def cb_fn_trig_keyword(callback: CallbackQuery, callback_data: FunnelCb,
 async def msg_fn_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     keyword = message.text.strip()
+    if not keyword:
+        await message.answer("⚠️ Ключевое слово не может быть пустым. Введите снова:", reply_markup=_fn_cancel_kb(data.get("bot_id", 0)))
+        return
+    if len(keyword) > 100:
+        await message.answer("⚠️ Слишком длинное ключевое слово (макс. 100 символов). Введите снова:", reply_markup=_fn_cancel_kb(data.get("bot_id", 0)))
+        return
     funnel_name = data.get("funnel_name", "Новая цепочка")
     bot_id = data["bot_id"]
     row = await db.create_funnel(pool, bot_id, funnel_name, "keyword", keyword)
@@ -167,6 +202,7 @@ async def msg_fn_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool
         "Цепочка создана! Теперь добавьте первый шаг.\n\n"
         "Введите текст сообщения для шага 1:",
         parse_mode="HTML",
+        reply_markup=_fn_cancel_kb(bot_id),
     )
 
 
@@ -184,17 +220,25 @@ async def cb_fn_add_step(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.message.edit_text(
         f"➕ <b>Добавить шаг {callback_data.step + 1}</b>\n\nВведите текст сообщения:",
         parse_mode="HTML",
+        reply_markup=_fn_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
 
 @router.message(CreateFunnel.waiting_step_text, F.text)
 async def msg_fn_step_text(message: Message, state: FSMContext) -> None:
-    await state.update_data(step_text=message.text)
+    text = message.text
+    if not text or not text.strip():
+        data = await state.get_data()
+        await message.answer("⚠️ Текст сообщения не может быть пустым. Введите снова:", reply_markup=_fn_cancel_kb(data.get("bot_id", 0)))
+        return
+    await state.update_data(step_text=text)
     await state.set_state(CreateFunnel.waiting_step_delay)
+    data = await state.get_data()
     await message.answer(
         "⏱ Задержка в минутах перед отправкой этого шага (0 = сразу):",
         parse_mode="HTML",
+        reply_markup=_fn_cancel_kb(data.get("bot_id", 0)),
     )
 
 
@@ -297,12 +341,18 @@ async def cb_fn_broadcast(callback: CallbackQuery, callback_data: FunnelCb,
         f"Подписчиков: <b>{len(user_ids)}</b>\n\n"
         "Введите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
+        reply_markup=_fn_cancel_kb(callback_data.bot_id),
     )
 
 
 @router.message(FunnelBroadcast.waiting_message, F.text)
 async def msg_fn_broadcast(message: Message, state: FSMContext,
                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    text = message.text.strip() if message.text else ""
+    if not text:
+        data = await state.get_data()
+        await message.answer("⚠️ Текст сообщения не может быть пустым. Введите снова:", reply_markup=_fn_cancel_kb(data.get("bot_id", 0)))
+        return
     data = await state.get_data()
     await state.clear()
 
@@ -312,10 +362,10 @@ async def msg_fn_broadcast(message: Message, state: FSMContext,
         return
 
     user_ids = data["subscriber_ids"]
-    bc_id = await db.create_broadcast(pool, data["bot_id"], message.text,
+    bc_id = await db.create_broadcast(pool, data["bot_id"], text,
                                        len(user_ids), message.from_user.id, None)
     broadcaster.start(pool, http, bc_id, row["token"], data["bot_id"],
-                      message.text, None, user_ids)
+                      text, None, user_ids)
 
     await message.answer(
         f"🚀 Рассылка #{bc_id} запущена для <b>{len(user_ids)}</b> подписчиков цепочки «{data['funnel_name']}»!",

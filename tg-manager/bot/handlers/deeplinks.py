@@ -8,8 +8,15 @@ from bot.keyboards import deeplinks_menu, deeplink_view_menu, back_to_bot, subsc
 from bot.states import CreateDeepLink
 from bot.utils.subscription import require_plan, locked_text
 from database import db
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
+
+
+def _dl_cancel_kb(bot_id: int) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=DeepLinkCb(action="menu", bot_id=bot_id))
+    return kb.as_markup()
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "menu"))
@@ -88,19 +95,30 @@ async def cb_dl_create(callback: CallbackQuery, callback_data: DeepLinkCb,
         "Введите название ссылки (для вашего удобства):\n"
         "Например: <code>Instagram bio</code>, <code>VK post</code>, <code>YouTube desc</code>",
         parse_mode="HTML",
+        reply_markup=_dl_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
 
 @router.message(CreateDeepLink.waiting_name, F.text)
 async def msg_dl_name(message: Message, state: FSMContext) -> None:
-    await state.update_data(link_name=message.text.strip())
+    name = message.text.strip()
+    if not name:
+        data = await state.get_data()
+        await message.answer("⚠️ Название не может быть пустым. Введите снова:", reply_markup=_dl_cancel_kb(data.get("bot_id", 0)))
+        return
+    if len(name) > 200:
+        await message.answer("⚠️ Слишком длинное название (макс. 200 символов). Введите снова:", reply_markup=_dl_cancel_kb((await state.get_data()).get("bot_id", 0)))
+        return
+    await state.update_data(link_name=name)
     await state.set_state(CreateDeepLink.waiting_param)
+    data = await state.get_data()
     await message.answer(
         "🔗 Введите уникальный <b>start параметр</b> (латиница, цифры, _, -):\n\n"
         "Например: <code>insta</code>, <code>vk2024</code>, <code>yt_video1</code>\n\n"
         "<i>Будет использоваться в ссылке: t.me/bot?start=ВАШ_ПАРАМЕТР</i>",
         parse_mode="HTML",
+        reply_markup=_dl_cancel_kb(data.get("bot_id", 0)),
     )
 
 

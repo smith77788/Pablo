@@ -1,5 +1,32 @@
 # IMPLEMENTATION LOG
 
+## 2026-05-30 — UX Audit: Cancel/Back Buttons + Input Validation (r15)
+
+**Цель:** Исправить отсутствующие Cancel/Back кнопки во всех FSM wizard'ах, добавить валидацию ввода.
+
+**Изменённые файлы:**
+- `bot/handlers/auto_reply.py` — +12 fixes: Cancel на 10 шагах, Back на extended rules, валидация keyword/text/name
+- `bot/handlers/funnels.py` — +10 fixes: Cancel на 7 шагах, Back на keyword-триггере, валидация name/keyword/step_text/broadcast
+- `bot/handlers/schedule.py` — +3 fixes: Cancel на всех шагах create wizard, улучшена валидация текста
+- `bot/handlers/deeplinks.py` — +3 fixes: Cancel на всех шагах, валидация name (непустой, max 200)
+- `bot/handlers/asset_templates.py` — +1 fix: Cancel на переходе waiting_name → waiting_json
+- `bot/handlers/broadcast.py` — +3 fixes: Cancel на compose/add_button/button_text, валидация button_text
+
+**До:**
+- 32+ FSM-шагов без Cancel/Back кнопок — пользователи застревали в wizard'ах
+- 14 message-хендлеров без валидации ввода — пустые/невалидные данные попадали в БД
+- 0 button dumps найдено (Telegram-native UX принцип группировки соблюдается)
+
+**После:**
+- Все FSM wizard'ы имеют Cancel на каждом шаге (6 файлов исправлено)
+- Валидация добавлена: проверка на пустоту, максимальную длину, regex где нужно
+- Паттерн _xxx_cancel_kb() и _xxx_back_cancel_kb() унифицирован
+
+**Проверки:**
+- `python3 -c "import ast; ast.parse(open(f).read())"` — все 6 файлов OK
+
+---
+
 ## 2026-05-30 — Drift Detection, Anomalies UI, Import Center v2 (r15)
 
 **Цель:** Мониторинг изменений каналов, anomaly alerts UI, CSV import аккаунтов, UX-улучшения.

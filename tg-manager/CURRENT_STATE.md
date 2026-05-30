@@ -16,6 +16,14 @@
 
 **Коммиты:** 9ddf27f (основная) + 549a339 (deploy trigger)
 
+### ✅ UX-аудит: Cancel/Back кнопки + валидация ввода (r15)
+- auto_reply.py: Cancel на всех FSM-шагах (10 шагов), Back на extended rules, валидация keyword/text/name
+- funnels.py: Cancel на всех FSM-шагах (7 шагов), Back на keyword-триггере, валидация name/keyword/text
+- schedule.py: Cancel на всех шагах create wizard (3 шага), улучшена валидация
+- deeplinks.py: Cancel на всех шагах create wizard (2 шага), валидация name (непустой, max 200)
+- asset_templates.py: Cancel на переходе waiting_name → waiting_json
+- broadcast.py: Cancel на compose/add_button/button_text, валидация button_text
+
 ### ✅ Выполнено в сессии 2026-05-30 (r13 → r15)
 
 1. **Anomaly alerts sub-view** — вкладка ⚠️ Аномалии в behavioral dashboard (6a9843a/d02b247)

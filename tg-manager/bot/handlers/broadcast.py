@@ -17,6 +17,13 @@ from services import broadcaster
 router = Router()
 
 
+def _bc_cancel_kb(bot_id: int) -> object:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
+    kb = _Kb()
+    kb.button(text="❌ Отмена", callback_data=BroadcastCb(action="menu", bot_id=bot_id))
+    return kb.as_markup()
+
+
 @router.callback_query(BroadcastCb.filter(F.action == "menu"))
 async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
                       pool: asyncpg.Pool) -> None:
@@ -52,7 +59,9 @@ async def cb_compose(callback: CallbackQuery, callback_data: BroadcastCb,
     await callback.message.edit_text(
         "✍️ Напишите текст рассылки или отправьте фото с подписью.\n\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
-        "<code>&lt;a href=...&gt;</code>"
+        "<code>&lt;a href=...&gt;</code>",
+        parse_mode="HTML",
+        reply_markup=_bc_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
@@ -177,17 +186,25 @@ async def cb_add_button(callback: CallbackQuery, callback_data: BroadcastCb,
     await callback.message.edit_text(
         "🔗 <b>Добавить кнопку к рассылке</b>\n\nВведите текст кнопки:",
         parse_mode="HTML",
+        reply_markup=_bc_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
 
 @router.message(Broadcast.waiting_button_text, F.text)
 async def msg_button_text(message: Message, state: FSMContext) -> None:
-    await state.update_data(pending_btn_text=message.text.strip())
+    btn_text = message.text.strip()
+    if not btn_text:
+        data = await state.get_data()
+        await message.answer("⚠️ Текст кнопки не может быть пустым. Введите снова:", reply_markup=_bc_cancel_kb(data.get("bot_id", 0)))
+        return
+    await state.update_data(pending_btn_text=btn_text)
     await state.set_state(Broadcast.waiting_button_url)
+    data = await state.get_data()
     await message.answer(
-        f"🔗 Текст кнопки: <b>{message.text.strip()}</b>\n\nТеперь введите URL:",
+        f"🔗 Текст кнопки: <b>{btn_text}</b>\n\nТеперь введите URL:",
         parse_mode="HTML",
+        reply_markup=_bc_cancel_kb(data.get("bot_id", 0)),
     )
 
 

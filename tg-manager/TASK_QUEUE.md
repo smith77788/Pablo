@@ -43,10 +43,10 @@
 - [x] Статус-иконки ✅/⛔ в списке аккаунтов
 - [x] Описания в Channel Factory, Group Factory, Mass Publish
 - [x] experiments.py FSM: кнопки Отмены на всех шагах (r13)
-- [ ] Полный аудит всех меню на button dumps
-- [ ] Проверка консистентности Cancel/Help во всех FSM
+- [x] Полный аудит всех меню на button dumps — аудит проведён, button dumps не найдены
+- [x] Проверка консистентности Cancel/Back во всех FSM — исправлено 6 файлов: auto_reply, funnels, schedule, deeplinks, asset_templates, broadcast
 - [ ] Inline help для сложных полей
-- [ ] Валидация input-данных перед сохранением во всех FSM
+- [x] Валидация input-данных перед сохранением во всех FSM — исправлено в auto_reply, funnels, schedule, deeplinks, broadcast
 
 ## P3 — Targeting and templates
 - [ ] Add reusable target selection abstraction
@@ -89,11 +89,11 @@
 - [x] Auto-rotation аккаунтов — автоматические кулдауны (r14)
 - [x] Behavioral Engine — velocity anomaly + pattern deviation (r14)
 - [ ] Import center improvements (CSV import для bulk operations)
-- [ ] Drift detection foundation
+- [x] Drift detection foundation (d934241)
 - [ ] Telegram Mini App для аналитики
 - [ ] RBAC / Multi-user workspaces
 - [ ] Approval workflows
-- [ ] Topology map
+- [x] Topology map (5a6cf53)
 
 ---
 

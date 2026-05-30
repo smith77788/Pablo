@@ -9,8 +9,16 @@ from bot.callbacks import ScheduleCb, BmCb
 from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list
 from bot.states import ScheduleBroadcast
 from database import db
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
+
+
+def _sch_cancel_kb(bot_id: int) -> object:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ScheduleCb(action="menu", bot_id=bot_id))
+    return kb.as_markup()
+
 
 _DT_HINT = (
     "Введите дату и время в формате:\n"
@@ -64,6 +72,7 @@ async def cb_schedule_create(callback: CallbackQuery, callback_data: ScheduleCb,
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
         "<code>&lt;a href=...&gt;</code>",
         parse_mode="HTML",
+        reply_markup=_sch_cancel_kb(callback_data.bot_id),
     )
     await callback.answer()
 
@@ -71,14 +80,17 @@ async def cb_schedule_create(callback: CallbackQuery, callback_data: ScheduleCb,
 @router.message(ScheduleBroadcast.waiting_message)
 async def msg_schedule_message(message: Message, state: FSMContext) -> None:
     text = message.text or message.caption or ""
-    if not text:
-        await message.answer("❌ Текст не может быть пустым. Попробуйте ещё раз:")
+    if not text or not text.strip():
+        data = await state.get_data()
+        await message.answer("❌ Текст не может быть пустым. Попробуйте ещё раз:", reply_markup=_sch_cancel_kb(data.get("bot_id", 0)))
         return
     await state.update_data(text=text)
     await state.set_state(ScheduleBroadcast.waiting_datetime)
+    data = await state.get_data()
     await message.answer(
         f"⏰ <b>Шаг 2/2: Дата и время запуска</b>\n\n{_DT_HINT}",
         parse_mode="HTML",
+        reply_markup=_sch_cancel_kb(data.get("bot_id", 0)),
     )
 
 
