@@ -6,6 +6,7 @@ import asyncpg
 from bot.callbacks import TemplateCb
 from bot.keyboards import templates_list, template_actions, broadcast_confirm, back_to_bot
 from bot.states import AddTemplate, Broadcast
+from bot.utils.template_validator import validate_message_template
 from database import db
 
 router = Router()
@@ -80,11 +81,19 @@ async def msg_template_text(message: Message, state: FSMContext,
     name = data["name"]
     text = message.text or message.caption or ""
     bot_id = data.get("bot_id", 0)
-    await state.clear()
 
-    if not text:
-        await message.answer("❌ Текст шаблона не может быть пустым.")
+    # Validate before saving
+    validation = validate_message_template(name, text)
+    if not validation.valid:
+        errors = "\n".join(f"• {e}" for e in validation.errors)
+        await message.answer(f"❌ <b>Ошибки в шаблоне:</b>\n{errors}", parse_mode="HTML")
         return
+    if validation.warnings:
+        warns = "\n".join(f"⚠️ {w}" for w in validation.warnings)
+        await message.answer(f"<b>Предупреждения:</b>\n{warns}\n\nВсё равно сохранить? Напишите текст снова для подтверждения.", parse_mode="HTML")
+        return
+
+    await state.clear()
 
     saved = await db.save_template(pool, message.from_user.id, name, text)
     if saved:

@@ -23,6 +23,7 @@ import asyncpg
 from bot.callbacks import AssetTplCb, ChanFactCb, GroupFCb, MassPubCb, MassOpCb, LibCb, TplBotApplyCb
 from bot.states import AssetTemplateFSM, ChannelFactoryFSM, CreateGroupFSM, BulkJoinFSM, BulkLeaveFSM
 from bot.utils.op_helpers import _get_active_accounts
+from bot.utils.template_validator import validate_asset_template
 from database import db
 
 log = logging.getLogger(__name__)
@@ -381,6 +382,16 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
                 "username":    parts[2] if len(parts) > 2 else "",
             }
 
+    # Validate the parsed template
+    validation = validate_asset_template(asset_type, name, template)
+    if not validation.valid:
+        errors = "\n".join(f"• {e}" for e in validation.errors)
+        await message.answer(
+            f"❌ <b>Ошибки в шаблоне:</b>\n{errors}\n\nВведите параметры заново:",
+            parse_mode="HTML",
+        )
+        return
+
     await state.update_data(template=template)
     await state.set_state(AssetTemplateFSM.confirming)
 
@@ -389,6 +400,10 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
     for k, v in template.items():
         if v:
             lines.append(f"<b>{k}:</b> {v}")
+
+    if validation.warnings:
+        lines.append("\n⚠️ <b>Замечания:</b>")
+        lines.extend(f"• {w}" for w in validation.warnings)
 
     await message.answer(
         "\n".join(lines) + "\n\nСохранить шаблон?",
@@ -409,13 +424,30 @@ async def cb_save(
     asset_type = data.get("asset_type", callback_data.asset_type or "")
     name = data.get("name", "")
     template = data.get("template", {})
+
+    # Validate before saving
+    validation = validate_asset_template(asset_type, name, template)
+    if not validation.valid:
+        errors = "\n".join(f"• {e}" for e in validation.errors)
+        await callback.message.edit_text(
+            f"❌ <b>Ошибки в шаблоне:</b>\n{errors}",
+            parse_mode="HTML",
+            reply_markup=_menu_kb(),
+        )
+        await state.clear()
+        return
+    # Warnings already shown at confirm step; still allow saving
+
     await state.clear()
 
     try:
         tpl_id = await _save_template(pool, callback.from_user.id, asset_type, name, template)
         label = _TYPE_LABELS.get(asset_type, asset_type)
+        msg = f"✅ Шаблон <b>«{name}»</b> ({label}) сохранён!"
+        if validation.warnings:
+            msg += "\n\n⚠️ <b>Замечания:</b>\n" + "\n".join(f"• {w}" for w in validation.warnings)
         await callback.message.edit_text(
-            f"✅ Шаблон <b>«{name}»</b> ({label}) сохранён!",
+            msg,
             parse_mode="HTML",
             reply_markup=_menu_kb(),
         )
