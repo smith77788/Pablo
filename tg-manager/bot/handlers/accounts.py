@@ -2320,27 +2320,73 @@ async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
         "📋 <b>Батч-импорт Telethon String Sessions</b>\n\n"
         "Отправьте несколько session strings — <b>по одной на строку</b>:\n\n"
         "<code>1BQANOTEuAGkA...\n"
-        "1BVtsOIKAGkB...\n"
-        "1ByDfhMFAlkC...</code>\n\n"
-        "Или загрузите <b>.txt файл</b> со списком сессий.\n\n"
+        "1BVtsOIKAGkB...</code>\n\n"
+        "Или загрузите файл:\n"
+        "• <b>.txt</b> — одна сессия на строку\n"
+        "• <b>.csv</b> — колонки: <code>session,cluster</code> (cluster — опционально)\n\n"
+        "Пример CSV:\n"
+        "<code>session,cluster\n"
+        "1BQANOTEuAGkA...,main\n"
+        "1BVtsOIKAGkB...,reserve</code>\n\n"
         "⚠️ Никогда не передавайте сессии незнакомым людям.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
-async def _do_batch_import(raw_sessions: list[str], message, pool: asyncpg.Pool, user_id: int) -> None:
-    """Common logic for batch session import."""
+def _parse_sessions_csv(raw: bytes) -> list[tuple[str, str]]:
+    """Parse CSV bytes → list of (session_string, cluster) pairs."""
+    import csv, io
+    for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return []
+    delimiter = "," if raw[:2000].count(b",") >= raw[:2000].count(b";") else ";"
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    results: list[tuple[str, str]] = []
+    header_skipped = False
+    for row in reader:
+        if not row:
+            continue
+        first = (row[0] or "").strip().lower()
+        if not header_skipped and first in ("session", "session_string", "string", "#", ""):
+            header_skipped = True
+            continue
+        header_skipped = True
+        sess = (row[0] or "").strip()
+        cluster = (row[1] if len(row) > 1 else "").strip()
+        if sess and len(sess) > 20:
+            results.append((sess, cluster))
+    return results
+
+
+async def _do_batch_import(
+    raw_sessions: list[str] | list[tuple[str, str]],
+    message, pool: asyncpg.Pool, user_id: int,
+) -> None:
+    """Common logic for batch session import. Accepts plain strings or (session, cluster) tuples."""
     from services.account_manager import import_from_session_string, generate_device_fingerprint
 
-    total = len(raw_sessions)
+    # Normalise input: always work with (session_str, cluster) pairs
+    pairs: list[tuple[str, str]] = []
+    for item in raw_sessions:
+        if isinstance(item, tuple):
+            pairs.append(item)
+        else:
+            pairs.append((str(item).strip(), ""))
+
+    total = len(pairs)
     progress_msg = await message.answer(
         f"⏳ <b>Батч-импорт</b>\n\nОбрабатывается 0 / {total}...",
         parse_mode="HTML",
     )
 
     ok_list, err_list = [], []
-    for i, session_str in enumerate(raw_sessions):
+    for i, (session_str, cluster) in enumerate(pairs):
         session_str = session_str.strip()
         if not session_str:
             continue
@@ -2351,21 +2397,41 @@ async def _do_batch_import(raw_sessions: list[str], message, pool: asyncpg.Pool,
 
             phone = info.get("phone", "") or ""
             device = generate_device_fingerprint()
-            await db.add_tg_account(
+            acc_id = await db.add_tg_account(
                 pool,
                 owner_id=user_id,
-                session_str=validated_str,
                 phone=phone,
+                session_str=validated_str,
+                tg_user_id=info.get("tg_user_id") or 0,
                 first_name=info.get("first_name", ""),
-                last_name=info.get("last_name", ""),
                 username=info.get("username", ""),
-                tg_user_id=info.get("tg_user_id"),
                 device_model=device["device_model"],
                 system_version=device["system_version"],
                 app_version=device["app_version"],
             )
+            # Assign cluster if provided
+            if cluster and acc_id:
+                try:
+                    cl_row = await pool.fetchrow(
+                        "SELECT id FROM clusters WHERE owner_id=$1 AND name=$2", user_id, cluster
+                    )
+                    if not cl_row:
+                        await pool.execute(
+                            "INSERT INTO clusters(owner_id, name) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                            user_id, cluster,
+                        )
+                        cl_row = await pool.fetchrow(
+                            "SELECT id FROM clusters WHERE owner_id=$1 AND name=$2", user_id, cluster
+                        )
+                    if cl_row:
+                        await pool.execute(
+                            "UPDATE tg_accounts SET cluster=$1 WHERE id=$2", cl_row["id"], acc_id
+                        )
+                except Exception:
+                    pass
             name = info.get("first_name") or info.get("username") or phone or f"сессия #{i+1}"
-            ok_list.append(f"✅ {escape(name[:40])}")
+            suffix = f" [{cluster}]" if cluster else ""
+            ok_list.append(f"✅ {escape(name[:35])}{suffix}")
         except Exception as e:
             err_list.append(f"❌ Сессия #{i+1}: {escape(str(e)[:60])}")
 
@@ -2414,8 +2480,12 @@ async def fsm_batch_import_text(message: Message, state: FSMContext, pool: async
 @router.message(SessionImport.waiting_batch_sessions, F.document)
 async def fsm_batch_import_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     doc = message.document
-    if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый .txt файл со списком сессий.")
+    if not doc:
+        await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.")
+        return
+    filename = (doc.file_name or "").lower()
+    if not (filename.endswith(".txt") or filename.endswith(".csv")):
+        await message.answer("⚠️ Поддерживаются только .txt и .csv файлы.")
         return
     if doc.file_size and doc.file_size > 500_000:
         await message.answer("⚠️ Файл слишком большой. Максимум 500 КБ.")
@@ -2423,19 +2493,36 @@ async def fsm_batch_import_file(message: Message, state: FSMContext, pool: async
     try:
         file_info = await message.bot.get_file(doc.file_id)
         downloaded = await message.bot.download_file(file_info.file_path)
-        raw = downloaded.read().decode("utf-8", errors="ignore")
+        raw_bytes = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
     except Exception as e:
         await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
         return
-    sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    if not sessions:
-        await message.answer("⚠️ Файл пустой или не содержит сессий.")
-        return
-    if len(sessions) > 50:
-        sessions = sessions[:50]
-        await message.answer("⚠️ Взяты первые 50 сессий из файла.")
-    await state.clear()
-    await _do_batch_import(sessions, message, pool, message.from_user.id)
+
+    if filename.endswith(".csv"):
+        pairs = _parse_sessions_csv(raw_bytes)
+        if not pairs:
+            await message.answer(
+                "⚠️ CSV не содержит распознанных сессий.\n\n"
+                "Ожидаемый формат: <code>session,cluster</code> (cluster — опционально)",
+                parse_mode="HTML",
+            )
+            return
+        if len(pairs) > 50:
+            pairs = pairs[:50]
+            await message.answer("⚠️ Взяты первые 50 сессий из CSV.")
+        await state.clear()
+        await _do_batch_import(pairs, message, pool, message.from_user.id)
+    else:
+        raw_text = raw_bytes.decode("utf-8", errors="ignore")
+        sessions = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+        if not sessions:
+            await message.answer("⚠️ Файл пустой или не содержит сессий.")
+            return
+        if len(sessions) > 50:
+            sessions = sessions[:50]
+            await message.answer("⚠️ Взяты первые 50 сессий из файла.")
+        await state.clear()
+        await _do_batch_import(sessions, message, pool, message.from_user.id)
 
 
 # ── Asset Scanner ──────────────────────────────────────────────────────────────
