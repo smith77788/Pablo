@@ -74,6 +74,7 @@ from services import account_warmer
 from services import account_health
 from services import payment_webhook
 from services import task_registry
+from services import drift_detector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -239,6 +240,7 @@ async def main() -> None:
         asyncio.create_task(_resilient("account_health",   account_health.run_health_check_loop, pool))
         asyncio.create_task(_resilient("payment_webhook",  payment_webhook.run, pool, bot))
         asyncio.create_task(_resilient("task_registry",  task_registry.run_cleanup_loop))
+        asyncio.create_task(_resilient("drift_detector",  drift_detector.run, pool, bot))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:
