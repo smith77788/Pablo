@@ -170,7 +170,8 @@ async def _render_channel_step(
     selected: list[int] = sd.get("pack_channel_ids") or []
 
     channels = await pool.fetch(
-        "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 ORDER BY title LIMIT 30",
+        "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 "
+        "AND (type = 'channel' OR type IS NULL) ORDER BY title LIMIT 30",
         callback.from_user.id,
     )
     kb = InlineKeyboardBuilder()
@@ -223,7 +224,8 @@ async def _render_group_step(
     selected: list[int] = sd.get("pack_group_ids") or []
 
     groups = await pool.fetch(
-        "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 ORDER BY title LIMIT 30",
+        "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 "
+        "AND type IN ('megagroup', 'supergroup', 'group') ORDER BY title LIMIT 30",
         callback.from_user.id,
     )
     kb = InlineKeyboardBuilder()
@@ -395,11 +397,11 @@ async def cb_pack_confirm_create(
 async def cb_pack_view(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     pack = await db.get_presence_pack(pool, callback_data.pack_id, callback.from_user.id)
     if not pack:
         await callback.answer("Пакет не найден", show_alert=True)
         return
+    await callback.answer()
 
     ch_ids = json.loads(pack["channel_ids"] or "[]")
     gr_ids = json.loads(pack["group_ids"] or "[]")

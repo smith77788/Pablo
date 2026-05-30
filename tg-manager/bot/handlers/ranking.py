@@ -1395,6 +1395,12 @@ async def vis_receive_region(
                ON CONFLICT(bot_id, keyword) DO NOTHING""",
             bot_id, keyword, region, owner_id,
         )
+        # Also insert into tracked_keywords so ranking_checker picks it up
+        await pool.execute(
+            "INSERT INTO tracked_keywords(bot_id, owner_id, keyword) VALUES($1,$2,$3) "
+            "ON CONFLICT(bot_id, keyword) DO NOTHING",
+            bot_id, owner_id, keyword,
+        )
         saved = True
     except Exception as exc:
         log.warning("vis_receive_region save error: %s", exc)

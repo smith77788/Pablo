@@ -88,8 +88,8 @@ async def seed_channel_post(
     """Post a message to a channel via Bot API. Bot must be admin in the channel."""
     from services import bot_api
     try:
-        result = await bot_api.send_message(http, bot_token, channel_id, text)
-        return bool(result)
+        ok, _ = await bot_api.send_message(http, bot_token, channel_id, text)
+        return ok
     except Exception as e:
         log.warning("seed_channel_post failed for %s: %s", channel_id, e)
         return False
