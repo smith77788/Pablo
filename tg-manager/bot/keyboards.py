@@ -5,6 +5,7 @@ from bot.callbacks import (
     CommandsCb, TemplateCb, ScheduleCb, MultigeoCb, AutoReplyCb, RelayCb, FunnelCb, StatsCb,
     NoteCb, SwarmCb, CrmCb, AutoCb, ExperimentCb, DeepLinkCb, EngageCb, SeoCb,
     NetworkCb, ClusterCb, SubCb, AiCb, NetBcCb, AccCb, RankCb, ChanCb, RefCb, BmCb,
+    TaskCb,
 )
 
 PAGE_SIZE = 5
@@ -34,10 +35,11 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb.button(text="💳 Подписка",              callback_data=SubCb(action="menu"))
     kb.button(text="🔗 Реф. программа",        callback_data=RefCb(action="menu"))
     kb.button(text="🤖 AI-ассистент",          callback_data=AiCb(action="start"))
+    kb.button(text="⚡ Активные задачи",       callback_data=TaskCb(action="list"))
     kb.button(text="❓ Справка",               callback_data=BotCb(action="help"))
     if is_admin:
         kb.button(text="⚙️ Админка",           callback_data="adm:main")
-    kb.adjust(1, 2, 2, 2, 2, 2, 1 if not is_admin else 2)
+    kb.adjust(1, 2, 2, 2, 2, 2, 2, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
