@@ -122,10 +122,10 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[int]:
 
     if target_type == "bot_users" and target_id:
         rows = await pool.fetch(
-            "SELECT DISTINCT chat_id FROM bot_users WHERE bot_id=$1 AND chat_id > 0",
+            "SELECT DISTINCT user_id FROM bot_users WHERE bot_id=$1 AND user_id > 0",
             target_id,
         )
-        return [r["chat_id"] for r in rows if r["chat_id"] not in sent_ids]
+        return [r["user_id"] for r in rows if r["user_id"] not in sent_ids]
     elif target_type == "crm":
         rows = await pool.fetch(
             "SELECT DISTINCT tg_user_id FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",

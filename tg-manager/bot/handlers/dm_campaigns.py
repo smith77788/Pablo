@@ -334,7 +334,7 @@ async def _show_dm_preview(
     # Подсчитать аудиторию
     if target_type == "bot_users" and target_id:
         count_row = await pool.fetchrow(
-            "SELECT COUNT(DISTINCT chat_id) AS cnt FROM bot_users WHERE bot_id=$1 AND chat_id > 0",
+            "SELECT COUNT(DISTINCT user_id) AS cnt FROM bot_users WHERE bot_id=$1 AND user_id > 0",
             target_id,
         )
         bot_row = await pool.fetchrow(
