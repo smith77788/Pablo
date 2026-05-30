@@ -81,14 +81,14 @@ async def _check_search_visibility(pool: asyncpg.Pool, bot: Bot) -> None:
     rows = await pool.fetch(
         """
         WITH recent AS (
-            SELECT DISTINCT ON (bot_id) bot_id, position, created_at
+            SELECT DISTINCT ON (bot_id) bot_id, position, checked_at
             FROM search_rankings
-            ORDER BY bot_id, created_at DESC
+            ORDER BY bot_id, checked_at DESC
         ),
         historical AS (
             SELECT bot_id, AVG(position) AS avg_position
             FROM search_rankings
-            WHERE created_at > NOW() - INTERVAL '7 days'
+            WHERE checked_at > NOW() - INTERVAL '7 days'
               AND position IS NOT NULL
             GROUP BY bot_id
         )
