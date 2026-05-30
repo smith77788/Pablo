@@ -145,11 +145,13 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
     toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
     kb.button(text=toggle_text,
               callback_data=AccCb(action="toggle", acc_id=acc_id))
+    kb.button(text="🔄 Релог",
+              callback_data=AccCb(action="relog", acc_id=acc_id))
     kb.button(text="🗑 Удалить",
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -806,6 +808,9 @@ async def _finalize_login(
     phone: str,
 ) -> None:
     """Fetch session, save to DB, clean up pending login state."""
+    data = await state.get_data()
+    relog_acc_id: int | None = data.get("relog_acc_id")
+
     try:
         session_str, info = await get_client_info_and_session(phone)
     except Exception as exc:
@@ -842,12 +847,19 @@ async def _finalize_login(
 
     display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+
+    if relog_acc_id:
+        kb.button(text="👤 Открыть аккаунт", callback_data=AccCb(action="view", acc_id=relog_acc_id))
+        action_word = "переподключён"
+    else:
+        kb.button(text="➕ Добавить ещё аккаунт", callback_data=AccCb(action="add"))
+        action_word = "добавлен"
+
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
     await message.answer(
-        f"✅ <b>Аккаунт успешно добавлен!</b>\n\n"
+        f"✅ <b>Аккаунт успешно {action_word}!</b>\n\n"
         f"👤 {display_name}\n"
         f"📱 {escape(phone)}",
         parse_mode="HTML",
@@ -895,6 +907,92 @@ async def cb_view_account(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=_acc_menu_markup(callback_data.acc_id, is_active=is_active),
+    )
+
+
+# ── Relog (one-click re-authentication with stored phone) ─────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "relog"))
+async def cb_relog_account(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+
+    if not _api_configured():
+        await callback.message.edit_text(
+            _api_missing_text(),
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    phone: str = acc.get("phone") or ""
+    if not phone or not re.match(r"^\+\d{7,15}$", phone):
+        await callback.message.edit_text(
+            "❌ <b>Нет сохранённого номера</b>\n\n"
+            "Для этого аккаунта не сохранён номер телефона.\n"
+            "Используйте обычный вход: <b>Добавить → По номеру</b>.",
+            parse_mode="HTML",
+            reply_markup=_cancel_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"⏳ Отправляю SMS-код на <code>{escape(phone)}</code>…",
+        parse_mode="HTML",
+    )
+
+    try:
+        phone_code_hash, delivery_hint = await start_login(phone)
+    except Exception as exc:
+        err = str(exc)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id))
+        kb.adjust(1)
+        if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
+            m = re.search(r"(\d+)", err)
+            wait = m.group(1) if m else "?"
+            await callback.message.edit_text(
+                f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        else:
+            await callback.message.edit_text(
+                f"❌ Ошибка отправки кода: <code>{escape(err[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        return
+
+    await state.update_data(
+        phone=phone,
+        phone_code_hash=phone_code_hash,
+        relog_acc_id=callback_data.acc_id,
+    )
+    await state.set_state(AccountLogin.waiting_code)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Выслать SMS", callback_data=AccCb(action="resend_sms"))
+    kb.button(text="❌ Отмена",      callback_data=AccCb(action="cancel_login"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ {delivery_hint} <code>{escape(phone)}</code>.\n\n"
+        f"Код обычно приходит как уведомление <b>в приложении Telegram</b> "
+        f"(не SMS) — проверьте на всех устройствах.\n\n"
+        f"Не пришёл? Нажмите <b>«Выслать SMS»</b>.\n\n"
+        f"Введите код (только цифры, например <code>12345</code>):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
