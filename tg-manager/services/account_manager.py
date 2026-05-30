@@ -1143,12 +1143,16 @@ async def invite_users_to_channel(
                 if idx < len(usernames) - 1:
                     await asyncio.sleep(random.uniform(3, 15) * session_simulator.chaos_factor())
             except ChatAdminRequiredError:
-                # Account has no invite_users right — no point continuing
+                # Account has no invite_users right — mark remaining as failed
+                for u in usernames[idx + 1:]:
+                    failed.append(f"{u.strip()}: нет прав администратора")
                 return {
                     "invited": invited, "failed": failed,
                     "error": "Нет прав администратора для инвайта. Убедитесь что аккаунт назначен администратором с правом 'Добавление участников'.",
                 }
             except PeerFloodError:
+                for u in usernames[idx + 1:]:
+                    failed.append(f"{u.strip()}: аккаунт ограничен (PeerFlood)")
                 return {"invited": invited, "failed": failed,
                         "error": "PeerFlood — аккаунт временно ограничен Telegram"}
             except UserBannedInChannelError:

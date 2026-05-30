@@ -571,7 +571,11 @@ async def staggered_strike(
         result.abuse_form_ok = abuse_res.get("ok", False)
 
         # ═══ Фаза: SpamBot escalation ═══
-        await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
+        spambot_result = await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
+        if spambot_result:
+            result.spambot_escalation = spambot_result.get("status", "unknown")
+        else:
+            result.spambot_escalation = "skipped"
 
         result.duration_s = time.time() - t_start
         all_results.append(result)

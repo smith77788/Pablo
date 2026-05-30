@@ -244,12 +244,22 @@ async def run_campaign(
             # Сохранить ошибку но не считать как fail — попробуем потом
             continue
         elif status in ("blocked", "auth"):
-            # Аккаунт заблокирован/невалиден — перейти на следующий
+            # Аккаунт заблокирован/невалиден — считать текущую попытку ошибкой
             log.warning("dm_engine: acc %d status %s, skipping", acc["id"], status)
+            failed += 1
+            await pool.execute(
+                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
+                "VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+                campaign_id, acc["id"], user_id, status, result.get("error", "")[:200],
+            )
+            await pool.execute(
+                "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
+                campaign_id,
+            )
             acc_cycle = [a for a in acc_cycle if a["id"] != acc["id"]]
             if not acc_cycle:
-                log.error("dm_engine: no more accounts for campaign %d", campaign_id)
-                break
+                log.error("dm_engine: no more accounts for campaign %d, stopping", campaign_id)
+                break  # Оставшиеся цели будут учтены после цикла
         else:
             # skip или retry — логируем как ошибку
             failed += 1
@@ -267,7 +277,17 @@ async def run_campaign(
         delay = random.uniform(_MIN_DELAY, _MAX_DELAY)
         await asyncio.sleep(delay)
 
-    status_final = "done" if sent + failed >= total else "done"
+    # Учесть необработанные цели (напр., при исчерпании всех аккаунтов)
+    unprocessed = max(0, total - sent - failed)
+    if unprocessed > 0:
+        failed += unprocessed
+        await pool.execute(
+            "UPDATE dm_campaigns SET fail_count=fail_count+$1 WHERE id=$2",
+            unprocessed, campaign_id,
+        )
+        log.warning("dm_engine: campaign %d — %d targets unprocessed (accounts exhausted)", campaign_id, unprocessed)
+
+    status_final = "done"
     await pool.execute(
         "UPDATE dm_campaigns SET status=$1, finished_at=now() WHERE id=$2",
         status_final, campaign_id,

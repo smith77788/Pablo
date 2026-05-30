@@ -67,6 +67,15 @@ async def _activate_subscription(
     amount: float,
 ) -> None:
     """Активировать подписку после успешного платежа."""
+    # Записать платёж ПЕРВЫМ — если запись упадёт, подписка не активируется и вебхук можно переповторить.
+    # Без этого подписка активируется без платёжной записи → финансовые данные теряются безвозвратно.
+    await pool.execute(
+        """INSERT INTO payments(user_id, amount_usd, currency, tx_hash, plan, period_months, status)
+           VALUES($1,$2,$3,$4,$5,$6,'confirmed')
+           ON CONFLICT (user_id, tx_hash) DO UPDATE
+           SET status='confirmed', updated_at=now()""",
+        user_id, amount, currency, tx_ref, plan, months,
+    )
     expires = datetime.utcnow() + timedelta(days=30 * months)
     await pool.execute(
         """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
@@ -75,16 +84,6 @@ async def _activate_subscription(
            SET plan=$2, expires_at=$3, is_active=true, updated_at=now()""",
         user_id, plan, expires,
     )
-    # Записать платёж
-    try:
-        await pool.execute(
-            """INSERT INTO payments(user_id, amount_usd, currency, tx_hash, plan, period_months, status)
-               VALUES($1,$2,$3,$4,$5,$6,'confirmed')
-               ON CONFLICT DO NOTHING""",
-            user_id, amount, currency, tx_ref, plan, months,
-        )
-    except Exception:
-        log_exc_swallow(log, "Сбой записи платежа в БД — финансовые данные потеряны!", user_id=user_id, tx_ref=tx_ref)
 
     try:
         await bot.send_message(

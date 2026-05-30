@@ -117,6 +117,7 @@ async def delete_contacts(
 
     except Exception as e:
         log.warning("delete_contacts error: %s", e)
+        return {"deleted": 0, "error": str(e)[:200]}
     finally:
         try:
             await client.disconnect()

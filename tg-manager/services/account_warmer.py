@@ -234,8 +234,15 @@ async def run_daily_warmup(
         except Exception:
             log_exc_swallow(log, "сбой disconnect при разогреве аккаунта")
 
-    # Обновляем план
-    new_day = current_day + 1
+    # Обновляем план — только если было хотя бы частичное выполнение
+    # Если все действия провалились, повторяем тот же день на следующем цикле
+    if actions_ok > 0:
+        new_day = current_day + 1
+    else:
+        log.warning("warmup: all %d actions failed for acc=%d, retrying same day %d",
+                    daily_actions, account_id, current_day)
+        new_day = current_day
+
     completed = new_day >= plan["target_days"]
     new_status = "completed" if completed else "active"
 
@@ -247,8 +254,8 @@ async def run_daily_warmup(
         new_day, new_status, plan_id,
     )
 
-    if completed:
-        # После завершения разогрева повышаем trust_score
+    if completed and actions_ok > 0:
+        # После успешного завершения разогрева повышаем trust_score
         await pool.execute(
             "UPDATE tg_accounts SET trust_score = LEAST(trust_score + 0.3, 1.0) WHERE id=$1",
             account_id,

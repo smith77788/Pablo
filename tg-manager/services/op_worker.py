@@ -105,7 +105,7 @@ async def _audit(
             result, error_msg, flood_wait_s, duration_ms,
         )
     except Exception as e:
-        log.debug("audit write failed: %s", e)
+        log.warning("audit write failed for op=%s action=%s: %s", operation_id, action, e)
 
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
@@ -318,6 +318,30 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
 
         except Exception as e:
             log.warning("op_worker mass_publish: account %s error: %s", acc["phone"], e)
+            total_failed += 1
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id, total_sent + total_failed,
+                f"account:{acc.get('phone','unknown')}",
+                f"get_dialogs/connect error: {str(e)[:200]}",
+            )
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+
+    # Account-level exceptions may cause done_items < total_items — sync at end.
+    row = await pool.fetchrow("SELECT total_items, done_items FROM operation_queue WHERE id=$1", op_id)
+    if row:
+        total = row["total_items"] or 0
+        done = row["done_items"] or 0
+        if total > 0 and done < total:
+            gap = total - done
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id
+            )
+            total_failed += gap
+            log.warning("op_worker mass_publish #%d: synced done_items (+%d unaccounted)", op_id, gap)
 
     return {
         "status": "done",
