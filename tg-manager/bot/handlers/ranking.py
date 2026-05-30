@@ -1048,8 +1048,9 @@ async def vis_all_positions(
 
     try:
         rows = await pool.fetch(
-            """SELECT sr.keyword, sr.position, sr.checked_at, b.username AS bot_username
+            """SELECT tk.keyword, sr.position, sr.checked_at, b.username AS bot_username
                FROM search_rankings sr
+               JOIN tracked_keywords tk ON tk.id = sr.keyword_id
                JOIN managed_bots b ON b.bot_id = sr.bot_id
                WHERE b.added_by = $1
                ORDER BY sr.checked_at DESC
@@ -1184,8 +1185,9 @@ async def vis_by_bot(
 
     try:
         rows = await pool.fetch(
-            """SELECT sr.keyword, sr.position, sr.checked_at
+            """SELECT tk.keyword, sr.position, sr.checked_at
                FROM search_rankings sr
+               JOIN tracked_keywords tk ON tk.id = sr.keyword_id
                WHERE sr.bot_id = $1
                ORDER BY sr.checked_at DESC
                LIMIT 30""",
@@ -1493,10 +1495,11 @@ async def vis_trends(
     if not history_rows:
         try:
             history_rows = await pool.fetch(
-                """SELECT sr.keyword, sr.position, sr.checked_at
+                """SELECT tk.keyword, sr.position, sr.checked_at
                    FROM search_rankings sr
+                   JOIN tracked_keywords tk ON tk.id = sr.keyword_id
                    WHERE sr.bot_id = $1
-                   ORDER BY sr.keyword, sr.checked_at DESC""",
+                   ORDER BY tk.keyword, sr.checked_at DESC""",
                 bot_id,
             )
         except Exception as exc:
