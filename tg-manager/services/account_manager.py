@@ -702,7 +702,7 @@ async def check_account_status_full(
                 if any(kw in reply_lower for kw in ("limited", "spam", "restricted", "ограничен", "спам", "ограничения")):
                     return {"status": "spamblock", "reason": f"SpamBot: {reply_text[:120]}", "display_name": display_name}
         except asyncio.TimeoutError:
-            pass
+            log_exc_swallow(log, "Таймаут при проверке статуса через @SpamBot — считаем аккаунт активным")
         except Exception:
             log_exc_swallow(log, "Сбой в check_account_status_full")
         return {"status": "active", "reason": "Аккаунт активен", "display_name": display_name}

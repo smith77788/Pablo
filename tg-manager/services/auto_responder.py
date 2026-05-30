@@ -105,6 +105,9 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
             is_start = text.strip().lower().startswith("/start")
 
+            # Extract user info once (used for notification + registration below)
+            from_user = msg.get("from") or {}
+
             # Track user activity — returns True for first-ever message (new user)
             is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
 
@@ -117,7 +120,6 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                 asyncio.create_task(db.notify_if_enabled(pool, main_bot, owner_id, "new_user", note))
 
             # Register in bot_users so the user appears in broadcast audience
-            from_user = msg.get("from") or {}
             await db.upsert_users(pool, bot_id, [{
                 "user_id": chat_id,
                 "username": from_user.get("username", ""),
@@ -219,7 +221,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                         try:
                             await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
                         except (ValueError, TypeError):
-                            pass
+                            log_exc_swallow(log, "Неверный funnel_id в правиле авто-ответа (блок 1)", rule_id=arule.get("id"), action_value=arule.get("action_value"))
                     elif arule["action_type"] == "webhook":
                         # action_value = URL to POST to
                         url = arule.get("action_value", "").strip()
@@ -283,7 +285,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                         try:
                             await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
                         except (ValueError, TypeError):
-                            pass
+                            log_exc_swallow(log, "Неверный funnel_id в правиле авто-ответа (блок 2)", rule_id=arule.get("id"), action_value=arule.get("action_value"))
                     elif arule["action_type"] == "webhook":
                         url = arule.get("action_value", "").strip()
                         if url:
