@@ -39,6 +39,70 @@ from bot.states import (
 from bot.utils.subscription import require_plan
 from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text
 from services import session_simulator
+
+# ── Bulk Pacing Presets ──────────────────────────────────────────────────────
+
+_BULK_PACING = {
+    "safe": {
+        "label": "🐢 Безопасный",
+        "item_delay": (90, 150),       # seconds between items
+        "cooldown_every": 5,            # long pause every N items
+        "cooldown_delay": (300, 600),  # long pause range
+        "desc": "~5-10 мин между группами по 5",
+    },
+    "medium": {
+        "label": "🐇 Средний",
+        "item_delay": (45, 90),
+        "cooldown_every": 5,
+        "cooldown_delay": (120, 300),
+        "desc": "~2-5 мин между группами по 5",
+    },
+    "fast": {
+        "label": "🚀 Быстрый",
+        "item_delay": (15, 30),
+        "cooldown_every": 5,
+        "cooldown_delay": (60, 120),
+        "desc": "~1-2 мин между группами по 5",
+    },
+    "turbo": {
+        "label": "⚡ Турбо",
+        "item_delay": (8, 15),
+        "cooldown_every": 10,
+        "cooldown_delay": (45, 90),
+        "desc": "⚠️ Риск флуд-бана! Каждые 10 — пауза",
+    },
+}
+_DEFAULT_PACING = "medium"
+
+
+def _estimate_duration(total_items: int, pacing_key: str) -> str:
+    """Estimate total duration for a bulk operation."""
+    preset = _BULK_PACING.get(pacing_key, _BULK_PACING[_DEFAULT_PACING])
+    avg_item = sum(preset["item_delay"]) / 2
+    avg_cooldown = sum(preset["cooldown_delay"]) / 2
+    cooldown_every = preset["cooldown_every"]
+    num_cooldowns = max(0, (total_items - 1) // cooldown_every)
+    total_secs = total_items * avg_item + num_cooldowns * avg_cooldown
+    mins = total_secs / 60
+    if mins < 1:
+        return f"~{int(total_secs)} сек"
+    if mins < 60:
+        return f"~{int(mins)} мин"
+    hours = mins / 60
+    return f"~{hours:.1f} ч"
+
+
+def _pacing_kb(current: str) -> InlineKeyboardBuilder:
+    """Build pacing selection keyboard."""
+    kb = InlineKeyboardBuilder()
+    for key, preset in _BULK_PACING.items():
+        prefix = "✅ " if key == current else ""
+        kb.button(
+            text=f"{prefix}{preset['label']}",
+            callback_data=ChanCb(action=f"bulk_pacing_{key}"),
+        )
+    kb.adjust(2, 2)
+    return kb
 from database import db
 
 log = logging.getLogger(__name__)
@@ -648,6 +712,64 @@ async def fsm_bulk_create_count(message: Message, state: FSMContext) -> None:
     )
 
 
+async def _render_bulk_confirm(
+    msg_or_cb, state: FSMContext, pacing: str | None = None
+) -> None:
+    """Render the bulk create confirmation screen with pacing selection."""
+    data = await state.get_data()
+    selected_ids = data.get("bulk_selected", [])
+    n_acc = len(selected_ids)
+    count = data.get("channel_count", 1)
+    total = n_acc * count
+    title_s = html.escape(data["title"])
+    entity = "группа" if data.get("is_group") else "канал"
+    mode = data.get("name_mode", "none")
+    mode_labels = {"none": "Без изменений", "num": "Порядковый номер", "acc": "По аккаунту"}
+
+    pacing = pacing or data.get("bulk_pacing", _DEFAULT_PACING)
+    preset = _BULK_PACING.get(pacing, _BULK_PACING[_DEFAULT_PACING])
+    eta = _estimate_duration(total, pacing)
+
+    await state.update_data(bulk_pacing=pacing)
+    await state.set_state(BulkCreateFSM.confirming)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"✅ Создать {total} объект(ов)", callback_data=ChanCb(action="do_bulk_create"))
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+    kb.adjust(1)
+
+    pacing_kb = _pacing_kb(pacing)
+    # Place pacing buttons above execute/cancel
+    final_kb = InlineKeyboardBuilder()
+    for row in pacing_kb.as_markup().inline_keyboard:
+        final_kb.row(*row)
+    for row in kb.as_markup().inline_keyboard:
+        final_kb.row(*row)
+
+    text = (
+        f"🔁 <b>Подтверждение массового создания</b>\n\n"
+        f"📋 Тип: <b>{entity}</b>\n"
+        f"✏️ Название: <b>{title_s}</b>\n"
+        f"🔤 Режим имён: <b>{mode_labels[mode]}</b>\n"
+        f"📱 Аккаунтов: <b>{n_acc}</b> × <b>{count}</b> = итого <b>{total}</b>\n\n"
+        f"⏱ <b>Темп:</b> {preset['label']}\n"
+        f"⏳ Расчётное время: <b>{eta}</b>\n"
+        f"<i>{preset['desc']}</i>\n\n"
+        "⚠️ Telegram может ограничить создание с одного IP."
+    )
+
+    if isinstance(msg_or_cb, CallbackQuery):
+        try:
+            await msg_or_cb.message.edit_text(text, parse_mode="HTML", reply_markup=final_kb.as_markup())
+        except Exception:
+            await msg_or_cb.message.answer(text, parse_mode="HTML", reply_markup=final_kb.as_markup())
+    else:
+        try:
+            await msg_or_cb.edit_text(text, parse_mode="HTML", reply_markup=final_kb.as_markup())
+        except Exception:
+            await msg_or_cb.answer(text, parse_mode="HTML", reply_markup=final_kb.as_markup())
+
+
 @router.callback_query(ChanCb.filter(F.action.in_({"bulk_name_mode_none", "bulk_name_mode_num", "bulk_name_mode_acc"})))
 async def cb_bulk_name_mode(callback: CallbackQuery, callback_data: ChanCb, state: FSMContext) -> None:
     await callback.answer()
@@ -658,28 +780,19 @@ async def cb_bulk_name_mode(callback: CallbackQuery, callback_data: ChanCb, stat
     }
     mode = mode_map[callback_data.action]
     await state.update_data(name_mode=mode)
-    data = await state.get_data()
-    selected_ids = data.get("bulk_selected", [])
-    n_acc = len(selected_ids)
-    count = data.get("channel_count", 1)
-    total = n_acc * count
-    title_s = html.escape(data["title"])
-    entity = "группа" if data.get("is_group") else "канал"
-    mode_labels = {"none": "Без изменений", "num": "Порядковый номер", "acc": "По аккаунту"}
-    kb = InlineKeyboardBuilder()
-    kb.button(text=f"✅ Создать {total} объект(ов)", callback_data=ChanCb(action="do_bulk_create"))
-    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
-    kb.adjust(1)
-    await state.set_state(BulkCreateFSM.confirming)
-    await callback.message.edit_text(
-        f"🔁 <b>Подтверждение массового создания</b>\n\n"
-        f"Тип: <b>{entity}</b>\n"
-        f"Название: <b>{title_s}</b>\n"
-        f"Режим имён: <b>{mode_labels[mode]}</b>\n"
-        f"Аккаунтов: <b>{n_acc}</b> × <b>{count}</b> = итого <b>{total}</b>\n\n"
-        "⚠️ Telegram может ограничить создание каналов с одного IP. Продолжить?",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
-    )
+    await _render_bulk_confirm(callback, state)
+
+
+# ── Pacing selection handler ────────────────────────────────────────────────
+
+@router.callback_query(ChanCb.filter(F.action.startswith("bulk_pacing_")))
+async def cb_bulk_pacing(callback: CallbackQuery, callback_data: ChanCb, state: FSMContext) -> None:
+    pacing_key = callback_data.action.replace("bulk_pacing_", "")
+    if pacing_key not in _BULK_PACING:
+        pacing_key = _DEFAULT_PACING
+    await callback.answer(_BULK_PACING[pacing_key]["label"])
+    await state.update_data(bulk_pacing=pacing_key)
+    await _render_bulk_confirm(callback, state, pacing=pacing_key)
 
 
 @router.callback_query(ChanCb.filter(F.action == "do_bulk_create"))
@@ -770,19 +883,21 @@ async def cb_do_bulk_create(
             )
         except Exception:
             pass
-        # Smart anti-flood: rotate attempt counter, apply human-like delay
-        if attempt >= 4:
-            attempt = 0
-        else:
-            attempt += 1
-        flood = result.get("flood_wait", 0)
-        # Every 5th operation → longer cooldown (simulate human taking a break)
-        if (task_i + 1) % 5 == 0:
-            base_delay = 120.0  # longer pause every 5 operations
-        else:
-            base_delay = _human_delay(25, 40)
-        chaos = session_simulator.chaos_factor()
-        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos))
+        # Apply pacing-aware delay between operations
+        if done_ops < total_ops:
+            attempt = (attempt + 1) % 5  # rotate 0-4 for backoff
+            pacing_key = data.get("bulk_pacing", _DEFAULT_PACING)
+            preset = _BULK_PACING.get(pacing_key, _BULK_PACING[_DEFAULT_PACING])
+            cooldown_every = preset["cooldown_every"]
+
+            if (task_i + 1) % cooldown_every == 0:
+                base_delay = _human_delay(*preset["cooldown_delay"])
+            else:
+                base_delay = _human_delay(*preset["item_delay"])
+
+            chaos = session_simulator.chaos_factor()
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
