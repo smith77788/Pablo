@@ -44,6 +44,7 @@ from bot.callbacks import (
     AutoReplyCb,
     DmCb,
     StrikeCb,
+    TopoCb,
     VisCb,
     WarmupCb,
 )
@@ -109,8 +110,9 @@ def _infrastructure_kb():
     kb.button(text="🔍 Парсер аудитории",  callback_data=ParserCb(action="menu"))
     kb.button(text="📊 Аналитика инфры",   callback_data=InfraCb(action="menu"))
     kb.button(text="🧹 Очиститель",        callback_data=CleanerCb(action="menu"))
+    kb.button(text="🗺️ Топология",         callback_data=TopoCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1, 1, 1)
     return kb.as_markup()
 
 
@@ -298,7 +300,8 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: 
         "🔗 <b>Кластеры</b> — объединить ботов в сеть\n"
         "🌐 <b>Прокси</b> — прокси для аккаунтов\n"
         "❤️ <b>Здоровье</b> — статус аккаунтов и ботов\n"
-        "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением",
+        "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением\n"
+        "🗺️ <b>Топология</b> — граф связей между аккаунтами, каналами, ботами",
         _infrastructure_kb(),
     )
 

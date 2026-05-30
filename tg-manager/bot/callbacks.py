@@ -330,3 +330,10 @@ class TaskCb(CallbackData, prefix="tsk"):
     task_id: Optional[str] = None
 
 
+class TopoCb(CallbackData, prefix="topo"):
+    action: str       # "menu", "overview", "acc_view", "chan_view"
+    acc_id: int = 0
+    chan_id: int = 0
+    page: int = 0
+
+

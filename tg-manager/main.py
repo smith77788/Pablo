@@ -58,6 +58,7 @@ from bot.handlers import account_cleaner as account_cleaner_handler
 from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
 from bot.handlers import active_tasks as active_tasks_handler
+from bot.handlers import topology as topology_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -181,6 +182,7 @@ async def main() -> None:
     dp.include_router(account_warmup_handler.router)
     dp.include_router(infra_analytics_handler.router)
     dp.include_router(account_cleaner_handler.router)
+    dp.include_router(topology_handler.router)
     dp.include_router(dm_campaigns_handler.router)
     dp.include_router(strike_handler.router)
     dp.include_router(active_tasks_handler.router)
@@ -203,6 +205,7 @@ async def main() -> None:
         BotCommand(command="subscription", description="Подписка и оплата"),
         BotCommand(command="ranking",      description="Трекер позиций в поиске"),
         BotCommand(command="tasks",         description="Активные задачи (отмена)"),
+        BotCommand(command="topology",     description="🗺️ Топология активов"),
         BotCommand(command="cancel",       description="Отменить текущее действие"),
     ])
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
