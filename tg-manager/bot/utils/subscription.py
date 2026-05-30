@@ -3,6 +3,10 @@ import logging
 import os
 import asyncpg
 
+from services.logger import log_exc_swallow
+
+log = logging.getLogger(__name__)
+
 PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
 BOT_LIMITS: dict[str, int] = {"free": 3, "starter": 10, "pro": 30, "enterprise": 9999}
 PLAN_PRICES = {"starter": "$9", "pro": "$25", "enterprise": "$69"}
@@ -12,10 +16,6 @@ PLAN_FEATURES = {
     "pro": "30 ботов, Фабрики каналов/групп, парсер, A/B тесты, мультигео, 3 аккаунта",
     "enterprise": "∞ ботов+аккаунтов, AI-ассистент, DM-кампании, Global Presence, сеть ботов, Swarm",
 }
-
-from services.logger import log_exc_swallow  # noqa: E402
-
-log = logging.getLogger(__name__)
 
 
 def _admin_ids() -> set[int]:
