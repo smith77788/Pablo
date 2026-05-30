@@ -59,6 +59,7 @@ async def cb_ar_menu(callback: CallbackQuery, callback_data: AutoReplyCb,
 @router.callback_query(AutoReplyCb.filter(F.action == "add"))
 async def cb_ar_add(callback: CallbackQuery, callback_data: AutoReplyCb,
                     state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(AddAutoReply.choosing_trigger)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(

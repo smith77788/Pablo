@@ -194,6 +194,7 @@ async def cb_gp_tpl_page(
     callback: CallbackQuery, callback_data: GeoPresenceCb,
     state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
+    await callback.answer()
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
     await _show_template_step(callback, state, pool, asset_type=asset_type, page=callback_data.page)

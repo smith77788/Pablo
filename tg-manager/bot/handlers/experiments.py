@@ -148,6 +148,7 @@ async def cb_exp_view(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "create"))
 async def cb_exp_create(callback: CallbackQuery, callback_data: ExperimentCb,
                          state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(CreateExperiment.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(

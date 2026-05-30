@@ -253,6 +253,7 @@ async def msg_button_url(message: Message, state: FSMContext, pool: asyncpg.Pool
 
 @router.callback_query(BroadcastCb.filter(F.action == "cancel"))
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     data = await state.get_data()
     await state.clear()
     bot_id = data.get("bot_id", 0)
