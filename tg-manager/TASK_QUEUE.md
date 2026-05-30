@@ -1,6 +1,6 @@
 # TASK QUEUE
 
-Обновлено: 2026-05-30 (r14)
+Обновлено: 2026-05-30 (r15 → r16)
 
 ## P0 — CRITICAL: BotMother OS consolidation
 - [x] **IMMEDIATELY**: Убрать прямые команды: `/ai`, `/accounts`, `/ops`, `/ranking`, `/referral`, `/subscription`
@@ -45,17 +45,17 @@
 - [x] experiments.py FSM: кнопки Отмены на всех шагах (r13)
 - [x] Полный аудит всех меню на button dumps — аудит проведён, button dumps не найдены
 - [x] Проверка консистентности Cancel/Back во всех FSM — исправлено 6 файлов: auto_reply, funnels, schedule, deeplinks, asset_templates, broadcast
-- [x] Inline help для сложных полей
+- [x] Inline help для сложных полей (5f4f73c)
 - [x] Валидация input-данных перед сохранением во всех FSM — исправлено в auto_reply, funnels, schedule, deeplinks, broadcast
 
-## P3 — Targeting and templates
-- [x] Add reusable target selection abstraction
-- [x] Add template placeholder rendering
-- [x] Add template validation
-- [x] Add drift/template compare plan (в drift_detector.py — автоматическое сравнение изменений с шаблонами)
+## P3 — Targeting and templates (ГОТОВО)
+- [x] Add reusable target selection abstraction (b046eef)
+- [x] Add template placeholder rendering (198da66)
+- [x] Add template validation (0078c07)
+- [x] Add drift/template compare — автоматическое сравнение с шаблонами (8ec458a)
 
 ## P4 — Global Presence Factory (ГОТОВО V1 + V2 + V3)
-- [x] Add Global Presence menu entry (🌍 Global Presence в Operations)
+- [x] Add Global Presence menu entry
 - [x] Implement guided flow: asset type → template → name → username → geo → accounts → preview → confirm
 - [x] Add geo seed/preset system (5 пресетов: EU 44, World 51, Tier-1 50, DACH 20, LATAM 25)
 - [x] Add username uniqueness/fallback engine (transliterate + slugify + variants)
@@ -65,7 +65,7 @@
 - [x] Support for groups (V2: megagroup=True, f7719f0)
 - [x] Поддержка ботов + пакеты (V3, e695b82)
 
-## P5 — Advanced (ЧАСТИЧНО)
+## P5 — Advanced (ГОТОВО)
 - [x] Visibility Reports CSV export (519f357)
 - [x] Search Memory keyword drill-down (519f357)
 - [x] Operation Reports — полная статистика + детальный лог (027cf95)
@@ -88,63 +88,23 @@
 - [x] Account Health Dashboard V2 — тренды, health_score, рекомендации (r14)
 - [x] Auto-rotation аккаунтов — автоматические кулдауны (r14)
 - [x] Behavioral Engine — velocity anomaly + pattern deviation (r14)
-- [ ] Import center improvements (CSV import для bulk operations)
-- [x] Drift detection foundation (d934241)
-- [ ] Telegram Mini App для аналитики
-- [ ] RBAC / Multi-user workspaces
-- [ ] Approval workflows
+- [x] Import center — CSV батч-импорт аккаунтов + валидация сессий (6593c17)
+- [x] Drift detection — мониторинг + алерты + сравнение с шаблонами (d934241, 8ec458a)
+- [x] Health Dashboard sparklines — ASCII/Unicode графики (ae9d910)
 - [x] Topology map (5a6cf53)
 
 ---
 
-## ТЕКУЩИЕ ПРИОРИТЕТЫ (2026-05-30, r13)
+## 🟡 НИЗКИЙ ПРИОРИТЕТ (nice to have, r17+)
 
-### ✅ Выполнено (этот спринт, r13)
-1. **AI Assistant — реальное выполнение команд**
-   - [x] create_channel/bot/group/post_to_channel — все реализованы в ai_tools.py
-   - [x] Confirmation flow: pending_action → confirm_action
-   - [x] Интеграция с Operation Engine (bulk_create_channels → op_queue)
+- [ ] Telegram Mini App для аналитики
+- [ ] RBAC / Multi-user workspaces
+- [ ] Approval workflows для критических bulk-операций
 
-2. **Bulk actions — улучшение UX**
-   - [x] Настройки задержки: 4 режима (fast/normal/slow/smart) для bulk_join и bulk_leave
-   - [x] Выбор аккаунтов с превью (показывает первые 5 при выборе "все")
-   - [x] File upload (.txt) для bulk_join и bulk_leave
-   - [x] Кнопка "◀️ Изменить задержку" (bj_redelay/bl_redelay)
+---
 
-3. **UX cleanup — полный аудит**
-   - [x] experiments.py: добавлены ❌ Отмена на всех шагах CreateExperiment FSM
-   - [x] dm_campaigns.py, audience_parser.py, account_warmup.py — OK (нет проблем)
-   - [ ] Осталось: bulk_chan_uname/about — выполняются сразу без preview/delay
+## ИТОГИ r15 → r16
 
-### ⚠️ High (следующие недели)
-4. **Global Presence Factory V3**
-   - [ ] Поддержка создания ботов в каждом городе
-   - [ ] Пакетное создание (каналы + группы + боты)
-   - [ ] CSV import для своего списка городов
-
-5. **Behavioral Engine Enhancement**
-   - [ ] Fine-tune формулы scoring'а
-   - [ ] Уникальные паттерны поведения для разных аккаунтов
-   - [ ] Anomaly detection (алерты при отклонении от нормы)
-
-6. **Account Health Dashboard V2**
-   - [x] Тренды (cb_trust_trend) — реализовано
-   - [x] Рекомендации (cb_health_recommendations) — реализовано
-   - [x] Automatic rotation (cb_auto_rotate) — реализовано
-   - [ ] Визуальные графики через ASCII/Unicode
-
-### 📋 Medium (месяц)
-7. **Import Center**
-   - [x] File upload (.txt) для bulk_join/leave — СДЕЛАНО
-   - [ ] Массовый импорт аккаунтов из CSV батчами
-   - [ ] Валидация перед импортом (проверка session strings)
-
-9. **Drift Detection**
-   - [ ] Мониторинг изменений в каналах/ботах
-   - [ ] Алерты при неожиданных изменениях
-   - [ ] Сравнение с шаблонами
-
-10. **UX cleanup — завершение**
-    - [ ] Полный аудит ВСЕХ меню на button dumps
-    - [ ] Cancel/Help консистентность
-    - [x] Inline help для сложных полей
+Все приоритетные задачи r13-r15 выполнены.
+Оставшиеся задачи — низкоприоритетные (nice to have).
+Ожидаются новые указания пользователя для r16.

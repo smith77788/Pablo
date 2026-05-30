@@ -1,5 +1,22 @@
 # IMPLEMENTATION LOG
 
+## 2026-05-30 — r16: Полный цикл (7 задач за сессию)
+
+**Коммиты:** 5fe1c58, 5f4f73c, b046eef, ae9d910, 8ec458a, 2588b75, 5b92bdc
+
+**Выполненные задачи:**
+
+1. **Template validation + placeholders** — валидация HTML, username, длины; replace_placeholders, list_placeholders
+2. **Inline help для сложных полей** — 7 подсказок в FSM: channel_factory, group_factory, funnels, competitors, broadcast
+3. **Reusable target selection abstraction** — TargetSelector класс, fetch_bots/accounts/channels/groups, single_pick/multi_pick/quick_pick КБ
+4. **Account Health Dashboard V2 ASCII-графики** — sparklines (▁▂▃▄▅▆▇█), comparison chart, bar helpers
+5. **Drift Detection — сравнение с шаблонами** — _compare_with_templates(), 3 вердикта (match/partial/unexpected), placeholder-aware matching
+6. **Import Center — CSV валидация** — _prevalidate_sessions(), waiting_batch_confirm FSM, base64/длина проверки
+7. **Behavioral Engine Enhancement** — log-scale формулы, consistency_factor, diversity_bonus, schedule_deviation аномалия, улучшенный UI
+
+**Все задачи r13-r16 выполнены. Оставшиеся — низкоприоритетные (Mini App, RBAC, Approval workflows).**
+
+
 ## 2026-05-30 — Placeholder Rendering Integration + Inline Help (r15→r16)
 
 **Цель:** Интегрировать систему плейсхолдеров в авто-ответчик и рассылки, добавить inline help в FSM-шаги.

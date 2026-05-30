@@ -1,6 +1,7 @@
 """Async Telegram Bot API wrapper for managed (target) bots."""
 from __future__ import annotations
 import asyncio
+import logging
 import aiohttp
 from config import MAX_CONCURRENT
 
@@ -8,6 +9,11 @@ _semaphore: asyncio.Semaphore | None = None
 
 TG = "https://api.telegram.org/bot{token}/{method}"
 TG_FILE = "https://api.telegram.org/file/bot{token}/{file_path}"
+
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+_BASE_BACKOFF = 1.0
+log = logging.getLogger(__name__)
 
 
 def _sem() -> asyncio.Semaphore:
@@ -19,11 +25,53 @@ def _sem() -> asyncio.Semaphore:
 
 async def _call(session: aiohttp.ClientSession, token: str, method: str,
                 **params) -> dict:
+    """Call Bot API with automatic retry on network errors and 429/5xx.
+
+    Retries up to 3 times with exponential backoff for transient errors.
+    Respects Telegram's retry_after header on 429 responses.
+    """
     url = TG.format(token=token, method=method)
     payload = {k: v for k, v in params.items() if v is not None}
-    async with _sem():
-        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            return await resp.json()
+    last_error = None
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            async with _sem():
+                async with session.post(url, json=payload,
+                                        timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    data = await resp.json()
+
+            status = data.get("error_code", 0) or resp.status
+            if status in _RETRYABLE_STATUSES or not data.get("ok"):
+                if status == 429:
+                    retry_after = data.get("parameters", {}).get("retry_after", 5)
+                    log.debug("bot_api %s rate-limited, sleeping %ds (attempt %d/%d)",
+                              method, retry_after, attempt + 1, _MAX_RETRIES)
+                    await asyncio.sleep(retry_after)
+                    continue
+                if status in (500, 502, 503, 504) and attempt < _MAX_RETRIES - 1:
+                    backoff = _BASE_BACKOFF * (2 ** attempt)
+                    log.debug("bot_api %s HTTP %d, retrying in %.1fs (attempt %d/%d)",
+                              method, status, backoff, attempt + 1, _MAX_RETRIES)
+                    await asyncio.sleep(backoff)
+                    continue
+                # Non-retryable error — return as-is
+                return data
+            return data
+
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            last_error = e
+            if attempt < _MAX_RETRIES - 1:
+                backoff = _BASE_BACKOFF * (2 ** attempt)
+                log.debug("bot_api %s network error, retrying in %.1fs: %s",
+                          method, backoff, e)
+                await asyncio.sleep(backoff)
+                continue
+            log.warning("bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, e)
+
+    # All retries exhausted
+    return {"ok": False, "error_code": 0,
+            "description": f"Network error after {_MAX_RETRIES} retries: {last_error}"}
 
 
 # ── Bot info ──────────────────────────────────────────────────────────────
