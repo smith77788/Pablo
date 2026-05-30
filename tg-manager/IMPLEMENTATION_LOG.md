@@ -1,5 +1,38 @@
 # IMPLEMENTATION LOG
 
+## 2026-05-30 — Template Validation (r15)
+
+**Цель:** Добавить валидацию шаблонов перед сохранением (P3).
+
+**Изменённые файлы:**
+- `bot/utils/template_validator.py` (NEW) — общий модуль валидации шаблонов
+- `bot/handlers/templates.py` — интеграция валидации в message templates
+- `bot/handlers/asset_templates.py` — интеграция валидации в asset templates
+
+**До:**
+- Message templates: только проверка на пустое имя и пустой текст
+- Asset templates: только проверка имени и типа операции
+- Нет проверки баланса HTML-тегов, лимитов длины, формата username
+- Нет валидации обязательных полей per-type (имя бота, название канала, текст поста)
+
+**После:**
+- Message templates: проверка имени, текста, лимитов длины (4096), баланса HTML-тегов
+- Asset templates:
+  - Bot: имя обязательно, предупреждения о длинных описаниях
+  - Channel/Group: title обязательно, username формат (латиница, цифры, подчёркивание)
+  - Post: текст обязателен, HTML-баланс, лимит длины
+  - Operation: тип обязателен, per-type параметры (text для mass_publish, links для bulk_join и т.д.)
+- Ошибки блокируют сохранение, показываются сразу при вводе параметров
+- Предупреждения отображаются в превью и после сохранения
+- +placeholders helpers: `replace_placeholders()`, `list_placeholders()`
+
+**Проверки:**
+- `python3 -c "import ast; ast.parse(open(f).read())"` — все 3 файла OK
+- Smoke-test: 25+ assertions для всех типов шаблонов (valid/invalid/warnings)
+- Edge cases: пустые поля, невалидный username, слишком длинный текст, несбалансированный HTML
+
+---
+
 ## 2026-05-30 — UX Audit: Cancel/Back Buttons + Input Validation (r15)
 
 **Цель:** Исправить отсутствующие Cancel/Back кнопки во всех FSM wizard'ах, добавить валидацию ввода.

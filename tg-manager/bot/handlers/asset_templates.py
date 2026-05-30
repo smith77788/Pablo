@@ -51,20 +51,34 @@ _TYPE_PROMPTS = {
         "Введите через <code>;;;</code>: название канала, описание, username "
         "(или оставьте пустым).\n\n"
         "Пример:\n"
-        "<code>Мой канал;;;Новости о моде;;;fashion_shop</code>"
+        "<code>Мой канал;;;Новости о моде;;;fashion_shop</code>\n\n"
+        "💡 Для Global Presence Factory поддерживаются:\n"
+        "<code>{{CITY}}</code>, <code>{{COUNTRY}}</code>, <code>{{CITY_SLUG}}</code>, "
+        "<code>{{INDEX}}</code>"
     ),
     "group": (
         "👥 <b>Шаблон группы — параметры</b>\n\n"
         "Введите через <code>;;;</code>: название группы, описание, username "
         "(или оставьте пустым).\n\n"
         "Пример:\n"
-        "<code>Моя группа;;;Обсуждения о моде;;;fashion_chat</code>"
+        "<code>Моя группа;;;Обсуждения о моде;;;fashion_chat</code>\n\n"
+        "💡 Для Global Presence Factory поддерживаются:\n"
+        "<code>{{CITY}}</code>, <code>{{COUNTRY}}</code>, <code>{{CITY_SLUG}}</code>, "
+        "<code>{{INDEX}}</code>"
     ),
     "post": (
         "📝 <b>Шаблон поста — параметры</b>\n\n"
         "Введите текст поста (поддерживается HTML-разметка: "
         "<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
-        "<code>&lt;a href=...&gt;</code> и т.д.)."
+        "<code>&lt;a href=...&gt;</code> и т.д.).\n\n"
+        "💡 <b>Плейсхолдеры:</b>\n"
+        "• <code>{{USERNAME}}</code> — @username пользователя\n"
+        "• <code>{{FIRST_NAME}}</code> — имя пользователя\n"
+        "• <code>{{DATE}}</code> — текущая дата\n"
+        "• <code>{{BOT_NAME}}</code> — имя бота\n"
+        "• <code>{{CHANNEL}}</code> — @username канала\n"
+        "• <code>{{CITY}}</code>, <code>{{COUNTRY}}</code> — гео\n"
+        "<i>Поддерживаются в рассылках и авто-ответах.</i>"
     ),
     "operation": (
         "⚙️ <b>Шаблон операции — параметры</b>\n\n"
@@ -269,6 +283,16 @@ async def cb_view(
     lines = [f"📄 <b>{tpl['name']}</b>", f"Тип: {_TYPE_LABELS.get(tpl['asset_type'], tpl['asset_type'])}"]
     for k, v in data.items():
         lines.append(f"<b>{k}:</b> {v}")
+
+    # Detect placeholders in template text
+    from bot.utils.template_validator import list_placeholders
+    all_text = " ".join(str(v) for v in data.values() if isinstance(v, str))
+    placeholders = list_placeholders(all_text)
+    if placeholders:
+        lines.append("")
+        lines.append("💡 <b>Найдены плейсхолдеры:</b>")
+        for ph in placeholders[:8]:
+            lines.append(f"  • <code>{{{{{ph}}}}}</code>")
 
     await callback.message.edit_text(
         "\n".join(lines),

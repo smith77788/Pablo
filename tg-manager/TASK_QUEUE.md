@@ -50,8 +50,8 @@
 
 ## P3 — Targeting and templates
 - [ ] Add reusable target selection abstraction
-- [ ] Add template placeholder rendering
-- [ ] Add template validation
+- [x] Add template placeholder rendering
+- [x] Add template validation
 - [ ] Add drift/template compare plan if existing structures support it
 
 ## P4 — Global Presence Factory (ГОТОВО V1 + V2 + V3)
