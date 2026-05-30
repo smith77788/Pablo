@@ -990,18 +990,42 @@ async def cb_bulk_join_start(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     await callback.message.edit_text(
-        "🔗 <b>Массовый join — Шаг 1/3</b>\n\n"
+        "🔗 <b>Массовый join — Шаг 1/4</b>\n\n"
         "Введите ссылки или юзернеймы каналов/групп — <b>по одному на строку</b>:\n\n"
         "<code>@channel_name\n"
         "https://t.me/channel_name\n"
         "https://t.me/+InviteHash</code>\n\n"
-        "Поддерживаются публичные каналы, группы и приватные ссылки-инвайты.",
+        "Или <b>загрузите .txt файл</b> со списком (макс. 50 строк).",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
-@router.message(BulkJoinFSM.waiting_links)
+async def _process_bj_links(links: list[str], message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    """Common logic after collecting bulk_join links (text or file)."""
+    await state.update_data(bj_links=links)
+    await state.set_state(BulkJoinFSM.choosing_accounts)
+    accounts = await _get_active_accounts(pool, message.from_user.id)
+    if not accounts:
+        await state.clear()
+        await message.answer("⚠️ Нет активных аккаунтов. Добавьте через /accounts.", parse_mode="HTML")
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
+    for acc in accounts[:10]:
+        kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"🔗 <b>Массовый join — Шаг 2/4</b>\n\n"
+        f"Каналов/групп: <b>{len(links)}</b>\n\n"
+        "Выберите аккаунты для вступления:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkJoinFSM.waiting_links, F.text)
 async def fsm_bulk_join_links(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -1013,35 +1037,35 @@ async def fsm_bulk_join_links(
     if len(links) > 50:
         await message.answer("⚠️ Максимум 50 ссылок за одну операцию.")
         return
+    await _process_bj_links(links, message, state, pool)
 
-    await state.update_data(bj_links=links)
-    await state.set_state(BulkJoinFSM.choosing_accounts)
 
-    accounts = await _get_active_accounts(pool, message.from_user.id)
-    if not accounts:
-        await state.clear()
-        await message.answer(
-            "⚠️ Нет активных аккаунтов. Добавьте через /accounts.",
-            parse_mode="HTML",
-        )
+@router.message(BulkJoinFSM.waiting_links, F.document)
+async def fsm_bulk_join_links_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    doc = message.document
+    if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
+        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком ссылок.")
         return
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
-    for acc in accounts[:10]:
-        kb.button(
-            text=f"👤 {_acc_label(acc)}",
-            callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]),
-        )
-    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    kb.adjust(1)
-    await message.answer(
-        f"🔗 <b>Массовый join — Шаг 2/3</b>\n\n"
-        f"Каналов/групп: <b>{len(links)}</b>\n\n"
-        "Выберите аккаунты для вступления:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    if doc.file_size and doc.file_size > 100_000:
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+        return
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        raw = downloaded.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+    links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not links:
+        await message.answer("⚠️ Файл пустой или не содержит ссылок.")
+        return
+    if len(links) > 200:
+        links = links[:200]
+        await message.answer(f"⚠️ Взяты первые 200 строк из файла.")
+    await _process_bj_links(links, message, state, pool)
 
 
 @router.callback_query(MassOpCb.filter(F.action == "bj_accs"))
@@ -1248,18 +1272,42 @@ async def cb_bulk_leave_start(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     await callback.message.edit_text(
-        "🚪 <b>Массовый leave — Шаг 1/3</b>\n\n"
+        "🚪 <b>Массовый leave — Шаг 1/4</b>\n\n"
         "Введите юзернеймы или ID каналов/групп — <b>по одному на строку</b>:\n\n"
         "<code>@channel_name\n"
         "-1001234567890\n"
         "username</code>\n\n"
-        "Аккаунты выйдут из всех указанных каналов.",
+        "Или <b>загрузите .txt файл</b> со списком каналов.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
-@router.message(BulkLeaveFSM.waiting_channels)
+async def _process_bl_channels(channels: list[str], message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    """Common logic after collecting bulk_leave channels (text or file)."""
+    await state.update_data(bl_channels=channels)
+    await state.set_state(BulkLeaveFSM.choosing_accounts)
+    accounts = await _get_active_accounts(pool, message.from_user.id)
+    if not accounts:
+        await state.clear()
+        await message.answer("⚠️ Нет активных аккаунтов. Добавьте через /accounts.")
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
+    for acc in accounts[:10]:
+        kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"🚪 <b>Массовый leave — Шаг 2/4</b>\n\n"
+        f"Каналов/групп: <b>{len(channels)}</b>\n\n"
+        "Выберите аккаунты для выхода:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BulkLeaveFSM.waiting_channels, F.text)
 async def fsm_bulk_leave_channels(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -1268,35 +1316,37 @@ async def fsm_bulk_leave_channels(
     if not channels:
         await message.answer("⚠️ Введите хотя бы один юзернейм или ID канала:")
         return
-    if len(channels) > 50:
-        await message.answer("⚠️ Максимум 50 каналов за одну операцию.")
+    if len(channels) > 200:
+        channels = channels[:200]
+    await _process_bl_channels(channels, message, state, pool)
+
+
+@router.message(BulkLeaveFSM.waiting_channels, F.document)
+async def fsm_bulk_leave_channels_file(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    doc = message.document
+    if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
+        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком каналов.")
         return
-
-    await state.update_data(bl_channels=channels)
-    await state.set_state(BulkLeaveFSM.choosing_accounts)
-
-    accounts = await _get_active_accounts(pool, message.from_user.id)
-    if not accounts:
-        await state.clear()
-        await message.answer("⚠️ Нет активных аккаунтов. Добавьте через /accounts.")
+    if doc.file_size and doc.file_size > 100_000:
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
         return
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
-    for acc in accounts[:10]:
-        kb.button(
-            text=f"👤 {_acc_label(acc)}",
-            callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]),
-        )
-    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    kb.adjust(1)
-    await message.answer(
-        f"🚪 <b>Массовый leave — Шаг 2/3</b>\n\n"
-        f"Каналов/групп: <b>{len(channels)}</b>\n\n"
-        "Выберите аккаунты для выхода:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        raw = downloaded.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+    channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not channels:
+        await message.answer("⚠️ Файл пустой или не содержит каналов.")
+        return
+    if len(channels) > 200:
+        channels = channels[:200]
+        await message.answer("⚠️ Взяты первые 200 строк из файла.")
+    await _process_bl_channels(channels, message, state, pool)
 
 
 @router.callback_query(MassOpCb.filter(F.action == "bl_accs"))
