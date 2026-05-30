@@ -433,11 +433,11 @@ async def cb_clone_field_toggle(callback: CallbackQuery, callback_data: BotFactC
 @router.callback_query(BotFactCb.filter(F.action == "clone_fields_done"))
 async def cb_clone_fields_done(callback: CallbackQuery, state: FSMContext,
                                 pool: asyncpg.Pool) -> None:
-    await callback.answer()
     data = await state.get_data()
     if not data.get("selected_fields"):
         await callback.answer("Выберите хотя бы одно поле!", show_alert=True)
         return
+    await callback.answer()
 
     bots = await db.get_bots(pool, callback.from_user.id)
     src_bot_id = data.get("src_bot_id", 0)
@@ -486,12 +486,12 @@ async def cb_clone_tgt(callback: CallbackQuery, callback_data: BotFactCb,
 @router.callback_query(BotFactCb.filter(F.action == "clone_targets_done"))
 async def cb_clone_targets_done(callback: CallbackQuery, state: FSMContext,
                                  pool: asyncpg.Pool) -> None:
-    await callback.answer()
     data = await state.get_data()
     selected_targets: list[int] = data.get("selected_targets", [])
     if not selected_targets:
         await callback.answer("Выберите хотя бы одного целевого бота!", show_alert=True)
         return
+    await callback.answer()
 
     src_bot_id = data.get("src_bot_id", 0)
     selected_fields: list[str] = data.get("selected_fields", [])

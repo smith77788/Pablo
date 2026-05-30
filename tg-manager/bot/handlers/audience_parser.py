@@ -101,11 +101,10 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_parser_start(
     callback: CallbackQuery, callback_data: ParserCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
-
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer("🔒 Требуется PRO", show_alert=True)
         return
+    await callback.answer()
 
     parse_type = "members" if callback_data.action == "start_members" else "active"
     await state.update_data(parse_type=parse_type)

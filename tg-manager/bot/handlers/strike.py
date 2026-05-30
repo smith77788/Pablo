@@ -141,11 +141,11 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(StrikeCb.filter(F.action == "settings"))
 async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     access = await _has_access(pool, callback.from_user.id)
     if not access:
         await callback.answer("Нет доступа.", show_alert=True)
         return
+    await callback.answer()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
     await callback.message.edit_text(
@@ -173,12 +173,11 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 @router.callback_query(StrikeCb.filter(F.action == "buy"))
 async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
-
     # Уже есть доступ?
     if await _has_access(pool, callback.from_user.id):
         await callback.answer("⚔️ Strike уже активен!", show_alert=True)
         return
+    await callback.answer()
 
     wallet = _tron_wallet()
     ref = _gen_ref()
