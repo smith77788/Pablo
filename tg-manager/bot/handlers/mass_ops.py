@@ -249,7 +249,8 @@ async def _ask_mp_text(msg, state: FSMContext, target_label: str, edit: bool = F
     text = (
         f"📤 <b>Массовая публикация</b>\n"
         f"Цели: <b>{target_label}</b>\n\n"
-        "Шаг 3 из 5: Введите текст поста (поддерживается HTML):"
+        "Шаг 3 из 5: Введите текст поста (поддерживается HTML)\n"
+        "или загрузите <b>.txt файл</b> с текстом:"
     )
     if edit:
         try:
@@ -260,15 +261,10 @@ async def _ask_mp_text(msg, state: FSMContext, target_label: str, edit: bool = F
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
-@router.message(MassPublishFSM.waiting_text)
-async def fsm_mp_text(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-    if not text:
-        await message.answer("⚠️ Введите текст поста:")
-        return
+async def _proceed_mp_text(text: str, message: Message, state: FSMContext) -> None:
+    """Common logic after collecting mass publish post text."""
     await state.update_data(mp_text=text)
     await state.set_state(MassPublishFSM.choosing_timing)
-
     kb = InlineKeyboardBuilder()
     for label, val in _TIMING_OPTIONS:
         kb.button(text=label, callback_data=MassOpCb(action="mp_timing", op_type=val))
@@ -279,6 +275,46 @@ async def fsm_mp_text(message: Message, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.message(MassPublishFSM.waiting_text, F.text)
+async def fsm_mp_text(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("⚠️ Введите текст поста:")
+        return
+    await _proceed_mp_text(text, message, state)
+
+
+@router.message(MassPublishFSM.waiting_text, F.document)
+async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
+    doc = message.document
+    if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
+        await message.answer("⚠️ Отправьте текстовый .txt файл с текстом поста.")
+        return
+    if doc.file_size and doc.file_size > 50_000:
+        await message.answer("⚠️ Файл слишком большой. Максимум 50 КБ.")
+        return
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        text = downloaded.read().decode("utf-8", errors="ignore").strip()
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+    if not text:
+        await message.answer("⚠️ Файл пустой.")
+        return
+    if len(text) > 4000:
+        text = text[:4000]
+        await message.answer("⚠️ Текст обрезан до 4000 символов.")
+    await _proceed_mp_text(text, message, state)
+    return
+
+
+@router.message(MassPublishFSM.waiting_text)
+async def fsm_mp_text_fallback(message: Message, state: FSMContext) -> None:
+    await message.answer("⚠️ Введите текст поста или загрузите .txt файл:")
 
 
 # Step 4: choose timing
