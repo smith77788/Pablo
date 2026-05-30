@@ -2,13 +2,38 @@
 from __future__ import annotations
 import asyncio
 import logging
+from datetime import datetime
+
 import aiohttp
 import asyncpg
 from database import db
 from services import bot_api
 from services import routing_engine
 
+from bot.utils.template_validator import replace_placeholders
+
 log = logging.getLogger(__name__)
+
+
+def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str:
+    """Render {{PLACEHOLDER}} tokens in text with user/bot context."""
+    if not text or "{{" not in text:
+        return text
+    username = from_user.get("username", "") or ""
+    first_name = from_user.get("first_name", "") or ""
+    last_name = from_user.get("last_name", "") or ""
+    bot_name = (bot_row.get("username") or bot_row.get("first_name") or "") if bot_row else ""
+    now = datetime.now()
+    return replace_placeholders(text, {
+        "USERNAME": f"@{username}" if username else first_name,
+        "FIRST_NAME": first_name,
+        "LAST_NAME": last_name,
+        "FULL_NAME": f"{first_name} {last_name}".strip(),
+        "BOT_NAME": bot_name,
+        "DATE": now.strftime("%d.%m.%Y"),
+        "DATE_SHORT": now.strftime("%d.%m"),
+        "TIME": now.strftime("%H:%M"),
+    })
 
 
 def _match_rule(rule: dict, text: str) -> bool:
@@ -149,7 +174,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             # Auto-replies (first match wins)
             for rule in rules:
                 if _match_rule(rule, text):
-                    await bot_api.send_message(http, token, chat_id, rule["response_text"])
+                    rendered = _render_text(rule["response_text"], from_user, bot_row)
+                    await bot_api.send_message(http, token, chat_id, rendered)
                     break
 
             # Swarm routing: /start on entry bot with swarm enabled
@@ -172,7 +198,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
                 if triggered:
                     if arule["action_type"] == "send_message":
-                        await bot_api.send_message(http, token, chat_id, arule["action_value"])
+                        rendered = _render_text(arule["action_value"], from_user, bot_row)
+                        await bot_api.send_message(http, token, chat_id, rendered)
                     elif arule["action_type"] == "add_tag":
                         await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
                         newly_added_tags.append(arule["action_value"])

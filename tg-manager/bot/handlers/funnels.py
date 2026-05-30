@@ -236,7 +236,14 @@ async def msg_fn_step_text(message: Message, state: FSMContext) -> None:
     await state.set_state(CreateFunnel.waiting_step_delay)
     data = await state.get_data()
     await message.answer(
-        "⏱ Задержка в минутах перед отправкой этого шага (0 = сразу):",
+        "⏱ <b>Задержка в минутах</b> перед отправкой этого шага\n"
+        "(0 = сразу после предыдущего шага).\n\n"
+        "💡 <b>Примеры:</b>\n"
+        "• <code>0</code> — сразу\n"
+        "• <code>5</code> — через 5 минут\n"
+        "• <code>60</code> — через 1 час\n"
+        "• <code>1440</code> — через 1 день\n"
+        "• <code>10080</code> — через 1 неделю",
         parse_mode="HTML",
         reply_markup=_fn_cancel_kb(data.get("bot_id", 0)),
     )

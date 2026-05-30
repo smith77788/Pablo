@@ -58,8 +58,16 @@ async def cb_compose(callback: CallbackQuery, callback_data: BroadcastCb,
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
         "✍️ Напишите текст рассылки или отправьте фото с подписью.\n\n"
-        "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
-        "<code>&lt;a href=...&gt;</code>",
+        "💡 <b>HTML-форматирование:</b>\n"
+        "• <code>&lt;b&gt;жирный&lt;/b&gt;</code> — <b>жирный</b>\n"
+        "• <code>&lt;i&gt;курсив&lt;/i&gt;</code> — <i>курсив</i>\n"
+        "• <code>&lt;u&gt;подчёркнутый&lt;/u&gt;</code> — подчёркнутый\n"
+        "• <code>&lt;s&gt;зачёркнутый&lt;/s&gt;</code> — <s>зачёркнутый</s>\n"
+        "• <code>&lt;a href=\"https://...\"&gt;ссылка&lt;/a&gt;</code> — ссылка\n"
+        "• <code>&lt;code&gt;моно&lt;/code&gt;</code> — моноширинный\n\n"
+        "💡 <b>Плейсхолдеры (в шаблонах):</b>\n"
+        "• <code>{{NAME}}</code> — будет запрошено при использовании\n"
+        "• <code>{{DATE}}</code>, <code>{{CITY}}</code> — любые ключи",
         parse_mode="HTML",
         reply_markup=_bc_cancel_kb(callback_data.bot_id),
     )

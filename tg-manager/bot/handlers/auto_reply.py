@@ -87,7 +87,13 @@ async def cb_trig_keyword(callback: CallbackQuery, callback_data: AutoReplyCb,
     await state.update_data(trigger_type="keyword")
     await state.set_state(AddAutoReply.waiting_keyword)
     await callback.message.edit_text(
-        "🔑 Триггер: <b>Ключевое слово</b>\n\nВведите ключевое слово (регистр не важен):",
+        "🔑 Триггер: <b>Ключевое слово</b>\n\n"
+        "Введите ключевое слово (регистр не важен).\n\n"
+        "💡 <b>Как работает:</b>\n"
+        "• Бот проверяет, содержит ли сообщение ваше ключевое слово\n"
+        "• Например, ключ «<code>цена</code>» сработает на «Какая цена?»\n"
+        "• Можно использовать фразу: «<code>как заказать</code>»\n"
+        "• Русский и английский язык поддерживаются",
         parse_mode="HTML",
         reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
