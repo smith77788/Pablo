@@ -31,6 +31,7 @@ from bot.utils.op_helpers import (
     _format_duration,
     _progress_text as _progress_text_base,
 )
+from services import task_registry as _treg
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -371,72 +372,88 @@ async def cb_mpub_confirm_send(
         )
         return
 
-    ok = 0
-    err = 0
-    start_ts = time.monotonic()
     progress_msg = await callback.message.edit_text(
-        _progress_text_base("Публикация...", 0, total, 0, 0),
+        f"📤 <b>Публикация запущена в фоне</b>\n\n"
+        f"Каналов для обработки: <b>{total}</b>\n"
+        f"<i>Для отмены: /tasks</i>",
         parse_mode="HTML",
     )
 
+    task = asyncio.create_task(_mpub_bg(
+        bot=callback.bot,
+        user_id=callback.from_user.id,
+        progress_msg=progress_msg,
+        pairs=pairs,
+        post_text=post_text,
+        delay_s=delay_s,
+    ))
+    _treg.register(callback.from_user.id, "publish", f"Mass publish {total} каналов", task)
+
+
+async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str, delay_s: int) -> None:
+    import random
+    from services import account_manager
+    ok = 0
+    err = 0
     forbidden_count = 0
-    for idx, (acc, ch) in enumerate(pairs, 1):
-        ch_id = ch["id"]
-        access_hash = ch.get("access_hash", 0) or 0
-        result = await account_manager.post_to_channel(
-            acc["session_str"], ch_id, post_text, access_hash=access_hash, _acc=acc
-        )
-        if result.get("banned") or "error" in result:
-            err += 1
-            if result.get("banned"):
-                forbidden_count += 1
-        else:
-            ok += 1
-
-        try:
-            await progress_msg.edit_text(
-                _progress_text_base("Публикация...", idx, total, ok, err),
-                parse_mode="HTML",
+    total = len(pairs)
+    start_ts = time.monotonic()
+    try:
+        for idx, (acc, ch) in enumerate(pairs, 1):
+            ch_id = ch["id"]
+            access_hash = ch.get("access_hash", 0) or 0
+            result = await account_manager.post_to_channel(
+                acc["session_str"], ch_id, post_text, access_hash=access_hash, _acc=acc
             )
-        except Exception:
-            pass
+            if result.get("banned") or "error" in result:
+                err += 1
+                if result.get("banned"):
+                    forbidden_count += 1
+            else:
+                ok += 1
 
-        # Progress notification every 3 items
-        if idx % 3 == 0:
             try:
-                await callback.message.answer(
-                    f"✅ {idx}/{total} каналов... продолжаю",
+                await progress_msg.edit_text(
+                    _progress_text_base("Публикация...", idx, total, ok, err),
                     parse_mode="HTML",
                 )
             except Exception:
                 pass
 
-        if idx < total:
-            if delay_s < 0:
-                # Smart timing: random 30-90s with human-like variation
-                import random
-                actual_delay = random.uniform(30, 90)
-            else:
-                actual_delay = delay_s
-            await asyncio.sleep(actual_delay)
+            if idx < total:
+                actual_delay = random.uniform(30, 90) if delay_s < 0 else delay_s
+                await asyncio.sleep(actual_delay)
 
-    elapsed = time.monotonic() - start_ts
-    hint = ""
-    if forbidden_count > 0:
-        hint = (
-            f"\n\n⚠️ <i>{forbidden_count} канал(ов) — нет прав публикации.\n"
-            "Аккаунт должен быть администратором канала с правом публикации.\n"
-            "Используйте: Управление каналом → 👑 Со-Администраторы</i>"
+        elapsed = time.monotonic() - start_ts
+        hint = ""
+        if forbidden_count > 0:
+            hint = (
+                f"\n\n⚠️ <i>{forbidden_count} канал(ов) — нет прав публикации.</i>"
+            )
+        await progress_msg.edit_text(
+            f"📤 <b>Публикация завершена</b>\n\n"
+            f"✅ Успешно: {ok} каналов\n"
+            f"❌ Ошибки: {err} канал(ов)"
+            f"{hint}\n"
+            f"⏱️ Время: {_format_duration(elapsed)}",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
         )
-    await progress_msg.edit_text(
-        f"📤 <b>Публикация завершена</b>\n\n"
-        f"✅ Успешно: {ok} каналов\n"
-        f"❌ Ошибки: {err} канал(ов)"
-        f"{hint}\n"
-        f"⏱️ Время: {_format_duration(elapsed)}",
-        parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
-    )
+    except asyncio.CancelledError:
+        try:
+            await bot.send_message(
+                user_id,
+                f"📤 <b>Публикация отменена</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+    except Exception as exc:
+        log.exception("_mpub_bg error user=%s: %s", user_id, exc)
+        try:
+            await bot.send_message(user_id, f"⚠️ Ошибка публикации: {html.escape(str(exc)[:200])}", parse_mode="HTML")
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════
