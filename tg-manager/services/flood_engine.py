@@ -93,7 +93,7 @@ async def record_flood(
     # Persist to DB (non-blocking)
     try:
         await pool.execute(
-            """INSERT INTO account_flood_log(account_id, flood_wait_seconds, action_type)
+            """INSERT INTO account_flood_log(account_id, flood_seconds, action_type)
                VALUES ($1, $2, $3)""",
             account_id, wait_seconds, action_type,
         )
