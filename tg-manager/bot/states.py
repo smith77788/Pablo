@@ -213,7 +213,8 @@ class BulkDmFSM(StatesGroup):
 
 
 class BulkChanFSM(StatesGroup):
-    waiting_value = State()   # ожидаем username-шаблон или текст описания
+    waiting_value   = State()   # ожидаем username-шаблон или текст описания
+    waiting_confirm = State()   # preview — ожидаем подтверждение выполнения
 
 
 class SeoFSM(StatesGroup):

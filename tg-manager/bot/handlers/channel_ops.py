@@ -3747,16 +3747,77 @@ async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg
     elif op == "chan_about" and len(value) > 255:
         value = value[:255]
 
+    # Count channels from DB cache for preview
+    chan_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels mc "
+        "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[])",
+        message.from_user.id, selected_ids,
+    ) or 0
+
+    if chan_count == 0:
+        await message.answer(
+            "⚠️ Нет каналов в базе для выбранных аккаунтов.\n\n"
+            "Сначала загрузите каналы через <b>🔎 Мои каналы → Загрузить из Telegram</b>.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    # Save value and op in state, show preview before executing
+    await state.update_data(bulk_op=op, bulk_selected=selected_ids, bulk_value=value)
+    await state.set_state(BulkChanFSM.waiting_confirm)
+
+    op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
+    value_preview = html.escape(value[:80])
+    acc_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) AND is_active=TRUE",
+        message.from_user.id, selected_ids,
+    ) or 0
+    eta_s = chan_count * 6  # ~6s per channel average
+    eta_str = f"{eta_s // 60} мин" if eta_s >= 60 else f"{eta_s}с"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить", callback_data=ChanCb(action="bulk_chan_exec"))
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+    kb.adjust(2)
+    await message.answer(
+        f"<b>{op_label} каналам (bulk) — Предпросмотр</b>\n\n"
+        f"Значение: <code>{value_preview}</code>\n"
+        f"Каналов: <b>{chan_count}</b>\n"
+        f"Аккаунтов: <b>{acc_count}</b>\n"
+        f"Оценочное время: ~<b>{eta_str}</b>\n\n"
+        "Подтвердите запуск операции:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ChanCb.filter(F.action == "bulk_chan_exec"))
+async def cb_bulk_chan_exec(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    op = data.get("bulk_op", "")
+    selected_ids = data.get("bulk_selected", [])
+    value = data.get("bulk_value", "")
+    await state.clear()
+
+    if not selected_ids or not value or op not in ("chan_uname", "chan_about"):
+        await callback.message.edit_text("⚠️ Данные операции устарели. Начните заново: /ops")
+        return
+
+    base_uname = value.lstrip("@") if op == "chan_uname" else ""
+
     # Fetch account sessions with acc data
     accounts = await pool.fetch(
         "SELECT a.id, a.session_str, a.first_name, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
         "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE",
-        message.from_user.id, selected_ids,
+        callback.from_user.id, selected_ids,
     )
     if not accounts:
-        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+        await callback.message.edit_text("⚠️ Аккаунты не найдены. Начните заново: /ops")
         return
 
     # Fetch all channels for selected accounts from DB cache
@@ -3765,11 +3826,11 @@ async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg
         "FROM managed_channels mc "
         "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[]) "
         "ORDER BY mc.acc_id, mc.title",
-        message.from_user.id, selected_ids,
+        callback.from_user.id, selected_ids,
     )
 
     if not channels:
-        await message.answer(
+        await callback.message.edit_text(
             "⚠️ Нет каналов в базе для выбранных аккаунтов.\n\n"
             "Сначала загрузите каналы через <b>🔎 Мои каналы → Загрузить из Telegram</b>.",
             parse_mode="HTML",
@@ -3779,7 +3840,7 @@ async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg
 
     total = len(channels)
     op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
-    progress_msg = await message.answer(
+    progress_msg = await callback.message.edit_text(
         f"⏳ <b>{op_label} каналам (bulk)</b>\n\n"
         f"Каналов: <b>{total}</b> | Аккаунтов: <b>{len(accounts)}</b>\n\n"
         f"⏳ 0 / {total}",
@@ -3813,7 +3874,7 @@ async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg
                 # Update DB cache
                 await pool.execute(
                     "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
-                    candidate, message.from_user.id, chan["channel_id"],
+                    candidate, callback.from_user.id, chan["channel_id"],
                 )
 
         elif op == "chan_about":
