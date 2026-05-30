@@ -4,33 +4,31 @@
 
 **Цель:** Улучшить надёжность системы, добавить отслеживание задач и фоновое выполнение.
 
-**Изменённые файлы:**
-- `bot/handlers/accounts.py` — кнопка Релог (переподключение без повторного ввода номера)
-- `services/account_manager.py` — _resilient_restart: factory pattern вместо coroutine reuse
-- `bot/handlers/mass_publish.py` — фоновое выполнение + task_registry
-- `main.py` — регистрация mass_publish в task_registry
-- `services/account_manager.py` — Telethon operation timeouts (предотвращение зависаний)
-- `bot/handlers/botmother_menu.py` — кнопка «Active Tasks» в главном меню
-- `bot/handlers/active_tasks.py` — /tasks keyboard
-- `bot/handlers/dm_campaigns.py` — регистрация задач + исправление propagation отмены
-- `services/` — live task tracking and cancellation system
+**Изменённые файлы (по коммитам):**
+- `d6e2018` — `database/db.py` (5 silent fails → log.debug), `bot/handlers/admin.py` (SQL-инъекция key→$2), `services/op_worker.py` (SQL-инъекция backoff→$4*interval), `services/account_monitor.py` (compat except), `main.py` (factory pattern)
+- `e6cfd05` — `services/task_registry.py` (NEW), `bot/handlers/active_tasks.py` (NEW), `bot/callbacks.py` (TaskCb prefix="tsk"), `main.py` (router + BotCommand /tasks)
+- `9adee3c` — `bot/handlers/dm_campaigns.py` (background + CancelledError → status=paused)
+- `f5119f7` — `bot/keyboards.py` (⚡ Активные задачи в main_menu)
+- `30065ce` — `services/account_manager.py` (_OP_TIMEOUT=45, wait_for в iter_dialogs + get_me)
+- `32d2946` — `bot/handlers/mass_publish.py` (background _mpub_bg, task_registry.register)
+- `3c50b7f` — `main.py` (Strike bg), `bot/handlers/channel_ops.py` (_cinv_bg, _strike_bg)
+- `4479677` — `bot/handlers/accounts.py` (🔄 Релог + cb_relog_account + _finalize_login с relog_acc_id)
 
 **До:**
+- ВСЕ 15 фоновых сервисов не перезапускались после первого краша (coroutine exhausted после await)
+- 2 SQL-инъекции в admin.py (key) и op_worker.py (backoff)
+- 5 функций в db.py с `except Exception: pass` — ошибки исчезали бесследно
 - Аккаунты требовали повторного ввода номера при обрыве сессии
-- Сервисы падали при ошибках без авто-восстановления
-- mass_publish блокировал интерфейс до завершения
-- Telethon операции могли висеть бесконечно
-- Не было видимости запущенных задач
-- Отмена DM-кампаний не распространялась на подзадачи
+- Длинные операции блокировали интерфейс и не могли быть отменены
+- Telethon iter_dialogs мог висеть бесконечно без таймаута
 
 **После:**
-- Кнопка Релог — переподключение аккаунта без номера
-- Сервисы auto-restart через factory pattern
-- mass_publish в фоне с прогресс-трекингом
-- Timeout 120s на все Telethon операции
-- Кнопка «Active Tasks» + /tasks — видимость всех задач
-- Полная цепочка отмены для DM-кампаний
-- Live tracking всех фоновых задач с возможность отмены
+- factory pattern: `_resilient(name, fn, *args)` → `fn(*args)` создаёт свежую корутину при каждом рестарте
+- SQL параметризованы: `$2` для key, `$4 * interval '1 second'` для backoff
+- Silent fails → `log.debug()` — видны в Railway logs
+- Кнопка 🔄 Релог: читает phone из БД → start_login → ждёт код — номер не нужен вводить
+- Strike/invite/dm_campaign/mass_publish — backgrounded asyncio.Task + /tasks для отмены
+- `_OP_TIMEOUT = 45` секунд на каждую Telethon-операцию (не 120s как указано ранее)
 
 **Проверки:**
 - `python3 -c "import ast; ast.parse(open(f).read())"` — все файлы OK

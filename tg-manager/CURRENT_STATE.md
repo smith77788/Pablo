@@ -20,11 +20,18 @@
 
 1. **Кнопка Релог** — переподключение аккаунта без повторного ввода номера (4479677)
 2. **Resilient service restart** — factory pattern вместо coroutine reuse (3c50b7f)
+   - ⚠️ ВСЕ 15 сервисов тихо не перезапускались после краша — теперь исправлено
 3. **Background mass_publish** — регистрация в task_registry (32d2946)
-4. **Telethon operation timeouts** — предотвращение бесконечных зависаний (30065ce)
-5. **Active Tasks button** — кнопка в главном меню + /tasks keyboard (f5119f7)
-6. **DM campaign task registration** — исправление propagation отмены (9adee3c)
-7. **Live task tracking and cancellation system** (e6cfd05)
+4. **Telethon operation timeouts** — `_OP_TIMEOUT=45s`, wait_for в iter_dialogs/get_me (30065ce)
+5. **Active Tasks button** — кнопка ⚡ Активные задачи в главном меню + /tasks (f5119f7)
+6. **DM campaign task registration** — backgrounded + CancelledError → status=paused (9adee3c)
+7. **Live task tracking** — services/task_registry.py + active_tasks handler (e6cfd05)
+   - Strike, mass_publish, dm_campaign, invite — все backgrounded + отменяемы через /tasks
+8. **SQL-инъекции устранены** (d6e2018)
+   - `admin.py`: key из callback data → параметр `$2` (не f-string)
+   - `op_worker.py`: backoff в f-string → `$4 * interval '1 second'`
+9. **Silent fails исправлены** (d6e2018)
+   - 5 функций db.py с `except Exception: pass` → `log.debug(...)` — ошибки теперь видны в логах
 
 ### ✅ Выполнено в предыдущих сессиях (r6-r11)
 
