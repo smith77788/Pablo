@@ -248,7 +248,7 @@ async def cb_dm_target_cohort_pick(
     # Count each cohort size
     try:
         from database import db as _db
-        cohort_stats = await _db.get_user_cohorts(pool, bot_id)
+        cohort_stats = await _db.get_activity_segments(pool, bot_id)
     except Exception:
         log_exc_swallow(log, "Ошибка получения статистики когорт для DM-кампании")
         cohort_stats = {"hot": 0, "warm": 0, "cold": 0, "lost": 0}
