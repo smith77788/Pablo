@@ -16,6 +16,20 @@
 
 **Все задачи r13-r16 выполнены. Оставшиеся — низкоприоритетные (Mini App, RBAC, Approval workflows).**
 
+### r16 Continuation (2026-05-30) — Bug Fixes + Report Quality
+
+**Коммиты:** d7f09c0, 532c01c
+
+**Выполнено:**
+
+1. **Drift Detector SQL fix** — `_compare_with_templates()`: колонка `params`→`template` (реальная колонка), убран несуществующий `is_active`
+2. **Operation Reports — root cause analysis** — `_analyze_error()` в `botmother_menu.py`: классификация ошибок (flood/auth/permissions/network/not found) + рекомендации «Что делать»
+3. **Auto-responder — проверка send_message** — логирование неудачных отправок (3 точки)
+4. **Audit retry/execution patterns** — проверены 6 сервисов; bot_api, funnel_runner, scheduler уже исправлены в более ранних коммитах (e359cc9, b6d6123, f169ed9)
+
+
+
+
 
 ## 2026-05-30 — Placeholder Rendering Integration + Inline Help (r15→r16)
 
