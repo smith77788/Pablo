@@ -20,6 +20,7 @@ import asyncio
 import html
 import logging
 import random
+import time
 import aiohttp
 import asyncpg
 from aiogram import F, Router
@@ -2678,13 +2679,32 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     from services import strike_engine
 
     # ═══════════════════════════════════════════════════════════════════════
-    # ФАЗА 0: РАЗВЕДКА — одним аккаунтом карту цели
+    # ФАЗА 0: PRE-FLIGHT — проверка аккаунтов перед атакой
+    # ═══════════════════════════════════════════════════════════════════════
+    viable = strike_engine.preflight_accounts(chosen)
+    if not viable:
+        await callback.message.edit_text(
+            "⚠️ <b>Нет доступных аккаунтов.</b>\n\n"
+            "Все аккаунты либо в кулдауне, либо имеют слишком низкий trust_score.\n"
+            "Подождите и попробуйте снова.",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    skipped = len(chosen) - len(viable)
+    preflight_note = ""
+    if skipped > 0:
+        preflight_note = f"\n⚠️ Пропущено аккаунтов в кулдауне: <b>{skipped}</b>"
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ФАЗА 1: РАЗВЕДКА — лучшим аккаунтом карту цели
     # ═══════════════════════════════════════════════════════════════════════
     status_msg = await callback.message.edit_text(
-        f"⚔️ <b>Strike инициализирован</b>\n\n"
-        f"🔍 <b>Фаза 0: Разведка цели...</b>\n"
-        f"Цели: <b>{len(peers)}</b> · Аккаунтов в ударной группе: <b>{len(chosen)}</b>\n"
-        f"Маппинг: администраторы, связанные каналы, боты, сообщения...",
+        f"⚔️ <b>Strike v2 — Инициализация</b>\n\n"
+        f"🛡 <b>Pre-flight:</b> {len(viable)}/{len(chosen)} аккаунтов готовы{preflight_note}\n"
+        f"🔍 <b>Фаза 1: Разведка цели...</b>\n"
+        f"Цели: <b>{len(peers)}</b> · Лучший разведчик: trust={viable[0].get('trust_score', 0):.1f}\n"
+        f"Маппинг: администраторы, узлы сети, боты, сообщения...",
         parse_mode="HTML",
     )
 
@@ -2693,7 +2713,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
         try:
             from services import account_manager
             intel = await account_manager.strike_map_target(
-                chosen[0]["session_str"], peer, _acc=chosen[0]
+                viable[0]["session_str"], peer, _acc=viable[0]
             )
         except Exception as e:
             intel = {"error": str(e)[:100], "admin_ids": [], "mentioned_usernames": [],
@@ -2701,8 +2721,12 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
                      "title": peer, "members": 0, "linked_group_id": None}
         all_intel[peer] = intel
 
-    # Показываем результат разведки и запускаем фазы 1-3 в фоне
-    intel_lines = [f"⚔️ <b>Strike — Разведка завершена</b>\n"]
+    # План атаки: распределяем аккаунты по волнам
+    waves = strike_engine.plan_waves(viable, num_waves=3)
+    wave_sizes = [len(w) for w in waves]
+    wave_desc = " → ".join(f"W{i+1}:{s}" for i, s in enumerate(wave_sizes) if s > 0)
+
+    intel_lines = [f"⚔️ <b>Strike v2 — Разведка завершена</b>\n"]
     for peer, intel in all_intel.items():
         nodes = (
             len(intel.get("admin_ids", []))
@@ -2713,24 +2737,26 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
         intel_lines.append(
             f"🎯 <code>{html.escape(peer)}</code>\n"
             f"   📋 {intel.get('title', '?')} · {intel.get('members', 0):,} подписчиков\n"
-            f"   👤 Администраторов: <b>{len(intel.get('admin_ids', []))}</b>\n"
-            f"   🔗 Связанных узлов сети: <b>{nodes}</b>\n"
+            f"   👤 Админов: <b>{len(intel.get('admin_ids', []))}</b> · "
+            f"Узлов сети: <b>{nodes}</b>\n"
             f"   📌 Закреплённых: <b>{len(intel.get('pinned_msg_ids', []))}</b> · "
-            f"Сообщений в очереди: <b>{len(intel.get('latest_msg_ids', []))}</b>"
+            f"Сообщений: <b>{len(intel.get('latest_msg_ids', []))}</b>"
         )
-    intel_lines.append(f"\n⚡ <b>Фазы 1-3 запущены в фоне ({len(chosen)} аккаунтов)</b>")
-    intel_lines.append(f"<i>Для отмены: /tasks</i>")
+    intel_lines.append(f"\n⚡ <b>План атаки:</b> {wave_desc}")
+    intel_lines.append(f"🔄 Волны с паузами {strike_engine._WAVE_COOLDOWN[0]}-{strike_engine._WAVE_COOLDOWN[1]}с")
+    intel_lines.append(f"\n<i>Фазы 2-6 запускаются в фоне. Для отмены: /tasks</i>")
     try:
         await status_msg.edit_text("\n".join(intel_lines), parse_mode="HTML")
     except Exception:
         pass
 
-    task = asyncio.create_task(_strike_bg(
+    task = asyncio.create_task(_strike_bg_v2(
         status_msg=status_msg,
         bot=callback.bot,
         user_id=callback.from_user.id,
         peers=peers,
-        chosen=chosen,
+        viable=viable,
+        waves=waves,
         all_intel=all_intel,
         reason=reason,
         preset=preset,
@@ -2738,157 +2764,70 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     ))
     _treg.register(
         callback.from_user.id, "strike",
-        f"Strike {', '.join(peers[:2])[:40]}",
+        f"Strike v2 {', '.join(peers[:2])[:40]}",
         task,
     )
 
 
-async def _strike_bg(
+async def _strike_bg_v2(
     status_msg, bot, user_id: int,
-    peers: list, chosen: list, all_intel: dict,
+    peers: list, viable: list, waves: list, all_intel: dict,
     reason: str, preset: str | None, label: str,
 ) -> None:
+    """Фоновое выполнение Strike v2 — эшелонированная атака с верификацией."""
     from services import strike_engine
-    try:
-        # ═══════════════════════════════════════════════════════════════════════
-        # ФАЗА 1: ПАРАЛЛЕЛЬНАЯ АТАКА — все аккаунты одновременно
-        # ═══════════════════════════════════════════════════════════════════════
-        all_stat: dict = {
-            "peer": 0, "multi": 0, "photo": 0, "pinned": 0,
-            "msgs": 0, "spam": 0, "reacts": 0, "admins": 0,
-            "linked_grp": 0, "bots": 0, "fwd": 0, "blocked": 0, "failed": 0,
-        }
-        nodes_total = 0
-        nodes_reports = 0
 
-        for peer_idx, peer in enumerate(peers):
-            intel = all_intel.get(peer, {})
-
-            results = await strike_engine.parallel_strike(chosen, peer, intel, reason, preset)
-            wave_stat = strike_engine.aggregate_results(results)
-            for k in all_stat:
-                all_stat[k] += wave_stat.get(k, 0)
-
-            _total_now = sum(v for k, v in all_stat.items() if k != "failed")
-            try:
-                await status_msg.edit_text(
-                    f"⚔️ <b>Strike — Фаза 1 / цель {peer_idx+1}/{len(peers)}</b>\n"
-                    f"🎯 <code>{html.escape(peer)}</code> — атакована {len(chosen)} аккаунтами\n\n"
-                    f"① Жалоб на канал: <b>{all_stat['peer']}</b>"
-                    + (f" (+{all_stat['multi']} причин)" if all_stat['multi'] else "") + "\n"
-                    f"② Фото: <b>{all_stat['photo']}</b>  "
-                    f"③ Закреплённых: <b>{all_stat['pinned']}</b>  "
-                    f"④ Сообщений: <b>{all_stat['msgs']}</b>\n"
-                    f"⑥ Реакций: <b>{all_stat['reacts']}</b>  "
-                    f"⑦ Админов: <b>{all_stat['admins']}</b>  "
-                    f"⑩ Форвард: <b>{all_stat['fwd']}</b>\n\n"
-                    f"📊 Сигналов отправлено: <b>{_total_now}</b>\n"
-                    f"⚡ <b>Фаза 2: Уничтожение сети (узлы)...</b>\n"
-                    f"<i>Для отмены: /tasks</i>",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-
-            net = await strike_engine.strike_network_nodes(chosen, intel, reason, preset)
-            nodes_total += net.get("nodes_attacked", 0)
-            nodes_reports += net.get("total_reports", 0)
-
-            if peer_idx < len(peers) - 1:
-                await asyncio.sleep(random.uniform(3.0, 7.0))
-
-        # ═══════════════════════════════════════════════════════════════════════
-        # ФАЗА 3: ВНЕШНЯЯ ЭСКАЛАЦИЯ — официальная форма Telegram
-        # ═══════════════════════════════════════════════════════════════════════
+    async def _progress(phase: str, detail: str) -> None:
         try:
+            current_text = status_msg.text or ""
+            base_lines = current_text.split("\n")
+            header = "\n".join(base_lines[:5]) if len(base_lines) > 5 else current_text
             await status_msg.edit_text(
-                f"⚔️ <b>Strike — Фаза 3: Внешняя эскалация...</b>\n"
-                f"📡 Отправка официальных форм в Telegram Trust &amp; Safety...",
+                f"{header}\n\n"
+                f"⚡ <b>{detail}</b>\n"
+                f"<i>Для отмены: /tasks</i>",
                 parse_mode="HTML",
             )
         except Exception:
             pass
 
-        abuse_ok = 0
-        for peer in peers:
-            intel = all_intel.get(peer, {})
-            res = await strike_engine.submit_abuse_form(
-                peer, preset or reason,
-                title=intel.get("title", ""),
-                members=intel.get("members", 0),
-            )
-            if res.get("ok"):
-                abuse_ok += 1
-            await asyncio.sleep(1.5)
+    try:
+        await _progress("strike", f"Фаза 2-4: Эшелонированная атака — {len(peers)} целей, {len(viable)} аккаунтов")
 
-        # ═══════════════════════════════════════════════════════════════════════
-        # ИТОГ
-        # ═══════════════════════════════════════════════════════════════════════
-        total_signals = (
-            all_stat["peer"] + all_stat["multi"] + all_stat["photo"] + all_stat["pinned"]
-            + all_stat["msgs"] + all_stat["spam"] + all_stat["reacts"]
-            + all_stat["admins"] + all_stat["linked_grp"] + all_stat["bots"]
-            + all_stat["fwd"] + all_stat["blocked"] + nodes_reports
+        plan = strike_engine.StrikePlan(
+            targets=peers, accounts=viable, reason=reason, preset=preset,
+            label=label, intel=all_intel, waves=waves,
+            started_at=time.time(), phase="strike",
         )
+        results = await strike_engine.staggered_strike(plan, progress_cb=_progress)
+
+        # ── Фаза 5: Верификация ──
+        await _progress("verify", "Фаза 5: Проверка результата...")
+        for r in results:
+            try:
+                is_down = await strike_engine.verify_target_takedown(
+                    viable[0], r.target, max_attempts=3,
+                    delay_range=strike_engine._VERIFY_WAIT,
+                )
+                r.verified_down = is_down
+            except Exception:
+                r.verified_down = None
+
+        # ── Финальный отчёт ──
+        summary_text = strike_engine.format_strike_summary(results)
+        summary_text += "\n\n" + _DISCLAIMER
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
-        summary = [
-            f"⚔️ <b>Strike завершён — 3 фазы</b>",
-            f"",
-            f"🎯 Целей: <b>{len(peers)}</b>  👥 Аккаунтов: <b>{len(chosen)}</b>",
-            f"📋 Причина: {label}",
-            f"",
-            f"<b>— Фаза 1: Главные цели —</b>",
-            f"① Жалоб на канал: <b>{all_stat['peer']}</b>"
-            + (f" (+{all_stat['multi']} причин)" if all_stat["multi"] else ""),
-            f"② Фото профиля: <b>{all_stat['photo']}</b>",
-            f"③ Закреплённых: <b>{all_stat['pinned']}</b>",
-            f"④ Сообщений: <b>{all_stat['msgs']}</b>",
-        ]
-        if all_stat["spam"]:
-            summary.append(f"⑤ Спам-сигналов: <b>{all_stat['spam']}</b>")
-        if all_stat["reacts"]:
-            summary.append(f"⑥ Реакций 👎💩: <b>{all_stat['reacts']}</b>")
-        if all_stat["admins"]:
-            summary.append(f"⑦ Жалоб на админов: <b>{all_stat['admins']}</b>")
-        if all_stat["linked_grp"]:
-            summary.append(f"⑧ Связанных групп: <b>{all_stat['linked_grp']}</b>")
-        if all_stat["bots"] or all_stat["fwd"]:
-            summary.append(f"⑨ Ботов / форвардов T&S: <b>{all_stat['bots']}</b> / <b>{all_stat['fwd']}</b>")
-        summary.extend([
-            f"⑩ Заблокировано: <b>{all_stat['blocked']}</b>",
-            f"",
-            f"<b>— Фаза 2: Сеть —</b>",
-            f"🕸 Узлов сети атаковано: <b>{nodes_total}</b>  "
-            f"Сигналов: <b>{nodes_reports}</b>",
-            f"",
-            f"<b>— Фаза 3: Официальные каналы —</b>",
-            f"📡 Форм Telegram T&S: <b>{abuse_ok}/{len(peers)}</b>",
-            f"",
-            f"━━━━━━━━━━━━━━━━━━━━━",
-            f"📊 <b>ВСЕГО сигналов: {total_signals}</b>",
-            f"❌ Ошибок: <b>{all_stat['failed']}</b>",
-            f"",
-            f"<i>⚠️ Результат зависит от решения Telegram T&S. "
-            f"Strike не гарантирует удаление ресурса.</i>",
-        ])
-        await status_msg.edit_text(
-            "\n".join(summary),
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
+        await status_msg.edit_text(summary_text, parse_mode="HTML", reply_markup=kb.as_markup())
 
     except asyncio.CancelledError:
         try:
             await bot.send_message(
-                user_id,
-                "⚔️ <b>Strike отменён</b>\n\nОперация прервана пользователем через /tasks.",
-                parse_mode="HTML",
-            )
+                user_id, "⚔️ <b>Strike отменён пользователем.</b>", parse_mode="HTML")
         except Exception:
             pass
     except Exception as exc:
-        log.exception("_strike_bg error user=%s: %s", user_id, exc)
+        log.exception("_strike_bg_v2 error user=%s: %s", user_id, exc)
         try:
             await bot.send_message(
                 user_id,
@@ -2897,6 +2836,24 @@ async def _strike_bg(
             )
         except Exception:
             pass
+
+
+async def _strike_bg(
+    status_msg, bot, user_id: int,
+    peers: list, chosen: list, all_intel: dict,
+    reason: str, preset: str | None, label: str,
+) -> None:
+    """Обратная совместимость — делегирует в _strike_bg_v2."""
+    from services import strike_engine
+    viable = strike_engine.preflight_accounts(chosen)
+    if not viable:
+        viable = chosen
+    waves = strike_engine.plan_waves(viable, num_waves=3)
+    await _strike_bg_v2(
+        status_msg=status_msg, bot=bot, user_id=user_id,
+        peers=peers, viable=viable, waves=waves, all_intel=all_intel,
+        reason=reason, preset=preset, label=label,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
