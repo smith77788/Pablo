@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-30 (r12)
+Обновлено: 2026-05-30 (r13)
 
 ## Статус: АКТИВНАЯ РАЗРАБОТКА
 
@@ -15,6 +15,16 @@
 - `/subscription` → BotMother → 💳 Billing
 
 **Коммиты:** 9ddf27f (основная) + 549a339 (deploy trigger)
+
+### ✅ Выполнено в сессии 2026-05-30 (r12 → r13)
+
+1. **Bulk actions pacing selector** — выбор задержки в bulk_join и bulk_leave wizard (59aaac1)
+   - 4 режима: ⚡ Быстро (5-15с) / 🛡 Нормально / 🐌 Медленно / 🧠 Умный (авто)
+   - op_worker читает delay_mode из params и применяет его
+   - Кнопка ◀️ Изменить задержку + новые handlers bj_redelay/bl_redelay (477f0fe)
+2. **Fix cancel buttons in experiments.py FSM** — все шаги CreateExperiment теперь имеют ❌ Отмена (078286f)
+3. **File upload in bulk_join/bulk_leave** — загрузка .txt списка до 200 строк (eb88a80)
+4. **Account preview at step 3/4** — при выборе "все аккаунты" показывает первые 5 имён (4b816f6)
 
 ### ✅ Выполнено в сессии 2026-05-30 (r11 → r12)
 
@@ -95,22 +105,24 @@
 
 ### 🔄 Текущая ветка
 `claude/telegram-bot-services-xfAh6`
-Last commit: `4479677 feat: кнопка Релог — переподключение аккаунта без повторного ввода номера`
+Last commit: `4b816f6 feat: превью аккаунтов в bulk_join/bulk_leave`
 
 ### 🔜 Следующие приоритеты (2026-05-30)
 
 **P1 — Этот спринт:**
-- [ ] AI Assistant: реальное выполнение команд (создание каналов/ботов/групп через BotMother API)
-- [ ] Bulk actions: настройки задержки, выбор аккаунтов, preview перед запуском
-- [ ] Полный UX-аудит всех меню (button dumps, Back/Cancel/Help консистентность)
+- [x] AI Assistant: реальное выполнение команд (create_channel/bot/group/post — уже реализовано)
+- [x] Bulk actions: настройки задержки, выбор аккаунтов, preview перед запуском
+- [x] Полный UX-аудит всех меню — критические fixes сделаны (experiments.py cancel buttons)
+- [x] File upload для bulk_join/bulk_leave (.txt со списком)
 
 **P2 — Следующий спринт:**
-- [ ] Global Presence Factory V3: поддержка ботов + пакеты
-- [ ] Account Health Dashboard V2: тренды, рекомендации, auto-rotation
+- [ ] Global Presence Factory V3: поддержка ботов + CSV импорт городов
+- [x] Account Health Dashboard V2: тренды, рекомендации, auto-rotation — РЕАЛИЗОВАНО
 - [ ] Behavioral Engine Enhancement: fine-tune + anomaly detection
 
 **P3 — Бэклог:**
-- [ ] Import Center (CSV для bulk, массовый импорт аккаунтов)
+- [x] Import Center файловый импорт (.txt для bulk_join/leave добавлен)
+- [ ] Import Center: CSV импорт аккаунтов батчами
 - [ ] Drift Detection (мониторинг изменений, алерты)
 - [ ] Telegram Mini App для аналитики
 - [ ] Topology map (граф связей)

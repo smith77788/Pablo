@@ -32,6 +32,9 @@
 - [x] Resilient service restart — factory pattern (3c50b7f)
 - [x] Relog button — reconnect account without re-entering phone (4479677)
 - [x] SEO AI fix — принимает текстовый фидбек, спрашивает username
+- [x] Bulk join/leave delay selector — 4 режима pacing (r13)
+- [x] Bulk join/leave file upload — .txt список до 200 строк (r13)
+- [x] Account preview в bulk_join/leave при выборе "все аккаунты" (r13)
 
 ## P2 — Telegram UX (ЧАСТИЧНО)
 - [x] Добавлены Back-кнопки на все lock-screen экраны подписки (d005062)
@@ -39,6 +42,7 @@
 - [x] Онбординг с тремя сценариями для новых пользователей
 - [x] Статус-иконки ✅/⛔ в списке аккаунтов
 - [x] Описания в Channel Factory, Group Factory, Mass Publish
+- [x] experiments.py FSM: кнопки Отмены на всех шагах (r13)
 - [ ] Полный аудит всех меню на button dumps
 - [ ] Проверка консистентности Cancel/Help во всех FSM
 - [ ] Inline help для сложных полей
@@ -88,45 +92,47 @@
 
 ---
 
-## ТЕКУЩИЕ ПРИОРИТЕТЫ (2026-05-30, r12)
+## ТЕКУЩИЕ ПРИОРИТЕТЫ (2026-05-30, r13)
 
-### 🔥 Urgent (этот спринт)
+### ✅ Выполнено (этот спринт, r13)
 1. **AI Assistant — реальное выполнение команд**
-   - [ ] Создание каналов/ботов/групп через AI → BotMother API
-   - [ ] Интеграция AI с Operation Engine
-   - [ ] Подтверждение перед выполнением
+   - [x] create_channel/bot/group/post_to_channel — все реализованы в ai_tools.py
+   - [x] Confirmation flow: pending_action → confirm_action
+   - [x] Интеграция с Operation Engine (bulk_create_channels → op_queue)
 
 2. **Bulk actions — улучшение UX**
-   - [ ] Настройки задержки (кастомный pacing)
-   - [ ] Выбор аккаунтов с превью
-   - [ ] Preview перед запуском массовых операций
+   - [x] Настройки задержки: 4 режима (fast/normal/slow/smart) для bulk_join и bulk_leave
+   - [x] Выбор аккаунтов с превью (показывает первые 5 при выборе "все")
+   - [x] File upload (.txt) для bulk_join и bulk_leave
+   - [x] Кнопка "◀️ Изменить задержку" (bj_redelay/bl_redelay)
 
 3. **UX cleanup — полный аудит**
-   - [ ] Проверить ВСЕ меню на button dumps
-   - [ ] Убедиться что Back/Cancel есть везде
-   - [ ] Добавить описания где пропущены
+   - [x] experiments.py: добавлены ❌ Отмена на всех шагах CreateExperiment FSM
+   - [x] dm_campaigns.py, audience_parser.py, account_warmup.py — OK (нет проблем)
+   - [ ] Осталось: bulk_chan_uname/about — выполняются сразу без preview/delay
 
-### ⚠️ High (недель 2-3)
+### ⚠️ High (следующие недели)
 4. **Global Presence Factory V3**
-   - [ ] Поддержка создания ботов
-   - [ ] Пакетное создание (каналы + группы + боты в каждом городе)
-   - [ ] CSV import для списка городов
+   - [ ] Поддержка создания ботов в каждом городе
+   - [ ] Пакетное создание (каналы + группы + боты)
+   - [ ] CSV import для своего списка городов
 
 5. **Behavioral Engine Enhancement**
    - [ ] Fine-tune формулы scoring'а
-   - [ ] Уникальные паттерны поведения
-   - [ ] Anomaly detection
+   - [ ] Уникальные паттерны поведения для разных аккаунтов
+   - [ ] Anomaly detection (алерты при отклонении от нормы)
 
 6. **Account Health Dashboard V2**
-   - [ ] Тренды (графики изменения health_score)
-   - [ ] Рекомендации для восстановления trust_score
-   - [ ] Automatic rotation при низком score
+   - [x] Тренды (cb_trust_trend) — реализовано
+   - [x] Рекомендации (cb_health_recommendations) — реализовано
+   - [x] Automatic rotation (cb_auto_rotate) — реализовано
+   - [ ] Визуальные графики через ASCII/Unicode
 
 ### 📋 Medium (месяц)
 7. **Import Center**
-   - [ ] CSV import для bulk операций
-   - [ ] Массовый импорт аккаунтов из файла
-   - [ ] Валидация перед импортом
+   - [x] File upload (.txt) для bulk_join/leave — СДЕЛАНО
+   - [ ] Массовый импорт аккаунтов из CSV батчами
+   - [ ] Валидация перед импортом (проверка session strings)
 
 8. **Drift Detection**
    - [ ] Мониторинг изменений в каналах/ботах

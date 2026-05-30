@@ -1,5 +1,34 @@
 # IMPLEMENTATION LOG
 
+## 2026-05-30 — Bulk UX & Import Center (r13)
+
+**Цель:** Улучшить UX массовых операций, добавить выбор задержки, файловый импорт, исправить UX-проблемы.
+
+**Изменённые файлы (по коммитам):**
+- `59aaac1` — `bot/handlers/mass_ops.py` (delay selector шаг 3/4: bj_delay, bl_delay handlers), `services/op_worker.py` (delay_mode в params для bulk_join/bulk_leave)
+- `477f0fe` — `bot/handlers/mass_ops.py` (bj_redelay/bl_redelay handlers — кнопка ◀️ Изменить задержку)
+- `078286f` — `bot/handlers/experiments.py` (❌ Отмена на всех шагах CreateExperiment FSM)
+- `eb88a80` — `bot/handlers/mass_ops.py` (F.document handler для bulk_join/leave: _process_bj_links, _process_bl_channels, file upload до 200 строк)
+- `4b816f6` — `bot/handlers/mass_ops.py` (preview аккаунтов при выборе "все": первые 5 имён)
+
+**До:**
+- bulk_join/bulk_leave запускались с hardcoded задержками без выбора
+- experiments.py: пользователь застревал в FSM без кнопки Отмена
+- Списки каналов/групп нельзя было загрузить файлом
+- При выборе "все аккаунты" не было видно каких именно
+
+**После:**
+- 4 режима задержки: ⚡ Быстро (5-15с) / 🛡 Нормально / 🐌 Медленно / 🧠 Умный
+- op_worker применяет delay_mode из params операции
+- experiments.py: ❌ Отмена на каждом шаге (waiting_name, waiting_variant_name, waiting_variant_content, add_variant)
+- bulk_join/leave: загрузка .txt файла (F.document handler), до 200 строк
+- bulk_join/leave шаг 3/4: показывает первые 5 аккаунтов из выбранных
+
+**Проверки:**
+- `python3 -c "import ast; ast.parse(open(f).read())"` — все файлы OK
+
+---
+
 ## 2026-05-30 — Reliability & Task Tracking (r12)
 
 **Цель:** Улучшить надёжность системы, добавить отслеживание задач и фоновое выполнение.
