@@ -9,7 +9,6 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
-
 def _parse_proxy(proxy_url: str):
     """Parse socks5://user:pass@host:port → (socks.SOCKS5, host, port, True, user, pass).
     Returns None if proxy_url is empty.
@@ -52,12 +51,10 @@ _OP_TIMEOUT = 45
 # Кап для FloodWait backoff
 _FLOOD_CAP = 65.0
 
-
 def _backoff(attempt: int, base: float = 2.0, cap: float = 120.0) -> float:
     """Return exponential backoff seconds: base^attempt, capped at cap."""
     import math
     return min(base ** attempt, cap)
-
 
 # Pool of realistic Android device fingerprints
 _ANDROID_DEVICES: list[tuple[str, str]] = [
@@ -87,7 +84,6 @@ _APP_VERSIONS: list[str] = [
     "10.10.1", "10.9.1",  "10.8.2",  "10.7.0",  "10.6.2",
 ]
 
-
 def generate_device_fingerprint() -> dict:
     """Return a random realistic Android device fingerprint."""
     import random
@@ -97,7 +93,6 @@ def generate_device_fingerprint() -> dict:
         "system_version": system_version,
         "app_version": random.choice(_APP_VERSIONS),
     }
-
 
 def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
@@ -120,7 +115,6 @@ def _make_client(session_string: str = "", device: dict | None = None):
         flood_sleep_threshold=0,
         proxy=proxy,
     )
-
 
 async def start_login(phone: str) -> tuple[str, str]:
     """Начинает авторизацию по номеру телефона.
@@ -164,7 +158,6 @@ async def start_login(phone: str) -> tuple[str, str]:
 
     return result.phone_code_hash, delivery_hint
 
-
 async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
     """Resend code via next available method (usually SMS if app was first).
     Returns (new_phone_code_hash, delivery_hint).
@@ -192,7 +185,6 @@ async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
         hint = "💬 Код выслан повторно (SMS или звонок)"
     return result.phone_code_hash, hint
 
-
 async def confirm_code(phone: str, code: str, phone_code_hash: str):
     """Confirm SMS/TG code. Returns client or 'need_2fa'."""
     from telethon.errors import (
@@ -209,7 +201,6 @@ async def confirm_code(phone: str, code: str, phone_code_hash: str):
     except (PhoneCodeInvalidError, PhoneCodeExpiredError):
         raise ValueError("Неверный или истёкший код.")
 
-
 async def confirm_2fa(phone: str, password: str):
     """Complete 2FA login. Returns client."""
     from telethon.errors import PasswordHashInvalidError
@@ -222,10 +213,8 @@ async def confirm_2fa(phone: str, password: str):
     except PasswordHashInvalidError:
         raise ValueError("Неверный пароль 2FA.")
 
-
 async def get_session_string(client) -> str:
     return client.session.save()
-
 
 # ── Session Import Helpers ─────────────────────────────────────────────────────
 
@@ -255,6 +244,7 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в import_from_session_string")
+
 async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
     """Convert a Pyrogram JSON session to Telethon StringSession.
 
@@ -299,7 +289,6 @@ async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
 
     return await import_from_session_string(session_string)
 
-
 async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     """Convert a TDesktop tdata directory to Telethon StringSession via opentele."""
     try:
@@ -343,6 +332,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в import_from_tdata")
+
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
     client = _pending.get(phone)
@@ -359,7 +349,6 @@ async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     }
     return session_str, info
 
-
 async def cleanup_pending(phone: str) -> None:
     _pending_device.pop(phone, None)
     client = _pending.pop(phone, None)
@@ -368,6 +357,7 @@ async def cleanup_pending(phone: str) -> None:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в cleanup_pending")
+
 # ── QR Login ──────────────────────────────────────────────────────────────────
 
 async def start_qr_login(user_id: int) -> bytes:
@@ -391,7 +381,6 @@ async def start_qr_login(user_id: int) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
-
 
 async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict]:
     """Block until user scans QR code or timeout. Returns (session_str, info).
@@ -422,7 +411,6 @@ async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict
     }
     return session_str, info
 
-
 async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
     """Finish QR login that required 2FA. Returns (session_str, info)."""
     from telethon.errors import PasswordHashInvalidError
@@ -447,7 +435,6 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
     }
     return session_str, info
 
-
 async def cleanup_qr_pending(user_id: int) -> None:
     entry = _pending_qr.pop(user_id, None)
     if entry:
@@ -456,6 +443,7 @@ async def cleanup_qr_pending(user_id: int) -> None:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в cleanup_qr_pending")
+
 async def get_account_info(session_string: str, _acc: dict | None = None) -> dict:
     client = _make_client(session_string, _acc)
     try:
@@ -472,6 +460,7 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_account_info")
+
 async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
                       _acc: dict | None = None) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
@@ -497,6 +486,7 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_dialogs")
+
 async def scan_owned_assets(
     session_string: str, _acc: dict | None = None
 ) -> dict:
@@ -555,6 +545,7 @@ async def scan_owned_assets(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в _collect")
+
 async def send_message_via_account(session_string: str, chat_id: int, text: str,
                                    _acc: dict | None = None) -> bool:
     """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
@@ -573,7 +564,6 @@ async def send_message_via_account(session_string: str, chat_id: int, text: str,
             log_exc_swallow(log, "Сбой в send_message_via_account")
 # Псевдоним для обратной совместимости с хендлером accounts.py
 send_message = send_message_via_account
-
 
 async def send_dm(session_string: str, username: str, text: str,
                   _acc: dict | None = None) -> dict:
@@ -622,6 +612,7 @@ async def send_dm(session_string: str, username: str, text: str,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в send_dm")
+
 async def get_account_dialogs_stats(session_string: str, _acc: dict | None = None) -> dict:
     """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
     from telethon.tl.types import Channel, Chat, User
@@ -655,6 +646,7 @@ async def get_account_dialogs_stats(session_string: str, _acc: dict | None = Non
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_account_dialogs_stats")
+
 async def check_account_health(session_string: str, _acc: dict | None = None) -> dict:
     """Проверяет доступность аккаунта: авторизован ли, не заблокирован ли.
 
@@ -662,7 +654,6 @@ async def check_account_health(session_string: str, _acc: dict | None = None) ->
     """
     result = await check_account_status_full(session_string, _acc=_acc, check_spambot=False)
     return {"ok": result["status"] == "active", "reason": result["reason"]}
-
 
 async def check_account_status_full(
     session_string: str,
@@ -734,7 +725,6 @@ async def check_account_status_full(
         log.exception("check_account_status_full error: %s", e)
         return {"status": "active", "reason": f"Нет данных: {err[:120]}", "display_name": ""}
 
-
 async def get_channel_members_count(session_string: str, channel_username: str,
                                     _acc: dict | None = None) -> int:
     """Возвращает количество участников канала/группы по username. При ошибке — -1."""
@@ -757,6 +747,7 @@ async def get_channel_members_count(session_string: str, channel_username: str,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_members_count")
+
 async def get_full_channel_info(
     session_string: str,
     channel_id: int | str,
@@ -785,6 +776,7 @@ async def get_full_channel_info(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_full_channel_info")
+
 async def get_recent_messages(
     session_string: str,
     channel_username: str,
@@ -819,6 +811,7 @@ async def get_recent_messages(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_recent_messages")
+
 async def search_in_telegram(session_string: str, query: str, limit: int = 20,
                              _acc: dict | None = None) -> list[dict]:
     """Search Telegram contacts/global and return ordered results."""
@@ -845,7 +838,6 @@ async def search_in_telegram(session_string: str, query: str, limit: int = 20,
         return []
     finally:
         await client.disconnect()
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHANNEL / GROUP OPERATIONS
@@ -900,6 +892,7 @@ async def create_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в create_channel")
+
 async def join_channel(session_string: str, invite_or_username: str,
                        _acc: dict | None = None) -> dict:
     """Join a channel or group by username (@name) or invite link (https://t.me/...).
@@ -944,6 +937,7 @@ async def join_channel(session_string: str, invite_or_username: str,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в join_channel")
+
 async def leave_channel(session_string: str, channel_id: int | str,
                         _acc: dict | None = None) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
@@ -966,6 +960,7 @@ async def leave_channel(session_string: str, channel_id: int | str,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в leave_channel")
+
 async def edit_channel_title(
     session_string: str, channel_id: int, title: str, _acc: dict | None = None,
 ) -> bool:
@@ -984,6 +979,7 @@ async def edit_channel_title(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в edit_channel_title")
+
 async def edit_channel_about(
     session_string: str, channel_id: int, about: str, _acc: dict | None = None,
 ) -> bool:
@@ -1002,6 +998,7 @@ async def edit_channel_about(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в edit_channel_about")
+
 async def set_channel_username(
     session_string: str, channel_id: int, username: str, _acc: dict | None = None,
 ) -> str:
@@ -1021,6 +1018,7 @@ async def set_channel_username(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в set_channel_username")
+
 async def get_channel_invite_link(session_string: str, channel_id: int,
                                   _acc: dict | None = None) -> str:
     """Get (or create) an invite link for the channel. Returns link string or ''."""
@@ -1039,6 +1037,7 @@ async def get_channel_invite_link(session_string: str, channel_id: int,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_invite_link")
+
 async def delete_channel(session_string: str, channel_id: int,
                          _acc: dict | None = None) -> bool:
     """Permanently delete a channel or group. Irreversible."""
@@ -1057,6 +1056,7 @@ async def delete_channel(session_string: str, channel_id: int,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в delete_channel")
+
 async def get_channel_members(
     session_string: str, channel_id: int, limit: int = 50, _acc: dict | None = None,
 ) -> list[dict]:
@@ -1091,6 +1091,7 @@ async def get_channel_members(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_members")
+
 async def invite_users_to_channel(
     session_string: str, channel_id: int, usernames: list[str], _acc: dict | None = None,
     access_hash: int = 0,
@@ -1172,6 +1173,7 @@ async def invite_users_to_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в invite_users_to_channel")
+
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
@@ -1203,6 +1205,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_contacts")
+
 async def kick_from_channel(
     session_string: str, channel_id: int, user_id: int, _acc: dict | None = None,
 ) -> bool:
@@ -1230,6 +1233,7 @@ async def kick_from_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в kick_from_channel")
+
 async def promote_to_admin(
     session_string: str,
     channel_id: int,
@@ -1354,6 +1358,7 @@ async def post_to_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в post_to_channel")
+
 async def send_reaction(
     session_string: str, channel_id: int, msg_id: int, emoji: str,
     _acc: dict | None = None,
@@ -1379,6 +1384,7 @@ async def send_reaction(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в send_reaction")
+
 async def report_peer(
     session_string: str,
     peer_username: str,
@@ -1419,6 +1425,7 @@ async def report_peer(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer")
+
 async def report_peer_deep(
     session_string: str,
     peer_username: str,
@@ -1797,7 +1804,6 @@ async def report_peer_deep(
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer_deep")
     return result
-
 
 async def report_peer_deep_v2(
     session_string: str,
@@ -2243,7 +2249,6 @@ async def report_peer_deep_v2(
             log_exc_swallow(log, "Сбой в report_peer_deep_v2")
     return result
 
-
 def _extract_flood_wait(err_str: str, default: float = 30.0) -> float:
     """Извлекает секунды ожидания из ошибки FloodWait."""
     import re as _re
@@ -2251,7 +2256,6 @@ def _extract_flood_wait(err_str: str, default: float = 30.0) -> float:
     if match:
         return min(_FLOOD_CAP, float(match.group(1)))
     return default
-
 
 async def strike_map_target(
     session_string: str,
@@ -2353,7 +2357,6 @@ async def strike_map_target(
             log_exc_swallow(log, "Сбой в strike_map_target")
     return intel
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # ACCOUNT PROFILE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2393,6 +2396,7 @@ async def update_profile(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в update_profile")
+
 async def update_account_username(session_string: str, username: str,
                                   _acc: dict | None = None) -> str:
     """Update account username. Returns '' on success, error string on failure."""
@@ -2418,7 +2422,6 @@ async def update_account_username(session_string: str, username: str,
 # ══════════════════════════════════════════════════════════════════════════════
 
 _BOTFATHER_USERNAME = "BotFather"
-
 
 async def create_bot_via_botfather(
     session_string: str,
