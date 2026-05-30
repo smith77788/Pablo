@@ -82,6 +82,7 @@ class SessionImport(StatesGroup):
     waiting_string_session = State()
     waiting_pyrogram_json = State()
     waiting_tdata_zip = State()
+    waiting_batch_sessions = State()
 
 
 class AccountPost(StatesGroup):
@@ -2034,6 +2035,7 @@ async def cb_import_menu(
     kb.button(text="🔑 String Session (Telethon)",  callback_data=AccCb(action="import_string"))
     kb.button(text="📄 Session JSON (Pyrogram)",    callback_data=AccCb(action="import_pyrogram"))
     kb.button(text="📦 tdata (ZIP-архив)",          callback_data=AccCb(action="import_tdata"))
+    kb.button(text="📋 Батч-импорт (несколько)",   callback_data=AccCb(action="import_batch"))
     kb.button(text="◀️ Мои аккаунты",              callback_data=AccCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -2041,7 +2043,8 @@ async def cb_import_menu(
         "Выберите формат:\n\n"
         "🔑 <b>String Session</b> — строка вида <code>1BQANOTEuA...</code> (Telethon)\n"
         "📄 <b>Session JSON</b> — JSON с полями <code>dc_id</code>, <code>auth_key</code> (Pyrogram)\n"
-        "📦 <b>tdata</b> — ZIP-архив папки <code>tdata</code> из Telegram Desktop\n\n"
+        "📦 <b>tdata</b> — ZIP-архив папки <code>tdata</code> из Telegram Desktop\n"
+        "📋 <b>Батч-импорт</b> — несколько Telethon session strings, по одному на строку\n\n"
         "⚠️ Никогда не передавайте сессии незнакомым людям.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -2303,6 +2306,136 @@ async def _finalize_import(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ── Batch Import (multiple Telethon string sessions) ──────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "import_batch"))
+async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(SessionImport.waiting_batch_sessions)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📋 <b>Батч-импорт Telethon String Sessions</b>\n\n"
+        "Отправьте несколько session strings — <b>по одной на строку</b>:\n\n"
+        "<code>1BQANOTEuAGkA...\n"
+        "1BVtsOIKAGkB...\n"
+        "1ByDfhMFAlkC...</code>\n\n"
+        "Или загрузите <b>.txt файл</b> со списком сессий.\n\n"
+        "⚠️ Никогда не передавайте сессии незнакомым людям.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _do_batch_import(raw_sessions: list[str], message, pool: asyncpg.Pool, user_id: int) -> None:
+    """Common logic for batch session import."""
+    from services.account_manager import import_from_session_string, generate_device_fingerprint
+
+    total = len(raw_sessions)
+    progress_msg = await message.answer(
+        f"⏳ <b>Батч-импорт</b>\n\nОбрабатывается 0 / {total}...",
+        parse_mode="HTML",
+    )
+
+    ok_list, err_list = [], []
+    for i, session_str in enumerate(raw_sessions):
+        session_str = session_str.strip()
+        if not session_str:
+            continue
+        try:
+            validated_str, info = await import_from_session_string(session_str)
+            if not validated_str or not info:
+                raise ValueError("invalid session or expired")
+
+            phone = info.get("phone", "") or ""
+            device = generate_device_fingerprint()
+            await db.add_tg_account(
+                pool,
+                owner_id=user_id,
+                session_str=validated_str,
+                phone=phone,
+                first_name=info.get("first_name", ""),
+                last_name=info.get("last_name", ""),
+                username=info.get("username", ""),
+                tg_user_id=info.get("tg_user_id"),
+                device_model=device["device_model"],
+                system_version=device["system_version"],
+                app_version=device["app_version"],
+            )
+            name = info.get("first_name") or info.get("username") or phone or f"сессия #{i+1}"
+            ok_list.append(f"✅ {escape(name[:40])}")
+        except Exception as e:
+            err_list.append(f"❌ Сессия #{i+1}: {escape(str(e)[:60])}")
+
+        if (i + 1) % 3 == 0 or i + 1 == total:
+            try:
+                await progress_msg.edit_text(
+                    f"⏳ <b>Батч-импорт</b>\n\nОбрабатывается {i + 1} / {total}...",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))
+    kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    result_lines = ok_list + err_list
+    detail = "\n".join(result_lines[:30])
+    if len(result_lines) > 30:
+        detail += f"\n<i>...ещё {len(result_lines) - 30}</i>"
+
+    await progress_msg.edit_text(
+        f"✅ <b>Батч-импорт завершён</b>\n\n"
+        f"Всего: {total} | Успешно: {len(ok_list)} | Ошибок: {len(err_list)}\n\n"
+        f"{detail}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_batch_sessions, F.text)
+async def fsm_batch_import_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    raw = (message.text or "").strip()
+    sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not sessions:
+        await message.answer("⚠️ Введите хотя бы одну session string:")
+        return
+    if len(sessions) > 50:
+        sessions = sessions[:50]
+        await message.answer("⚠️ Взяты первые 50 сессий из списка.")
+    await state.clear()
+    await _do_batch_import(sessions, message, pool, message.from_user.id)
+
+
+@router.message(SessionImport.waiting_batch_sessions, F.document)
+async def fsm_batch_import_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    doc = message.document
+    if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
+        await message.answer("⚠️ Отправьте текстовый .txt файл со списком сессий.")
+        return
+    if doc.file_size and doc.file_size > 500_000:
+        await message.answer("⚠️ Файл слишком большой. Максимум 500 КБ.")
+        return
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        raw = downloaded.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+    sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not sessions:
+        await message.answer("⚠️ Файл пустой или не содержит сессий.")
+        return
+    if len(sessions) > 50:
+        sessions = sessions[:50]
+        await message.answer("⚠️ Взяты первые 50 сессий из файла.")
+    await state.clear()
+    await _do_batch_import(sessions, message, pool, message.from_user.id)
 
 
 # ── Asset Scanner ──────────────────────────────────────────────────────────────
