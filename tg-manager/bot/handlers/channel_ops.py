@@ -232,8 +232,9 @@ def _human_delay(min_s: float, max_s: float) -> float:
 
 async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT id, session_str, phone, first_name, username, is_active FROM tg_accounts "
-        "WHERE owner_id=$1 ORDER BY added_at",
+        "SELECT id, session_str, phone, first_name, username, is_active, "
+        "trust_score, flood_count_7d, cooldown_until, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE owner_id=$1 ORDER BY added_at",
         owner_id,
     )
 
