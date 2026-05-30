@@ -7,6 +7,7 @@ import logging
 import asyncpg
 from aiogram import Bot
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
                 owner_id, _LOW_TRUST_THRESHOLD,
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "сбой алерта low trust — не удалось обновить last_low_trust_alert")
         log.info("account_monitor: low trust alert for owner=%s (%d accounts)", owner_id, len(accs))
 
 

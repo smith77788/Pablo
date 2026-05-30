@@ -254,18 +254,27 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 # ── Bots health ────────────────────────────────────────────────────────────────
 
-async def _check_bot_alive(token: str, http_session=None) -> tuple[bool, str]:
-    """Check if a bot token is valid via Bot API /getMe."""
+_http_session: aiohttp.ClientSession | None = None
+
+
+async def _check_bot_alive(token: str, http_session: aiohttp.ClientSession | None = None) -> tuple[bool, str]:
+    """Check if a bot token is valid via Bot API /getMe.
+
+    Uses the shared http_session to avoid connection leaks.
+    """
     import aiohttp
     url = f"https://api.telegram.org/bot{token}/getMe"
+    session = http_session or _http_session
+    if session is None:
+        session = aiohttp.ClientSession()
+        _http_session = session
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                data = await resp.json()
-                if data.get("ok"):
-                    username = data["result"].get("username", "")
-                    return True, username
-                return False, ""
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            data = await resp.json()
+            if data.get("ok"):
+                username = data["result"].get("username", "")
+                return True, username
+            return False, ""
     except Exception:
         return False, ""
 

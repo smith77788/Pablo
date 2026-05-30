@@ -22,6 +22,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
 from bot.utils.subscription import locked_text, require_plan
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -199,7 +200,7 @@ async def _show_type_choice(msg, state: FSMContext, edit: bool = False) -> None:
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка редактирования сообщения выбора типа группы")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -239,7 +240,7 @@ async def _show_group_confirm(msg, state: FSMContext, edit: bool = False) -> Non
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка редактирования сообщения подтверждения создания группы")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -830,7 +831,7 @@ async def cb_group_do_announce(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка обновления прогресса отправки объявления")
         await asyncio.sleep(3)
 
     await progress_msg.edit_text(

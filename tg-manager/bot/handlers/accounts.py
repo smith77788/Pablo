@@ -6,8 +6,11 @@ so the platform can list channels/groups, post messages, and track search rankin
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from html import escape
+
+from services.logger import log_exc_swallow
 
 import asyncpg
 from aiogram import Bot, F, Router
@@ -16,6 +19,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
 
@@ -107,6 +112,7 @@ def _api_configured() -> bool:
     try:
         return bool(TG_API_ID and TG_API_HASH)
     except Exception:
+        log_exc_swallow(log, "Ошибка проверки API-конфигурации")
         return False
 
 
@@ -541,7 +547,7 @@ async def _qr_wait_task(
                 reply_markup=kb.as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка обновления сообщения об истечении QR-кода")
         await cleanup_qr_pending(user_id)
         return
     except SessionPasswordNeededError:
@@ -565,7 +571,7 @@ async def _qr_wait_task(
                 reply_markup=kb.as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка отображения запроса пароля 2FA")
         # Client stays in _pending_qr — needed by confirm_qr_2fa()
         return
     except Exception as exc:
@@ -576,7 +582,7 @@ async def _qr_wait_task(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка отправки сообщения об ошибке QR-входа")
         await cleanup_qr_pending(user_id)
         return
 
@@ -601,7 +607,7 @@ async def _qr_wait_task(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка отправки сообщения о неудаче сохранения аккаунта")
         await cleanup_qr_pending(user_id)
         return
 
@@ -1494,7 +1500,7 @@ async def cb_check_all_accounts(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Ошибка обновления прогресса проверки аккаунтов")
 
     # Build summary
     status_counts: dict[str, int] = {}
@@ -1673,7 +1679,7 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка удаления мёртвого аккаунта из БД", account_id=acc_id)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
@@ -2218,7 +2224,7 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка очистки временной директории импорта")
 
     await _finalize_import(message, pool, state, session_str, info)
 
@@ -2471,7 +2477,7 @@ async def _do_batch_import(
                             "UPDATE tg_accounts SET cluster=$1 WHERE id=$2", cl_row["id"], acc_id
                         )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Ошибка привязки кластера при батч-импорте аккаунта", account_id=acc_id)
             name = info.get("first_name") or info.get("username") or phone or f"сессия #{i+1}"
             suffix = f" [{cluster}]" if cluster else ""
             ok_list.append(f"✅ {escape(name[:35])}{suffix}")
@@ -2485,7 +2491,7 @@ async def _do_batch_import(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Ошибка обновления прогресса батч-импорта аккаунтов")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))

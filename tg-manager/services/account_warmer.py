@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import asyncpg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ async def _perform_read_channel(client, channel_ref: str) -> bool:
         await asyncio.sleep(random.uniform(3, 8))
         return bool(msgs)
     except Exception as e:
-        log.debug("warmup read_channel %s: %s", channel_ref, e)
+        log_exc_swallow(log, "warmup read_channel %s", channel_ref)
         return False
 
 
@@ -118,7 +119,7 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
         await asyncio.sleep(random.uniform(2, 5))
         return True
     except Exception as e:
-        log.debug("warmup join_channel %s: %s", channel_ref, e)
+        log_exc_swallow(log, "warmup join_channel %s", channel_ref)
         return False
 
 
@@ -130,7 +131,7 @@ async def _perform_search(client, query: str) -> bool:
         await asyncio.sleep(random.uniform(2, 6))
         return True
     except Exception as e:
-        log.debug("warmup search %s: %s", query, e)
+        log_exc_swallow(log, "warmup search %s", query)
         return False
 
 
@@ -231,7 +232,7 @@ async def run_daily_warmup(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "сбой disconnect при разогреве аккаунта")
 
     # Обновляем план
     new_day = current_day + 1

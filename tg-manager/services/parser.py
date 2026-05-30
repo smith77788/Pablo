@@ -16,6 +16,8 @@ import asyncio
 import logging
 from typing import Any, Callable, Optional
 
+from services.logger import log_exc_swallow
+
 import asyncpg
 
 log = logging.getLogger(__name__)
@@ -179,7 +181,7 @@ async def parse_members(
                     try:
                         await progress_cb(total_found, min(limit, getattr(result, "count", limit)))
                     except Exception:
-                        pass
+                        log_exc_swallow(log, "Сбой progress_cb в parser")
 
                 if len(result.users) < batch_size:
                     break
@@ -193,7 +195,8 @@ async def parse_members(
                     try:
                         wait = int(err.split("wait ")[1].split(" ")[0])
                     except Exception:
-                        pass
+                        log_exc_swallow(log, "Не удалось распарсить FloodWait в parser")
+                        wait = 30
                     log.info("parser FloodWait %ds, sleeping", wait)
                     await asyncio.sleep(min(wait + 5, 120))
                     continue
@@ -204,7 +207,7 @@ async def parse_members(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой disconnect клиента в parser")
 
     status = "done" if total_found > 0 else "empty"
     await _update_run(pool, run_id, status, total_found, total_saved)
@@ -268,6 +271,7 @@ async def parse_active_users(
             try:
                 user = await client.get_entity(msg.sender_id)
             except Exception:
+                log_exc_swallow(log, "Сбой get_entity в parser", sender_id=msg.sender_id)
                 pass
 
             if user:
@@ -294,14 +298,14 @@ async def parse_active_users(
                     try:
                         await progress_cb(total_found, limit)
                     except Exception:
-                        pass
+                        log_exc_swallow(log, "Сбой progress_cb в parser (reactors)")
                 await asyncio.sleep(0.5)
 
     finally:
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой disconnect клиента в parser")
 
     status = "done" if total_found > 0 else "empty"
     await _update_run(pool, run_id, status, total_found, total_saved)

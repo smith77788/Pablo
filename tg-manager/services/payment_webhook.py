@@ -26,6 +26,8 @@ import asyncpg
 from aiohttp import web
 from aiogram import Bot
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 _WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
@@ -81,7 +83,7 @@ async def _activate_subscription(
             user_id, amount, currency, tx_ref, plan, months,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой записи платежа в БД — финансовые данные потеряны!", user_id=user_id, tx_ref=tx_ref)
 
     try:
         await bot.send_message(
@@ -93,7 +95,7 @@ async def _activate_subscription(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой уведомления пользователя об активации подписки", user_id=user_id, plan=plan)
     log.info("payment_webhook: activated %s %s/%dm user=%d", currency, plan, months, user_id)
 
 
@@ -261,7 +263,7 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
             try:
                 await bot.send_message(admin_id, text, parse_mode="HTML")
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой отправки deploy-уведомления админу", admin_id=admin_id)
 
         log.info("deploy_webhook: notified %d admins about deployment %s status=%s",
                  len(admin_ids), deployment.get("id", "")[:8], status)

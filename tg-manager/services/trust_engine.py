@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 _INTERVAL = 1800          # recalculate every 30 min
@@ -163,7 +165,7 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
                         "Trust score восстановится со временем при отсутствии операций.",
                     )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Сбой notify_if_enabled в auto-rotate", owner_id=owner_id)
 
         log.info(
             "trust_engine auto-rotate: %d critical (72h), %d low (24h), notified %d owners",

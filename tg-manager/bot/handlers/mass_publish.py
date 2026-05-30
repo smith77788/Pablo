@@ -32,6 +32,7 @@ from bot.utils.op_helpers import (
     _progress_text as _progress_text_base,
 )
 from services import task_registry as _treg
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -236,7 +237,7 @@ async def _ask_post_text(event, edit: bool = True) -> None:
                 await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
                 return
             except Exception:
-                pass
+                log_exc_swallow(log, "сбой edit_text в _ask_post_text")
         await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -418,7 +419,7 @@ async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str,
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "сбой progress_msg.edit_text в _mpub_bg")
 
             if idx < total:
                 actual_delay = random.uniform(30, 90) if delay_s < 0 else delay_s
@@ -447,13 +448,13 @@ async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str,
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "сбой send_message при отмене публикации")
     except Exception as exc:
         log.exception("_mpub_bg error user=%s: %s", user_id, exc)
         try:
             await bot.send_message(user_id, f"⚠️ Ошибка публикации: {html.escape(str(exc)[:200])}", parse_mode="HTML")
         except Exception:
-            pass
+            log_exc_swallow(log, "сбой send_message при ошибке публикации")
 
 
 # ══════════════════════════════════════════════════════════════════════════

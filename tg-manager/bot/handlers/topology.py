@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import asyncpg
+import logging
 from html import escape
+
+from services.logger import log_exc_swallow
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -20,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import AccCb, BotCb, ChanCb, TopoCb
 from database import db
 
+log = logging.getLogger(__name__)
 router = Router()
 
 _PAGE_SIZE = 8
@@ -125,7 +129,7 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         cross_count = cross_row["cnt"] if cross_row else 0
         lines.append(f"\n🔗 Перекрёстных переходов: <b>{cross_count}</b>")
     except Exception:
-        pass
+        log_exc_swallow(log, "Ошибка сбора статистики перекрёстных переходов для топологии")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=TopoCb(action="overview"))

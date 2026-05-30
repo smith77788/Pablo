@@ -30,6 +30,8 @@ from typing import Any
 
 import aiohttp
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 # ── Константы ──────────────────────────────────────────────────────────────────
@@ -345,7 +347,7 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
                 if cd_ts > now:
                     continue  # аккаунт в кулдауне — пропускаем
             except (TypeError, ValueError, OSError):
-                pass
+                log_exc_swallow(log, "Не удалось распарсить cooldown_until аккаунта в preflight")
         # Проверка trust_score
         if acc.get("trust_score", 0) is not None and acc["trust_score"] < min_trust:
             continue
@@ -723,10 +725,11 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> bool:
             await client.disconnect()
             return True
         except Exception:
+            log_exc_swallow(log, "Сбой операции в _escalate_to_spambot")
             try:
                 await client.disconnect()
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой disconnect клиента в _escalate_to_spambot")
             return False
     except Exception as e:
         log.warning("_escalate_to_spambot: %s", e)
@@ -781,7 +784,7 @@ async def verify_target_takedown(
             try:
                 await client.disconnect()
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой disconnect клиента в verify_target_takedown")
             err_str = str(e).lower()
             # Эти ошибки означают что канал удалён/недоступен
             if any(kw in err_str for kw in (

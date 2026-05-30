@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 import asyncpg
 from aiogram import Bot
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 _REPO_ROOT: str | None = None
@@ -34,7 +36,7 @@ def _repo_root() -> str:
             _REPO_ROOT = result.stdout.strip()
             return _REPO_ROOT
     except Exception:
-        pass
+        log_exc_swallow(log, "git rev-parse failed, using fallback root")
     # Fallback: assume we're in tg-manager/ subdirectory
     _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return _REPO_ROOT
@@ -61,7 +63,7 @@ def _get_git_log(prev_sha: str | None = None, max_commits: int = 15) -> str:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
-        pass
+        log_exc_swallow(log, "git log failed")
     return ""
 
 
@@ -81,7 +83,7 @@ def _get_git_diff_summary(prev_sha: str | None = None) -> str:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
-        pass
+        log_exc_swallow(log, "git diff --stat failed")
     return ""
 
 
@@ -96,7 +98,7 @@ def _get_current_sha() -> str:
         if result.returncode == 0:
             return result.stdout.strip()
     except Exception:
-        pass
+        log_exc_swallow(log, "git rev-parse HEAD failed")
     return ""
 
 
@@ -197,7 +199,7 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
                 log.info("deploy_notifier: admin %d opted out of deploy notifications", admin_id)
                 continue
         except Exception:
-            pass  # If settings check fails, still try to send
+            log_exc_swallow(log, "get_notification_settings failed, still trying to send", admin_id=admin_id)
 
         try:
             await bot.send_message(admin_id, text, parse_mode="HTML")

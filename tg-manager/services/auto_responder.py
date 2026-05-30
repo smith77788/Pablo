@@ -9,6 +9,7 @@ import asyncpg
 from database import db
 from services import bot_api
 from services import routing_engine
+from services.logger import log_exc_swallow
 
 from bot.utils.template_validator import replace_placeholders
 
@@ -347,7 +348,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                 try:
                     await db.record_experiment_conversion(pool, bot_id, chat_id, active_exp["id"])
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Сбой record_experiment_conversion", bot_id=bot_id, chat_id=chat_id)
 
         if max_update_id > offset:
             await db.set_update_offset(pool, bot_id, max_update_id)

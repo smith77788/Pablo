@@ -2,6 +2,7 @@
 """TG Manager — Telegram bot management platform."""
 import asyncio
 import logging
+import os
 import ssl
 import aiohttp
 from aiogram import Bot, Dispatcher
@@ -12,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
+from services.logger import configure_root_logger, get_logger, log_exc_swallow
 from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
 from bot.handlers import commands as cmd_handler
 from bot.handlers import templates as tpl_handler
@@ -79,11 +81,11 @@ from services import task_registry
 from services import drift_detector
 from services import deploy_notifier
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+configure_root_logger(
+    level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
+    use_json=os.environ.get("LOG_FORMAT") == "json",
 )
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 async def _global_error_handler(event: ErrorEvent) -> None:
@@ -103,7 +105,7 @@ async def _global_error_handler(event: ErrorEvent) -> None:
             try:
                 await cb.answer(f"⚠️ Ошибка: {type(exc).__name__}", show_alert=True)
             except Exception:
-                pass
+                log_exc_swallow(log, "Failed to answer callback_query on error handler")
             try:
                 exc_text = str(exc)[:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 await cb.message.answer(
@@ -112,7 +114,7 @@ async def _global_error_handler(event: ErrorEvent) -> None:
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Failed to send error message via callback_query")
         elif update.message:
             try:
                 exc_text = str(exc)[:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -122,9 +124,9 @@ async def _global_error_handler(event: ErrorEvent) -> None:
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Failed to send error message via message")
     except Exception:
-        pass
+        log_exc_swallow(log, "Double-fault in error handler")
 
 
 async def main() -> None:
@@ -229,7 +231,7 @@ async def main() -> None:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                log.error("Service %s crashed: %s — restarting in 30s", name, e)
+                log.error("Service %s crashed: %s — restarting in 30s", name, e, exc_info=True)
                 await asyncio.sleep(30)
 
     try:

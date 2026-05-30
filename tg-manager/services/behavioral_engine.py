@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 import asyncpg
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 _RESCORE_INTERVAL = 900  # 15 minutes
@@ -603,7 +605,7 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
                             parse_mode="HTML",
                         )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Сбой уведомления о завершении A/B-эксперимента", exp_id=exp["id"])
         except Exception as exc:
             log.debug("auto_conclude exp %d: %s", exp["id"], exc)
 

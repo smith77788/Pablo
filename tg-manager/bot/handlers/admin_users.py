@@ -1,4 +1,6 @@
 """Admin user management: list, grant/revoke plans, ban/unban."""
+import logging
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -6,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import CallbackData
 from bot.utils.subscription import is_platform_admin
+from services.logger import log_exc_swallow
 
 
 def _is_admin(uid: int) -> bool:
@@ -17,6 +20,7 @@ def _is_admin(uid: int) -> bool:
         return is_platform_admin(uid)
 from database import db
 
+log = logging.getLogger(__name__)
 router = Router()
 
 
@@ -356,7 +360,7 @@ async def cb_grant_strike(callback: CallbackQuery, callback_data: AdminUserCb, p
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Ошибка отправки уведомления об активации Strike-доступа")
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "revoke_strike"))
@@ -382,7 +386,7 @@ async def cb_revoke_strike(callback: CallbackQuery, callback_data: AdminUserCb, 
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Ошибка отправки уведомления об отзыве Strike-доступа")
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "ban"))

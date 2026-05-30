@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+
+from services.logger import log_exc_swallow
 import json
 import logging
 import os

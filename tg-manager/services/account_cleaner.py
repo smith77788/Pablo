@@ -20,6 +20,8 @@ from typing import Optional, Callable, Any
 
 import asyncpg
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 
@@ -64,7 +66,7 @@ async def leave_all_chats(
                 try:
                     await progress_cb(i + 1, dialog.name or entity_id)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Сбой progress_cb в leave_all_chats")
 
             if not dry_run:
                 try:
@@ -86,7 +88,7 @@ async def leave_all_chats(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой disconnect клиента в leave_all_chats")
 
     return {"left": left, "skipped": skipped, "errors": errors[:10], "dry_run": dry_run}
 
@@ -119,7 +121,7 @@ async def delete_contacts(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой disconnect клиента в delete_contacts")
 
     return {"deleted": deleted}
 
@@ -154,6 +156,6 @@ async def get_chat_list_for_cleanup(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой disconnect клиента в get_chat_list_for_cleanup")
 
     return chats

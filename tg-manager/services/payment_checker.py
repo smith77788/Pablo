@@ -7,6 +7,8 @@ import aiohttp
 import asyncpg
 from aiogram import Bot
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 NANOTON = 1_000_000_000
 _USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
@@ -142,7 +144,7 @@ async def _check_trc20(pool, http, bot, payments) -> None:
         )
         used_txids = {r["tx_hash"] for r in existing if r["tx_hash"]}
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой получения used_txids из payments")
 
     for payment in payments:
         try:
@@ -208,7 +210,7 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой уведомления реферера о платеже", referrer_id=referrer_id)
     except Exception as e:
         log.warning("Referral paid hook error: %s", e)
 
@@ -233,7 +235,7 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой уведомления пользователя о платеже", user_id=payment["user_id"])
 
 
 async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> None:

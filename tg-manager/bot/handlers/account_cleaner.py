@@ -16,6 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import CleanerCb, BmCb
 from bot.states import CleanerFSM
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -183,7 +184,7 @@ async def cb_confirm_leave(
             try:
                 await msg.edit_text(f"⏳ Выхожу из чатов... {i} обработано\nТекущий: {html.escape(name[:30])}")
             except Exception:
-                pass
+                log_exc_swallow(log, "Ошибка обновления прогресса очистки аккаунта")
 
     from services.account_cleaner import leave_all_chats
     result = await leave_all_chats(acc["session_str"], dict(acc), progress_cb=progress)

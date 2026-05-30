@@ -22,6 +22,8 @@ from typing import Optional
 
 import asyncpg
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 
@@ -305,7 +307,7 @@ async def _persist_health_snapshots(pool: asyncpg.Pool) -> int:
             )
             written += 1
         except Exception:
-            pass  # таблица может ещё не существовать
+            log_exc_swallow(log, "Сбой записи health-снапшота — таблица может ещё не существовать", account_id=acc_id)
 
     return written
 
@@ -320,6 +322,7 @@ async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:
         )
         return int(deleted or 0)
     except Exception:
+        log_exc_swallow(log, "Сбой очистки старых health-снапшотов")
         return 0
 
 
