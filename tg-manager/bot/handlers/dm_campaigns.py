@@ -18,6 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import DmCb, BotCb, BmCb
 from bot.states import DmCampaignFSM
+from services import task_registry as _treg
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 
@@ -422,12 +423,14 @@ async def cb_dm_launch_or_draft(
             campaign_id,
         )
         # Запустить асинхронно уже после установки статуса
-        asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
+        _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
+        _treg.register(callback.from_user.id, "dm_campaign", f"DM «{name[:30]}»", _t)
         await _edit(
             callback,
             f"🚀 Кампания <b>«{html.escape(name)}»</b> запущена!\n\n"
             f"ID кампании: <code>{campaign_id}</code>\n"
-            "Отправка идёт в фоне — вы получите уведомление когда закончится.",
+            "Отправка идёт в фоне — вы получите уведомление когда закончится.\n"
+            "<i>Для отмены: /tasks</i>",
         )
     else:
         await _edit(
@@ -442,6 +445,11 @@ async def _launch_campaign(pool: asyncpg.Pool, bot, campaign_id: int) -> None:
     from services.dm_engine import run_campaign
     try:
         await run_campaign(pool, bot, campaign_id)
+    except asyncio.CancelledError:
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+        )
+        raise
     except Exception as e:
         log.exception("dm_engine campaign %d error: %s", campaign_id, e)
         await pool.execute(
@@ -522,7 +530,8 @@ async def cb_dm_resume(
 ) -> None:
     await callback.answer("▶️ Запущена")
     campaign_id = callback_data.campaign_id
-    asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
+    _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
+    _treg.register(callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t)
     await pool.execute(
         "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1",
         campaign_id,
