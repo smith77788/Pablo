@@ -1,5 +1,35 @@
 # IMPLEMENTATION LOG
 
+## 2026-05-30 — Drift Detection, Anomalies UI, Import Center v2 (r15)
+
+**Цель:** Мониторинг изменений каналов, anomaly alerts UI, CSV import аккаунтов, UX-улучшения.
+
+**Изменённые файлы (по коммитам):**
+- `d02b247` — `bot/handlers/botmother_menu.py` (⚠️ Аномалии sub-view в behavioral dashboard)
+- `d934241` — `services/drift_detector.py` (NEW), `schema_v46.sql` (NEW), `main.py` (регистрация)
+- `2b32bdf` — `bot/handlers/channel_ops.py` (preview/confirm для bulk_chan_uname/about), `bot/states.py` (BulkChanFSM.waiting_confirm)
+- `6593c17` — `bot/handlers/accounts.py` (CSV import: `_parse_sessions_csv`, cluster assignment)
+- `a34da34` — `bot/handlers/channel_ops.py` (BulkDm .txt file upload)
+
+**До:**
+- Anomaly events писались в behavioral_events но не отображались в UI
+- managed_channels не проверялись на дрейф (изменения title/username/about)
+- bulk_chan_uname/about запускались немедленно без preview
+- Батч-импорт аккаунтов принимал только .txt, без cluster assignment
+- Bulk DM — только ручной ввод получателей
+
+**После:**
+- Behavioral dashboard: вкладка ⚠️ Аномалии — decay_spike/affinity_dropout/reentry_burst
+- Drift Detector: фоновый сервис, раз в 4ч сканирует каналы, алерты в restriction_events
+- bulk_chan_uname/about: показывает preview (N каналов, M аккаунтов, ~ETA) перед запуском
+- CSV import: колонки session,cluster → авто-создание кластера + привязка аккаунта
+- Bulk DM: загрузка .txt файла со списком получателей (до 500)
+
+**Проверки:**
+- `python3 -c "import ast; ast.parse(open(f).read())"` — все файлы OK
+
+---
+
 ## 2026-05-30 — Bulk UX & Import Center (r13)
 
 **Цель:** Улучшить UX массовых операций, добавить выбор задержки, файловый импорт, исправить UX-проблемы.

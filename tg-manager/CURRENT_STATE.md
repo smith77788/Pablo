@@ -1,6 +1,6 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-30 (r13)
+Обновлено: 2026-05-30 (r15)
 
 ## Статус: АКТИВНАЯ РАЗРАБОТКА
 
@@ -15,6 +15,24 @@
 - `/subscription` → BotMother → 💳 Billing
 
 **Коммиты:** 9ddf27f (основная) + 549a339 (deploy trigger)
+
+### ✅ Выполнено в сессии 2026-05-30 (r13 → r15)
+
+1. **Anomaly alerts sub-view** — вкладка ⚠️ Аномалии в behavioral dashboard (6a9843a/d02b247)
+   - decay_spike: угасание ресурса с высоким вниманием
+   - affinity_dropout: ключевое слово не искали 14+ дней при affinity > 50
+   - reentry_burst: 5+ возвратов за 1 час (сигнал автоматизации)
+2. **Drift Detection service** — schema_v46 + services/drift_detector.py (d934241)
+   - Каждые 4 часа проверяет managed_channels на изменения title/username/about
+   - Записывает в restriction_events (event_type='drift_detected') + уведомление владельцу
+3. **bulk_chan_uname/about preview** — preview/confirm шаг перед выполнением (2b32bdf)
+   - Показывает кол-во каналов, аккаунтов, оценочное время
+   - Кнопки "✅ Запустить" и "❌ Отмена" перед стартом
+4. **CSV import аккаунтов** — поддержка CSV файла с колонками session,cluster (6593c17)
+   - Авто-назначение кластера при импорте
+   - Создаёт кластер если не существует
+5. **BulkDm file upload** — загрузка .txt файла со списком получателей (a34da34)
+   - До 500 получателей из файла
 
 ### ✅ Выполнено в сессии 2026-05-30 (r12 → r13)
 
