@@ -210,7 +210,11 @@ async def msg_button_text(message: Message, state: FSMContext) -> None:
     await state.set_state(Broadcast.waiting_button_url)
     data = await state.get_data()
     await message.answer(
-        f"🔗 Текст кнопки: <b>{btn_text}</b>\n\nТеперь введите URL:",
+        f"🔗 Текст кнопки: <b>{btn_text}</b>\n\n"
+        "Теперь введите URL:\n"
+        "💡 Должен начинаться с <code>http://</code>, <code>https://</code> "
+        "или <code>tg://</code>\n"
+        "Например: <code>https://your-site.com/page</code>",
         parse_mode="HTML",
         reply_markup=_bc_cancel_kb(data.get("bot_id", 0)),
     )

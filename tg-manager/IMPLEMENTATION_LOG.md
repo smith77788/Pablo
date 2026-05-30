@@ -1,5 +1,34 @@
 # IMPLEMENTATION LOG
 
+## 2026-05-30 — Placeholder Rendering Integration + Inline Help (r15→r16)
+
+**Цель:** Интегрировать систему плейсхолдеров в авто-ответчик и рассылки, добавить inline help в FSM-шаги.
+
+**Изменённые файлы:**
+- `services/auto_responder.py` — `_render_text()`: рендеринг `{{USERNAME}}`, `{{FIRST_NAME}}`, `{{BOT_NAME}}`, `{{DATE}}` в авто-ответах и automation rules
+- `services/broadcaster.py` — `_render_for_user()`: батч-загрузка данных пользователей + per-user рендеринг в рассылках
+- `bot/handlers/asset_templates.py` — плейсхолдеры в подсказках (пост/канал/группа) + детекция при просмотре
+- `bot/handlers/broadcast.py` — inline help с HTML-форматированием и подсказкой о плейсхолдерах
+- `bot/handlers/auto_reply.py` — inline help «Как работает» для триггера keyword
+- `bot/handlers/funnels.py` — inline help с примерами задержек (минуты→часы→дни)
+
+**До:**
+- `replace_placeholders()` и `list_placeholders()` из template_validator.py не использовались нигде
+- Плейсхолдеры `{{USERNAME}}` в авто-ответах отправлялись буквально
+- Рассылки не персонализировались (один текст для всех)
+- В FSM-шагах не было пояснений для сложных полей
+
+**После:**
+- Авто-ответы: рендеринг с контекстом пользователя (username, first_name, date и т.д.)
+- Рассылки: батч-загрузка bot_users → per-user рендеринг в цикле отправки
+- Просмотр шаблона: показывает обнаруженные плейсхолдеры
+- Inline help: пояснения в keyword-триггере, HTML-форматировании, задержках воронок
+
+**Проверки:**
+- `python3 -c "import ast; ast.parse(open(f).read())"` — все файлы OK
+
+---
+
 ## 2026-05-30 — Template Placeholder Rendering (r15)
 
 **Цель:** Добавить рендеринг плейсхолдеров при использовании шаблонов сообщений (P3).

@@ -160,7 +160,9 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.message.edit_text(
         "▶️ Триггер: <b>/start</b>\n\n"
         "Цепочка создана! Теперь добавьте первый шаг.\n\n"
-        "Введите текст сообщения для шага 1:",
+        "Введите текст сообщения для шага 1 "
+        "(поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;a href=...&gt;</code>):",
         parse_mode="HTML",
         reply_markup=_fn_cancel_kb(bot_id),
     )
@@ -218,7 +220,10 @@ async def cb_fn_add_step(callback: CallbackQuery, callback_data: FunnelCb,
         current_step=callback_data.step,
     )
     await callback.message.edit_text(
-        f"➕ <b>Добавить шаг {callback_data.step + 1}</b>\n\nВведите текст сообщения:",
+        f"➕ <b>Добавить шаг {callback_data.step + 1}</b>\n\n"
+        "Введите текст сообщения "
+        "(поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;a href=...&gt;</code>):",
         parse_mode="HTML",
         reply_markup=_fn_cancel_kb(callback_data.bot_id),
     )
