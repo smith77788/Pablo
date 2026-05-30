@@ -390,19 +390,21 @@ async def _exec_bulk_join(
     links = params.get("links", [])
     account_ids = params.get("account_ids") or []
 
+    _acc_q = (
+        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
+        "a.trust_score, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=true "
+        "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
+        "ORDER BY a.trust_score DESC NULLS LAST"
+    )
     if account_ids:
         accounts = await pool.fetch(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id = ANY($1) AND owner_id=$2 AND is_active=true",
-            [int(i) for i in account_ids], owner_id,
+            _acc_q.replace("WHERE a.owner_id=$1", "WHERE a.id = ANY($2) AND a.owner_id=$1"),
+            owner_id, [int(i) for i in account_ids],
         )
     else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=true",
-            owner_id,
-        )
+        accounts = await pool.fetch(_acc_q, owner_id)
 
     ok_count = 0
     fail_count = 0
@@ -496,19 +498,21 @@ async def _exec_bulk_leave(
     channels = params.get("channels", [])
     account_ids = params.get("account_ids") or []
 
+    _acc_q = (
+        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
+        "a.trust_score, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=true "
+        "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
+        "ORDER BY a.trust_score DESC NULLS LAST"
+    )
     if account_ids:
         accounts = await pool.fetch(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id = ANY($1) AND owner_id=$2 AND is_active=true",
-            [int(i) for i in account_ids], owner_id,
+            _acc_q.replace("WHERE a.owner_id=$1", "WHERE a.id = ANY($2) AND a.owner_id=$1"),
+            owner_id, [int(i) for i in account_ids],
         )
     else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=true",
-            owner_id,
-        )
+        accounts = await pool.fetch(_acc_q, owner_id)
 
     ok_count = 0
     fail_count = 0
