@@ -324,9 +324,9 @@ async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:
     """Удаляет health-снапшоты старше 30 дней."""
     try:
         deleted = await pool.fetchval(
-            "DELETE FROM account_health_history "
-            "WHERE recorded_at < NOW() - INTERVAL '30 days' "
-            "RETURNING COUNT(*)"
+            "WITH d AS (DELETE FROM account_health_history "
+            "WHERE recorded_at < NOW() - INTERVAL '30 days' RETURNING 1) "
+            "SELECT COUNT(*) FROM d"
         )
         return int(deleted or 0)
     except Exception:

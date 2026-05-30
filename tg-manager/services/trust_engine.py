@@ -90,9 +90,9 @@ async def _cleanup_old_history(pool: asyncpg.Pool) -> None:
     """Remove trust score history older than 30 days."""
     try:
         deleted = await pool.fetchval(
-            "DELETE FROM account_trust_history "
-            "WHERE recorded_at < NOW() - INTERVAL '30 days' "
-            "RETURNING COUNT(*)"
+            "WITH d AS (DELETE FROM account_trust_history "
+            "WHERE recorded_at < NOW() - INTERVAL '30 days' RETURNING 1) "
+            "SELECT COUNT(*) FROM d"
         )
         if deleted:
             log.debug("trust_engine: cleaned %d old history rows", deleted)

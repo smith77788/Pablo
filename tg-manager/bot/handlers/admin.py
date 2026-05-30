@@ -953,26 +953,26 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             return
         try:
             flood_del = await pool.fetchval(
-                "DELETE FROM account_flood_log WHERE created_at < now() - INTERVAL '30 days' RETURNING COUNT(*)"
+                "WITH d AS (DELETE FROM account_flood_log WHERE created_at < now() - INTERVAL '30 days' RETURNING 1) SELECT COUNT(*) FROM d"
             ) or 0
         except Exception:
             flood_del = 0
         try:
             ops_del = await pool.fetchval(
-                "DELETE FROM operation_queue WHERE status IN ('done','failed') "
-                "AND finished_at < now() - INTERVAL '7 days' RETURNING COUNT(*)"
+                "WITH d AS (DELETE FROM operation_queue WHERE status IN ('done','failed') "
+                "AND finished_at < now() - INTERVAL '7 days' RETURNING 1) SELECT COUNT(*) FROM d"
             ) or 0
         except Exception:
             ops_del = 0
         try:
             audit_del = await pool.fetchval(
-                "DELETE FROM operation_audit WHERE occurred_at < now() - INTERVAL '30 days' RETURNING COUNT(*)"
+                "WITH d AS (DELETE FROM operation_audit WHERE occurred_at < now() - INTERVAL '30 days' RETURNING 1) SELECT COUNT(*) FROM d"
             ) or 0
         except Exception:
             audit_del = 0
         try:
             dm_del = await pool.fetchval(
-                "DELETE FROM dm_campaign_log WHERE sent_at < now() - INTERVAL '90 days' RETURNING COUNT(*)"
+                "WITH d AS (DELETE FROM dm_campaign_log WHERE sent_at < now() - INTERVAL '90 days' RETURNING 1) SELECT COUNT(*) FROM d"
             ) or 0
         except Exception:
             dm_del = 0
