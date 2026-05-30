@@ -356,6 +356,7 @@ async def _show_dm_preview(
                 target_id,
             ) or 0
         except Exception:
+            log_exc_swallow(log, "Ошибка подсчёта размера когорты для DM-кампании")
             cnt = 0
         bot_row = await pool.fetchrow(
             "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", target_id
