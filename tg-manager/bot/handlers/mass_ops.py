@@ -1084,10 +1084,15 @@ async def cb_bulk_join_accs(
         return
 
     uid = callback.from_user.id
+    acc_list_preview = ""
     if callback_data.op_type == "all":
         accounts = await _get_active_accounts(pool, uid)
         acc_ids = [a["id"] for a in accounts]
+        acc_names = [_acc_label(a) for a in accounts[:5]]
         acc_label = f"все ({len(acc_ids)})"
+        acc_list_preview = "\n".join(f"  👤 {html.escape(n)}" for n in acc_names)
+        if len(acc_ids) > 5:
+            acc_list_preview += f"\n  … и ещё {len(acc_ids) - 5}"
     else:
         acc_ids = [callback_data.op_id]
         acc = await pool.fetchrow(
@@ -1095,6 +1100,7 @@ async def cb_bulk_join_accs(
             callback_data.op_id, uid,
         )
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
+        acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
     if not acc_ids:
         await callback.answer("Нет активных аккаунтов", show_alert=True)
@@ -1114,11 +1120,12 @@ async def cb_bulk_join_accs(
     kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bj_delay", op_type="smart"))
     kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
+    acc_section = f"\n<b>Аккаунты:</b>\n{acc_list_preview}" if acc_list_preview else ""
     await callback.message.edit_text(
         f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
-        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Аккаунты: <b>{acc_label}</b>{acc_section}\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
-        f"<b>Список:</b>\n{link_preview}\n\n"
+        f"<b>Список каналов:</b>\n{link_preview}\n\n"
         f"Выберите режим задержки между вступлениями:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1365,10 +1372,15 @@ async def cb_bulk_leave_accs(
         return
 
     uid = callback.from_user.id
+    bl_acc_list_preview = ""
     if callback_data.op_type == "all":
         accounts = await _get_active_accounts(pool, uid)
         acc_ids = [a["id"] for a in accounts]
+        acc_names = [_acc_label(a) for a in accounts[:5]]
         acc_label = f"все ({len(acc_ids)})"
+        bl_acc_list_preview = "\n".join(f"  👤 {html.escape(n)}" for n in acc_names)
+        if len(acc_ids) > 5:
+            bl_acc_list_preview += f"\n  … и ещё {len(acc_ids) - 5}"
     else:
         acc_ids = [callback_data.op_id]
         acc = await pool.fetchrow(
@@ -1376,6 +1388,7 @@ async def cb_bulk_leave_accs(
             callback_data.op_id, uid,
         )
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
+        bl_acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
     if not acc_ids:
         await callback.answer("Нет активных аккаунтов", show_alert=True)
@@ -1394,11 +1407,12 @@ async def cb_bulk_leave_accs(
     kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bl_delay", op_type="smart"))
     kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
+    bl_acc_section = f"\n<b>Аккаунты:</b>\n{bl_acc_list_preview}" if bl_acc_list_preview else ""
     await callback.message.edit_text(
         f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
-        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Аккаунты: <b>{acc_label}</b>{bl_acc_section}\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
-        f"<b>Список:</b>\n{ch_preview}\n\n"
+        f"<b>Список каналов:</b>\n{ch_preview}\n\n"
         f"Выберите режим задержки между выходами:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
