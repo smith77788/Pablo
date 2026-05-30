@@ -349,7 +349,8 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
             except (TypeError, ValueError, OSError):
                 log_exc_swallow(log, "Не удалось распарсить cooldown_until аккаунта в preflight")
         # Проверка trust_score
-        if acc.get("trust_score", 0) is not None and acc["trust_score"] < min_trust:
+        ts = acc.get("trust_score") or 0
+        if ts < min_trust:
             continue
         viable.append(acc)
 
