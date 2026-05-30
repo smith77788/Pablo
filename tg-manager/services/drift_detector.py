@@ -48,11 +48,10 @@ async def _compare_with_templates(
 
     # Fetch all channel and group templates for this owner
     templates = await pool.fetch(
-        """SELECT id, name, params
+        """SELECT id, name, template
            FROM asset_templates
            WHERE owner_id = $1
-             AND asset_type IN ('channel', 'group')
-             AND is_active = TRUE""",
+             AND asset_type IN ('channel', 'group')""",
         owner_id,
     )
     if not templates:
@@ -62,7 +61,7 @@ async def _compare_with_templates(
     matched = []
 
     for tpl in templates:
-        params = tpl["params"] or {}
+        params = tpl["template"] or {}
         if not isinstance(params, dict):
             try:
                 params = json.loads(params)

@@ -49,10 +49,10 @@
 - [x] Валидация input-данных перед сохранением во всех FSM — исправлено в auto_reply, funnels, schedule, deeplinks, broadcast
 
 ## P3 — Targeting and templates
-- [ ] Add reusable target selection abstraction
+- [x] Add reusable target selection abstraction
 - [x] Add template placeholder rendering
 - [x] Add template validation
-- [ ] Add drift/template compare plan if existing structures support it
+- [x] Add drift/template compare plan (в drift_detector.py — автоматическое сравнение изменений с шаблонами)
 
 ## P4 — Global Presence Factory (ГОТОВО V1 + V2 + V3)
 - [x] Add Global Presence menu entry (🌍 Global Presence в Operations)

@@ -1177,6 +1177,79 @@ async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await _edit(callback, "\n".join(lines), kb.as_markup())
 
 
+# ── Report helpers ─────────────────────────────────────────────────────────────
+
+def _analyze_error(error_msg: str) -> dict:
+    """Analyze operation error and return cause + recommendation.
+
+    Answers "Why?" and "What to do next?" framework questions.
+    """
+    msg = (error_msg or "").lower()
+    result = {"cause": "", "recommendation": ""}
+
+    # Flood / rate limit
+    if "flood" in msg or "flood_wait" in msg or "too many" in msg:
+        result["cause"] = "Превышен лимит запросов Telegram (FloodWait)"
+        result["recommendation"] = (
+            "Дождитесь окончания тайм-аута (обычно 5–15 минут). "
+            "Уменьшите темп операций в настройках, увеличьте задержки между действиями."
+        )
+        return result
+
+    # Auth / session
+    if any(w in msg for w in ("auth", "unauthorized", "session", "key", "token")):
+        result["cause"] = "Проблема с авторизацией аккаунта или бота"
+        result["recommendation"] = (
+            "Проверьте аккаунт в разделе Infrastructure → Аккаунты. "
+            "Возможно, сессия истекла — используйте кнопку «Переподключить»."
+        )
+        return result
+
+    # Permissions
+    if any(w in msg for w in ("admin", "permission", "forbidden", "not enough rights", "chat_admin")):
+        result["cause"] = "Недостаточно прав для выполнения действия"
+        result["recommendation"] = (
+            "Убедитесь, что аккаунт/бот имеет права администратора в целевом канале/группе. "
+            "Проверьте права: публикация сообщений, управление каналом."
+        )
+        return result
+
+    # Network
+    if any(w in msg for w in ("timeout", "connection", "network", "timed out")):
+        result["cause"] = "Сетевая ошибка или тайм-аут соединения"
+        result["recommendation"] = (
+            "Операция будет автоматически повторена. Если ошибка повторяется — "
+            "проверьте подключение прокси или интернет-соединение."
+        )
+        return result
+
+    # Channel/chat not found
+    if any(w in msg for w in ("not found", "not exist", "invalid", "no such")):
+        result["cause"] = "Целевой канал/чат/бот не найден"
+        result["recommendation"] = (
+            "Проверьте правильность username или ID. "
+            "Возможно, канал был удалён или переименован."
+        )
+        return result
+
+    # Peer flood (spam-like behavior)
+    if "peer" in msg and ("flood" in msg or "spam" in msg):
+        result["cause"] = "Telegram ограничил операции с этим контактом (peer flood)"
+        result["recommendation"] = (
+            "Сделайте паузу 12–24 часа. Аккаунт временно ограничен для этого получателя. "
+            "Не пытайтесь повторить операцию немедленно."
+        )
+        return result
+
+    # Default — unknown
+    result["cause"] = "Не удалось определить точную причину"
+    result["recommendation"] = (
+        "Проверьте логи операции (CSV-экспорт), состояние аккаунтов в Health Dashboard. "
+        "При повторении ошибки — попробуйте с другими аккаунтами или в другое время."
+    )
+    return result
+
+
 # ── Operation Reports ─────────────────────────────────────────────────────
 
 @router.callback_query(BmCb.filter(F.action == "op_reports"))
@@ -1321,6 +1394,12 @@ async def cb_op_detail(
 
     if op["error_msg"]:
         lines.append(f"\n❌ <b>Ошибка:</b>\n<code>{html.escape(op['error_msg'][:300])}</code>")
+        # Root cause analysis and recommendations
+        analysis = _analyze_error(op["error_msg"])
+        if analysis["cause"]:
+            lines.append(f"\n🔍 <b>Причина:</b> {analysis['cause']}")
+        if analysis["recommendation"]:
+            lines.append(f"💡 <b>Что делать:</b> {analysis['recommendation']}")
 
     if op["result"]:
         import json as _json
