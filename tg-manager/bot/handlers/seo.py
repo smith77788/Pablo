@@ -454,7 +454,6 @@ async def cb_seo_chan_menu(
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
-    await callback.answer()
     chan_id = callback_data.chan_id
     acc_id  = callback_data.acc_id
 
@@ -465,6 +464,7 @@ async def cb_seo_chan_menu(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
+    await callback.answer()
 
     name = f"@{chan['username']}" if chan.get("username") else html.escape(chan["title"] or "")
 
@@ -1278,7 +1278,6 @@ async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
 @router.callback_query(SeoCb.filter(F.action == "chan_preview"))
 async def cb_seo_chan_preview(callback: CallbackQuery, callback_data: SeoCb,
                                pool: asyncpg.Pool) -> None:
-    await callback.answer()
     chan_id = callback_data.chan_id
     chan = await pool.fetchrow(
         "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
@@ -1287,6 +1286,7 @@ async def cb_seo_chan_preview(callback: CallbackQuery, callback_data: SeoCb,
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
+    await callback.answer()
 
     title = chan.get("title") or "Канал"
     uname = chan.get("username") or ""
@@ -1325,12 +1325,12 @@ async def cb_seo_chan_preview(callback: CallbackQuery, callback_data: SeoCb,
 @router.callback_query(SeoCb.filter(F.action == "momentum"))
 async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
                            pool: asyncpg.Pool) -> None:
-    await callback.answer()
     bot_id = callback_data.bot_id
     row = await db.get_bot(pool, bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     keywords = await db.get_tracked_keywords(pool, bot_id)
     if not keywords:
@@ -1456,7 +1456,6 @@ async def cb_seo_content_gap(callback: CallbackQuery, callback_data: SeoCb,
 @router.callback_query(SeoCb.filter(F.action == "chan_content_gap"))
 async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
                                    pool: asyncpg.Pool) -> None:
-    await callback.answer()
     chan_id = callback_data.chan_id
     acc_id  = callback_data.acc_id
     user_id = callback.from_user.id
@@ -1468,6 +1467,7 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
+    await callback.answer()
 
     about = ""
     if acc_id:
@@ -1539,7 +1539,6 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
 @router.callback_query(SeoCb.filter(F.action.in_({"uname_alts", "chan_uname_alts"})))
 async def cb_seo_uname_alts(callback: CallbackQuery, callback_data: SeoCb,
                               pool: asyncpg.Pool) -> None:
-    await callback.answer()
     is_chan = callback_data.action == "chan_uname_alts"
 
     if is_chan:
@@ -1561,6 +1560,7 @@ async def cb_seo_uname_alts(callback: CallbackQuery, callback_data: SeoCb,
         current = row.get("username") or ""
         base = current or row.get("first_name") or "bot"
         back_cb = SeoCb(action="menu", bot_id=callback_data.bot_id)
+    await callback.answer()
 
     from services.username_engine import generate_username_variants
     variants = generate_username_variants(base, geo=None)
