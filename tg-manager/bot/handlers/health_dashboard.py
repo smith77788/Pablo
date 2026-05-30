@@ -28,6 +28,79 @@ def _back_kb() -> InlineKeyboardBuilder:
     return kb
 
 
+# ── Sparklines & Visualization ────────────────────────────────────────────────────
+
+# Unicode block elements for sparklines (8 levels)
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def _make_sparkline(values: list[float], width: int = 12) -> str:
+    """Render a sparkline from a list of numeric values.
+
+    Uses Unicode block elements scaled to 8 levels.
+    Returns empty string for empty input.
+    """
+    if not values:
+        return ""
+
+    vmin = min(values)
+    vmax = max(values)
+    span = vmax - vmin
+
+    if span < 0.001:
+        # All values equal — flat line
+        return "▄" * min(width, len(values))
+
+    # Optionally compress if more values than width
+    if len(values) > width:
+        step = len(values) / width
+        compressed = [values[int(i * step)] for i in range(width)]
+    else:
+        compressed = values
+
+    chars = []
+    for v in compressed:
+        level = int((v - vmin) / span * 7)
+        chars.append(_SPARK_CHARS[min(7, max(0, level))])
+
+    return "".join(chars)
+
+
+def _make_bar(value: float, max_val: float = 100.0, width: int = 10) -> str:
+    """Render a horizontal bar. Returns string like '████░░░░░░'."""
+    if max_val <= 0:
+        return "█" * width
+    filled = max(0, min(width, round(value / max_val * width)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _make_comparison_chart(
+    accounts: list[dict], title: str, metric_key: str, max_val: float = 100.0
+) -> str:
+    """Side-by-side comparison chart for multiple accounts.
+
+    Args:
+        accounts: list of dicts with 'label', metric_key, and optional 'trend'
+        title: chart title
+        metric_key: key for the metric to compare
+        max_val: maximum value for bar scaling (default 100)
+    """
+    if not accounts:
+        return title + "\n<i>Нет данных</i>"
+
+    lines = [title, ""]
+    max_label = max(len(a.get("label", "?")) for a in accounts)
+
+    for a in accounts[:12]:
+        label = a.get("label", "?")
+        val = float(a.get(metric_key, 0) or 0)
+        bar = _make_bar(val, max_val, 12)
+        trend = a.get("trend", "")
+        lines.append(f"{trend} <code>{label:<{max_label}}</code> {bar} {val:.0f}")
+
+    return "\n".join(lines)
+
+
 async def _fetch_account_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
     row = await pool.fetchrow(
         """
@@ -111,12 +184,14 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🤖 Боты",           callback_data=HealthCb(action="bots_health"))
     kb.button(text="📈 Тренд trust",    callback_data=HealthCb(action="trust_trend"))
     kb.button(text="📊 Тренд health",   callback_data=HealthCb(action="health_trend"))
+    kb.button(text="📉 Sparklines",     callback_data=HealthCb(action="sparklines"))
+    kb.button(text="📊 Сравнить все",   callback_data=HealthCb(action="compare"))
     kb.button(text="🌊 Flood log",      callback_data=HealthCb(action="flood_log"))
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="infrastructure"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -418,7 +493,163 @@ async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
-# ── Recommendations ────────────────────────────────────────────────────────────
+# ── Sparkline charts ─────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "sparklines"))
+async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Sparkline charts for health score trends over 14 days per account."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT a.phone, a.first_name, a.username,
+                      d.day::date AS day,
+                      COALESCE(ROUND(AVG(h.health_score)::numeric, 1), 0) AS avg_health
+               FROM tg_accounts a
+               CROSS JOIN LATERAL generate_series(
+                   current_date - INTERVAL '14 days',
+                   current_date,
+                   INTERVAL '1 day'
+               ) AS d(day)
+               LEFT JOIN account_health_history h
+                 ON h.account_id = a.id
+                AND h.recorded_at >= d.day
+                AND h.recorded_at < d.day + INTERVAL '1 day'
+               WHERE a.owner_id = $1
+                 AND a.is_active = TRUE
+               GROUP BY a.id, a.phone, a.first_name, a.username, d.day
+               ORDER BY a.id, d.day""",
+            user_id,
+        )
+    except Exception:
+        rows = []
+
+    if not rows:
+        kb = _back_kb()
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "📉 <b>Sparkline — тренды здоровья</b>\n\n"
+            "ℹ️ Данные ещё накапливаются. Зайдите позже.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Group by account
+    accounts: dict[int, dict] = {}
+    for r in rows:
+        aid = r["phone"] or str(r.get("username", "")) or str(r.get("first_name", ""))
+        # Use phone as key
+        key = str(r["phone"]) if r["phone"] else str(id(r))
+        if key not in accounts:
+            name = r["username"] or r["first_name"] or r["phone"] or "?"
+            accounts[key] = {
+                "label": name,
+                "values": [],
+                "current": 0,
+            }
+        val = float(r["avg_health"] or 0)
+        accounts[key]["values"].append(val)
+
+    # Build lines
+    lines = ["📉 <b>Sparklines — Health Score за 14 дней</b>\n"]
+    lines.append("<code>" + "·" * 14 + "</code>  ← каждый символ = 1 день\n")
+
+    for key, data in sorted(accounts.items(), key=lambda x: sum(x[1]["values"]) / max(len(x[1]["values"]), 1), reverse=True):
+        vals = data["values"]
+        if vals:
+            spark = _make_sparkline(vals, 14)
+            avg = sum(vals) / len(vals)
+            cur = vals[-1] if vals else 0
+            trend = "↗️" if cur >= avg * 1.05 else ("↘️" if cur < avg * 0.95 else "→")
+            lines.append(
+                f"{trend} <b>{html.escape(data['label'][:15])}</b> "
+                f"<code>{spark}</code> {cur:.0f}/100"
+            )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Comparison chart ──────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "compare"))
+async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Side-by-side comparison chart of all accounts."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    try:
+        rows = await pool.fetch(
+            """SELECT a.phone, a.first_name, a.username,
+                      COALESCE(
+                          (SELECT ROUND(AVG(h2.health_score)::numeric, 0)
+                           FROM account_health_history h2
+                           WHERE h2.account_id = a.id
+                             AND h2.recorded_at > now() - INTERVAL '7 days'),
+                          0
+                      ) AS health_7d,
+                      COALESCE(
+                          (SELECT ROUND(AVG(h2.health_score)::numeric, 0)
+                           FROM account_health_history h2
+                           WHERE h2.account_id = a.id
+                             AND h2.recorded_at > now() - INTERVAL '24 hours'),
+                          0
+                      ) AS health_24h,
+                      a.trust_score,
+                      a.is_active
+               FROM tg_accounts a
+               WHERE a.owner_id = $1
+               ORDER BY health_7d DESC""",
+            user_id,
+        )
+    except Exception:
+        rows = []
+
+    if not rows:
+        kb = _back_kb()
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "📊 <b>Сравнение аккаунтов</b>\n\n"
+            "ℹ️ Нет данных. Добавьте аккаунты через 🏗️ Infrastructure → 📱 Аккаунты.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = ["📊 <b>Сравнительная карта здоровья</b>\n"]
+    lines.append(f"<code>{'Аккаунт':<16} {'Health':>7} {'Trust':>6} {'Статус'}</code>")
+
+    max_health = max((float(r["health_7d"] or 0) for r in rows), default=100)
+    max_health = max(max_health, 100)
+
+    for r in rows:
+        name = r["username"] or r["first_name"] or r["phone"] or "?"
+        h7 = float(r["health_7d"] or 0)
+        trust = float(r["trust_score"] or 0)
+        active = r["is_active"]
+
+        bar = _make_bar(h7, max_health, 8)
+        status = "✅" if active else "⛔"
+        h24 = float(r["health_24h"] or 0)
+        trend_sym = "↗️" if h24 >= h7 else "↘️"
+
+        lines.append(
+            f"{status}{trend_sym} <code>{name:<14}</code> {bar} {h7:>4.0f}   "
+            f"<code>{trust:.2f}</code>"
+        )
+
+    kb = _back_kb()
+    kb.adjust(1)
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 @router.callback_query(HealthCb.filter(F.action == "recommendations"))
 async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
