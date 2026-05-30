@@ -5,6 +5,7 @@ Entry point: HealthCb(action="menu")
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from datetime import datetime, timezone
 
@@ -286,10 +287,14 @@ async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             avg = float(r["avg_7d"] or 0)
             mn = float(r["min_7d"] or 0)
             trend = "↗️" if cur >= avg else ("↘️" if cur < avg * 0.9 else "→")
-            bar = "█" * int(cur * 5) + "░" * (5 - int(cur * 5))
+            # 10-segment bar scaled 0.0-1.0
+            filled = min(10, round(cur * 10))
+            bar = "█" * filled + "░" * (10 - filled)
+            delta = cur - avg
+            delta_str = f"+{delta:.2f}" if delta >= 0 else f"{delta:.2f}"
             lines.append(
-                f"{trend} @{name}  [{bar}] {cur:.2f} "
-                f"<i>(avg {avg:.2f}, min {mn:.2f})</i>"
+                f"{trend} <b>{html.escape(name[:20])}</b>\n"
+                f"   [{bar}] {cur:.2f}  <i>avg {avg:.2f}  Δ{delta_str}  min {mn:.2f}</i>"
             )
 
     kb = _back_kb()
