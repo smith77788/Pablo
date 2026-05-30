@@ -192,6 +192,6 @@ async def convert_auto(content: str | bytes, hint: str = "") -> tuple[str, dict]
             if len(decoded) > 260:  # версия + DC + IP + port + auth_key
                 return possible_session, {"format": "telethon_string", "dc_id": decoded[0] if decoded else 0}
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось определить формат сессии — автоопределение провалено")
 
     raise ConversionError("Не удалось определить формат сессии. Поддерживаются: Pyrogram JSON, Telethon StringSession")

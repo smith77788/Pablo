@@ -19,6 +19,8 @@ from typing import AsyncIterator
 import asyncpg
 from aiogram import Bot
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 

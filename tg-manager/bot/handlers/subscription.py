@@ -1,5 +1,6 @@
 """Subscription plan selection and crypto payment flow."""
 from __future__ import annotations
+import logging
 import os
 import random
 import string
@@ -14,6 +15,9 @@ from bot.callbacks import SubCb
 from bot.states import PaymentSettingsFSM
 from bot.utils.subscription import get_plan, PLAN_EMOJIS, BOT_LIMITS, is_platform_admin
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
+from services.logger import log_exc_swallow
+
+log = logging.getLogger(__name__)
 
 PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
     "free": [
