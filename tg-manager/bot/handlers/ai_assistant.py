@@ -22,6 +22,7 @@ from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
 from config import OPENROUTER_MODEL
+from services.logger import log_exc_swallow
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -427,7 +428,7 @@ async def _call_openrouter(
                                     "preview": parsed.get("preview", ""),
                                 }, ensure_ascii=False)
                         except Exception:
-                            pass
+                            log_exc_swallow(log, "Не удалось распарсить JSON-ответ AI-ассистента")
 
                         current_messages.append({
                             "role": "tool",

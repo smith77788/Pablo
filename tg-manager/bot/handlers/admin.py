@@ -18,6 +18,7 @@ from bot.keyboards import main_menu
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -143,7 +144,7 @@ async def cmd_admin_secret(message: Message) -> None:
     try:
         await message.delete()
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось удалить сообщение с секретной фразой", user_id=message.from_user.id)
     kb = InlineKeyboardBuilder()
     kb.button(text="🔑 Открыть Админ Меню", callback_data="adm:main")
     await message.answer(
@@ -171,7 +172,9 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
     try:
         total_users = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
     except Exception:
-        pass  # total_users already set above as fallback
+        log_exc_swallow(log, "Не удалось получить количество пользователей из platform_users",
+                        user_id=msg_or_cb.from_user.id)
+        # total_users already set above as fallback
     try:
         today_users = await pool.fetchval(
             "SELECT COUNT(*) FROM platform_users "
@@ -713,7 +716,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                 sent += 1
                 await asyncio.sleep(0.05)
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось отправить сообщение рассылки пользователю",
+                                user_id=u["added_by"])
         await message.answer(
             f"✅ Рассылка завершена\n\nОтправлено: <b>{sent}</b> / {len(users)}",
             parse_mode="HTML", reply_markup=_admin_main_kb(),
@@ -790,7 +794,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось уведомить пользователя о выдаче подписки",
+                                user_id=uid)
         except (ValueError, IndexError):
             await message.answer(
                 "❌ Формат: <code>USER_ID план месяцев</code>\n"
@@ -859,7 +864,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                         parse_mode="HTML",
                     )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Не удалось уведомить пользователя о массовой выдаче подписки",
+                                    user_id=uid)
             except (ValueError, IndexError) as e:
                 fail_list.append(f"❌ {line[:30]}: {e}")
         result_lines = ok_list[:20] + fail_list[:10]
@@ -888,7 +894,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось уведомить пользователя об отзыве подписки",
+                                user_id=uid)
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
@@ -916,7 +923,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось уведомить пользователя о выдаче Strike доступа",
+                                user_id=target_uid)
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
@@ -937,7 +945,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось уведомить пользователя об отзыве Strike доступа",
+                                user_id=target_uid)
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
@@ -1236,4 +1245,5 @@ async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отправить уведомление о новом пользователе админу",
+                            user_id=admin_id)

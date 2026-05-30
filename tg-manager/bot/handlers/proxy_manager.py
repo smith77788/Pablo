@@ -18,6 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ProxyCb, BotCb, BmCb
 from bot.states import AddProxyFSM
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -97,7 +98,7 @@ async def _detect_proxy_geo(proxy_url: str) -> dict:
                     data = await resp.json()
                     return {"geo_country": data.get("country"), "geo_city": data.get("city")}
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось определить геолокацию прокси")
     return {}
 
 
@@ -333,7 +334,7 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     row["id"], user_id, alive, latency_ms,
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось сохранить запись в proxy_health_log")
 
     lines.append(f"\n✅ Рабочих: <b>{ok_count}</b> | ❌ Нерабочих: <b>{fail_count}</b>")
     await progress_msg.edit_text(

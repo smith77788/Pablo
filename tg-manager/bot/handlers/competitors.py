@@ -1,6 +1,7 @@
 """Мониторинг конкурирующих каналов."""
 import re
 import asyncio
+import logging
 import aiohttp
 import asyncpg
 from aiogram import Router, F
@@ -9,7 +10,9 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import CompCb, BmCb
 from bot.states import AddCompetitorFSM
+from services.logger import log_exc_swallow
 
+log = logging.getLogger(__name__)
 router = Router()
 
 
@@ -156,7 +159,7 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
                     updated += 1
                 await asyncio.sleep(1.5)
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось обновить данные конкурента")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
@@ -175,7 +178,7 @@ async def comp_delete(cb: CallbackQuery, callback_data: CompCb, pool: asyncpg.Po
             callback_data.comp_id, cb.from_user.id,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось удалить конкурента")
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
     await cb.message.edit_text("🗑 Конкурент удалён.", reply_markup=kb.as_markup())

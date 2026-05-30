@@ -18,6 +18,7 @@ from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
 from bot.utils.subscription import get_plan, locked_text
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -254,7 +255,7 @@ async def msg_add_keyword(
             from services import behavioral_engine
             await behavioral_engine.record_search_repeat(pool, message.from_user.id, keyword)
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось записать поведенческое событие для ключевого слова")
 
     kb = InlineKeyboardBuilder()
     kb.button(

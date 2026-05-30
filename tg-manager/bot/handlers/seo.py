@@ -16,6 +16,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.states import SeoFSM
 from database import db
 from services import bot_api
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -623,7 +624,7 @@ async def cb_seo_chan_ai(
             if info:
                 about = info.get("about", "")
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось получить about канала через get_full_channel_info")
 
     # Ключевые слова из поисковой памяти
     kw_rows = await pool.fetch(
@@ -674,7 +675,7 @@ async def cb_seo_chan_ai(
             user_id, chan_id, new_title, new_about, new_username,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось сохранить SEO-предложение в сессионном AI-анализе")
 
     # Сохраняем контекст в FSM для возможных правок
     await state.update_data(
@@ -769,7 +770,7 @@ async def fsm_seo_feedback(
             if info:
                 about = info.get("about", "")
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось получить about канала через get_full_channel_info (обновление)")
 
     kw_rows = await pool.fetch(
         "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
@@ -807,7 +808,7 @@ async def fsm_seo_feedback(
             message.from_user.id, chan_id, new_title, new_about, new_username,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось сохранить SEO-предложение в БД (обновление)")
 
     lines = [
         "🤖 <b>AI-предложение (обновлено)</b>\n",
@@ -909,7 +910,7 @@ async def fsm_seo_username(
             if info:
                 about = info.get("about", "")
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось получить about канала через get_full_channel_info (по username)")
 
     kw_rows = await pool.fetch(
         "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
@@ -946,7 +947,7 @@ async def fsm_seo_username(
             message.from_user.id, chan_id, new_title, new_about, uname,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось сохранить SEO-предложение в БД (по username)")
 
     lines = [
         f"🤖 <b>AI-предложение (username: @{html.escape(uname)})</b>\n",
@@ -1483,7 +1484,7 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
                 if info:
                     about = info.get("about", "") or ""
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось получить about канала для анализа ключевых слов")
 
     all_text = f"{chan.get('title', '')} {chan.get('username', '')} {about}"
     tracked = await pool.fetch(

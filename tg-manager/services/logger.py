@@ -265,7 +265,10 @@ def log_exc_swallow(
         except Exception:
             log_exc_swallow(log, "Optional context message", account_id=acc_id)
     """
-    log.log(level, "%s  | swallowed: %s", msg, traceback.format_exc().strip().split("\n")[-1], extra=extra)
+    try:
+        log.log(level, "%s  | swallowed: %s", msg, traceback.format_exc().strip().split("\n")[-1], extra=extra)
+    except Exception:
+        log.debug("log_exc_swallow itself failed: %s", msg, exc_info=True)
 
 
 def log_exc_silent(

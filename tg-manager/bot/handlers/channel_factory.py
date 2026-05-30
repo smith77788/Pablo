@@ -24,6 +24,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ChanFactCb, SeoCb
+from services.logger import log_exc_swallow
 from bot.states import (
     BulkChannelCreateFSM,
     ChannelFactoryFSM,
@@ -65,7 +66,7 @@ async def _send_or_edit(event, text: str, kb: InlineKeyboardBuilder) -> None:
             await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать сообщение в _send_or_edit")
         await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -426,7 +427,7 @@ async def _ask_username(msg, edit: bool) -> None:
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать сообщение при показе username")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -463,7 +464,7 @@ async def _show_chanf_cluster_or_confirm(event, state: FSMContext, pool: asyncpg
             owner_id,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось загрузить список кластеров")
 
     if not clusters:
         await state.update_data(cluster_id=None, cluster_name="")
@@ -487,7 +488,7 @@ async def _show_chanf_cluster_or_confirm(event, state: FSMContext, pool: asyncpg
             await event.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать сообщение при выборе кластера")
         await event.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
@@ -539,7 +540,7 @@ async def _show_chanf_confirm(event, state: FSMContext) -> None:
             await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать сообщение подтверждения создания канала")
         await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -772,7 +773,7 @@ async def _show_bulk_confirm(event, state: FSMContext) -> None:
             await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать сообщение подтверждения массового создания")
         await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -832,7 +833,7 @@ async def cb_chanf_do_bulk_create(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось обновить прогресс массового создания каналов")
         if i < count:
             # Smart anti-flood: human-like delay between channel creations
             # Every 5 channels — longer pause (5-10 min), otherwise 45-90s
@@ -1274,7 +1275,7 @@ async def cb_chanf_stats_chan(
             if fetched > 0:
                 members = fetched
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось получить количество участников канала")
 
     type_label = {
         "channel": "📡 Канал",

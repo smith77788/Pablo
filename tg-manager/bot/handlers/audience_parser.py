@@ -30,6 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ParserCb
 from bot.utils.subscription import require_plan
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -218,7 +219,7 @@ async def _start_parse(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Не удалось обновить сообщение прогресса парсинга")
 
     try:
         if parse_type == "members":

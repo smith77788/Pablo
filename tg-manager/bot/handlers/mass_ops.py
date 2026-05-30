@@ -20,6 +20,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb, BmCb
+from services.logger import log_exc_swallow
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
 
@@ -257,7 +258,7 @@ async def _ask_mp_text(msg, state: FSMContext, target_label: str, edit: bool = F
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать сообщение ввода текста массовой публикации, отправляем новое")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -451,7 +452,7 @@ async def cb_mp_confirm(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось обновить прогресс массовой публикации")
 
         if delay > 0:
             await asyncio.sleep(delay)
@@ -903,7 +904,7 @@ async def cb_bbe_confirm(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось обновить прогресс массового редактирования ботов")
         await asyncio.sleep(1)
 
     await progress_msg.edit_text(
@@ -988,7 +989,7 @@ async def _log_op_step(
             op_id, step_num, target, status,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось записать шаг операции в operation_log")
 
 
 async def _finish_op_record(
@@ -1001,7 +1002,7 @@ async def _finish_op_record(
             status, ok_count, op_id,
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось завершить запись операции в operation_queue")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1821,7 +1822,7 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
         accounts = await _get_active_accounts(pool, uid)
         acc_count = len(accounts)
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось посчитать активные аккаунты для предпросмотра операции")
 
     lines = []
     lines.append(f"🛠️ <b>Построитель — Предпросмотр операции</b>")
@@ -1865,7 +1866,7 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
             await msg.edit_text(preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось отредактировать предпросмотр построителя операций, отправляем новое")
     await msg.answer(preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup())
 
 

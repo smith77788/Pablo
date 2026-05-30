@@ -40,6 +40,7 @@ from bot.states import (
 from bot.utils.subscription import require_plan
 from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text
 from services import session_simulator
+from services.logger import log_exc_swallow
 
 # ── Bulk Pacing Presets ──────────────────────────────────────────────────────
 
@@ -355,7 +356,7 @@ async def _send_or_edit(msg_or_cb, text: str, kb, edit: bool = True) -> None:
             await msg_or_cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой edit_text в _send_or_edit — отправляю новое сообщение")
         await msg_or_cb.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
@@ -487,7 +488,7 @@ async def _start_create_channel_fsm(msg, state: FSMContext, entity_type: str, ed
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой edit_text при установке названия — отправляю новое сообщение")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -546,7 +547,7 @@ async def _show_create_confirm(msg, state: FSMContext, edit: bool = False) -> No
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой edit_text при подтверждении — отправляю новое сообщение")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -667,7 +668,7 @@ async def _bulk_choose_type(msg, state: FSMContext, edit: bool) -> None:
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой edit_text при выборе типа bulk — отправляю новое сообщение")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -883,7 +884,7 @@ async def cb_do_bulk_create(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой обновления прогресса bulk-создания")
         # Apply pacing-aware delay between operations
         if done_ops < total_ops:
             attempt = (attempt + 1) % 5  # rotate 0-4 for backoff
@@ -1017,7 +1018,7 @@ async def _show_bpchans_page(msg, state: FSMContext, edit: bool = False) -> None
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой edit_text при выборе каналов — отправляю новое сообщение")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -1104,7 +1105,7 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой обновления прогресса массовой публикации")
         # Exponential backoff; reset every 5 iterations
         if attempt >= 4:
             attempt = 0
@@ -1184,7 +1185,7 @@ async def _start_join_fsm(msg, state: FSMContext, edit: bool = False) -> None:
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой edit_text при настройке join — отправляю новое сообщение")
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -2141,7 +2142,7 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой обновления прогресса создания ботов")
         # Exponential backoff; reset every 5 iterations
         if attempt >= 4:
             attempt = 0
@@ -2748,7 +2749,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     try:
         await status_msg.edit_text("\n".join(intel_lines), parse_mode="HTML")
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой отправки статуса разведки Strike")
 
     task = asyncio.create_task(_strike_bg_v2(
         status_msg=status_msg,
@@ -2789,7 +2790,7 @@ async def _strike_bg_v2(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой обновления статуса фазы Strike")
 
     try:
         await _progress("strike", f"Фаза 2-4: Эшелонированная атака — {len(peers)} целей, {len(viable)} аккаунтов")
@@ -2825,7 +2826,7 @@ async def _strike_bg_v2(
             await bot.send_message(
                 user_id, "⚔️ <b>Strike отменён пользователем.</b>", parse_mode="HTML")
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой отправки уведомления об отмене Strike", user_id=user_id)
     except Exception as exc:
         log.exception("_strike_bg_v2 error user=%s: %s", user_id, exc)
         try:
@@ -2835,7 +2836,7 @@ async def _strike_bg_v2(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой отправки уведомления об ошибке Strike", user_id=user_id)
 
 
 async def _strike_bg(
@@ -3217,7 +3218,7 @@ async def fsm_bulk_channel_id(message: Message, state: FSMContext, pool: asyncpg
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой обновления прогресса покидания каналов")
             # Exponential backoff; reset every 5 iterations
             if attempt >= 4:
                 attempt = 0
@@ -3303,7 +3304,7 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой обновления прогресса публикации в канал")
             # Exponential backoff; reset every 5 iterations
             if attempt >= 4:
                 attempt = 0
@@ -3395,7 +3396,7 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой обновления прогресса вступления в канал")
             # Exponential backoff; reset every 5 iterations
             if attempt >= 4:
                 attempt = 0
@@ -3498,7 +3499,7 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой обновления прогресса обновления профилей")
             # Exponential backoff; reset every 5 iterations
             if attempt >= 4:
                 attempt = 0
@@ -3700,7 +3701,7 @@ async def fsm_bulk_dm_text(message: Message, state: FSMContext, pool: asyncpg.Po
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой обновления прогресса рассылки ЛС")
 
         # Delay: base + any extra flood wait accumulated
         wait = base_delay + min(flood_wait_total, 30)
@@ -3912,7 +3913,7 @@ async def cb_bulk_chan_exec(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой обновления прогресса bulk-операции (leave)")
 
         await asyncio.sleep(_backoff(idx % 5, base=2.0, cap=20.0))
 
@@ -4050,7 +4051,7 @@ async def _show_my_chans_page(
             if edit:
                 await msg.edit_text("⏳ Загружаю список каналов из Telegram...", parse_mode="HTML")
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой отображения статуса загрузки каналов")
         try:
             raw = await account_manager.get_dialogs(session_str, limit=200, _acc=acc_row)
         except Exception as e:
@@ -4061,7 +4062,7 @@ async def _show_my_chans_page(
                     parse_mode="HTML", reply_markup=kb.as_markup(),
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой отображения ошибки загрузки каналов")
             return
         if owner_id:
             await upsert_managed_channels(pool, owner_id, acc_id, raw)
@@ -4108,7 +4109,7 @@ async def _show_my_chans_page(
     try:
         await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой отображения списка каналов")
 
 
 @router.callback_query(ChanCb.filter(F.action == "my_chans_item"))
@@ -4587,7 +4588,7 @@ async def _cinv_bg(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой уведомления об отмене инвайта")
         log.info("_cinv_bg: cancelled by user %s", user_id)
     except Exception as exc:
         try:
@@ -4597,7 +4598,7 @@ async def _cinv_bg(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой уведомления об ошибке инвайта")
         log.exception("_cinv_bg error user=%s: %s", user_id, exc)
     finally:
         _active_tasks.pop((user_id, "cinv"), None)
@@ -4669,7 +4670,7 @@ async def _cinv_bg_inner(
                     )
                     tg_uid = row["tg_user_id"] if row else None
                 except Exception:
-                    pass
+                    log_exc_swallow(log, "Сбой получения tg_user_id для promote_to_admin")
             if tg_uid:
                 try:
                     ok = await _am.promote_to_admin(
@@ -4711,7 +4712,7 @@ async def _cinv_bg_inner(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой уведомления об отсутствии контактов")
         return
 
     # 2. Build identifier list: @username preferred, phone as fallback
@@ -4732,7 +4733,7 @@ async def _cinv_bg_inner(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой уведомления об отсутствии идентификаторов")
         return
 
     # 3. Split list among accounts (round-robin distribution)
@@ -4785,4 +4786,4 @@ async def _cinv_bg_inner(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой отправки итогов инвайта")

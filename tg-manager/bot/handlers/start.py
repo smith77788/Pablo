@@ -11,6 +11,7 @@ from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin
 from database import db
 from bot.callbacks import BotCb
 from bot.handlers.admin import notify_new_platform_user
+from services.logger import log_exc_swallow
 import logging
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
             await message.answer("⛔️ Ваш аккаунт заблокирован. Обратитесь в поддержку.")
             return
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось проверить блокировку пользователя")
 
     is_new = False
     try:
@@ -88,7 +89,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
                     _record_reentry_safe(pool, uid, days_absent)
                 )
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось зарегистрировать или обновить пользователя")
 
     # Handle referral code from /start inv_XXXXXX
     if is_new:

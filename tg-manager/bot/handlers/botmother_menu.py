@@ -52,6 +52,7 @@ from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
@@ -73,8 +74,7 @@ async def _fire_cross_nav(
             pool, owner_id, from_type, from_id, to_type, to_id
         )
     except Exception:
-        pass
-
+        log_exc_swallow(log, "Не удалось записать событие cross-navigation")
 
 # ── Keyboard builders ─────────────────────────────────────────────────────
 
@@ -240,8 +240,7 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
             await callback.bot.send_message(callback.from_user.id, text,
                                             parse_mode="HTML", reply_markup=markup)
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Не удалось отправить fallback-сообщение при ошибке _edit")
 
 # ── Main menu callback ────────────────────────────────────────────────────
 
@@ -278,7 +277,7 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
             if parts:
                 status_line = "\n\n<i>📊 " + " · ".join(parts) + "</i>"
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось получить статус-строку главного меню")
 
     await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
 
@@ -658,7 +657,7 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     "arrow": arrow,
                 }
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось построить данные тренда поисковых позиций")
 
     by_bot: dict[str, list] = {}
     for kw in kws:
@@ -1020,7 +1019,7 @@ async def fsm_plan_waiting_datetime(
             for w in plan.warnings[:2]:
                 preview_lines.append(f"⚠️ {w}")
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось рассчитать план загрузки через capacity_planner")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запланировать", callback_data=BmCb(action="plan_confirm"))
@@ -1152,7 +1151,7 @@ async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 lines.append(f"{flag} {country}: <b>{cnt}</b>")
             lines.append("")
     except Exception:
-        pass
+        log_exc_swallow(log, "Не удалось получить гео-распределение аккаунтов")
 
     # Прогнозы для типичных операций
     scenarios = [
@@ -1313,7 +1312,7 @@ async def cb_op_reports(
                     + f"\n📈 Success rate: {success_rate}%  ⏱ Avg: {avg_str}\n"
                 )
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось получить статистику операций из operation_queue")
 
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
     kb = InlineKeyboardBuilder()
@@ -1409,7 +1408,7 @@ async def cb_op_detail(
             if summary:
                 lines.append(f"\n✅ <b>Итог:</b> {html.escape(summary)}")
         except Exception:
-            pass
+            log_exc_swallow(log, "Не удалось распарсить result JSON операции")
 
     # Last 5 steps from operation_log
     steps = await pool.fetch(
