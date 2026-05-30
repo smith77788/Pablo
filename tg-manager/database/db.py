@@ -832,6 +832,7 @@ async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
         )
         return True
     except Exception:
+        log.debug("add_user_tag: error for bot_id=%s user_id=%s tag=%s", bot_id, user_id, tag, exc_info=True)
         return False
 
 async def remove_user_tag(pool, bot_id: int, user_id: int, tag: str) -> None:
@@ -1280,7 +1281,7 @@ async def record_message_keywords(pool, bot_id: int, text: str) -> None:
                 bot_id, word,
             )
         except Exception:
-            pass
+            log.debug("record_message_keywords: error recording keyword=%s bot_id=%s", word, bot_id, exc_info=True)
 
 async def get_top_keywords(pool, bot_id: int, limit: int = 20) -> list:
     return await pool.fetch(
@@ -1521,7 +1522,7 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
             )
             counts["auto_replies"] += 1
         except Exception:
-            pass
+            log.debug("clone_bot_settings: error copying auto_reply for dst_id=%s", dst_id, exc_info=True)
     funnels_src = await pool.fetch(
         "SELECT id,name,trigger_type,keyword FROM funnels WHERE bot_id=$1", src_id,
     )
@@ -1543,7 +1544,7 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
                     )
                 counts["funnels"] += 1
         except Exception:
-            pass
+            log.debug("clone_bot_settings: error copying funnel src=%s dst=%s", fn["id"], dst_id, exc_info=True)
     rules = await pool.fetch(
         "SELECT name,trigger_type,trigger_value,action_type,action_value FROM automation_rules WHERE bot_id=$1",
         src_id,
@@ -1558,7 +1559,7 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
             )
             counts["automation_rules"] += 1
         except Exception:
-            pass
+            log.debug("clone_bot_settings: error copying automation_rule dst=%s", dst_id, exc_info=True)
     return counts
 
 
@@ -1878,13 +1879,14 @@ async def upsert_managed_channels(
                 owner_id, acc_id,
             )
             await conn.executemany(
-                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
-                   VALUES($1, $2, $3, $4, $5, $6)
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
+                   VALUES($1, $2, $3, $4, $5, $6, $7)
                    ON CONFLICT (owner_id, channel_id) DO UPDATE
                    SET title=EXCLUDED.title, username=EXCLUDED.username,
-                       acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash""",
+                       acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
+                       type=EXCLUDED.type""",
                 [
-                    (owner_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""), ch.get("access_hash", 0))
+                    (owner_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""), ch.get("access_hash", 0), ch.get("type", "channel"))
                     for ch in channels
                 ],
             )

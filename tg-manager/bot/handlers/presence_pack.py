@@ -641,7 +641,7 @@ async def cb_bot_admin_panel(
         "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
     ) or 0
     funnel_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM funnel_sequences WHERE bot_id=$1 AND is_active=TRUE", bot_id
+        "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
     ) or 0
 
     token = await db.get_bot_admin_token(pool, bot_id)

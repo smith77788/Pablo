@@ -129,7 +129,7 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                             "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
                         ) or 0
                         funnel_count = await pool.fetchval(
-                            "SELECT COUNT(*) FROM funnel_sequences WHERE bot_id=$1 AND is_active=TRUE", bot_id
+                            "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
                         ) or 0
                         panel_text = (
                             "🔧 <b>Панель управления ботом</b>\n\n"

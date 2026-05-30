@@ -64,7 +64,7 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                     acc_dict["session_str"], ch["channel_id"], _acc=acc_dict
                 )
             except Exception as e:
-                log.debug("drift_detector get_full_channel_info error: %s", e)
+                log.warning("drift_detector get_full_channel_info error for channel %s: %s", ch["channel_id"], e)
                 info = None
 
             # Always update last_drift_check

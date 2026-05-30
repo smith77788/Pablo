@@ -430,17 +430,17 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         uid,
     )
 
-    # Channels and groups via account-linked data
+    # Channels and groups via managed_channels
     try:
         chan_total = await pool.fetchval(
-            "SELECT COUNT(DISTINCT channel_id) FROM channel_access WHERE owner_id=$1", uid
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
         ) or 0
     except Exception:
         chan_total = 0
 
     try:
         group_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_groups WHERE owner_id=$1 AND is_active=TRUE", uid
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND type IN ('megagroup','supergroup','group')", uid
         ) or 0
     except Exception:
         group_total = 0
