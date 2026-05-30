@@ -83,6 +83,7 @@ class SessionImport(StatesGroup):
     waiting_pyrogram_json = State()
     waiting_tdata_zip = State()
     waiting_batch_sessions = State()
+    waiting_batch_confirm = State()
 
 
 class AccountPost(StatesGroup):
@@ -2364,6 +2365,48 @@ def _parse_sessions_csv(raw: bytes) -> list[tuple[str, str]]:
     return results
 
 
+def _prevalidate_sessions(
+    pairs: list[tuple[str, str]],
+) -> dict:
+    """Pre-validate session strings before import.
+
+    Returns dict with:
+      - valid: list of (session_str, cluster) that pass format check
+      - invalid: list of (index, reason) for invalid entries
+      - warnings: list of str with non-blocking warnings
+    """
+    import base64
+
+    valid = []
+    invalid = []
+    warnings = []
+
+    for i, (session_str, cluster) in enumerate(pairs):
+        session_str = session_str.strip()
+        if not session_str:
+            invalid.append((i + 1, "пустая строка"))
+            continue
+
+        # Check length: StringSession is typically >200 chars
+        if len(session_str) < 50:
+            invalid.append((i + 1, f"слишком короткая ({len(session_str)} симв., нужно ≥50)"))
+            continue
+
+        # Check base64-decodable (StringSession = base64)
+        try:
+            base64.b64decode(session_str + "=" * (-len(session_str) % 4))
+        except Exception:
+            warnings.append(f"Сессия #{i + 1}: не в формате base64 — может быть другой формат")
+
+        valid.append((session_str, cluster))
+
+        # Warn about very long sessions
+        if len(session_str) > 10_000:
+            warnings.append(f"Сессия #{i + 1}: очень длинная ({len(session_str)} симв.)")
+
+    return {"valid": valid, "invalid": invalid, "warnings": warnings}
+
+
 async def _do_batch_import(
     raw_sessions: list[str] | list[tuple[str, str]],
     message, pool: asyncpg.Pool, user_id: int,
@@ -2473,8 +2516,55 @@ async def fsm_batch_import_text(message: Message, state: FSMContext, pool: async
     if len(sessions) > 50:
         sessions = sessions[:50]
         await message.answer("⚠️ Взяты первые 50 сессий из списка.")
-    await state.clear()
-    await _do_batch_import(sessions, message, pool, message.from_user.id)
+
+    # Pre-validate
+    pairs = [(s, "") for s in sessions]
+    report = _prevalidate_sessions(pairs)
+    await _show_validation_report(message, state, report)
+
+
+async def _show_validation_report(
+    message, state: FSMContext, report: dict
+) -> None:
+    """Show pre-validation report and ask for confirmation."""
+    valid = report["valid"]
+    invalid = report["invalid"]
+    warnings = report["warnings"]
+
+    lines = ["📋 <b>Результат проверки сессий</b>\n"]
+    lines.append(f"✅ Годных: <b>{len(valid)}</b>")
+    if invalid:
+        lines.append(f"❌ Невалидных: <b>{len(invalid)}</b>")
+        for idx, reason in invalid[:5]:
+            lines.append(f"  • #{idx}: {reason}")
+        if len(invalid) > 5:
+            lines.append(f"  <i>... ещё {len(invalid) - 5}</i>")
+
+    if warnings:
+        lines.append(f"\n⚠️ Предупреждений: <b>{len(warnings)}</b>")
+        for w in warnings[:3]:
+            lines.append(f"  • {w}")
+        if len(warnings) > 3:
+            lines.append(f"  <i>... ещё {len(warnings) - 3}</i>")
+
+    if not valid:
+        lines.append("\n❌ Нет валидных сессий для импорта.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))
+        kb.adjust(1)
+        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+        return
+
+    await state.update_data(batch_pairs=valid)
+    await state.set_state(SessionImport.waiting_batch_confirm)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить импорт", callback_data=AccCb(action="confirm_batch"))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_batch"))
+    kb.adjust(1)
+
+    lines.append(f"\nЗапустить импорт <b>{len(valid)}</b> сессий?")
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.message(SessionImport.waiting_batch_sessions, F.document)
@@ -2510,8 +2600,8 @@ async def fsm_batch_import_file(message: Message, state: FSMContext, pool: async
         if len(pairs) > 50:
             pairs = pairs[:50]
             await message.answer("⚠️ Взяты первые 50 сессий из CSV.")
-        await state.clear()
-        await _do_batch_import(pairs, message, pool, message.from_user.id)
+        report = _prevalidate_sessions(pairs)
+        await _show_validation_report(message, state, report)
     else:
         raw_text = raw_bytes.decode("utf-8", errors="ignore")
         sessions = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
@@ -2521,8 +2611,35 @@ async def fsm_batch_import_file(message: Message, state: FSMContext, pool: async
         if len(sessions) > 50:
             sessions = sessions[:50]
             await message.answer("⚠️ Взяты первые 50 сессий из файла.")
-        await state.clear()
-        await _do_batch_import(sessions, message, pool, message.from_user.id)
+        pairs = [(s, "") for s in sessions]
+        report = _prevalidate_sessions(pairs)
+        await _show_validation_report(message, state, report)
+
+
+# ── Batch import confirmation ────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "confirm_batch"))
+async def cb_confirm_batch_import(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """User confirmed batch import after pre-validation."""
+    await callback.answer()
+    data = await state.get_data()
+    pairs = data.get("batch_pairs", [])
+
+    if not pairs:
+        await callback.message.edit_text(
+            "⚠️ Нет данных для импорта.",
+            reply_markup=InlineKeyboardBuilder()
+                .button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))
+                .as_markup(),
+        )
+        return
+
+    await state.clear()
+    await _do_batch_import(pairs, callback.message, pool, callback.from_user.id)
 
 
 # ── Asset Scanner ──────────────────────────────────────────────────────────────
