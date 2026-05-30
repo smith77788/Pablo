@@ -13,6 +13,10 @@ PLAN_FEATURES = {
     "enterprise": "∞ ботов+аккаунтов, AI-ассистент, DM-кампании, Global Presence, сеть ботов, Swarm",
 }
 
+from services.logger import log_exc_swallow  # noqa: E402
+
+log = logging.getLogger(__name__)
+
 
 def _admin_ids() -> set[int]:
     raw = os.getenv("ADMIN_IDS", "")
