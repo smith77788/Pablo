@@ -4,6 +4,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 from bot.callbacks import ExperimentCb, BmCb
 from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, subscription_locked_markup
@@ -162,9 +163,13 @@ async def cb_exp_type(callback: CallbackQuery, callback_data: ExperimentCb,
     exp_type = "start_message" if callback_data.action == "type_start" else "auto_reply"
     await state.update_data(exp_type=exp_type)
     await state.set_state(CreateExperiment.waiting_name)
+    bot_id = callback_data.bot_id
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=bot_id))
     await callback.message.edit_text(
         "🧪 <b>Новый эксперимент</b>\n\nВведите название эксперимента:",
         parse_mode="HTML",
+        reply_markup=cancel_kb.as_markup(),
     )
     await callback.answer()
 
@@ -177,24 +182,31 @@ async def msg_exp_name(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     await state.update_data(exp_id=exp_id)
     await state.set_state(CreateExperiment.waiting_variant_name)
     safe_name = _html_escape(name)
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=data["bot_id"]))
     await message.answer(
         f"✅ Эксперимент «{safe_name}» создан!\n\n"
         "Добавьте первый вариант.\n"
         "Введите название варианта (например: «Контроль» или «Вариант A»):",
         parse_mode="HTML",
+        reply_markup=cancel_kb.as_markup(),
     )
 
 
 @router.message(CreateExperiment.waiting_variant_name, F.text)
 async def msg_variant_name(message: Message, state: FSMContext) -> None:
     variant_name = message.text.strip()
+    data = await state.get_data()
     await state.update_data(variant_name=variant_name)
     await state.set_state(CreateExperiment.waiting_variant_content)
     safe_vname = _html_escape(variant_name)
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=data.get("bot_id", 0)))
     await message.answer(
         f"Вариант: <b>{safe_vname}</b>\n\n"
         "Введите содержимое (текст /start сообщения или авто-ответа):",
         parse_mode="HTML",
+        reply_markup=cancel_kb.as_markup(),
     )
 
 
@@ -225,9 +237,12 @@ async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
                           state: FSMContext) -> None:
     await state.set_state(CreateExperiment.waiting_variant_name)
     await state.update_data(bot_id=callback_data.bot_id, exp_id=callback_data.exp_id)
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         "➕ <b>Добавить вариант</b>\n\nВведите название варианта:",
         parse_mode="HTML",
+        reply_markup=cancel_kb.as_markup(),
     )
     await callback.answer()
 
