@@ -42,7 +42,13 @@ async def run(pool: asyncpg.Pool, bot=None) -> None:
 # ── Score recomputation ───────────────────────────────────────────────────
 
 async def _recompute_scores(pool: asyncpg.Pool) -> None:
-    """Recompute attention/habit/ecosystem scores for all active entities."""
+    """Recompute attention/habit/ecosystem scores for all active entities.
+
+    Scoring uses logarithmic scaling to avoid linear runaway:
+      - attention: weighted reentry + recency bonus (log-scaled reentry count)
+      - habit: active_weeks × consistency_factor (standard deviation penalty)
+      - ecosystem: cross_nav_count × diversity_bonus (unique destination types)
+    """
     rows = await pool.fetch(
         """SELECT owner_id, entity_type, entity_id,
                   COUNT(*) AS event_count,
@@ -50,7 +56,10 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
                   MIN(occurred_at) AS first_event,
                   COUNT(*) FILTER (WHERE event_type = 'reentry') AS reentry_count,
                   COUNT(*) FILTER (WHERE event_type = 'cross_nav') AS cross_nav_count,
-                  COUNT(DISTINCT date_trunc('week', occurred_at)) AS active_weeks
+                  COUNT(DISTINCT date_trunc('week', occurred_at)) AS active_weeks,
+                  ROUND(STDDEV(
+                      EXTRACT(DOW FROM occurred_at) * 24 + EXTRACT(HOUR FROM occurred_at)
+                  )::numeric, 1) AS time_stddev_hours
            FROM behavioral_events
            WHERE occurred_at > now() - INTERVAL '30 days'
            GROUP BY owner_id, entity_type, entity_id""",
@@ -58,20 +67,73 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
     if not rows:
         return
 
+    import math
+
     now = datetime.now(tz=timezone.utc)
     upserts = []
     for r in rows:
         days_since = max(0.0, (now - r["last_event"]).total_seconds() / 86400)
-        recency_bonus = max(0.0, (30 - days_since) * 2)
-        attention = min(100.0, r["reentry_count"] * 15 + recency_bonus)
-        habit = min(100.0, float(r["active_weeks"]) * 20)
-        ecosystem = min(100.0, float(r["cross_nav_count"]) * 25)
+
+        # ── Fine-tuned attention score ──
+        # Logarithmic scaling for reentry count: 1=5%, 5=30%, 20=65%
+        # This prevents a few re-entries from dominating the score
+        reentry_count = r["reentry_count"]
+        if reentry_count > 0:
+            reentry_score = min(75.0, 5.0 + 25.0 * math.log(reentry_count + 1))
+        else:
+            reentry_score = 0.0
+
+        # Recency bonus: decays smoothly over 30 days
+        recency_bonus = max(0.0, (30 - days_since) * 1.5)  # max 45 at day 0
+
+        attention = min(100.0, reentry_score + recency_bonus)
+
+        # ── Fine-tuned habit score ──
+        # Consistency factor: if stddev is low, sessions are at predictable times → high habit
+        active_weeks = r["active_weeks"]
+        time_stddev = float(r["time_stddev_hours"] or 0)
+
+        if time_stddev > 0 and active_weeks > 0:
+            # Lower stddev = more consistent = higher score
+            consistency_factor = max(0.3, 1.0 - (time_stddev / 168.0))  # 168 = hours in week
+        else:
+            consistency_factor = 0.5
+
+        habit_base = min(60.0, float(active_weeks) * 12)
+        habit = min(100.0, habit_base + 40.0 * consistency_factor)
+
+        # ── Fine-tuned ecosystem score ──
+        cross_nav = r["cross_nav_count"]
+        if cross_nav > 0:
+            # Check diversity: unique destination types
+            unique_dest = await pool.fetchval(
+                """SELECT COUNT(DISTINCT meta->>'to_type')
+                   FROM behavioral_events
+                   WHERE owner_id=$1 AND entity_type=$2 AND entity_id=$3
+                     AND event_type='cross_nav'
+                     AND occurred_at > now() - INTERVAL '30 days'""",
+                r["owner_id"], r["entity_type"], r["entity_id"],
+            ) or 0
+            diversity_bonus = min(1.5, 0.8 + unique_dest * 0.15)
+        else:
+            diversity_bonus = 1.0
+
+        ecosystem = min(100.0, float(cross_nav) * 20 * diversity_bonus)
+
+        # ── Decay rate (fine-tuned) ──
         lifespan_days = max(1.0, (r["last_event"] - r["first_event"]).total_seconds() / 86400)
-        decay = round(1.0 / (lifespan_days / max(1, r["event_count"])), 4)
+        event_count = r["event_count"]
+        if event_count > 0 and lifespan_days > 0:
+            # Events per day → higher = lower decay
+            events_per_day = event_count / lifespan_days
+            decay = min(1.0, max(0.01, 1.0 / (1.0 + events_per_day * 2)))
+        else:
+            decay = 0.5
+
         upserts.append((
             r["owner_id"], r["entity_type"], r["entity_id"],
             round(attention, 2), round(habit, 2), round(ecosystem, 2),
-            min(1.0, decay), r["reentry_count"],
+            round(decay, 4), r["reentry_count"],
         ))
 
     await pool.executemany(
@@ -169,12 +231,13 @@ async def record_cross_nav(
 async def _detect_anomalies(pool: asyncpg.Pool) -> None:
     """
     Detect unusual behavioral patterns and log them as 'anomaly' events.
-    Detects:
+    Detects (6 types):
     - Decay spike: entity that had high attention_score now has decay_rate > 0.8
     - Affinity dropout: keyword not searched in 14+ days but had affinity > 50
     - Reentry burst: 5+ reentries to same entity in 1 hour (automation signal)
     - Velocity anomaly: события в последний час > 3× от среднего за 7 дней
     - Pattern deviation: attention/ecosystem отклонение > 50% от 7-дневного baseline
+    - Schedule deviation: активность в необычное время суток (за пределами нормальных часов)
     """
     try:
         # 1. Decay spikes — entities dropping fast
@@ -348,6 +411,77 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "behavioral_engine velocity/deviation scan: %d velocity, %d deviations",
                 len(velocity_anomalies), len(deviation_anomalies),
             )
+
+        # 6. Schedule deviation — activity at unusual hours for this account
+        schedule_anomalies = await pool.fetch(
+            """WITH hour_dist AS (
+                   SELECT owner_id, entity_type, entity_id,
+                          EXTRACT(HOUR FROM occurred_at)::int AS hour_of_day,
+                          COUNT(*) AS cnt
+                   FROM behavioral_events
+                   WHERE occurred_at > now() - INTERVAL '30 days'
+                     AND event_type NOT IN ('anomaly', 'cross_nav')
+                   GROUP BY owner_id, entity_type, entity_id, hour_of_day
+               ), top_hours AS (
+                   SELECT DISTINCT ON (owner_id, entity_type, entity_id)
+                          owner_id, entity_type, entity_id,
+                          hour_of_day
+                   FROM hour_dist
+                   ORDER BY owner_id, entity_type, entity_id, cnt DESC
+               ), active_windows AS (
+                   SELECT owner_id, entity_type, entity_id,
+                          array_agg(hour_of_day ORDER BY cnt DESC) AS active_hours
+                   FROM hour_dist
+                   WHERE cnt >= 2
+                   GROUP BY owner_id, entity_type, entity_id
+               ), recent_unusual AS (
+                   SELECT e.owner_id, e.entity_type, e.entity_id,
+                          EXTRACT(HOUR FROM e.occurred_at)::int AS hour,
+                          e.occurred_at
+                   FROM behavioral_events e
+                   WHERE e.occurred_at > now() - INTERVAL '6 hours'
+                     AND e.event_type NOT IN ('anomaly', 'cross_nav')
+                     AND EXISTS (
+                         SELECT 1 FROM active_windows aw
+                         WHERE aw.owner_id=e.owner_id
+                           AND aw.entity_type=e.entity_type
+                           AND aw.entity_id=e.entity_id
+                           AND array_length(aw.active_hours, 1) >= 5
+                     )
+               )
+               SELECT ru.owner_id, ru.entity_type, ru.entity_id,
+                      ru.hour AS unusual_hour,
+                      aw.active_hours[1:5] AS normal_hours
+               FROM recent_unusual ru
+               JOIN active_windows aw
+                 ON aw.owner_id=ru.owner_id
+                 AND aw.entity_type=ru.entity_type
+                 AND aw.entity_id=ru.entity_id
+               WHERE ru.hour != ALL(aw.active_hours[1:8])
+               GROUP BY ru.owner_id, ru.entity_type, ru.entity_id,
+                        ru.hour, aw.active_hours
+               HAVING COUNT(*) >= 3""",  # at least 3 events at unusual hours
+        )
+        for r in schedule_anomalies:
+            normal = [int(h) for h in (r["normal_hours"] or [])[:5]]
+            unusual = int(r["unusual_hour"])
+            await pool.execute(
+                "INSERT INTO behavioral_events"
+                "(owner_id, entity_type, entity_id, event_type, meta) "
+                "VALUES ($1, $2, $3, 'anomaly', $4) "
+                "ON CONFLICT DO NOTHING",
+                r["owner_id"], r["entity_type"], r["entity_id"],
+                json.dumps({
+                    "type": "schedule_deviation",
+                    "unusual_hour": unusual,
+                    "normal_hours": normal,
+                    "detail": f"Активность в {unusual}:00, обычно в {normal}",
+                }),
+            )
+
+        if schedule_anomalies:
+            log.info("behavioral_engine schedule deviation: %d anomalies", len(schedule_anomalies))
+
     except Exception:
         log.debug("behavioral_engine anomaly detection skipped (table may not exist)")
 

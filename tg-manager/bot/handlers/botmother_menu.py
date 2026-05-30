@@ -1685,9 +1685,12 @@ async def cb_behavioral(
         else:
             lines = ["<b>⚠️ Аномалии поведенческого слоя</b>\n"]
             _anom_icon = {
-                "decay_spike":      "📉",
-                "affinity_dropout": "🔍",
-                "reentry_burst":    "🔁",
+                "decay_spike":       "📉",
+                "affinity_dropout":  "🔍",
+                "reentry_burst":     "🔁",
+                "velocity_spike":    "⚡",
+                "pattern_deviation": "📊",
+                "schedule_deviation":"🕐",
             }
             for r in rows:
                 try:
@@ -1713,6 +1716,26 @@ async def cb_behavioral(
                     etype = r["entity_type"]
                     eid = r["entity_id"]
                     lines.append(f"{icon} <b>Бурст</b> {etype}#{eid}  ×{cnt} за час  <i>{ts}</i>")
+                elif atype == "velocity_spike":
+                    etype = r["entity_type"]
+                    eid = r["entity_id"]
+                    ratio = meta.get("ratio", 0)
+                    cur = meta.get("current_hour", 0)
+                    avg = meta.get("avg_hourly", 0)
+                    lines.append(f"{icon} <b>Скачок</b> {etype}#{eid}  ×{ratio:.1f}  ({cur}/ч при норме {avg:.0f}/ч)  <i>{ts}</i>")
+                elif atype == "pattern_deviation":
+                    subtypes = meta.get("subtypes", [])
+                    etype = r["entity_type"]
+                    eid = r["entity_id"]
+                    sub_str = ", ".join(subtypes)
+                    lines.append(f"{icon} <b>Отклонение</b> {etype}#{eid}  {sub_str}  <i>{ts}</i>")
+                elif atype == "schedule_deviation":
+                    etype = r["entity_type"]
+                    eid = r["entity_id"]
+                    unusual = meta.get("unusual_hour", "?")
+                    normal = meta.get("normal_hours", [])
+                    normal_str = ", ".join(f"{h}:00" for h in normal[:4])
+                    lines.append(f"{icon} <b>Необычное время</b> {etype}#{eid}  в {unusual}:00 (обычно {normal_str})  <i>{ts}</i>")
                 else:
                     lines.append(f"{icon} {atype}  <i>{ts}</i>")
             text = "\n".join(lines)
