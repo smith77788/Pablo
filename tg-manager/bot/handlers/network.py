@@ -202,7 +202,6 @@ async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
 async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
                             pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     cluster = callback_data.cluster or ""
     n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, True)
     await callback.answer(f"✅ Swarm включён для {n} ботов.", show_alert=True)
@@ -225,7 +224,6 @@ async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
 async def cb_bulk_swarm_off(callback: CallbackQuery, callback_data: ClusterCb,
                              pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     cluster = callback_data.cluster or ""
     n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, False)
     await callback.answer(f"⚫ Swarm отключён для {n} ботов.", show_alert=True)
@@ -244,7 +242,6 @@ async def cb_bulk_swarm_off(callback: CallbackQuery, callback_data: ClusterCb,
 async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
                        pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     cluster = callback_data.cluster or ""
     role_map = {"bulk_role_entry": "entry", "bulk_role_conversion": "conversion",
                 "bulk_role_retention": "retention"}
@@ -283,7 +280,6 @@ async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: Cluste
 async def cb_cluster_assign_confirm(callback: CallbackQuery, callback_data: ClusterCb,
                                      pool: asyncpg.Pool, state: FSMContext) -> None:
 
-    await callback.answer()
     cluster = callback_data.cluster or ""
     await state.clear()
     await db.set_bot_cluster_name(pool, callback_data.bot_id, callback.from_user.id, cluster)
@@ -430,7 +426,6 @@ async def msg_set_weight(message: Message, state: FSMContext, pool: asyncpg.Pool
 @router.callback_query(NetworkCb.filter(F.action == "reset_weights"))
 async def cb_reset_weights(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     await db.reset_routing_weights(pool, callback.from_user.id)
     await callback.answer("✅ Все веса сброшены до 1.0 (равное распределение).", show_alert=True)
     weights = await db.get_routing_weights_for_user(pool, callback.from_user.id)
@@ -665,7 +660,6 @@ async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb
     if not src_id or src_id == dst_id:
         await callback.answer("Ошибка: некорректные боты.", show_alert=True)
         return
-    await callback.answer()
 
     src_row = await db.get_bot(pool, src_id, callback.from_user.id)
     dst_row = await db.get_bot(pool, dst_id, callback.from_user.id)
