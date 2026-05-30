@@ -382,7 +382,7 @@ cln  dm
 
 ---
 
-## 7. ФОНОВЫЕ СЕРВИСЫ (18 штук в main.py)
+## 7. ФОНОВЫЕ СЕРВИСЫ (16 штук в main.py + 2 библиотеки)
 
 ```python
 asyncio.create_task(scheduler.run(pool, http))
@@ -400,10 +400,12 @@ asyncio.create_task(behavioral_engine.run(pool))
 asyncio.create_task(account_warmer.run_warmup_loop(pool))
 asyncio.create_task(account_health.run_health_check_loop(pool))
 asyncio.create_task(payment_webhook.run(pool, bot))  # HTTP :8080
-asyncio.create_task(flood_engine.run(pool))
-asyncio.create_task(session_pool.run(pool))
-asyncio.create_task(task_registry.run_cleanup_loop(pool))
+asyncio.create_task(task_registry.run_cleanup_loop())
 ```
+
+**Библиотеки (не фоновые сервисы — используются через прямые вызовы):**
+- `services/flood_engine.py` — FloodWait tracking, adaptive pacing, `get_best_account()` (используется op_worker, infra_analytics)
+- `services/session_pool.py` — Session lifecycle, warm/load API (импортируется по необходимости)
 
 ---
 
@@ -684,12 +686,12 @@ if not await require_plan(pool, callback.from_user.id, "starter"):
 | Strike Module | ✅ | strike.py (12-векторная атака + $250 lifetime) |
 | Enterprise Tier | ✅ | self-healing schema loader + все продвинутые фичи |
 | Global Presence Factory V1+V2 | ✅ | global_presence.py + geo_data + username_engine |
-| Flood Intelligence Engine | ✅ | services/flood_engine.py |
-| Session Orchestrator | ✅ | services/session_pool.py |
+| Flood Intelligence Engine | ✅ | services/flood_engine.py (library — used by op_worker, infra_analytics) |
+| Session Orchestrator | ✅ | services/session_pool.py (library — session lifecycle, warm/load API) |
 | Account Health Engine | ✅ | services/account_health.py |
 | Audience Parser | ✅ | services/parser.py + audience_parser.py |
 | Account Warming | ✅ | services/account_warmer.py + handler |
-| Live Task Tracking | ✅ | services/task_registry.py + active_tasks.py (r12) |
+| Live Task Tracking | ✅ | services/task_registry.py + active_tasks.py (r12, cleanup loop в main.py) |
 | Telethon Timeouts | ✅ | account_manager.py (120s default, r12) |
 | Resilient Service Restart | ✅ | main.py factory pattern (r12) |
 | Back buttons on lock screens | ✅ | all subscription gates (r11) |

@@ -82,3 +82,53 @@ def cancel_all(user_id: int) -> int:
         entry.task.cancel()
         count += 1
     return count
+
+
+async def run_cleanup_loop(*, interval: int = 600) -> None:
+    """Periodically clean up completed/dangling tasks from the registry.
+
+    Runs every `interval` seconds (default: 10 min). Completed tasks are already
+    cleaned by the done-callback, but tasks whose callback was lost (e.g. GC'd
+    without firing) or that are done but not cleaned are swept here.
+    Also removes entries for user buckets that have been empty for >1 hour
+    (those should already be cleaned by _cleanup, but this is a safety net).
+    """
+    import asyncio
+    import logging
+    import time
+
+    log = logging.getLogger(__name__)
+    last_empty_bucket_sweep: dict[int, float] = {}
+
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            now = time.time()
+            removed = 0
+
+            # Sweep done/stale tasks
+            for user_id in list(_registry.keys()):
+                bucket = _registry.get(user_id, {})
+                for task_id in list(bucket.keys()):
+                    entry = bucket[task_id]
+                    # Remove if done or running >24h (stuck)
+                    if entry.is_done() or (now - entry.started_at) > 86400:
+                        bucket.pop(task_id, None)
+                        removed += 1
+
+                # Track empty buckets for delayed removal
+                if not bucket:
+                    if user_id not in last_empty_bucket_sweep:
+                        last_empty_bucket_sweep[user_id] = now
+                    elif now - last_empty_bucket_sweep[user_id] > 3600:
+                        _registry.pop(user_id, None)
+                        last_empty_bucket_sweep.pop(user_id, None)
+                else:
+                    last_empty_bucket_sweep.pop(user_id, None)
+
+            if removed:
+                log.info("task_registry cleanup: removed %d done/stale tasks", removed)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.exception("task_registry cleanup loop error: %s", e)
