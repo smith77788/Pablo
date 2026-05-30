@@ -41,17 +41,25 @@ _SYSTEM_PROMPT = (
     "- get_my_channels: список каналов из кэша\n"
     "- get_broadcast_history: история рассылок\n\n"
     "ACTION — действия (требуют подтверждения пользователя):\n"
-    "- create_channel: СОЗДАТЬ канал или группу в Telegram через подключённый аккаунт\n"
+    "- create_channel: СОЗДАТЬ канал в Telegram через подключённый аккаунт\n"
+    "- create_group: СОЗДАТЬ группу/супергруппу в Telegram\n"
+    "- create_bot: СОЗДАТЬ бота через BotFather\n"
+    "- bulk_create_channels: МАССОВОЕ создание каналов (3-50 шт) с умными задержками — ставится в очередь\n"
     "- post_to_channel: опубликовать пост в канал\n"
     "- launch_broadcast: запустить рассылку боту сейчас\n"
     "- schedule_broadcast: запланировать рассылку на через N минут\n"
     "- update_bot_profile: обновить имя/описание бота\n\n"
+    "КОГДА ЧТО ИСПОЛЬЗОВАТЬ:\n"
+    "- create_channel — для ОДНОГО канала\n"
+    "- create_group — для ОДНОЙ группы\n"
+    "- create_bot — для ОДНОГО бота\n"
+    "- bulk_create_channels — когда пользователь просит СОЗДАТЬ НЕСКОЛЬКО каналов (3+)\n\n"
     "ПРОТОКОЛ ДЕЙСТВИЙ:\n"
-    "1. Когда пользователь просит создать канал/группу/сеть присутствия — используй create_channel\n"
-    "2. Для создания нескольких объектов — вызывай create_channel НЕСКОЛЬКО РАЗ (по одному на каждый)\n"
+    "1. Когда пользователь просит создать канал/группу/бота/сеть присутствия — используй соответствующий инструмент\n"
+    "2. Для массового создания (>2 объектов) — используй bulk_create_channels\n"
     "3. Действие НЕ выполнится сразу — пользователь подтвердит его\n"
     "4. После подготовки действия — сообщи что подготовлено и ждёт подтверждения\n"
-    "5. НЕ ГОВОРИ что не можешь создать присутствие — ты УМЕЕШЬ создавать каналы и группы\n\n"
+    "5. НЕ ГОВОРИ что не можешь создать присутствие — ты УМЕЕШЬ создавать каналы, группы и ботов\n\n"
     "ВАЖНО:\n"
     "- Отвечай только на русском языке\n"
     "- Давай конкретные советы с числами\n"
@@ -503,11 +511,42 @@ async def _process_ai_turn(
         kb.button(text="❌ Отмена", callback_data=AiCb(action="cancel_action"))
         kb.adjust(2)
 
+        # Build enhanced confirmation screen
+        action_name = action_data.get("pending_action", "")
+        preview = action_data.get("preview", "")
+
+        icons = {
+            "create_channel": "📡", "create_group": "👥", "create_bot": "🤖",
+            "launch_broadcast": "📢", "post_to_channel": "📤",
+            "update_bot_profile": "✏️", "schedule_broadcast": "⏱️",
+            "bulk_create_channels": "📋",
+        }
+        icon = icons.get(action_name, "⚡")
+
+        acc_info = ""
+        if action_data.get("acc_id"):
+            acc_row = await pool.fetchrow(
+                "SELECT phone, first_name FROM tg_accounts WHERE id=$1",
+                action_data["acc_id"],
+            )
+            if acc_row:
+                acc_name = acc_row["first_name"] or acc_row["phone"]
+                acc_info = f"\n📱 Аккаунт: <code>{acc_name}</code>"
+
+        audience_info = ""
+        if "audience" in action_data:
+            audience_info = f"\n👥 Получателей: {action_data['audience']}"
+
+        count_info = ""
+        if action_data.get("count"):
+            count_info = f"\n📊 Количество: {action_data['count']}"
+
         confirm_text = (
             f"{ai_message}\n\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ <b>Нужно подтверждение:</b>\n"
+            f"{icon} <b>Подтвердите действие:</b>\n"
             f"<code>{preview}</code>"
+            f"{acc_info}{audience_info}{count_info}"
         )
         await _edit_or_answer_long(thinking, message, confirm_text, reply_markup=kb.as_markup())
     else:

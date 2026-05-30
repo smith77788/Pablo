@@ -6,6 +6,9 @@ confirmation before execution. The executor function runs confirmed actions.
 from __future__ import annotations
 import asyncpg
 import json
+import logging
+
+log = logging.getLogger(__name__)
 
 # ── READ TOOLS ────────────────────────────────────────────────────────────────
 
@@ -354,6 +357,88 @@ async def action_create_channel(
     }
 
 
+async def action_create_bot(
+    pool: asyncpg.Pool, user_id: int,
+    name: str, username: str = "", description: str = "",
+) -> dict:
+    """Создать нового бота через BotFather используя аккаунт с наивысшим trust_score."""
+    acc_row = await pool.fetchrow(
+        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+        user_id,
+    )
+    if not acc_row:
+        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+    uname_str = f", @{username}" if username else ""
+    desc_str = f"\nОписание: {description[:60]}{'...' if len(description)>60 else ''}" if description else ""
+    return {
+        "pending_action": "create_bot",
+        "acc_id": acc_row["id"],
+        "name": name,
+        "username": username,
+        "description": description,
+        "preview": f"Создать бота «{name}» через @{acc_row['phone']}{uname_str}{desc_str}",
+    }
+
+
+async def action_create_group(
+    pool: asyncpg.Pool, user_id: int,
+    title: str, about: str = "", username: str = "",
+) -> dict:
+    """Создать группу/супергруппу. Отдельный инструмент для ясности AI."""
+    acc_row = await pool.fetchrow(
+        "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+        user_id,
+    )
+    if not acc_row:
+        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+    uname_str = f", @{username}" if username else ""
+    return {
+        "pending_action": "create_group",
+        "acc_id": acc_row["id"],
+        "title": title,
+        "about": about,
+        "username": username,
+        "preview": f"Создать группу «{title}» через @{acc_row['phone']}{uname_str}\nОписание: {about[:60] if about else '(нет)'}",
+    }
+
+
+async def action_bulk_create_channels(
+    pool: asyncpg.Pool, user_id: int,
+    prefix: str, count: int = 5, about: str = "",
+    username_pattern: str = "", acc_id: int = 0,
+) -> dict:
+    """Подготовить массовое создание каналов. Будет поставлено в operation_queue."""
+    if count < 1 or count > 50:
+        return {"error": "Количество каналов должно быть от 1 до 50"}
+    if not prefix or len(prefix) < 2:
+        return {"error": "Префикс названия должен быть минимум 2 символа"}
+    if acc_id:
+        acc_row = await pool.fetchrow(
+            "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
+            user_id, acc_id,
+        )
+    else:
+        acc_row = await pool.fetchrow(
+            "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+            "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+            user_id,
+        )
+    if not acc_row:
+        return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
+    return {
+        "pending_action": "bulk_create_channels",
+        "acc_id": acc_row["id"],
+        "prefix": prefix,
+        "count": count,
+        "about": about,
+        "username_pattern": username_pattern,
+        "preview": f"Массовое создание {count} каналов «{prefix} #1–#{count}» через @{acc_row['phone']}"
+                  + (f" с шаблоном @{username_pattern}" if username_pattern else ""),
+    }
+
+
 async def action_schedule_broadcast(
     pool: asyncpg.Pool, user_id: int,
     bot_id: int, text: str, when_minutes: int = 60,
@@ -496,6 +581,93 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
             return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан! ID: {ch_id}"
         err_msg = result if isinstance(result, str) else str(result)
         return f"❌ Ошибка создания: {err_msg[:200]}"
+
+    elif name == "create_bot":
+        acc_id = action_data["acc_id"]
+        bot_name = action_data["name"]
+        bot_username = action_data.get("username", "")
+        description = action_data.get("description", "")
+        acc_row = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone "
+            "FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
+            user_id, acc_id,
+        )
+        if not acc_row:
+            return "❌ Аккаунт не найден или не активен"
+        # Ensure username ends with _bot
+        if bot_username and not bot_username.lower().endswith("bot"):
+            bot_username = bot_username + "_bot"
+        from services import account_manager
+        result = await account_manager.create_bot_via_botfather(
+            acc_row["session_str"], bot_name, bot_username or f"ai_bot", _acc=dict(acc_row)
+        )
+        if result.get("error"):
+            return f"❌ Ошибка создания бота: {result['error'][:200]}"
+        token = result.get("token", "")
+        actual_username = result.get("username", bot_username)
+        # Save to managed_bots
+        try:
+            if token and ":" in token:
+                bot_id_int = int(token.split(":")[0])
+                from database import db as _db
+                await _db.add_bot(pool, token, bot_id_int, actual_username, bot_name, user_id)
+        except Exception as e:
+            log.warning("ai_tools create_bot: managed_bots insert failed: %s", e)
+        # Set description if provided
+        if description and token and http:
+            from services import bot_api
+            await bot_api.set_description(http, token, description)
+            await bot_api.set_short_description(http, token, description[:120])
+        return f"✅ Бот @{actual_username} создан!\nТокен сохранён в системе.\nID: {token.split(':')[0] if ':' in token else '?'}"
+
+    elif name == "create_group":
+        acc_id = action_data["acc_id"]
+        title = action_data["title"]
+        about = action_data.get("about", "")
+        username = action_data.get("username", "")
+        acc_row = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone "
+            "FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
+            user_id, acc_id,
+        )
+        if not acc_row:
+            return "❌ Аккаунт не найден или не активен"
+        from services import account_manager
+        result = await account_manager.create_group(acc_row["session_str"], title, about=about, _acc=dict(acc_row))
+        if isinstance(result, dict) and result.get("id"):
+            ch_id = result["id"]
+            # Save to managed_channels
+            await pool.execute(
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                user_id, acc_id, ch_id, title, username or None,
+            )
+            if username:
+                err = await account_manager.set_channel_username(acc_row["session_str"], ch_id, username, _acc=dict(acc_row))
+                if err:
+                    return f"✅ Группа «{title}» создана (ID: {ch_id})\n⚠️ Username не удалось установить: {err}"
+                return f"✅ Группа «{title}» создана! ID: {ch_id}, @{username}"
+            return f"✅ Группа «{title}» создана! ID: {ch_id}"
+        err_msg = result if isinstance(result, str) else str(result)
+        return f"❌ Ошибка создания группы: {err_msg[:200]}"
+
+    elif name == "bulk_create_channels":
+        # Enqueue in operation_queue instead of immediate execution
+        count = int(action_data.get("count", 5))
+        op_id = await pool.fetchval(
+            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, done_items)
+               VALUES($1, 'bulk_create_channels', 'pending', $2::jsonb, $3, 0)
+               RETURNING id""",
+            user_id,
+            json.dumps(action_data),
+            count,
+        )
+        return (
+            f"✅ Операция #{op_id} поставлена в очередь.\n"
+            f"Будет создано {count} каналов с префиксом «{action_data.get('prefix', '?')}».\n"
+            f"Следите за прогрессом в 📋 Очередь операций."
+        )
 
     elif name == "schedule_broadcast":
         import datetime
@@ -679,6 +851,61 @@ TOOL_DEFINITIONS = [
             "required": ["bot_id", "text"],
         },
     },
+    {
+        "name": "create_bot",
+        "description": (
+            "ДЕЙСТВИЕ: Создать нового бота через BotFather. "
+            "Требует подтверждения пользователя. "
+            "Используй когда пользователь просит создать бота с определённым именем."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Имя бота (отображаемое)"},
+                "username": {"type": "string", "description": "Username бота без @ (опционально, закончится на _bot)"},
+                "description": {"type": "string", "description": "Описание бота (опционально)"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "create_group",
+        "description": (
+            "ДЕЙСТВИЕ: Создать группу/супергруппу в Telegram. "
+            "Требует подтверждения пользователя. "
+            "Используй когда пользователь просит создать группу (НЕ канал). "
+            "Для канала используй create_channel."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название группы"},
+                "about": {"type": "string", "description": "Описание группы (опционально)"},
+                "username": {"type": "string", "description": "Username без @ (опционально)"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "bulk_create_channels",
+        "description": (
+            "ДЕЙСТВИЕ: Массовое создание каналов (3-50 шт) с умными анти-бан задержками. "
+            "Операция ставится в фоновую очередь — не блокирует интерфейс. "
+            "Требует подтверждения пользователя. "
+            "Используй когда пользователь просит создать НЕСКОЛЬКО каналов."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prefix": {"type": "string", "description": "Префикс названия (например «Новости Москва» → каналы «Новости Москва #1», ...)"},
+                "count": {"type": "integer", "description": "Количество каналов (1-50, по умолчанию 5)", "default": 5},
+                "about": {"type": "string", "description": "Описание для всех каналов (опционально)"},
+                "username_pattern": {"type": "string", "description": "Шаблон username без @ (опционально, например news_msk → news_msk_1, ...)"},
+                "acc_id": {"type": "integer", "description": "ID аккаунта (опционально, по умолчанию — лучший по trust_score)"},
+            },
+            "required": ["prefix", "count"],
+        },
+    },
 ]
 
 
@@ -728,6 +955,29 @@ async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, ht
                 bot_id=inputs["bot_id"],
                 text=inputs["text"],
                 when_minutes=inputs.get("when_minutes", 60),
+            )
+        elif name == "create_bot":
+            result = await action_create_bot(
+                pool, user_id,
+                name=inputs["name"],
+                username=inputs.get("username", ""),
+                description=inputs.get("description", ""),
+            )
+        elif name == "create_group":
+            result = await action_create_group(
+                pool, user_id,
+                title=inputs["title"],
+                about=inputs.get("about", ""),
+                username=inputs.get("username", ""),
+            )
+        elif name == "bulk_create_channels":
+            result = await action_bulk_create_channels(
+                pool, user_id,
+                prefix=inputs["prefix"],
+                count=inputs.get("count", 5),
+                about=inputs.get("about", ""),
+                username_pattern=inputs.get("username_pattern", ""),
+                acc_id=inputs.get("acc_id", 0),
             )
         else:
             result = {"error": f"Unknown tool: {name}"}

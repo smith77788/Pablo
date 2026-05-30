@@ -194,6 +194,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
         elif op_type == "global_presence_bot":
             result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
+        elif op_type == "bulk_create_channels":
+            result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
         else:
             result = {"status": "skipped", "reason": f"unknown op_type: {op_type}"}
 
@@ -900,4 +902,136 @@ async def _exec_global_presence_bot(
         "failed": failed_count,
         "plan_id": plan_id,
         "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
+    }
+
+
+async def _exec_bulk_create_channels(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовое создание каналов через Telethon с умными задержками (из AI-ассистента)."""
+    from services import account_manager, session_simulator
+    import random
+
+    prefix = params.get("prefix", "Channel")
+    count = int(params.get("count", 5))
+    about = params.get("about", "")
+    username_pattern = params.get("username_pattern", "")
+    acc_id = params.get("acc_id", 0)
+
+    # Get the account
+    if acc_id:
+        acc_row = await pool.fetchrow(
+            "SELECT id, session_str, phone, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            acc_id, owner_id,
+        )
+    else:
+        acc_row = await pool.fetchrow(
+            "SELECT id, session_str, phone, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+            "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+            owner_id,
+        )
+
+    if not acc_row:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    acc = dict(acc_row)
+    created_count = 0
+    failed_count = 0
+
+    for i in range(count):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "created": created_count,
+                "failed": failed_count,
+                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+            }
+
+        num = i + 1
+        title = f"{prefix} #{num}"
+        if username_pattern:
+            username = f"{username_pattern}_{num}"
+        else:
+            username = ""
+
+        # Human-like typing delay
+        await session_simulator.typing_delay(title)
+
+        result = await account_manager.create_channel(
+            acc["session_str"], title, about=about, _acc=acc
+        )
+
+        # Handle flood wait
+        if result.get("error") and result.get("flood_wait"):
+            wait_time = min(int(result["flood_wait"]) + 15, 300)
+            log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
+            await asyncio.sleep(wait_time)
+            result = await account_manager.create_channel(
+                acc["session_str"], title, about=about, _acc=acc
+            )
+
+        if isinstance(result, dict) and result.get("id"):
+            ch_id = result["id"]
+            # Save to managed_channels
+            await pool.execute(
+                """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                owner_id, acc_id, ch_id, title, username or None,
+            )
+            # Set username if pattern provided
+            if username:
+                await asyncio.sleep(random.uniform(8, 15))
+                err = await account_manager.set_channel_username(
+                    acc["session_str"], ch_id, username, _acc=acc
+                )
+                if err:
+                    log.info("op_worker bulk_channels: username '%s' failed: %s", username, err[:80])
+
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                op_id, num, f"{title}",
+                f"channel_id={ch_id}" + (f" @{username}" if username else ""),
+            )
+            created_count += 1
+        else:
+            err_msg = result if isinstance(result, str) else str(result)
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                op_id, num, f"{title}", err_msg[:200],
+            )
+            failed_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+        if i < count - 1:
+            tod_factor = session_simulator.time_of_day_factor()
+            chaos = session_simulator.chaos_factor()
+            if i % 5 == 4:
+                cooldown = random.uniform(300, 600) * chaos * tod_factor
+                log.info("op_worker bulk_channels: cooldown %.0fs after %d items", cooldown, i + 1)
+                await asyncio.sleep(cooldown)
+            else:
+                delay = random.uniform(45, 90) * chaos * tod_factor
+                await asyncio.sleep(delay)
+
+        # Progress update every 5 channels
+        if created_count > 0 and created_count % 5 == 0:
+            try:
+                await bot.send_message(
+                    owner_id,
+                    f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
+                    f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    return {
+        "status": "done",
+        "created": created_count,
+        "failed": failed_count,
+        "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
     }
