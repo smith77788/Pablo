@@ -1857,7 +1857,7 @@ async def cb_mem_keyword_drilldown(
 
     # Данные из search_memory
     mem_row = await pool.fetchrow(
-        """SELECT search_count, affinity_score, last_searched_at, first_searched_at
+        """SELECT search_count, affinity_score, last_searched, first_searched
            FROM search_memory
            WHERE owner_id = $1 AND keyword = $2""",
         user_id, keyword,
@@ -1896,8 +1896,8 @@ async def cb_mem_keyword_drilldown(
         total_searches = mem_row["search_count"] or 0
         affinity = int(mem_row["affinity_score"] or 0)
         bar = "█" * (affinity // 20) + "░" * (5 - affinity // 20)
-        first_dt = mem_row["first_searched_at"]
-        last_dt = mem_row["last_searched_at"]
+        first_dt = mem_row["first_searched"]
+        last_dt = mem_row["last_searched"]
         first_str = first_dt.strftime("%d.%m.%Y") if first_dt else "—"
         last_str = last_dt.strftime("%d.%m.%Y %H:%M") if last_dt else "—"
         lines.append("📊 <b>Статистика поиска:</b>")
