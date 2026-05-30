@@ -407,13 +407,13 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
 
         # Find users inactive for N days (use user_activity table)
         inactive_users = await pool.fetch(
-            """SELECT ua.chat_id FROM user_activity ua
+            """SELECT ua.user_id FROM user_activity ua
                WHERE ua.bot_id = $1
                  AND ua.last_seen < NOW() - ($2 * INTERVAL '1 day')
                  AND NOT EXISTS (
                      SELECT 1 FROM inactivity_alerts_sent ias
                      WHERE ias.bot_id = $1
-                       AND ias.chat_id = ua.chat_id
+                       AND ias.chat_id = ua.user_id
                        AND ias.rule_id = $3
                        AND ias.sent_at > NOW() - ($2 * INTERVAL '1 day')
                  )
@@ -422,7 +422,7 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
         )
 
         for user in inactive_users:
-            chat_id = user["chat_id"]
+            chat_id = user["user_id"]
             try:
                 if rule["action_type"] == "send_message":
                     await bot_api.send_message(http, rule["token"], chat_id, rule["action_value"])
