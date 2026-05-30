@@ -519,26 +519,32 @@ async def scan_owned_assets(
     groups: list[dict] = []
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        async for dialog in client.iter_dialogs(limit=300):
-            entity = dialog.entity
-            if isinstance(entity, Channel):
-                is_creator = getattr(entity, "creator", False)
-                admin_rights = getattr(entity, "admin_rights", None)
-                if not (is_creator or admin_rights is not None):
-                    continue
-                is_broadcast = getattr(entity, "broadcast", False)
-                item = {
-                    "id": entity.id,
-                    "title": entity.title or "",
-                    "username": getattr(entity, "username", "") or "",
-                    "members": getattr(entity, "participants_count", 0) or 0,
-                    "is_creator": is_creator,
-                    "access_hash": getattr(entity, "access_hash", 0) or 0,
-                }
-                if is_broadcast:
-                    channels.append(item)
-                else:
-                    groups.append(item)
+
+        async def _collect():
+            _ch, _gr = [], []
+            async for dialog in client.iter_dialogs(limit=300):
+                entity = dialog.entity
+                if isinstance(entity, Channel):
+                    is_creator = getattr(entity, "creator", False)
+                    admin_rights = getattr(entity, "admin_rights", None)
+                    if not (is_creator or admin_rights is not None):
+                        continue
+                    is_broadcast = getattr(entity, "broadcast", False)
+                    item = {
+                        "id": entity.id,
+                        "title": entity.title or "",
+                        "username": getattr(entity, "username", "") or "",
+                        "members": getattr(entity, "participants_count", 0) or 0,
+                        "is_creator": is_creator,
+                        "access_hash": getattr(entity, "access_hash", 0) or 0,
+                    }
+                    if is_broadcast:
+                        _ch.append(item)
+                    else:
+                        _gr.append(item)
+            return _ch, _gr
+
+        channels, groups = await asyncio.wait_for(_collect(), timeout=_OP_TIMEOUT)
         return {"channels": channels, "groups": groups, "error": None}
     except Exception as e:
         err_str = str(e)
@@ -690,7 +696,7 @@ async def check_account_status_full(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        me = await client.get_me()
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         if me is None:
             return {"status": "session_expired", "reason": "Аккаунт не авторизован или сессия истекла.", "display_name": ""}
 
