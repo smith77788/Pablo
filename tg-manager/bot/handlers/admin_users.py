@@ -219,6 +219,8 @@ async def cb_user_actions(callback: CallbackQuery, callback_data: AdminUserCb, p
 
     kb.button(text="💳 Выдать подписку", callback_data=AdminUserCb(action="grant_plan", user_id=user_id))
     kb.button(text="❌ Забрать подписку", callback_data=AdminUserCb(action="revoke_plan", user_id=user_id))
+    kb.button(text="⚔️ Выдать Strike", callback_data=AdminUserCb(action="grant_strike", user_id=user_id))
+    kb.button(text="⚔️ Забрать Strike", callback_data=AdminUserCb(action="revoke_strike", user_id=user_id))
 
     if user["is_banned"]:
         kb.button(text="✅ Разбанить", callback_data=AdminUserCb(action="unban", user_id=user_id))
@@ -322,6 +324,65 @@ async def cb_revoke_plan(callback: CallbackQuery, callback_data: AdminUserCb, po
         f"✅ Подписка отменена. Пользователь #{user_id} переведён на план <b>FREE</b>.",
         parse_mode="HTML",
     )
+
+
+@router.callback_query(AdminUserCb.filter(F.action == "grant_strike"))
+async def cb_grant_strike(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+    """Выдать Strike доступ пользователю."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️", show_alert=True)
+        return
+
+    user_id = callback_data.user_id
+    from bot.handlers.strike import _ensure_table
+    await _ensure_table(pool)
+    await pool.execute(
+        "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
+        "ON CONFLICT (user_id) DO NOTHING",
+        user_id, callback.from_user.id,
+    )
+    await callback.answer(f"✅ Strike доступ выдан.", show_alert=True)
+
+    await callback.message.edit_text(
+        f"⚔️ Strike доступ выдан пользователю #{user_id}.",
+        parse_mode="HTML",
+    )
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "⚔️ <b>Strike Module активирован!</b>\n\n"
+            "Администратор предоставил вам доступ к Strike Module.\n"
+            "Откройте меню для использования.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(AdminUserCb.filter(F.action == "revoke_strike"))
+async def cb_revoke_strike(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+    """Забрать Strike доступ у пользователя."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️", show_alert=True)
+        return
+
+    user_id = callback_data.user_id
+    await db.revoke_strike_access(pool, user_id, callback.from_user.id)
+    await callback.answer(f"✅ Strike доступ отозван.", show_alert=True)
+
+    await callback.message.edit_text(
+        f"⚔️ Strike доступ отозван у пользователя #{user_id}.",
+        parse_mode="HTML",
+    )
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "ℹ️ <b>Strike доступ был отозван администратором.</b>\n\n"
+            "Для получения доступа обратитесь к администратору.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "ban"))

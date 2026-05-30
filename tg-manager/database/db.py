@@ -2509,6 +2509,20 @@ async def revoke_plan_from_user(pool: asyncpg.Pool, user_id: int, admin_id: int)
     )
 
 
+async def revoke_strike_access(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
+    """Забрать Strike доступ у пользователя."""
+    await pool.execute(
+        "DELETE FROM strike_access WHERE user_id=$1", user_id
+    )
+
+    # Логировать действие
+    await pool.execute(
+        """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
+           VALUES ($1, 'revoke_strike', $2, '{}')""",
+        admin_id, user_id,
+    )
+
+
 async def ban_user(pool: asyncpg.Pool, user_id: int, admin_id: int, reason: str = None) -> None:
     """Забанить пользователя."""
     await pool.execute(

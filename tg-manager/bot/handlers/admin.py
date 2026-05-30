@@ -60,8 +60,10 @@ def _admin_main_kb():
     kb.button(text="✅ Разблокировать юзера",    callback_data="adm:unblock_ask")
     kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")
     kb.button(text="💰 Выдать подписку",         callback_data="adm:grant_ask")
+    kb.button(text="❌ Забрать подписку",        callback_data="adm:revoke_ask")
     kb.button(text="💰 Bulk-выдача подписок",    callback_data="adm:bulk_grant_ask")
     kb.button(text="⚔️ Выдать Strike доступ",   callback_data="adm:strike_grant_ask")
+    kb.button(text="⚔️ Забрать Strike доступ",  callback_data="adm:strike_revoke_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
     kb.button(text="📋 Экспорт юзеров (CSV)",   callback_data="adm:users_csv")
     kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
@@ -69,7 +71,7 @@ def _admin_main_kb():
     kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
     return kb.as_markup()
 
 
@@ -296,6 +298,21 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             callback.from_user.id,
         )
 
+    elif action == "revoke_ask":
+        await callback.message.edit_text(
+            "❌ <b>Забрать подписку</b>\n\n"
+            "Отправьте Telegram ID пользователя:\n"
+            "<code>USER_ID</code>\n\n"
+            "Пример: <code>123456789</code>\n\n"
+            "Подписка будет деактивирована, пользователь вернётся на FREE.",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'revoke','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='revoke',data=''",
+            callback.from_user.id,
+        )
+
     elif action == "tokens_file":
         await _adm_send_tokens_file(callback, pool)
 
@@ -371,6 +388,21 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_grant','') "
             "ON CONFLICT(admin_id) DO UPDATE SET state='strike_grant',data=''",
+            callback.from_user.id,
+        )
+
+    elif action == "strike_revoke_ask":
+        await callback.message.edit_text(
+            "⚔️ <b>Забрать Strike доступ</b>\n\n"
+            "Отправьте Telegram ID пользователя:\n"
+            "<code>USER_ID</code>\n\n"
+            "Пример: <code>123456789</code>\n\n"
+            "Strike доступ будет немедленно отозван.",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_revoke','') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state='strike_revoke',data=''",
             callback.from_user.id,
         )
 
@@ -838,6 +870,28 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             parse_mode="HTML", reply_markup=_admin_main_kb(),
         )
 
+    elif state == "revoke":
+        try:
+            uid = int(text.strip())
+            await db.revoke_plan_from_user(pool, uid, message.from_user.id)
+            await message.answer(
+                f"❌ Подписка отозвана у пользователя <code>{uid}</code>.\n"
+                f"Пользователь переведён на план <b>FREE</b>.",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+            try:
+                await message.bot.send_message(
+                    uid,
+                    "ℹ️ <b>Ваша подписка была отозвана администратором.</b>\n\n"
+                    "Вы переведены на план FREE.\n"
+                    "Для восстановления доступа оформите подписку в /menu → 💳 Billing.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
     elif state == "strike_grant":
         try:
             target_uid = int(text.strip())
@@ -859,6 +913,27 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     "⚔️ <b>Strike Module активирован!</b>\n\n"
                     "Администратор предоставил вам доступ к Strike Module.\n"
                     "Откройте меню для использования.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+
+    elif state == "strike_revoke":
+        try:
+            target_uid = int(text.strip())
+            await db.revoke_strike_access(pool, target_uid, message.from_user.id)
+            await message.answer(
+                f"⚔️ <b>Strike доступ отозван</b>\n\n"
+                f"У пользователя <code>{target_uid}</code> больше нет доступа к Strike Module.",
+                parse_mode="HTML", reply_markup=_admin_main_kb(),
+            )
+            try:
+                await message.bot.send_message(
+                    target_uid,
+                    "ℹ️ <b>Strike доступ был отозван администратором.</b>\n\n"
+                    "Для получения доступа обратитесь к администратору.",
                     parse_mode="HTML",
                 )
             except Exception:
