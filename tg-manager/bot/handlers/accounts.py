@@ -927,9 +927,8 @@ async def cb_relog_account(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
-
     if not _api_configured():
+        await callback.answer()
         await callback.message.edit_text(
             _api_missing_text(),
             parse_mode="HTML",
@@ -941,6 +940,7 @@ async def cb_relog_account(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     phone: str = acc.get("phone") or ""
     if not phone or not re.match(r"^\+\d{7,15}$", phone):
@@ -1051,7 +1051,6 @@ async def cb_assign_proxy(
     callback_data: AccCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     acc_id = callback_data.acc_id
     proxy_id = callback_data.page  # 0 = no proxy, >0 = proxy id
     if proxy_id == 0:
@@ -1635,12 +1634,12 @@ async def cb_scan_all_resources(
 
 @router.callback_query(AccCb.filter(F.action == "del_dead"))
 async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
         await callback.answer("Нет аккаунтов.", show_alert=True)
         return
+    await callback.answer()
 
     await callback.message.edit_text(
         "🔍 <b>Проверяю статус сессий...</b>\nЭто займёт ~30 сек.",
@@ -1857,7 +1856,6 @@ async def cb_toggle_account(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer()
 
     current_status = bool(acc.get("is_active", True))
     new_status = not current_status
@@ -1868,6 +1866,7 @@ async def cb_toggle_account(
     if not updated:
         await callback.answer("Не удалось обновить статус.", show_alert=True)
         return
+    await callback.answer()
 
     status_text = "▶️ <b>Аккаунт включён.</b>" if new_status else "⏸ <b>Аккаунт отключён.</b>"
     name = escape(acc.get("first_name") or "")
