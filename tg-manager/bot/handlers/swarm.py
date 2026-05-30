@@ -222,7 +222,7 @@ async def cb_change_mode(
     if not row:
         await callback.answer("Режим изменён.", show_alert=True)
         return
-    await callback.answer()
+    await callback.answer(f"✅ Режим изменён: {mode.upper()}")
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
@@ -234,4 +234,3 @@ async def cb_change_mode(
         parse_mode="HTML",
         reply_markup=swarm_menu(callback_data.bot_id, dict(row)),
     )
-    await callback.answer(f"✅ Режим изменён: {mode.upper()}")

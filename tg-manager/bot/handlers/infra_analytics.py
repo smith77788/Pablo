@@ -118,7 +118,7 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         icon = "🟢" if score >= 70 else ("🟡" if score >= 40 else "🔴")
         warmup = s["warmup_state"]
         lines.append(
-            f"{icon} <b>{label}</b>: {score}% | {warmup} | trust={acc['trust_score']:.1f}"
+            f"{icon} <b>{label}</b>: {score}% | {warmup} | trust={float(acc['trust_score'] or 0):.1f}"
         )
     if len(accounts) > 15:
         lines.append(f"\n<i>...и ещё {len(accounts)-15} аккаунтов</i>")
