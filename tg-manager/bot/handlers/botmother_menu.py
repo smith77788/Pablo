@@ -1039,7 +1039,6 @@ async def cb_plan_confirm(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     sd = await state.get_data()
     op_type = sd.get("op_type", "")
     publish_text = sd.get("publish_text", "")
@@ -1079,6 +1078,7 @@ async def cb_plan_confirm(
         log.error("plan_confirm insert error: %s", e)
         await callback.answer("Ошибка при создании задачи. Попробуйте снова.", show_alert=True)
         return
+    await callback.answer()
 
     await state.clear()
     label = _OP_TYPE_LABELS.get(op_type, op_type)
@@ -1104,7 +1104,6 @@ async def cb_plan_cancel(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
     try:
         op_id = int(callback_data.sub or "0")
     except (ValueError, TypeError):
@@ -1363,7 +1362,6 @@ async def cb_op_detail(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     user_id = callback.from_user.id
     op_id = callback_data.op_id
 
@@ -1376,6 +1374,7 @@ async def cb_op_detail(
     if not op:
         await callback.answer("Операция не найдена.", show_alert=True)
         return
+    await callback.answer()
 
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
     emoji = status_emoji.get(op["status"], "❓")
@@ -1443,7 +1442,6 @@ async def cb_op_retry(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     op_id = callback_data.op_id
     user_id = callback.from_user.id
 

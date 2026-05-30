@@ -472,7 +472,6 @@ async def cb_mp_confirm(
 async def cb_cancel_op(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     # Cancel both pending and running operations
     result = await pool.execute(
         "UPDATE operation_queue SET status='cancelled', finished_at=now() "
@@ -482,6 +481,7 @@ async def cb_cancel_op(
     if result == "UPDATE 0":
         await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
         return
+    await callback.answer()
     # Refresh queue view
     rows = await pool.fetch(
         "SELECT id, op_type, status, done_items, total_items, created_at "
@@ -536,7 +536,6 @@ async def cb_cancel_op(
 async def cb_retry_op(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     result = await pool.execute(
         "UPDATE operation_queue SET status='pending', last_error=NULL, retry_count=0, "
         "finished_at=NULL WHERE id=$1 AND owner_id=$2 AND status='failed'",
@@ -545,6 +544,7 @@ async def cb_retry_op(
     if result == "UPDATE 0":
         await callback.answer("Операция не найдена или уже выполнена.", show_alert=True)
         return
+    await callback.answer()
     # Re-render queue view
     try:
         rows = await pool.fetch(
@@ -1112,7 +1112,6 @@ async def cb_bulk_join_accs(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     sd = await state.get_data()
     links = sd.get("bj_links", [])
     if not links:
@@ -1142,6 +1141,7 @@ async def cb_bulk_join_accs(
     if not acc_ids:
         await callback.answer("Нет активных аккаунтов", show_alert=True)
         return
+    await callback.answer()
 
     # Show preview + delay selector
     link_preview = "\n".join(f"• {html.escape(ln)}" for ln in links[:5])
@@ -1250,7 +1250,6 @@ async def cb_bulk_join_delay(
 async def cb_bulk_join_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     sd = await state.get_data()
     links = sd.get("bj_links", [])
     acc_ids = sd.get("bj_acc_ids", [])
@@ -1275,6 +1274,7 @@ async def cb_bulk_join_confirm(
         log.error("bulk_join confirm error: %s", e)
         await callback.answer("Ошибка создания операции", show_alert=True)
         return
+    await callback.answer()
 
     icon, delay_str, _ = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", ""))
     await state.clear()
@@ -1400,7 +1400,6 @@ async def cb_bulk_leave_accs(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     sd = await state.get_data()
     channels = sd.get("bl_channels", [])
     if not channels:
@@ -1430,6 +1429,7 @@ async def cb_bulk_leave_accs(
     if not acc_ids:
         await callback.answer("Нет активных аккаунтов", show_alert=True)
         return
+    await callback.answer()
 
     ch_preview = "\n".join(f"• {html.escape(ch)}" for ch in channels[:5])
     if len(channels) > 5:
@@ -1537,7 +1537,6 @@ async def cb_bulk_leave_delay(
 async def cb_bulk_leave_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     sd = await state.get_data()
     channels = sd.get("bl_channels", [])
     acc_ids = sd.get("bl_acc_ids", [])
@@ -1562,6 +1561,7 @@ async def cb_bulk_leave_confirm(
         log.error("bulk_leave confirm error: %s", e)
         await callback.answer("Ошибка создания операции", show_alert=True)
         return
+    await callback.answer()
 
     icon, delay_str, _ = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", ""))
     await state.clear()

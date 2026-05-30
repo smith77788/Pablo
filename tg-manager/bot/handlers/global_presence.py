@@ -1033,7 +1033,6 @@ async def cb_gp_progress(
     callback: CallbackQuery, callback_data: GeoPresenceCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     plan_id = callback_data.plan_id
     if not plan_id:
         await callback.answer("Укажите ID плана", show_alert=True)
@@ -1043,6 +1042,7 @@ async def cb_gp_progress(
     if not plan:
         await callback.answer("План не найден", show_alert=True)
         return
+    await callback.answer()
 
     stats = await db.get_global_presence_stats(pool, plan_id)
     op_id = plan.get("op_id")
@@ -1135,12 +1135,12 @@ async def cb_gp_retry(
 async def cb_gp_report(
     callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     plan_id = callback_data.plan_id
     plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
     if not plan:
         await callback.answer("План не найден", show_alert=True)
         return
+    await callback.answer()
 
     stats = await db.get_global_presence_stats(pool, plan_id)
 
