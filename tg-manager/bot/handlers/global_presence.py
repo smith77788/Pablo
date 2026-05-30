@@ -77,12 +77,13 @@ async def cb_gp_menu(
     await state.clear()
     await state.set_state(GlobalPresenceFSM.choosing_asset_type)
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Каналы",          callback_data=GeoPresenceCb(action="asset", item="channel"))
-    kb.button(text="👥 Группы",          callback_data=GeoPresenceCb(action="asset", item="group"))
-    kb.button(text="🤖 Боты",            callback_data=GeoPresenceCb(action="asset", item="bot"))
-    kb.button(text="📦 Пакет (кан+гр)", callback_data=GeoPresenceCb(action="asset", item="package"))
-    kb.button(text="❌ Отмена",          callback_data=GeoPresenceCb(action="cancel"))
-    kb.adjust(2, 2, 1)
+    kb.button(text="📡 Каналы",              callback_data=GeoPresenceCb(action="asset", item="channel"))
+    kb.button(text="👥 Группы",              callback_data=GeoPresenceCb(action="asset", item="group"))
+    kb.button(text="🤖 Боты",                callback_data=GeoPresenceCb(action="asset", item="bot"))
+    kb.button(text="📦 Пакет (кан+гр)",     callback_data=GeoPresenceCb(action="asset", item="package"))
+    kb.button(text="📦 Полный (кан+гр+бот)", callback_data=GeoPresenceCb(action="asset", item="full_package"))
+    kb.button(text="❌ Отмена",              callback_data=GeoPresenceCb(action="cancel"))
+    kb.adjust(2, 2, 1, 1)
     await callback.message.edit_text(
         "🌍 <b>Global Presence Factory</b>\n\n"
         "Создайте Telegram-присутствие в любом городе мира за несколько шагов — "
@@ -91,7 +92,8 @@ async def cb_gp_menu(
         "• <b>Каналы</b> — создать каналы под каждый город\n"
         "• <b>Группы</b> — создать супергруппы\n"
         "• <b>Боты</b> — зарегистрировать ботов через BotFather\n"
-        "• <b>Пакет</b> — канал + группа на каждый город\n\n"
+        "• <b>Пакет</b> — канал + группа на каждый город\n"
+        "• <b>Полный пакет</b> — канал + группа + бот на каждый город\n\n"
         "Что создаём?",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
@@ -104,7 +106,7 @@ async def cb_gp_asset(
     state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
     asset = callback_data.item or "channel"
-    if asset not in ("channel", "group", "bot", "package"):
+    if asset not in ("channel", "group", "bot", "package", "full_package"):
         await callback.answer("Неподдерживаемый тип", show_alert=True)
         return
     await callback.answer()
@@ -135,7 +137,7 @@ async def _show_template_step(
     # Library presets on first page (top-3)
     lib_count = 0
     if page == 0:
-        lib_atype = asset_type if asset_type != "package" else "channel"
+        lib_atype = asset_type if asset_type not in ("package", "full_package") else "channel"
         lib_presets = get_presets(lib_atype)[:3]
         for p in lib_presets:
             kb.button(
@@ -175,7 +177,7 @@ async def _show_template_step(
         header_parts.append("📋 Ваших шаблонов: 0 (создайте в BotMother → Операции → Шаблоны)")
     header = "\n".join(header_parts) if header_parts else "📚 Доступны готовые шаблоны из библиотеки"
 
-    _asset_label_map = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы"}
+    _asset_label_map = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы", "full_package": "канала/группы/бота"}
     asset_label = _asset_label_map.get(asset_type, "актива")
     await _edit(
         callback,
@@ -257,7 +259,7 @@ async def _show_name_pattern_step(
 ) -> None:
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
-    _asset_noun = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы"}
+    _asset_noun = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы", "full_package": "канала/группы/бота"}
     asset_noun = _asset_noun.get(asset_type, "актива")
     examples = [
         "Crypto News {{CITY}}",
@@ -266,7 +268,7 @@ async def _show_name_pattern_step(
         "Trading {{COUNTRY_CODE}} {{CITY}}",
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
-    bot_note = ("\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>" if asset_type == "bot" else "")
+    bot_note = ("\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>" if asset_type in ("bot", "full_package") else "")
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"
@@ -805,16 +807,17 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
     if len(acc_phones) > 5:
         accs_text += f" (+{len(acc_phones) - 5})"
 
-    asset_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦"}.get(asset_type, "📦")
-    _asset_label = {"channel": "Каналы", "group": "Группы", "bot": "Боты (BotFather)", "package": "Пакет (Канал+Группа)"}
-    _asset_count_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов (×2 актива)"}
+    asset_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦", "full_package": "📦"}.get(asset_type, "📦")
+    _asset_label = {"channel": "Каналы", "group": "Группы", "bot": "Боты (BotFather)", "package": "Пакет (Канал+Группа)", "full_package": "Полный пакет (Канал+Группа+Бот)"}
+    _asset_count_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов (×2 актива)", "full_package": "пакетов (×3 актива)"}
     asset_type_label = _asset_label.get(asset_type, asset_type.capitalize())
     count_label = _asset_count_label.get(asset_type, "активов")
     hours = estimated // 60
     mins = estimated % 60
     duration_str = f"{hours}ч {mins}м" if hours else f"{mins}м"
-    bot_note = "\n💡 <i>Username ботов должен заканчиваться на _bot</i>" if asset_type == "bot" else ""
+    bot_note = "\n💡 <i>Username ботов должен заканчиваться на _bot</i>" if asset_type in ("bot", "full_package") else ""
     pkg_note = "\n📦 <i>Пакет создаст канал И группу для каждого города</i>" if asset_type == "package" else ""
+    fullpkg_note = "\n📦 <i>Полный пакет создаст канал, группу И бота для каждого города</i>" if asset_type == "full_package" else ""
 
     text = (
         f"🌍 <b>Global Presence Plan — Предпросмотр</b>\n"
@@ -831,6 +834,7 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
         f"⚠️ Это создаст <b>{n_cities} {count_label}</b> в Telegram."
         + bot_note
         + pkg_note
+        + fullpkg_note
     )
 
     kb = InlineKeyboardBuilder()
@@ -902,12 +906,16 @@ async def cb_gp_launch(
     elif asset_type == "package":
         _op_type = "global_presence_package"
         _effective_asset = "package"
+    elif asset_type == "full_package":
+        _op_type = "global_presence_full_package"
+        _effective_asset = "full_package"
     else:
         _op_type = "global_presence_channel"
         _effective_asset = asset_type  # "channel" or "group"
 
-    # Build targets (for package: channel targets first)
-    targets = build_targets(geo_list, "channel" if asset_type == "package" else _effective_asset,
+    # Build targets (for package/full_package: channel targets first)
+    targets = build_targets(geo_list,
+                            "channel" if asset_type in ("package", "full_package") else _effective_asset,
                             name_pattern, username_pattern, selected_acc_ids)
 
     # Create plan in DB
@@ -938,9 +946,9 @@ async def cb_gp_launch(
     # Link operation to plan
     await db.link_plan_to_operation(pool, plan_id, op_id)
 
-    # For package: also queue group creation as second operation
-    op_id2 = None
-    if asset_type == "package":
+    # For package/full_package: also queue group (and bot for full) creation
+    op_id2, op_id3 = None, None
+    if asset_type in ("package", "full_package"):
         grp_targets = build_targets(geo_list, "group", name_pattern, username_pattern, selected_acc_ids)
         plan_id2 = await db.create_global_presence_plan(
             pool,
@@ -962,14 +970,44 @@ async def cb_gp_launch(
         )
         await db.link_plan_to_operation(pool, plan_id2, op_id2)
 
+    # For full_package: also queue bot creation
+    if asset_type == "full_package":
+        bot_targets = build_targets(geo_list, "bot", name_pattern, username_pattern, selected_acc_ids)
+        plan_id3 = await db.create_global_presence_plan(
+            pool,
+            owner_id=callback.from_user.id,
+            asset_type="bot",
+            name_pattern=name_pattern,
+            username_pattern=username_pattern,
+            geo_selection={"preset": geo_preset, "count": len(geo_list)},
+            account_selection={"account_ids": selected_acc_ids},
+            template_id=template_id,
+        )
+        await db.create_global_presence_targets(pool, plan_id3, bot_targets)
+        op_id3 = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
+            "VALUES($1,'global_presence_bot','pending',$2::jsonb,$3) RETURNING id",
+            callback.from_user.id,
+            json.dumps({"plan_id": plan_id3}),
+            len(bot_targets),
+        )
+        await db.link_plan_to_operation(pool, plan_id3, op_id3)
+
     await state.clear()
 
     # Build result message
-    _type_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦"}
-    _type_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов"}
+    _type_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦", "full_package": "📦"}
+    _type_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов", "full_package": "пакетов"}
     emoji = _type_emoji.get(asset_type, "📦")
     label = _type_label.get(asset_type, "активов")
-    pkg_line = f"\n👥 + Группы в очереди: #{op_id2}" if op_id2 else ""
+    pkg_lines = []
+    if op_id2:
+        pkg_lines.append(f"👥 + Группы в очереди: #{op_id2}")
+    if op_id3:
+        pkg_lines.append(f"🤖 + Боты в очереди: #{op_id3}")
+    pkg_line = "\n".join(pkg_lines) if pkg_lines else ""
+    if pkg_line:
+        pkg_line = "\n" + pkg_line
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
