@@ -311,6 +311,9 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
                         op_id, total_sent + total_failed, str(ch["id"]), str(e)[:200],
                     )
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    )
                 await asyncio.sleep(delay)
 
         except Exception as e:
@@ -464,6 +467,9 @@ async def _exec_bulk_join(
                 await _audit(pool, owner_id, "join", "flood_wait" if flood_wait else "error",
                              operation_id=op_id, account_id=acc["id"],
                              target=link, error_msg=err_str, flood_wait_s=flood_wait or None)
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
             # Apply pacing based on delay_mode from params
             delay_mode = params.get("delay_mode", "smart")
             chaos = session_simulator.chaos_factor()
@@ -544,6 +550,9 @@ async def _exec_bulk_leave(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
                     op_id, step, str(channel), str(e)[:200],
+                )
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
             # Apply pacing based on delay_mode from params
             delay_mode = params.get("delay_mode", "smart")
