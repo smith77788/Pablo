@@ -1,4 +1,5 @@
 """Preset template library — ready-made templates for channels, groups, bots, and posts."""
+
 from __future__ import annotations
 
 # Each preset:
@@ -8,7 +9,6 @@ from __future__ import annotations
 #   template:    the actual template data dict (same format as asset_templates)
 
 PRESETS: dict[str, list[dict]] = {
-
     "channel": [
         {
             "id": "news_channel",
@@ -123,7 +123,6 @@ PRESETS: dict[str, list[dict]] = {
             },
         },
     ],
-
     "group": [
         {
             "id": "community_group",
@@ -197,7 +196,6 @@ PRESETS: dict[str, list[dict]] = {
             },
         },
     ],
-
     "bot": [
         {
             "id": "support_bot",
@@ -319,7 +317,10 @@ PRESETS: dict[str, list[dict]] = {
                 "short_description": "Интернет-магазин в Telegram — заказывай легко!",
                 "commands": [
                     {"command": "start", "description": "Открыть магазин"},
-                    {"command": "catalog", "description": "Просмотреть каталог товаров"},
+                    {
+                        "command": "catalog",
+                        "description": "Просмотреть каталог товаров",
+                    },
                     {"command": "cart", "description": "Моя корзина"},
                     {"command": "orders", "description": "Мои заказы"},
                     {"command": "help", "description": "Помощь и контакты"},
@@ -448,7 +449,10 @@ PRESETS: dict[str, list[dict]] = {
                 "commands": [
                     {"command": "start", "description": "Начало работы"},
                     {"command": "help", "description": "Как пользоваться ботом"},
-                    {"command": "faq", "description": "Список часто задаваемых вопросов"},
+                    {
+                        "command": "faq",
+                        "description": "Список часто задаваемых вопросов",
+                    },
                     {"command": "search", "description": "Поиск по базе знаний"},
                     {"command": "contact", "description": "Связаться с оператором"},
                 ],
@@ -790,7 +794,6 @@ PRESETS: dict[str, list[dict]] = {
             },
         },
     ],
-
     "post": [
         {
             "id": "announcement",
@@ -905,9 +908,7 @@ def get_preset(asset_type: str, preset_id: str) -> dict | None:
 
 # Flat mapping for O(1) lookup  (separator __ avoids aiogram3 CallbackData clash)
 _ALL: dict[str, dict] = {
-    f"{atype}__{p['id']}": p
-    for atype, plist in PRESETS.items()
-    for p in plist
+    f"{atype}__{p['id']}": p for atype, plist in PRESETS.items() for p in plist
 }
 
 

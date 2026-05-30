@@ -1,4 +1,5 @@
 """Bulk operations merged into the network module — apply changes to all bots at once."""
+
 from __future__ import annotations
 import asyncio
 import aiohttp
@@ -21,8 +22,9 @@ _LANG_HINT = (
 )
 
 
-async def _apply_all(pool: asyncpg.Pool, user_id: int,
-                     http: aiohttp.ClientSession, method, *args) -> tuple[int, int, int]:
+async def _apply_all(
+    pool: asyncpg.Pool, user_id: int, http: aiohttp.ClientSession, method, *args
+) -> tuple[int, int, int]:
     bots = await db.get_bots(pool, user_id)
     if not bots:
         return 0, 0, 0
@@ -46,7 +48,8 @@ async def _check_enterprise(callback: CallbackQuery, pool: asyncpg.Pool) -> bool
     if await require_plan(pool, callback.from_user.id, "enterprise"):
         return True
     await callback.message.edit_text(
-        locked_text("Массовые операции", "enterprise"), parse_mode="HTML",
+        locked_text("Массовые операции", "enterprise"),
+        parse_mode="HTML",
         reply_markup=subscription_locked_markup("enterprise"),
     )
     return False
@@ -54,9 +57,11 @@ async def _check_enterprise(callback: CallbackQuery, pool: asyncpg.Pool) -> bool
 
 # ── NetworkCb bulk actions ─────────────────────────────────────────────────────
 
+
 @router.callback_query(NetworkCb.filter(F.action == "bulk_check"))
-async def cb_bulk_check(callback: CallbackQuery, pool: asyncpg.Pool,
-                        http: aiohttp.ClientSession) -> None:
+async def cb_bulk_check(
+    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     if not await _check_enterprise(callback, pool):
         return
     bots = await db.get_bots(pool, callback.from_user.id)
@@ -81,85 +86,126 @@ async def cb_bulk_check(callback: CallbackQuery, pool: asyncpg.Pool,
     )
     if len(lines) > 50:
         text += f"\n…и ещё {len(lines) - 50}"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=network_ops_menu())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=network_ops_menu()
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_name"))
-async def cb_bulk_name(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_name(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_name)
-    await callback.message.edit_text("✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:", parse_mode="HTML")
+    await callback.message.edit_text(
+        "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:", parse_mode="HTML"
+    )
 
 
 @router.message(BulkEdit.waiting_name, F.text)
-async def msg_bulk_name(message: Message, state: FSMContext,
-                        pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     name = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_name, name)
-    await msg.edit_text(_result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_name, name
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_name_lang"))
-async def cb_bulk_name_lang(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_name_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_name_lang)
-    await callback.message.edit_text(f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML"
+    )
 
 
 @router.message(BulkEdit.waiting_name_lang, F.text)
 async def msg_bulk_name_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_name)
-    await message.answer(f"✏️ Введите имя для языка <code>{message.text.strip()}</code>:", parse_mode="HTML")
+    await message.answer(
+        f"✏️ Введите имя для языка <code>{message.text.strip()}</code>:",
+        parse_mode="HTML",
+    )
 
 
 @router.message(BulkEdit.waiting_localized_name, F.text)
-async def msg_bulk_localized_name(message: Message, state: FSMContext,
-                                   pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_localized_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     lang = "" if data["lang"] == "-" else data["lang"]
     name = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_name, name, lang)
-    await msg.edit_text(_result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_name, name, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_desc"))
-async def cb_bulk_desc(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_desc(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_desc)
-    await callback.message.edit_text("📄 <b>Описание для всех ботов</b>\n\nВведите новое описание:", parse_mode="HTML")
+    await callback.message.edit_text(
+        "📄 <b>Описание для всех ботов</b>\n\nВведите новое описание:",
+        parse_mode="HTML",
+    )
 
 
 @router.message(BulkEdit.waiting_desc, F.text)
-async def msg_bulk_desc(message: Message, state: FSMContext,
-                        pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_desc(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     desc = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_description, desc)
-    await msg.edit_text(_result_text(ok, fail, total, "Описание обновлено"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_description, desc
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, "Описание обновлено"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_desc_lang"))
-async def cb_bulk_desc_lang(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_desc_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_desc_lang)
-    await callback.message.edit_text(f"🌍 <b>Описание по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"🌍 <b>Описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        parse_mode="HTML",
+    )
 
 
 @router.message(BulkEdit.waiting_desc_lang, F.text)
@@ -170,45 +216,66 @@ async def msg_bulk_desc_lang(message: Message, state: FSMContext) -> None:
 
 
 @router.message(BulkEdit.waiting_localized_desc, F.text)
-async def msg_bulk_localized_desc(message: Message, state: FSMContext,
-                                   pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_localized_desc(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     lang = "" if data["lang"] == "-" else data["lang"]
     desc = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_description, desc, lang)
-    await msg.edit_text(_result_text(ok, fail, total, f"Описание [{lang or 'default'}]"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_description, desc, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Описание [{lang or 'default'}]"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_short"))
-async def cb_bulk_short(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_short(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_short)
-    await callback.message.edit_text("📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст:", parse_mode="HTML")
+    await callback.message.edit_text(
+        "📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст:", parse_mode="HTML"
+    )
 
 
 @router.message(BulkEdit.waiting_short, F.text)
-async def msg_bulk_short(message: Message, state: FSMContext,
-                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_short(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     short = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_short_description, short)
-    await msg.edit_text(_result_text(ok, fail, total, "Краткое описание обновлено"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_short_description, short
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, "Краткое описание обновлено"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_short_lang"))
-async def cb_bulk_short_lang(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_short_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_short_lang)
-    await callback.message.edit_text(f"🌍 <b>Краткое по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"🌍 <b>Краткое по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        parse_mode="HTML",
+    )
 
 
 @router.message(BulkEdit.waiting_short_lang, F.text)
@@ -219,20 +286,28 @@ async def msg_bulk_short_lang(message: Message, state: FSMContext) -> None:
 
 
 @router.message(BulkEdit.waiting_localized_short, F.text)
-async def msg_bulk_localized_short(message: Message, state: FSMContext,
-                                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_localized_short(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     lang = "" if data["lang"] == "-" else data["lang"]
     short = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_short_description, short, lang)
-    await msg.edit_text(_result_text(ok, fail, total, f"Краткое [{lang or 'default'}]"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_short_description, short, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Краткое [{lang or 'default'}]"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_commands"))
-async def cb_bulk_commands(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_commands(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
@@ -246,55 +321,85 @@ async def cb_bulk_commands(callback: CallbackQuery, pool: asyncpg.Pool, state: F
 
 
 @router.message(BulkEdit.waiting_commands, F.text)
-async def msg_bulk_commands(message: Message, state: FSMContext,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_commands(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     from bot.handlers.commands import _parse_commands
+
     commands = _parse_commands(message.text or "")
     if not commands:
-        await message.answer("❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>", parse_mode="HTML")
+        await message.answer(
+            "❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>",
+            parse_mode="HTML",
+        )
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю команды ко всем ботам…")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_my_commands, commands, "")
-    await msg.edit_text(_result_text(ok, fail, total, "Команды установлены"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_my_commands, commands, ""
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, "Команды установлены"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_commands_lang"))
-async def cb_bulk_commands_lang(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_commands_lang(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_commands_lang)
-    await callback.message.edit_text(f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        parse_mode="HTML",
+    )
 
 
 @router.message(BulkEdit.waiting_commands_lang, F.text)
 async def msg_bulk_commands_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_commands)
-    await message.answer("🤖 Отправьте список команд:\n\n<code>start - Главное меню\nhelp - Помощь</code>", parse_mode="HTML")
+    await message.answer(
+        "🤖 Отправьте список команд:\n\n<code>start - Главное меню\nhelp - Помощь</code>",
+        parse_mode="HTML",
+    )
 
 
 @router.message(BulkEdit.waiting_localized_commands, F.text)
-async def msg_bulk_localized_commands(message: Message, state: FSMContext,
-                                       pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_bulk_localized_commands(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     from bot.handlers.commands import _parse_commands
+
     data = await state.get_data()
     lang = "" if data["lang"] == "-" else data["lang"]
     commands = _parse_commands(message.text or "")
     if not commands:
-        await message.answer("❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>", parse_mode="HTML")
+        await message.answer(
+            "❌ Неверный формат. Каждая строка: <code>/команда - Описание</code>",
+            parse_mode="HTML",
+        )
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам…")
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_my_commands, commands, lang)
-    await msg.edit_text(_result_text(ok, fail, total, f"Команды [{lang or 'default'}]"),
-                        parse_mode="HTML", reply_markup=network_ops_menu())
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_my_commands, commands, lang
+    )
+    await msg.edit_text(
+        _result_text(ok, fail, total, f"Команды [{lang or 'default'}]"),
+        parse_mode="HTML",
+        reply_markup=network_ops_menu(),
+    )
 
 
 @router.callback_query(NetworkCb.filter(F.action == "bulk_import"))
-async def cb_bulk_import(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_bulk_import(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     # Import доступен без подписки
     await state.set_state(ImportBots.waiting_tokens)
@@ -307,34 +412,50 @@ async def cb_bulk_import(callback: CallbackQuery, pool: asyncpg.Pool, state: FSM
 
 
 @router.message(ImportBots.waiting_tokens, F.text)
-async def msg_import_tokens(message: Message, state: FSMContext,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_import_tokens(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     await state.clear()
     lines = [l.strip() for l in (message.text or "").strip().splitlines() if l.strip()]
     if not lines:
-        await message.answer("❌ Не найдено ни одного токена.", reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)))
+        await message.answer(
+            "❌ Не найдено ни одного токена.",
+            reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
+        )
         return
     progress = await message.answer(f"⏳ Проверяю {len(lines)} токенов…")
     import asyncio as _aio
-    results = await _aio.gather(*(bot_api.get_me(http, t) for t in lines), return_exceptions=True)
+
+    results = await _aio.gather(
+        *(bot_api.get_me(http, t) for t in lines), return_exceptions=True
+    )
     added, skipped, failed = [], [], []
     for token, info in zip(lines, results):
         if isinstance(info, Exception) or not info:
             failed.append(f"❌ {token[:25]}…")
             continue
-        ok = await db.add_bot(pool, token=token, bot_id=info["id"],
-                               username=info.get("username", ""),
-                               first_name=info.get("first_name", ""),
-                               added_by=message.from_user.id)
+        ok = await db.add_bot(
+            pool,
+            token=token,
+            bot_id=info["id"],
+            username=info.get("username", ""),
+            first_name=info.get("first_name", ""),
+            added_by=message.from_user.id,
+        )
         label = f"@{info.get('username') or info.get('first_name', str(info['id']))}"
         (added if ok else skipped).append(f"{'✅' if ok else '⚠️'} {label}")
     parts = []
-    if added: parts.append(f"✅ Добавлено: <b>{len(added)}</b>")
-    if skipped: parts.append(f"⚠️ Уже были: <b>{len(skipped)}</b>")
-    if failed: parts.append(f"❌ Ошибок: <b>{len(failed)}</b>")
+    if added:
+        parts.append(f"✅ Добавлено: <b>{len(added)}</b>")
+    if skipped:
+        parts.append(f"⚠️ Уже были: <b>{len(skipped)}</b>")
+    if failed:
+        parts.append(f"❌ Ошибок: <b>{len(failed)}</b>")
     detail = "\n".join((added + skipped + failed)[:30])
     await progress.edit_text(
-        "📥 <b>Результат импорта</b>\n\n" + "\n".join(parts) + (f"\n\n{detail}" if detail else ""),
-        parse_mode="HTML", reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
+        "📥 <b>Результат импорта</b>\n\n"
+        + "\n".join(parts)
+        + (f"\n\n{detail}" if detail else ""),
+        parse_mode="HTML",
+        reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
     )
-

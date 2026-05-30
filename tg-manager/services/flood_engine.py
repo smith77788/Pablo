@@ -5,6 +5,7 @@ per-account cooldown management, and operation risk scoring.
 Integrates with account_flood_log table (existing) + new flood_intelligence table.
 Used by op_worker, account_manager, and any bulk operation handler.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,8 +29,10 @@ class _AccountFloodState:
     total_floods_24h: int = 0
     last_flood_at: float = 0.0
     cooldown_until: float = 0.0
-    risk_score: float = 0.0        # 0.0 = safe, 1.0 = very risky
-    action_delays: dict[str, float] = field(default_factory=dict)  # action_type → delay_s
+    risk_score: float = 0.0  # 0.0 = safe, 1.0 = very risky
+    action_delays: dict[str, float] = field(
+        default_factory=dict
+    )  # action_type → delay_s
 
 
 def get_account_state(account_id: int) -> _AccountFloodState:
@@ -87,7 +90,12 @@ async def record_flood(
 
     log.warning(
         "FloodWait acc=%d action=%s wait=%ds consecutive=%d cooldown=%.0fs risk=%.2f",
-        account_id, action_type, wait_seconds, state.consecutive_floods, actual_wait, state.risk_score
+        account_id,
+        action_type,
+        wait_seconds,
+        state.consecutive_floods,
+        actual_wait,
+        state.risk_score,
     )
 
     # Persist to DB (non-blocking)
@@ -95,7 +103,9 @@ async def record_flood(
         await pool.execute(
             """INSERT INTO account_flood_log(account_id, flood_seconds, action_type)
                VALUES ($1, $2, $3)""",
-            account_id, wait_seconds, action_type,
+            account_id,
+            wait_seconds,
+            action_type,
         )
         # Update cooldown_until in tg_accounts
         await pool.execute(
@@ -103,7 +113,8 @@ async def record_flood(
                SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'),
                    last_flood_at = NOW()
                WHERE id = $2""",
-            actual_wait, account_id,
+            actual_wait,
+            account_id,
         )
     except Exception as e:
         log.warning("flood_engine DB write failed: %s", e)
@@ -146,7 +157,8 @@ async def get_best_account(
              AND a.id != ALL($2::bigint[])
            ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST
            LIMIT 10""",
-        owner_id, exclude,
+        owner_id,
+        exclude,
     )
     if not rows:
         return None
@@ -170,12 +182,18 @@ async def wait_if_cooling(account_id: int, action_type: str = "default") -> None
     """Async wait if account is in cooldown, then apply recommended delay."""
     cool_secs = seconds_until_ready(account_id)
     if cool_secs > 0:
-        log.info("flood_engine: acc=%d cooling %.0fs for %s", account_id, cool_secs, action_type)
+        log.info(
+            "flood_engine: acc=%d cooling %.0fs for %s",
+            account_id,
+            cool_secs,
+            action_type,
+        )
         await asyncio.sleep(min(cool_secs, 300))  # cap at 5 min wait
 
     delay = recommended_delay(account_id, action_type)
     if delay > 0.1:
         import random
+
         jitter = random.uniform(0.8, 1.2)
         await asyncio.sleep(delay * jitter)
 
@@ -201,7 +219,9 @@ async def load_state_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
             state.cooldown_until = now + remaining
         # Estimate risk from 24h flood count
         state.risk_score = min(1.0, (state.total_floods_24h * 0.1))
-    log.info("flood_engine: loaded state for %d accounts (owner=%d)", len(rows), owner_id)
+    log.info(
+        "flood_engine: loaded state for %d accounts (owner=%d)", len(rows), owner_id
+    )
 
 
 def get_risk_summary(account_ids: list[int]) -> dict[int, dict]:

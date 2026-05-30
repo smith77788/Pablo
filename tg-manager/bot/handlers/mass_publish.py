@@ -9,6 +9,7 @@ Sends a post to multiple Telegram channels at once:
 
 Entry point: MassPubCb(action="menu")
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,9 +42,9 @@ _STARTER = "starter"
 
 # Timing options: label → delay in seconds
 _TIMING_OPTIONS = {
-    "delay_5s":   ("⚡ 5 сек (быстро)",     5),
-    "delay_30s":  ("🛡️ 30 сек (безопасно)", 30),
-    "delay_60s":  ("🐌 60 сек (осторожно)", 60),
+    "delay_5s": ("⚡ 5 сек (быстро)", 5),
+    "delay_30s": ("🛡️ 30 сек (безопасно)", 30),
+    "delay_60s": ("🐌 60 сек (осторожно)", 60),
     "delay_smart": ("🧠 Умный (30-90 сек)", -1),  # -1 = random
 }
 
@@ -59,13 +60,19 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
 
 # ── Main menu ──────────────────────────────────────────────────────────────
 
+
 def _main_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📢 Все каналы",    callback_data=MassPubCb(action="start", target_type="all"))
-    kb.button(text="👤 По аккаунту",   callback_data=MassPubCb(action="start", target_type="account"))
-    kb.button(text="🔍 Сухой прогон",  callback_data=MassPubCb(action="dry_run"))
-    kb.button(text="📋 История",       callback_data=MassPubCb(action="history"))
-    kb.button(text="◀️ Назад",        callback_data=MassPubCb(action="back_to_factory"))
+    kb.button(
+        text="📢 Все каналы", callback_data=MassPubCb(action="start", target_type="all")
+    )
+    kb.button(
+        text="👤 По аккаунту",
+        callback_data=MassPubCb(action="start", target_type="account"),
+    )
+    kb.button(text="🔍 Сухой прогон", callback_data=MassPubCb(action="dry_run"))
+    kb.button(text="📋 История", callback_data=MassPubCb(action="history"))
+    kb.button(text="◀️ Назад", callback_data=MassPubCb(action="back_to_factory"))
     kb.adjust(2, 2, 1)
     return kb
 
@@ -91,6 +98,7 @@ async def cb_mpub_menu(callback: CallbackQuery) -> None:
 async def cb_mpub_back_factory(callback: CallbackQuery) -> None:
     await callback.answer()
     from bot.callbacks import ChanFactCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 Channel Factory", callback_data=ChanFactCb(action="menu"))
     await callback.message.edit_text(
@@ -104,6 +112,7 @@ async def cb_mpub_back_factory(callback: CallbackQuery) -> None:
 # MAIN FLOW: start (all | account)
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassPubCb.filter(F.action == "start"))
 async def cb_mpub_start(
     callback: CallbackQuery,
@@ -113,6 +122,7 @@ async def cb_mpub_start(
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 <b>Массовая публикация — STARTER</b>\n\nОформите: /subscription",
@@ -234,7 +244,9 @@ async def _ask_post_text(event, edit: bool = True) -> None:
     if hasattr(event, "message"):
         if edit:
             try:
-                await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+                await event.message.edit_text(
+                    text, parse_mode="HTML", reply_markup=markup
+                )
                 return
             except Exception:
                 log_exc_swallow(log, "сбой edit_text в _ask_post_text")
@@ -276,14 +288,16 @@ async def cb_mpub_timing(
 ) -> None:
     await callback.answer()
     # Extract timing key from action: "timing_delay_5s" → "delay_5s"
-    timing_key = callback_data.action[len("timing_"):]
+    timing_key = callback_data.action[len("timing_") :]
     delay_s = _TIMING_OPTIONS.get(timing_key, ("", 30))[1]
     await state.update_data(timing_key=timing_key, delay_s=delay_s)
     await state.set_state(MassPublishFSM2.previewing)
     await _show_preview(callback, state, pool)
 
 
-async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def _show_preview(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
     acc_ids: list[int] = data.get("target_acc_ids", [])
     delay_s: int = data.get("delay_s", 30)
@@ -292,30 +306,38 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     # Count total channels
     from services import account_manager
+
     total_channels = 0
     acc_count = 0
     accounts = await pool.fetch(
         "SELECT id, session_str, first_name, phone FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        callback.from_user.id, acc_ids,
+        callback.from_user.id,
+        acc_ids,
     )
     for acc in accounts:
         dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+        channels = [
+            d
+            for d in dialogs
+            if d.get("type") in ("channel", "megagroup", "supergroup")
+        ]
         total_channels += len(channels)
         if channels:
             acc_count += 1
 
     effective_delay = 60 if delay_s < 0 else delay_s  # smart = ~60s avg
     estimated_s = total_channels * effective_delay
-    timing_label = _TIMING_OPTIONS.get(data.get("timing_key", "delay_30s"), ("30с", 30))[0]
+    timing_label = _TIMING_OPTIONS.get(
+        data.get("timing_key", "delay_30s"), ("30с", 30)
+    )[0]
 
     # Truncate post text for preview
     preview_text = post_text[:300] + ("..." if len(post_text) > 300 else "")
 
     preview_msg = (
         f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
-        f"Целевых каналов: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2,3,4) else 'ов' if acc_count != 1 else 'а'})\n"
+        f"Целевых каналов: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'})\n"
         f"Задержка: <b>{timing_label}</b>\n"
         f"Расчётное время: ~{_format_duration(estimated_s)}\n\n"
         f"Текст поста:\n"
@@ -332,9 +354,13 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     await state.set_state(MassPublishFSM2.confirming)
     try:
-        await callback.message.edit_text(preview_msg, parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            preview_msg, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
     except Exception:
-        await callback.message.answer(preview_msg, parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.answer(
+            preview_msg, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
 
 
 @router.callback_query(MassPubCb.filter(F.action == "confirm_send"))
@@ -352,15 +378,21 @@ async def cb_mpub_confirm_send(
     accounts = await pool.fetch(
         "SELECT id, session_str, first_name, phone FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        callback.from_user.id, acc_ids,
+        callback.from_user.id,
+        acc_ids,
     )
 
     from services import account_manager
+
     # Gather all (acc, channel) pairs first
     pairs: list[tuple[asyncpg.Record, dict]] = []
     for acc in accounts:
         dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+        channels = [
+            d
+            for d in dialogs
+            if d.get("type") in ("channel", "megagroup", "supergroup")
+        ]
         for ch in channels:
             pairs.append((acc, ch))
 
@@ -380,20 +412,27 @@ async def cb_mpub_confirm_send(
         parse_mode="HTML",
     )
 
-    task = asyncio.create_task(_mpub_bg(
-        bot=callback.bot,
-        user_id=callback.from_user.id,
-        progress_msg=progress_msg,
-        pairs=pairs,
-        post_text=post_text,
-        delay_s=delay_s,
-    ))
-    _treg.register(callback.from_user.id, "publish", f"Mass publish {total} каналов", task)
+    task = asyncio.create_task(
+        _mpub_bg(
+            bot=callback.bot,
+            user_id=callback.from_user.id,
+            progress_msg=progress_msg,
+            pairs=pairs,
+            post_text=post_text,
+            delay_s=delay_s,
+        )
+    )
+    _treg.register(
+        callback.from_user.id, "publish", f"Mass publish {total} каналов", task
+    )
 
 
-async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str, delay_s: int) -> None:
+async def _mpub_bg(
+    bot, user_id: int, progress_msg, pairs: list, post_text: str, delay_s: int
+) -> None:
     import random
     from services import account_manager
+
     ok = 0
     err = 0
     forbidden_count = 0
@@ -428,9 +467,7 @@ async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str,
         elapsed = time.monotonic() - start_ts
         hint = ""
         if forbidden_count > 0:
-            hint = (
-                f"\n\n⚠️ <i>{forbidden_count} канал(ов) — нет прав публикации.</i>"
-            )
+            hint = f"\n\n⚠️ <i>{forbidden_count} канал(ов) — нет прав публикации.</i>"
         await progress_msg.edit_text(
             f"📤 <b>Публикация завершена</b>\n\n"
             f"✅ Успешно: {ok} каналов\n"
@@ -452,7 +489,11 @@ async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str,
     except Exception as exc:
         log.exception("_mpub_bg error user=%s: %s", user_id, exc)
         try:
-            await bot.send_message(user_id, f"⚠️ Ошибка публикации: {html.escape(str(exc)[:200])}", parse_mode="HTML")
+            await bot.send_message(
+                user_id,
+                f"⚠️ Ошибка публикации: {html.escape(str(exc)[:200])}",
+                parse_mode="HTML",
+            )
         except Exception:
             log_exc_swallow(log, "сбой send_message при ошибке публикации")
 
@@ -461,12 +502,14 @@ async def _mpub_bg(bot, user_id: int, progress_msg, pairs: list, post_text: str,
 # DRY RUN
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassPubCb.filter(F.action == "dry_run"))
 async def cb_mpub_dry_run(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
             "🔒 <b>Сухой прогон — STARTER</b>\n\nОформите: /subscription",
@@ -497,10 +540,9 @@ async def cb_mpub_dry_run(
 # HISTORY
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassPubCb.filter(F.action == "history"))
-async def cb_mpub_history(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     rows: list[asyncpg.Record] = []
     try:
@@ -534,14 +576,10 @@ async def cb_mpub_history(
         done = r["done_items"] or 0
         total = r["total_items"] or 0
         created = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "—"
-        lines.append(
-            f"{status_icon} {created} — {done}/{total} каналов"
-        )
+        lines.append(f"{status_icon} {created} — {done}/{total} каналов")
 
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=_back_menu_kb().as_markup(),
     )
-
-

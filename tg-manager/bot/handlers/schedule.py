@@ -1,4 +1,5 @@
 """Scheduled broadcasts: create, list, cancel."""
+
 from __future__ import annotations
 from datetime import datetime
 import asyncpg
@@ -28,8 +29,9 @@ _DT_HINT = (
 
 
 @router.callback_query(ScheduleCb.filter(F.action == "menu"))
-async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
-                            pool: asyncpg.Pool) -> None:
+async def cb_schedule_menu(
+    callback: CallbackQuery, callback_data: ScheduleCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -46,7 +48,9 @@ async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
         emoji = status_emoji.get(s["status"], "❓")
         dt = s["execute_at"].strftime("%d.%m.%Y %H:%M")
         preview = s["message_text"][:35].replace("\n", " ")
-        safe_preview = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_preview = (
+            preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
         lines.append(f"{emoji} {dt} UTC — {safe_preview}…")
 
     body = "\n".join(lines) if lines else "Запланированных рассылок пока нет."
@@ -62,8 +66,9 @@ async def cb_schedule_menu(callback: CallbackQuery, callback_data: ScheduleCb,
 
 
 @router.callback_query(ScheduleCb.filter(F.action == "create"))
-async def cb_schedule_create(callback: CallbackQuery, callback_data: ScheduleCb,
-                              state: FSMContext) -> None:
+async def cb_schedule_create(
+    callback: CallbackQuery, callback_data: ScheduleCb, state: FSMContext
+) -> None:
     await state.set_state(ScheduleBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -95,8 +100,9 @@ async def msg_schedule_message(message: Message, state: FSMContext) -> None:
 
 
 @router.message(ScheduleBroadcast.waiting_datetime, F.text)
-async def msg_schedule_datetime(message: Message, state: FSMContext,
-                                 pool: asyncpg.Pool) -> None:
+async def msg_schedule_datetime(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     raw = message.text.strip() if message.text else ""
@@ -139,8 +145,9 @@ async def msg_schedule_datetime(message: Message, state: FSMContext,
 
 
 @router.callback_query(ScheduleCb.filter(F.action == "cancel"))
-async def cb_schedule_cancel(callback: CallbackQuery, callback_data: ScheduleCb,
-                              pool: asyncpg.Pool) -> None:
+async def cb_schedule_cancel(
+    callback: CallbackQuery, callback_data: ScheduleCb, pool: asyncpg.Pool
+) -> None:
 
     cancelled = await db.cancel_scheduled(
         pool, callback_data.schedule_id, callback.from_user.id
@@ -159,8 +166,9 @@ async def cb_schedule_cancel(callback: CallbackQuery, callback_data: ScheduleCb,
 
 
 @router.callback_query(ScheduleCb.filter(F.action == "from_template"))
-async def cb_schedule_from_template(callback: CallbackQuery, callback_data: ScheduleCb,
-                                     pool: asyncpg.Pool) -> None:
+async def cb_schedule_from_template(
+    callback: CallbackQuery, callback_data: ScheduleCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -168,7 +176,9 @@ async def cb_schedule_from_template(callback: CallbackQuery, callback_data: Sche
         return
     templates = await db.get_templates(pool, callback.from_user.id)
     if not templates:
-        await callback.answer("Нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True)
+        await callback.answer(
+            "Нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True
+        )
         return
     await callback.answer()
     await callback.message.edit_text(
@@ -179,18 +189,26 @@ async def cb_schedule_from_template(callback: CallbackQuery, callback_data: Sche
 
 
 @router.callback_query(ScheduleCb.filter(F.action == "use_template"))
-async def cb_schedule_use_template(callback: CallbackQuery, callback_data: ScheduleCb,
-                                    state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_schedule_use_template(
+    callback: CallbackQuery,
+    callback_data: ScheduleCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
 
     # schedule_id repurposed as template_id here
-    template = await db.get_template(pool, callback_data.schedule_id, callback.from_user.id)
+    template = await db.get_template(
+        pool, callback_data.schedule_id, callback.from_user.id
+    )
     if not template:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
     await callback.answer()
     await state.set_state(ScheduleBroadcast.waiting_datetime)
     await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
-    safe_name = template['name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_name = (
+        template["name"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
     await callback.message.edit_text(
         f"📋 Шаблон: <b>{safe_name}</b>\n\n"
         "Введите дату и время отправки (формат: ДД.ММ.ГГГГ ЧЧ:ММ):",

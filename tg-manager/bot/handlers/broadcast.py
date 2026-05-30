@@ -1,4 +1,5 @@
 """Broadcast composer and launcher."""
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -6,8 +7,13 @@ import aiohttp
 import asyncpg
 from bot.callbacks import BroadcastCb
 from bot.keyboards import (
-    broadcast_menu, broadcast_confirm, back_to_bot, broadcast_from_template,
-    broadcast_history, broadcast_detail, broadcast_segment_menu,
+    broadcast_menu,
+    broadcast_confirm,
+    back_to_bot,
+    broadcast_from_template,
+    broadcast_history,
+    broadcast_detail,
+    broadcast_segment_menu,
 )
 from bot.states import Broadcast
 from services import bot_api as _bot_api
@@ -25,8 +31,9 @@ def _bc_cancel_kb(bot_id: int) -> object:
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "menu"))
-async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
-                      pool: asyncpg.Pool) -> None:
+async def cb_bc_menu(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -52,8 +59,9 @@ async def cb_bc_menu(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "compose"))
-async def cb_compose(callback: CallbackQuery, callback_data: BroadcastCb,
-                      state: FSMContext) -> None:
+async def cb_compose(
+    callback: CallbackQuery, callback_data: BroadcastCb, state: FSMContext
+) -> None:
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -75,8 +83,9 @@ async def cb_compose(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.message(Broadcast.waiting_message)
-async def msg_broadcast_text(message: Message, state: FSMContext,
-                              pool: asyncpg.Pool) -> None:
+async def msg_broadcast_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
     segment_user_ids = data.get("segment_user_ids")
     if segment_user_ids:
@@ -116,9 +125,13 @@ async def msg_broadcast_text(message: Message, state: FSMContext,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "confirm"))
-async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
-                      state: FSMContext, pool: asyncpg.Pool,
-                      http: aiohttp.ClientSession) -> None:
+async def cb_confirm(
+    callback: CallbackQuery,
+    callback_data: BroadcastCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     data = await state.get_data()
     text = data.get("text", "")
@@ -142,10 +155,21 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
         segment_user_ids = None
 
     buttons = data.get("buttons")
-    bc_id = await db.create_broadcast(pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id)
+    bc_id = await db.create_broadcast(
+        pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id
+    )
 
-    broadcaster.start(pool, http, bc_id, row["token"], row["bot_id"], text, photo_file_id,
-                      segment_user_ids, buttons=buttons)
+    broadcaster.start(
+        pool,
+        http,
+        bc_id,
+        row["token"],
+        row["bot_id"],
+        text,
+        photo_file_id,
+        segment_user_ids,
+        buttons=buttons,
+    )
 
     await state.clear()
     await callback.message.edit_text(
@@ -157,9 +181,13 @@ async def cb_confirm(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "test"))
-async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
-                  state: FSMContext, pool: asyncpg.Pool,
-                  http: aiohttp.ClientSession) -> None:
+async def cb_test(
+    callback: CallbackQuery,
+    callback_data: BroadcastCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     data = await state.get_data()
     text = data.get("text", "")
@@ -176,19 +204,27 @@ async def cb_test(callback: CallbackQuery, callback_data: BroadcastCb,
 
     test_uid = callback.from_user.id
     if photo_file_id:
-        ok, _ = await _bot_api.send_photo(http, row["token"], test_uid, photo_file_id, text, buttons=buttons)
+        ok, _ = await _bot_api.send_photo(
+            http, row["token"], test_uid, photo_file_id, text, buttons=buttons
+        )
     else:
-        ok, _ = await _bot_api.send_message(http, row["token"], test_uid, text, buttons=buttons)
+        ok, _ = await _bot_api.send_message(
+            http, row["token"], test_uid, text, buttons=buttons
+        )
 
     if ok:
         await callback.answer("✅ Тест отправлен вам!", show_alert=True)
     else:
-        await callback.answer("❌ Не удалось отправить тест. Убедитесь, что вы написали этому боту /start.", show_alert=True)
+        await callback.answer(
+            "❌ Не удалось отправить тест. Убедитесь, что вы написали этому боту /start.",
+            show_alert=True,
+        )
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "add_button"))
-async def cb_add_button(callback: CallbackQuery, callback_data: BroadcastCb,
-                        state: FSMContext) -> None:
+async def cb_add_button(
+    callback: CallbackQuery, callback_data: BroadcastCb, state: FSMContext
+) -> None:
     await state.set_state(Broadcast.waiting_button_text)
     await callback.message.edit_text(
         "🔗 <b>Добавить кнопку к рассылке</b>\n\nВведите текст кнопки:",
@@ -220,10 +256,14 @@ async def msg_button_text(message: Message, state: FSMContext) -> None:
 
 
 @router.message(Broadcast.waiting_button_url, F.text)
-async def msg_button_url(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def msg_button_url(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     url = message.text.strip()
     if not url.startswith(("http://", "https://", "tg://")):
-        await message.answer("❌ Неверный URL. Должен начинаться с http:// или https://")
+        await message.answer(
+            "❌ Неверный URL. Должен начинаться с http:// или https://"
+        )
         return
 
     data = await state.get_data()
@@ -235,11 +275,21 @@ async def msg_button_url(message: Message, state: FSMContext, pool: asyncpg.Pool
 
     text = data.get("text", "")
     photo_file_id = data.get("photo_file_id")
-    segment_label = f"🎯 Сегмент: <b>{data['segment_lang'].upper()}</b>\n" if data.get("segment_lang") else ""
+    segment_label = (
+        f"🎯 Сегмент: <b>{data['segment_lang'].upper()}</b>\n"
+        if data.get("segment_lang")
+        else ""
+    )
     btn_list = "\n".join(f"  • {b['text']} → {b['url']}" for b in buttons)
-    count = len(data.get("segment_user_ids") or []) or await db.get_audience_count(pool, data["bot_id"])
+    count = len(data.get("segment_user_ids") or []) or await db.get_audience_count(
+        pool, data["bot_id"]
+    )
 
-    preview_header = "📸 <b>Фото + подпись:</b>\n\n" if photo_file_id else "📢 <b>Предпросмотр:</b>\n\n"
+    preview_header = (
+        "📸 <b>Фото + подпись:</b>\n\n"
+        if photo_file_id
+        else "📢 <b>Предпросмотр:</b>\n\n"
+    )
     await message.answer(
         f"{preview_header}{text}\n\n"
         f"🔘 <b>Кнопки:</b>\n{btn_list}\n\n"
@@ -263,8 +313,9 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "status"))
-async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
-                    pool: asyncpg.Pool) -> None:
+async def cb_status(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -285,8 +336,9 @@ async def cb_status(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "detail"))
-async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
-                    pool: asyncpg.Pool) -> None:
+async def cb_detail(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
 
     bc = await db.get_broadcast(pool, callback_data.broadcast_id)
     if not bc:
@@ -296,8 +348,12 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
     emoji = status_emoji.get(bc["status"], "❓")
     preview = bc["message_text"][:300] if bc["message_text"] else ""
-    success_rate = round(bc["sent_count"] / bc["total_users"] * 100) if bc["total_users"] else 0
-    finished = bc["finished_at"].strftime("%d.%m.%Y %H:%M") if bc.get("finished_at") else "—"
+    success_rate = (
+        round(bc["sent_count"] / bc["total_users"] * 100) if bc["total_users"] else 0
+    )
+    finished = (
+        bc["finished_at"].strftime("%d.%m.%Y %H:%M") if bc.get("finished_at") else "—"
+    )
     progress_bar = ""
     if bc["status"] == "running" and bc["total_users"]:
         done = bc["sent_count"] + bc["failed_count"]
@@ -305,7 +361,9 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
         filled = pct // 10
         progress_bar = f"\n{'█' * filled}{'░' * (10 - filled)} {pct}%\n"
     # Escape broadcast preview text to avoid HTML parse errors
-    safe_preview = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_preview = (
+        preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
     text = (
         f"📋 <b>Рассылка #{bc['id']}</b>\n\n"
         f"Статус: {emoji} {bc['status']}{progress_bar}\n"
@@ -315,14 +373,19 @@ async def cb_detail(callback: CallbackQuery, callback_data: BroadcastCb,
         f"Ошибок: {bc['failed_count']}\n\n"
         f"<b>Текст:</b>\n{safe_preview}"
     )
-    await callback.message.edit_text(text, parse_mode="HTML",
-                                     reply_markup=broadcast_detail(callback_data.bot_id,
-                                                                    bc["id"] if bc["status"] == "running" else None))
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=broadcast_detail(
+            callback_data.bot_id, bc["id"] if bc["status"] == "running" else None
+        ),
+    )
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "bc_summary"))
-async def cb_bc_summary(callback: CallbackQuery, callback_data: BroadcastCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_bc_summary(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
     """Show a concise summary of last 5 broadcasts with delivery stats."""
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -371,8 +434,9 @@ async def cb_bc_summary(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "from_template"))
-async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
-                            pool: asyncpg.Pool) -> None:
+async def cb_from_template(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -380,7 +444,9 @@ async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
         return
     templates = await db.get_templates(pool, callback.from_user.id)
     if not templates:
-        await callback.answer("У вас нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True)
+        await callback.answer(
+            "У вас нет шаблонов. Создайте шаблон в разделе шаблонов.", show_alert=True
+        )
         return
     await callback.answer()
     await callback.message.edit_text(
@@ -391,11 +457,17 @@ async def cb_from_template(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "use_template"))
-async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
-                           pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_use_template(
+    callback: CallbackQuery,
+    callback_data: BroadcastCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     # broadcast_id field repurposed here as template_id
-    template = await db.get_template(pool, callback_data.broadcast_id, callback.from_user.id)
+    template = await db.get_template(
+        pool, callback_data.broadcast_id, callback.from_user.id
+    )
     if not template:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
@@ -413,8 +485,15 @@ async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
     await state.set_state(Broadcast.confirming)
     await state.update_data(bot_id=callback_data.bot_id, text=template["text"])
 
-    safe_name = template['name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    safe_preview = template["text"][:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_name = (
+        template["name"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    safe_preview = (
+        template["text"][:200]
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     await callback.message.edit_text(
         f"📋 <b>Шаблон: {safe_name}</b>\n\n"
         f"Превью:\n{safe_preview}\n\n"
@@ -426,8 +505,9 @@ async def cb_use_template(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "segment"))
-async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
-                     pool: asyncpg.Pool) -> None:
+async def cb_segment(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -448,8 +528,12 @@ async def cb_segment(callback: CallbackQuery, callback_data: BroadcastCb,
 
 
 @router.callback_query(BroadcastCb.filter(F.action == "segment_select"))
-async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
-                             state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_segment_select(
+    callback: CallbackQuery,
+    callback_data: BroadcastCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
 
     lang = callback_data.lang or ""
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -476,7 +560,9 @@ async def cb_segment_select(callback: CallbackQuery, callback_data: BroadcastCb,
         return
     await callback.answer()
     await state.set_state(Broadcast.waiting_message)
-    await state.update_data(bot_id=callback_data.bot_id, segment_lang=lang, segment_user_ids=user_ids)
+    await state.update_data(
+        bot_id=callback_data.bot_id, segment_lang=lang, segment_user_ids=user_ids
+    )
     await callback.message.edit_text(
         f"🎯 Сегмент: <b>{segment_label}</b> ({len(user_ids)} польз.)\n\n"
         "Напишите сообщение или отправьте фото для этого сегмента:",

@@ -1,4 +1,5 @@
 """Hermes Relay: polls managed bots, forwards messages to operator, routes replies back."""
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -14,14 +15,16 @@ log = logging.getLogger(__name__)
 _offsets: dict[int, int] = {}
 
 
-async def _send_via_management(http: aiohttp.ClientSession, operator_id: int,
-                                 text: str) -> int | None:
+async def _send_via_management(
+    http: aiohttp.ClientSession, operator_id: int, text: str
+) -> int | None:
     """Send message to operator via management bot. Returns message_id."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": operator_id, "text": text, "parse_mode": "HTML"}
     try:
-        async with http.post(url, json=payload,
-                             timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        async with http.post(
+            url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
             data = await resp.json()
         return data["result"]["message_id"] if data.get("ok") else None
     except Exception:
@@ -29,21 +32,28 @@ async def _send_via_management(http: aiohttp.ClientSession, operator_id: int,
         return None
 
 
-async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
-                        bot_id: int, token: str, operator_id: int) -> None:
+async def _process_bot(
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+    bot_id: int,
+    token: str,
+    operator_id: int,
+) -> None:
     try:
         offset = _offsets.get(bot_id, 0)
 
         if offset == 0:
             # First run — skip old updates
-            data = await bot_api._call(http, token, "getUpdates",
-                                        offset=-1, limit=1, timeout=0)
+            data = await bot_api._call(
+                http, token, "getUpdates", offset=-1, limit=1, timeout=0
+            )
             updates = data.get("result", []) if data.get("ok") else []
             _offsets[bot_id] = updates[-1]["update_id"] if updates else 0
             return
 
-        data = await bot_api._call(http, token, "getUpdates",
-                                    offset=offset + 1, limit=100, timeout=0)
+        data = await bot_api._call(
+            http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0
+        )
         updates = data.get("result", []) if data.get("ok") else []
         if not updates:
             return
@@ -52,7 +62,8 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             "SELECT username, first_name FROM managed_bots WHERE bot_id=$1", bot_id
         )
         bot_label = (
-            f"@{bot_row['username']}" if bot_row and bot_row["username"]
+            f"@{bot_row['username']}"
+            if bot_row and bot_row["username"]
             else (bot_row["first_name"] if bot_row else str(bot_id))
         )
 
@@ -102,8 +113,10 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
             bots = await db.get_bots_with_relay(pool)
             if bots:
                 await asyncio.gather(
-                    *(_process_bot(pool, http, b["bot_id"], b["token"], b["added_by"])
-                      for b in bots),
+                    *(
+                        _process_bot(pool, http, b["bot_id"], b["token"], b["added_by"])
+                        for b in bots
+                    ),
                     return_exceptions=True,
                 )
         except Exception:

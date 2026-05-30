@@ -1,4 +1,5 @@
 """Session Realism utilities — human-like delays and behavioral timing variation."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +10,7 @@ from typing import Optional
 
 
 # ── Core primitives ──────────────────────────────────────────────────────────
+
 
 async def human_delay(min_s: float = 1.5, max_s: float = 8.0) -> None:
     """Pause with a human-like distribution (beta-skewed toward lower values)."""
@@ -41,6 +43,7 @@ async def bulk_item_pause(index: int, batch_size: int = 10) -> None:
 
 
 # ── Timing multipliers ───────────────────────────────────────────────────────
+
 
 def chaos_factor(base: float = 1.0, spread: float = 0.3) -> float:
     """Return a multiplier in [base-spread, base+spread] for timing variation."""
@@ -89,6 +92,7 @@ def session_fatigue(duration_minutes: float) -> float:
 
 
 # ── Behavioral patterns ───────────────────────────────────────────────────────
+
 
 async def distraction_pause(probability: float = 0.06) -> bool:
     """
@@ -195,6 +199,7 @@ async def smart_batch_delay(
 
 # ── Realistic typing ─────────────────────────────────────────────────────────
 
+
 async def realistic_type(text: str, session_minutes: float = 0) -> None:
     """
     Simulate realistic typing time for a text string.
@@ -215,6 +220,7 @@ async def realistic_type(text: str, session_minutes: float = 0) -> None:
 
 
 # ── Daily rhythm helpers ─────────────────────────────────────────────────────
+
 
 def is_active_hours(hour: Optional[int] = None) -> bool:
     """Returns True if current hour is within typical human active hours (8 AM - 11 PM)."""

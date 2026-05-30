@@ -1,4 +1,5 @@
 """Analytics and reporting agent for BASIC.FOOD."""
+
 from __future__ import annotations
 from agents.base import BaseAgent
 from tools.analytics_tools import (

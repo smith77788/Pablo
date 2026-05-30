@@ -1,4 +1,5 @@
 """Handler: show and cancel active background tasks for current user."""
+
 from __future__ import annotations
 
 from aiogram import Router, F
@@ -12,15 +13,15 @@ from services import task_registry
 router = Router()
 
 _KIND_LABELS = {
-    "strike":       "⚔️ Strike",
-    "mass_join":    "👥 Массовый вступ",
-    "mass_leave":   "🚪 Массовый выход",
-    "mass_report":  "🚨 Массовая жалоба",
-    "warmup":       "🔥 Прогрев аккаунта",
-    "scan":         "🔍 Сканирование",
-    "publish":      "📢 Публикация",
-    "dm_campaign":  "✉️ DM-кампания",
-    "bulk_edit":    "✏️ Массовое редактирование",
+    "strike": "⚔️ Strike",
+    "mass_join": "👥 Массовый вступ",
+    "mass_leave": "🚪 Массовый выход",
+    "mass_report": "🚨 Массовая жалоба",
+    "warmup": "🔥 Прогрев аккаунта",
+    "scan": "🔍 Сканирование",
+    "publish": "📢 Публикация",
+    "dm_campaign": "✉️ DM-кампания",
+    "bulk_edit": "✏️ Массовое редактирование",
 }
 
 
@@ -34,7 +35,9 @@ def _build_text_and_kb(user_id: int):
         lines = [f"⚡ <b>Активные задачи</b> ({len(tasks)}):\n"]
         for entry in tasks:
             kind_label = _KIND_LABELS.get(entry.kind, entry.kind)
-            lines.append(f"• {kind_label} — <i>{entry.label}</i> [{entry.elapsed_str()}]")
+            lines.append(
+                f"• {kind_label} — <i>{entry.label}</i> [{entry.elapsed_str()}]"
+            )
             kb.button(
                 text=f"🛑 Отменить: {kind_label}",
                 callback_data=TaskCb(action="cancel", task_id=entry.task_id),

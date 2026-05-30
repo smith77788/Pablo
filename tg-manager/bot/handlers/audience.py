@@ -1,4 +1,5 @@
 """Audience collection, stats, comparison, CSV export, and user management."""
+
 from __future__ import annotations
 import csv
 import io
@@ -8,7 +9,13 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from bot.callbacks import AudCb, BotCb
-from bot.keyboards import audience_menu, bots_pick, back_to_bot, user_profile_menu, subscription_locked_markup
+from bot.keyboards import (
+    audience_menu,
+    bots_pick,
+    back_to_bot,
+    user_profile_menu,
+    subscription_locked_markup,
+)
 from bot.states import SendToUser
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -18,8 +25,9 @@ router = Router()
 
 
 @router.callback_query(AudCb.filter(F.action == "menu"))
-async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
-                       pool: asyncpg.Pool) -> None:
+async def cb_aud_menu(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -44,8 +52,12 @@ async def cb_aud_menu(callback: CallbackQuery, callback_data: AudCb,
 
 
 @router.callback_query(AudCb.filter(F.action == "refresh"))
-async def cb_refresh(callback: CallbackQuery, callback_data: AudCb,
-                      pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_refresh(
+    callback: CallbackQuery,
+    callback_data: AudCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -72,8 +84,9 @@ async def cb_refresh(callback: CallbackQuery, callback_data: AudCb,
 
 
 @router.callback_query(AudCb.filter(F.action == "stats"))
-async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
-                    pool: asyncpg.Pool) -> None:
+async def cb_stats(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -84,9 +97,12 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
     stats = await db.get_audience_stats(pool, row["bot_id"])
     label = f"@{row['username']}" if row["username"] else row["first_name"]
 
-    lang_lines = "\n".join(
-        f"  <code>{l['lang']}</code>: {l['count']}" for l in stats["languages"]
-    ) or "  нет данных"
+    lang_lines = (
+        "\n".join(
+            f"  <code>{l['lang']}</code>: {l['count']}" for l in stats["languages"]
+        )
+        or "  нет данных"
+    )
 
     total_all = stats["total"] + stats["inactive"]
     block_pct = round(stats["inactive"] / total_all * 100, 1) if total_all else 0
@@ -113,14 +129,16 @@ async def cb_stats(callback: CallbackQuery, callback_data: AudCb,
         f"📅 <b>График (7 дней):</b>\n<code>{graph}</code>\n\n"
         f"🌍 <b>Языки (топ-10):</b>\n{lang_lines}"
     )
-    await callback.message.edit_text(text, parse_mode="HTML",
-                                      reply_markup=audience_menu(row["bot_id"]))
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=audience_menu(row["bot_id"])
+    )
     await callback.answer()
 
 
 @router.callback_query(AudCb.filter(F.action == "export"))
-async def cb_export(callback: CallbackQuery, callback_data: AudCb,
-                     pool: asyncpg.Pool) -> None:
+async def cb_export(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -137,21 +155,31 @@ async def cb_export(callback: CallbackQuery, callback_data: AudCb,
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow([
-        "user_id", "username", "first_name", "last_name",
-        "language_code", "first_seen", "last_seen", "is_active",
-    ])
+    writer.writerow(
+        [
+            "user_id",
+            "username",
+            "first_name",
+            "last_name",
+            "language_code",
+            "first_seen",
+            "last_seen",
+            "is_active",
+        ]
+    )
     for r in rows:
-        writer.writerow([
-            r["user_id"],
-            r["username"] or "",
-            r["first_name"] or "",
-            r["last_name"] or "",
-            r["language_code"] or "",
-            r["first_seen"].strftime("%Y-%m-%d %H:%M:%S"),
-            r["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
-            r["is_active"],
-        ])
+        writer.writerow(
+            [
+                r["user_id"],
+                r["username"] or "",
+                r["first_name"] or "",
+                r["last_name"] or "",
+                r["language_code"] or "",
+                r["first_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+                r["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+                r["is_active"],
+            ]
+        )
 
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = row["username"] or str(row["bot_id"])
@@ -166,8 +194,12 @@ async def cb_export(callback: CallbackQuery, callback_data: AudCb,
 
 
 @router.callback_query(AudCb.filter(F.action == "scan"))
-async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
-                   pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_scan(
+    callback: CallbackQuery,
+    callback_data: AudCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -182,7 +214,9 @@ async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
     from services import bot_api as _api
 
     start_offset = await _db.get_update_offset(pool, callback_data.bot_id)
-    users, last_id = await _api.scan_all_users(http, row["token"], start_offset=start_offset)
+    users, last_id = await _api.scan_all_users(
+        http, row["token"], start_offset=start_offset
+    )
 
     new_count = 0
     if users:
@@ -204,8 +238,9 @@ async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
 
 
 @router.callback_query(AudCb.filter(F.action == "compare"))
-async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
-                           pool: asyncpg.Pool) -> None:
+async def cb_compare_pick(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
 
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
@@ -222,8 +257,9 @@ async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
 
 
 @router.callback_query(AudCb.filter(F.action == "pick_b"))
-async def cb_compare_result(callback: CallbackQuery, callback_data: AudCb,
-                              pool: asyncpg.Pool) -> None:
+async def cb_compare_result(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
 
     row_a = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     row_b = await db.get_bot(pool, callback_data.target_id, callback.from_user.id)
@@ -251,9 +287,11 @@ async def cb_compare_result(callback: CallbackQuery, callback_data: AudCb,
 
 # ── Send to specific user ──────────────────────────────────────────────────
 
+
 @router.callback_query(AudCb.filter(F.action == "send_user"))
-async def cb_send_user(callback: CallbackQuery, callback_data: AudCb,
-                        state: FSMContext) -> None:
+async def cb_send_user(
+    callback: CallbackQuery, callback_data: AudCb, state: FSMContext
+) -> None:
     await state.set_state(SendToUser.waiting_user_id)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -281,8 +319,9 @@ async def msg_send_user_id(message: Message, state: FSMContext) -> None:
 
 
 @router.message(SendToUser.waiting_message, F.text)
-async def msg_send_user_text(message: Message, state: FSMContext,
-                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_send_user_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     await state.clear()
     bot_id = data["bot_id"]
@@ -293,7 +332,9 @@ async def msg_send_user_text(message: Message, state: FSMContext,
         await message.answer("Бот не найден.")
         return
 
-    ok, retry = await bot_api.send_message(http, row["token"], target_user_id, message.text)
+    ok, retry = await bot_api.send_message(
+        http, row["token"], target_user_id, message.text
+    )
     if ok:
         await message.answer(
             f"✅ Сообщение доставлено пользователю <code>{target_user_id}</code>.",
@@ -311,14 +352,17 @@ async def msg_send_user_text(message: Message, state: FSMContext,
 
 # ── Export audience from bot menu ─────────────────────────────────────────
 
+
 @router.callback_query(BotCb.filter(F.action == "export_audience"))
-async def cb_bot_export_audience(callback: CallbackQuery, callback_data: BotCb,
-                                  pool: asyncpg.Pool) -> None:
+async def cb_bot_export_audience(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
     """Export all bot users as a CSV file. Available from STARTER plan."""
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("Экспорт аудитории", "starter"), parse_mode="HTML",
+            locked_text("Экспорт аудитории", "starter"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter"),
         )
         return
@@ -337,20 +381,29 @@ async def cb_bot_export_audience(callback: CallbackQuery, callback_data: BotCb,
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow([
-        "user_id", "username", "first_name", "last_name",
-        "language_code", "first_seen", "last_seen",
-    ])
+    writer.writerow(
+        [
+            "user_id",
+            "username",
+            "first_name",
+            "last_name",
+            "language_code",
+            "first_seen",
+            "last_seen",
+        ]
+    )
     for r in rows:
-        writer.writerow([
-            r["user_id"],
-            r["username"] or "",
-            r["first_name"] or "",
-            r["last_name"] or "",
-            r["language_code"] or "",
-            r["first_seen"].strftime("%Y-%m-%d %H:%M:%S"),
-            r["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
-        ])
+        writer.writerow(
+            [
+                r["user_id"],
+                r["username"] or "",
+                r["first_name"] or "",
+                r["last_name"] or "",
+                r["language_code"] or "",
+                r["first_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+                r["last_seen"].strftime("%Y-%m-%d %H:%M:%S"),
+            ]
+        )
 
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = row["username"] or str(callback_data.bot_id)
@@ -366,9 +419,11 @@ async def cb_bot_export_audience(callback: CallbackQuery, callback_data: BotCb,
 
 # ── Block / unblock user ───────────────────────────────────────────────────
 
+
 @router.callback_query(AudCb.filter(F.action.in_({"block_user", "unblock_user"})))
-async def cb_block_user(callback: CallbackQuery, callback_data: AudCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_block_user(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
 
     blocked = callback_data.action == "block_user"
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -390,6 +445,8 @@ async def cb_block_user(callback: CallbackQuery, callback_data: AudCb,
         f"Язык: {lang}\n"
         f"Статус: {'🚫 Заблокирован' if blocked else '✅ Активен'}",
         parse_mode="HTML",
-        reply_markup=user_profile_menu(callback_data.bot_id, callback_data.target_id, blocked),
+        reply_markup=user_profile_menu(
+            callback_data.bot_id, callback_data.target_id, blocked
+        ),
     )
     await callback.answer(f"✅ Пользователь {action_text}.")

@@ -1,4 +1,5 @@
 """Telegram search ranking tracker — tracks bot positions for keywords."""
+
 from __future__ import annotations
 
 import html
@@ -100,6 +101,7 @@ async def _has_active_account(pool: asyncpg.Pool, owner_id: int) -> bool:
 @router.message(Command("ranking"))
 async def cmd_ranking(message: Message) -> None:
     from bot.callbacks import BmCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
     await message.answer(
@@ -126,7 +128,9 @@ async def cb_rank_menu(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="visibility")
+            ),
         )
         return
 
@@ -159,7 +163,9 @@ async def cb_rank_add(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="visibility")
+            ),
         )
         return
 
@@ -253,7 +259,10 @@ async def msg_add_keyword(
     if ok:
         try:
             from services import behavioral_engine
-            await behavioral_engine.record_search_repeat(pool, message.from_user.id, keyword)
+
+            await behavioral_engine.record_search_repeat(
+                pool, message.from_user.id, keyword
+            )
         except Exception:
             log_exc_swallow(log, "Не удалось записать поведенческое событие для ключевого слова")
 
@@ -288,9 +297,13 @@ async def cb_rank_remove(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
-    ok = await db.remove_tracked_keyword(pool, callback_data.keyword_id, callback.from_user.id)
+    ok = await db.remove_tracked_keyword(
+        pool, callback_data.keyword_id, callback.from_user.id
+    )
     if not ok:
-        await callback.answer("Ключевое слово не найдено или уже удалено.", show_alert=True)
+        await callback.answer(
+            "Ключевое слово не найдено или уже удалено.", show_alert=True
+        )
         return
 
     await callback.answer()
@@ -347,7 +360,9 @@ async def cb_rank_history(
         date_label = _relative_date(checked_at)
 
         # Trend: compare current entry to the previous one (older, i+1)
-        prev_pos: int | None = rankings[i + 1]["position"] if i + 1 < len(rankings) else None
+        prev_pos: int | None = (
+            rankings[i + 1]["position"] if i + 1 < len(rankings) else None
+        )
         arrow = _trend_arrow(pos, prev_pos)
 
         bar = _position_bar(pos)
@@ -382,7 +397,9 @@ async def cb_rank_check_now(
     if keyword_id:
         back_kb.button(
             text="◀️ Назад к истории",
-            callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=keyword_id),
+            callback_data=RankCb(
+                action="history", bot_id=bot_id, keyword_id=keyword_id
+            ),
         )
     else:
         back_kb.button(
@@ -475,7 +492,10 @@ async def cb_rank_check_now(
                 # Deterministic position lookup for UI display
                 position: int | None = None
                 for r in search_results:
-                    if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
+                    if (
+                        r.get("is_bot")
+                        and canonicalize(r.get("username", "")) == entity_id
+                    ):
                         position = r["position"]
                         break
 
@@ -498,18 +518,24 @@ async def cb_rank_check_now(
                 # Mark account as used (least-recently-used rotation)
                 await db.update_tg_account_used(pool, account["id"])
 
-                results.append({
-                    "keyword": kw["keyword"],
-                    "position": position,
-                    "keyword_id": kw["id"],
-                })
+                results.append(
+                    {
+                        "keyword": kw["keyword"],
+                        "position": position,
+                        "keyword_id": kw["id"],
+                    }
+                )
             except Exception as exc:
-                log.warning("Ошибка поиска для ключевого слова %r: %s", kw["keyword"], exc)
-                results.append({
-                    "keyword": kw["keyword"],
-                    "position": None,
-                    "keyword_id": kw["id"],
-                })
+                log.warning(
+                    "Ошибка поиска для ключевого слова %r: %s", kw["keyword"], exc
+                )
+                results.append(
+                    {
+                        "keyword": kw["keyword"],
+                        "position": None,
+                        "keyword_id": kw["id"],
+                    }
+                )
 
     except ImportError:
         log.warning("account_manager service not available")
@@ -536,7 +562,9 @@ async def cb_rank_check_now(
     if keyword_id and len(results) == 1:
         result_kb.button(
             text="📈 История позиций",
-            callback_data=RankCb(action="history", bot_id=bot_id, keyword_id=keyword_id),
+            callback_data=RankCb(
+                action="history", bot_id=bot_id, keyword_id=keyword_id
+            ),
         )
     result_kb.button(
         text="📊 К позициям",
@@ -661,7 +689,9 @@ async def cb_rank_dashboard(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="visibility")
+            ),
         )
         return
 
@@ -698,7 +728,9 @@ async def cb_rank_dashboard(
     display = sorted_keywords[:DASHBOARD_LIMIT]
 
     # Compute average rating for entries that have a position
-    positions_with_value = [e["position"] for e in keywords if e["position"] is not None]
+    positions_with_value = [
+        e["position"] for e in keywords if e["position"] is not None
+    ]
     avg_line = ""
     if positions_with_value:
         avg = sum(positions_with_value) / len(positions_with_value)
@@ -717,7 +749,9 @@ async def cb_rank_dashboard(
             lines.append(f"#{pos} {bot_safe} — «{kw_safe}»")
 
     if total > DASHBOARD_LIMIT:
-        lines.append(f"\n<i>...и ещё {total - DASHBOARD_LIMIT} слов (показаны первые {DASHBOARD_LIMIT})</i>")
+        lines.append(
+            f"\n<i>...и ещё {total - DASHBOARD_LIMIT} слов (показаны первые {DASHBOARD_LIMIT})</i>"
+        )
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -832,7 +866,9 @@ async def _render_rank_menu(
         )
         kb.button(
             text=pause_label,
-            callback_data=RankCb(action="toggle_keyword", bot_id=bot_id, keyword_id=kw["id"]),
+            callback_data=RankCb(
+                action="toggle_keyword", bot_id=bot_id, keyword_id=kw["id"]
+            ),
         )
         kb.button(
             text=f"🗑 {kw_safe_btn}",
@@ -846,7 +882,9 @@ async def _render_rank_menu(
 
     kb.row(*back_to_bot(bot_id).inline_keyboard[0])
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 async def _show_rank_menu(
@@ -860,7 +898,9 @@ async def _show_rank_menu(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="visibility")
+            ),
         )
         return
 
@@ -894,7 +934,9 @@ async def cb_rank_notify_settings(
     notify_on = await db.get_keyword_notify_enabled(pool, bot_id, owner_id)
 
     status_text = "✅ включены" if notify_on else "❌ выключены"
-    toggle_label = "🔕 Выключить уведомления" if notify_on else "🔔 Включить уведомления"
+    toggle_label = (
+        "🔕 Выключить уведомления" if notify_on else "🔔 Включить уведомления"
+    )
 
     text = (
         f"🔔 <b>Уведомления об изменении позиции — {html.escape(label)}</b>\n\n"
@@ -917,7 +959,9 @@ async def cb_rank_notify_settings(
     )
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ── action="notify_toggle" — переключить уведомления ──────────────────────
@@ -934,7 +978,9 @@ async def cb_rank_notify_toggle(
 
     new_val = await db.toggle_keyword_notify(pool, bot_id, owner_id)
     if new_val is None:
-        await callback.answer("Нет ключевых слов для изменения настроек.", show_alert=True)
+        await callback.answer(
+            "Нет ключевых слов для изменения настроек.", show_alert=True
+        )
         return
 
     status = "включены ✅" if new_val else "выключены ❌"
@@ -970,7 +1016,9 @@ async def cb_rank_notify_toggle(
     )
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1022,16 +1070,19 @@ async def vis_dashboard(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Все позиции",       callback_data=VisCb(action="all_positions"))
-    kb.button(text="🔍 По боту",           callback_data=VisCb(action="select_bot"))
-    kb.button(text="➕ Добавить слово",    callback_data=VisCb(action="add_keyword"))
-    kb.button(text="📈 Тренды",            callback_data=VisCb(action="trends"))
+    kb.button(text="📊 Все позиции", callback_data=VisCb(action="all_positions"))
+    kb.button(text="🔍 По боту", callback_data=VisCb(action="select_bot"))
+    kb.button(text="➕ Добавить слово", callback_data=VisCb(action="add_keyword"))
+    kb.button(text="📈 Тренды", callback_data=VisCb(action="trends"))
     kb.button(text="🔔 Настройки алертов", callback_data=VisCb(action="alerts"))
     from bot.callbacks import BmCb as _BmCb
-    kb.button(text="◀️ Назад",             callback_data=_BmCb(action="visibility"))
+
+    kb.button(text="◀️ Назад", callback_data=_BmCb(action="visibility"))
     kb.adjust(2, 2, 1, 1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ── VisCb(action="all_positions") — Все позиции всех ботов ───────────────────
@@ -1063,7 +1114,7 @@ async def vis_all_positions(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=VisCb(action="all_positions"))
-    kb.button(text="◀️ Назад",   callback_data=VisCb(action="dashboard"))
+    kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
     kb.adjust(2)
 
     if not rows:
@@ -1076,6 +1127,7 @@ async def vis_all_positions(
 
     # Group by bot
     from collections import defaultdict
+
     by_bot: dict[str, list] = defaultdict(list)
     for row in rows:
         by_bot[row["bot_username"] or "unknown"].append(row)
@@ -1096,7 +1148,8 @@ async def vis_all_positions(
                          AND keyword = $2
                        ORDER BY checked_at DESC
                        LIMIT 1 OFFSET 1""",
-                    bot_un, e["keyword"],
+                    bot_un,
+                    e["keyword"],
                 )
                 prev_pos = prev_row["position"] if prev_row else None
             except Exception:
@@ -1199,7 +1252,7 @@ async def vis_by_bot(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📈 Тренды", callback_data=VisCb(action="trends", bot_id=bot_id))
-    kb.button(text="◀️ Назад",  callback_data=VisCb(action="select_bot"))
+    kb.button(text="◀️ Назад", callback_data=VisCb(action="select_bot"))
     kb.adjust(2)
 
     if not rows:
@@ -1226,7 +1279,8 @@ async def vis_by_bot(
                    WHERE bot_id = $1 AND keyword = $2
                    ORDER BY checked_at DESC
                    LIMIT 1 OFFSET 1""",
-                bot_id, kw_text,
+                bot_id,
+                kw_text,
             )
             prev_pos = prev_row["position"] if prev_row else None
         except Exception:
@@ -1293,7 +1347,9 @@ async def vis_add_keyword_start(
     )
 
 
-@router.callback_query(VisCb.filter(F.action == "vis_pick_bot"), AddKeywordFSM.choosing_bot)
+@router.callback_query(
+    VisCb.filter(F.action == "vis_pick_bot"), AddKeywordFSM.choosing_bot
+)
 async def vis_pick_bot(
     callback: CallbackQuery,
     callback_data: VisCb,
@@ -1333,17 +1389,20 @@ async def vis_receive_keyword(
     await state.set_state(AddKeywordFSM.waiting_region)
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    region_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🇺🇦 UA",  callback_data="vis_reg:ua"),
-            InlineKeyboardButton(text="🇷🇺 RU",  callback_data="vis_reg:ru"),
-        ],
-        [
-            InlineKeyboardButton(text="🇬🇧 EN",  callback_data="vis_reg:en"),
-            InlineKeyboardButton(text="🌍 Все",  callback_data="vis_reg:all"),
-        ],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="vis_reg:cancel")],
-    ])
+
+    region_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🇺🇦 UA", callback_data="vis_reg:ua"),
+                InlineKeyboardButton(text="🇷🇺 RU", callback_data="vis_reg:ru"),
+            ],
+            [
+                InlineKeyboardButton(text="🇬🇧 EN", callback_data="vis_reg:en"),
+                InlineKeyboardButton(text="🌍 Все", callback_data="vis_reg:all"),
+            ],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="vis_reg:cancel")],
+        ]
+    )
 
     await message.answer(
         f"➕ <b>Добавить ключевое слово</b>\n\n"
@@ -1354,7 +1413,9 @@ async def vis_receive_keyword(
     )
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("vis_reg:"), AddKeywordFSM.waiting_region)
+@router.callback_query(
+    lambda c: c.data and c.data.startswith("vis_reg:"), AddKeywordFSM.waiting_region
+)
 async def vis_receive_region(
     callback: CallbackQuery,
     state: FSMContext,
@@ -1394,7 +1455,10 @@ async def vis_receive_region(
             """INSERT INTO search_keywords(bot_id, keyword, region, owner_id)
                VALUES($1, $2, $3, $4)
                ON CONFLICT(bot_id, keyword) DO NOTHING""",
-            bot_id, keyword, region, owner_id,
+            bot_id,
+            keyword,
+            region,
+            owner_id,
         )
         # Also insert into tracked_keywords so ranking_checker picks it up
         await pool.execute(
@@ -1408,7 +1472,7 @@ async def vis_receive_region(
         saved = False
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="👁️ Дашборд",  callback_data=VisCb(action="dashboard"))
+    kb.button(text="👁️ Дашборд", callback_data=VisCb(action="dashboard"))
     kb.button(text="➕ Ещё слово", callback_data=VisCb(action="add_keyword"))
     kb.adjust(2)
 
@@ -1508,7 +1572,7 @@ async def vis_trends(
 
     kb2 = InlineKeyboardBuilder()
     kb2.button(text="🔄 Обновить", callback_data=VisCb(action="trends", bot_id=bot_id))
-    kb2.button(text="◀️ Назад",   callback_data=VisCb(action="dashboard"))
+    kb2.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
     kb2.adjust(2)
 
     if not history_rows:
@@ -1520,6 +1584,7 @@ async def vis_trends(
         return
 
     from collections import defaultdict
+
     kw_history: dict[str, list] = defaultdict(list)
     for row in history_rows:
         kw_history[row["keyword"]].append(row)
@@ -1610,12 +1675,14 @@ async def _render_vis_alerts(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text=toggle_label,        callback_data=VisCb(action="alerts_toggle"))
+    kb.button(text=toggle_label, callback_data=VisCb(action="alerts_toggle"))
     kb.button(text="✏️ Изменить порог", callback_data=VisCb(action="alerts_threshold"))
-    kb.button(text="◀️ Назад",          callback_data=VisCb(action="dashboard"))
+    kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(VisCb.filter(F.action == "alerts_toggle"))
@@ -1638,7 +1705,8 @@ async def vis_alerts_toggle(
             """INSERT INTO visibility_alert_settings(owner_id, alerts_enabled)
                VALUES($1, $2)
                ON CONFLICT(owner_id) DO UPDATE SET alerts_enabled = EXCLUDED.alerts_enabled""",
-            owner_id, new_val,
+            owner_id,
+            new_val,
         )
     except Exception as exc:
         log.warning("vis_alerts_toggle DB error: %s", exc)
@@ -1683,7 +1751,7 @@ async def vis_receive_threshold(
         drop_thr = int(parts[0])
         rise_thr = int(parts[1]) if len(parts) > 1 else 5
         assert 1 <= drop_thr <= 50 and 1 <= rise_thr <= 50
-    except (ValueError, IndexError, AssertionError):
+    except ValueError, IndexError, AssertionError:
         await message.answer(
             "⚠️ Неверный формат. Введите два числа от 1 до 50, например: <code>10 5</code>",
             parse_mode="HTML",
@@ -1699,7 +1767,9 @@ async def vis_receive_threshold(
                ON CONFLICT(owner_id) DO UPDATE
                  SET drop_threshold = EXCLUDED.drop_threshold,
                      rise_threshold = EXCLUDED.rise_threshold""",
-            owner_id, drop_thr, rise_thr,
+            owner_id,
+            drop_thr,
+            rise_thr,
         )
         saved = True
     except Exception as exc:
@@ -1708,7 +1778,7 @@ async def vis_receive_threshold(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔔 К настройкам алертов", callback_data=VisCb(action="alerts"))
-    kb.button(text="👁️ Дашборд",              callback_data=VisCb(action="dashboard"))
+    kb.button(text="👁️ Дашборд", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 
     if saved:

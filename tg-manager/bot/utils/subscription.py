@@ -31,6 +31,7 @@ def is_platform_admin(user_id: int) -> bool:
     # Also check session admins set via ADMIN_SECRET in admin panel
     try:
         from bot.handlers.admin import _session_admins
+
         if user_id in _session_admins:
             return True
     except Exception:

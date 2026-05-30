@@ -1,4 +1,5 @@
 """Telegram Bot tools for BASIC.FOOD AI agents."""
+
 from __future__ import annotations
 import os
 import time
@@ -46,8 +47,17 @@ def send_message_with_keyboard(
     buttons: list[list[str]],
 ) -> dict:
     """Send a message with a reply keyboard."""
-    keyboard = {"keyboard": [[{"text": b} for b in row] for row in buttons], "resize_keyboard": True}
-    return _call("sendMessage", chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+    keyboard = {
+        "keyboard": [[{"text": b} for b in row] for row in buttons],
+        "resize_keyboard": True,
+    }
+    return _call(
+        "sendMessage",
+        chat_id=chat_id,
+        text=text,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 def send_message_with_inline(
@@ -57,7 +67,13 @@ def send_message_with_inline(
 ) -> dict:
     """Send a message with inline keyboard. Each button: {text, callback_data}."""
     keyboard = {"inline_keyboard": inline_buttons}
-    return _call("sendMessage", chat_id=chat_id, text=text, reply_markup=keyboard, parse_mode="HTML")
+    return _call(
+        "sendMessage",
+        chat_id=chat_id,
+        text=text,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
 
 
 def get_updates(offset: int = 0, limit: int = 100) -> list[dict]:
@@ -133,7 +149,13 @@ def get_bot_info() -> dict:
 
 
 def send_photo(chat_id: int | str, photo_url: str, caption: str = "") -> dict:
-    return _call("sendPhoto", chat_id=chat_id, photo=photo_url, caption=caption, parse_mode="HTML")
+    return _call(
+        "sendPhoto",
+        chat_id=chat_id,
+        photo=photo_url,
+        caption=caption,
+        parse_mode="HTML",
+    )
 
 
 def broadcast(chat_ids: list[int], text: str, delay: float = 0.05) -> dict[int, bool]:

@@ -1,4 +1,5 @@
 """Referral program dashboard for platform users."""
+
 from __future__ import annotations
 
 import asyncpg
@@ -15,10 +16,10 @@ router = Router()
 
 # Reward tier metadata (mirrors db._REWARD_TIERS)
 _TIERS = [
-    ("basic",    "active", 5,  "starter",    14, "🥉 Базовый"),
-    ("silver",   "paid",   3,  "starter",    30, "🥈 Серебро"),
-    ("gold",     "paid",   10, "pro",        30, "🥇 Золото"),
-    ("platinum", "paid",   25, "enterprise", 30, "💎 Платина"),
+    ("basic", "active", 5, "starter", 14, "🥉 Базовый"),
+    ("silver", "paid", 3, "starter", 30, "🥈 Серебро"),
+    ("gold", "paid", 10, "pro", 30, "🥇 Золото"),
+    ("platinum", "paid", 25, "enterprise", 30, "💎 Платина"),
 ]
 _PLAN_LABEL = {"starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}
 
@@ -48,10 +49,7 @@ def _build_dashboard(stats: dict, bot_username: str) -> str:
         else:
             bar = _progress_bar(count, threshold, width=8)
             status = f"{bar} {count}/{threshold}"
-        lines.append(
-            f"{label} [{status}]"
-            f" — {days} дн. {_PLAN_LABEL[plan]} бесплатно"
-        )
+        lines.append(f"{label} [{status}] — {days} дн. {_PLAN_LABEL[plan]} бесплатно")
 
     lines += [
         "━━━━━━━━━━━━━━━━━━",
@@ -78,6 +76,7 @@ def _dashboard_keyboard() -> object:
 @router.message(Command("referral"))
 async def cmd_referral(message: Message) -> None:
     from bot.callbacks import BmCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
     await message.answer(
@@ -96,7 +95,9 @@ async def cb_ref_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     stats = await db.get_referral_stats(pool, uid)
     me = await callback.bot.get_me()
     text = _build_dashboard(stats, me.username or "bot")
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_dashboard_keyboard())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_dashboard_keyboard()
+    )
 
 
 @router.callback_query(RefCb.filter(F.action == "leaderboard"))
@@ -105,12 +106,18 @@ async def cb_ref_leaderboard(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     rows = await db.get_referral_leaderboard_platform(pool, limit=10)
 
     if not rows:
-        text = "🏆 <b>Топ рефереров</b>\n\nПока никто не пригласил платящих пользователей."
+        text = (
+            "🏆 <b>Топ рефереров</b>\n\nПока никто не пригласил платящих пользователей."
+        )
     else:
         medals = ["🥇", "🥈", "🥉"] + ["▪️"] * 7
         lines = ["🏆 <b>Топ рефереров (по платящим)</b>\n"]
         for i, row in enumerate(rows):
-            name = row.get("first_name") or row.get("username") or f"id:{row['referrer_id']}"
+            name = (
+                row.get("first_name")
+                or row.get("username")
+                or f"id:{row['referrer_id']}"
+            )
             lines.append(
                 f"{medals[i]} {name} — "
                 f"💳 {row['paid_count']} платящих / "
@@ -120,4 +127,6 @@ async def cb_ref_leaderboard(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=RefCb(action="menu"))
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )

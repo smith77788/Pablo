@@ -7,6 +7,7 @@ Capacity Planner — прогнозирование нагрузки и безо
 - Риск флуд-вейта по текущим данным
 - Рекомендуемое количество аккаунтов
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,10 +20,10 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 # Telegram soft limits (conservative estimates)
-_SAFE_JOIN_PER_HOUR = 15       # вступлений в час на аккаунт
-_SAFE_POST_PER_HOUR = 20       # публикаций в час на аккаунт
-_SAFE_EDIT_PER_HOUR = 30       # редактирований в час на аккаунт
-_SAFE_DM_PER_HOUR = 30         # DM в час на аккаунт
+_SAFE_JOIN_PER_HOUR = 15  # вступлений в час на аккаунт
+_SAFE_POST_PER_HOUR = 20  # публикаций в час на аккаунт
+_SAFE_EDIT_PER_HOUR = 30  # редактирований в час на аккаунт
+_SAFE_DM_PER_HOUR = 30  # DM в час на аккаунт
 
 _OP_LIMITS: dict[str, int] = {
     "join": _SAFE_JOIN_PER_HOUR,
@@ -40,7 +41,7 @@ class CapacityPlan:
     account_count: int
     estimated_minutes: float
     items_per_account: int
-    risk_level: str   # low / medium / high
+    risk_level: str  # low / medium / high
     warnings: list[str] = field(default_factory=list)
     recommended_accounts: int = 1
 
@@ -49,7 +50,9 @@ class CapacityPlan:
         return self.estimated_minutes / 60
 
     def summary_text(self) -> str:
-        risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(self.risk_level, "⚪")
+        risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(
+            self.risk_level, "⚪"
+        )
         lines = [
             f"📊 <b>Прогноз операции</b>",
             f"",
@@ -95,7 +98,8 @@ async def plan_operation(
             """SELECT id, trust_score, flood_count_7d, cooldown_until
                FROM tg_accounts
                WHERE id = ANY($1) AND owner_id = $2 AND is_active = true""",
-            account_ids, owner_id,
+            account_ids,
+            owner_id,
         )
     else:
         accounts = await pool.fetch(
@@ -120,10 +124,10 @@ async def plan_operation(
 
     # Аккаунты на кулдауне
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     cooling = [
-        a for a in accounts
-        if a.get("cooldown_until") and a["cooldown_until"] > now
+        a for a in accounts if a.get("cooldown_until") and a["cooldown_until"] > now
     ]
     if cooling:
         warnings.append(f"{len(cooling)} аккаунт(ов) на кулдауне")
@@ -146,9 +150,9 @@ async def plan_operation(
         warnings.append(f"{len(high_flood)} аккаунт(ов) с высокой частотой флуд-вейтов")
 
     # Снизить effective rate для аккаунтов с флудами
-    avg_trust = sum(
-        float(a.get("trust_score") or 50) for a in accounts
-    ) / max(1, account_count)
+    avg_trust = sum(float(a.get("trust_score") or 50) for a in accounts) / max(
+        1, account_count
+    )
     trust_factor = avg_trust / 100.0  # 0.0 - 1.0
 
     effective_per_hour = safe_per_hour * (0.5 + 0.5 * trust_factor)

@@ -1,4 +1,5 @@
 """Bot profile editing: name, description, short description, photo (default language only)."""
+
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -20,9 +21,11 @@ async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | Non
 
 # ── Edit menu ─────────────────────────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "menu"))
-async def cb_edit_menu(callback: CallbackQuery, callback_data: EditCb,
-                        pool: asyncpg.Pool) -> None:
+async def cb_edit_menu(
+    callback: CallbackQuery, callback_data: EditCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -40,9 +43,11 @@ async def cb_edit_menu(callback: CallbackQuery, callback_data: EditCb,
 
 # ── Name (default language) ───────────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "name"))
-async def cb_name(callback: CallbackQuery, callback_data: EditCb,
-                   state: FSMContext) -> None:
+async def cb_name(
+    callback: CallbackQuery, callback_data: EditCb, state: FSMContext
+) -> None:
     await state.set_state(EditProfile.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text("📝 Введите новое имя бота (до 64 символов):")
@@ -50,8 +55,9 @@ async def cb_name(callback: CallbackQuery, callback_data: EditCb,
 
 
 @router.message(EditProfile.waiting_name, F.text)
-async def msg_name(message: Message, state: FSMContext,
-                   pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     token = await _get_token(pool, data["bot_id"], message.from_user.id)
     if not token:
@@ -68,18 +74,23 @@ async def msg_name(message: Message, state: FSMContext,
 
 # ── Description (default) ────────────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "desc"))
-async def cb_desc(callback: CallbackQuery, callback_data: EditCb,
-                   state: FSMContext) -> None:
+async def cb_desc(
+    callback: CallbackQuery, callback_data: EditCb, state: FSMContext
+) -> None:
     await state.set_state(EditProfile.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text("📄 Введите новое описание бота (до 512 символов):")
+    await callback.message.edit_text(
+        "📄 Введите новое описание бота (до 512 символов):"
+    )
     await callback.answer()
 
 
 @router.message(EditProfile.waiting_desc, F.text)
-async def msg_desc(message: Message, state: FSMContext,
-                   pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_desc(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     token = await _get_token(pool, data["bot_id"], message.from_user.id)
     if not token:
@@ -95,9 +106,11 @@ async def msg_desc(message: Message, state: FSMContext,
 
 # ── Short description (default) ───────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "short"))
-async def cb_short(callback: CallbackQuery, callback_data: EditCb,
-                    state: FSMContext) -> None:
+async def cb_short(
+    callback: CallbackQuery, callback_data: EditCb, state: FSMContext
+) -> None:
     await state.set_state(EditProfile.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text("📃 Введите краткое описание (до 120 символов):")
@@ -105,8 +118,9 @@ async def cb_short(callback: CallbackQuery, callback_data: EditCb,
 
 
 @router.message(EditProfile.waiting_short, F.text)
-async def msg_short(message: Message, state: FSMContext,
-                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_short(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     token = await _get_token(pool, data["bot_id"], message.from_user.id)
     if not token:
@@ -122,9 +136,11 @@ async def msg_short(message: Message, state: FSMContext,
 
 # ── Photo ─────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "photo"))
-async def cb_photo(callback: CallbackQuery, callback_data: EditCb,
-                    state: FSMContext) -> None:
+async def cb_photo(
+    callback: CallbackQuery, callback_data: EditCb, state: FSMContext
+) -> None:
     await state.set_state(EditProfile.waiting_photo)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -135,8 +151,13 @@ async def cb_photo(callback: CallbackQuery, callback_data: EditCb,
 
 
 @router.message(EditProfile.waiting_photo, F.photo)
-async def msg_photo(message: Message, state: FSMContext,
-                    bot: Bot, pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_photo(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
     data = await state.get_data()
     token = await _get_token(pool, data["bot_id"], message.from_user.id)
     if not token:
@@ -163,8 +184,12 @@ async def msg_photo_wrong(message: Message) -> None:
 
 
 @router.callback_query(EditCb.filter(F.action == "del_photo"))
-async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
-                        pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_del_photo(
+    callback: CallbackQuery,
+    callback_data: EditCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -183,9 +208,11 @@ async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
 
 # ── Update token ──────────────────────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "update_token"))
-async def cb_update_token(callback: CallbackQuery, callback_data: EditCb,
-                           state: FSMContext) -> None:
+async def cb_update_token(
+    callback: CallbackQuery, callback_data: EditCb, state: FSMContext
+) -> None:
     await state.set_state(UpdateToken.waiting_token)
     await state.update_data(old_bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -198,8 +225,9 @@ async def cb_update_token(callback: CallbackQuery, callback_data: EditCb,
 
 
 @router.message(UpdateToken.waiting_token, F.text)
-async def msg_update_token(message: Message, state: FSMContext,
-                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_update_token(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     token = message.text.strip() if message.text else ""
     if not token or ":" not in token:
         await message.answer("❌ Неверный формат токена. Попробуйте ещё раз:")
@@ -219,8 +247,9 @@ async def msg_update_token(message: Message, state: FSMContext,
     first_name = info.get("first_name", "")
 
     await state.clear()
-    await db.update_bot_token(pool, old_bot_id, message.from_user.id,
-                               token, new_bot_id, username, first_name)
+    await db.update_bot_token(
+        pool, old_bot_id, message.from_user.id, token, new_bot_id, username, first_name
+    )
 
     label = f"@{username}" if username else first_name
     await message.answer(
@@ -232,9 +261,14 @@ async def msg_update_token(message: Message, state: FSMContext,
 
 # ── Health check ──────────────────────────────────────────────────────────
 
+
 @router.callback_query(EditCb.filter(F.action == "health"))
-async def cb_health(callback: CallbackQuery, callback_data: EditCb,
-                     pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_health(
+    callback: CallbackQuery,
+    callback_data: EditCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -244,10 +278,18 @@ async def cb_health(callback: CallbackQuery, callback_data: EditCb,
     await callback.answer("⏳ Проверяю…")
     info = await bot_api.get_me(http, row["token"])
     if info:
-        label = f"@{info.get('username', '')}" if info.get("username") else info.get("first_name", str(info["id"]))
+        label = (
+            f"@{info.get('username', '')}"
+            if info.get("username")
+            else info.get("first_name", str(info["id"]))
+        )
         wh = await bot_api.get_webhook_info(http, row["token"])
         webhook_url = wh.get("url") if wh else ""
-        wh_text = f"Вебхук: <code>{webhook_url}</code>" if webhook_url else "Вебхук: не установлен (polling)"
+        wh_text = (
+            f"Вебхук: <code>{webhook_url}</code>"
+            if webhook_url
+            else "Вебхук: не установлен (polling)"
+        )
         await callback.message.edit_text(
             f"✅ <b>Бот работает нормально</b>\n\n"
             f"Имя: <b>{info.get('first_name', '')}</b>\n"

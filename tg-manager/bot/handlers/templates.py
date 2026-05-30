@@ -1,10 +1,16 @@
 """Message templates: save, list, use for broadcasts, delete."""
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import TemplateCb
-from bot.keyboards import templates_list, template_actions, broadcast_confirm, back_to_bot
+from bot.keyboards import (
+    templates_list,
+    template_actions,
+    broadcast_confirm,
+    back_to_bot,
+)
 from bot.states import AddTemplate, Broadcast
 from bot.utils.template_validator import validate_message_template, list_placeholders, replace_placeholders
 from database import db
@@ -13,8 +19,9 @@ router = Router()
 
 
 @router.callback_query(TemplateCb.filter(F.action == "list"))
-async def cb_templates_list(callback: CallbackQuery, callback_data: TemplateCb,
-                             pool: asyncpg.Pool) -> None:
+async def cb_templates_list(
+    callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
+) -> None:
 
     await callback.answer()
     bot_id = callback_data.bot_id
@@ -22,8 +29,8 @@ async def cb_templates_list(callback: CallbackQuery, callback_data: TemplateCb,
     count = len(templates)
     header = (
         f"📝 <b>Шаблоны сообщений</b>\n\nВсего: {count}"
-        if count else
-        "📝 <b>Шаблоны сообщений</b>\n\nШаблонов ещё нет."
+        if count
+        else "📝 <b>Шаблоны сообщений</b>\n\nШаблонов ещё нет."
     )
     hint = (
         "\n\n📌 <b>Что это?</b>\n"
@@ -41,8 +48,9 @@ async def cb_templates_list(callback: CallbackQuery, callback_data: TemplateCb,
 
 
 @router.callback_query(TemplateCb.filter(F.action == "add"))
-async def cb_template_add(callback: CallbackQuery, callback_data: TemplateCb,
-                           state: FSMContext) -> None:
+async def cb_template_add(
+    callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
+) -> None:
     await state.set_state(AddTemplate.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -60,7 +68,9 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Название не может быть пустым. Введите ещё раз:")
         return
     if len(name) > 64:
-        await message.answer("❌ Название слишком длинное (макс. 64 символа). Введите ещё раз:")
+        await message.answer(
+            "❌ Название слишком длинное (макс. 64 символа). Введите ещё раз:"
+        )
         return
     await state.update_data(name=name)
     await state.set_state(AddTemplate.waiting_text)
@@ -75,8 +85,9 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
 
 
 @router.message(AddTemplate.waiting_text, F.text)
-async def msg_template_text(message: Message, state: FSMContext,
-                             pool: asyncpg.Pool) -> None:
+async def msg_template_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
     name = data["name"]
     text = message.text or message.caption or ""
@@ -111,8 +122,9 @@ async def msg_template_text(message: Message, state: FSMContext,
 
 
 @router.callback_query(TemplateCb.filter(F.action == "view"))
-async def cb_template_view(callback: CallbackQuery, callback_data: TemplateCb,
-                            pool: asyncpg.Pool) -> None:
+async def cb_template_view(
+    callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
+) -> None:
 
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
@@ -128,10 +140,13 @@ async def cb_template_view(callback: CallbackQuery, callback_data: TemplateCb,
 
 
 @router.callback_query(TemplateCb.filter(F.action == "delete"))
-async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
-                              pool: asyncpg.Pool) -> None:
+async def cb_template_delete(
+    callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
+) -> None:
 
-    deleted = await db.delete_template(pool, callback_data.template_id, callback.from_user.id)
+    deleted = await db.delete_template(
+        pool, callback_data.template_id, callback.from_user.id
+    )
     if not deleted:
         await callback.answer("Не удалось удалить шаблон.", show_alert=True)
         return
@@ -139,7 +154,11 @@ async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
     templates = await db.get_templates(pool, callback.from_user.id)
     bot_id = callback_data.bot_id
     count = len(templates)
-    header = f"✅ Шаблон удалён. Осталось: {count}" if count else "✅ Шаблон удалён. Шаблонов больше нет."
+    header = (
+        f"✅ Шаблон удалён. Осталось: {count}"
+        if count
+        else "✅ Шаблон удалён. Шаблонов больше нет."
+    )
     await callback.message.edit_text(
         f"📝 <b>Шаблоны</b>\n\n{header}",
         parse_mode="HTML",
@@ -148,8 +167,12 @@ async def cb_template_delete(callback: CallbackQuery, callback_data: TemplateCb,
 
 
 @router.callback_query(TemplateCb.filter(F.action == "use"))
-async def cb_template_use(callback: CallbackQuery, callback_data: TemplateCb,
-                           pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_template_use(
+    callback: CallbackQuery,
+    callback_data: TemplateCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:

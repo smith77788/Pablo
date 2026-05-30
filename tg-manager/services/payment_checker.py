@@ -1,4 +1,5 @@
 """Background loop: verify crypto payments on-chain and activate subscriptions."""
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -14,9 +15,16 @@ NANOTON = 1_000_000_000
 _USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 
 
-def _TON_WALLET() -> str:   return os.getenv("TON_WALLET", "")
-def _TRON_WALLET() -> str:  return os.getenv("TRON_WALLET", "")
-def _TON_API_KEY() -> str:  return os.getenv("TON_API_KEY", "")
+def _TON_WALLET() -> str:
+    return os.getenv("TON_WALLET", "")
+
+
+def _TRON_WALLET() -> str:
+    return os.getenv("TRON_WALLET", "")
+
+
+def _TON_API_KEY() -> str:
+    return os.getenv("TON_API_KEY", "")
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: Bot) -> None:
@@ -28,7 +36,9 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: Bot) -> None
         await asyncio.sleep(30)
 
 
-async def _check_pending(pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: Bot) -> None:
+async def _check_pending(
+    pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: Bot
+) -> None:
     # Expire old pending payments
     await pool.execute(
         "UPDATE payments SET status='expired' WHERE status='pending' AND expires_at < now()"
@@ -68,7 +78,9 @@ async def _check_ton(pool, http, bot, payments) -> None:
                 log.warning("TON API: invalid API key (401). Check TON_API_KEY.")
                 return
             if r.status == 429:
-                log.warning("TON API: rate limited (429). Set TON_API_KEY for higher limits.")
+                log.warning(
+                    "TON API: rate limited (429). Set TON_API_KEY for higher limits."
+                )
                 return
             if r.status != 200:
                 log.warning("TON API returned %s", r.status)
@@ -100,7 +112,9 @@ async def _check_ton(pool, http, bot, payments) -> None:
             if value_nano < expected_nano * 0.98:
                 log.info(
                     "TON partial payment: ref=%s got=%d expected=%d",
-                    comment, value_nano, expected_nano,
+                    comment,
+                    value_nano,
+                    expected_nano,
                 )
                 continue
             tx_hash = tx.get("hash", "")
@@ -149,7 +163,7 @@ async def _check_trc20(pool, http, bot, payments) -> None:
     for payment in payments:
         try:
             expected = float(payment["amount_crypto"])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         for tx in data.get("token_transfers", []):
             try:
@@ -171,7 +185,8 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         """UPDATE payments SET status='confirmed', tx_hash=$1, confirmed_at=now()
            WHERE id=$2 AND status IN ('pending','confirming')
            RETURNING id""",
-        tx_hash, payment["id"],
+        tx_hash,
+        payment["id"],
     )
     if not updated:
         return  # already confirmed or expired
@@ -186,18 +201,25 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         await pool.execute(
             """INSERT INTO strike_access (user_id, payment_ref)
                VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING""",
-            user_id, payment["reference"],
+            user_id,
+            payment["reference"],
         )
-    await _activate_subscription(pool, user_id, payment["plan"], payment["period_months"])
+    await _activate_subscription(
+        pool, user_id, payment["plan"], payment["period_months"]
+    )
     log.info(
         "Payment confirmed: user=%s plan=%s months=%s ref=%s tx=%s",
-        user_id, payment["plan"], payment["period_months"],
-        payment["reference"], tx_hash[:16] if tx_hash else "",
+        user_id,
+        payment["plan"],
+        payment["period_months"],
+        payment["reference"],
+        tx_hash[:16] if tx_hash else "",
     )
 
     # Referral system: mark paid + check rewards for referrer
     try:
         from database import db as _db
+
         referrer_id = await _db.mark_referral_paid(pool, user_id)
         if referrer_id:
             await _db.check_and_grant_rewards(pool, referrer_id, bot)
@@ -215,7 +237,9 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         log.warning("Referral paid hook error: %s", e)
 
     try:
-        em = {"starter": "⭐", "pro": "🚀", "enterprise": "👑", "strike": "⚔️"}.get(payment["plan"], "💳")
+        em = {"starter": "⭐", "pro": "🚀", "enterprise": "👑", "strike": "⚔️"}.get(
+            payment["plan"], "💳"
+        )
         if payment["plan"] == "strike":
             msg = (
                 "⚔️ <b>Strike Module активирован!</b>\n\n"
@@ -254,5 +278,7 @@ async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> 
                    WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
                    ELSE now()
                END""",
-        user_id, plan, str(months),
+        user_id,
+        plan,
+        str(months),
     )

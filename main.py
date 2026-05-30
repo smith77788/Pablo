@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Entry point for Pablo — BASIC.FOOD AI agent system."""
+
 import argparse
 import logging
 import os
@@ -38,6 +39,7 @@ def main() -> None:
     args = parser.parse_args()
 
     from orchestrator import Pablo
+
     pablo = Pablo()
 
     if args.command == "telegram":

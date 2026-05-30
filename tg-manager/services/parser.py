@@ -10,6 +10,7 @@ Audience Parser Framework — извлечение аудитории из ка�
 Результаты сохраняются в parsed_audiences (дедупликация по owner+source+user_id).
 История запусков — в parser_runs.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +52,11 @@ async def _create_run(
     row = await pool.fetchrow(
         """INSERT INTO parser_runs(owner_id, source_type, source_ref, parse_type, account_id)
            VALUES ($1, $2, $3, $4, $5) RETURNING id""",
-        owner_id, source_type, source_ref, parse_type, account_id,
+        owner_id,
+        source_type,
+        source_ref,
+        parse_type,
+        account_id,
     )
     return row["id"]
 
@@ -68,7 +73,11 @@ async def _update_run(
         """UPDATE parser_runs
            SET status=$1, total_found=$2, total_saved=$3, error=$4, finished_at=NOW()
            WHERE id=$5""",
-        status, total_found, total_saved, error, run_id,
+        status,
+        total_found,
+        total_saved,
+        error,
+        run_id,
     )
 
 
@@ -94,9 +103,18 @@ async def _save_users(
                    ON CONFLICT (owner_id, source_id, tg_user_id) DO UPDATE
                    SET username=$8, first_name=$9, last_name=$10,
                        is_premium=$11, parsed_at=NOW()""",
-                owner_id, source_type, source_id, source_title, source_username,
-                run_id, u["id"], u.get("username"), u.get("first_name"), u.get("last_name"),
-                bool(u.get("premium")), bool(u.get("bot")),
+                owner_id,
+                source_type,
+                source_id,
+                source_title,
+                source_username,
+                run_id,
+                u["id"],
+                u.get("username"),
+                u.get("first_name"),
+                u.get("last_name"),
+                bool(u.get("premium")),
+                bool(u.get("bot")),
             )
             if "INSERT" in str(result):
                 saved += 1
@@ -125,7 +143,9 @@ async def parse_members(
     if not acc:
         return {"status": "error", "error": "Нет доступных аккаунтов"}
 
-    run_id = await _create_run(pool, owner_id, "channel", source_ref, "members", acc["id"])
+    run_id = await _create_run(
+        pool, owner_id, "channel", source_ref, "members", acc["id"]
+    )
 
     client = account_manager._make_client(acc["session_str"], acc)
     total_found = 0
@@ -142,17 +162,24 @@ async def parse_members(
             source_title = getattr(entity, "title", source_ref)
             source_username = getattr(entity, "username", "") or source_ref.lstrip("@")
         except Exception as e:
-            await _update_run(pool, run_id, "failed", error=f"Не удалось получить сущность: {e}")
+            await _update_run(
+                pool, run_id, "failed", error=f"Не удалось получить сущность: {e}"
+            )
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         offset = 0
         batch_size = 200
         while total_found < limit:
             try:
-                result = await client(GetParticipantsRequest(
-                    entity, ChannelParticipantsSearch(""),
-                    offset=offset, limit=min(batch_size, limit - total_found), hash=0
-                ))
+                result = await client(
+                    GetParticipantsRequest(
+                        entity,
+                        ChannelParticipantsSearch(""),
+                        offset=offset,
+                        limit=min(batch_size, limit - total_found),
+                        hash=0,
+                    )
+                )
                 if not result.users:
                     break
 
@@ -170,8 +197,14 @@ async def parse_members(
                 ]
 
                 batch_saved = await _save_users(
-                    pool, owner_id, run_id, "channel",
-                    source_id, source_title, source_username, users
+                    pool,
+                    owner_id,
+                    run_id,
+                    "channel",
+                    source_id,
+                    source_title,
+                    source_username,
+                    users,
                 )
                 total_found += len(users)
                 total_saved += batch_saved
@@ -179,7 +212,9 @@ async def parse_members(
 
                 if progress_cb:
                     try:
-                        await progress_cb(total_found, min(limit, getattr(result, "count", limit)))
+                        await progress_cb(
+                            total_found, min(limit, getattr(result, "count", limit))
+                        )
                     except Exception:
                         log_exc_swallow(log, "Сбой progress_cb в parser")
 
@@ -258,6 +293,7 @@ async def parse_active_users(
 
         seen_ids: set[int] = set()
         from datetime import datetime, timedelta, timezone
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
 
         async for msg in client.iter_messages(entity, limit=5000):
@@ -274,17 +310,25 @@ async def parse_active_users(
                 log_exc_swallow(log, "Сбой get_entity в parser", sender_id=msg.sender_id)
 
             if user:
-                users_batch = [{
-                    "id": user.id,
-                    "username": getattr(user, "username", None),
-                    "first_name": getattr(user, "first_name", None),
-                    "last_name": getattr(user, "last_name", None),
-                    "premium": getattr(user, "premium", False),
-                    "bot": getattr(user, "bot", False),
-                }]
+                users_batch = [
+                    {
+                        "id": user.id,
+                        "username": getattr(user, "username", None),
+                        "first_name": getattr(user, "first_name", None),
+                        "last_name": getattr(user, "last_name", None),
+                        "premium": getattr(user, "premium", False),
+                        "bot": getattr(user, "bot", False),
+                    }
+                ]
                 saved = await _save_users(
-                    pool, owner_id, run_id, "group",
-                    source_id, source_title, source_ref.lstrip("@"), users_batch
+                    pool,
+                    owner_id,
+                    run_id,
+                    "group",
+                    source_id,
+                    source_title,
+                    source_ref.lstrip("@"),
+                    users_batch,
                 )
                 total_found += 1
                 total_saved += saved
@@ -347,19 +391,24 @@ async def get_parsed_audience(
     where = " AND ".join(conditions)
     rows = await pool.fetch(
         f"SELECT * FROM parsed_audiences WHERE {where} "
-        f"ORDER BY parsed_at DESC OFFSET ${p} LIMIT ${p+1}",
-        *params, offset, limit,
+        f"ORDER BY parsed_at DESC OFFSET ${p} LIMIT ${p + 1}",
+        *params,
+        offset,
+        limit,
     )
     return [dict(r) for r in rows]
 
 
-async def get_run_history(pool: asyncpg.Pool, owner_id: int, limit: int = 20) -> list[dict]:
+async def get_run_history(
+    pool: asyncpg.Pool, owner_id: int, limit: int = 20
+) -> list[dict]:
     rows = await pool.fetch(
         """SELECT id, source_type, source_ref, parse_type, status,
                   total_found, total_saved, started_at, finished_at
            FROM parser_runs WHERE owner_id=$1
            ORDER BY started_at DESC LIMIT $2""",
-        owner_id, limit,
+        owner_id,
+        limit,
     )
     return [dict(r) for r in rows]
 
@@ -374,12 +423,14 @@ async def delete_audience(
     if run_id:
         result = await pool.execute(
             "DELETE FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2",
-            owner_id, run_id,
+            owner_id,
+            run_id,
         )
     elif source_id:
         result = await pool.execute(
             "DELETE FROM parsed_audiences WHERE owner_id=$1 AND source_id=$2",
-            owner_id, source_id,
+            owner_id,
+            source_id,
         )
     else:
         result = await pool.execute(

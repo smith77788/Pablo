@@ -3,6 +3,7 @@ Account Cleaner UI — управление очисткой аккаунтов.
 
 Entry: CleanerCb(action="menu")
 """
+
 from __future__ import annotations
 
 import html
@@ -32,10 +33,16 @@ def _back_kb() -> InlineKeyboardBuilder:
 async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="🚪 Выйти из всех чатов",   callback_data=CleanerCb(action="leave_all"))
-    kb.button(text="👥 Удалить контакты",        callback_data=CleanerCb(action="del_contacts"))
-    kb.button(text="📋 Список чатов аккаунта",   callback_data=CleanerCb(action="list_chats"))
-    kb.button(text="◀️ Назад",                   callback_data=BmCb(action="infrastructure"))
+    kb.button(
+        text="🚪 Выйти из всех чатов", callback_data=CleanerCb(action="leave_all")
+    )
+    kb.button(
+        text="👥 Удалить контакты", callback_data=CleanerCb(action="del_contacts")
+    )
+    kb.button(
+        text="📋 Список чатов аккаунта", callback_data=CleanerCb(action="list_chats")
+    )
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="infrastructure"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -50,7 +57,9 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     )
 
 
-async def _pick_account_kb(pool: asyncpg.Pool, owner_id: int, action: str) -> InlineKeyboardBuilder:
+async def _pick_account_kb(
+    pool: asyncpg.Pool, owner_id: int, action: str
+) -> InlineKeyboardBuilder:
     accounts = await pool.fetch(
         "SELECT id, phone, first_name FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at",
         owner_id,
@@ -58,7 +67,10 @@ async def _pick_account_kb(pool: asyncpg.Pool, owner_id: int, action: str) -> In
     kb = InlineKeyboardBuilder()
     for acc in accounts:
         label = acc.get("first_name") or acc["phone"]
-        kb.button(text=html.escape(label), callback_data=CleanerCb(action=action, account_id=acc["id"]))
+        kb.button(
+            text=html.escape(label),
+            callback_data=CleanerCb(action=action, account_id=acc["id"]),
+        )
     kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
     return kb
@@ -106,12 +118,20 @@ async def cb_do_leave_all(
 
     # Confirm step
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚠️ Да, выйти из ВСЕХ чатов", callback_data=CleanerCb(action="confirm_leave", account_id=acc_id))
-    kb.button(text="🔍 Сначала посмотреть список", callback_data=CleanerCb(action="dry_leave", account_id=acc_id))
+    kb.button(
+        text="⚠️ Да, выйти из ВСЕХ чатов",
+        callback_data=CleanerCb(action="confirm_leave", account_id=acc_id),
+    )
+    kb.button(
+        text="🔍 Сначала посмотреть список",
+        callback_data=CleanerCb(action="dry_leave", account_id=acc_id),
+    )
     kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
 
-    acc = await pool.fetchrow("SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id)
+    acc = await pool.fetchrow(
+        "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+    )
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
     await callback.message.edit_text(
@@ -137,14 +157,20 @@ async def cb_dry_leave(
         acc_id,
     )
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
+        )
         return
 
     from services.account_cleaner import leave_all_chats
+
     result = await leave_all_chats(acc["session_str"], dict(acc), dry_run=True)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"⚠️ Выйти из {result['left']} чатов", callback_data=CleanerCb(action="confirm_leave", account_id=acc_id))
+    kb.button(
+        text=f"⚠️ Выйти из {result['left']} чатов",
+        callback_data=CleanerCb(action="confirm_leave", account_id=acc_id),
+    )
     kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
 
@@ -171,7 +197,9 @@ async def cb_confirm_leave(
         acc_id,
     )
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
+        )
         return
 
     msg = await callback.message.edit_text("⏳ Выхожу из чатов...")
@@ -182,11 +210,14 @@ async def cb_confirm_leave(
         if i - last_n["n"] >= 5:
             last_n["n"] = i
             try:
-                await msg.edit_text(f"⏳ Выхожу из чатов... {i} обработано\nТекущий: {html.escape(name[:30])}")
+                await msg.edit_text(
+                    f"⏳ Выхожу из чатов... {i} обработано\nТекущий: {html.escape(name[:30])}"
+                )
             except Exception:
                 log_exc_swallow(log, "Ошибка обновления прогресса очистки аккаунта")
 
     from services.account_cleaner import leave_all_chats
+
     result = await leave_all_chats(acc["session_str"], dict(acc), progress_cb=progress)
 
     label = acc.get("first_name") or acc["phone"]
@@ -214,10 +245,13 @@ async def cb_do_del_contacts(
         acc_id,
     )
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
+        )
         return
 
     from services.account_cleaner import delete_contacts
+
     result = await delete_contacts(acc["session_str"], dict(acc))
     label = acc.get("first_name") or acc["phone"]
 
@@ -243,14 +277,20 @@ async def cb_show_chats(
         acc_id,
     )
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
+        )
         return
 
     from services.account_cleaner import get_chat_list_for_cleanup
+
     chats = await get_chat_list_for_cleanup(acc["session_str"], dict(acc))
 
     label = acc.get("first_name") or acc["phone"]
-    lines = [f"📋 <b>Чаты аккаунта {html.escape(label)}</b>\n", f"Всего: {len(chats)}\n"]
+    lines = [
+        f"📋 <b>Чаты аккаунта {html.escape(label)}</b>\n",
+        f"Всего: {len(chats)}\n",
+    ]
 
     type_icons = {"group": "👥", "channel": "📢", "pm": "💬"}
     for ch in chats[:25]:
@@ -260,7 +300,7 @@ async def cb_show_chats(
         lines.append(f"{icon} {html.escape(ch['title'][:30])}{uname}{members}")
 
     if len(chats) > 25:
-        lines.append(f"\n<i>...и ещё {len(chats)-25} чатов</i>")
+        lines.append(f"\n<i>...и ещё {len(chats) - 25} чатов</i>")
 
     await callback.message.edit_text(
         "\n".join(lines),

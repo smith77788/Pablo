@@ -1,4 +1,5 @@
 """Multigeo (per-language) bot profile editing."""
+
 import asyncio
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -7,7 +8,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import MultigeoCb, BotCb
-from bot.keyboards import multigeo_menu, multigeo_field, LANGUAGES, subscription_locked_markup
+from bot.keyboards import (
+    multigeo_menu,
+    multigeo_field,
+    LANGUAGES,
+    subscription_locked_markup,
+)
 from bot.utils.subscription import require_plan, locked_text
 from bot.states import MultigeoEdit
 from database import db
@@ -23,22 +29,27 @@ async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | Non
 
 def _after_save_markup(bot_id: int):
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌍 К мультигео", callback_data=MultigeoCb(action="menu", bot_id=bot_id))
-    kb.button(text="◀️ К боту",      callback_data=BotCb(action="select", bot_id=bot_id))
+    kb.button(
+        text="🌍 К мультигео", callback_data=MultigeoCb(action="menu", bot_id=bot_id)
+    )
+    kb.button(text="◀️ К боту", callback_data=BotCb(action="select", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
 
 
 # ── Menu ──────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "menu"))
-async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
-                            pool: asyncpg.Pool) -> None:
+async def cb_multigeo_menu(
+    callback: CallbackQuery, callback_data: MultigeoCb, pool: asyncpg.Pool
+) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("Мультигео (редактирование по языкам)", "pro"), parse_mode="HTML",
+            locked_text("Мультигео (редактирование по языкам)", "pro"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro"),
         )
         return
@@ -62,9 +73,14 @@ async def cb_multigeo_menu(callback: CallbackQuery, callback_data: MultigeoCb,
 
 # ── Names list ────────────────────────────────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "names"))
-async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_multigeo_names(
+    callback: CallbackQuery,
+    callback_data: MultigeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -76,7 +92,10 @@ async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
         *(bot_api.get_my_name(http, row["token"], code) for code, _, _ in LANGUAGES),
         return_exceptions=True,
     )
-    lang_vals = {code: (v if not isinstance(v, Exception) else "") for (code, _, _), v in zip(LANGUAGES, values)}
+    lang_vals = {
+        code: (v if not isinstance(v, Exception) else "")
+        for (code, _, _), v in zip(LANGUAGES, values)
+    }
     await callback.message.edit_text(
         "🌍 <b>Имена по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
@@ -86,9 +105,14 @@ async def cb_multigeo_names(callback: CallbackQuery, callback_data: MultigeoCb,
 
 # ── Short descriptions list ───────────────────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "short"))
-async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_multigeo_short(
+    callback: CallbackQuery,
+    callback_data: MultigeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -97,10 +121,16 @@ async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
     await callback.answer()
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
-        *(bot_api.get_my_short_description(http, row["token"], code) for code, _, _ in LANGUAGES),
+        *(
+            bot_api.get_my_short_description(http, row["token"], code)
+            for code, _, _ in LANGUAGES
+        ),
         return_exceptions=True,
     )
-    lang_vals = {code: (v if not isinstance(v, Exception) else "") for (code, _, _), v in zip(LANGUAGES, values)}
+    lang_vals = {
+        code: (v if not isinstance(v, Exception) else "")
+        for (code, _, _), v in zip(LANGUAGES, values)
+    }
     await callback.message.edit_text(
         "📋 <b>Краткие описания (about) по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
@@ -110,9 +140,14 @@ async def cb_multigeo_short(callback: CallbackQuery, callback_data: MultigeoCb,
 
 # ── Descriptions list ─────────────────────────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "desc"))
-async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
-                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_multigeo_desc(
+    callback: CallbackQuery,
+    callback_data: MultigeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -121,10 +156,16 @@ async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
     await callback.answer()
     await callback.message.edit_text("⏳ Загружаю текущие значения…")
     values = await asyncio.gather(
-        *(bot_api.get_my_description(http, row["token"], code) for code, _, _ in LANGUAGES),
+        *(
+            bot_api.get_my_description(http, row["token"], code)
+            for code, _, _ in LANGUAGES
+        ),
         return_exceptions=True,
     )
-    lang_vals = {code: (v if not isinstance(v, Exception) else "") for (code, _, _), v in zip(LANGUAGES, values)}
+    lang_vals = {
+        code: (v if not isinstance(v, Exception) else "")
+        for (code, _, _), v in zip(LANGUAGES, values)
+    }
     await callback.message.edit_text(
         "📄 <b>Описания по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
@@ -134,9 +175,11 @@ async def cb_multigeo_desc(callback: CallbackQuery, callback_data: MultigeoCb,
 
 # ── Per-language edit: name ───────────────────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "lang_name"))
-async def cb_lang_name(callback: CallbackQuery, callback_data: MultigeoCb,
-                        state: FSMContext) -> None:
+async def cb_lang_name(
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+) -> None:
     await state.set_state(MultigeoEdit.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -149,8 +192,9 @@ async def cb_lang_name(callback: CallbackQuery, callback_data: MultigeoCb,
 
 
 @router.message(MultigeoEdit.waiting_name, F.text)
-async def msg_multigeo_name(message: Message, state: FSMContext,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_multigeo_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     lang = data["lang"]
@@ -171,9 +215,11 @@ async def msg_multigeo_name(message: Message, state: FSMContext,
 
 # ── Per-language edit: short description ─────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "lang_short"))
-async def cb_lang_short(callback: CallbackQuery, callback_data: MultigeoCb,
-                         state: FSMContext) -> None:
+async def cb_lang_short(
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+) -> None:
     await state.set_state(MultigeoEdit.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -186,8 +232,9 @@ async def cb_lang_short(callback: CallbackQuery, callback_data: MultigeoCb,
 
 
 @router.message(MultigeoEdit.waiting_short, F.text)
-async def msg_multigeo_short(message: Message, state: FSMContext,
-                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_multigeo_short(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     lang = data["lang"]
@@ -208,9 +255,11 @@ async def msg_multigeo_short(message: Message, state: FSMContext,
 
 # ── Per-language edit: description ───────────────────────────────────────
 
+
 @router.callback_query(MultigeoCb.filter(F.action == "lang_desc"))
-async def cb_lang_desc(callback: CallbackQuery, callback_data: MultigeoCb,
-                        state: FSMContext) -> None:
+async def cb_lang_desc(
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+) -> None:
     await state.set_state(MultigeoEdit.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -223,8 +272,9 @@ async def cb_lang_desc(callback: CallbackQuery, callback_data: MultigeoCb,
 
 
 @router.message(MultigeoEdit.waiting_desc, F.text)
-async def msg_multigeo_desc(message: Message, state: FSMContext,
-                             pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_multigeo_desc(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     lang = data["lang"]

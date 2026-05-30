@@ -1,4 +1,5 @@
 """Add, list, select, delete managed bots."""
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
@@ -20,10 +21,12 @@ def _bot_label(row: asyncpg.Record) -> str:
 
 # ── Main menu (inline) ───────────────────────────────────────────────────
 
+
 @router.callback_query(BotCb.filter(F.action == "main"))
 async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     from bot.utils.subscription import is_platform_admin
+
     admin = is_platform_admin(callback.from_user.id)
     bots = await db.get_bots(pool, callback.from_user.id)
     bot_count = len(bots)
@@ -43,10 +46,14 @@ async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── List ──────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(BotCb.filter(F.action == "list"))
-async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool) -> None:
+async def cb_list(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     from bot.utils.subscription import is_platform_admin
+
     admin = is_platform_admin(callback.from_user.id)
     bots = await db.get_bots(pool, callback.from_user.id)
     hint = (
@@ -73,19 +80,27 @@ async def cb_list(callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.P
 
 # ── Add — step 1: ask token ───────────────────────────────────────────────
 
+
 @router.callback_query(BotCb.filter(F.action == "add"))
-async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_add(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     from bot.utils.subscription import get_plan
+
     current_plan = await get_plan(pool, callback.from_user.id)
     limit = await get_bot_limit(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
     if len(current_bots) >= limit:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
+
         kb = InlineKeyboardBuilder()
 
         if current_plan == "free":
-            kb.button(text="💳 Обновить до STARTER", callback_data=SubCb(action="choose_plan", plan="starter"))
+            kb.button(
+                text="💳 Обновить до STARTER",
+                callback_data=SubCb(action="choose_plan", plan="starter"),
+            )
             kb.button(text="🔍 Все планы", callback_data=SubCb(action="menu"))
             upgrade_text = (
                 f"⛔️ <b>Достигнут лимит FREE плана</b>\n\n"
@@ -96,7 +111,10 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool)
                 "Обновите до STARTER, чтобы продолжить добавлять ботов."
             )
         elif current_plan == "starter":
-            kb.button(text="💳 Обновить до PRO", callback_data=SubCb(action="choose_plan", plan="pro"))
+            kb.button(
+                text="💳 Обновить до PRO",
+                callback_data=SubCb(action="choose_plan", plan="pro"),
+            )
             kb.button(text="🔍 Все планы", callback_data=SubCb(action="menu"))
             upgrade_text = (
                 f"⛔️ <b>Достигнут лимит STARTER плана</b>\n\n"
@@ -136,9 +154,11 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool)
 
 # ── Add — step 2: receive token ───────────────────────────────────────────
 
+
 @router.message(AddBot.waiting_token, F.text)
-async def msg_token(message: Message, state: FSMContext,
-                    pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_token(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     token = message.text.strip()
     info_msg = await message.answer("⏳ Проверяю токен...")
 
@@ -161,17 +181,25 @@ async def msg_token(message: Message, state: FSMContext,
     await state.clear()
 
     if not added:
-        safe_uname = (bot_info.get('username') or '').replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_uname = (
+            (bot_info.get("username") or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
         from bot.utils.subscription import is_platform_admin
+
         await info_msg.edit_text(
             f"⚠️ Бот @{safe_uname} уже добавлен.",
             reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
         )
         return
 
-    raw_label = bot_info.get('username') or bot_info.get('first_name', '')
-    safe_label = raw_label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    prefix = "@" if bot_info.get('username') else ""
+    raw_label = bot_info.get("username") or bot_info.get("first_name", "")
+    safe_label = (
+        raw_label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    prefix = "@" if bot_info.get("username") else ""
     await info_msg.edit_text(
         f"✅ Бот <b>{prefix}{safe_label}</b> добавлен!",
         parse_mode="HTML",
@@ -181,9 +209,11 @@ async def msg_token(message: Message, state: FSMContext,
 
 # ── Select bot ────────────────────────────────────────────────────────────
 
+
 @router.callback_query(BotCb.filter(F.action == "select"))
-async def cb_select(callback: CallbackQuery, callback_data: BotCb,
-                    pool: asyncpg.Pool) -> None:
+async def cb_select(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -194,7 +224,9 @@ async def cb_select(callback: CallbackQuery, callback_data: BotCb,
     count = await db.get_audience_count(pool, row["bot_id"])
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     if row.get("note"):
-        safe_note = row["note"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        safe_note = (
+            row["note"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
         note_text = f"\n\n📝 <i>{safe_note}</i>"
     else:
         note_text = ""
@@ -210,16 +242,20 @@ async def cb_select(callback: CallbackQuery, callback_data: BotCb,
 
 # ── Delete — confirm ──────────────────────────────────────────────────────
 
+
 @router.callback_query(BotCb.filter(F.action == "delete"))
-async def cb_delete(callback: CallbackQuery, callback_data: BotCb,
-                    pool: asyncpg.Pool) -> None:
+async def cb_delete(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
     await callback.answer()
-    safe_label = _bot_label(row).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_label = (
+        _bot_label(row).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
     await callback.message.edit_text(
         f"🗑 Удалить бота <b>{safe_label}</b>?\n"
         "Аудитория и история рассылок тоже удалятся.",
@@ -229,8 +265,9 @@ async def cb_delete(callback: CallbackQuery, callback_data: BotCb,
 
 
 @router.callback_query(BotCb.filter(F.action == "confirm_delete"))
-async def cb_confirm_delete(callback: CallbackQuery, callback_data: BotCb,
-                             pool: asyncpg.Pool) -> None:
+async def cb_confirm_delete(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
 
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:

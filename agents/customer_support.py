@@ -1,4 +1,5 @@
 """Customer support agent for BASIC.FOOD."""
+
 from __future__ import annotations
 import json
 from agents.base import BaseAgent
@@ -195,7 +196,9 @@ class CustomerSupportAgent(BaseAgent):
             search_products,
         )
 
-    def handle_telegram(self, chat_id: int, user_text: str, customer: dict | None = None) -> str:
+    def handle_telegram(
+        self, chat_id: int, user_text: str, customer: dict | None = None
+    ) -> str:
         """Process an inbound Telegram message and send reply."""
         if user_text.strip() == "/start":
             send_message(chat_id, WELCOME_MESSAGE)
@@ -206,7 +209,10 @@ class CustomerSupportAgent(BaseAgent):
         self._trim_history(history)
 
         context = {"chat_id": chat_id, "customer": customer}
-        system = self.system_prompt + f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+        system = (
+            self.system_prompt
+            + f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+        )
 
         prompt = f"Повідомлення від клієнта (chat_id={chat_id}): {user_text}"
         reply, _ = self.run_with_history(system, history, prompt)

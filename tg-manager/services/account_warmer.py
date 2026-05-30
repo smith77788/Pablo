@@ -10,6 +10,7 @@ Account Warming System — постепенный разогрев новых а
 Все действия логируются в account_warmup_log.
 Статус плана хранится в account_warmup_plans.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,10 +33,16 @@ _WARMUP_PUBLIC_CHANNELS = [
 
 # Действия по дням разогрева
 _WARMUP_SCHEDULE: dict[str, list[str]] = {
-    "days_1_3":  ["read_channel", "view_profile", "open_chat"],
-    "days_4_7":  ["read_channel", "view_profile", "join_channel", "send_reaction"],
+    "days_1_3": ["read_channel", "view_profile", "open_chat"],
+    "days_4_7": ["read_channel", "view_profile", "join_channel", "send_reaction"],
     "days_8_14": ["read_channel", "join_channel", "send_reaction", "search"],
-    "days_15_plus": ["read_channel", "join_channel", "send_reaction", "search", "dm_bot"],
+    "days_15_plus": [
+        "read_channel",
+        "join_channel",
+        "send_reaction",
+        "search",
+        "dm_bot",
+    ],
 }
 
 
@@ -58,7 +65,7 @@ async def create_warmup_plan(
 ) -> int:
     """Создаёт план разогрева для аккаунта. Возвращает plan_id."""
     daily_map = {"gentle": 3, "standard": 5, "aggressive": 10}
-    days_map  = {"gentle": 21, "standard": 14, "aggressive": 7}
+    days_map = {"gentle": 21, "standard": 14, "aggressive": 7}
 
     row = await pool.fetchrow(
         """INSERT INTO account_warmup_plans(
@@ -68,7 +75,9 @@ async def create_warmup_plan(
                SET status='active', current_day=0, started_at=NOW(),
                    plan_type=$3, daily_actions=$4, target_days=$5
            RETURNING id""",
-        owner_id, account_id, plan_type,
+        owner_id,
+        account_id,
+        plan_type,
         daily_map.get(plan_type, 5),
         days_map.get(plan_type, 14),
     )
@@ -114,6 +123,7 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
     """Вступаем в публичный канал."""
     try:
         from telethon.tl.functions.channels import JoinChannelRequest
+
         entity = await client.get_entity(channel_ref)
         await client(JoinChannelRequest(entity))
         await asyncio.sleep(random.uniform(2, 5))
@@ -127,6 +137,7 @@ async def _perform_search(client, query: str) -> bool:
     """Имитирует поиск в Telegram."""
     try:
         from telethon.tl.functions.contacts import SearchRequest
+
         await client(SearchRequest(q=query, limit=5))
         await asyncio.sleep(random.uniform(2, 6))
         return True
@@ -147,7 +158,11 @@ async def _log_warmup_action(
         await pool.execute(
             """INSERT INTO account_warmup_log(account_id, action_type, target, success, error)
                VALUES ($1,$2,$3,$4,$5)""",
-            account_id, action_type, target, success, error,
+            account_id,
+            action_type,
+            target,
+            success,
+            error,
         )
     except Exception as e:
         log.debug("warmup log write: %s", e)
@@ -179,7 +194,12 @@ async def run_daily_warmup(
     )
     if not acc_row:
         log.warning("warmup: account %d not found or inactive", account_id)
-        return {"actions_done": 0, "actions_ok": 0, "actions_fail": 0, "completed": False}
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+        }
 
     device = dict(acc_row) if acc_row["device_model"] else None
     client = account_manager._make_client(acc_row["session_str"], device)
@@ -251,7 +271,9 @@ async def run_daily_warmup(
            SET current_day=$1, status=$2, last_action_at=NOW(),
                completed_at=CASE WHEN $2='completed' THEN NOW() ELSE NULL END
            WHERE id=$3""",
-        new_day, new_status, plan_id,
+        new_day,
+        new_status,
+        plan_id,
     )
 
     if completed and actions_ok > 0:
@@ -275,6 +297,7 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 6) -> None:
     Один запуск в день на план (проверяем last_action_at).
     """
     import asyncio
+
     while True:
         try:
             # Найти планы, которые не запускались сегодня

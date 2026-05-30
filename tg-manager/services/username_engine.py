@@ -1,28 +1,106 @@
 """Username generation engine: slugify, transliteration, variant generation."""
+
 from __future__ import annotations
 
 import re
 import unicodedata
 
 _TRANSLIT: dict[str, str] = {
-    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
-    'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
-    'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts',
-    'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu',
-    'я': 'ya',
-    'А': 'a', 'Б': 'b', 'В': 'v', 'Г': 'g', 'Д': 'd', 'Е': 'e', 'Ё': 'yo', 'Ж': 'zh',
-    'З': 'z', 'И': 'i', 'Й': 'y', 'К': 'k', 'Л': 'l', 'М': 'm', 'Н': 'n', 'О': 'o',
-    'П': 'p', 'Р': 'r', 'С': 's', 'Т': 't', 'У': 'u', 'Ф': 'f', 'Х': 'kh', 'Ц': 'ts',
-    'Ч': 'ch', 'Ш': 'sh', 'Щ': 'sch', 'Ъ': '', 'Ы': 'y', 'Ь': '', 'Э': 'e', 'Ю': 'yu',
-    'Я': 'ya',
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "yo",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+    "А": "a",
+    "Б": "b",
+    "В": "v",
+    "Г": "g",
+    "Д": "d",
+    "Е": "e",
+    "Ё": "yo",
+    "Ж": "zh",
+    "З": "z",
+    "И": "i",
+    "Й": "y",
+    "К": "k",
+    "Л": "l",
+    "М": "m",
+    "Н": "n",
+    "О": "o",
+    "П": "p",
+    "Р": "r",
+    "С": "s",
+    "Т": "t",
+    "У": "u",
+    "Ф": "f",
+    "Х": "kh",
+    "Ц": "ts",
+    "Ч": "ch",
+    "Ш": "sh",
+    "Щ": "sch",
+    "Ъ": "",
+    "Ы": "y",
+    "Ь": "",
+    "Э": "e",
+    "Ю": "yu",
+    "Я": "ya",
     # German umlauts
-    'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss',
-    'Ä': 'ae', 'Ö': 'oe', 'Ü': 'ue',
+    "ä": "ae",
+    "ö": "oe",
+    "ü": "ue",
+    "ß": "ss",
+    "Ä": "ae",
+    "Ö": "oe",
+    "Ü": "ue",
     # French
-    'à': 'a', 'â': 'a', 'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
-    'î': 'i', 'ï': 'i', 'ô': 'o', 'ù': 'u', 'û': 'u', 'ç': 'c',
+    "à": "a",
+    "â": "a",
+    "é": "e",
+    "è": "e",
+    "ê": "e",
+    "ë": "e",
+    "î": "i",
+    "ï": "i",
+    "ô": "o",
+    "ù": "u",
+    "û": "u",
+    "ç": "c",
     # Spanish/Portuguese
-    'á': 'a', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ñ': 'n', 'ã': 'a', 'õ': 'o',
+    "á": "a",
+    "í": "i",
+    "ó": "o",
+    "ú": "u",
+    "ñ": "n",
+    "ã": "a",
+    "õ": "o",
 }
 
 
@@ -33,21 +111,21 @@ def transliterate(text: str) -> str:
             result.append(_TRANSLIT[ch])
         else:
             try:
-                normalized = unicodedata.normalize('NFD', ch)
-                ascii_ch = normalized.encode('ascii', 'ignore').decode('ascii')
-                result.append(ascii_ch if ascii_ch else '_')
+                normalized = unicodedata.normalize("NFD", ch)
+                ascii_ch = normalized.encode("ascii", "ignore").decode("ascii")
+                result.append(ascii_ch if ascii_ch else "_")
             except Exception:
-                result.append('')
-    return ''.join(result)
+                result.append("")
+    return "".join(result)
 
 
 def slugify(text: str) -> str:
     """Convert text to Telegram-safe slug: lowercase a-z0-9 and underscores, max 32 chars."""
     text = transliterate(text)
     text = text.lower()
-    text = re.sub(r'[^a-z0-9]+', '_', text)
-    text = re.sub(r'_+', '_', text)
-    text = text.strip('_')
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    text = re.sub(r"_+", "_", text)
+    text = text.strip("_")
     return text[:32]
 
 
@@ -55,9 +133,9 @@ def _valid_username(username: str) -> bool:
     """Check Telegram username rules: 5-32 chars, a-z0-9_, no leading/trailing _, no __."""
     if not (5 <= len(username) <= 32):
         return False
-    if not re.match(r'^[a-z][a-z0-9_]*[a-z0-9]$', username):
+    if not re.match(r"^[a-z][a-z0-9_]*[a-z0-9]$", username):
         return False
-    if '__' in username:
+    if "__" in username:
         return False
     return True
 

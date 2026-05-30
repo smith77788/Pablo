@@ -6,6 +6,7 @@ Results feed into the Search Observability & Change Detection System
 
 search_rankings table is still populated for the UI history display.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,11 +23,12 @@ from services.search_observer import canonicalize, process_search_result
 
 log = logging.getLogger(__name__)
 
-_INTERVAL = 3600         # background sweep every hour
+_INTERVAL = 3600  # background sweep every hour
 _INTER_SEARCH_DELAY = 5  # seconds between searches (rate limit)
 
 
 # ── Account selection ──────────────────────────────────────────────────────
+
 
 async def _get_all_active_accounts(
     pool: asyncpg.Pool,
@@ -34,10 +36,12 @@ async def _get_all_active_accounts(
 ) -> list[asyncpg.Record]:
     """Return trusted active accounts ordered by trust_score DESC."""
     from database import db
+
     return await db.get_trusted_accounts(pool, owner_id)
 
 
 # ── On-demand check (called from ranking.py handler) ──────────────────────
+
 
 async def check_bot_keywords(
     pool: asyncpg.Pool,
@@ -51,10 +55,13 @@ async def check_bot_keywords(
     """
     bot_row = await pool.fetchrow(
         "SELECT username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, owner_id,
+        bot_id,
+        owner_id,
     )
     if not bot_row:
-        log.warning("check_bot_keywords: bot %s not found for owner %s", bot_id, owner_id)
+        log.warning(
+            "check_bot_keywords: bot %s not found for owner %s", bot_id, owner_id
+        )
         return []
 
     bot_username = (bot_row["username"] or "").lower().lstrip("@")
@@ -68,7 +75,8 @@ async def check_bot_keywords(
     keywords = await pool.fetch(
         "SELECT id, keyword FROM tracked_keywords "
         "WHERE bot_id=$1 AND owner_id=$2 AND is_active=TRUE",
-        bot_id, owner_id,
+        bot_id,
+        owner_id,
     )
     if not keywords:
         return []
@@ -88,7 +96,10 @@ async def check_bot_keywords(
 
                 position: int | None = None
                 for r in search_results:
-                    if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
+                    if (
+                        r.get("is_bot")
+                        and canonicalize(r.get("username", "")) == entity_id
+                    ):
                         position = r["position"]
                         break
 
@@ -107,7 +118,10 @@ async def check_bot_keywords(
                 await db.update_tg_account_used(pool, account["id"])
                 log.debug(
                     "check_bot_keywords: kw=%r bot=%r position=%s account=%s",
-                    kw["keyword"], bot_username, position, account["id"],
+                    kw["keyword"],
+                    bot_username,
+                    position,
+                    account["id"],
                 )
 
                 # Use the first successful account's result for the UI ranking entry
@@ -119,49 +133,69 @@ async def check_bot_keywords(
 
             except Exception as exc:
                 from telethon.errors import FloodWaitError
+
                 if isinstance(exc, FloodWaitError):
                     wait = min(exc.seconds + 5, 120)
                     log.warning(
                         "check_bot_keywords FloodWait %ds kw=%r account=%s — sleeping",
-                        wait, kw["keyword"], account["id"],
+                        wait,
+                        kw["keyword"],
+                        account["id"],
                     )
                     from database import db as _db
-                    await _db.record_flood_event(pool, account["id"], operation="ranking_check", flood_seconds=exc.seconds if hasattr(exc, 'seconds') else 0)
+
+                    await _db.record_flood_event(
+                        pool,
+                        account["id"],
+                        operation="ranking_check",
+                        flood_seconds=exc.seconds if hasattr(exc, "seconds") else 0,
+                    )
                     await asyncio.sleep(wait)
                 else:
                     log.warning(
                         "check_bot_keywords: error for %r account=%s: %s",
-                        kw["keyword"], account["id"], exc,
+                        kw["keyword"],
+                        account["id"],
+                        exc,
                     )
 
         # Write one UI history entry per keyword sweep
         if not ui_error:
             await pool.execute(
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
-                kw["id"], bot_id, ui_position,
+                kw["id"],
+                bot_id,
+                ui_position,
             )
             # Also persist into position_history for Visibility Engine trends
             try:
                 await pool.execute(
                     "INSERT INTO position_history(bot_id, keyword, position) VALUES($1,$2,$3)",
-                    bot_id, kw["keyword"], ui_position,
+                    bot_id,
+                    kw["keyword"],
+                    ui_position,
                 )
             except Exception as exc:
                 log.debug("position_history insert skipped: %s", exc)
             # Check visibility alerts
-            await _check_visibility_alerts(pool, bot_id, kw["keyword"], ui_position, owner_id)
+            await _check_visibility_alerts(
+                pool, bot_id, kw["keyword"], ui_position, owner_id
+            )
 
-        results_out.append({
-            "keyword": kw["keyword"],
-            "keyword_id": kw["id"],
-            "position": ui_position,
-            "error": ui_error,
-        })
+        results_out.append(
+            {
+                "keyword": kw["keyword"],
+                "keyword_id": kw["id"],
+                "position": ui_position,
+                "error": ui_error,
+            }
+        )
 
     return results_out
 
 
 # ── Background sweep ───────────────────────────────────────────────────────
+
 
 async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
     """Sweep all active keywords across all owners once."""
@@ -184,7 +218,8 @@ async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
         if not accounts:
             log.warning(
                 "ranking_checker: no active accounts for owner=%s kw=%r — skipping",
-                kw["owner_id"], kw["keyword"],
+                kw["owner_id"],
+                kw["keyword"],
             )
             continue
 
@@ -201,7 +236,10 @@ async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
 
                 position: int | None = None
                 for r in search_results:
-                    if r.get("is_bot") and canonicalize(r.get("username", "")) == entity_id:
+                    if (
+                        r.get("is_bot")
+                        and canonicalize(r.get("username", "")) == entity_id
+                    ):
                         position = r["position"]
                         break
 
@@ -220,7 +258,10 @@ async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
                 await db.update_tg_account_used(pool, account["id"])
                 log.debug(
                     "ranking_checker: kw=%r bot=%r position=%s account=%s",
-                    kw["keyword"], bot_username, position, account["id"],
+                    kw["keyword"],
+                    bot_username,
+                    position,
+                    account["id"],
                 )
 
                 # Use first successful account for the UI history entry
@@ -232,39 +273,58 @@ async def _check_all(pool: asyncpg.Pool, bot: "Bot | None" = None) -> None:
 
             except Exception as exc:
                 from telethon.errors import FloodWaitError
+
                 if isinstance(exc, FloodWaitError):
                     wait = min(exc.seconds + 5, 120)
                     log.warning(
                         "ranking_checker FloodWait %ds kw=%r account=%s — sleeping",
-                        wait, kw["keyword"], account["id"],
+                        wait,
+                        kw["keyword"],
+                        account["id"],
                     )
                     from database import db as _db
-                    await _db.record_flood_event(pool, account["id"], operation="ranking_check", flood_seconds=exc.seconds if hasattr(exc, 'seconds') else 0)
+
+                    await _db.record_flood_event(
+                        pool,
+                        account["id"],
+                        operation="ranking_check",
+                        flood_seconds=exc.seconds if hasattr(exc, "seconds") else 0,
+                    )
                     await asyncio.sleep(wait)
                 else:
                     log.warning(
                         "ranking_checker: error for kw=%r (id=%s) account=%s: %s",
-                        kw["keyword"], kw["id"], account["id"], exc,
+                        kw["keyword"],
+                        kw["id"],
+                        account["id"],
+                        exc,
                     )
 
         if ui_written:
             await pool.execute(
                 "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
-                kw["id"], kw["bot_id"], ui_position,
+                kw["id"],
+                kw["bot_id"],
+                ui_position,
             )
             # Also persist into position_history for Visibility Engine trends
             try:
                 await pool.execute(
                     "INSERT INTO position_history(bot_id, keyword, position) VALUES($1,$2,$3)",
-                    kw["bot_id"], kw["keyword"], ui_position,
+                    kw["bot_id"],
+                    kw["keyword"],
+                    ui_position,
                 )
             except Exception as exc:
                 log.debug("position_history insert skipped: %s", exc)
             # Check visibility alerts
-            await _check_visibility_alerts(pool, kw["bot_id"], kw["keyword"], ui_position, kw["owner_id"], bot)
+            await _check_visibility_alerts(
+                pool, kw["bot_id"], kw["keyword"], ui_position, kw["owner_id"], bot
+            )
 
 
 # ── Visibility alert checker ───────────────────────────────────────────────
+
 
 async def _check_visibility_alerts(
     pool: asyncpg.Pool,
@@ -299,7 +359,8 @@ async def _check_visibility_alerts(
                WHERE bot_id=$1 AND keyword=$2
                ORDER BY checked_at DESC
                LIMIT 1 OFFSET 1""",
-            bot_id, keyword,
+            bot_id,
+            keyword,
         )
         prev_pos: int | None = prev_row["position"] if prev_row else None
     except Exception:
@@ -308,7 +369,9 @@ async def _check_visibility_alerts(
     if prev_pos is None:
         return  # no history to compare against
 
-    dropped_below = position > drop_thr and (prev_pos <= drop_thr or position > prev_pos)
+    dropped_below = position > drop_thr and (
+        prev_pos <= drop_thr or position > prev_pos
+    )
     rose_above = position <= rise_thr and (prev_pos > rise_thr or position < prev_pos)
 
     if not (dropped_below or rose_above):
@@ -319,7 +382,11 @@ async def _check_visibility_alerts(
         bot_row = await pool.fetchrow(
             "SELECT username FROM managed_bots WHERE bot_id=$1 LIMIT 1", bot_id
         )
-        bot_label = f"@{bot_row['username']}" if bot_row and bot_row["username"] else f"bot#{bot_id}"
+        bot_label = (
+            f"@{bot_row['username']}"
+            if bot_row and bot_row["username"]
+            else f"bot#{bot_id}"
+        )
     except Exception:
         bot_label = f"bot#{bot_id}"
 

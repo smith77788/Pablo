@@ -11,6 +11,7 @@ Tracks:
 Интегрируется с tg_accounts (trust_score, cooldown_until, acc_status),
 account_flood_log, account_trust_history.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,17 +29,17 @@ log = logging.getLogger(__name__)
 
 
 class WarmupState(str, Enum):
-    RAW      = "raw"       # новый аккаунт, никогда не использовался
-    WARMING  = "warming"   # в процессе разогрева
-    READY    = "ready"     # готов к операциям
-    VETERAN  = "veteran"   # проверенный, много успешных операций
+    RAW = "raw"  # новый аккаунт, никогда не использовался
+    WARMING = "warming"  # в процессе разогрева
+    READY = "ready"  # готов к операциям
+    VETERAN = "veteran"  # проверенный, много успешных операций
 
 
 @dataclass
 class AccountHealth:
     account_id: int
-    health_score: float = 100.0      # 0-100, выше = лучше
-    load_score: float = 0.0          # 0-100, выше = более нагружен
+    health_score: float = 100.0  # 0-100, выше = лучше
+    load_score: float = 0.0  # 0-100, выше = более нагружен
     warmup_state: WarmupState = WarmupState.RAW
     total_ops: int = 0
     success_ops: int = 0
@@ -47,13 +48,15 @@ class AccountHealth:
     spamblock_events: int = 0
     restriction_count: int = 0
     last_updated: float = field(default_factory=time.monotonic)
-    suitability: dict[str, bool] = field(default_factory=lambda: {
-        "invite": True,
-        "dm": True,
-        "create": True,
-        "post": True,
-        "join": True,
-    })
+    suitability: dict[str, bool] = field(
+        default_factory=lambda: {
+            "invite": True,
+            "dm": True,
+            "create": True,
+            "post": True,
+            "join": True,
+        }
+    )
 
 
 # In-memory health cache
@@ -95,7 +98,9 @@ def compute_health_score(
     return max(0.0, min(100.0, score))
 
 
-def estimate_warmup_state(days_active: int, total_ops: int, trust_score: float) -> WarmupState:
+def estimate_warmup_state(
+    days_active: int, total_ops: int, trust_score: float
+) -> WarmupState:
     if trust_score < 0.2 or total_ops == 0:
         return WarmupState.RAW
     if days_active < 3 or total_ops < 10:
@@ -224,7 +229,8 @@ async def get_sorted_accounts(
              AND COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired')
            ORDER BY a.trust_score DESC NULLS LAST
            LIMIT $2""",
-        owner_id, limit * 2,
+        owner_id,
+        limit * 2,
     )
 
     scored = []
@@ -244,15 +250,17 @@ def get_health_summary(account_ids: list[int]) -> list[dict]:
     result = []
     for acc_id in account_ids:
         h = get_health(acc_id)
-        result.append({
-            "account_id": acc_id,
-            "health_score": round(h.health_score, 1),
-            "load_score": round(h.load_score, 1),
-            "warmup_state": h.warmup_state.value,
-            "flood_events_7d": h.flood_events_7d,
-            "success_rate": round(h.success_ops / max(h.total_ops, 1) * 100, 1),
-            "suitability": h.suitability,
-        })
+        result.append(
+            {
+                "account_id": acc_id,
+                "health_score": round(h.health_score, 1),
+                "load_score": round(h.load_score, 1),
+                "warmup_state": h.warmup_state.value,
+                "flood_events_7d": h.flood_events_7d,
+                "success_rate": round(h.success_ops / max(h.total_ops, 1) * 100, 1),
+                "suitability": h.suitability,
+            }
+        )
     return sorted(result, key=lambda x: -x["health_score"])
 
 

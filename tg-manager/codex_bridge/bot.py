@@ -16,7 +16,12 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ChatAction, ParseMode
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,9 +30,30 @@ HISTORY_DIR = STATE_DIR / "history"
 LOG = logging.getLogger("codex_bridge")
 
 TEXT_FILE_EXTENSIONS = {
-    ".cfg", ".conf", ".css", ".csv", ".env", ".html", ".ini", ".js", ".json",
-    ".jsx", ".log", ".md", ".mjs", ".prisma", ".py", ".sh", ".sql", ".toml",
-    ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
+    ".cfg",
+    ".conf",
+    ".css",
+    ".csv",
+    ".env",
+    ".html",
+    ".ini",
+    ".js",
+    ".json",
+    ".jsx",
+    ".log",
+    ".md",
+    ".mjs",
+    ".prisma",
+    ".py",
+    ".sh",
+    ".sql",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
 }
 STRUCTURED_FILE_EXTENSIONS = {".pdf", ".docx", ".xlsx"}
 
@@ -107,7 +133,7 @@ def _load_history(user_id: int, turns: int) -> list[dict[str, str]]:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return []
     if not isinstance(data, list):
         return []
@@ -164,7 +190,9 @@ def _extract_pdf_text(raw: bytes) -> str:
     try:
         from pypdf import PdfReader
     except ImportError as exc:
-        raise RuntimeError("PDF пока не читается: не установлена библиотека pypdf.") from exc
+        raise RuntimeError(
+            "PDF пока не читается: не установлена библиотека pypdf."
+        ) from exc
 
     reader = PdfReader(BytesIO(raw))
     parts: list[str] = []
@@ -182,7 +210,9 @@ def _extract_docx_text(raw: bytes) -> str:
     try:
         from docx import Document
     except ImportError as exc:
-        raise RuntimeError("DOCX пока не читается: не установлена библиотека python-docx.") from exc
+        raise RuntimeError(
+            "DOCX пока не читается: не установлена библиотека python-docx."
+        ) from exc
 
     doc = Document(BytesIO(raw))
     parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -201,7 +231,9 @@ def _extract_xlsx_text(raw: bytes) -> str:
     try:
         from openpyxl import load_workbook
     except ImportError as exc:
-        raise RuntimeError("XLSX пока не читается: не установлена библиотека openpyxl.") from exc
+        raise RuntimeError(
+            "XLSX пока не читается: не установлена библиотека openpyxl."
+        ) from exc
 
     workbook = load_workbook(BytesIO(raw), read_only=True, data_only=True)
     parts: list[str] = []
@@ -242,7 +274,9 @@ class BridgeConfig:
 
         self.bot_token = _str_env("TELEGRAM_CODEX_BOT_TOKEN")
         if not self.bot_token:
-            raise RuntimeError("Missing TELEGRAM_CODEX_BOT_TOKEN in tg-manager/codex_bridge/.env")
+            raise RuntimeError(
+                "Missing TELEGRAM_CODEX_BOT_TOKEN in tg-manager/codex_bridge/.env"
+            )
 
         self.admin_user_ids = _ids_env("TELEGRAM_ADMIN_USER_IDS")
         self.admin_user_ids.update(_ids_env("TELEGRAM_OWNER_USER_ID"))
@@ -297,7 +331,9 @@ class CodexBridge:
         history_text = "\n".join(
             f"{item['role'].upper()}: {item['content']}" for item in history
         )
-        history_block = f"\nRecent Telegram conversation:\n{history_text}\n" if history_text else ""
+        history_block = (
+            f"\nRecent Telegram conversation:\n{history_text}\n" if history_text else ""
+        )
 
         return (
             "You are Codex working through the BotMother Telegram bridge.\n"
@@ -352,7 +388,9 @@ class CodexBridge:
         except asyncio.TimeoutError:
             process.kill()
             await process.communicate()
-            raise RuntimeError("Время ожидания вышло. Я остановил задачу, чтобы не зависнуть.")
+            raise RuntimeError(
+                "Время ожидания вышло. Я остановил задачу, чтобы не зависнуть."
+            )
         finally:
             self.current_process = None
             self.current_started_at = None
@@ -363,7 +401,9 @@ class CodexBridge:
             detail = stderr.decode("utf-8", errors="replace").strip()
             if not detail:
                 detail = stdout.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(detail or f"Codex завершился с ошибкой {process.returncode}")
+            raise RuntimeError(
+                detail or f"Codex завершился с ошибкой {process.returncode}"
+            )
 
         try:
             answer = output_path.read_text(encoding="utf-8").strip()
@@ -460,8 +500,16 @@ class ConfirmationStore:
 def _confirm_markup(run_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Запустить", callback_data=f"codex:run:{run_id}")],
-            [InlineKeyboardButton(text="Отменить", callback_data=f"codex:cancel:{run_id}")],
+            [
+                InlineKeyboardButton(
+                    text="Запустить", callback_data=f"codex:run:{run_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Отменить", callback_data=f"codex:cancel:{run_id}"
+                )
+            ],
         ]
     )
 
@@ -480,7 +528,9 @@ async def typing_loop(bot: Bot, chat_id: int, stop: asyncio.Event) -> None:
             continue
 
 
-async def progress_loop(bot: Bot, chat_id: int, stop: asyncio.Event, interval: int) -> None:
+async def progress_loop(
+    bot: Bot, chat_id: int, stop: asyncio.Event, interval: int
+) -> None:
     phrases = [
         "Я в работе. Не завис, просто задача длинная.",
         "Двигаюсь дальше. Без лишнего шума, но держу курс.",
@@ -496,7 +546,9 @@ async def progress_loop(bot: Bot, chat_id: int, stop: asyncio.Event, interval: i
     index = 0
     while not stop.is_set():
         minutes = max(1, elapsed // 60)
-        await bot.send_message(chat_id, f"{phrases[index % len(phrases)]}\nПрошло примерно {minutes} мин.")
+        await bot.send_message(
+            chat_id, f"{phrases[index % len(phrases)]}\nПрошло примерно {minutes} мин."
+        )
         index += 1
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
@@ -519,7 +571,9 @@ async def run_user_request(
         )
         return
 
-    await message.answer("Ок, беру в работу. Если задача затянется, дам короткий статус примерно раз в 5 минут.")
+    await message.answer(
+        "Ок, беру в работу. Если задача затянется, дам короткий статус примерно раз в 5 минут."
+    )
     stop_event = asyncio.Event()
     typing_task = asyncio.create_task(typing_loop(bot, message.chat.id, stop_event))
     progress_task = asyncio.create_task(
@@ -540,7 +594,9 @@ async def run_user_request(
         await progress_task
 
 
-async def read_document_text(bot: Bot, message: Message, config: BridgeConfig) -> tuple[str, str]:
+async def read_document_text(
+    bot: Bot, message: Message, config: BridgeConfig
+) -> tuple[str, str]:
     document = message.document
     if document is None:
         raise RuntimeError("Файл не найден в сообщении.")
@@ -562,7 +618,11 @@ async def read_document_text(bot: Bot, message: Message, config: BridgeConfig) -
         limit_mb = config.max_file_bytes / 1024 / 1024
         raise RuntimeError(f"Файл слишком большой. Сейчас лимит {limit_mb:.1f} МБ.")
 
-    text = _extract_file_text(file_name, document.mime_type, raw).replace("\x00", "").strip()
+    text = (
+        _extract_file_text(file_name, document.mime_type, raw)
+        .replace("\x00", "")
+        .strip()
+    )
     if not text:
         raise RuntimeError("В файле не нашёл читаемый текст.")
     if len(text) > config.max_file_chars:
@@ -654,7 +714,9 @@ async def main() -> None:
             return
 
         stopped = await bridge.stop_current()
-        await message.answer("Остановил текущую задачу." if stopped else "Сейчас активной задачи нет.")
+        await message.answer(
+            "Остановил текущую задачу." if stopped else "Сейчас активной задачи нет."
+        )
 
     @dp.callback_query(F.data.startswith("codex:cancel:"))
     async def cancel_run(callback: CallbackQuery) -> None:
@@ -689,7 +751,9 @@ async def main() -> None:
 
         await callback.answer("Запускаю")
         if callback.message:
-            await callback.message.edit_text("Ок, запускаю. Дальше буду писать только полезные статусы.")
+            await callback.message.edit_text(
+                "Ок, запускаю. Дальше буду писать только полезные статусы."
+            )
 
         fake_message = callback.message
         if fake_message is None:
@@ -722,7 +786,9 @@ async def main() -> None:
 
         if config.confirm_before_run:
             run_id = confirmations.create(user_id, message.chat.id, prompt)
-            await message.answer("Файл прочитал. Запустить работу?", reply_markup=_confirm_markup(run_id))
+            await message.answer(
+                "Файл прочитал. Запустить работу?", reply_markup=_confirm_markup(run_id)
+            )
             return
 
         await run_user_request(bot, bridge, message, user_id, prompt)
@@ -740,7 +806,9 @@ async def main() -> None:
 
         if config.confirm_before_run:
             run_id = confirmations.create(user_id, message.chat.id, text)
-            await message.answer("Задачу понял. Запустить?", reply_markup=_confirm_markup(run_id))
+            await message.answer(
+                "Задачу понял. Запустить?", reply_markup=_confirm_markup(run_id)
+            )
             return
 
         await run_user_request(bot, bridge, message, user_id, text)

@@ -1,4 +1,5 @@
 """Presence Planner: pattern rendering and target list generation."""
+
 from __future__ import annotations
 
 from services.username_engine import slugify
@@ -45,19 +46,23 @@ def build_targets(
 
         selected_account_id = account_ids[i % n_accs] if n_accs else None
 
-        targets.append({
-            "country": geo.get("country") or None,
-            "country_code": geo.get("country_code") or None,
-            "region": geo.get("region") or None,
-            "city": geo.get("city") or None,
-            "city_slug": geo.get("city_slug") or slugify(geo.get("city", "")) or None,
-            "language": geo.get("language") or None,
-            "timezone": geo.get("timezone") or None,
-            "asset_type": asset_type,
-            "planned_name": planned_name or None,
-            "planned_username": planned_username,
-            "selected_account_id": selected_account_id,
-        })
+        targets.append(
+            {
+                "country": geo.get("country") or None,
+                "country_code": geo.get("country_code") or None,
+                "region": geo.get("region") or None,
+                "city": geo.get("city") or None,
+                "city_slug": geo.get("city_slug")
+                or slugify(geo.get("city", ""))
+                or None,
+                "language": geo.get("language") or None,
+                "timezone": geo.get("timezone") or None,
+                "asset_type": asset_type,
+                "planned_name": planned_name or None,
+                "planned_username": planned_username,
+                "selected_account_id": selected_account_id,
+            }
+        )
 
     return targets
 

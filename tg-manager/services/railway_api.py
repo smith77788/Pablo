@@ -8,6 +8,7 @@ Optional (auto-discovered if missing):
   RAILWAY_SERVICE_ID      — first service in the project
   RAILWAY_ENVIRONMENT_ID  — first environment (usually 'production')
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,7 +37,10 @@ async def _gql(http: aiohttp.ClientSession, query: str, variables: dict) -> dict
     async with http.post(
         _GQL,
         json={"query": query, "variables": variables},
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
         timeout=aiohttp.ClientTimeout(total=15),
     ) as r:
         data = await r.json()
@@ -57,14 +61,18 @@ async def _resolve_ids(http: aiohttp.ClientSession) -> tuple[str, str]:
     if not project_id:
         raise RuntimeError("RAILWAY_PROJECT_ID не задан")
 
-    data = await _gql(http, """
+    data = await _gql(
+        http,
+        """
         query Project($id: String!) {
             project(id: $id) {
                 services { edges { node { id name } } }
                 environments { edges { node { id name } } }
             }
         }
-    """, {"id": project_id})
+    """,
+        {"id": project_id},
+    )
 
     project = data.get("project", {})
     services = [e["node"] for e in project.get("services", {}).get("edges", [])]
@@ -81,8 +89,13 @@ async def _resolve_ids(http: aiohttp.ClientSession) -> tuple[str, str]:
 
     _discovered["service_id"] = svc["id"]
     _discovered["env_id"] = env["id"]
-    log.info("Railway auto-discovered: service=%s (%s), env=%s (%s)",
-             svc["id"], svc["name"], env["id"], env["name"])
+    log.info(
+        "Railway auto-discovered: service=%s (%s), env=%s (%s)",
+        svc["id"],
+        svc["name"],
+        env["id"],
+        env["name"],
+    )
 
     return svc["id"], env["id"]
 
@@ -93,11 +106,15 @@ async def list_variables(http: aiohttp.ClientSession) -> dict[str, str]:
         raise RuntimeError("Задайте RAILWAY_TOKEN и RAILWAY_PROJECT_ID")
 
     service_id, env_id = await _resolve_ids(http)
-    data = await _gql(http, """
+    data = await _gql(
+        http,
+        """
         query Variables($projectId: String!, $environmentId: String!, $serviceId: String!) {
             variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId)
         }
-    """, {"projectId": _project_id(), "environmentId": env_id, "serviceId": service_id})
+    """,
+        {"projectId": _project_id(), "environmentId": env_id, "serviceId": service_id},
+    )
 
     return dict(data.get("variables", {}))
 
@@ -108,16 +125,22 @@ async def set_variable(http: aiohttp.ClientSession, key: str, value: str) -> Non
         raise RuntimeError("Задайте RAILWAY_TOKEN и RAILWAY_PROJECT_ID")
 
     service_id, env_id = await _resolve_ids(http)
-    await _gql(http, """
+    await _gql(
+        http,
+        """
         mutation VariableCollectionUpsert($input: VariableCollectionUpsertInput!) {
             variableCollectionUpsert(input: $input)
         }
-    """, {"input": {
-        "projectId": _project_id(),
-        "environmentId": env_id,
-        "serviceId": service_id,
-        "variables": {key: value},
-    }})
+    """,
+        {
+            "input": {
+                "projectId": _project_id(),
+                "environmentId": env_id,
+                "serviceId": service_id,
+                "variables": {key: value},
+            }
+        },
+    )
 
 
 async def delete_variable(http: aiohttp.ClientSession, key: str) -> None:
@@ -126,16 +149,22 @@ async def delete_variable(http: aiohttp.ClientSession, key: str) -> None:
         raise RuntimeError("Задайте RAILWAY_TOKEN и RAILWAY_PROJECT_ID")
 
     service_id, env_id = await _resolve_ids(http)
-    await _gql(http, """
+    await _gql(
+        http,
+        """
         mutation VariableDelete($input: VariableDeleteInput!) {
             variableDelete(input: $input)
         }
-    """, {"input": {
-        "projectId": _project_id(),
-        "environmentId": env_id,
-        "serviceId": service_id,
-        "name": key,
-    }})
+    """,
+        {
+            "input": {
+                "projectId": _project_id(),
+                "environmentId": env_id,
+                "serviceId": service_id,
+                "name": key,
+            }
+        },
+    )
 
 
 def is_configured() -> bool:

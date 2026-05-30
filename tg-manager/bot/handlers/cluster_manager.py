@@ -2,6 +2,7 @@
 
 Entry point: ClustMCb(action="menu")
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,12 +22,13 @@ router = Router()
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+
 def _menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Создать кластер", callback_data=ClustMCb(action="create"))
-    kb.button(text="📋 Мои кластеры",    callback_data=ClustMCb(action="list"))
-    kb.button(text="📊 Статистика",      callback_data=ClustMCb(action="stats"))
-    kb.button(text="◀️ Назад",           callback_data=BotCb(action="main"))
+    kb.button(text="📋 Мои кластеры", callback_data=ClustMCb(action="list"))
+    kb.button(text="📊 Статистика", callback_data=ClustMCb(action="stats"))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="main"))
     kb.adjust(2, 1, 1)
     return kb
 
@@ -45,6 +47,7 @@ def _cancel_kb() -> InlineKeyboardBuilder:
 
 # ── Menu ───────────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(ClustMCb.filter(F.action == "menu"))
 async def cb_cluster_menu(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -57,6 +60,7 @@ async def cb_cluster_menu(callback: CallbackQuery) -> None:
 
 
 # ── List clusters ──────────────────────────────────────────────────────────────
+
 
 @router.callback_query(ClustMCb.filter(F.action == "list"))
 async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -101,6 +105,7 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Stats ──────────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(ClustMCb.filter(F.action == "stats"))
 async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
@@ -144,6 +149,7 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Create — step 1: name ─────────────────────────────────────────────────────
 
+
 @router.callback_query(ClustMCb.filter(F.action == "create"))
 async def cb_cluster_create(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -171,7 +177,7 @@ async def fsm_cluster_name(message: Message, state: FSMContext) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=ClustMCb(action="skip_desc"))
-    kb.button(text="❌ Отмена",     callback_data=ClustMCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=ClustMCb(action="menu"))
     kb.adjust(1)
 
     await message.answer(
@@ -183,6 +189,7 @@ async def fsm_cluster_name(message: Message, state: FSMContext) -> None:
 
 
 # ── Create — step 2: description ──────────────────────────────────────────────
+
 
 @router.callback_query(ClustMCb.filter(F.action == "skip_desc"))
 async def cb_skip_desc(callback: CallbackQuery, state: FSMContext) -> None:
@@ -216,6 +223,7 @@ async def _finish_cluster_create(message: Message, cluster_name: str) -> None:
 
 # ── View cluster bots ──────────────────────────────────────────────────────────
 
+
 @router.callback_query(ClustMCb.filter(F.action == "view"))
 async def cb_cluster_view(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
@@ -231,7 +239,8 @@ async def cb_cluster_view(
         WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE
         ORDER BY first_name
         """,
-        user_id, cluster_name,
+        user_id,
+        cluster_name,
     )
 
     lines = [f"🔗 <b>Кластер: {cluster_name}</b>\n"]
@@ -241,7 +250,9 @@ async def cb_cluster_view(
         lines.append("Нет ботов в этом кластере.")
     else:
         for bot_rec in rows:
-            name = bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
+            name = (
+                bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
+            )
             lines.append(f"🤖 @{name}")
 
     kb.button(
@@ -257,6 +268,7 @@ async def cb_cluster_view(
 
 
 # ── Broadcast redirect ─────────────────────────────────────────────────────────
+
 
 @router.callback_query(ClustMCb.filter(F.action == "broadcast"))
 async def cb_cluster_broadcast(

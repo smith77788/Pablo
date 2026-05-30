@@ -1,4 +1,5 @@
 """Network (multi-bot) management: clusters, routing weights, health, cross-bot ops + bulk."""
+
 from __future__ import annotations
 import asyncio
 import aiohttp
@@ -10,10 +11,15 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import NetworkCb, ClusterCb
 from bot.keyboards import (
-    network_ops_menu, network_clusters_menu, network_cluster_view,
-    network_assign_bot_pick, network_routing_menu,
-    network_clone_pick_source, network_clone_pick_dest,
-    network_broadcast_confirm, subscription_locked_markup,
+    network_ops_menu,
+    network_clusters_menu,
+    network_cluster_view,
+    network_assign_bot_pick,
+    network_routing_menu,
+    network_clone_pick_source,
+    network_clone_pick_dest,
+    network_broadcast_confirm,
+    subscription_locked_markup,
 )
 from bot.states import NetworkBroadcast, CloneSettings, SetRoutingWeight, AssignCluster
 from bot.utils.subscription import require_plan, locked_text
@@ -23,8 +29,10 @@ from services import broadcaster, bot_api
 router = Router()
 
 _ROLE_LABELS = {
-    "entry": "🚪 Entry", "conversion": "💰 Conversion",
-    "retention": "🔄 Retention", "general": "⚙️ General",
+    "entry": "🚪 Entry",
+    "conversion": "💰 Conversion",
+    "retention": "🔄 Retention",
+    "general": "⚙️ General",
 }
 
 
@@ -36,9 +44,9 @@ _LANG_HINT = (
 )
 
 
-async def _apply_all(pool: asyncpg.Pool, user_id: int,
-                     http: aiohttp.ClientSession,
-                     method, *args) -> tuple[int, int, int]:
+async def _apply_all(
+    pool: asyncpg.Pool, user_id: int, http: aiohttp.ClientSession, method, *args
+) -> tuple[int, int, int]:
     bots = await db.get_bots(pool, user_id)
     if not bots:
         return 0, 0, 0
@@ -61,12 +69,15 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 
 
 @router.callback_query(NetworkCb.filter(F.action == "menu"))
-async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
-                      pool: asyncpg.Pool) -> None:
+async def cb_net_menu(
+    callback: CallbackQuery, callback_data: NetworkCb, pool: asyncpg.Pool
+) -> None:
 
     await callback.answer()
     ov = await db.get_network_overview(pool, callback.from_user.id)
-    swarm_pct = round(ov["swarm_bots"] / ov["total_bots"] * 100) if ov["total_bots"] else 0
+    swarm_pct = (
+        round(ov["swarm_bots"] / ov["total_bots"] * 100) if ov["total_bots"] else 0
+    )
     await callback.message.edit_text(
         f"🌐 <b>Сеть &amp; массовые операции</b>\n\n"
         f"🤖 Ботов: <b>{ov['total_bots']}</b> | "
@@ -91,13 +102,15 @@ async def cb_net_menu(callback: CallbackQuery, callback_data: NetworkCb,
 
 # ── Analytics (PRO) ───────────────────────────────────────────────────────────
 
+
 @router.callback_query(NetworkCb.filter(F.action == "analytics"))
 async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Аналитика сети", "enterprise"), parse_mode="HTML",
+            locked_text("Аналитика сети", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -141,13 +154,15 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Clusters (ENTERPRISE) ────────────────────────────────────────────────────
 
+
 @router.callback_query(NetworkCb.filter(F.action == "clusters"))
 async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Кластеры", "enterprise"), parse_mode="HTML",
+            locked_text("Кластеры", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -158,7 +173,8 @@ async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             "🌐 <b>Кластеры</b>\n\nКластеров пока нет.\n"
             "Назначьте боту кластер через «🧬 Swarm» → «Изменить кластер».",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
     else:
         await callback.message.edit_text(
@@ -172,8 +188,9 @@ async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ClusterCb.filter(F.action == "view"))
-async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
-                           pool: asyncpg.Pool) -> None:
+async def cb_cluster_view(
+    callback: CallbackQuery, callback_data: ClusterCb, pool: asyncpg.Pool
+) -> None:
 
     await callback.answer()
     cluster = callback_data.cluster or ""
@@ -182,25 +199,31 @@ async def cb_cluster_view(callback: CallbackQuery, callback_data: ClusterCb,
     swarm_on = sum(1 for b in bots if b["swarm_enabled"])
     mode = await db.get_system_mode(pool)
 
-    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
-             f"Ботов: {len(bots)} | В Swarm: {swarm_on} | Аудитория: {total_aud:,}",
-             f"Режим: <b>{mode.upper()}</b>\n",
-             "<b>Боты:</b>"]
+    lines = [
+        f"🌐 <b>Кластер: {cluster}</b>\n",
+        f"Ботов: {len(bots)} | В Swarm: {swarm_on} | Аудитория: {total_aud:,}",
+        f"Режим: <b>{mode.upper()}</b>\n",
+        "<b>Боты:</b>",
+    ]
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
-        lines.append(f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз. | score {b['score']:.3f}")
+        lines.append(
+            f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз. | score {b['score']:.3f}"
+        )
 
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML",
+        "\n".join(lines),
+        parse_mode="HTML",
         reply_markup=network_cluster_view(cluster, bots),
     )
 
 
 @router.callback_query(ClusterCb.filter(F.action == "bulk_swarm_on"))
-async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
-                            pool: asyncpg.Pool) -> None:
+async def cb_bulk_swarm_on(
+    callback: CallbackQuery, callback_data: ClusterCb, pool: asyncpg.Pool
+) -> None:
 
     cluster = callback_data.cluster or ""
     n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, True)
@@ -208,43 +231,64 @@ async def cb_bulk_swarm_on(callback: CallbackQuery, callback_data: ClusterCb,
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     total_aud = sum(b["audience_count"] for b in bots)
     mode = await db.get_system_mode(pool)
-    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
-             f"Ботов: {len(bots)} | В Swarm: {n} | Аудитория: {total_aud:,}",
-             f"Режим: <b>{mode.upper()}</b>\n", "<b>Боты:</b>"]
+    lines = [
+        f"🌐 <b>Кластер: {cluster}</b>\n",
+        f"Ботов: {len(bots)} | В Swarm: {n} | Аудитория: {total_aud:,}",
+        f"Режим: <b>{mode.upper()}</b>\n",
+        "<b>Боты:</b>",
+    ]
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
         lines.append(f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз.")
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
-                                      reply_markup=network_cluster_view(cluster, bots))
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=network_cluster_view(cluster, bots),
+    )
 
 
 @router.callback_query(ClusterCb.filter(F.action == "bulk_swarm_off"))
-async def cb_bulk_swarm_off(callback: CallbackQuery, callback_data: ClusterCb,
-                             pool: asyncpg.Pool) -> None:
+async def cb_bulk_swarm_off(
+    callback: CallbackQuery, callback_data: ClusterCb, pool: asyncpg.Pool
+) -> None:
 
     cluster = callback_data.cluster or ""
     n = await db.bulk_set_swarm(pool, callback.from_user.id, cluster, False)
     await callback.answer(f"⚫ Swarm отключён для {n} ботов.", show_alert=True)
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     mode = await db.get_system_mode(pool)
-    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
-             f"Режим: <b>{mode.upper()}</b>\n", "<b>Боты:</b>"]
+    lines = [
+        f"🌐 <b>Кластер: {cluster}</b>\n",
+        f"Режим: <b>{mode.upper()}</b>\n",
+        "<b>Боты:</b>",
+    ]
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         lines.append(f"  ⚫ {label} — swarm off")
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
-                                      reply_markup=network_cluster_view(cluster, bots))
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=network_cluster_view(cluster, bots),
+    )
 
 
-@router.callback_query(ClusterCb.filter(F.action.in_({"bulk_role_entry", "bulk_role_conversion", "bulk_role_retention"})))
-async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
-                       pool: asyncpg.Pool) -> None:
+@router.callback_query(
+    ClusterCb.filter(
+        F.action.in_({"bulk_role_entry", "bulk_role_conversion", "bulk_role_retention"})
+    )
+)
+async def cb_bulk_role(
+    callback: CallbackQuery, callback_data: ClusterCb, pool: asyncpg.Pool
+) -> None:
 
     cluster = callback_data.cluster or ""
-    role_map = {"bulk_role_entry": "entry", "bulk_role_conversion": "conversion",
-                "bulk_role_retention": "retention"}
+    role_map = {
+        "bulk_role_entry": "entry",
+        "bulk_role_conversion": "conversion",
+        "bulk_role_retention": "retention",
+    }
     role = role_map[callback_data.action]
     n = await db.bulk_set_role(pool, callback.from_user.id, cluster, role)
     label = _ROLE_LABELS.get(role, role)
@@ -258,8 +302,12 @@ async def cb_bulk_role(callback: CallbackQuery, callback_data: ClusterCb,
 
 
 @router.callback_query(ClusterCb.filter(F.action == "assign_start"))
-async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: ClusterCb,
-                                   pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_cluster_assign_start(
+    callback: CallbackQuery,
+    callback_data: ClusterCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
@@ -277,28 +325,45 @@ async def cb_cluster_assign_start(callback: CallbackQuery, callback_data: Cluste
 
 
 @router.callback_query(ClusterCb.filter(F.action == "assign_confirm"))
-async def cb_cluster_assign_confirm(callback: CallbackQuery, callback_data: ClusterCb,
-                                     pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_cluster_assign_confirm(
+    callback: CallbackQuery,
+    callback_data: ClusterCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     cluster = callback_data.cluster or ""
     await state.clear()
-    await db.set_bot_cluster_name(pool, callback_data.bot_id, callback.from_user.id, cluster)
+    await db.set_bot_cluster_name(
+        pool, callback_data.bot_id, callback.from_user.id, cluster
+    )
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
-    label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else str(callback_data.bot_id))
+    label = (
+        f"@{row['username']}"
+        if row and row["username"]
+        else (row["first_name"] if row else str(callback_data.bot_id))
+    )
     await callback.answer(f"✅ {label} → кластер «{cluster}»", show_alert=True)
     bots = await db.get_bots_in_cluster(pool, callback.from_user.id, cluster)
     mode = await db.get_system_mode(pool)
-    lines = [f"🌐 <b>Кластер: {cluster}</b>\n",
-             f"Режим: <b>{mode.upper()}</b>\n", "<b>Боты:</b>"]
+    lines = [
+        f"🌐 <b>Кластер: {cluster}</b>\n",
+        f"Режим: <b>{mode.upper()}</b>\n",
+        "<b>Боты:</b>",
+    ]
     for b in bots:
         lbl = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         lines.append(f"  {swarm_icon} {lbl} — {b['audience_count']:,} юз.")
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
-                                      reply_markup=network_cluster_view(cluster, bots))
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=network_cluster_view(cluster, bots),
+    )
 
 
 # ── Bot Ranking (PRO) ─────────────────────────────────────────────────────────
+
 
 @router.callback_query(NetworkCb.filter(F.action == "ranking"))
 async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -306,7 +371,8 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Рейтинг ботов", "enterprise"), parse_mode="HTML",
+            locked_text("Рейтинг ботов", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -328,12 +394,15 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
     await callback.answer()
 
 
 # ── Routing Weights (PRO) ─────────────────────────────────────────────────────
+
 
 @router.callback_query(NetworkCb.filter(F.action == "routing"))
 async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -341,7 +410,8 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Веса роутинга", "enterprise"), parse_mode="HTML",
+            locked_text("Веса роутинга", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -352,14 +422,17 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             "⚖️ <b>Веса роутинга</b>\n\nНет ботов в Swarm.\n"
             "Включите Swarm для ботов через их меню → «🧬 Swarm».",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         await callback.answer()
         return
 
     total_weight = sum(float(w["weight"]) for w in weights)
-    lines = ["⚖️ <b>Веса роутинга трафика</b>\n",
-             "Вес определяет вероятность попасть именно в этот бот.\n"]
+    lines = [
+        "⚖️ <b>Веса роутинга трафика</b>\n",
+        "Вес определяет вероятность попасть именно в этот бот.\n",
+    ]
     for w in weights:
         label = f"@{w['username']}" if w["username"] else w["first_name"]
         cluster = w.get("cluster") or "default"
@@ -374,8 +447,12 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(NetworkCb.filter(F.action == "set_weight_pick"))
-async def cb_set_weight_pick(callback: CallbackQuery, callback_data: NetworkCb,
-                              pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_set_weight_pick(
+    callback: CallbackQuery,
+    callback_data: NetworkCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -399,7 +476,9 @@ async def cb_set_weight_pick(callback: CallbackQuery, callback_data: NetworkCb,
 
 
 @router.message(SetRoutingWeight.waiting_weight, F.text)
-async def msg_set_weight(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def msg_set_weight(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     try:
         weight = float(message.text.strip().replace(",", "."))
         if weight < 0 or weight > 10:
@@ -419,7 +498,8 @@ async def msg_set_weight(message: Message, state: FSMContext, pool: asyncpg.Pool
     kb.adjust(1)
     await message.answer(
         f"✅ Вес {label} установлен: <b>{weight:.1f}</b>",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -427,7 +507,9 @@ async def msg_set_weight(message: Message, state: FSMContext, pool: asyncpg.Pool
 async def cb_reset_weights(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await db.reset_routing_weights(pool, callback.from_user.id)
-    await callback.answer("✅ Все веса сброшены до 1.0 (равное распределение).", show_alert=True)
+    await callback.answer(
+        "✅ Все веса сброшены до 1.0 (равное распределение).", show_alert=True
+    )
     weights = await db.get_routing_weights_for_user(pool, callback.from_user.id)
     await callback.message.edit_text(
         "⚖️ <b>Веса роутинга</b>\n\nВсе веса сброшены — трафик распределяется равномерно.",
@@ -438,13 +520,16 @@ async def cb_reset_weights(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Health Check (PRO) ────────────────────────────────────────────────────────
 
+
 @router.callback_query(NetworkCb.filter(F.action == "health"))
-async def cb_net_health(callback: CallbackQuery, pool: asyncpg.Pool,
-                         http: aiohttp.ClientSession) -> None:
+async def cb_net_health(
+    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Здоровье сети", "enterprise"), parse_mode="HTML",
+            locked_text("Здоровье сети", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -485,20 +570,25 @@ async def cb_net_health(callback: CallbackQuery, pool: asyncpg.Pool,
     kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
     kb.adjust(2)
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── Cross-bot Broadcast (ENTERPRISE) ─────────────────────────────────────────
 
+
 @router.callback_query(NetworkCb.filter(F.action == "broadcast"))
-async def cb_net_broadcast(callback: CallbackQuery, pool: asyncpg.Pool,
-                            state: FSMContext) -> None:
+async def cb_net_broadcast(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
 
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Сетевая рассылка (legacy)", "enterprise"), parse_mode="HTML",
+            locked_text("Сетевая рассылка (legacy)", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -508,7 +598,8 @@ async def cb_net_broadcast(callback: CallbackQuery, pool: asyncpg.Pool,
         kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
         await callback.message.edit_text(
             "📢 <b>Сетевая рассылка</b>\n\nАудитория сети пуста.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
@@ -537,9 +628,13 @@ async def msg_net_broadcast_text(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(NetworkCb.filter(F.action == "broadcast_confirm"))
-async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: NetworkCb,
-                                    state: FSMContext, pool: asyncpg.Pool,
-                                    http: aiohttp.ClientSession) -> None:
+async def cb_net_broadcast_confirm(
+    callback: CallbackQuery,
+    callback_data: NetworkCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     data = await state.get_data()
     await state.clear()
@@ -555,12 +650,14 @@ async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: Netwo
         kb_empty.button(text="◀️ К сети", callback_data=NetworkCb(action="menu"))
         await callback.message.edit_text(
             "📢 <b>Сетевая рассылка</b>\n\nАудитория сети пуста.",
-            parse_mode="HTML", reply_markup=kb_empty.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb_empty.as_markup(),
         )
         return
 
     # Group by bot_id
     from collections import defaultdict
+
     by_bot: dict[int, list] = defaultdict(list)
     token_map: dict[int, str] = {}
     for u in users:
@@ -571,8 +668,9 @@ async def cb_net_broadcast_confirm(callback: CallbackQuery, callback_data: Netwo
     started_bots = 0
     for bot_id, user_ids in by_bot.items():
         token = token_map[bot_id]
-        bc_id = await db.create_broadcast(pool, bot_id, text, len(user_ids),
-                                           callback.from_user.id)
+        bc_id = await db.create_broadcast(
+            pool, bot_id, text, len(user_ids), callback.from_user.id
+        )
         broadcaster.start(pool, http, bc_id, token, bot_id, text, None, user_ids)
         started_bots += 1
 
@@ -593,11 +691,14 @@ async def cb_net_broadcast_cancel(callback: CallbackQuery, state: FSMContext) ->
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К сети", callback_data=NetworkCb(action="menu"))
-    await callback.message.edit_text("❌ Рассылка отменена.", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "❌ Рассылка отменена.", reply_markup=kb.as_markup()
+    )
     await callback.answer()
 
 
 # ── Clone Settings (ENTERPRISE) ───────────────────────────────────────────────
+
 
 @router.callback_query(NetworkCb.filter(F.action == "clone"))
 async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -605,7 +706,8 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Клонирование настроек", "enterprise"), parse_mode="HTML",
+            locked_text("Клонирование настроек", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -615,7 +717,8 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
         await callback.message.edit_text(
             "🔄 <b>Клонирование настроек</b>\n\nНужно минимум 2 бота.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         await callback.answer()
         return
@@ -629,8 +732,12 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(NetworkCb.filter(F.action == "clone_pick_dest"))
-async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: NetworkCb,
-                                  pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_net_clone_pick_dest(
+    callback: CallbackQuery,
+    callback_data: NetworkCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     bots = await db.get_bots(pool, callback.from_user.id)
     src_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -638,7 +745,9 @@ async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: Network
         await callback.answer("Бот не найден.", show_alert=True)
         return
     await callback.answer()
-    src_label = f"@{src_row['username']}" if src_row["username"] else src_row["first_name"]
+    src_label = (
+        f"@{src_row['username']}" if src_row["username"] else src_row["first_name"]
+    )
     await state.set_state(CloneSettings.picking_dest)
     await state.update_data(src_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -650,8 +759,12 @@ async def cb_net_clone_pick_dest(callback: CallbackQuery, callback_data: Network
 
 
 @router.callback_query(NetworkCb.filter(F.action == "clone_confirm"))
-async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb,
-                                pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_net_clone_confirm(
+    callback: CallbackQuery,
+    callback_data: NetworkCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     data = await state.get_data()
     await state.clear()
@@ -670,8 +783,12 @@ async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb
     await callback.answer("⏳ Клонирую настройки…")
     counts = await db.clone_bot_settings(pool, src_id, dst_id)
 
-    src_label = f"@{src_row['username']}" if src_row["username"] else src_row["first_name"]
-    dst_label = f"@{dst_row['username']}" if dst_row["username"] else dst_row["first_name"]
+    src_label = (
+        f"@{src_row['username']}" if src_row["username"] else src_row["first_name"]
+    )
+    dst_label = (
+        f"@{dst_row['username']}" if dst_row["username"] else dst_row["first_name"]
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Ещё клонирование", callback_data=NetworkCb(action="clone"))
@@ -691,13 +808,15 @@ async def cb_net_clone_confirm(callback: CallbackQuery, callback_data: NetworkCb
 
 # ── User Overlap (PRO) ────────────────────────────────────────────────────────
 
+
 @router.callback_query(NetworkCb.filter(F.action == "overlap"))
 async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Пересечение аудиторий", "enterprise"), parse_mode="HTML",
+            locked_text("Пересечение аудиторий", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -727,6 +846,8 @@ async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
     await callback.answer()

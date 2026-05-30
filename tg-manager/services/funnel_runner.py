@@ -1,4 +1,5 @@
 """Background funnel (message chain) runner service."""
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -22,20 +23,26 @@ async def _record_funnel_conversion(
         # Найти реферрера для этого пользователя в данном боте
         ref_row = await pool.fetchrow(
             "SELECT referrer_user_id FROM referrals WHERE bot_id=$1 AND referred_user_id=$2 LIMIT 1",
-            bot_id, user_id,
+            bot_id,
+            user_id,
         )
         if ref_row and ref_row["referrer_user_id"] != user_id:
             # Проверить дубли
             exists = await pool.fetchval(
                 "SELECT 1 FROM referral_conversions "
                 "WHERE bot_id=$1 AND referred_id=$2 AND funnel_id=$3 AND conversion_type='funnel_complete'",
-                bot_id, user_id, funnel_id,
+                bot_id,
+                user_id,
+                funnel_id,
             )
             if not exists:
                 await pool.execute(
                     """INSERT INTO referral_conversions(bot_id, referrer_id, referred_id, conversion_type, funnel_id)
                        VALUES($1,$2,$3,'funnel_complete',$4)""",
-                    bot_id, ref_row["referrer_user_id"], user_id, funnel_id,
+                    bot_id,
+                    ref_row["referrer_user_id"],
+                    user_id,
+                    funnel_id,
                 )
                 await pool.execute(
                     "UPDATE funnel_subscriptions SET conversion_recorded=true WHERE id=$1",
@@ -86,7 +93,11 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     next_step = row["current_step"] + 1
                     steps = await db.get_funnel_steps(pool, row["funnel_id"])
                     is_last = next_step >= row["total_steps"]
-                    next_delay = steps[next_step]["delay_minutes"] if next_step < len(steps) else 0
+                    next_delay = (
+                        steps[next_step]["delay_minutes"]
+                        if next_step < len(steps)
+                        else 0
+                    )
                     await db.advance_funnel_step(
                         pool, row["sub_id"], next_step, row["total_steps"], next_delay
                     )
@@ -94,8 +105,11 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     if is_last:
                         asyncio.create_task(
                             _record_funnel_conversion(
-                                pool, row["bot_id"], row["user_id"],
-                                row["funnel_id"], row["sub_id"],
+                                pool,
+                                row["bot_id"],
+                                row["user_id"],
+                                row["funnel_id"],
+                                row["sub_id"],
                             )
                         )
                 except Exception:

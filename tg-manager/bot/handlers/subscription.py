@@ -1,4 +1,5 @@
 """Subscription plan selection and crypto payment flow."""
+
 from __future__ import annotations
 import logging
 import os
@@ -74,10 +75,10 @@ PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
 }
 
 _PAY_SETTING_LABELS: dict[str, str] = {
-    "TON_WALLET":  "💎 TON кошелёк",
+    "TON_WALLET": "💎 TON кошелёк",
     "TRON_WALLET": "💵 USDT (TRC-20) кошелёк",
     "TON_API_KEY": "🔑 TON API ключ",
-    "TON_RATE":    "📊 Курс TON/USD",
+    "TON_RATE": "📊 Курс TON/USD",
 }
 
 router = Router()
@@ -85,11 +86,14 @@ router = Router()
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _ton_wallet() -> str:
     return os.getenv("TON_WALLET", "")
 
+
 def _tron_wallet() -> str:
     return os.getenv("TRON_WALLET", "")
+
 
 def _get_ton_rate() -> float:
     try:
@@ -97,8 +101,10 @@ def _get_ton_rate() -> float:
     except ValueError:
         return 3.0
 
+
 def _gen_ref() -> str:
     return "PAY-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
 
 def _calc(plan: str, months: int, currency: str) -> tuple[float, float]:
     """Returns (usd_total, crypto_amount)."""
@@ -109,6 +115,7 @@ def _calc(plan: str, months: int, currency: str) -> tuple[float, float]:
         return usd, round(usd / _get_ton_rate(), 2)
     return usd, usd  # USDT 1:1
 
+
 def _mask(val: str) -> str:
     if not val:
         return "❌ не задан"
@@ -118,6 +125,7 @@ def _mask(val: str) -> str:
 
 
 # ── subscription menu ────────────────────────────────────────────────────────
+
 
 async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     plan = await get_plan(pool, user_id)
@@ -159,8 +167,11 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             callback_data=SubCb(action="plan_features", plan=p),
         )
     from bot.callbacks import BotCb
+
     if is_platform_admin(user_id):
-        kb.button(text="⚙️ Настройка оплаты", callback_data=SubCb(action="payment_settings"))
+        kb.button(
+            text="⚙️ Настройка оплаты", callback_data=SubCb(action="payment_settings")
+        )
         kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
         kb.adjust(2, 2, 2, 2)
     else:
@@ -176,7 +187,9 @@ async def cmd_subscription(message: Message, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(SubCb.filter(F.action == "menu"))
-async def cb_sub_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_sub_menu(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     await callback.answer()
     await state.clear()
     text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id)
@@ -184,6 +197,7 @@ async def cb_sub_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
 
 
 # ── plan features ────────────────────────────────────────────────────────────
+
 
 @router.callback_query(SubCb.filter(F.action == "plan_features"))
 async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> None:
@@ -198,7 +212,10 @@ async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> Non
     limit_label = "∞" if bot_limit >= 9999 else str(bot_limit)
     features_text = "\n".join(f"  {f}" for f in PLAN_DETAILED_FEATURES[plan])
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"💳 Оформить {plan.upper()}", callback_data=SubCb(action="choose_plan", plan=plan))
+    kb.button(
+        text=f"💳 Оформить {plan.upper()}",
+        callback_data=SubCb(action="choose_plan", plan=plan),
+    )
     kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -210,6 +227,7 @@ async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb) -> Non
 
 
 # ── choose plan / period ─────────────────────────────────────────────────────
+
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))
 async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
@@ -239,7 +257,9 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
 
 
 @router.callback_query(SubCb.filter(F.action == "choose_period"))
-async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
+async def cb_choose_period(
+    callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
+) -> None:
     plan, months = callback_data.plan or "", callback_data.months
     ton = _ton_wallet()
     tron = _tron_wallet()
@@ -266,7 +286,7 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: 
         kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
         kb.adjust(1)
         await callback.message.edit_text(
-            f"💳 <b>{PLAN_EMOJIS.get(plan,'')} {plan.upper()} × {months} мес.</b> — <b>${usd}</b>\n\n"
+            f"💳 <b>{PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b> — <b>${usd}</b>\n\n"
             f"⚠️ Автоматическая оплата не настроена.\n\n"
             f"Нажмите <b>«📩 Запросить подписку»</b> — администратор активирует вручную после оплаты.",
             parse_mode="HTML",
@@ -286,13 +306,15 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: 
         usd_usdt, _ = _calc(plan, months, "USDT_TRC20")
         kb.button(
             text=f"💵 USDT TRC-20 — {usd_usdt:.2f} USDT",
-            callback_data=SubCb(action="pay", plan=plan, months=months, currency="USDT_TRC20"),
+            callback_data=SubCb(
+                action="pay", plan=plan, months=months, currency="USDT_TRC20"
+            ),
         )
     kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
     kb.adjust(1)
     usd_show, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20")
     await callback.message.edit_text(
-        f"💳 <b>{PLAN_EMOJIS.get(plan,'')} {plan.upper()} × {months} мес.</b>\n\n"
+        f"💳 <b>{PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b>\n\n"
         f"Итого: <b>${usd_show}</b>\n\nВыберите способ оплаты:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -301,12 +323,21 @@ async def cb_choose_period(callback: CallbackQuery, callback_data: SubCb, pool: 
 
 # ── payment ──────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(SubCb.filter(F.action == "pay"))
-async def cb_pay(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
-    plan, months, currency = callback_data.plan or "", callback_data.months, callback_data.currency or ""
+async def cb_pay(
+    callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
+) -> None:
+    plan, months, currency = (
+        callback_data.plan or "",
+        callback_data.months,
+        callback_data.currency or "",
+    )
     wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
-        await callback.answer("Кошелёк не настроен. Обратитесь к администратору.", show_alert=True)
+        await callback.answer(
+            "Кошелёк не настроен. Обратитесь к администратору.", show_alert=True
+        )
         return
     await callback.answer()
 
@@ -323,7 +354,14 @@ async def cb_pay(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Po
                                   wallet_address, reference)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
            ON CONFLICT (reference) DO NOTHING""",
-        callback.from_user.id, plan, months, currency, crypto, usd, wallet, ref,
+        callback.from_user.id,
+        plan,
+        months,
+        currency,
+        crypto,
+        usd,
+        wallet,
+        ref,
     )
 
     if currency == "TON":
@@ -400,6 +438,7 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── request subscription (no wallets configured) ─────────────────────────────
 
+
 @router.callback_query(SubCb.filter(F.action == "request_sub"))
 async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.answer()
@@ -407,9 +446,17 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     usd, _ = _calc(plan, months, "TON")
     em = PLAN_EMOJIS.get(plan, "")
     uid = callback.from_user.id
-    user_label = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.first_name or str(uid)
+    user_label = (
+        f"@{callback.from_user.username}"
+        if callback.from_user.username
+        else callback.from_user.first_name or str(uid)
+    )
 
-    admin_ids = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+    admin_ids = [
+        int(x.strip())
+        for x in os.getenv("ADMIN_IDS", "").split(",")
+        if x.strip().isdigit()
+    ]
     notify = (
         f"💳 <b>Запрос на подписку</b>\n\n"
         f"Пользователь: {user_label} (<code>{uid}</code>)\n"
@@ -439,20 +486,26 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
 
 # ── admin grant (self) ────────────────────────────────────────────────────────
 
+
 @router.callback_query(SubCb.filter(F.action == "admin_grant"))
-async def cb_admin_grant(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
+async def cb_admin_grant(
+    callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
+) -> None:
     if not is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
     await callback.answer()
     plan, months = callback_data.plan or "", max(1, callback_data.months)
     from datetime import datetime, timedelta
+
     expires = datetime.utcnow() + timedelta(days=30 * months)
     await pool.execute(
         """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
            VALUES($1,$2,$3,true)
            ON CONFLICT(user_id) DO UPDATE SET plan=$2, expires_at=$3, is_active=true""",
-        callback.from_user.id, plan, expires,
+        callback.from_user.id,
+        plan,
+        expires,
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Готово", callback_data=SubCb(action="menu"))
@@ -466,6 +519,7 @@ async def cb_admin_grant(callback: CallbackQuery, callback_data: SubCb, pool: as
 
 
 # ── payment settings (admin) ─────────────────────────────────────────────────
+
 
 def _payment_settings_kb() -> object:
     kb = InlineKeyboardBuilder()
@@ -497,8 +551,11 @@ def _payment_settings_text() -> str:
         "⚙️ <b>Настройка оплаты</b>\n\n"
         + "\n".join(status_lines)
         + "\n\n"
-        + ("✅ Автооплата активна — пользователи могут платить самостоятельно.\n\n" if pay_ok
-           else "❌ Кошельки не настроены — пользователи не могут оплатить автоматически.\n\n")
+        + (
+            "✅ Автооплата активна — пользователи могут платить самостоятельно.\n\n"
+            if pay_ok
+            else "❌ Кошельки не настроены — пользователи не могут оплатить автоматически.\n\n"
+        )
         + "<b>Инструкция:</b>\n"
         "1. Задайте TON или USDT кошелёк\n"
         "2. TON API ключ (необязательно): получить на tonconsole.com\n"
@@ -522,7 +579,9 @@ async def cb_payment_settings(callback: CallbackQuery, state: FSMContext) -> Non
 
 
 @router.callback_query(SubCb.filter(F.action == "pay_edit"))
-async def cb_pay_edit(callback: CallbackQuery, callback_data: SubCb, state: FSMContext) -> None:
+async def cb_pay_edit(
+    callback: CallbackQuery, callback_data: SubCb, state: FSMContext
+) -> None:
     if not is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
@@ -586,7 +645,9 @@ async def msg_payment_setting_value(
             return
 
     if key in ("TON_WALLET", "TRON_WALLET") and len(value) < 10:
-        await message.answer("❌ Адрес кошелька слишком короткий. Проверьте и отправьте снова.")
+        await message.answer(
+            "❌ Адрес кошелька слишком короткий. Проверьте и отправьте снова."
+        )
         await state.clear()
         return
 
@@ -599,6 +660,7 @@ async def msg_payment_setting_value(
     railway_saved = False
     try:
         from services import railway_api
+
         if railway_api.is_configured():
             await railway_api.set_variable(http, key, value)
             railway_saved = True
@@ -606,10 +668,16 @@ async def msg_payment_setting_value(
         log_exc_swallow(log, "Ошибка сохранения платёжной настройки в Railway API")
 
     label = _PAY_SETTING_LABELS[key]
-    note = "" if railway_saved else "\n\n⚠️ Railway API не настроен — значение активно до перезапуска бота. Настройте Railway Token в /admin для постоянного сохранения."
+    note = (
+        ""
+        if railway_saved
+        else "\n\n⚠️ Railway API не настроен — значение активно до перезапуска бота. Настройте Railway Token в /admin для постоянного сохранения."
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚙️ К настройкам оплаты", callback_data=SubCb(action="payment_settings"))
+    kb.button(
+        text="⚙️ К настройкам оплаты", callback_data=SubCb(action="payment_settings")
+    )
     kb.button(text="💳 К подписке", callback_data=SubCb(action="menu"))
     kb.adjust(1)
     await message.answer(

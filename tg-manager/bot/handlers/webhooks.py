@@ -1,4 +1,5 @@
 """Webhook management for managed bots."""
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import aiohttp
@@ -12,8 +13,9 @@ router = Router()
 
 
 @router.callback_query(WebhookCb.filter(F.action == "menu"))
-async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
-                           pool: asyncpg.Pool) -> None:
+async def cb_webhook_menu(
+    callback: CallbackQuery, callback_data: WebhookCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -31,13 +33,18 @@ async def cb_webhook_menu(callback: CallbackQuery, callback_data: WebhookCb,
         "• Если бот «завис» — удалите вебхук, это сбросит очередь\n"
         "• Не нужен для большинства функций TG Manager (используется polling)"
     )
-    await callback.message.edit_text(text, parse_mode="HTML",
-                                      reply_markup=webhook_menu(callback_data.bot_id))
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=webhook_menu(callback_data.bot_id)
+    )
 
 
 @router.callback_query(WebhookCb.filter(F.action == "info"))
-async def cb_webhook_info(callback: CallbackQuery, callback_data: WebhookCb,
-                           pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_webhook_info(
+    callback: CallbackQuery,
+    callback_data: WebhookCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -63,13 +70,18 @@ async def cb_webhook_info(callback: CallbackQuery, callback_data: WebhookCb,
     if last_err:
         text += f"\n⚠️ Последняя ошибка: {last_err}"
 
-    await callback.message.edit_text(text, parse_mode="HTML",
-                                      reply_markup=webhook_menu(callback_data.bot_id))
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=webhook_menu(callback_data.bot_id)
+    )
 
 
 @router.callback_query(WebhookCb.filter(F.action == "disable"))
-async def cb_webhook_disable(callback: CallbackQuery, callback_data: WebhookCb,
-                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_webhook_disable(
+    callback: CallbackQuery,
+    callback_data: WebhookCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:

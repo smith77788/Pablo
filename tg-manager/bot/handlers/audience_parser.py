@@ -10,6 +10,7 @@ Flows:
 
 Subscription: STARTER минимум для парсинга.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,9 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    BufferedInputFile, CallbackQuery, Message,
+    BufferedInputFile,
+    CallbackQuery,
+    Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -40,7 +43,7 @@ _PAGE_SIZE = 10
 
 class ParserFSM(StatesGroup):
     waiting_source = State()
-    waiting_limit   = State()
+    waiting_limit = State()
 
 
 def _back_kb() -> InlineKeyboardBuilder:
@@ -51,16 +54,24 @@ def _back_kb() -> InlineKeyboardBuilder:
 
 def _menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="👥 Парсить участников",        callback_data=ParserCb(action="start_members"))
-    kb.button(text="⚡ Парсить активных (группа)", callback_data=ParserCb(action="start_active"))
-    kb.button(text="📋 История запусков",          callback_data=ParserCb(action="runs"))
-    kb.button(text="📊 Моя аудитория",             callback_data=ParserCb(action="audience"))
-    kb.button(text="🗑 Очистить всю аудиторию",    callback_data=ParserCb(action="clear_all"))
+    kb.button(
+        text="👥 Парсить участников", callback_data=ParserCb(action="start_members")
+    )
+    kb.button(
+        text="⚡ Парсить активных (группа)",
+        callback_data=ParserCb(action="start_active"),
+    )
+    kb.button(text="📋 История запусков", callback_data=ParserCb(action="runs"))
+    kb.button(text="📊 Моя аудитория", callback_data=ParserCb(action="audience"))
+    kb.button(
+        text="🗑 Очистить всю аудиторию", callback_data=ParserCb(action="clear_all")
+    )
     kb.adjust(1)
     return kb
 
 
 # ── Главное меню парсера ──────────────────────────────────────────────────
+
 
 @router.callback_query(ParserCb.filter(F.action == "menu"))
 async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -74,14 +85,20 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
-        callback.from_user.id,
-    ) or 0
-    runs = await pool.fetchval(
-        "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1",
-        callback.from_user.id,
-    ) or 0
+    total = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+            callback.from_user.id,
+        )
+        or 0
+    )
+    runs = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1",
+            callback.from_user.id,
+        )
+        or 0
+    )
 
     await callback.message.edit_text(
         "🔍 <b>Парсер аудитории</b>\n\n"
@@ -97,9 +114,13 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Начало парсинга ──────────────────────────────────────────────────────
 
+
 @router.callback_query(ParserCb.filter(F.action.in_({"start_members", "start_active"})))
 async def cb_parser_start(
-    callback: CallbackQuery, callback_data: ParserCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: ParserCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer("🔒 Требуется PRO", show_alert=True)
@@ -114,7 +135,11 @@ async def cb_parser_start(
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
 
     type_label = "участников" if parse_type == "members" else "активных пользователей"
-    extra = "" if parse_type == "members" else "\n\n⚠️ Работает только для <b>супергрупп</b> (не каналов)"
+    extra = (
+        ""
+        if parse_type == "members"
+        else "\n\n⚠️ Работает только для <b>супергрупп</b> (не каналов)"
+    )
 
     await callback.message.edit_text(
         f"🔍 <b>Парсинг {type_label}</b>\n\n"
@@ -127,7 +152,9 @@ async def cb_parser_start(
 
 
 @router.message(ParserFSM.waiting_source)
-async def fsm_parser_source(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def fsm_parser_source(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     source = (message.text or "").strip()
     if not source:
         await message.answer("⚠️ Введите username или ссылку:")
@@ -145,7 +172,7 @@ async def fsm_parser_source(message: Message, state: FSMContext, pool: asyncpg.P
     await state.set_state(ParserFSM.waiting_limit)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="500",  callback_data=f"prs:limit:500")
+    kb.button(text="500", callback_data=f"prs:limit:500")
     kb.button(text="1000", callback_data=f"prs:limit:1000")
     kb.button(text="5000", callback_data=f"prs:limit:5000")
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
@@ -161,14 +188,18 @@ async def fsm_parser_source(message: Message, state: FSMContext, pool: asyncpg.P
 
 
 @router.callback_query(F.data.startswith("prs:limit:"))
-async def cb_parser_limit_quick(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_parser_limit_quick(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     limit = int(callback.data.split(":")[-1])
     await _start_parse(callback.message, state, pool, callback.from_user.id, limit)
 
 
 @router.message(ParserFSM.waiting_limit)
-async def fsm_parser_limit(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def fsm_parser_limit(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     text = (message.text or "").strip()
     try:
         limit = int(text.replace(" ", "").replace(",", ""))
@@ -222,9 +253,13 @@ async def _start_parse(
 
     try:
         if parse_type == "members":
-            result = await parse_members(pool, owner_id, source, limit=limit, progress_cb=progress_cb)
+            result = await parse_members(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
         else:
-            result = await parse_active_users(pool, owner_id, source, limit=limit, progress_cb=progress_cb)
+            result = await parse_active_users(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
     except Exception as e:
         await progress_msg.edit_text(
             f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(str(e)[:200])}",
@@ -242,9 +277,15 @@ async def _start_parse(
         return
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Просмотреть аудиторию", callback_data=ParserCb(action="audience", run_id=result.get("run_id", 0)))
-    kb.button(text="📥 Экспорт CSV",           callback_data=ParserCb(action="export",   run_id=result.get("run_id", 0)))
-    kb.button(text="◀️ В меню парсера",        callback_data=ParserCb(action="menu"))
+    kb.button(
+        text="📊 Просмотреть аудиторию",
+        callback_data=ParserCb(action="audience", run_id=result.get("run_id", 0)),
+    )
+    kb.button(
+        text="📥 Экспорт CSV",
+        callback_data=ParserCb(action="export", run_id=result.get("run_id", 0)),
+    )
+    kb.button(text="◀️ В меню парсера", callback_data=ParserCb(action="menu"))
     kb.adjust(1)
 
     await progress_msg.edit_text(
@@ -260,10 +301,12 @@ async def _start_parse(
 
 # ── История запусков ──────────────────────────────────────────────────────
 
+
 @router.callback_query(ParserCb.filter(F.action == "runs"))
 async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     from services.parser import get_run_history
+
     runs = await get_run_history(pool, callback.from_user.id, limit=15)
 
     if not runs:
@@ -277,7 +320,12 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     lines = ["📋 <b>История запусков парсера</b>\n"]
     kb = InlineKeyboardBuilder()
     for r in runs:
-        status_icon = {"done": "✅", "failed": "❌", "running": "⏳", "empty": "⚪"}.get(r["status"], "❓")
+        status_icon = {
+            "done": "✅",
+            "failed": "❌",
+            "running": "⏳",
+            "empty": "⚪",
+        }.get(r["status"], "❓")
         started = r["started_at"].strftime("%d.%m %H:%M") if r["started_at"] else "—"
         lines.append(
             f"{status_icon} <code>{html.escape(r['source_ref'])}</code> "
@@ -302,6 +350,7 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Просмотр аудитории ───────────────────────────────────────────────────
 
+
 @router.callback_query(ParserCb.filter(F.action == "audience"))
 async def cb_parser_audience(
     callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
@@ -313,17 +362,21 @@ async def cb_parser_audience(
     page = callback_data.page
 
     users = await get_parsed_audience(
-        pool, callback.from_user.id,
+        pool,
+        callback.from_user.id,
         run_id=run_id,
         offset=page * _PAGE_SIZE,
         limit=_PAGE_SIZE,
     )
 
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1"
-        + (" AND parse_run_id=$2" if run_id else ""),
-        *([callback.from_user.id, run_id] if run_id else [callback.from_user.id]),
-    ) or 0
+    total = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1"
+            + (" AND parse_run_id=$2" if run_id else ""),
+            *([callback.from_user.id, run_id] if run_id else [callback.from_user.id]),
+        )
+        or 0
+    )
 
     if not users:
         await callback.message.edit_text(
@@ -335,18 +388,37 @@ async def cb_parser_audience(
 
     lines = [f"📊 <b>Аудитория</b> (всего: {total:,})\n"]
     for u in users:
-        uname = f"@{html.escape(u['username'])}" if u.get("username") else f"ID:{u['tg_user_id']}"
-        name = html.escape(u.get("first_name") or "") + (" " + html.escape(u.get("last_name") or "") if u.get("last_name") else "")
+        uname = (
+            f"@{html.escape(u['username'])}"
+            if u.get("username")
+            else f"ID:{u['tg_user_id']}"
+        )
+        name = html.escape(u.get("first_name") or "") + (
+            " " + html.escape(u.get("last_name") or "") if u.get("last_name") else ""
+        )
         premium = " ⭐" if u.get("is_premium") else ""
         lines.append(f"• {uname} — {name.strip()}{premium}")
 
     kb = InlineKeyboardBuilder()
     if page > 0:
-        kb.button(text="◀️", callback_data=ParserCb(action="audience", run_id=run_id or 0, page=page-1))
+        kb.button(
+            text="◀️",
+            callback_data=ParserCb(
+                action="audience", run_id=run_id or 0, page=page - 1
+            ),
+        )
     if (page + 1) * _PAGE_SIZE < total:
-        kb.button(text="▶️", callback_data=ParserCb(action="audience", run_id=run_id or 0, page=page+1))
+        kb.button(
+            text="▶️",
+            callback_data=ParserCb(
+                action="audience", run_id=run_id or 0, page=page + 1
+            ),
+        )
     if run_id:
-        kb.button(text="📥 Экспорт CSV", callback_data=ParserCb(action="export", run_id=run_id))
+        kb.button(
+            text="📥 Экспорт CSV",
+            callback_data=ParserCb(action="export", run_id=run_id),
+        )
     kb.button(text="◀️ В меню", callback_data=ParserCb(action="menu"))
     kb.adjust(2, 1, 1)
 
@@ -359,6 +431,7 @@ async def cb_parser_audience(
 
 # ── Экспорт CSV ──────────────────────────────────────────────────────────
 
+
 @router.callback_query(ParserCb.filter(F.action == "export"))
 async def cb_parser_export(
     callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
@@ -368,7 +441,8 @@ async def cb_parser_export(
 
     run_id = callback_data.run_id or None
     users = await get_parsed_audience(
-        pool, callback.from_user.id,
+        pool,
+        callback.from_user.id,
         run_id=run_id,
         limit=10000,
     )
@@ -379,17 +453,29 @@ async def cb_parser_export(
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["tg_user_id", "username", "first_name", "last_name", "is_premium", "source_title", "parsed_at"])
+    writer.writerow(
+        [
+            "tg_user_id",
+            "username",
+            "first_name",
+            "last_name",
+            "is_premium",
+            "source_title",
+            "parsed_at",
+        ]
+    )
     for u in users:
-        writer.writerow([
-            u["tg_user_id"],
-            u.get("username") or "",
-            u.get("first_name") or "",
-            u.get("last_name") or "",
-            "yes" if u.get("is_premium") else "no",
-            u.get("source_title") or "",
-            str(u.get("parsed_at", ""))[:19],
-        ])
+        writer.writerow(
+            [
+                u["tg_user_id"],
+                u.get("username") or "",
+                u.get("first_name") or "",
+                u.get("last_name") or "",
+                "yes" if u.get("is_premium") else "no",
+                u.get("source_title") or "",
+                str(u.get("parsed_at", ""))[:19],
+            ]
+        )
 
     csv_bytes = buf.getvalue().encode("utf-8-sig")
     fname = f"audience_{run_id or 'all'}_{len(users)}.csv"
@@ -402,17 +488,21 @@ async def cb_parser_export(
 
 # ── Очистка ──────────────────────────────────────────────────────────────
 
+
 @router.callback_query(ParserCb.filter(F.action == "clear_all"))
 async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
     kb.button(text="🗑 Да, очистить всё", callback_data=ParserCb(action="confirm_clear"))
-    kb.button(text="❌ Отмена",           callback_data=ParserCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
     kb.adjust(1)
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
-        callback.from_user.id,
-    ) or 0
+    total = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+            callback.from_user.id,
+        )
+        or 0
+    )
     await callback.message.edit_text(
         f"⚠️ <b>Очистить всю аудиторию?</b>\n\n"
         f"Будет удалено: <b>{total:,}</b> пользователей\n"
@@ -426,6 +516,7 @@ async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     from services.parser import delete_audience
+
     deleted = await delete_audience(pool, callback.from_user.id)
     await callback.message.edit_text(
         f"🗑 <b>Аудитория очищена</b>\n\nУдалено: <b>{deleted:,}</b> пользователей",

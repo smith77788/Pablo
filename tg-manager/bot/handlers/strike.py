@@ -3,6 +3,7 @@
 Доступ: разовая оплата $250 USDT (TRC-20). Пожизненная лицензия.
 Хранит доступ в таблице strike_access.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,12 +43,15 @@ CREATE TABLE IF NOT EXISTS strike_access (
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _tron_wallet() -> str:
     return os.getenv("TRON_WALLET", "")
 
 
 def _gen_ref() -> str:
-    return "STK-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
+    return "STK-" + "".join(
+        random.choices(string.ascii_uppercase + string.digits, k=10)
+    )
 
 
 async def _ensure_table(pool: asyncpg.Pool) -> None:
@@ -60,6 +64,7 @@ async def _ensure_table(pool: asyncpg.Pool) -> None:
 
 async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
     from bot.utils.subscription import is_platform_admin, get_plan
+
     if is_platform_admin(user_id):
         return True
     plan = await get_plan(pool, user_id)
@@ -73,19 +78,22 @@ async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
 def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     if has_access:
-        kb.button(text="🚨 Одиночная цель",    callback_data=ChanCb(action="br_mode_single"))
-        kb.button(text="📋 Список целей",       callback_data=ChanCb(action="br_mode_batch"))
-        kb.button(text="⚙️ Настройки атаки",   callback_data=StrikeCb(action="settings"))
-        kb.button(text="◀️ Назад",              callback_data=BmCb(action="main"))
+        kb.button(
+            text="🚨 Одиночная цель", callback_data=ChanCb(action="br_mode_single")
+        )
+        kb.button(text="📋 Список целей", callback_data=ChanCb(action="br_mode_batch"))
+        kb.button(text="⚙️ Настройки атаки", callback_data=StrikeCb(action="settings"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         kb.adjust(2, 1, 1)
     else:
         kb.button(text="💳 Купить за $250 USDT", callback_data=StrikeCb(action="buy"))
-        kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         kb.adjust(1, 1)
     return kb
 
 
 # ── main menu ─────────────────────────────────────────────────────────────────
+
 
 @router.callback_query(StrikeCb.filter(F.action == "menu"))
 async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -108,8 +116,7 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "⑩ Жалобы на связанные боты\n"
             "⑪ Пересылка доказательств в @stopCA / @notoscam\n"
             "⑫ Заглушить + заблокировать + выйти\n\n"
-            "Выберите режим:"
-            + _DISCLAIMER
+            "Выберите режим:" + _DISCLAIMER
         )
     else:
         text = (
@@ -127,17 +134,18 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "администраторов, связанные группы и боты, пересылка "
             "в Telegram Trust &amp; Safety.\n\n"
             "💰 <b>Стоимость:</b> $250 USDT · Пожизненный доступ · "
-            "Неограниченное использование"
-            + _DISCLAIMER
+            "Неограниченное использование" + _DISCLAIMER
         )
 
     await callback.message.edit_text(
-        text, parse_mode="HTML",
+        text,
+        parse_mode="HTML",
         reply_markup=_menu_kb(access).as_markup(),
     )
 
 
 # ── settings stub ─────────────────────────────────────────────────────────────
+
 
 @router.callback_query(StrikeCb.filter(F.action == "settings"))
 async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -162,14 +170,14 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         "⑨ Связанная группа обсуждений: <b>вкл</b>\n"
         "⑩ Связанные боты: <b>вкл</b>\n"
         "⑪ Forward в @stopCA / @notoscam: <b>вкл</b>\n"
-        "⑫ Заглушить + заблокировать + выйти: <b>вкл</b>"
-        + _DISCLAIMER,
+        "⑫ Заглушить + заблокировать + выйти: <b>вкл</b>" + _DISCLAIMER,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
 # ── payment flow ──────────────────────────────────────────────────────────────
+
 
 @router.callback_query(StrikeCb.filter(F.action == "buy"))
 async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -182,7 +190,9 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     wallet = _tron_wallet()
     ref = _gen_ref()
     for _ in range(5):
-        existing = await pool.fetchrow("SELECT id FROM payments WHERE reference=$1", ref)
+        existing = await pool.fetchrow(
+            "SELECT id FROM payments WHERE reference=$1", ref
+        )
         if not existing:
             break
         ref = _gen_ref()
@@ -193,8 +203,11 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 wallet_address, reference)
            VALUES ($1, 'strike', 0, 'USDT_TRC20', $2, $3, $4, $5)
            ON CONFLICT (reference) DO NOTHING""",
-        callback.from_user.id, float(_PRICE_USD), float(_PRICE_USD),
-        wallet or "NOT_CONFIGURED", ref,
+        callback.from_user.id,
+        float(_PRICE_USD),
+        float(_PRICE_USD),
+        wallet or "NOT_CONFIGURED",
+        ref,
     )
 
     kb = InlineKeyboardBuilder()
@@ -207,7 +220,8 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "⚔️ <b>Strike Module — $250 USDT</b>\n\n"
             "⚠️ Автоматическая оплата не настроена.\n\n"
             "Свяжитесь с администратором для активации.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
@@ -220,7 +234,8 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"⚠️ Другие сети не принимаются.\n\n"
         f"⏱ Подтверждение: 5–30 минут\n"
         f"<i>ID платежа: {ref}</i>",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -232,9 +247,9 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         kb = InlineKeyboardBuilder()
         kb.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
-            "✅ <b>Strike Module активирован!</b>\n\n"
-            "Доступ открыт. Добро пожаловать.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            "✅ <b>Strike Module активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
@@ -258,26 +273,29 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         return
 
     labels = {
-        "pending":    "⏳ Ожидает оплаты",
+        "pending": "⏳ Ожидает оплаты",
         "confirming": "🔄 Подтверждается в блокчейне...",
-        "confirmed":  "✅ Подтверждён — доступ активирован!",
-        "expired":    "❌ Истёк",
+        "confirmed": "✅ Подтверждён — доступ активирован!",
+        "expired": "❌ Истёк",
     }
     await callback.message.edit_text(
         f"⚔️ <b>Статус платежа</b>\n\n"
         f"Статус: <b>{labels.get(row['status'], row['status'])}</b>\n"
         f"ID: <code>{row['reference']}</code>",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── admin grant ───────────────────────────────────────────────────────────────
+
 
 @router.callback_query(StrikeCb.filter(F.action == "admin_grant"))
 async def cb_strike_admin_grant(
     callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
 ) -> None:
     from bot.utils.subscription import is_platform_admin
+
     if not is_platform_admin(callback.from_user.id):
         await callback.answer("Нет прав.", show_alert=True)
         return
@@ -286,6 +304,7 @@ async def cb_strike_admin_grant(
     await pool.execute(
         "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
         "ON CONFLICT (user_id) DO NOTHING",
-        target_id, callback.from_user.id,
+        target_id,
+        callback.from_user.id,
     )
     await callback.answer(f"✅ Strike активирован для {target_id}", show_alert=True)

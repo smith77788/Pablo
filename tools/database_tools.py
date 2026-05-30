@@ -1,4 +1,5 @@
 """CRM and business data tools for BASIC.FOOD AI agents (Supabase-backed)."""
+
 from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
@@ -10,13 +11,28 @@ from database.models import get_client
 # Customers
 # ---------------------------------------------------------------------------
 
+
 def get_customer_by_email(email: str) -> dict | None:
-    res = get_client().table("customers").select("*").eq("email", email).maybe_single().execute()
+    res = (
+        get_client()
+        .table("customers")
+        .select("*")
+        .eq("email", email)
+        .maybe_single()
+        .execute()
+    )
     return res.data
 
 
 def get_customer_by_id(customer_id: str) -> dict | None:
-    res = get_client().table("customers").select("*").eq("id", customer_id).maybe_single().execute()
+    res = (
+        get_client()
+        .table("customers")
+        .select("*")
+        .eq("id", customer_id)
+        .maybe_single()
+        .execute()
+    )
     return res.data
 
 
@@ -46,7 +62,15 @@ def search_customers(query: str, limit: int = 10) -> list[dict]:
 
 
 def update_customer(customer_id: str, **fields) -> bool:
-    allowed = {"name", "phone", "address", "tags", "notes", "telegram_chat_id", "lifecycle_stage"}
+    allowed = {
+        "name",
+        "phone",
+        "address",
+        "tags",
+        "notes",
+        "telegram_chat_id",
+        "lifecycle_stage",
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
@@ -56,11 +80,18 @@ def update_customer(customer_id: str, **fields) -> bool:
 
 
 def add_customer_note(customer_id: str, note: str, author: str = "pablo-ai") -> dict:
-    res = get_client().table("customer_notes").insert({
-        "customer_id": customer_id,
-        "note": note,
-        "author": author,
-    }).execute()
+    res = (
+        get_client()
+        .table("customer_notes")
+        .insert(
+            {
+                "customer_id": customer_id,
+                "note": note,
+                "author": author,
+            }
+        )
+        .execute()
+    )
     return res.data[0] if res.data else {}
 
 
@@ -79,6 +110,7 @@ def get_customer_notes(customer_id: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Orders
 # ---------------------------------------------------------------------------
+
 
 def get_order(order_number: str) -> dict | None:
     res = (
@@ -119,10 +151,21 @@ def get_customer_orders(customer_id: str, limit: int = 20) -> list[dict]:
 
 
 def update_order_status(order_id: str, status: str, notes: str = "") -> bool:
-    valid = {"new", "confirmed", "processing", "shipped", "delivered", "cancelled", "refunded"}
+    valid = {
+        "new",
+        "confirmed",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+        "refunded",
+    }
     if status not in valid:
         return False
-    update: dict[str, Any] = {"status": status, "updated_at": datetime.now().isoformat()}
+    update: dict[str, Any] = {
+        "status": status,
+        "updated_at": datetime.now().isoformat(),
+    }
     if notes:
         update["notes"] = notes
     get_client().table("orders").update(update).eq("id", order_id).execute()
@@ -130,11 +173,13 @@ def update_order_status(order_id: str, status: str, notes: str = "") -> bool:
 
 
 def set_tracking_number(order_id: str, tracking: str) -> bool:
-    get_client().table("orders").update({
-        "tracking_number": tracking,
-        "status": "shipped",
-        "updated_at": datetime.now().isoformat(),
-    }).eq("id", order_id).execute()
+    get_client().table("orders").update(
+        {
+            "tracking_number": tracking,
+            "status": "shipped",
+            "updated_at": datetime.now().isoformat(),
+        }
+    ).eq("id", order_id).execute()
     return True
 
 
@@ -156,8 +201,16 @@ def get_recent_orders(days: int = 7, limit: int = 50) -> list[dict]:
 # Products
 # ---------------------------------------------------------------------------
 
+
 def get_product(product_id: str) -> dict | None:
-    res = get_client().table("products").select("*").eq("id", product_id).maybe_single().execute()
+    res = (
+        get_client()
+        .table("products")
+        .select("*")
+        .eq("id", product_id)
+        .maybe_single()
+        .execute()
+    )
     return res.data
 
 
@@ -188,22 +241,32 @@ def get_low_stock_products(threshold: int = 10) -> list[dict]:
 
 
 def update_stock(product_id: str, new_quantity: int, reason: str = "") -> bool:
-    get_client().table("products").update({
-        "stock_quantity": new_quantity,
-        "updated_at": datetime.now().isoformat(),
-    }).eq("id", product_id).execute()
+    get_client().table("products").update(
+        {
+            "stock_quantity": new_quantity,
+            "updated_at": datetime.now().isoformat(),
+        }
+    ).eq("id", product_id).execute()
 
-    get_client().table("stock_adjustments").insert({
-        "product_id": product_id,
-        "new_quantity": new_quantity,
-        "reason": reason,
-        "adjusted_by": "pablo-ai",
-    }).execute()
+    get_client().table("stock_adjustments").insert(
+        {
+            "product_id": product_id,
+            "new_quantity": new_quantity,
+            "reason": reason,
+            "adjusted_by": "pablo-ai",
+        }
+    ).execute()
     return True
 
 
 def get_all_products(active_only: bool = True) -> list[dict]:
-    q = get_client().table("products").select("id, name, price, stock_quantity, categories, weight, is_active, sold_count")
+    q = (
+        get_client()
+        .table("products")
+        .select(
+            "id, name, price, stock_quantity, categories, weight, is_active, sold_count"
+        )
+    )
     if active_only:
         q = q.eq("is_active", True)
     res = q.order("sort_order").execute()
@@ -213,6 +276,7 @@ def get_all_products(active_only: bool = True) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Messages / Support
 # ---------------------------------------------------------------------------
+
 
 def save_message(
     channel: str,
@@ -254,16 +318,19 @@ def get_unresolved_messages(channel: str | None = None, limit: int = 20) -> list
 
 
 def mark_message_resolved(message_id: str, agent_response: str = "") -> bool:
-    get_client().table("pablo_messages").update({
-        "is_resolved": True,
-        "agent_response": agent_response,
-    }).eq("id", message_id).execute()
+    get_client().table("pablo_messages").update(
+        {
+            "is_resolved": True,
+            "agent_response": agent_response,
+        }
+    ).eq("id", message_id).execute()
     return True
 
 
 # ---------------------------------------------------------------------------
 # Telegram chat sessions
 # ---------------------------------------------------------------------------
+
 
 def get_telegram_chat_meta(chat_id: int) -> dict | None:
     res = (
@@ -277,10 +344,15 @@ def get_telegram_chat_meta(chat_id: int) -> dict | None:
     return res.data
 
 
-def upsert_telegram_chat(chat_id: int, first_name: str = "", username: str = "") -> None:
-    get_client().table("telegram_customer_chats").upsert({
-        "chat_id": chat_id,
-        "first_name": first_name,
-        "username": username,
-        "last_message_at": datetime.now().isoformat(),
-    }, on_conflict="chat_id").execute()
+def upsert_telegram_chat(
+    chat_id: int, first_name: str = "", username: str = ""
+) -> None:
+    get_client().table("telegram_customer_chats").upsert(
+        {
+            "chat_id": chat_id,
+            "first_name": first_name,
+            "username": username,
+            "last_message_at": datetime.now().isoformat(),
+        },
+        on_conflict="chat_id",
+    ).execute()

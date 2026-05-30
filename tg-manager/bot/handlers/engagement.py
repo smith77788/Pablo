@@ -1,4 +1,5 @@
 """User activity tracking and re-engagement broadcasts."""
+
 from __future__ import annotations
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -31,13 +32,15 @@ def _heatmap_chart(data: list[dict]) -> str:
 
 
 @router.callback_query(EngageCb.filter(F.action == "menu"))
-async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
-                          pool: asyncpg.Pool) -> None:
+async def cb_engage_menu(
+    callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
+) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("Активность и реактивация", "enterprise"), parse_mode="HTML",
+            locked_text("Активность и реактивация", "enterprise"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
@@ -50,7 +53,7 @@ async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     total = segs["total"]
-    pct_hot  = round(segs["hot"]  / total * 100) if total else 0
+    pct_hot = round(segs["hot"] / total * 100) if total else 0
     pct_warm = round(segs["warm"] / total * 100) if total else 0
     pct_cold = round(segs["cold"] / total * 100) if total else 0
     pct_lost = round(segs["lost"] / total * 100) if total else 0
@@ -72,15 +75,16 @@ async def cb_engage_menu(callback: CallbackQuery, callback_data: EngageCb,
 @router.callback_query(EngageCb.filter(F.action.in_({"segment_hot", "segment_warm"})))
 async def cb_engage_info(callback: CallbackQuery, callback_data: EngageCb) -> None:
     labels = {
-        "segment_hot":  "🔥 Горячие — были активны < 24ч. Они сейчас в боте!",
+        "segment_hot": "🔥 Горячие — были активны < 24ч. Они сейчас в боте!",
         "segment_warm": "🌡 Тёплые — были активны 1–7 дней назад. Поддерживайте интерес.",
     }
     await callback.answer(labels.get(callback_data.action, ""), show_alert=True)
 
 
 @router.callback_query(EngageCb.filter(F.action == "reactivate_cold"))
-async def cb_reactivate_cold(callback: CallbackQuery, callback_data: EngageCb,
-                               state: FSMContext) -> None:
+async def cb_reactivate_cold(
+    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
+) -> None:
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="cold")
     await callback.message.edit_text(
@@ -96,8 +100,9 @@ async def cb_reactivate_cold(callback: CallbackQuery, callback_data: EngageCb,
 
 
 @router.callback_query(EngageCb.filter(F.action == "reactivate_lost"))
-async def cb_reactivate_lost(callback: CallbackQuery, callback_data: EngageCb,
-                               state: FSMContext) -> None:
+async def cb_reactivate_lost(
+    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
+) -> None:
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="lost")
     await callback.message.edit_text(
@@ -113,8 +118,9 @@ async def cb_reactivate_lost(callback: CallbackQuery, callback_data: EngageCb,
 
 
 @router.message(ReactivateBroadcast.waiting_message, F.text)
-async def msg_reactivate(message: Message, state: FSMContext,
-                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_reactivate(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     await state.clear()
     bot_id = data["bot_id"]
@@ -140,7 +146,9 @@ async def msg_reactivate(message: Message, state: FSMContext,
         )
         return
 
-    bc_id = await db.create_broadcast(pool, bot_id, message.text, len(user_ids), message.from_user.id)
+    bc_id = await db.create_broadcast(
+        pool, bot_id, message.text, len(user_ids), message.from_user.id
+    )
     await message.answer(
         f"✅ <b>Реактивация запущена!</b>\n\n"
         f"Сегмент: {seg_label}\n"
@@ -150,19 +158,24 @@ async def msg_reactivate(message: Message, state: FSMContext,
         reply_markup=back_to_bot(bot_id),
     )
     # broadcaster.start() is sync — it schedules asyncio.Task internally
-    broadcaster.start(pool, http, bc_id, row["token"], bot_id,
-                      message.text, None, user_ids, None)
+    broadcaster.start(
+        pool, http, bc_id, row["token"], bot_id, message.text, None, user_ids, None
+    )
 
 
 @router.callback_query(EngageCb.filter(F.action == "heatmap"))
-async def cb_engage_heatmap(callback: CallbackQuery, callback_data: EngageCb,
-                              pool: asyncpg.Pool) -> None:
+async def cb_engage_heatmap(
+    callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
+) -> None:
 
     await callback.answer()
     data = await db.get_activity_heatmap(pool, callback_data.bot_id, days=7)
     chart = _heatmap_chart(data)
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="◀️ Назад",
+        callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id),
+    )
     await callback.message.edit_text(
         "📊 <b>Тепловая карта активности (7 дней)</b>\n\n"
         f"<code>{chart}</code>\n\n"
@@ -173,13 +186,17 @@ async def cb_engage_heatmap(callback: CallbackQuery, callback_data: EngageCb,
 
 
 @router.callback_query(EngageCb.filter(F.action == "top_users"))
-async def cb_engage_top(callback: CallbackQuery, callback_data: EngageCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_engage_top(
+    callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
+) -> None:
 
     await callback.answer()
     users = await db.get_top_active_users(pool, callback_data.bot_id, limit=10)
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="◀️ Назад",
+        callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id),
+    )
     medals = ["🥇", "🥈", "🥉"] + ["🎖"] * 10
     if users:
         lines = [
@@ -198,15 +215,20 @@ async def cb_engage_top(callback: CallbackQuery, callback_data: EngageCb,
 
 
 @router.callback_query(EngageCb.filter(F.action == "autotag"))
-async def cb_engage_autotag(callback: CallbackQuery, callback_data: EngageCb,
-                              pool: asyncpg.Pool) -> None:
+async def cb_engage_autotag(
+    callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer("⏳ Присваиваю теги...")
     segs = await db.autotag_by_activity(pool, callback_data.bot_id)
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏷 Открыть CRM",
-              callback_data=CrmCb(action="menu", bot_id=callback_data.bot_id))
-    kb.button(text="◀️ Назад",
-              callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="🏷 Открыть CRM",
+        callback_data=CrmCb(action="menu", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=EngageCb(action="menu", bot_id=callback_data.bot_id),
+    )
     kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>Авто-теги по активности назначены!</b>\n\n"

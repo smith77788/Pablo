@@ -6,6 +6,7 @@ Session Converter — конвертация форматов сессий.
 - SQLite session → Telethon StringSession (через telethon.sync или asyncio)
 - tdata — определение (конвертация через opentele если установлена)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -54,7 +55,9 @@ async def pyrogram_json_to_telethon(json_str: str) -> tuple[str, dict]:
         raise ConversionError(f"Ошибка парсинга данных: {e}")
 
     if len(auth_key) != 256:
-        raise ConversionError(f"auth_key должен быть 256 байт, получено {len(auth_key)}")
+        raise ConversionError(
+            f"auth_key должен быть 256 байт, получено {len(auth_key)}"
+        )
 
     # Telethon StringSession format:
     # Version(1) + DC ID(1) + IP bytes(4 or 16) + Port(2) + Auth Key(256)
@@ -75,7 +78,9 @@ async def pyrogram_json_to_telethon(json_str: str) -> tuple[str, dict]:
     # Pack: version(1) + dc_id(1) + ip(4) + port(2) + auth_key(256)
     session_bytes = struct.pack(">BBHH", 1, dc_id, 0, port)  # simplified packing
     # Correct Telethon format
-    data_bytes = struct.pack(">B", dc_id) + ip_bytes + struct.pack(">H", port) + auth_key
+    data_bytes = (
+        struct.pack(">B", dc_id) + ip_bytes + struct.pack(">H", port) + auth_key
+    )
     # Telethon StringSession = base64url(version_byte + data)
     version = b"\x01"
     session_string = base64.urlsafe_b64encode(version + data_bytes).decode()
@@ -89,7 +94,9 @@ async def pyrogram_json_to_telethon(json_str: str) -> tuple[str, dict]:
         "format": "pyrogram_json",
     }
 
-    log.info("session_converter: pyrogram_json → telethon dc=%d user_id=%d", dc_id, user_id)
+    log.info(
+        "session_converter: pyrogram_json → telethon dc=%d user_id=%d", dc_id, user_id
+    )
     return session_string, info
 
 
@@ -116,13 +123,27 @@ async def sqlite_to_telethon(sqlite_path: str) -> tuple[str, dict]:
                 auth_key_bytes = session_data.get("auth_key")
 
                 if auth_key_bytes and len(auth_key_bytes) == 256:
-                    DC_IPS = {1: "149.154.175.53", 2: "149.154.167.51",
-                              3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130"}
+                    DC_IPS = {
+                        1: "149.154.175.53",
+                        2: "149.154.167.51",
+                        3: "149.154.175.100",
+                        4: "149.154.167.91",
+                        5: "91.108.56.130",
+                    }
                     dc_ip = DC_IPS.get(dc_id, "149.154.167.51")
                     ip_bytes = bytes(int(x) for x in dc_ip.split("."))
                     port = session_data.get("port", 443)
-                    data_bytes = struct.pack(">B", dc_id) + ip_bytes + struct.pack(">H", port) + auth_key_bytes
-                    session_string = base64.urlsafe_b64encode(b"\x01" + data_bytes).decode().rstrip("=")
+                    data_bytes = (
+                        struct.pack(">B", dc_id)
+                        + ip_bytes
+                        + struct.pack(">H", port)
+                        + auth_key_bytes
+                    )
+                    session_string = (
+                        base64.urlsafe_b64encode(b"\x01" + data_bytes)
+                        .decode()
+                        .rstrip("=")
+                    )
 
                     info = {"dc_id": dc_id, "format": "sqlite_telethon"}
                     return session_string, info
@@ -140,7 +161,11 @@ def detect_tdata(path: str) -> dict:
     Возвращает {'is_tdata': bool, 'can_convert': bool, 'message': str}
     """
     if not os.path.isdir(path):
-        return {"is_tdata": False, "can_convert": False, "message": "Не является директорией"}
+        return {
+            "is_tdata": False,
+            "can_convert": False,
+            "message": "Не является директорией",
+        }
 
     # tdata признаки: наличие файлов key_data, D877F783D5D3EF8C, settings/0
     indicators = ["key_data", "D877F783D5D3EF8C", "settings"]
@@ -153,6 +178,7 @@ def detect_tdata(path: str) -> dict:
         # Проверяем наличие opentele
         try:
             import opentele  # type: ignore
+
             can_convert = True
             msg = f"tdata обнаружен ({', '.join(found)}). opentele доступен — конвертация возможна."
         except ImportError:
@@ -190,8 +216,13 @@ async def convert_auto(content: str | bytes, hint: str = "") -> tuple[str, dict]
         try:
             decoded = base64.urlsafe_b64decode(possible_session + "==")
             if len(decoded) > 260:  # версия + DC + IP + port + auth_key
-                return possible_session, {"format": "telethon_string", "dc_id": decoded[0] if decoded else 0}
+                return possible_session, {
+                    "format": "telethon_string",
+                    "dc_id": decoded[0] if decoded else 0,
+                }
         except Exception:
             log_exc_swallow(log, "Не удалось определить формат сессии — автоопределение провалено")
 
-    raise ConversionError("Не удалось определить формат сессии. Поддерживаются: Pyrogram JSON, Telethon StringSession")
+    raise ConversionError(
+        "Не удалось определить формат сессии. Поддерживаются: Pyrogram JSON, Telethon StringSession"
+    )

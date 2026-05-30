@@ -3,6 +3,7 @@
 READ tools return data. ACTION tools return a pending_action dict that requires
 confirmation before execution. The executor function runs confirmed actions.
 """
+
 from __future__ import annotations
 import asyncpg
 import json
@@ -11,6 +12,7 @@ import logging
 log = logging.getLogger(__name__)
 
 # ── READ TOOLS ────────────────────────────────────────────────────────────────
+
 
 async def get_my_bots(pool: asyncpg.Pool, user_id: int) -> dict:
     bots = await pool.fetch(
@@ -45,20 +47,29 @@ async def get_my_bots(pool: asyncpg.Pool, user_id: int) -> dict:
 async def get_bot_details(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict:
     row = await pool.fetchrow(
         "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден или не принадлежит вам"}
-    audience = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
-    ) or 0
-    today = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-        "AND first_seen > now() - INTERVAL '24 hours'", bot_id,
-    ) or 0
-    broadcasts = await pool.fetchval(
-        "SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", bot_id
-    ) or 0
+    audience = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", bot_id
+        )
+        or 0
+    )
+    today = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
+            "AND first_seen > now() - INTERVAL '24 hours'",
+            bot_id,
+        )
+        or 0
+    )
+    broadcasts = (
+        await pool.fetchval("SELECT COUNT(*) FROM broadcasts WHERE bot_id=$1", bot_id)
+        or 0
+    )
     return {
         "id": bot_id,
         "name": f"@{row['username']}" if row["username"] else row["first_name"],
@@ -75,22 +86,36 @@ async def get_bot_details(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict
 
 
 async def get_network_stats(pool: asyncpg.Pool, user_id: int) -> dict:
-    total_bots = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", user_id
-    ) or 0
-    total_audience = await pool.fetchval(
-        "SELECT COUNT(DISTINCT a.user_id) FROM bot_users a "
-        "JOIN managed_bots b ON b.bot_id=a.bot_id WHERE b.added_by=$1 AND a.is_active=TRUE",
-        user_id,
-    ) or 0
-    total_sent = await pool.fetchval(
-        "SELECT COALESCE(SUM(sent_count),0) FROM broadcasts b2 "
-        "JOIN managed_bots m ON m.bot_id=b2.bot_id WHERE m.added_by=$1",
-        user_id,
-    ) or 0
-    swarm_bots = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND swarm_enabled=true", user_id
-    ) or 0
+    total_bots = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+            user_id,
+        )
+        or 0
+    )
+    total_audience = (
+        await pool.fetchval(
+            "SELECT COUNT(DISTINCT a.user_id) FROM bot_users a "
+            "JOIN managed_bots b ON b.bot_id=a.bot_id WHERE b.added_by=$1 AND a.is_active=TRUE",
+            user_id,
+        )
+        or 0
+    )
+    total_sent = (
+        await pool.fetchval(
+            "SELECT COALESCE(SUM(sent_count),0) FROM broadcasts b2 "
+            "JOIN managed_bots m ON m.bot_id=b2.bot_id WHERE m.added_by=$1",
+            user_id,
+        )
+        or 0
+    )
+    swarm_bots = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND swarm_enabled=true",
+            user_id,
+        )
+        or 0
+    )
     return {
         "total_bots": int(total_bots),
         "unique_audience": int(total_audience),
@@ -102,32 +127,53 @@ async def get_network_stats(pool: asyncpg.Pool, user_id: int) -> dict:
 async def get_audience_activity(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict:
     row = await pool.fetchrow(
         "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден"}
-    hot = await pool.fetchval(
-        "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen > now() - INTERVAL '24 hours'", bot_id,
-    ) or 0
-    warm = await pool.fetchval(
-        "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen BETWEEN now() - INTERVAL '7 days' AND now() - INTERVAL '24 hours'", bot_id,
-    ) or 0
-    cold = await pool.fetchval(
-        "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen BETWEEN now() - INTERVAL '30 days' AND now() - INTERVAL '7 days'", bot_id,
-    ) or 0
-    lost = await pool.fetchval(
-        "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
-        "AND last_seen < now() - INTERVAL '30 days'", bot_id,
-    ) or 0
+    hot = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
+            "AND last_seen > now() - INTERVAL '24 hours'",
+            bot_id,
+        )
+        or 0
+    )
+    warm = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
+            "AND last_seen BETWEEN now() - INTERVAL '7 days' AND now() - INTERVAL '24 hours'",
+            bot_id,
+        )
+        or 0
+    )
+    cold = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
+            "AND last_seen BETWEEN now() - INTERVAL '30 days' AND now() - INTERVAL '7 days'",
+            bot_id,
+        )
+        or 0
+    )
+    lost = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 "
+            "AND last_seen < now() - INTERVAL '30 days'",
+            bot_id,
+        )
+        or 0
+    )
     return {"hot": int(hot), "warm": int(warm), "cold": int(cold), "lost": int(lost)}
 
 
-async def get_growth_trend(pool: asyncpg.Pool, user_id: int, bot_id: int, days: int = 7) -> dict:
+async def get_growth_trend(
+    pool: asyncpg.Pool, user_id: int, bot_id: int, days: int = 7
+) -> dict:
     row = await pool.fetchrow(
-        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
+        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден"}
@@ -136,7 +182,8 @@ async def get_growth_trend(pool: asyncpg.Pool, user_id: int, bot_id: int, days: 
            FROM bot_users
            WHERE bot_id=$1 AND first_seen > now() - ($2 || ' days')::INTERVAL
            GROUP BY day ORDER BY day""",
-        bot_id, str(days),
+        bot_id,
+        str(days),
     )
     return {
         "period_days": days,
@@ -145,7 +192,9 @@ async def get_growth_trend(pool: asyncpg.Pool, user_id: int, bot_id: int, days: 
     }
 
 
-async def get_seo_recommendations(pool: asyncpg.Pool, user_id: int, bot_id: int) -> dict:
+async def get_seo_recommendations(
+    pool: asyncpg.Pool, user_id: int, bot_id: int
+) -> dict:
     row = await pool.fetchrow(
         "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
     )
@@ -216,9 +265,13 @@ async def get_my_channels(pool: asyncpg.Pool, user_id: int) -> dict:
     }
 
 
-async def get_broadcast_history(pool: asyncpg.Pool, user_id: int, bot_id: int, limit: int = 10) -> dict:
+async def get_broadcast_history(
+    pool: asyncpg.Pool, user_id: int, bot_id: int, limit: int = 10
+) -> dict:
     row = await pool.fetchrow(
-        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, user_id
+        "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден"}
@@ -226,7 +279,8 @@ async def get_broadcast_history(pool: asyncpg.Pool, user_id: int, bot_id: int, l
         """SELECT id, status, total_users, sent_count, failed_count, created_at, finished_at,
                   LEFT(message_text, 100) AS preview
            FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2""",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
     return {
         "broadcasts": [
@@ -247,17 +301,24 @@ async def get_broadcast_history(pool: asyncpg.Pool, user_id: int, bot_id: int, l
 
 # ── ACTION TOOLS (return pending_action, require confirmation) ─────────────────
 
-async def action_launch_broadcast(pool: asyncpg.Pool, user_id: int, bot_id: int, text: str) -> dict:
+
+async def action_launch_broadcast(
+    pool: asyncpg.Pool, user_id: int, bot_id: int, text: str
+) -> dict:
     row = await pool.fetchrow(
         "SELECT bot_id, token, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден или не принадлежит вам"}
-    audience = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
-        bot_id,
-    ) or 0
+    audience = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+            bot_id,
+        )
+        or 0
+    )
     name = f"@{row['username']}" if row["username"] else row["first_name"]
     return {
         "pending_action": "launch_broadcast",
@@ -270,27 +331,36 @@ async def action_launch_broadcast(pool: asyncpg.Pool, user_id: int, bot_id: int,
 
 
 async def action_update_bot_profile(
-    pool: asyncpg.Pool, user_id: int, bot_id: int,
+    pool: asyncpg.Pool,
+    user_id: int,
+    bot_id: int,
     name: str | None = None,
     description: str | None = None,
     short_description: str | None = None,
 ) -> dict:
     row = await pool.fetchrow(
         "SELECT bot_id, token, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден или не принадлежит вам"}
     if not any([name, description, short_description]):
-        return {"error": "Укажите хотя бы одно поле для обновления: name, description или short_description"}
+        return {
+            "error": "Укажите хотя бы одно поле для обновления: name, description или short_description"
+        }
     bot_name = f"@{row['username']}" if row["username"] else row["first_name"]
     changes = []
     if name:
         changes.append(f"имя: «{name}»")
     if description:
-        changes.append(f"описание: «{description[:50]}{'...' if len(description)>50 else ''}»")
+        changes.append(
+            f"описание: «{description[:50]}{'...' if len(description) > 50 else ''}»"
+        )
     if short_description:
-        changes.append(f"краткое описание: «{short_description[:50]}{'...' if len(short_description)>50 else ''}»")
+        changes.append(
+            f"краткое описание: «{short_description[:50]}{'...' if len(short_description) > 50 else ''}»"
+        )
     return {
         "pending_action": "update_bot_profile",
         "bot_id": bot_id,
@@ -303,22 +373,30 @@ async def action_update_bot_profile(
 
 
 async def action_post_to_channel(
-    pool: asyncpg.Pool, user_id: int,
-    channel_id: int, text: str,
+    pool: asyncpg.Pool,
+    user_id: int,
+    channel_id: int,
+    text: str,
 ) -> dict:
     ch_row = await pool.fetchrow(
         "SELECT channel_id, title, username, acc_id, access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-        user_id, channel_id,
+        user_id,
+        channel_id,
     )
     if not ch_row:
-        return {"error": "Канал не найден в кэше. Сначала откройте «Мои каналы» чтобы обновить кэш."}
+        return {
+            "error": "Канал не найден в кэше. Сначала откройте «Мои каналы» чтобы обновить кэш."
+        }
     acc_row = await pool.fetchrow(
         "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
-        user_id, ch_row["acc_id"],
+        user_id,
+        ch_row["acc_id"],
     )
     if not acc_row:
         return {"error": "Аккаунт канала не найден или не активен"}
-    ch_name = ch_row["title"] or (f"@{ch_row['username']}" if ch_row["username"] else f"id={channel_id}")
+    ch_name = ch_row["title"] or (
+        f"@{ch_row['username']}" if ch_row["username"] else f"id={channel_id}"
+    )
     return {
         "pending_action": "post_to_channel",
         "channel_id": channel_id,
@@ -326,15 +404,19 @@ async def action_post_to_channel(
         "acc_id": ch_row["acc_id"],
         "access_hash": ch_row["access_hash"] or 0,
         "text": text,
-        "preview": f"Опубликовать в {ch_name}: {text[:80]}{'...' if len(text)>80 else ''}",
+        "preview": f"Опубликовать в {ch_name}: {text[:80]}{'...' if len(text) > 80 else ''}",
     }
 
 
 # ── EXECUTOR (runs confirmed actions) ─────────────────────────────────────────
 
+
 async def action_create_channel(
-    pool: asyncpg.Pool, user_id: int,
-    title: str, about: str = "", username: str = "",
+    pool: asyncpg.Pool,
+    user_id: int,
+    title: str,
+    about: str = "",
+    username: str = "",
     is_group: bool = False,
 ) -> dict:
     acc_row = await pool.fetchrow(
@@ -440,18 +522,26 @@ async def action_bulk_create_channels(
 
 
 async def action_schedule_broadcast(
-    pool: asyncpg.Pool, user_id: int,
-    bot_id: int, text: str, when_minutes: int = 60,
+    pool: asyncpg.Pool,
+    user_id: int,
+    bot_id: int,
+    text: str,
+    when_minutes: int = 60,
 ) -> dict:
     row = await pool.fetchrow(
         "SELECT bot_id, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     if not row:
         return {"error": "Бот не найден или не принадлежит вам"}
-    audience = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE", bot_id,
-    ) or 0
+    audience = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
+            bot_id,
+        )
+        or 0
+    )
     name = f"@{row['username']}" if row["username"] else row["first_name"]
     return {
         "pending_action": "schedule_broadcast",
@@ -464,7 +554,9 @@ async def action_schedule_broadcast(
     }
 
 
-async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, http=None) -> str:
+async def execute_action(
+    action_data: dict, pool: asyncpg.Pool, user_id: int, http=None
+) -> str:
     """Execute a confirmed pending action. Returns result string."""
     name = action_data.get("pending_action")
 
@@ -473,12 +565,14 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
         text = action_data["text"]
         row = await pool.fetchrow(
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-            bot_id, user_id,
+            bot_id,
+            user_id,
         )
         if not row or not http:
             return "❌ Ошибка: бот не найден или HTTP сессия недоступна"
         from database import db
         from services import broadcaster
+
         user_ids_rows = await pool.fetch(
             "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND is_blocked=FALSE",
             bot_id,
@@ -497,30 +591,44 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
         short_desc = action_data.get("short_description")
         row = await pool.fetchrow(
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-            bot_id, user_id,
+            bot_id,
+            user_id,
         )
         if not row or not http:
             return "❌ Ошибка: бот не найден"
         from services import bot_api
+
         results = []
         if new_name:
             ok = await bot_api.set_name(http, row["token"], new_name)
             if ok:
-                await pool.execute("UPDATE managed_bots SET first_name=$1 WHERE bot_id=$2", new_name, bot_id)
+                await pool.execute(
+                    "UPDATE managed_bots SET first_name=$1 WHERE bot_id=$2",
+                    new_name,
+                    bot_id,
+                )
                 results.append(f"✅ Имя обновлено: «{new_name}»")
             else:
                 results.append("❌ Не удалось обновить имя")
         if description:
             ok = await bot_api.set_description(http, row["token"], description)
             if ok:
-                await pool.execute("UPDATE managed_bots SET description=$1 WHERE bot_id=$2", description, bot_id)
+                await pool.execute(
+                    "UPDATE managed_bots SET description=$1 WHERE bot_id=$2",
+                    description,
+                    bot_id,
+                )
                 results.append(f"✅ Описание обновлено ({len(description)} симв.)")
             else:
                 results.append("❌ Не удалось обновить описание")
         if short_desc:
             ok = await bot_api.set_short_description(http, row["token"], short_desc)
             if ok:
-                await pool.execute("UPDATE managed_bots SET short_description=$1 WHERE bot_id=$2", short_desc, bot_id)
+                await pool.execute(
+                    "UPDATE managed_bots SET short_description=$1 WHERE bot_id=$2",
+                    short_desc,
+                    bot_id,
+                )
                 results.append(f"✅ Краткое описание обновлено")
             else:
                 results.append("❌ Не удалось обновить краткое описание")
@@ -533,11 +641,13 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
         text = action_data["text"]
         acc_row = await pool.fetchrow(
             "SELECT session_str FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
-            user_id, acc_id,
+            user_id,
+            acc_id,
         )
         if not acc_row:
             return "❌ Аккаунт не найден или не активен"
         from services import account_manager
+
         result = await account_manager.post_to_channel(
             acc_row["session_str"], channel_id, text, access_hash=access_hash
         )
@@ -554,15 +664,21 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
         acc_row = await pool.fetchrow(
             "SELECT session_str, device_model, system_version, app_version, phone "
             "FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
-            user_id, acc_id,
+            user_id,
+            acc_id,
         )
         if not acc_row:
             return "❌ Аккаунт не найден или не активен"
         from services import account_manager
+
         if is_group:
-            result = await account_manager.create_group(acc_row["session_str"], title, about=about, _acc=dict(acc_row))
+            result = await account_manager.create_group(
+                acc_row["session_str"], title, about=about, _acc=dict(acc_row)
+            )
         else:
-            result = await account_manager.create_channel(acc_row["session_str"], title, about=about, _acc=dict(acc_row))
+            result = await account_manager.create_channel(
+                acc_row["session_str"], title, about=about, _acc=dict(acc_row)
+            )
         if isinstance(result, dict) and result.get("id"):
             ch_id = result["id"]
             # Save to managed_channels
@@ -570,15 +686,23 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
                    VALUES($1,$2,$3,$4,$5)
                    ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
-                user_id, acc_id, ch_id, title, username or None,
+                user_id,
+                acc_id,
+                ch_id,
+                title,
+                username or None,
             )
             # Set username if provided
             if username:
-                err = await account_manager.set_channel_username(acc_row["session_str"], ch_id, username, _acc=dict(acc_row))
+                err = await account_manager.set_channel_username(
+                    acc_row["session_str"], ch_id, username, _acc=dict(acc_row)
+                )
                 if err:
                     return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан (ID: {ch_id})\n⚠️ Username не удалось установить: {err}"
                 return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан! ID: {ch_id}, @{username}"
-            return f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан! ID: {ch_id}"
+            return (
+                f"✅ {'Группа' if is_group else 'Канал'} «{title}» создан! ID: {ch_id}"
+            )
         err_msg = result if isinstance(result, str) else str(result)
         return f"❌ Ошибка создания: {err_msg[:200]}"
 
@@ -671,20 +795,27 @@ async def execute_action(action_data: dict, pool: asyncpg.Pool, user_id: int, ht
 
     elif name == "schedule_broadcast":
         import datetime
+
         bot_id = action_data["bot_id"]
         text = action_data["text"]
         when_minutes = int(action_data.get("when_minutes", 60))
-        scheduled_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=when_minutes)
+        scheduled_at = datetime.datetime.utcnow() + datetime.timedelta(
+            minutes=when_minutes
+        )
         row = await pool.fetchrow(
             "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-            bot_id, user_id,
+            bot_id,
+            user_id,
         )
         if not row:
             return "❌ Бот не найден"
         sched_id = await pool.fetchval(
             """INSERT INTO scheduled_broadcasts(bot_id, owner_id, text, scheduled_at)
                VALUES($1,$2,$3,$4) RETURNING id""",
-            bot_id, user_id, text, scheduled_at,
+            bot_id,
+            user_id,
+            text,
+            scheduled_at,
         )
         return f"✅ Рассылка запланирована на {scheduled_at.strftime('%d.%m %H:%M')} UTC (через {when_minutes} мин). ID: {sched_id}"
 
@@ -704,7 +835,12 @@ TOOL_DEFINITIONS = [
         "description": "Получить детальную информацию о конкретном боте по его ID",
         "input_schema": {
             "type": "object",
-            "properties": {"bot_id": {"type": "integer", "description": "Числовой ID бота в Telegram"}},
+            "properties": {
+                "bot_id": {
+                    "type": "integer",
+                    "description": "Числовой ID бота в Telegram",
+                }
+            },
             "required": ["bot_id"],
         },
     },
@@ -729,7 +865,11 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "bot_id": {"type": "integer"},
-                "days": {"type": "integer", "description": "Кол-во дней (по умолчанию 7)", "default": 7},
+                "days": {
+                    "type": "integer",
+                    "description": "Кол-во дней (по умолчанию 7)",
+                    "default": 7,
+                },
             },
             "required": ["bot_id"],
         },
@@ -760,7 +900,11 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "bot_id": {"type": "integer"},
-                "limit": {"type": "integer", "description": "Кол-во последних рассылок (по умолчанию 10)", "default": 10},
+                "limit": {
+                    "type": "integer",
+                    "description": "Кол-во последних рассылок (по умолчанию 10)",
+                    "default": 10,
+                },
             },
             "required": ["bot_id"],
         },
@@ -776,7 +920,10 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "bot_id": {"type": "integer", "description": "ID бота для рассылки"},
-                "text": {"type": "string", "description": "Текст сообщения (HTML поддерживается)"},
+                "text": {
+                    "type": "string",
+                    "description": "Текст сообщения (HTML поддерживается)",
+                },
             },
             "required": ["bot_id", "text"],
         },
@@ -793,8 +940,14 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "bot_id": {"type": "integer"},
                 "name": {"type": "string", "description": "Новое имя бота"},
-                "description": {"type": "string", "description": "Новое полное описание бота"},
-                "short_description": {"type": "string", "description": "Новое краткое описание (about)"},
+                "description": {
+                    "type": "string",
+                    "description": "Новое полное описание бота",
+                },
+                "short_description": {
+                    "type": "string",
+                    "description": "Новое краткое описание (about)",
+                },
             },
             "required": ["bot_id"],
         },
@@ -809,8 +962,14 @@ TOOL_DEFINITIONS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "channel_id": {"type": "integer", "description": "Числовой ID канала из get_my_channels"},
-                "text": {"type": "string", "description": "Текст поста (HTML поддерживается)"},
+                "channel_id": {
+                    "type": "integer",
+                    "description": "Числовой ID канала из get_my_channels",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Текст поста (HTML поддерживается)",
+                },
             },
             "required": ["channel_id", "text"],
         },
@@ -826,10 +985,19 @@ TOOL_DEFINITIONS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "Название канала или группы"},
+                "title": {
+                    "type": "string",
+                    "description": "Название канала или группы",
+                },
                 "about": {"type": "string", "description": "Описание (опционально)"},
-                "username": {"type": "string", "description": "Username без @ (опционально, только a-z, 0-9, _)"},
-                "is_group": {"type": "boolean", "description": "true = создать группу, false = канал"},
+                "username": {
+                    "type": "string",
+                    "description": "Username без @ (опционально, только a-z, 0-9, _)",
+                },
+                "is_group": {
+                    "type": "boolean",
+                    "description": "true = создать группу, false = канал",
+                },
             },
             "required": ["title"],
         },
@@ -846,7 +1014,11 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "bot_id": {"type": "integer", "description": "ID бота"},
                 "text": {"type": "string", "description": "Текст рассылки"},
-                "when_minutes": {"type": "integer", "description": "Через сколько минут запустить (по умолчанию 60)", "default": 60},
+                "when_minutes": {
+                    "type": "integer",
+                    "description": "Через сколько минут запустить (по умолчанию 60)",
+                    "default": 60,
+                },
             },
             "required": ["bot_id", "text"],
         },
@@ -909,7 +1081,9 @@ TOOL_DEFINITIONS = [
 ]
 
 
-async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, http=None) -> str:
+async def run_tool(
+    name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, http=None
+) -> str:
     """Execute a tool and return JSON string result."""
     try:
         if name == "get_my_bots":
@@ -921,7 +1095,9 @@ async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, ht
         elif name == "get_audience_activity":
             result = await get_audience_activity(pool, user_id, inputs["bot_id"])
         elif name == "get_growth_trend":
-            result = await get_growth_trend(pool, user_id, inputs["bot_id"], inputs.get("days", 7))
+            result = await get_growth_trend(
+                pool, user_id, inputs["bot_id"], inputs.get("days", 7)
+            )
         elif name == "get_seo_recommendations":
             result = await get_seo_recommendations(pool, user_id, inputs["bot_id"])
         elif name == "get_my_accounts":
@@ -929,21 +1105,30 @@ async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, ht
         elif name == "get_my_channels":
             result = await get_my_channels(pool, user_id)
         elif name == "get_broadcast_history":
-            result = await get_broadcast_history(pool, user_id, inputs["bot_id"], inputs.get("limit", 10))
+            result = await get_broadcast_history(
+                pool, user_id, inputs["bot_id"], inputs.get("limit", 10)
+            )
         elif name == "launch_broadcast":
-            result = await action_launch_broadcast(pool, user_id, inputs["bot_id"], inputs["text"])
+            result = await action_launch_broadcast(
+                pool, user_id, inputs["bot_id"], inputs["text"]
+            )
         elif name == "update_bot_profile":
             result = await action_update_bot_profile(
-                pool, user_id, inputs["bot_id"],
+                pool,
+                user_id,
+                inputs["bot_id"],
                 name=inputs.get("name"),
                 description=inputs.get("description"),
                 short_description=inputs.get("short_description"),
             )
         elif name == "post_to_channel":
-            result = await action_post_to_channel(pool, user_id, inputs["channel_id"], inputs["text"])
+            result = await action_post_to_channel(
+                pool, user_id, inputs["channel_id"], inputs["text"]
+            )
         elif name == "create_channel":
             result = await action_create_channel(
-                pool, user_id,
+                pool,
+                user_id,
                 title=inputs["title"],
                 about=inputs.get("about", ""),
                 username=inputs.get("username", ""),
@@ -951,7 +1136,8 @@ async def run_tool(name: str, inputs: dict, pool: asyncpg.Pool, user_id: int, ht
             )
         elif name == "schedule_broadcast":
             result = await action_schedule_broadcast(
-                pool, user_id,
+                pool,
+                user_id,
                 bot_id=inputs["bot_id"],
                 text=inputs["text"],
                 when_minutes=inputs.get("when_minutes", 60),

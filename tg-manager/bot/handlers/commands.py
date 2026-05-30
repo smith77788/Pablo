@@ -1,4 +1,5 @@
 """Manage bot commands (set/view/delete)."""
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -32,8 +33,12 @@ def _parse_commands(text: str) -> list[dict] | None:
 
 
 @router.callback_query(CommandsCb.filter(F.action == "menu"))
-async def cb_commands_menu(callback: CallbackQuery, callback_data: CommandsCb,
-                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_commands_menu(
+    callback: CallbackQuery,
+    callback_data: CommandsCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -55,13 +60,15 @@ async def cb_commands_menu(callback: CallbackQuery, callback_data: CommandsCb,
         text = f"🤖 <b>Команды {label}</b>\n\n{lines}" + hint
     else:
         text = f"🤖 <b>Команды {label}</b>\n\nКоманды не заданы." + hint
-    await callback.message.edit_text(text, parse_mode="HTML",
-                                      reply_markup=commands_menu(callback_data.bot_id))
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=commands_menu(callback_data.bot_id)
+    )
 
 
 @router.callback_query(CommandsCb.filter(F.action == "add"))
-async def cb_commands_add(callback: CallbackQuery, callback_data: CommandsCb,
-                           state: FSMContext) -> None:
+async def cb_commands_add(
+    callback: CallbackQuery, callback_data: CommandsCb, state: FSMContext
+) -> None:
     await state.set_state(SetCommands.waiting_add)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -75,8 +82,9 @@ async def cb_commands_add(callback: CallbackQuery, callback_data: CommandsCb,
 
 
 @router.message(SetCommands.waiting_add, F.text)
-async def msg_commands_add(message: Message, state: FSMContext,
-                            pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_commands_add(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     await state.clear()
@@ -118,8 +126,9 @@ async def msg_commands_add(message: Message, state: FSMContext,
 
 
 @router.callback_query(CommandsCb.filter(F.action == "set_all"))
-async def cb_commands_set_all(callback: CallbackQuery, callback_data: CommandsCb,
-                               state: FSMContext) -> None:
+async def cb_commands_set_all(
+    callback: CallbackQuery, callback_data: CommandsCb, state: FSMContext
+) -> None:
     await state.set_state(SetCommands.waiting_commands)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -134,8 +143,9 @@ async def cb_commands_set_all(callback: CallbackQuery, callback_data: CommandsCb
 
 
 @router.message(SetCommands.waiting_commands, F.text)
-async def msg_commands_set_all(message: Message, state: FSMContext,
-                                pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def msg_commands_set_all(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     await state.clear()
@@ -171,8 +181,12 @@ async def msg_commands_set_all(message: Message, state: FSMContext,
 
 
 @router.callback_query(CommandsCb.filter(F.action == "delete"))
-async def cb_commands_delete(callback: CallbackQuery, callback_data: CommandsCb,
-                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_commands_delete(
+    callback: CallbackQuery,
+    callback_data: CommandsCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:

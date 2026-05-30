@@ -1,4 +1,5 @@
 """Order management agent for BASIC.FOOD."""
+
 from __future__ import annotations
 from agents.base import BaseAgent
 from tools.database_tools import (
@@ -61,7 +62,15 @@ class OrderManagerAgent(BaseAgent):
                     "properties": {
                         "status": {
                             "type": "string",
-                            "enum": ["new", "confirmed", "processing", "shipped", "delivered", "cancelled", "refunded"],
+                            "enum": [
+                                "new",
+                                "confirmed",
+                                "processing",
+                                "shipped",
+                                "delivered",
+                                "cancelled",
+                                "refunded",
+                            ],
                         },
                         "limit": {"type": "integer", "default": 20},
                     },
@@ -148,7 +157,9 @@ class OrderManagerAgent(BaseAgent):
 
     def process_new_orders(self) -> str:
         """Check and process all new orders."""
-        return self.run("Перевір всі нові замовлення (статус 'new'). Підтверди кожне і повідом клієнтів через Telegram якщо є chat_id.")
+        return self.run(
+            "Перевір всі нові замовлення (статус 'new'). Підтверди кожне і повідом клієнтів через Telegram якщо є chat_id."
+        )
 
     def add_tracking(self, order_number: str, tracking: str) -> str:
         """Add tracking number to an order and notify customer."""

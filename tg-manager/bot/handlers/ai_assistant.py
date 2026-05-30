@@ -3,6 +3,7 @@
 READ-инструменты возвращают данные для анализа.
 ACTION-инструменты запрашивают подтверждение у пользователя перед выполнением.
 """
+
 from __future__ import annotations
 import json
 import logging
@@ -73,9 +74,33 @@ _DEFAULT_MAX_FILE_BYTES = 1_048_576
 _DEFAULT_MAX_FILE_CHARS = 60_000
 _TELEGRAM_TEXT_LIMIT = 3900
 _SUPPORTED_TEXT_EXTENSIONS = {
-    ".txt", ".md", ".markdown", ".json", ".jsonl", ".csv", ".tsv", ".yaml", ".yml",
-    ".xml", ".html", ".htm", ".css", ".scss", ".js", ".jsx", ".ts", ".tsx",
-    ".py", ".sql", ".toml", ".ini", ".env", ".log", ".prisma", ".sh", ".ps1",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".jsonl",
+    ".csv",
+    ".tsv",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".py",
+    ".sql",
+    ".toml",
+    ".ini",
+    ".env",
+    ".log",
+    ".prisma",
+    ".sh",
+    ".ps1",
 }
 _SUPPORTED_STRUCTURED_EXTENSIONS = {".pdf", ".docx", ".xlsx"}
 _SUPPORTED_FILE_HINT = "txt, md, csv, json, yaml, код, log, pdf, docx, xlsx"
@@ -125,14 +150,16 @@ def _get_models_to_try() -> list[str]:
 def _openai_tools() -> list:
     result = []
     for t in TOOL_DEFINITIONS:
-        result.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t["description"],
-                "parameters": t["input_schema"],
-            },
-        })
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"],
+                },
+            }
+        )
     return result
 
 
@@ -212,14 +239,18 @@ def _extract_xlsx_text(raw: bytes) -> str:
     try:
         for sheet in workbook.worksheets[:max_sheets]:
             rows: list[str] = []
-            for row in sheet.iter_rows(max_row=max_rows, max_col=max_columns, values_only=True):
+            for row in sheet.iter_rows(
+                max_row=max_rows, max_col=max_columns, values_only=True
+            ):
                 values = ["" if value is None else str(value) for value in row]
                 if any(value.strip() for value in values):
                     rows.append("\t".join(values).rstrip())
             if rows:
                 parts.append(f"[Лист: {sheet.title}]\n" + "\n".join(rows))
         if len(workbook.worksheets) > max_sheets:
-            parts.append(f"[Показаны первые {max_sheets} листов из {len(workbook.worksheets)}.]")
+            parts.append(
+                f"[Показаны первые {max_sheets} листов из {len(workbook.worksheets)}.]"
+            )
     finally:
         workbook.close()
     return "\n\n".join(parts)
@@ -239,7 +270,9 @@ def _extract_document_text(file_name: str, mime_type: str | None, raw: bytes) ->
         return _extract_xlsx_text(raw)
 
     supported = sorted(_SUPPORTED_TEXT_EXTENSIONS | _SUPPORTED_STRUCTURED_EXTENSIONS)
-    raise ValueError(f"Формат пока не поддерживается. Поддерживаются: {', '.join(supported)}")
+    raise ValueError(
+        f"Формат пока не поддерживается. Поддерживаются: {', '.join(supported)}"
+    )
 
 
 async def _read_attached_document(message: Message) -> tuple[str, str]:
@@ -251,10 +284,14 @@ async def _read_attached_document(message: Message) -> tuple[str, str]:
     file_size = document.file_size or 0
     if file_size > _MAX_FILE_BYTES:
         size_mb = _MAX_FILE_BYTES / 1024 / 1024
-        raise ValueError(f"Файл слишком большой. Сейчас можно отправлять файлы до {size_mb:.1f} МБ.")
+        raise ValueError(
+            f"Файл слишком большой. Сейчас можно отправлять файлы до {size_mb:.1f} МБ."
+        )
 
     if message.bot is None:
-        raise RuntimeError("Бот не готов скачать файл. Попробуйте отправить файл еще раз.")
+        raise RuntimeError(
+            "Бот не готов скачать файл. Попробуйте отправить файл еще раз."
+        )
 
     bot_file = await message.bot.get_file(document.file_id)
     downloaded = await message.bot.download_file(bot_file.file_path)
@@ -263,7 +300,9 @@ async def _read_attached_document(message: Message) -> tuple[str, str]:
     raw = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded or b"")
     if len(raw) > _MAX_FILE_BYTES:
         size_mb = _MAX_FILE_BYTES / 1024 / 1024
-        raise ValueError(f"Файл слишком большой. Сейчас можно отправлять файлы до {size_mb:.1f} МБ.")
+        raise ValueError(
+            f"Файл слишком большой. Сейчас можно отправлять файлы до {size_mb:.1f} МБ."
+        )
 
     text = _extract_document_text(file_name, document.mime_type, raw)
     text = _truncate_file_text(text)
@@ -273,7 +312,11 @@ async def _read_attached_document(message: Message) -> tuple[str, str]:
 
 
 def _build_file_prompt(file_name: str, file_text: str, caption: str | None) -> str:
-    task = caption.strip() if caption and caption.strip() else "Изучи файл и помоги по его содержимому."
+    task = (
+        caption.strip()
+        if caption and caption.strip()
+        else "Изучи файл и помоги по его содержимому."
+    )
     return (
         f"{task}\n\n"
         f"Пользователь отправил файл: {file_name}\n"
@@ -318,14 +361,20 @@ async def _edit_or_answer_long(
     chunks = _split_telegram_text(text)
     if len(chunks) == 1:
         try:
-            await thinking_message.edit_text(chunks[0], parse_mode="HTML", reply_markup=reply_markup)
+            await thinking_message.edit_text(
+                chunks[0], parse_mode="HTML", reply_markup=reply_markup
+            )
             return
         except Exception:
             try:
-                await thinking_message.edit_text(chunks[0], parse_mode=None, reply_markup=reply_markup)
+                await thinking_message.edit_text(
+                    chunks[0], parse_mode=None, reply_markup=reply_markup
+                )
                 return
             except Exception:
-                await source_message.answer(chunks[0], parse_mode=None, reply_markup=reply_markup)
+                await source_message.answer(
+                    chunks[0], parse_mode=None, reply_markup=reply_markup
+                )
                 return
 
     try:
@@ -414,7 +463,9 @@ async def _call_openrouter(
                             args = json.loads(tc.function.arguments)
                         except Exception:
                             args = {}
-                        result_text = await run_tool(tc.function.name, args, pool, user_id, http)
+                        result_text = await run_tool(
+                            tc.function.name, args, pool, user_id, http
+                        )
 
                         # Detect pending action — intercept before AI sees it
                         try:
@@ -422,22 +473,29 @@ async def _call_openrouter(
                             if isinstance(parsed, dict) and "pending_action" in parsed:
                                 pending_action_data = parsed
                                 # Tell AI the action is queued for confirmation
-                                result_text = json.dumps({
-                                    "status": "pending_confirmation",
-                                    "message": f"Действие «{parsed['pending_action']}» поставлено в очередь на подтверждение пользователем.",
-                                    "preview": parsed.get("preview", ""),
-                                }, ensure_ascii=False)
+                                result_text = json.dumps(
+                                    {
+                                        "status": "pending_confirmation",
+                                        "message": f"Действие «{parsed['pending_action']}» поставлено в очередь на подтверждение пользователем.",
+                                        "preview": parsed.get("preview", ""),
+                                    },
+                                    ensure_ascii=False,
+                                )
                         except Exception:
                             log_exc_swallow(log, "Не удалось распарсить JSON-ответ AI-ассистента")
 
-                        current_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result_text,
-                        })
+                        current_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": result_text,
+                            }
+                        )
                 else:
                     ai_reply = msg.content or "Нет ответа."
-                    suffix = f"\n\n<i>Модель: {model}</i>" if model != primary_model else ""
+                    suffix = (
+                        f"\n\n<i>Модель: {model}</i>" if model != primary_model else ""
+                    )
                     full_reply = ai_reply + suffix
 
                     if pending_action_data:
@@ -452,16 +510,38 @@ async def _call_openrouter(
 
         except Exception as e:
             err_str = str(e).lower()
-            should_retry = any(x in err_str for x in (
-                "rate", "limit", "429", "quota", "overloaded", "timeout",
-                "model_not_found", "not found", "404", "invalid model",
-                "402", "credits", "payment", "billing", "insufficient",
-            ))
+            should_retry = any(
+                x in err_str
+                for x in (
+                    "rate",
+                    "limit",
+                    "429",
+                    "quota",
+                    "overloaded",
+                    "timeout",
+                    "model_not_found",
+                    "not found",
+                    "404",
+                    "invalid model",
+                    "402",
+                    "credits",
+                    "payment",
+                    "billing",
+                    "insufficient",
+                )
+            )
             if should_retry:
-                log.warning("Model %s (max_tokens=%d) failed (%s), trying next", model, max_tokens, type(e).__name__)
+                log.warning(
+                    "Model %s (max_tokens=%d) failed (%s), trying next",
+                    model,
+                    max_tokens,
+                    type(e).__name__,
+                )
                 continue
             log.exception("OpenRouter API error with model %s: %s", model, e)
-            return f"⚠️ Ошибка AI-ассистента ({model}): {type(e).__name__}: {str(e)[:120]}"
+            return (
+                f"⚠️ Ошибка AI-ассистента ({model}): {type(e).__name__}: {str(e)[:120]}"
+            )
 
     return (
         "⚠️ <b>AI-ассистент временно недоступен</b>\n\n"
@@ -549,7 +629,9 @@ async def _process_ai_turn(
             f"<code>{preview}</code>"
             f"{acc_info}{audience_info}{count_info}"
         )
-        await _edit_or_answer_long(thinking, message, confirm_text, reply_markup=kb.as_markup())
+        await _edit_or_answer_long(
+            thinking, message, confirm_text, reply_markup=kb.as_markup()
+        )
     else:
         # Regular AI response (text)
         str_reply = reply if isinstance(reply, str) else str(reply)
@@ -558,12 +640,15 @@ async def _process_ai_turn(
 
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
-        await _edit_or_answer_long(thinking, message, str_reply, reply_markup=kb.as_markup())
+        await _edit_or_answer_long(
+            thinking, message, str_reply, reply_markup=kb.as_markup()
+        )
 
 
 @router.message(Command("ai"))
 async def cmd_ai(message: Message) -> None:
     from bot.callbacks import BmCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
     await message.answer(
@@ -576,7 +661,9 @@ async def cmd_ai(message: Message) -> None:
 
 
 @router.callback_query(AiCb.filter(F.action == "start"))
-async def cb_ai_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_ai_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
@@ -612,14 +699,18 @@ async def cb_ai_stop(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(AiCb.filter(F.action == "confirm_action"))
 async def cb_ai_confirm_action(
-    callback: CallbackQuery, state: FSMContext,
-    pool: asyncpg.Pool, http: aiohttp.ClientSession,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
 ) -> None:
     await callback.answer()
     data = await state.get_data()
     action_data = data.get("pending_action_data")
     if not action_data:
-        await callback.message.edit_text("⚠️ Данные действия устарели. Попросите ассистента повторить.")
+        await callback.message.edit_text(
+            "⚠️ Данные действия устарели. Попросите ассистента повторить."
+        )
         return
 
     await callback.message.edit_text("⏳ <i>Выполняю...</i>", parse_mode="HTML")
@@ -650,16 +741,20 @@ async def cb_ai_cancel_action(callback: CallbackQuery, state: FSMContext) -> Non
 
 @router.message(AiChat.chatting, F.text)
 async def msg_ai_chat(
-    message: Message, state: FSMContext,
-    pool: asyncpg.Pool, http: aiohttp.ClientSession,
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
 ) -> None:
     await _process_ai_turn(message, state, pool, http, message.text or "")
 
 
 @router.message(AiChat.chatting, F.document)
 async def msg_ai_document(
-    message: Message, state: FSMContext,
-    pool: asyncpg.Pool, http: aiohttp.ClientSession,
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
 ) -> None:
     try:
         file_name, file_text = await _read_attached_document(message)

@@ -1,4 +1,5 @@
 """Base class for all BASIC.FOOD AI agents."""
+
 from __future__ import annotations
 import json
 import os
@@ -27,7 +28,9 @@ class BaseAgent:
         """Run one agent turn and return the final text response."""
         system = self.system_prompt
         if context:
-            system += f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+            system += (
+                f"\n\n<context>{json.dumps(context, ensure_ascii=False)}</context>"
+            )
 
         messages: list[dict] = [{"role": "user", "content": user_message}]
         return self._run_loop(system, messages)
@@ -71,11 +74,15 @@ class BaseAgent:
                 for block in response.content:
                     if block.type == "tool_use":
                         result = self._call_tool(block.name, block.input)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str),
-                        })
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": json.dumps(
+                                    result, ensure_ascii=False, default=str
+                                ),
+                            }
+                        )
 
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})

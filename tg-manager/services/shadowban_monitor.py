@@ -5,6 +5,7 @@ Checks:
 2. Account flood rate — accounts with high flood_count_7d flagged as restricted
 3. Search position collapse — position drops > 10 places vs 7-day average
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,9 +17,9 @@ from aiogram import Bot
 
 log = logging.getLogger(__name__)
 
-_INTERVAL = 1800           # check every 30 minutes
-_ALERT_COOLDOWN_HOURS = 24 # don't re-alert same event within 24h
-_FLOOD_THRESHOLD = 3       # accounts with flood_count_7d >= this are "restricted"
+_INTERVAL = 1800  # check every 30 minutes
+_ALERT_COOLDOWN_HOURS = 24  # don't re-alert same event within 24h
+_FLOOD_THRESHOLD = 3  # accounts with flood_count_7d >= this are "restricted"
 _POSITION_DROP_THRESHOLD = 10  # position drop > this = alert
 
 
@@ -31,12 +32,15 @@ async def _is_on_cooldown(
     row = await pool.fetchrow(
         """SELECT last_alerted FROM restriction_alert_cooldown
            WHERE owner_id=$1 AND event_type=$2 AND entity_id=$3""",
-        owner_id, event_type, entity_id,
+        owner_id,
+        event_type,
+        entity_id,
     )
     if not row:
         return False
     from datetime import timezone
     import datetime
+
     last = row["last_alerted"]
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
@@ -55,7 +59,9 @@ async def _mark_alerted(
            VALUES($1, $2, $3, NOW())
            ON CONFLICT(owner_id, event_type, entity_id)
            DO UPDATE SET last_alerted=NOW()""",
-        owner_id, event_type, entity_id,
+        owner_id,
+        event_type,
+        entity_id,
     )
 
 
@@ -71,7 +77,12 @@ async def _record_event(
     await pool.execute(
         """INSERT INTO restriction_events(owner_id, account_id, bot_id, event_type, severity, details, alerted_at)
            VALUES($1, $2, $3, $4, $5, $6::jsonb, NOW())""",
-        owner_id, account_id, bot_id, event_type, severity, json.dumps(details),
+        owner_id,
+        account_id,
+        bot_id,
+        event_type,
+        severity,
+        json.dumps(details),
     )
 
 
@@ -140,14 +151,25 @@ async def _check_search_visibility(pool: asyncpg.Pool, bot: Bot) -> None:
         if await _is_on_cooldown(pool, owner_id, event_type, bot_id):
             continue
 
-        await _record_event(pool, owner_id, event_type, severity,
-                            {"bot_id": bot_id, "last_position": last_pos, "avg_position": float(avg_pos or 0)},
-                            bot_id=bot_id)
+        await _record_event(
+            pool,
+            owner_id,
+            event_type,
+            severity,
+            {
+                "bot_id": bot_id,
+                "last_position": last_pos,
+                "avg_position": float(avg_pos or 0),
+            },
+            bot_id=bot_id,
+        )
         try:
             await bot.send_message(owner_id, message)
             await _mark_alerted(pool, owner_id, event_type, bot_id)
         except Exception as exc:
-            log.warning("shadowban_monitor: failed to alert owner=%s: %s", owner_id, exc)
+            log.warning(
+                "shadowban_monitor: failed to alert owner=%s: %s", owner_id, exc
+            )
 
 
 async def _check_account_restrictions(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -175,14 +197,21 @@ async def _check_account_restrictions(pool: asyncpg.Pool, bot: Bot) -> None:
             f"Рекомендуется снизить активность этого аккаунта или заменить его."
         )
 
-        await _record_event(pool, owner_id, "account_restricted", severity,
-                            {"account_id": account_id, "flood_count_7d": row["flood_count_7d"]},
-                            account_id=account_id)
+        await _record_event(
+            pool,
+            owner_id,
+            "account_restricted",
+            severity,
+            {"account_id": account_id, "flood_count_7d": row["flood_count_7d"]},
+            account_id=account_id,
+        )
         try:
             await bot.send_message(owner_id, message)
             await _mark_alerted(pool, owner_id, "account_restricted", account_id)
         except Exception as exc:
-            log.warning("shadowban_monitor: failed to alert owner=%s: %s", owner_id, exc)
+            log.warning(
+                "shadowban_monitor: failed to alert owner=%s: %s", owner_id, exc
+            )
 
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:

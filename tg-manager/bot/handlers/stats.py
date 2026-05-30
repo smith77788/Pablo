@@ -1,4 +1,5 @@
 """Per-bot statistics handler."""
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import asyncpg
@@ -10,8 +11,9 @@ router = Router()
 
 
 @router.callback_query(StatsCb.filter(F.action == "menu"))
-async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_stats_menu(
+    callback: CallbackQuery, callback_data: StatsCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -20,11 +22,16 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
     stats = await db.get_bot_stats(pool, callback_data.bot_id)
-    label = f"@{row.get('username')}" if row.get("username") else (row.get("first_name") or str(row.get("bot_id", "")))
+    label = (
+        f"@{row.get('username')}"
+        if row.get("username")
+        else (row.get("first_name") or str(row.get("bot_id", "")))
+    )
 
     completion_rate = (
         round(stats["funnel_completed"] / stats["funnel_total_subs"] * 100)
-        if stats["funnel_total_subs"] else 0
+        if stats["funnel_total_subs"]
+        else 0
     )
 
     hint = (
@@ -49,8 +56,7 @@ async def cb_stats_menu(callback: CallbackQuery, callback_data: StatsCb,
         f"🤖 <b>Авто-ответов активных:</b> {stats['active_replies']}\n\n"
         f"🔗 <b>Цепочек активных:</b> {stats['active_funnels']}\n"
         f"  👤 Подписчиков: {stats['funnel_users']}\n"
-        f"  ✅ Завершили: {stats['funnel_completed']} ({completion_rate}%)"
-        + hint
+        f"  ✅ Завершили: {stats['funnel_completed']} ({completion_rate}%)" + hint
     )
     await callback.message.edit_text(
         text,

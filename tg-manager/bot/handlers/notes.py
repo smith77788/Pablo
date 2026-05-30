@@ -1,4 +1,5 @@
 """Bot notes handler."""
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -16,8 +17,12 @@ class EditNote(StatesGroup):
 
 
 @router.callback_query(NoteCb.filter(F.action == "edit"))
-async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
-                       pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_note_edit(
+    callback: CallbackQuery,
+    callback_data: NoteCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -41,7 +46,9 @@ async def cb_note_edit(callback: CallbackQuery, callback_data: NoteCb,
 
 
 @router.message(EditNote.waiting_text, F.text)
-async def msg_note_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def msg_note_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
     await state.clear()
     note = "" if message.text.strip() == "-" else message.text.strip()

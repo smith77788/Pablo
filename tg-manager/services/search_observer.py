@@ -16,6 +16,7 @@ Invariants:
 - Every event is deterministic from declared inputs only.
 - Materialized state (observation_state) is a cache, never an input source.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,6 +47,7 @@ _CONFIRMATION_LOOP_INTERVAL = 300  # seconds
 # Input contract: { raw_string: str }
 # ══════════════════════════════════════════════════════════════════════════
 
+
 def canonicalize(raw: str) -> str:
     """Normalize a Telegram username to a stable entity_id.
 
@@ -60,6 +62,7 @@ def canonicalize(raw: str) -> str:
 # RAW EVENT LAYER  (append-only, immutable)
 # Input contract: { keyword_id, account_id, keyword, results[], truncated }
 # ══════════════════════════════════════════════════════════════════════════
+
 
 async def record_snapshot(
     pool: asyncpg.Pool,
@@ -78,9 +81,15 @@ async def record_snapshot(
            (snapshot_id, run_id, keyword_id, account_id, keyword,
             results, result_count, truncated, search_limit)
            VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9)""",
-        snapshot_id, run_id, keyword_id, account_id, keyword,
+        snapshot_id,
+        run_id,
+        keyword_id,
+        account_id,
+        keyword,
         json.dumps(results, ensure_ascii=False),
-        len(results), truncated, search_limit,
+        len(results),
+        truncated,
+        search_limit,
     )
     return snapshot_id
 
@@ -90,6 +99,7 @@ async def record_snapshot(
 # Input contract: { results[], entity_id }
 # Forbidden: IO, external state, probabilistic reasoning.
 # ══════════════════════════════════════════════════════════════════════════
+
 
 def extract_observation(
     results: list[dict[str, Any]],
@@ -124,7 +134,10 @@ async def record_observation(
         """INSERT INTO search_observations (snapshot_id, entity_id, found, rank)
            VALUES ($1,$2,$3,$4)
            ON CONFLICT (snapshot_id, entity_id) DO NOTHING""",
-        snapshot_id, entity_id, found, rank,
+        snapshot_id,
+        entity_id,
+        found,
+        rank,
     )
 
 
@@ -132,6 +145,7 @@ async def record_observation(
 # STATE MODEL  (per keyword × entity × account last-seen cache)
 # This is NOT an authoritative data source — only a comparison cache.
 # ══════════════════════════════════════════════════════════════════════════
+
 
 async def _get_last_state(
     pool: asyncpg.Pool,
@@ -143,7 +157,9 @@ async def _get_last_state(
         """SELECT last_rank, last_found, updated_at
            FROM observation_state
            WHERE keyword_id=$1 AND entity_id=$2 AND account_id=$3""",
-        keyword_id, entity_id, account_id,
+        keyword_id,
+        entity_id,
+        account_id,
     )
 
 
@@ -163,7 +179,12 @@ async def _upsert_state(
            VALUES ($1,$2,$3,$4,$5,$6,now())
            ON CONFLICT (keyword_id, entity_id, account_id) DO UPDATE
            SET last_rank=$4, last_found=$5, last_snapshot_id=$6, updated_at=now()""",
-        keyword_id, entity_id, account_id, rank, found, snapshot_id,
+        keyword_id,
+        entity_id,
+        account_id,
+        rank,
+        found,
+        snapshot_id,
     )
 
 
@@ -172,6 +193,7 @@ async def _upsert_state(
 # Input contract: { old_found, old_rank, new_found, new_rank }
 # Pure function — no IO, no side effects.
 # ══════════════════════════════════════════════════════════════════════════
+
 
 def detect_event_type(
     old_found: bool | None,
@@ -215,8 +237,14 @@ async def _record_change_event(
             event_type, old_rank, new_rank)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
            RETURNING id""",
-        run_id, snapshot_id, keyword_id, entity_id, account_id,
-        event_type, old_rank, new_rank,
+        run_id,
+        snapshot_id,
+        keyword_id,
+        entity_id,
+        account_id,
+        event_type,
+        old_rank,
+        new_rank,
     )
     return row_id
 
@@ -224,6 +252,7 @@ async def _record_change_event(
 # ══════════════════════════════════════════════════════════════════════════
 # FULL PIPELINE  (one call per keyword × account pair)
 # ══════════════════════════════════════════════════════════════════════════
+
 
 async def process_search_result(
     pool: asyncpg.Pool,
@@ -250,8 +279,13 @@ async def process_search_result(
     """
     # 1. Raw snapshot (append-only)
     snapshot_id = await record_snapshot(
-        pool, run_id, keyword_id, account_id, keyword,
-        results, truncated,
+        pool,
+        run_id,
+        keyword_id,
+        account_id,
+        keyword,
+        results,
+        truncated,
     )
 
     # 2. Observation extraction (pure)
@@ -271,17 +305,35 @@ async def process_search_result(
     # 6. Record change event
     if event_type:
         await _record_change_event(
-            pool, run_id, snapshot_id, keyword_id, entity_id, account_id,
-            event_type, old_rank, rank,
+            pool,
+            run_id,
+            snapshot_id,
+            keyword_id,
+            entity_id,
+            account_id,
+            event_type,
+            old_rank,
+            rank,
         )
         log.info(
             "search_observer event=%s kw_id=%s entity=%s account=%s old=%s new=%s",
-            event_type, keyword_id, entity_id, account_id, old_rank, rank,
+            event_type,
+            keyword_id,
+            entity_id,
+            account_id,
+            old_rank,
+            rank,
         )
 
     # 7. Update state cache
     await _upsert_state(
-        pool, keyword_id, entity_id, account_id, found, rank, snapshot_id,
+        pool,
+        keyword_id,
+        entity_id,
+        account_id,
+        found,
+        rank,
+        snapshot_id,
     )
 
     return event_type
@@ -290,6 +342,7 @@ async def process_search_result(
 # ══════════════════════════════════════════════════════════════════════════
 # CONFIRMATION & ALERTING
 # ══════════════════════════════════════════════════════════════════════════
+
 
 async def _is_on_cooldown(
     pool: asyncpg.Pool,
@@ -300,7 +353,9 @@ async def _is_on_cooldown(
     row = await pool.fetchrow(
         """SELECT last_alerted FROM search_alert_cooldown
            WHERE keyword_id=$1 AND entity_id=$2 AND event_type=$3""",
-        keyword_id, entity_id, event_type,
+        keyword_id,
+        entity_id,
+        event_type,
     )
     if not row:
         return False
@@ -321,7 +376,9 @@ async def _set_cooldown(
            VALUES ($1,$2,$3,now())
            ON CONFLICT (keyword_id, entity_id, event_type) DO UPDATE
            SET last_alerted=now()""",
-        keyword_id, entity_id, event_type,
+        keyword_id,
+        entity_id,
+        event_type,
     )
 
 
@@ -341,7 +398,10 @@ async def _has_oscillation(
            WHERE keyword_id=$1 AND entity_id=$2 AND event_type=$3
              AND confirmed=TRUE AND occurred_at > $4
            LIMIT 1""",
-        keyword_id, entity_id, opposite, cutoff,
+        keyword_id,
+        entity_id,
+        opposite,
+        cutoff,
     )
     return row is not None
 
@@ -384,7 +444,10 @@ async def _send_alert(bot: Bot, event: asyncpg.Record) -> None:
         await bot.send_message(owner_id, text, parse_mode="HTML")
         log.info(
             "search_observer alert=%s owner=%s kw=%r entity=%s",
-            event_type, owner_id, keyword, event["entity_id"],
+            event_type,
+            owner_id,
+            keyword,
+            event["entity_id"],
         )
     except Exception as exc:
         log.warning("search_observer alert send failed owner=%s: %s", owner_id, exc)
@@ -448,7 +511,8 @@ async def _try_confirm_and_alert(
         """UPDATE search_change_events
            SET confirmed=TRUE, confirmed_at=now(), confirming_snapshot_id=$2
            WHERE id=$1""",
-        event["id"], confirming["snapshot_id"],
+        event["id"],
+        confirming["snapshot_id"],
     )
 
     # Guard: notifications disabled for this keyword
@@ -459,15 +523,21 @@ async def _try_confirm_and_alert(
     if await _is_on_cooldown(pool, event["keyword_id"], event["entity_id"], event_type):
         log.debug(
             "search_observer cooldown active for kw_id=%s entity=%s type=%s",
-            event["keyword_id"], event["entity_id"], event_type,
+            event["keyword_id"],
+            event["entity_id"],
+            event_type,
         )
         return
 
     # Guard: oscillation
-    if await _has_oscillation(pool, event["keyword_id"], event["entity_id"], event_type):
+    if await _has_oscillation(
+        pool, event["keyword_id"], event["entity_id"], event_type
+    ):
         log.debug(
             "search_observer oscillation suppressed kw_id=%s entity=%s type=%s",
-            event["keyword_id"], event["entity_id"], event_type,
+            event["keyword_id"],
+            event["entity_id"],
+            event_type,
         )
         return
 
@@ -505,7 +575,8 @@ async def run_confirmation_pass(pool: asyncpg.Pool, bot: Bot) -> None:
         except Exception as exc:
             log.warning(
                 "search_observer confirmation_pass error for event_id=%s: %s",
-                event["id"], exc,
+                event["id"],
+                exc,
             )
 
 

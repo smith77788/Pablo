@@ -9,7 +9,9 @@ def _acc_label(acc: asyncpg.Record) -> str:
     return f"{name} ({uname})" if name else uname
 
 
-async def _get_active_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
+async def _get_active_accounts(
+    pool: asyncpg.Pool, owner_id: int
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
                   a.device_model, a.system_version, a.app_version,

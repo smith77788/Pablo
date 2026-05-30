@@ -8,6 +8,7 @@ Usage:
     ...
     cancel_task(user_id, task_id)
 """
+
 from __future__ import annotations
 import asyncio
 import time
@@ -20,8 +21,8 @@ from typing import Optional
 class TaskEntry:
     task_id: str
     user_id: int
-    kind: str          # "strike", "mass_join", "mass_report", "warmup", etc.
-    label: str         # human-readable description
+    kind: str  # "strike", "mass_join", "mass_report", "warmup", etc.
+    label: str  # human-readable description
     task: asyncio.Task
     started_at: float = field(default_factory=time.time)
 

@@ -1,10 +1,16 @@
 """Deep links manager and referral tracking."""
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import DeepLinkCb
-from bot.keyboards import deeplinks_menu, deeplink_view_menu, back_to_bot, subscription_locked_markup
+from bot.keyboards import (
+    deeplinks_menu,
+    deeplink_view_menu,
+    back_to_bot,
+    subscription_locked_markup,
+)
 from bot.states import CreateDeepLink
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -20,13 +26,15 @@ def _dl_cancel_kb(bot_id: int) -> object:
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "menu"))
-async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
-                      pool: asyncpg.Pool) -> None:
+async def cb_dl_menu(
+    callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
+) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("Диплинки и рефералы", "starter"), parse_mode="HTML",
+            locked_text("Диплинки и рефералы", "starter"),
+            parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter"),
         )
         return
@@ -54,8 +62,9 @@ async def cb_dl_menu(callback: CallbackQuery, callback_data: DeepLinkCb,
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "view"))
-async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
-                      pool: asyncpg.Pool) -> None:
+async def cb_dl_view(
+    callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -67,9 +76,19 @@ async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
         await callback.answer("Ссылка не найдена.", show_alert=True)
         return
     username = row.get("username") or ""
-    url = f"https://t.me/{username}?start={link['start_param']}" if username else f"start={link['start_param']}"
-    ctr = round(link['unique_users'] / link['click_count'] * 100, 1) if link['click_count'] else 0
-    safe_name = link['name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    url = (
+        f"https://t.me/{username}?start={link['start_param']}"
+        if username
+        else f"start={link['start_param']}"
+    )
+    ctr = (
+        round(link["unique_users"] / link["click_count"] * 100, 1)
+        if link["click_count"]
+        else 0
+    )
+    safe_name = (
+        link["name"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
     await callback.message.edit_text(
         f"🔗 <b>{safe_name}</b>\n\n"
         f"Параметр: <code>{link['start_param']}</code>\n"
@@ -86,8 +105,9 @@ async def cb_dl_view(callback: CallbackQuery, callback_data: DeepLinkCb,
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "create"))
-async def cb_dl_create(callback: CallbackQuery, callback_data: DeepLinkCb,
-                        state: FSMContext) -> None:
+async def cb_dl_create(
+    callback: CallbackQuery, callback_data: DeepLinkCb, state: FSMContext
+) -> None:
     await state.set_state(CreateDeepLink.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -125,10 +145,11 @@ async def msg_dl_name(message: Message, state: FSMContext) -> None:
 @router.message(CreateDeepLink.waiting_param, F.text)
 async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     import re
+
     data = await state.get_data()
     param = message.text.strip().replace(" ", "_")
     # Validate before clearing state so user can retry
-    if not re.match(r'^[a-zA-Z0-9_-]{1,50}$', param):
+    if not re.match(r"^[a-zA-Z0-9_-]{1,50}$", param):
         await message.answer(
             "❌ Параметр должен содержать только латиницу, цифры, _ или - (максимум 50 символов).\n\n"
             "Попробуйте снова:",
@@ -146,7 +167,12 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     row = await db.get_bot(pool, data["bot_id"], message.from_user.id)
     username = row.get("username") or "" if row else ""
     url = f"https://t.me/{username}?start={param}" if username else f"?start={param}"
-    safe_link_name = data['link_name'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe_link_name = (
+        data["link_name"]
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     await message.answer(
         f"✅ <b>Диплинк создан!</b>\n\n"
         f"Название: {safe_link_name}\n"
@@ -158,8 +184,9 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "delete"))
-async def cb_dl_delete(callback: CallbackQuery, callback_data: DeepLinkCb,
-                        pool: asyncpg.Pool) -> None:
+async def cb_dl_delete(
+    callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
+) -> None:
 
     await db.delete_deep_link(pool, callback_data.link_id, callback_data.bot_id)
     links = await db.get_deep_links(pool, callback_data.bot_id)
@@ -173,19 +200,26 @@ async def cb_dl_delete(callback: CallbackQuery, callback_data: DeepLinkCb,
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "leaders"))
-async def cb_dl_leaders(callback: CallbackQuery, callback_data: DeepLinkCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_dl_leaders(
+    callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
+) -> None:
 
     leaders = await db.get_referral_leaderboard(pool, callback_data.bot_id, limit=10)
     total = await db.get_referral_total(pool, callback_data.bot_id)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=DeepLinkCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="◀️ Назад",
+        callback_data=DeepLinkCb(action="menu", bot_id=callback_data.bot_id),
+    )
     if leaders:
         lines = []
         medals = ["🥇", "🥈", "🥉"] + ["🎖"] * 10
         for i, l in enumerate(leaders):
-            lines.append(f"{medals[i]} ID <code>{l['referrer_user_id']}</code> — {l['referral_count']} чел.")
+            lines.append(
+                f"{medals[i]} ID <code>{l['referrer_user_id']}</code> — {l['referral_count']} чел."
+            )
         body = "\n".join(lines)
     else:
         body = "Рефералов пока нет."

@@ -8,6 +8,7 @@ Provides:
 - Account-to-session mapping with in-memory cache
 - Worker-safe session checkout/checkin
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,14 +24,14 @@ log = logging.getLogger(__name__)
 
 
 class SessionState(str, Enum):
-    UNKNOWN    = "unknown"
-    WARMING    = "warming"
-    READY      = "ready"
-    BUSY       = "busy"
-    COOLING    = "cooling"
-    INVALID    = "invalid"
-    EXPIRED    = "expired"
-    BANNED     = "banned"
+    UNKNOWN = "unknown"
+    WARMING = "warming"
+    READY = "ready"
+    BUSY = "busy"
+    COOLING = "cooling"
+    INVALID = "invalid"
+    EXPIRED = "expired"
+    BANNED = "banned"
 
 
 @dataclass
@@ -98,7 +99,10 @@ async def warm_session(account_id: int, pool: asyncpg.Pool) -> SessionState:
         return SessionState.UNKNOWN
 
     async with _get_lock(account_id):
-        if entry.state == SessionState.READY and (time.monotonic() - entry.last_checked) < 300:
+        if (
+            entry.state == SessionState.READY
+            and (time.monotonic() - entry.last_checked) < 300
+        ):
             return SessionState.READY  # Fresh enough
 
         entry.state = SessionState.WARMING
@@ -116,7 +120,9 @@ async def warm_session(account_id: int, pool: asyncpg.Pool) -> SessionState:
                 entry.state = SessionState.BANNED
                 await pool.execute(
                     "UPDATE tg_accounts SET is_active=FALSE, acc_status=$1, status_reason=$2 WHERE id=$3",
-                    status, result.get("reason", ""), account_id,
+                    status,
+                    result.get("reason", ""),
+                    account_id,
                 )
             elif status == "session_expired":
                 entry.state = SessionState.EXPIRED
@@ -148,12 +154,16 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
     )
     loaded = 0
     for row in rows:
-        device = {
-            "device_model": row["device_model"],
-            "system_version": row["system_version"],
-            "app_version": row["app_version"],
-            "proxy_url": row["proxy_url"],
-        } if row["device_model"] else None
+        device = (
+            {
+                "device_model": row["device_model"],
+                "system_version": row["system_version"],
+                "app_version": row["app_version"],
+                "proxy_url": row["proxy_url"],
+            }
+            if row["device_model"]
+            else None
+        )
         register_session(row["id"], row["session_str"], owner_id, device)
         loaded += 1
     log.info("session_pool: loaded %d sessions for owner=%d", loaded, owner_id)
@@ -187,8 +197,11 @@ async def bulk_warm(pool: asyncpg.Pool, owner_id: int, concurrency: int = 3) -> 
 
 
 def get_ready_count(owner_id: int) -> int:
-    return sum(1 for e in _registry.values()
-               if e.owner_id == owner_id and e.state == SessionState.READY)
+    return sum(
+        1
+        for e in _registry.values()
+        if e.owner_id == owner_id and e.state == SessionState.READY
+    )
 
 
 def get_pool_summary(owner_id: int) -> dict:

@@ -1,4 +1,5 @@
 """Мониторинг конкурирующих каналов."""
+
 import re
 import asyncio
 import logging
@@ -36,16 +37,25 @@ async def comp_menu(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     lines = ["🏆 <b>Конкуренты</b>\n"]
     for r in rows:
-        checked = r["last_checked"].strftime("%d.%m %H:%M") if r["last_checked"] else "—"
+        checked = (
+            r["last_checked"].strftime("%d.%m %H:%M") if r["last_checked"] else "—"
+        )
         members = f"{r['last_members']:,}" if r["last_members"] else "?"
         label = r["label"] or r["username"]
-        lines.append(f"• @{r['username']} <i>({label})</i> — {members} подп. | {checked}")
-        kb.button(text=f"🗑 @{r['username']}", callback_data=CompCb(action="delete", comp_id=r["id"]))
+        lines.append(
+            f"• @{r['username']} <i>({label})</i> — {members} подп. | {checked}"
+        )
+        kb.button(
+            text=f"🗑 @{r['username']}",
+            callback_data=CompCb(action="delete", comp_id=r["id"]),
+        )
 
     if not rows:
         lines.append("Список пуст. Добавьте конкурентов для мониторинга.")
 
-    await cb.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await cb.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(CompCb.filter(F.action == "add"))
@@ -76,7 +86,9 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(CompCb.filter(F.action == "skip_label"))
-async def comp_skip_label(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def comp_skip_label(
+    cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await cb.answer()
     data = await state.get_data()
     await state.clear()
@@ -85,7 +97,9 @@ async def comp_skip_label(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Po
 
 
 @router.message(AddCompetitorFSM.waiting_label, F.text)
-async def comp_got_label(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def comp_got_label(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
     username = data.get("username", "")
     label = message.text.strip()
@@ -97,23 +111,33 @@ async def comp_got_label(message: Message, state: FSMContext, pool: asyncpg.Pool
         await pool.execute(
             "INSERT INTO competitors(owner_id, username, label) VALUES($1,$2,$3) "
             "ON CONFLICT(owner_id, username) DO UPDATE SET label=$3",
-            message.from_user.id, username, label,
+            message.from_user.id,
+            username,
+            label,
         )
-        await message.answer(f"✅ @{username} ({label}) добавлен.", reply_markup=kb.as_markup())
+        await message.answer(
+            f"✅ @{username} ({label}) добавлен.", reply_markup=kb.as_markup()
+        )
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}", reply_markup=kb.as_markup())
 
 
-async def _save_competitor(cb: CallbackQuery, pool: asyncpg.Pool, username: str, label) -> None:
+async def _save_competitor(
+    cb: CallbackQuery, pool: asyncpg.Pool, username: str, label
+) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
     try:
         await pool.execute(
             "INSERT INTO competitors(owner_id, username, label) VALUES($1,$2,$3) "
             "ON CONFLICT(owner_id, username) DO NOTHING",
-            cb.from_user.id, username, label,
+            cb.from_user.id,
+            username,
+            label,
         )
-        await cb.message.edit_text(f"✅ @{username} добавлен.", reply_markup=kb.as_markup())
+        await cb.message.edit_text(
+            f"✅ @{username} добавлен.", reply_markup=kb.as_markup()
+        )
     except Exception as e:
         await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=kb.as_markup())
 
@@ -131,7 +155,9 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not rows:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=CompCb(action="menu"))
-        await cb.message.edit_text("Список конкурентов пуст.", reply_markup=kb.as_markup())
+        await cb.message.edit_text(
+            "Список конкурентов пуст.", reply_markup=kb.as_markup()
+        )
         return
 
     await cb.message.edit_text(f"🔄 Обновляю данные для {len(rows)} конкурентов...")
@@ -149,12 +175,13 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
                 text = await resp.text()
                 m = re.search(r'"members_count":(\d+)', text)
                 if not m:
-                    m = re.search(r'([\d\s]{3,})\s*(?:subscribers|members)', text)
+                    m = re.search(r"([\d\s]{3,})\s*(?:subscribers|members)", text)
                 if m:
                     count = int(m.group(1).replace(" ", "").replace("\xa0", ""))
                     await pool.execute(
                         "UPDATE competitors SET last_members=$1, last_checked=now() WHERE id=$2",
-                        count, r["id"],
+                        count,
+                        r["id"],
                     )
                     updated += 1
                 await asyncio.sleep(1.5)
@@ -170,12 +197,15 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(CompCb.filter(F.action == "delete"))
-async def comp_delete(cb: CallbackQuery, callback_data: CompCb, pool: asyncpg.Pool) -> None:
+async def comp_delete(
+    cb: CallbackQuery, callback_data: CompCb, pool: asyncpg.Pool
+) -> None:
     await cb.answer()
     try:
         await pool.execute(
             "DELETE FROM competitors WHERE id=$1 AND owner_id=$2",
-            callback_data.comp_id, cb.from_user.id,
+            callback_data.comp_id,
+            cb.from_user.id,
         )
     except Exception:
         log_exc_swallow(log, "Не удалось удалить конкурента")

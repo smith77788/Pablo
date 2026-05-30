@@ -15,7 +15,9 @@ TON_WALLET: str = os.getenv("TON_WALLET", "")
 TON_API_KEY: str = os.getenv("TON_API_KEY", "")
 TRON_WALLET: str = os.getenv("TRON_WALLET", "")
 TRON_API_KEY: str = os.getenv("TRON_API_KEY", "")
-ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")  # оставлен для совместимости
+ANTHROPIC_API_KEY: str = os.getenv(
+    "ANTHROPIC_API_KEY", ""
+)  # оставлен для совместимости
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-6")
@@ -26,15 +28,17 @@ TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 # Format: socks5://user:pass@host:port  or  socks5://host:port
 TG_PROXY: str = os.getenv("TG_PROXY", "")
 
+
 def _price(plan: str, default: int) -> int:
     try:
         return int(os.getenv(f"PRICE_{plan.upper()}", str(default)))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return default
 
+
 PLAN_PRICES_USD: dict[str, int] = {
-    "starter":    _price("starter",    9),
-    "pro":        _price("pro",       25),
+    "starter": _price("starter", 9),
+    "pro": _price("pro", 25),
     "enterprise": _price("enterprise", 69),
 }
 PERIOD_DISCOUNTS: dict[int, int] = {1: 0, 3: 10, 6: 15, 12: 20}
