@@ -350,7 +350,6 @@ async def cb_group_list_start(
 async def cb_group_list_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю группы...")
     acc = await pool.fetchrow(
         "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -358,7 +357,7 @@ async def cb_group_list_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-
+    await callback.answer("⏳ Загружаю группы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
     groups = [
@@ -421,7 +420,6 @@ async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_group_members_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю группы...")
     acc = await pool.fetchrow(
         "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -429,7 +427,7 @@ async def cb_group_members_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-
+    await callback.answer("⏳ Загружаю группы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
     groups = [d for d in (dialogs or []) if d.get("type") in ("megagroup", "supergroup", "group", "chat")]
@@ -465,7 +463,6 @@ async def cb_group_members_acc(
 async def cb_group_members_list(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю участников...")
     acc = await pool.fetchrow(
         "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -473,7 +470,7 @@ async def cb_group_members_list(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-
+    await callback.answer("⏳ Загружаю участников...")
     from services import account_manager
     members = await account_manager.get_channel_members(
         acc["session_str"], callback_data.group_id, limit=50, _acc=acc
@@ -554,7 +551,6 @@ async def cb_group_import_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     """Загрузить группы аккаунта и сохранить в managed_channels."""
-    await callback.answer("⏳ Загружаю группы из Telegram...")
     from bot.utils.op_helpers import _acc_label
     acc = await pool.fetchrow(
         "SELECT id, session_str, phone, first_name, username FROM tg_accounts "
@@ -564,6 +560,7 @@ async def cb_group_import_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю группы из Telegram...")
 
     from services import account_manager
     from database.db import upsert_managed_channels
@@ -617,12 +614,12 @@ async def cb_group_import_all(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     """Импортировать группы со всех активных аккаунтов."""
-    await callback.answer("⏳ Загружаю группы со всех аккаунтов...")
     from bot.utils.op_helpers import _get_active_accounts, _acc_label
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.answer("Нет активных аккаунтов.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю группы со всех аккаунтов...")
 
     from services import account_manager
     from database.db import upsert_managed_channels

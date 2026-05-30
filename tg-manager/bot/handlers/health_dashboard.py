@@ -938,7 +938,6 @@ async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(HealthCb.filter(F.action == "export_csv"))
 async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Export account health data as CSV file."""
-    await callback.answer("⏳ Генерирую CSV...")
     user_id = callback.from_user.id
     now = datetime.now(timezone.utc)
 
@@ -951,6 +950,7 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not accounts:
         await callback.answer("Нет аккаунтов для экспорта", show_alert=True)
         return
+    await callback.answer("⏳ Генерирую CSV...")
 
     try:
         flood_map: dict[str, int] = {}

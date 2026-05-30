@@ -205,7 +205,6 @@ async def cb_topo_acc_list(callback: CallbackQuery, callback_data: TopoCb, pool:
 
 @router.callback_query(TopoCb.filter(F.action == "acc_view"))
 async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     owner_id = callback.from_user.id
     acc_id = callback_data.acc_id
 
@@ -213,6 +212,7 @@ async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool:
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     channels = await db.get_managed_channels(pool, owner_id, acc_id)
     name = acc.get("first_name") or acc.get("username") or acc.get("phone") or f"acc#{acc_id}"

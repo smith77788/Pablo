@@ -505,7 +505,6 @@ async def cb_seo_chan_menu(
 async def cb_seo_chan_analyze(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Анализирую...")
     chan_id = callback_data.chan_id
     acc_id  = callback_data.acc_id
     user_id = callback.from_user.id
@@ -517,6 +516,7 @@ async def cb_seo_chan_analyze(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Анализирую...")
 
     # Try to get full about from Telethon
     about = ""
@@ -594,7 +594,6 @@ async def cb_seo_chan_ai(
     callback: CallbackQuery, callback_data: SeoCb,
     pool: asyncpg.Pool, http: aiohttp.ClientSession, state: FSMContext,
 ) -> None:
-    await callback.answer("🤖 Генерирую SEO-текст...")
     chan_id = callback_data.chan_id
     acc_id  = callback_data.acc_id
     user_id = callback.from_user.id
@@ -606,6 +605,7 @@ async def cb_seo_chan_ai(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
+    await callback.answer("🤖 Генерирую SEO-текст...")
 
     # Берём текущее описание через Telethon
     about = ""
@@ -1031,14 +1031,13 @@ async def _apply_chan_field(
 async def cb_seo_apply(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Применяю...")
     chan_id = callback_data.chan_id
     acc_id  = callback_data.acc_id
     user_id = callback.from_user.id
     action  = callback_data.action
 
     if action == "chan_apply":
-        # Show manual edit prompt: pick what to change
+        await callback.answer()
         kb = InlineKeyboardBuilder()
         kb.button(text="📛 Изменить название",  callback_data=SeoCb(action="edit_title", chan_id=chan_id, acc_id=acc_id))
         kb.button(text="📄 Изменить описание",  callback_data=SeoCb(action="edit_about", chan_id=chan_id, acc_id=acc_id))
@@ -1056,6 +1055,7 @@ async def cb_seo_apply(
     if not suggestion:
         await callback.answer("Сначала запустите AI-оптимизацию.", show_alert=True)
         return
+    await callback.answer("⏳ Применяю...")
 
     results = []
     if action in ("apply_all", "apply_title") and suggestion.get("title"):
@@ -1212,12 +1212,11 @@ async def cb_seo_full_guide(callback: CallbackQuery, callback_data: SeoCb) -> No
 @router.callback_query(SeoCb.filter(F.action == "preview"))
 async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
                           pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    await callback.answer("🔍 Генерирую превью...")
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-
+    await callback.answer("🔍 Генерирую превью...")
     token = row["token"]
     name, short_desc = await asyncio.gather(
         bot_api.get_my_name(http, token),
@@ -1392,13 +1391,12 @@ def _keyword_coverage(text: str, keywords: list[str]) -> list[tuple[str, bool]]:
 @router.callback_query(SeoCb.filter(F.action == "content_gap"))
 async def cb_seo_content_gap(callback: CallbackQuery, callback_data: SeoCb,
                               pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    await callback.answer("🔍 Анализирую покрытие...")
     bot_id = callback_data.bot_id
     row = await db.get_bot(pool, bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-
+    await callback.answer("🔍 Анализирую покрытие...")
     token = row["token"]
     name, description, short_desc = await asyncio.gather(
         bot_api.get_my_name(http, token),

@@ -207,7 +207,6 @@ async def cb_scan(callback: CallbackQuery, callback_data: AudCb,
 async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
                            pool: asyncpg.Pool) -> None:
 
-    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
     if not others:
@@ -215,6 +214,7 @@ async def cb_compare_pick(callback: CallbackQuery, callback_data: AudCb,
             "Нужен хотя бы ещё один бот для сравнения.", show_alert=True
         )
         return
+    await callback.answer()
     await callback.message.edit_text(
         "⚖️ Выберите второй бот для сравнения аудиторий:",
         reply_markup=bots_pick(bots, exclude_bot_id=callback_data.bot_id),

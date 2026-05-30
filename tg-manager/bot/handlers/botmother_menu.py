@@ -704,8 +704,6 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer("🔒 Требуется план STARTER", show_alert=True)
         return
-    await callback.answer("⏳ Генерирую CSV…")
-
     import csv
     import io
     from aiogram.types import BufferedInputFile
@@ -724,6 +722,7 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     if not rows:
         await callback.answer("Нет данных для экспорта", show_alert=True)
         return
+    await callback.answer("⏳ Генерирую CSV…")
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -844,12 +843,11 @@ async def cb_plan_type(
     callback_data: BmCb,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
     op_type = callback_data.sub
     if op_type not in _OP_TYPE_LABELS:
         await callback.answer("Неизвестный тип операции", show_alert=True)
         return
-
+    await callback.answer()
     await state.update_data(op_type=op_type)
     kb_cancel = InlineKeyboardBuilder()
     kb_cancel.button(text="❌ Отмена", callback_data=BmCb(action="op_planner"))
@@ -1481,7 +1479,6 @@ async def cb_op_csv(
     callback_data: BmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("⏳ Генерирую CSV…")
     user_id = callback.from_user.id
     op_id = callback_data.op_id
 
@@ -1493,6 +1490,7 @@ async def cb_op_csv(
     if not op:
         await callback.answer("Операция не найдена", show_alert=True)
         return
+    await callback.answer("⏳ Генерирую CSV…")
 
     steps = await pool.fetch(
         "SELECT step_num, target, status, message FROM operation_log "

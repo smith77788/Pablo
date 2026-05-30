@@ -1528,11 +1528,11 @@ async def fsm_edit_value(message: Message, state: FSMContext, pool: asyncpg.Pool
 async def cb_get_invite(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Получаю ссылку...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Получаю ссылку...")
     from services import account_manager
     link = await account_manager.get_channel_invite_link(
         acc["session_str"], callback_data.channel_id, _acc=acc
@@ -1643,7 +1643,6 @@ async def cb_promote_all(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     """Promote all managed accounts to admin using the owner's account."""
-    await callback.answer("⏳ Промовую всех аккаунтов...")
     acc_id = callback_data.acc_id
     ch_id = callback_data.channel_id
     owner_id = callback.from_user.id
@@ -1652,6 +1651,7 @@ async def cb_promote_all(
     if not owner_acc:
         await callback.answer("Аккаунт-администратор не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Промовую всех аккаунтов...")
 
     accounts = await pool.fetch(
         "SELECT id, phone, first_name, tg_user_id FROM tg_accounts "
@@ -1710,11 +1710,11 @@ async def cb_del_channel_confirm(
 async def cb_do_delete(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Удаляю...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Удаляю...")
     from services import account_manager
     ok = await account_manager.delete_channel(acc["session_str"], callback_data.channel_id, _acc=acc)
     await callback.message.edit_text(
@@ -1752,11 +1752,11 @@ async def cb_members_pick_account(
 async def cb_members_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю каналы...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
     kb = InlineKeyboardBuilder()
@@ -2221,11 +2221,11 @@ async def cb_react_pick_account(
 async def cb_react_dialogs(
     callback: CallbackQuery, callback_data: ChanCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю каналы...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
     await state.update_data(acc_id=callback_data.acc_id)

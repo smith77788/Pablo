@@ -725,7 +725,6 @@ async def cb_apply_bot_exec(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    await callback.answer("⏳ Применяю шаблон...")
     user_id = callback.from_user.id
     bot_id = callback_data.bot_id
     tpl_id = callback_data.tpl_id
@@ -755,6 +754,7 @@ async def cb_apply_bot_exec(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Применяю шаблон...")
 
     from services import bot_api
     token = bot_row["token"]
@@ -901,13 +901,13 @@ async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
 
 @router.callback_query(LibCb.filter(F.action == "preview"))
 async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
+    await callback.answer()
 
     atype = callback_data.asset_type or key.split("__")[0]
     tdata = preset["template"]
@@ -953,13 +953,13 @@ async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: as
 
 @router.callback_query(LibCb.filter(F.action == "clone"))
 async def cb_lib_clone(callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool) -> None:
-    await callback.answer()
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
+    await callback.answer()
     atype = callback_data.asset_type or key.split("__")[0]
 
     tpl_id = await _save_template(pool, callback.from_user.id, atype, preset["name"], preset["template"])
@@ -985,13 +985,13 @@ async def cb_lib_apply(
     callback: CallbackQuery, callback_data: LibCb,
     pool: asyncpg.Pool, state: FSMContext,
 ) -> None:
-    await callback.answer()
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
+    await callback.answer()
     atype = callback_data.asset_type or key.split("__")[0]
     data = preset["template"]
     tpl_name = preset["name"]

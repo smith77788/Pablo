@@ -248,8 +248,6 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action == "notify_toggle":
         global _NOTIFY_NEW_USERS
         _NOTIFY_NEW_USERS = not _NOTIFY_NEW_USERS
-        status = "🔔 Включены" if _NOTIFY_NEW_USERS else "🔕 Отключены"
-        await callback.answer(f"Уведомления: {status}", show_alert=True)
         await _show_admin_main(callback, pool, edit=True)
 
     elif action == "block_ask":
@@ -376,7 +374,6 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action.startswith("set_mode:"):
         mode = action.split(":", 1)[1]
         await db.set_system_mode(pool, mode)
-        await callback.answer(f"✅ Режим: {mode.upper()}", show_alert=True)
         await _adm_swarm_mode(callback, pool)
 
     elif action == "strike_grant_ask":

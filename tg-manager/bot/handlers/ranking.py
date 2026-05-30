@@ -881,8 +881,6 @@ async def cb_rank_notify_settings(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
-
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id
 
@@ -890,6 +888,7 @@ async def cb_rank_notify_settings(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
     notify_on = await db.get_keyword_notify_enabled(pool, bot_id, owner_id)
@@ -1172,7 +1171,6 @@ async def vis_by_bot(
     callback_data: VisCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     owner_id = callback.from_user.id
     bot_id = callback_data.bot_id
 
@@ -1180,6 +1178,7 @@ async def vis_by_bot(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
 
@@ -1436,11 +1435,11 @@ async def vis_trends(
     callback_data: VisCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     owner_id = callback.from_user.id
     bot_id = callback_data.bot_id
 
     if not bot_id:
+        await callback.answer()
         bots = await db.get_bots(pool, owner_id)
         if not bots:
             kb = InlineKeyboardBuilder()
@@ -1474,6 +1473,7 @@ async def vis_trends(
     if not bot_row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     label = f"@{bot_row['username']}" if bot_row["username"] else bot_row["first_name"]
 

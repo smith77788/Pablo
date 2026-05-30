@@ -2754,8 +2754,6 @@ async def cb_scan_connect(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-    await callback.answer("⏳ Подключаю…")
-
     session_str = acc.get("session_str") or acc.get("session_string") or ""
     result = await scan_owned_assets(session_str, _acc=acc)
 
@@ -2773,6 +2771,7 @@ async def cb_scan_connect(
     if not to_connect:
         await callback.answer("Нечего подключать.", show_alert=True)
         return
+    await callback.answer("⏳ Подключаю…")
 
     # Insert all selected into managed_channels (no delete, just upsert)
     user_id = callback.from_user.id

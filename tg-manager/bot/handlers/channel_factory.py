@@ -1079,7 +1079,6 @@ async def cb_chanf_gen_links(
 async def cb_chanf_gen_links_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Загружаю каналы...")
     acc = await pool.fetchrow(
         "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -1087,6 +1086,7 @@ async def cb_chanf_gen_links_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
     channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
@@ -1121,7 +1121,6 @@ async def cb_chanf_gen_links_acc(
 async def cb_chanf_gen_link(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Генерирую ссылку...")
     acc = await pool.fetchrow(
         "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
@@ -1129,6 +1128,7 @@ async def cb_chanf_gen_link(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Генерирую ссылку...")
     from services import account_manager
     link = await account_manager.get_channel_invite_link(
         acc["session_str"], callback_data.channel_id, _acc=acc
@@ -1187,7 +1187,6 @@ async def cb_chanf_stats_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     """Step 2: load channel list for chosen account."""
-    await callback.answer("⏳ Загружаю каналы...")
     acc = await pool.fetchrow(
         "SELECT id, session_str, first_name, phone, username "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
@@ -1196,7 +1195,7 @@ async def cb_chanf_stats_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-
+    await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
     channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
@@ -1234,7 +1233,6 @@ async def cb_chanf_stats_chan(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     """Step 3: show basic stats for the chosen channel."""
-    await callback.answer("⏳ Получаю статистику...")
     acc = await pool.fetchrow(
         "SELECT id, session_str, first_name, phone, username "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
@@ -1243,7 +1241,7 @@ async def cb_chanf_stats_chan(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
-
+    await callback.answer("⏳ Получаю статистику...")
     from services import account_manager
 
     # Get dialogs to find the channel metadata
