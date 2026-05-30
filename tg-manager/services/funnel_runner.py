@@ -38,12 +38,12 @@ async def _record_funnel_conversion(
                     bot_id, ref_row["referrer_user_id"], user_id, funnel_id,
                 )
                 await pool.execute(
-                    "UPDATE funnel_subscribers SET conversion_recorded=true WHERE id=$1",
+                    "UPDATE funnel_subscriptions SET conversion_recorded=true WHERE id=$1",
                     sub_id,
                 )
         # Пометить воронку завершённой
         await pool.execute(
-            "UPDATE funnel_subscribers SET completed_at=now() WHERE id=$1 AND completed_at IS NULL",
+            "UPDATE funnel_subscriptions SET completed_at=now() WHERE id=$1 AND completed_at IS NULL",
             sub_id,
         )
     except Exception as e:

@@ -8,6 +8,7 @@ import aiohttp
 import asyncpg
 from aiogram import Bot
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10   # секунд между проверками очереди
@@ -178,7 +179,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 reply_markup=start_kb.as_markup(),
             )
         except Exception:
-            pass
+            log_exc_swallow(log, f"Сбой отправки уведомления о запуске операции #{op_id}")
 
         if op_type == "mass_publish":
             result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
@@ -329,7 +330,7 @@ async def _exec_bulk_bot_edit(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id
     value = params.get("value", "")
 
     bots_rows = await pool.fetch(
-        "SELECT id, token FROM bots WHERE owner_id=$1 AND is_active=true", owner_id
+        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", owner_id
     )
 
     ok_count = 0
@@ -439,7 +440,7 @@ async def _exec_bulk_join(
                     from services.flood_engine import record_success
                     await record_success(acc["id"], "join")
                 except Exception:
-                    pass
+                    log_exc_swallow(log, f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}")
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
@@ -448,12 +449,13 @@ async def _exec_bulk_join(
                     try:
                         flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])))
                     except Exception:
+                        log_exc_swallow(log, f"Сбой извлечения flood_wait из ошибки: {err_str[:80]}")
                         flood_wait = 60
                     try:
                         from services.flood_engine import record_flood
                         await record_flood(pool, acc["id"], flood_wait, "join", op_id)
                     except Exception:
-                        pass
+                        log_exc_swallow(log, f"Сбой записи flood в flood_engine для аккаунта {acc['id']}")
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -763,7 +765,7 @@ async def _exec_global_presence_channel(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, f"Сбой отправки прогресса создания каналов плана #{plan_id} владельцу {owner_id}")
 
         if i < total - 1:
             # ── Почитай daily rhythm и избегай ночных часов пиков ──
@@ -801,6 +803,7 @@ async def _exec_global_presence_bot(
 ) -> dict:
     """Создать ботов через BotFather для каждой цели плана global_presence."""
     from services import account_manager, session_simulator
+    import random
 
     plan_id = params.get("plan_id")
     if not plan_id:
@@ -909,7 +912,7 @@ async def _exec_global_presence_bot(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}")
 
         # Humanized delay between BotFather interactions
         await asyncio.sleep(random.uniform(60, 120) * session_simulator.chaos_factor())
@@ -1050,7 +1053,7 @@ async def _exec_bulk_create_channels(
                     parse_mode="HTML",
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}")
 
     return {
         "status": "done",

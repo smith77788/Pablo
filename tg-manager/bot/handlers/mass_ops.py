@@ -840,7 +840,7 @@ async def cb_bbe_confirm(
 
     # Fetch all bots for this user
     bots = await pool.fetch(
-        "SELECT id, token FROM bots WHERE owner_id=$1",
+        "SELECT id, token FROM managed_bots WHERE added_by=$1",
         callback.from_user.id,
     )
     if not bots:
