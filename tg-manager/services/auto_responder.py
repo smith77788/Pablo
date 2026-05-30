@@ -168,14 +168,20 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                             "• CRM и пользователи: Inbox / Relay\n\n"
                             "<i>Авторизация подтверждена ✅</i>"
                         )
-                        await bot_api.send_message(http, token, chat_id, panel_text)
+                        ok, _ = await bot_api.send_message(http, token, chat_id, panel_text)
+                        if not ok:
+                            log.warning("auto_responder: failed to send admin panel to chat %d bot %d", chat_id, bot_id)
                         continue  # skip normal auto_replies
 
             # Auto-replies (first match wins)
             for rule in rules:
                 if _match_rule(rule, text):
                     rendered = _render_text(rule["response_text"], from_user, bot_row)
-                    await bot_api.send_message(http, token, chat_id, rendered)
+                    ok, retry = await bot_api.send_message(http, token, chat_id, rendered)
+                    if not ok:
+                        log.warning("auto_responder: failed to send auto-reply to chat %d bot %d%s",
+                                    chat_id, bot_id,
+                                    f" (rate-limited {retry}s)" if retry else "")
                     break
 
             # Swarm routing: /start on entry bot with swarm enabled
@@ -199,7 +205,10 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                 if triggered:
                     if arule["action_type"] == "send_message":
                         rendered = _render_text(arule["action_value"], from_user, bot_row)
-                        await bot_api.send_message(http, token, chat_id, rendered)
+                        ok, _ = await bot_api.send_message(http, token, chat_id, rendered)
+                        if not ok:
+                            log.warning("auto_responder: failed to send automation message to chat %d bot %d",
+                                        chat_id, bot_id)
                     elif arule["action_type"] == "add_tag":
                         await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
                         newly_added_tags.append(arule["action_value"])
