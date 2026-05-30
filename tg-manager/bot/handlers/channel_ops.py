@@ -952,11 +952,11 @@ async def cb_bulk_post_chans_start(
 async def cb_bulk_post_chans_acc(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer("⏳ Загружаю каналы...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
     channels = [d for d in (dialogs or []) if d.get("type") in ("channel", "megagroup", "supergroup")]
@@ -1249,11 +1249,11 @@ async def cb_leave_show_dialogs(
 async def cb_do_leave(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Выхожу...")
     acc = await db.get_account_for_telethon(pool, callback_data.acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Выхожу...")
     from services import account_manager
     ok = await account_manager.leave_channel(acc["session_str"], callback_data.channel_id, _acc=acc)
     if ok:
@@ -1602,7 +1602,6 @@ async def cb_do_promote(
     callback: CallbackQuery, callback_data: ChanCb, pool: asyncpg.Pool
 ) -> None:
     """Promote a single account to admin using the owner's account."""
-    await callback.answer("⏳ Промовую в администраторы...")
     acc_id = callback_data.acc_id      # owner account (has admin rights)
     target_db_id = callback_data.page  # target account db id
     ch_id = callback_data.channel_id
@@ -1621,15 +1620,22 @@ async def cb_do_promote(
         await callback.answer("Целевой аккаунт не найден или нет Telegram ID.", show_alert=True)
         return
 
+    await callback.answer("⏳ Промовую в администраторы...")
     from services import account_manager
     ok = await account_manager.promote_to_admin(
         owner_acc["session_str"], ch_id, target["tg_user_id"], _acc=owner_acc
     )
     name = (target["first_name"] or target["phone"] or f"id{target['id']}")
     if ok:
-        await callback.answer(f"✅ {name} теперь администратор!", show_alert=True)
+        await callback.message.edit_text(
+            f"✅ <b>{html.escape(name)} теперь администратор!</b>",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
     else:
-        await callback.answer(f"❌ Не удалось промовать {name}. Проверьте: аккаунт должен быть участником канала.", show_alert=True)
+        await callback.message.edit_text(
+            f"❌ <b>Не удалось промовать {html.escape(name)}</b>\n\nПроверьте: аккаунт должен быть участником канала.",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
 
 
 @router.callback_query(ChanCb.filter(F.action == "promote_all"))

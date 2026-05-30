@@ -165,7 +165,6 @@ async def cb_chanf_import_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     """Step 2: загрузить каналы аккаунта и сохранить в систему."""
-    await callback.answer("⏳ Загружаю каналы из Telegram...")
     acc = await pool.fetchrow(
         "SELECT id, session_str, phone, first_name, username FROM tg_accounts "
         "WHERE id=$1 AND owner_id=$2",
@@ -174,6 +173,7 @@ async def cb_chanf_import_acc(
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю каналы из Telegram...")
 
     from services import account_manager
     from database.db import upsert_managed_channels
@@ -231,11 +231,11 @@ async def cb_chanf_import_all_accs(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     """Импортировать каналы со ВСЕХ активных аккаунтов."""
-    await callback.answer("⏳ Загружаю каналы со всех аккаунтов...")
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.answer("Нет активных аккаунтов.", show_alert=True)
         return
+    await callback.answer("⏳ Загружаю каналы со всех аккаунтов...")
 
     from services import account_manager
     from database.db import upsert_managed_channels

@@ -452,7 +452,6 @@ async def cb_pack_seed(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    await callback.answer("⏳ Публикую начальные посты...")
     owner_id = callback.from_user.id
     pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
     if not pack:
@@ -463,6 +462,8 @@ async def cb_pack_seed(
     if not ch_ids:
         await callback.answer("Нет каналов в пакете", show_alert=True)
         return
+
+    await callback.answer("⏳ Публикую начальные посты...")
 
     bot_token = None
     if pack.get("bot_id"):
@@ -536,7 +537,6 @@ async def cb_pack_seed(
 async def cb_pack_promote(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("⏳ Назначаю бота администратором...")
     owner_id = callback.from_user.id
     pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
     if not pack or not pack.get("bot_id"):
@@ -549,6 +549,8 @@ async def cb_pack_promote(
     if not all_asset_ids:
         await callback.answer("Нет каналов/групп в пакете", show_alert=True)
         return
+
+    await callback.answer("⏳ Назначаю бота администратором...")
 
     channels = await pool.fetch(
         "SELECT channel_id, access_hash FROM managed_channels WHERE id = ANY($1::int[])",
@@ -592,12 +594,13 @@ async def cb_pack_promote(
 async def cb_pack_mirror(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("⏳ Синхронизирую зеркала...")
     owner_id = callback.from_user.id
     pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
     if not pack or not pack.get("bot_id"):
         await callback.answer("Нет бота в пакете", show_alert=True)
         return
+
+    await callback.answer("⏳ Синхронизирую зеркала...")
 
     synced, total = await presence_setup.mirror_sync_auto_replies(pool, pack["bot_id"], owner_id)
 
@@ -629,11 +632,11 @@ async def cb_pack_mirror(
 async def cb_pack_confirm_delete(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     pack = await db.get_presence_pack(pool, callback_data.pack_id, callback.from_user.id)
     if not pack:
         await callback.answer("Не найден", show_alert=True)
         return
+    await callback.answer()
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🗑 Да, удалить", callback_data=PackCb(action="delete", pack_id=callback_data.pack_id))
