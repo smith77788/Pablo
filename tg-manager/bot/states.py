@@ -27,6 +27,7 @@ class Broadcast(StatesGroup):
     confirming = State()
     waiting_button_text = State()
     waiting_button_url = State()
+    waiting_placeholders = State()
 
 
 class Compare(StatesGroup):

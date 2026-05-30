@@ -6,7 +6,7 @@ import asyncpg
 from bot.callbacks import TemplateCb
 from bot.keyboards import templates_list, template_actions, broadcast_confirm, back_to_bot
 from bot.states import AddTemplate, Broadcast
-from bot.utils.template_validator import validate_message_template
+from bot.utils.template_validator import validate_message_template, list_placeholders, replace_placeholders
 from database import db
 
 router = Router()
@@ -157,11 +157,36 @@ async def cb_template_use(callback: CallbackQuery, callback_data: TemplateCb,
         return
     await callback.answer()
     bot_id = callback_data.bot_id
+    template_text = tpl["text"]
+
+    # Detect placeholders
+    placeholders = list_placeholders(template_text)
+    if placeholders:
+        await state.set_state(Broadcast.waiting_placeholders)
+        await state.update_data(
+            bot_id=bot_id,
+            template_id=callback_data.template_id,
+            template_text=template_text,
+            placeholders=placeholders,
+        )
+        ph_list = "\n".join(f"  • <code>{{{{{p}}}}}</code>" for p in placeholders)
+        await callback.message.edit_text(
+            f"📢 <b>Рассылка по шаблону «{tpl['name']}»</b>\n\n"
+            f"В шаблоне найдены плейсхолдеры:\n{ph_list}\n\n"
+            "Отправьте значения в формате:\n"
+            "<code>ключ=значение, ключ=значение</code>\n\n"
+            "Пример:\n"
+            "<code>NAME=Иван, CITY=Москва</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    # No placeholders — go directly to confirm
     count = await db.get_audience_count(pool, bot_id)
-    preview = tpl["text"][:600] + ("…" if len(tpl["text"]) > 600 else "")
+    preview = template_text[:600] + ("…" if len(template_text) > 600 else "")
 
     await state.set_state(Broadcast.confirming)
-    await state.update_data(bot_id=bot_id, text=tpl["text"])
+    await state.update_data(bot_id=bot_id, text=template_text)
 
     await callback.message.edit_text(
         f"📢 <b>Рассылка по шаблону «{tpl['name']}»</b>\n\n"
@@ -171,4 +196,57 @@ async def cb_template_use(callback: CallbackQuery, callback_data: TemplateCb,
         parse_mode="HTML",
         reply_markup=broadcast_confirm(bot_id),
     )
-    await callback.answer()
+
+
+@router.message(Broadcast.waiting_placeholders, F.text)
+async def msg_placeholders(message: Message, state: FSMContext,
+                            pool: asyncpg.Pool) -> None:
+    """Parse placeholder values, render template, proceed to broadcast confirm."""
+    data = await state.get_data()
+    placeholders: list = data.get("placeholders", [])
+    template_text: str = data.get("template_text", "")
+    bot_id: int = data.get("bot_id", 0)
+
+    # Parse: key=value, key=value
+    raw = (message.text or "").strip()
+    variables: dict[str, str] = {}
+    for part in raw.split(","):
+        part = part.strip()
+        if "=" in part:
+            key, val = part.split("=", 1)
+            variables[key.strip()] = val.strip()
+
+    # Check all placeholders are filled
+    missing = [p for p in placeholders if p not in variables]
+    if missing:
+        ph_list = "\n".join(f"• <code>{{{{{p}}}}}</code>" for p in missing)
+        await message.answer(
+            f"❌ Не все плейсхолдеры заполнены:\n{ph_list}\n\n"
+            "Отправьте значения ещё раз:",
+            parse_mode="HTML",
+        )
+        return
+
+    # Render
+    rendered = replace_placeholders(template_text, variables)
+
+    # Show preview
+    count = await db.get_audience_count(pool, bot_id)
+    preview = rendered[:600] + ("…" if len(rendered) > 600 else "")
+    unfilled = list_placeholders(rendered)
+    extra = ""
+    if unfilled:
+        extra = ("\n\n⚠️ Остались незаполненные: "
+                + ", ".join(f"<code>{{{{{p}}}}}</code>" for p in unfilled))
+
+    await state.set_state(Broadcast.confirming)
+    await state.update_data(text=rendered, bot_id=bot_id)
+
+    await message.answer(
+        f"📢 <b>Рассылка — проверка</b>\n\n"
+        f"{preview}{extra}\n\n"
+        f"Получателей: <b>{count}</b> чел.\n\n"
+        "Запустить рассылку?",
+        parse_mode="HTML",
+        reply_markup=broadcast_confirm(bot_id),
+    )
