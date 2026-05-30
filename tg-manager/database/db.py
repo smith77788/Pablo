@@ -2205,12 +2205,14 @@ async def record_flood_event(
 async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
     """Return notification preferences for a user. Defaults to all True if no record."""
     row = await pool.fetchrow(
-        "SELECT new_user, flood_warning, position_change, op_complete, restriction, deploy "
+        "SELECT new_user, flood_warning, position_change, op_complete, restriction "
         "FROM notification_settings WHERE user_id=$1",
         user_id,
     )
     if row:
-        return dict(row)
+        result = dict(row)
+        result.setdefault("deploy", True)
+        return result
     return {
         "new_user": True,
         "flood_warning": True,
