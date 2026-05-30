@@ -1,5 +1,5 @@
 """
-Payment Webhook Server — HTTP endpoint для входящих webhook-уведомлений о платежах.
+Webhook Server — HTTP endpoint для входящих webhook-уведомлений.
 
 Запускается как asyncio-задача рядом с polling-ботом.
 Порт: WEBHOOK_PORT (default 8080, Railway проксирует автоматически)
@@ -9,6 +9,7 @@ Payment Webhook Server — HTTP endpoint для входящих webhook-уве�
 - Cryptobot / CryptoPay webhooks
 - Telegram Stars (через inline_query callback)
 - Кастомный JSON-хук: POST /webhook/payment с {user_id, amount, currency, tx_hash}
+- Railway deploy webhook: POST /webhook/deploy — уведомления о деплоях
 
 Каждый webhook проходит проверку подписи (HMAC-SHA256) если задан WEBHOOK_SECRET.
 """
@@ -192,9 +193,89 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         await _activate_subscription(pool, bot, user_id, plan, months, tx_ref, currency, amount)
         return web.Response(status=200, text="OK")
 
+    async def deploy_webhook(request: web.Request) -> web.Response:
+        """Railway deployment webhook — уведомление админов о деплое."""
+        body = await request.read()
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            return web.Response(status=400, text="Invalid JSON")
+
+        # Railway sends deployment events with type field
+        event_type = data.get("type", "")
+        if event_type != "deployment":
+            return web.Response(status=200, text="OK")
+
+        deployment = data.get("deployment", {})
+        if not deployment:
+            return web.Response(status=200, text="OK")
+
+        status = deployment.get("status", "")
+        # Notify only on successful deployments (also notify on failed if needed)
+        if status not in ("SUCCESS", "FAILED", "CRASHED"):
+            return web.Response(status=200, text="OK")
+
+        commit = deployment.get("commit", {})
+        service = deployment.get("service", {})
+        environment = deployment.get("environment", {})
+        project = deployment.get("project", {})
+        creator = deployment.get("creator", {})
+
+        status_emoji = {"SUCCESS": "✅", "FAILED": "❌", "CRASHED": "💥"}.get(status, "🔄")
+        branch = commit.get("branch", "unknown")
+        sha = commit.get("message", "")  # Railway puts commit message in 'message' field
+        commit_sha = deployment.get("id", "")[:7]  # Short deployment ID as reference
+
+        # Try to get actual commit sha from deployment
+        commit_full = commit.get("sha", "")
+        if commit_full:
+            commit_sha = commit_full[:7]
+
+        created_at = deployment.get("createdAt", "")
+
+        # Build notification text
+        lines = [
+            f"<b>{status_emoji} Деплой {status}</b>",
+            "",
+            f"🏷️ <b>Проект:</b> {project.get('name', 'BotMother')}",
+            f"🔧 <b>Сервис:</b> {service.get('name', 'tg-manager')}",
+            f"🌍 <b>Окружение:</b> {environment.get('name', 'production')}",
+            f"🌿 <b>Ветка:</b> <code>{branch}</code>",
+        ]
+
+        if commit_full:
+            lines.append(f"🔖 <b>Коммит:</b> <code>{commit_full[:12]}</code>")
+        if sha:
+            lines.append(f"📝 <b>Изменения:</b>\n<code>{sha[:500]}</code>")
+        if creator:
+            lines.append(f"👤 <b>Автор деплоя:</b> {creator.get('name', '—')}")
+        if created_at:
+            lines.append(f"🕐 <b>Время:</b> {created_at}")
+
+        text = "\n".join(lines)
+
+        admin_ids_raw = os.getenv("ADMIN_IDS", "")
+        admin_ids = {int(x.strip()) for x in admin_ids_raw.split(",") if x.strip().isdigit()}
+
+        for admin_id in admin_ids:
+            try:
+                await bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception:
+                pass
+
+        log.info("deploy_webhook: notified %d admins about deployment %s status=%s",
+                 len(admin_ids), deployment.get("id", "")[:8], status)
+        return web.Response(status=200, text="OK")
+
+    async def deploy_health(request: web.Request) -> web.Response:
+        """Health check for deploy webhook (used when configuring in Railway)."""
+        return web.Response(status=200, text="deploy-ok")
+
     app.router.add_get("/health", health)
+    app.router.add_get("/webhook/deploy", deploy_health)
     app.router.add_post("/webhook/payment", payment_webhook)
     app.router.add_post("/webhook/cryptopay", cryptopay_webhook)
+    app.router.add_post("/webhook/deploy", deploy_webhook)
     return app
 
 

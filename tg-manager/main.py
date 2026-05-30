@@ -77,6 +77,7 @@ from services import account_health
 from services import payment_webhook
 from services import task_registry
 from services import drift_detector
+from services import deploy_notifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -195,6 +196,9 @@ async def main() -> None:
     dp.error.register(_global_error_handler)
 
     pool = await create_pool()
+
+    # Send deployment notification to admins on startup (detects new deploys)
+    asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 
     # Register bot commands (shows in Telegram "/" menu)
     from aiogram.types import BotCommand

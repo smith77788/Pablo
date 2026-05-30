@@ -1490,6 +1490,7 @@ _NOTIF_SQL: dict[str, str] = {
 
 _NOTIF_LABELS = {
     "new_user":        "Новый пользователь",
+    "deploy":          "Деплой",
     "flood_warning":   "Флуд-предупреждения",
     "position_change": "Изменение позиций",
     "op_complete":     "Завершение операций",
