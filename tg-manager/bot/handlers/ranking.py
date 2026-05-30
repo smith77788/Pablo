@@ -1751,7 +1751,7 @@ async def vis_receive_threshold(
         drop_thr = int(parts[0])
         rise_thr = int(parts[1]) if len(parts) > 1 else 5
         assert 1 <= drop_thr <= 50 and 1 <= rise_thr <= 50
-    except ValueError, IndexError, AssertionError:
+    except (ValueError, IndexError, AssertionError):
         await message.answer(
             "⚠️ Неверный формат. Введите два числа от 1 до 50, например: <code>10 5</code>",
             parse_mode="HTML",

@@ -133,7 +133,7 @@ def _load_history(user_id: int, turns: int) -> list[dict[str, str]]:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return []
     if not isinstance(data, list):
         return []

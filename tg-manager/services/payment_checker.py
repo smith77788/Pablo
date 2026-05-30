@@ -163,7 +163,7 @@ async def _check_trc20(pool, http, bot, payments) -> None:
     for payment in payments:
         try:
             expected = float(payment["amount_crypto"])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         for tx in data.get("token_transfers", []):
             try:

@@ -32,7 +32,7 @@ TG_PROXY: str = os.getenv("TG_PROXY", "")
 def _price(plan: str, default: int) -> int:
     try:
         return int(os.getenv(f"PRICE_{plan.upper()}", str(default)))
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return default
 
 
