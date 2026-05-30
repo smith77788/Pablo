@@ -3566,7 +3566,33 @@ def _parse_username_list(raw: str) -> list[str]:
     return result
 
 
-@router.message(BulkDmFSM.waiting_usernames)
+@router.message(BulkDmFSM.waiting_usernames, F.document)
+async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> None:
+    doc = message.document
+    if not doc:
+        await message.answer("⚠️ Документ не получен.")
+        return
+    if doc.file_size and doc.file_size > 200_000:
+        await message.answer("⚠️ Файл слишком большой. Максимум 200 КБ.")
+        return
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        dl = await message.bot.download_file(file_info.file_path)
+        raw = (dl.read() if hasattr(dl, "read") else bytes(dl)).decode("utf-8", errors="ignore")
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+    usernames = _parse_username_list(raw)
+    if not usernames:
+        await message.answer("⚠️ Файл не содержит распознанных usernames.")
+        return
+    if len(usernames) > 500:
+        usernames = usernames[:500]
+        await message.answer("⚠️ Взяты первые 500 получателей из файла.")
+    await _proceed_bulk_dm_usernames(usernames, message, state)
+
+
+@router.message(BulkDmFSM.waiting_usernames, F.text)
 async def fsm_bulk_dm_usernames(message: Message, state: FSMContext) -> None:
     raw = (message.text or "").strip()
     usernames = _parse_username_list(raw)
@@ -3578,6 +3604,10 @@ async def fsm_bulk_dm_usernames(message: Message, state: FSMContext) -> None:
         )
         return
 
+    await _proceed_bulk_dm_usernames(usernames, message, state)
+
+
+async def _proceed_bulk_dm_usernames(usernames: list[str], message, state: FSMContext) -> None:
     await state.update_data(bulk_dm_usernames=usernames)
     await state.set_state(BulkDmFSM.waiting_text)
 
