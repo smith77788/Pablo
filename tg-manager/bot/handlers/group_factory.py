@@ -134,7 +134,11 @@ async def cb_group_create_acc_chosen(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=GroupFCb(action="menu"))
     await callback.message.edit_text(
-        "📝 <b>Название группы</b>\n\nВведите название (до 128 символов):",
+        "📝 <b>Название группы</b>\n\nВведите название (до 128 символов):\n\n"
+        "💡 <b>Примеры:</b>\n"
+        "• <code>Python Developers | Chat</code>\n"
+        "• <code>Клуб Инвесторов</code>\n"
+        "• <code>Gaming Community 🎮</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -715,7 +719,9 @@ async def cb_group_announce_acc(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=GroupFCb(action="menu"))
     await callback.message.edit_text(
-        "📢 <b>Текст объявления</b>\n\nВведите текст для рассылки во все группы аккаунта:",
+        "📢 <b>Текст объявления</b>\n\nВведите текст для рассылки во все группы аккаунта:\n\n"
+        "💡 Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;a href=...&gt;</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

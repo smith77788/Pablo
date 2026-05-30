@@ -366,7 +366,11 @@ async def cb_chanf_create_acc_chosen(
     kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
     await callback.message.edit_text(
         f"➕ <b>Название канала</b>\n\nАккаунт: <b>{html.escape(_acc_label(acc))}</b>\n\n"
-        "Введите название канала (до 128 символов):",
+        "Введите название канала (до 128 символов):\n\n"
+        "💡 <b>Примеры:</b>\n"
+        "• <code>Crypto News | BTC &amp; ETH</code>\n"
+        "• <code>Мой Блог — Новости дня</code>\n"
+        "• <code>Travel Tips ✈️</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

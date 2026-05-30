@@ -52,7 +52,9 @@ async def comp_add(cb: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=CompCb(action="menu"))
     await cb.message.edit_text(
-        "Введите @username канала конкурента:",
+        "Введите @username канала конкурента:\n\n"
+        "💡 Например: <code>@durov</code> или просто <code>durov</code>\n"
+        "<i>Только username, не ссылка.</i>",
         reply_markup=kb.as_markup(),
     )
 

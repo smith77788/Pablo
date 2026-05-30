@@ -202,7 +202,9 @@ async def msg_fn_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool
     await message.answer(
         f"🔑 Ключевое слово: <code>{keyword}</code>\n\n"
         "Цепочка создана! Теперь добавьте первый шаг.\n\n"
-        "Введите текст сообщения для шага 1:",
+        "Введите текст сообщения для шага 1 "
+        "(поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
+        "<code>&lt;a href=...&gt;</code>):",
         parse_mode="HTML",
         reply_markup=_fn_cancel_kb(bot_id),
     )
