@@ -272,7 +272,6 @@ async def parse_active_users(
                 user = await client.get_entity(msg.sender_id)
             except Exception:
                 log_exc_swallow(log, "Сбой get_entity в parser", sender_id=msg.sender_id)
-                pass
 
             if user:
                 users_batch = [{
@@ -389,4 +388,5 @@ async def delete_audience(
     try:
         return int(str(result).split()[-1])
     except Exception:
+        log_exc_swallow(log, "Не удалось распарсить количество удалённых строк аудитории")
         return 0

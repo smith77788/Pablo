@@ -15,6 +15,7 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -299,4 +300,3 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         await runner.cleanup()
 
 
-import asyncio  # noqa: E402

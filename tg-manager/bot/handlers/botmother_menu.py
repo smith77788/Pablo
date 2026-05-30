@@ -67,7 +67,7 @@ async def _fire_cross_nav(
     to_type: str,
     to_id: int,
 ) -> None:
-    """Non-blocking cross-navigation event — call with asyncio.ensure_future."""
+    """Non-blocking cross-navigation event — call with asyncio.create_task."""
     try:
         from services import behavioral_engine
         await behavioral_engine.record_cross_nav(
@@ -289,7 +289,7 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
 async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
     import asyncio
-    asyncio.ensure_future(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "infrastructure", 0))
+    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "infrastructure", 0))
     await _edit(
         callback,
         "🏗️ <b>Infrastructure — ваша инфраструктура</b>\n\n"
@@ -313,7 +313,7 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: 
 async def cb_visibility(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
     import asyncio
-    asyncio.ensure_future(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "visibility", 0))
+    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "visibility", 0))
     await _edit(
         callback,
         "👁️ <b>Visibility — видимость в поиске Telegram</b>\n\n"
@@ -333,7 +333,7 @@ async def cb_visibility(callback: CallbackQuery, callback_data: BmCb, pool: asyn
 async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
     import asyncio
-    asyncio.ensure_future(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
+    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
     await _edit(
         callback,
         "⚙️ <b>Operations — массовые операции</b>\n\n"
@@ -776,6 +776,7 @@ async def _show_planner_menu(
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "Не удалось получить список запланированных операций")
         rows = []
 
     kb = InlineKeyboardBuilder()
@@ -1168,6 +1169,7 @@ async def cb_capacity(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             time_str = f"{mins:.0f} мин" if mins < 60 else f"{mins/60:.1f} ч"
             lines.append(f"{risk_icon} {label}: ~<b>{time_str}</b> ({plan.account_count} акк.)")
         except Exception:
+            log_exc_swallow(log, "Не удалось рассчитать прогноз для %s", label)
             lines.append(f"• {label}: н/д")
 
     kb = InlineKeyboardBuilder()
@@ -1695,6 +1697,7 @@ async def cb_behavioral(
                 try:
                     meta = _json.loads(r["meta"]) if r["meta"] else {}
                 except Exception:
+                    log_exc_swallow(log, "Не удалось распарсить meta JSON аномалии")
                     meta = {}
                 atype = meta.get("type", "unknown")
                 icon = _anom_icon.get(atype, "⚠️")
@@ -1977,6 +1980,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "SELECT id, name FROM clusters WHERE owner_id=$1 ORDER BY name LIMIT 10", uid
         )
     except Exception:
+        log_exc_swallow(log, "Не удалось загрузить кластеры для карты инфраструктуры")
         clusters = []
 
     try:
@@ -1992,6 +1996,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             uid,
         )
     except Exception:
+        log_exc_swallow(log, "Не удалось загрузить ботов для карты инфраструктуры")
         bots = []
 
     try:
@@ -1999,6 +2004,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "SELECT DISTINCT channel_id, title, username FROM managed_channels WHERE owner_id=$1 ORDER BY title LIMIT 20", uid
         )
     except Exception:
+        log_exc_swallow(log, "Не удалось загрузить каналы для карты инфраструктуры")
         channels = []
 
     lines = ["🗺️ <b>Карта инфраструктуры</b>\n"]

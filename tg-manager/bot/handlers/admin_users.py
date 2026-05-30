@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 import asyncpg
 from bot.callbacks import CallbackData
 from bot.utils.subscription import is_platform_admin
+from database import db
 from services.logger import log_exc_swallow
 
 
@@ -17,8 +18,8 @@ def _is_admin(uid: int) -> bool:
         from bot.handlers.admin import is_admin
         return is_admin(uid)
     except Exception:
+        log_exc_swallow(log, "Ошибка проверки is_admin через admin.py")
         return is_platform_admin(uid)
-from database import db
 
 log = logging.getLogger(__name__)
 router = Router()

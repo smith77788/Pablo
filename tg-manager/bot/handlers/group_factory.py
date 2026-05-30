@@ -17,7 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import GroupFCb
+from bot.callbacks import BmCb, GroupFCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
@@ -45,7 +45,7 @@ async def cb_group_menu(callback: CallbackQuery) -> None:
     kb.button(text="📋 Мои группы",            callback_data=GroupFCb(action="list"))
     kb.button(text="👥 Участники",             callback_data=GroupFCb(action="members"))
     kb.button(text="📢 Объявление",            callback_data=GroupFCb(action="announce"))
-    kb.button(text="◀️ Назад",                callback_data="main_menu")
+    kb.button(text="◀️ Назад",                callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1)
     await callback.message.edit_text(
         "👥 <b>Менеджер групп</b>\n\n"
@@ -823,6 +823,7 @@ async def cb_group_do_announce(
             else:
                 ok_count += 1
         except Exception:
+            log_exc_swallow(log, "Ошибка отправки объявления в группу %s", grp.get("id"))
             err_count += 1
 
         try:

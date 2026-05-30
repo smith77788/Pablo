@@ -85,7 +85,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
                 last = last.replace(tzinfo=timezone.utc)
             days_absent = (datetime.now(timezone.utc) - last).total_seconds() / 86400
             if days_absent >= 7:
-                asyncio.ensure_future(
+                asyncio.create_task(
                     _record_reentry_safe(pool, uid, days_absent)
                 )
     except Exception:
@@ -143,6 +143,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
             bot_ids,
         ) or 0
     except Exception:
+        log_exc_swallow(log, "Не удалось получить количество активных рассылок")
         active_broadcasts = 0
 
     stats_lines = [
@@ -171,6 +172,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         plan = await get_plan(pool, uid)
     except Exception:
+        log_exc_swallow(log, "Не удалось получить план пользователя для /help callback")
         plan = "free"
     emoji = PLAN_EMOJIS.get(plan, "🆓")
 
@@ -210,6 +212,7 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     try:
         plan = await get_plan(pool, uid)
     except Exception:
+        log_exc_swallow(log, "Не удалось получить план пользователя для /help команды")
         plan = "free"
     emoji = PLAN_EMOJIS.get(plan, "🆓")
 

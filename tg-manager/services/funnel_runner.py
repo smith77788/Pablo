@@ -92,7 +92,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     )
                     # Фиксировать конверсию при завершении воронки
                     if is_last:
-                        asyncio.ensure_future(
+                        asyncio.create_task(
                             _record_funnel_conversion(
                                 pool, row["bot_id"], row["user_id"],
                                 row["funnel_id"], row["sub_id"],
