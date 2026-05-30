@@ -69,7 +69,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="🔍 Предпросмотр (Dry Run)",        callback_data=MassOpCb(action="dry_run"))
     kb.button(text="📋 Очередь операций",              callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Назад",                         callback_data=BmCb(action="operations"))
-    kb.adjust(1)
+    kb.adjust(2, 2, 2, 1, 1)
     await callback.message.edit_text(
         "🛠️ <b>Построитель операций</b>\n\n"
         "🛠️ <b>Построитель</b> — пошаговый wizard для создания любой операции\n"
@@ -1366,7 +1366,7 @@ async def cb_build_start(
             callback_data=MassOpCb(action="ob_type", op_type=op_key),
         )
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
-    kb.adjust(1)
+    kb.adjust(2, 2, 1)
     await callback.message.edit_text(
         "🛠️ <b>Построитель операций</b>\n\n"
         "Шаг 1/4: Выберите тип операции\n\n"

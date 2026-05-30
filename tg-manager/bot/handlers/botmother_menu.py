@@ -110,7 +110,7 @@ def _infrastructure_kb():
     kb.button(text="📊 Аналитика инфры",   callback_data=InfraCb(action="menu"))
     kb.button(text="🧹 Очиститель",        callback_data=CleanerCb(action="menu"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 3, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -139,7 +139,7 @@ def _operations_kb():
     kb.button(text="📄 Шаблоны",             callback_data=AssetTplCb(action="menu"))
     kb.button(text="📊 Отчёты",              callback_data=BmCb(action="op_reports"))
     kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
-    kb.adjust(2, 1, 2, 2, 1, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -180,9 +180,9 @@ def _bulk_ops_kb():
     kb.button(text="🤖 Боты (массово)",           callback_data=NetworkCb(action="menu"))
     kb.button(text="📡 Каналы (bulk join/leave)",  callback_data=ChanCb(action="bulk_menu"))
     kb.button(text="📤 Публикация в каналы",       callback_data=MassPubCb(action="menu"))
-    kb.button(text="📱 Аккаунты (профиль, bulk)",  callback_data=MassOpCb(action="menu"))
+    kb.button(text="📱 Аккаунты (bulk)",           callback_data=MassOpCb(action="menu"))
     kb.button(text="◀️ Назад",                    callback_data=BmCb(action="operations"))
-    kb.adjust(1, 1, 1, 1, 1)
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 

@@ -84,7 +84,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📈 SEO-оптимизация",        callback_data=ChanFactCb(action="seo_pick"))
     kb.button(text="🔗 Генерация ссылок",       callback_data=ChanFactCb(action="gen_links"))
     kb.button(text="◀️ Назад",                 callback_data=ChanFactCb(action="back_to_ops"))
-    kb.adjust(2, 1, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb
 
 
