@@ -460,13 +460,22 @@ async def _exec_bulk_join(
                 await _audit(pool, owner_id, "join", "flood_wait" if flood_wait else "error",
                              operation_id=op_id, account_id=acc["id"],
                              target=link, error_msg=err_str, flood_wait_s=flood_wait or None)
-            # Human-like anti-flood
-            if i % 5 == 4:
-                pause = random.uniform(180, 360) * session_simulator.chaos_factor()
-            else:
-                pause = random.uniform(45, 120) * session_simulator.chaos_factor()
-            # Apply daily rhythm multiplier
-            pause *= session_simulator.time_of_day_factor()
+            # Apply pacing based on delay_mode from params
+            delay_mode = params.get("delay_mode", "smart")
+            chaos = session_simulator.chaos_factor()
+            tod = session_simulator.time_of_day_factor()
+            if delay_mode == "fast":
+                pause = random.uniform(5, 15) * chaos
+            elif delay_mode == "normal":
+                pause = random.uniform(30, 60) * chaos * tod
+            elif delay_mode == "slow":
+                pause = random.uniform(60, 120) * chaos * tod
+            else:  # smart — adaptive anti-flood
+                if i % 5 == 4:
+                    pause = random.uniform(180, 360) * chaos
+                else:
+                    pause = random.uniform(45, 120) * chaos
+                pause *= tod
             await asyncio.sleep(pause)
 
     return {
@@ -530,8 +539,18 @@ async def _exec_bulk_leave(
                     "VALUES($1,$2,$3,'error',$4)",
                     op_id, step, str(channel), str(e)[:200],
                 )
-            # Human-like delay with daily rhythm
-            pause = random.uniform(15, 45) * session_simulator.chaos_factor() * session_simulator.time_of_day_factor()
+            # Apply pacing based on delay_mode from params
+            delay_mode = params.get("delay_mode", "smart")
+            chaos = session_simulator.chaos_factor()
+            tod = session_simulator.time_of_day_factor()
+            if delay_mode == "fast":
+                pause = random.uniform(5, 15) * chaos
+            elif delay_mode == "normal":
+                pause = random.uniform(15, 45) * chaos * tod
+            elif delay_mode == "slow":
+                pause = random.uniform(60, 120) * chaos * tod
+            else:  # smart
+                pause = random.uniform(15, 45) * chaos * tod
             await asyncio.sleep(pause)
 
     return {

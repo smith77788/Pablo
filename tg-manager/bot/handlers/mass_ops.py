@@ -1076,24 +1076,73 @@ async def cb_bulk_join_accs(
         await callback.answer("Нет активных аккаунтов", show_alert=True)
         return
 
-    # Show preview and confirm
+    # Show preview + delay selector
     link_preview = "\n".join(f"• {html.escape(ln)}" for ln in links[:5])
     if len(links) > 5:
         link_preview += f"\n… и ещё {len(links) - 5}"
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
-    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    kb.adjust(2)
+    await state.update_data(bj_acc_ids=acc_ids, bj_acc_label=acc_label)
 
-    await state.update_data(bj_acc_ids=acc_ids)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bj_delay", op_type="fast"))
+    kb.button(text="🛡 Нормально (30-60с)", callback_data=MassOpCb(action="bj_delay", op_type="normal"))
+    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bj_delay", op_type="slow"))
+    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bj_delay", op_type="smart"))
+    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.adjust(2, 2, 1)
     await callback.message.edit_text(
-        f"🔗 <b>Массовый join — Шаг 3/3 (Подтверждение)</b>\n\n"
+        f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
         f"<b>Список:</b>\n{link_preview}\n\n"
-        f"⚠️ Задержка между вступлениями: 30–90 сек\n"
-        f"Примерное время: {len(links) * len(acc_ids) * 1}–{len(links) * len(acc_ids) * 2} мин",
+        f"Выберите режим задержки между вступлениями:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+_DELAY_LABELS = {
+    "fast":   ("⚡ Быстро",    "5–15с",   "1–3 мин"),
+    "normal": ("🛡 Нормально", "30–60с",  "5–15 мин"),
+    "slow":   ("🐌 Медленно",  "60–120с", "10–30 мин"),
+    "smart":  ("🧠 Умный",     "авто",    "переменно"),
+}
+
+
+@router.callback_query(MassOpCb.filter(F.action == "bj_delay"))
+async def cb_bulk_join_delay(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    links = sd.get("bj_links", [])
+    acc_ids = sd.get("bj_acc_ids", [])
+    acc_label = sd.get("bj_acc_label", "?")
+
+    delay_mode = callback_data.op_type or "smart"
+    await state.update_data(bj_delay_mode=delay_mode)
+
+    link_preview = "\n".join(f"• {html.escape(ln)}" for ln in links[:5])
+    if len(links) > 5:
+        link_preview += f"\n… и ещё {len(links) - 5}"
+
+    icon, delay_str, time_est = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
+    n = len(links) * len(acc_ids)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
+    kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bj_accs", op_type="reselect"))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🔗 <b>Массовый join — Шаг 4/4 (Подтверждение)</b>\n\n"
+        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Каналов/групп: <b>{len(links)}</b>\n"
+        f"Задержка: <b>{icon} {delay_str}</b>\n"
+        f"Операций: <b>{n}</b> (~{time_est})\n\n"
+        f"<b>Список:</b>\n{link_preview}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1107,13 +1156,14 @@ async def cb_bulk_join_confirm(
     sd = await state.get_data()
     links = sd.get("bj_links", [])
     acc_ids = sd.get("bj_acc_ids", [])
+    delay_mode = sd.get("bj_delay_mode", "smart")
 
     if not links or not acc_ids:
         await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
         await state.clear()
         return
 
-    params = {"links": links, "account_ids": acc_ids}
+    params = {"links": links, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
         op_id = await pool.fetchval(
             """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
@@ -1128,6 +1178,7 @@ async def cb_bulk_join_confirm(
         await callback.answer("Ошибка создания операции", show_alert=True)
         return
 
+    icon, delay_str, _ = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", ""))
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
@@ -1137,7 +1188,8 @@ async def cb_bulk_join_confirm(
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
         f"Тип: 🔗 Массовый join\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
-        f"Каналов: <b>{len(links)}</b>\n\n"
+        f"Каналов: <b>{len(links)}</b>\n"
+        f"Задержка: <b>{icon} {delay_str}</b>\n\n"
         f"Воркер запустит её автоматически.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1253,19 +1305,68 @@ async def cb_bulk_leave_accs(
     if len(channels) > 5:
         ch_preview += f"\n… и ещё {len(channels) - 5}"
 
-    await state.update_data(bl_acc_ids=acc_ids)
+    await state.update_data(bl_acc_ids=acc_ids, bl_acc_label=acc_label)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
-    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    kb.adjust(2)
+    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bl_delay", op_type="fast"))
+    kb.button(text="🛡 Нормально (15-45с)", callback_data=MassOpCb(action="bl_delay", op_type="normal"))
+    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bl_delay", op_type="slow"))
+    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bl_delay", op_type="smart"))
+    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.adjust(2, 2, 1)
     await callback.message.edit_text(
-        f"🚪 <b>Массовый leave — Шаг 3/3 (Подтверждение)</b>\n\n"
+        f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
         f"<b>Список:</b>\n{ch_preview}\n\n"
-        f"⚠️ Задержка между выходами: 5–15 сек\n"
-        f"Примерное время: {len(channels) * len(acc_ids) // 4 + 1}–{len(channels) * len(acc_ids) // 2 + 1} мин",
+        f"Выберите режим задержки между выходами:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+_DELAY_LABELS_LEAVE = {
+    "fast":   ("⚡ Быстро",    "5–15с",   "1–2 мин"),
+    "normal": ("🛡 Нормально", "15–45с",  "3–10 мин"),
+    "slow":   ("🐌 Медленно",  "60–120с", "10–30 мин"),
+    "smart":  ("🧠 Умный",     "авто",    "переменно"),
+}
+
+
+@router.callback_query(MassOpCb.filter(F.action == "bl_delay"))
+async def cb_bulk_leave_delay(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    sd = await state.get_data()
+    channels = sd.get("bl_channels", [])
+    acc_ids = sd.get("bl_acc_ids", [])
+    acc_label = sd.get("bl_acc_label", "?")
+
+    delay_mode = callback_data.op_type or "smart"
+    await state.update_data(bl_delay_mode=delay_mode)
+
+    ch_preview = "\n".join(f"• {html.escape(ch)}" for ch in channels[:5])
+    if len(channels) > 5:
+        ch_preview += f"\n… и ещё {len(channels) - 5}"
+
+    icon, delay_str, time_est = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
+    n = len(channels) * len(acc_ids)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
+    kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bl_accs", op_type="reselect"))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🚪 <b>Массовый leave — Шаг 4/4 (Подтверждение)</b>\n\n"
+        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Каналов/групп: <b>{len(channels)}</b>\n"
+        f"Задержка: <b>{icon} {delay_str}</b>\n"
+        f"Операций: <b>{n}</b> (~{time_est})\n\n"
+        f"<b>Список:</b>\n{ch_preview}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1279,13 +1380,14 @@ async def cb_bulk_leave_confirm(
     sd = await state.get_data()
     channels = sd.get("bl_channels", [])
     acc_ids = sd.get("bl_acc_ids", [])
+    delay_mode = sd.get("bl_delay_mode", "smart")
 
     if not channels or not acc_ids:
         await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
         await state.clear()
         return
 
-    params = {"channels": channels, "account_ids": acc_ids}
+    params = {"channels": channels, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
         op_id = await pool.fetchval(
             """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
@@ -1300,6 +1402,7 @@ async def cb_bulk_leave_confirm(
         await callback.answer("Ошибка создания операции", show_alert=True)
         return
 
+    icon, delay_str, _ = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", ""))
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
@@ -1309,7 +1412,8 @@ async def cb_bulk_leave_confirm(
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
         f"Тип: 🚪 Массовый leave\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
-        f"Каналов: <b>{len(channels)}</b>\n\n"
+        f"Каналов: <b>{len(channels)}</b>\n"
+        f"Задержка: <b>{icon} {delay_str}</b>\n\n"
         f"Воркер запустит её автоматически.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
