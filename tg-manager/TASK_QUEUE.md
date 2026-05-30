@@ -45,7 +45,7 @@
 - [x] experiments.py FSM: кнопки Отмены на всех шагах (r13)
 - [x] Полный аудит всех меню на button dumps — аудит проведён, button dumps не найдены
 - [x] Проверка консистентности Cancel/Back во всех FSM — исправлено 6 файлов: auto_reply, funnels, schedule, deeplinks, asset_templates, broadcast
-- [ ] Inline help для сложных полей
+- [x] Inline help для сложных полей
 - [x] Валидация input-данных перед сохранением во всех FSM — исправлено в auto_reply, funnels, schedule, deeplinks, broadcast
 
 ## P3 — Targeting and templates
@@ -147,4 +147,4 @@
 10. **UX cleanup — завершение**
     - [ ] Полный аудит ВСЕХ меню на button dumps
     - [ ] Cancel/Help консистентность
-    - [ ] Inline help для сложных полей
+    - [x] Inline help для сложных полей
