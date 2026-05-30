@@ -67,6 +67,11 @@ async def _activate_subscription(
     amount: float,
 ) -> None:
     """Активировать подписку после успешного платежа."""
+    _VALID_PLANS = {"starter", "pro", "enterprise"}
+    if plan not in _VALID_PLANS:
+        log.warning("payment_webhook: unknown plan %r for user=%d, skipping", plan, user_id)
+        return
+
     # Записать платёж ПЕРВЫМ — если запись упадёт, подписка не активируется и вебхук можно переповторить.
     # Без этого подписка активируется без платёжной записи → финансовые данные теряются безвозвратно.
     # reference = tx_ref (уникален для каждой транзакции); wallet_address='webhook' — заглушка для NOT NULL
