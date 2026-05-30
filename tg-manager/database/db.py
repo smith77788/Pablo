@@ -769,8 +769,8 @@ async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int
                 to_bot_id, r["trigger_type"], r["keyword"], r["response_text"],
             )
             count += 1
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("copy_auto_replies: skip duplicate rule: %s", e)
     return count
 
 
@@ -978,8 +978,8 @@ async def assign_experiment_variant(pool, bot_id: int, user_id: int,
         await pool.execute(
             "UPDATE experiment_variants SET impressions=impressions+1 WHERE id=$1", chosen["id"]
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("assign_experiment_variant: skip (likely duplicate assignment): %s", e)
     return chosen
 
 async def record_experiment_conversion(pool, bot_id: int, user_id: int, exp_id: int) -> None:
@@ -1117,9 +1117,8 @@ async def record_deep_link_visit(pool, bot_id: int, param: str, user_id: int) ->
             await pool.execute(
                 "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1", link_id
             )
-    except Exception:
-        # Duplicate — not a new unique visit (ON CONFLICT equivalent via try/except)
-        pass
+    except Exception as e:
+        log.debug("record_deep_link_visit: skip duplicate visit: %s", e)
     return link_id
 
 async def delete_deep_link(pool, link_id: int, bot_id: int) -> None:
@@ -1137,7 +1136,8 @@ async def record_referral(pool, bot_id: int, referrer_user_id: int,
             bot_id, referrer_user_id, referred_user_id, deep_link_id,
         )
         return True
-    except Exception:
+    except Exception as e:
+        log.debug("record_referral: skip (likely duplicate): %s", e)
         return False
 
 async def get_referral_leaderboard(pool, bot_id: int, limit: int = 10) -> list:
@@ -1244,8 +1244,8 @@ async def autotag_by_activity(pool, bot_id: int) -> dict:
                     "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3) ON CONFLICT (bot_id,user_id,tag) DO NOTHING",
                     bot_id, uid, tag,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("autotag_by_activity: skip duplicate tag: %s", e)
 
     hot_ids = await pool.fetch(
         "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '1 day'", bot_id

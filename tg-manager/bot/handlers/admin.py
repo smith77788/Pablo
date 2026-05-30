@@ -1054,7 +1054,7 @@ async def _adm_env_edit_ask(
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
     await pool.execute(
-        f"INSERT INTO admin_state(admin_id,state,data) VALUES($1,'env_edit:{key}','') "
+        "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
         "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
         callback.from_user.id, f"env_edit:{key}",
     )

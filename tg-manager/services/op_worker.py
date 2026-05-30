@@ -68,14 +68,14 @@ async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool
     scheduled_for = f"now() + interval '{backoff} seconds'"
 
     await pool.execute(
-        f"""UPDATE operation_queue
+        """UPDATE operation_queue
             SET status='pending',
                 retry_count=$1,
                 last_error=$2,
-                scheduled_for={scheduled_for},
+                scheduled_for=now() + ($4 * interval '1 second'),
                 started_at=NULL
             WHERE id=$3""",
-        retry_count, str(exc)[:300], op_id,
+        retry_count, str(exc)[:300], op_id, backoff,
     )
     log.info("op_worker: op %d queued for retry %d/%d in %ds", op_id, retry_count, max_retries, backoff)
     return True

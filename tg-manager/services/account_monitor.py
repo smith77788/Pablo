@@ -60,8 +60,8 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
             """,
             _LOW_TRUST_THRESHOLD,
         )
-    except Exception:
-        # Column last_low_trust_alert may not exist yet — skip silently
+    except Exception as e:
+        log.debug("low_trust_check: %s (column may not exist yet)", e)
         return
 
     by_owner: dict[int, list] = {}

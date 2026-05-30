@@ -205,22 +205,33 @@ async def main() -> None:
     ssl_ctx.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     http = aiohttp.ClientSession(connector=connector)
+    async def _resilient(name: str, coro):
+        """Wrap a background service coroutine with auto-restart on crash."""
+        while True:
+            try:
+                await coro
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.error("Service %s crashed: %s — restarting in 30s", name, e)
+                await asyncio.sleep(30)
+
     try:
-        asyncio.create_task(scheduler.run(pool, http))
-        asyncio.create_task(auto_responder.run(pool, http, bot))
-        asyncio.create_task(relay_service.run(pool, http))
-        asyncio.create_task(funnel_runner.run(pool, http))
-        asyncio.create_task(payment_checker.run(pool, http, bot))
-        asyncio.create_task(ranking_checker.run(pool, bot))
-        asyncio.create_task(search_observer.run_confirmation_loop(pool, bot))
-        asyncio.create_task(account_monitor.run(pool, bot))
-        asyncio.create_task(trust_engine.run(pool))
-        asyncio.create_task(shadowban_monitor.run(pool, bot))
-        asyncio.create_task(op_worker.run(pool, bot))
-        asyncio.create_task(behavioral_engine.run(pool, bot))
-        asyncio.create_task(account_warmer.run_warmup_loop(pool))
-        asyncio.create_task(account_health.run_health_check_loop(pool))
-        asyncio.create_task(payment_webhook.run(pool, bot))
+        asyncio.create_task(_resilient("scheduler",        scheduler.run(pool, http)))
+        asyncio.create_task(_resilient("auto_responder",   auto_responder.run(pool, http, bot)))
+        asyncio.create_task(_resilient("relay",            relay_service.run(pool, http)))
+        asyncio.create_task(_resilient("funnel_runner",    funnel_runner.run(pool, http)))
+        asyncio.create_task(_resilient("payment_checker",  payment_checker.run(pool, http, bot)))
+        asyncio.create_task(_resilient("ranking_checker",  ranking_checker.run(pool, bot)))
+        asyncio.create_task(_resilient("search_observer",  search_observer.run_confirmation_loop(pool, bot)))
+        asyncio.create_task(_resilient("account_monitor",  account_monitor.run(pool, bot)))
+        asyncio.create_task(_resilient("trust_engine",     trust_engine.run(pool)))
+        asyncio.create_task(_resilient("shadowban_monitor",shadowban_monitor.run(pool, bot)))
+        asyncio.create_task(_resilient("op_worker",        op_worker.run(pool, bot)))
+        asyncio.create_task(_resilient("behavioral_engine",behavioral_engine.run(pool, bot)))
+        asyncio.create_task(_resilient("account_warmer",   account_warmer.run_warmup_loop(pool)))
+        asyncio.create_task(_resilient("account_health",   account_health.run_health_check_loop(pool)))
+        asyncio.create_task(_resilient("payment_webhook",  payment_webhook.run(pool, bot)))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:

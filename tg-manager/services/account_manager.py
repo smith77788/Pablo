@@ -45,6 +45,8 @@ _pending_qr: dict[int, tuple] = {}
 
 # Таймаут подключения в секундах
 _CONNECT_TIMEOUT = 30
+# Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
+_OP_TIMEOUT = 45
 
 
 def _backoff(attempt: int, base: float = 2.0, cap: float = 120.0) -> float:
