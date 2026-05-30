@@ -1837,10 +1837,42 @@ async def cb_members_invite(
     )
 
 
-@router.message(InviteUsersFSM.waiting_usernames)
+@router.message(InviteUsersFSM.waiting_usernames, F.document)
+async def fsm_invite_usernames_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    doc = message.document
+    if not doc or (doc.file_size and doc.file_size > 100_000):
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+        return
+    try:
+        fi = await message.bot.get_file(doc.file_id)
+        dl = await message.bot.download_file(fi.file_path)
+        raw = (dl.read() if hasattr(dl, "read") else bytes(dl)).decode("utf-8", errors="ignore")
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
+        return
+    usernames = _parse_username_list(raw)
+    if not usernames:
+        await message.answer("⚠️ Файл не содержит распознанных usernames.")
+        return
+    if len(usernames) > 300:
+        usernames = usernames[:300]
+        await message.answer("⚠️ Взяты первые 300 пользователей из файла.")
+    await _exec_invite_usernames(usernames, message, state, pool)
+
+
+@router.message(InviteUsersFSM.waiting_usernames, F.text)
 async def fsm_invite_usernames(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     raw = (message.text or "").replace(",", "\n")
     usernames = [u.strip() for u in raw.split("\n") if u.strip()]
+    if not usernames:
+        await message.answer("⚠️ Список пуст. Начните заново: /ops")
+        return
+    await _exec_invite_usernames(usernames, message, state, pool)
+
+
+async def _exec_invite_usernames(
+    usernames: list[str], message, state: FSMContext, pool
+) -> None:
     data = await state.get_data()
     await state.clear()
     if not usernames:
