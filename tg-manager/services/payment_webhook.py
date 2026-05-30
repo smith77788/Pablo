@@ -69,19 +69,22 @@ async def _activate_subscription(
     """Активировать подписку после успешного платежа."""
     # Записать платёж ПЕРВЫМ — если запись упадёт, подписка не активируется и вебхук можно переповторить.
     # Без этого подписка активируется без платёжной записи → финансовые данные теряются безвозвратно.
+    # reference = tx_ref (уникален для каждой транзакции); wallet_address='webhook' — заглушка для NOT NULL
+    safe_ref = (tx_ref or "")[:200] or f"wh_{user_id}_{plan}"
     await pool.execute(
-        """INSERT INTO payments(user_id, amount_usd, currency, tx_hash, plan, period_months, status)
-           VALUES($1,$2,$3,$4,$5,$6,'confirmed')
-           ON CONFLICT (user_id, tx_hash) DO UPDATE
-           SET status='confirmed', updated_at=now()""",
-        user_id, amount, currency, tx_ref, plan, months,
+        """INSERT INTO payments(user_id, amount_usd, amount_crypto, currency, tx_hash,
+                                plan, period_months, status, wallet_address, reference)
+           VALUES($1,$2,$2,$3,$4,$5,$6,'confirmed','webhook',$4)
+           ON CONFLICT (reference) DO UPDATE
+           SET status='confirmed', tx_hash=EXCLUDED.tx_hash""",
+        user_id, amount, currency, safe_ref, plan, months,
     )
     expires = datetime.utcnow() + timedelta(days=30 * months)
     await pool.execute(
         """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
            VALUES($1,$2,$3,true)
            ON CONFLICT(user_id) DO UPDATE
-           SET plan=$2, expires_at=$3, is_active=true, updated_at=now()""",
+           SET plan=$2, expires_at=$3, is_active=true""",
         user_id, plan, expires,
     )
 
