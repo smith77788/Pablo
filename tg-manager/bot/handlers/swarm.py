@@ -60,7 +60,6 @@ async def cb_swarm_toggle(callback: CallbackQuery, callback_data: SwarmCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     new_state = not row.get("swarm_enabled", False)
     await db.toggle_swarm(pool, callback_data.bot_id, new_state)
     row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -127,7 +126,6 @@ async def cb_swarm_role(callback: CallbackQuery, callback_data: SwarmCb,
     if role not in ("entry", "conversion", "retention", "general"):
         await callback.answer("Неверная роль", show_alert=True)
         return
-    await callback.answer()
     await db.set_bot_role(pool, callback_data.bot_id, role)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
@@ -186,12 +184,12 @@ async def cb_change_mode(callback: CallbackQuery, callback_data: SwarmCb,
     if mode not in valid_modes:
         await callback.answer("Неизвестный режим.", show_alert=True)
         return
-    await callback.answer()
     await db.set_system_mode(pool, mode)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Режим изменён.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"

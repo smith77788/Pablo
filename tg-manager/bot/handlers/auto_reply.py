@@ -232,12 +232,12 @@ async def cb_ar_copy_to(callback: CallbackQuery, callback_data: AutoReplyCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
     if not others:
         await callback.answer("Нет других ботов для копирования.", show_alert=True)
         return
+    await callback.answer()
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await callback.message.edit_text(
         f"📋 <b>Копировать авто-ответы из {label}</b>\n\nВыберите бот-получатель:",
@@ -255,7 +255,6 @@ async def cb_ar_copy_confirm(callback: CallbackQuery, callback_data: AutoReplyCb
     if not src_bot or not dst_bot:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     copied = await db.copy_auto_replies(pool, callback_data.bot_id, callback_data.target_bot_id)
     dst_label = f"@{dst_bot['username']}" if dst_bot["username"] else dst_bot["first_name"]
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
