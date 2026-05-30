@@ -34,7 +34,7 @@ def is_platform_admin(user_id: int) -> bool:
         if user_id in _session_admins:
             return True
     except Exception:
-        pass
+        log_exc_swallow(log, "Ошибка проверки session-админов в is_platform_admin")
     return False
 
 

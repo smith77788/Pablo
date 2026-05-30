@@ -5,6 +5,8 @@ import logging
 import random
 from config import TG_API_ID, TG_API_HASH, TG_PROXY
 
+from services.logger import log_exc_swallow
+
 log = logging.getLogger(__name__)
 
 
@@ -139,13 +141,13 @@ async def start_login(phone: str) -> tuple[str, str]:
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой в start_login")
         raise
     except Exception:
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой в start_login")
         raise
     _pending[phone] = client
 
@@ -252,9 +254,7 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в import_from_session_string")
 async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
     """Convert a Pyrogram JSON session to Telethon StringSession.
 
@@ -342,9 +342,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в import_from_tdata")
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
     client = _pending.get(phone)
@@ -369,9 +367,7 @@ async def cleanup_pending(phone: str) -> None:
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в cleanup_pending")
 # ── QR Login ──────────────────────────────────────────────────────────────────
 
 async def start_qr_login(user_id: int) -> bytes:
@@ -459,9 +455,7 @@ async def cleanup_qr_pending(user_id: int) -> None:
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в cleanup_qr_pending")
 async def get_account_info(session_string: str, _acc: dict | None = None) -> dict:
     client = _make_client(session_string, _acc)
     try:
@@ -477,9 +471,7 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_account_info")
 async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
                       _acc: dict | None = None) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
@@ -504,9 +496,7 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_dialogs")
 async def scan_owned_assets(
     session_string: str, _acc: dict | None = None
 ) -> dict:
@@ -564,9 +554,7 @@ async def scan_owned_assets(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в _collect")
 async def send_message_via_account(session_string: str, chat_id: int, text: str,
                                    _acc: dict | None = None) -> bool:
     """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
@@ -582,9 +570,7 @@ async def send_message_via_account(session_string: str, chat_id: int, text: str,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в send_message_via_account")
 # Псевдоним для обратной совместимости с хендлером accounts.py
 send_message = send_message_via_account
 
@@ -635,9 +621,7 @@ async def send_dm(session_string: str, username: str, text: str,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в send_dm")
 async def get_account_dialogs_stats(session_string: str, _acc: dict | None = None) -> dict:
     """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
     from telethon.tl.types import Channel, Chat, User
@@ -670,9 +654,7 @@ async def get_account_dialogs_stats(session_string: str, _acc: dict | None = Non
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_account_dialogs_stats")
 async def check_account_health(session_string: str, _acc: dict | None = None) -> dict:
     """Проверяет доступность аккаунта: авторизован ли, не заблокирован ли.
 
@@ -731,8 +713,7 @@ async def check_account_status_full(
         except asyncio.TimeoutError:
             pass
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в check_account_status_full")
         return {"status": "active", "reason": "Аккаунт активен", "display_name": display_name}
 
     except Exception as e:
@@ -775,9 +756,7 @@ async def get_channel_members_count(session_string: str, channel_username: str,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_channel_members_count")
 async def get_full_channel_info(
     session_string: str,
     channel_id: int | str,
@@ -805,9 +784,7 @@ async def get_full_channel_info(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_full_channel_info")
 async def get_recent_messages(
     session_string: str,
     channel_username: str,
@@ -841,9 +818,7 @@ async def get_recent_messages(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_recent_messages")
 async def search_in_telegram(session_string: str, query: str, limit: int = 20,
                              _acc: dict | None = None) -> list[dict]:
     """Search Telegram contacts/global and return ordered results."""
@@ -904,7 +879,7 @@ async def create_channel(
             inv = await client(ExportChatInviteRequest(peer=ch))
             invite_link = getattr(inv, "link", "") or ""
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой в create_channel")
         return {
             "channel_id": ch.id,
             "title": ch.title,
@@ -924,9 +899,7 @@ async def create_channel(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в create_channel")
 async def join_channel(session_string: str, invite_or_username: str,
                        _acc: dict | None = None) -> dict:
     """Join a channel or group by username (@name) or invite link (https://t.me/...).
@@ -970,9 +943,7 @@ async def join_channel(session_string: str, invite_or_username: str,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в join_channel")
 async def leave_channel(session_string: str, channel_id: int | str,
                         _acc: dict | None = None) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
@@ -994,9 +965,7 @@ async def leave_channel(session_string: str, channel_id: int | str,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в leave_channel")
 async def edit_channel_title(
     session_string: str, channel_id: int, title: str, _acc: dict | None = None,
 ) -> bool:
@@ -1014,9 +983,7 @@ async def edit_channel_title(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в edit_channel_title")
 async def edit_channel_about(
     session_string: str, channel_id: int, about: str, _acc: dict | None = None,
 ) -> bool:
@@ -1034,9 +1001,7 @@ async def edit_channel_about(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в edit_channel_about")
 async def set_channel_username(
     session_string: str, channel_id: int, username: str, _acc: dict | None = None,
 ) -> str:
@@ -1055,9 +1020,7 @@ async def set_channel_username(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в set_channel_username")
 async def get_channel_invite_link(session_string: str, channel_id: int,
                                   _acc: dict | None = None) -> str:
     """Get (or create) an invite link for the channel. Returns link string or ''."""
@@ -1075,9 +1038,7 @@ async def get_channel_invite_link(session_string: str, channel_id: int,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_channel_invite_link")
 async def delete_channel(session_string: str, channel_id: int,
                          _acc: dict | None = None) -> bool:
     """Permanently delete a channel or group. Irreversible."""
@@ -1095,9 +1056,7 @@ async def delete_channel(session_string: str, channel_id: int,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в delete_channel")
 async def get_channel_members(
     session_string: str, channel_id: int, limit: int = 50, _acc: dict | None = None,
 ) -> list[dict]:
@@ -1131,9 +1090,7 @@ async def get_channel_members(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_channel_members")
 async def invite_users_to_channel(
     session_string: str, channel_id: int, usernames: list[str], _acc: dict | None = None,
     access_hash: int = 0,
@@ -1214,9 +1171,7 @@ async def invite_users_to_channel(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в invite_users_to_channel")
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
@@ -1247,9 +1202,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в get_contacts")
 async def kick_from_channel(
     session_string: str, channel_id: int, user_id: int, _acc: dict | None = None,
 ) -> bool:
@@ -1276,9 +1229,7 @@ async def kick_from_channel(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в kick_from_channel")
 async def promote_to_admin(
     session_string: str,
     channel_id: int,
@@ -1343,9 +1294,7 @@ async def promote_to_admin(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в promote_to_admin")
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTENT OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1404,9 +1353,7 @@ async def post_to_channel(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в post_to_channel")
 async def send_reaction(
     session_string: str, channel_id: int, msg_id: int, emoji: str,
     _acc: dict | None = None,
@@ -1431,9 +1378,7 @@ async def send_reaction(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в send_reaction")
 async def report_peer(
     session_string: str,
     peer_username: str,
@@ -1473,9 +1418,7 @@ async def report_peer(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в report_peer")
 async def report_peer_deep(
     session_string: str,
     peer_username: str,
@@ -1564,8 +1507,7 @@ async def report_peer_deep(
             import telethon.tl.types as _tlt
             reason_map[_key] = getattr(_tlt, _type_name)()
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep")
     # Escalation: primary → all applicable secondary reasons
     _escalation: dict[str, list[str]] = {
         "childabuse":  ["pornography", "violence", "drugs", "spam", "other"],
@@ -1664,8 +1606,7 @@ async def report_peer_deep(
             full_result = await client(GetFullChannelRequest(entity))
             full_chat = full_result.full_chat
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep")
         # ── 4. Pinned messages — высший приоритет для модераторов ─────────
         pinned_msgs = []
         if report_pinned and is_channel:
@@ -1835,13 +1776,12 @@ async def report_peer_deep(
                 settings=InputPeerNotifySettings(mute_until=2_147_483_647),
             ))
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep")
         if result["joined"]:
             try:
                 await client(LeaveChannelRequest(entity))
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой в report_peer_deep")
         if block_after:
             try:
                 await client(BlockRequest(id=entity))
@@ -1855,8 +1795,7 @@ async def report_peer_deep(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep")
     return result
 
 
@@ -1946,8 +1885,7 @@ async def report_peer_deep_v2(
             import telethon.tl.types as _tlt
             reason_map[_key] = getattr(_tlt, _type_name)()
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
     _escalation: dict[str, list[str]] = {
         "childabuse":  ["pornography", "violence", "drugs", "spam", "other"],
         "csam":        ["pornography", "violence", "drugs", "spam", "other"],
@@ -2038,7 +1976,7 @@ async def report_peer_deep_v2(
                         else:
                             result["multi_reason_sent"] += 1
                     except Exception:
-                        pass
+                        log_exc_swallow(log, "Сбой в report_peer_deep_v2")
                 else:
                     log.warning("rpv2[1/peer idx=%d]: %s", idx, e)
 
@@ -2078,8 +2016,7 @@ async def report_peer_deep_v2(
             full_result = await client(GetFullChannelRequest(entity))
             full_chat = full_result.full_chat
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
         # ── 4. Pinned messages — приоритет для модераторов ─────────────────
         pinned_msgs = []
         if report_pinned and is_channel:
@@ -2137,7 +2074,7 @@ async def report_peer_deep_v2(
                                 ))
                                 result["msg_reported"] += min(2, len(chunk))
                             except Exception:
-                                pass
+                                log_exc_swallow(log, "Сбой в report_peer_deep_v2")
                         else:
                             log.warning("rpv2[5/msg_chunk %d]: %s", chunk_idx, e)
                     # Human-like пауза между чанками
@@ -2281,13 +2218,12 @@ async def report_peer_deep_v2(
                 settings=InputPeerNotifySettings(mute_until=2_147_483_647),
             ))
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
         if result["joined"]:
             try:
                 await client(LeaveChannelRequest(entity))
             except Exception:
-                pass
+                log_exc_swallow(log, "Сбой в report_peer_deep_v2")
         if block_after:
             try:
                 await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -2304,8 +2240,7 @@ async def report_peer_deep_v2(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
     return result
 
 
@@ -2362,8 +2297,7 @@ async def strike_map_target(
             intel["description"]    = (getattr(fc, "about", "") or "")[:500]
             intel["linked_group_id"] = getattr(fc, "linked_chat_id", None)
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в strike_map_target")
         # Все администраторы (до 200)
         try:
             adm = await client(GetParticipantsRequest(
@@ -2373,22 +2307,19 @@ async def strike_map_target(
             ))
             intel["admin_ids"] = [u.id for u in getattr(adm, "users", [])]
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в strike_map_target")
         # Закреплённые сообщения
         try:
             pinned = await client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=20)
             intel["pinned_msg_ids"] = [m.id for m in pinned if m and m.id]
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в strike_map_target")
         # Последние 100 сообщений
         try:
             msgs = await client.get_messages(entity, limit=100)
             intel["latest_msg_ids"] = [m.id for m in msgs if m and m.id]
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в strike_map_target")
         # Упомянутые @usernames и @botы из описания + последних постов
         scan_text = intel["description"]
         try:
@@ -2397,7 +2328,7 @@ async def strike_map_target(
                 if m and m.text:
                     scan_text += " " + m.text
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой в strike_map_target")
         _bot_re    = _re.compile(r'@([A-Za-z]\w{3,31}[Bb]ot)\b')
         _chan_re   = _re.compile(r't\.me/([A-Za-z][A-Za-z0-9_]{3,31})\b')
         _at_re    = _re.compile(r'@([A-Za-z][A-Za-z0-9_]{3,31})\b')
@@ -2419,8 +2350,7 @@ async def strike_map_target(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
+            log_exc_swallow(log, "Сбой в strike_map_target")
     return intel
 
 
@@ -2462,9 +2392,7 @@ async def update_profile(
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в update_profile")
 async def update_account_username(session_string: str, username: str,
                                   _acc: dict | None = None) -> str:
     """Update account username. Returns '' on success, error string on failure."""
@@ -2484,9 +2412,7 @@ async def update_account_username(session_string: str, username: str,
         try:
             await client.disconnect()
         except Exception:
-            pass
-
-
+            log_exc_swallow(log, "Сбой в update_account_username")
 # ══════════════════════════════════════════════════════════════════════════════
 # BOTFATHER BOT CREATION
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2601,4 +2527,4 @@ async def create_bot_via_botfather(
         try:
             await client.disconnect()
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой в _bf_send_with_retry")

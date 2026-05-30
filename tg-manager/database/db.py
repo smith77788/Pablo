@@ -1,8 +1,11 @@
 import asyncpg
 import glob
+import json
 import logging
 import os
 from config import DATABASE_URL
+
+from services.logger import log_exc_swallow, timed
 
 log = logging.getLogger(__name__)
 
@@ -114,26 +117,27 @@ async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> in
     if not users:
         return 0
     inserted = 0
-    async with pool.acquire() as conn:
-        for u in users:
-            result = await conn.execute(
-                """INSERT INTO bot_users (bot_id, user_id, username, first_name, last_name, language_code)
-                   VALUES ($1, $2, $3, $4, $5, $6)
-                   ON CONFLICT (bot_id, user_id) DO UPDATE SET
-                       last_seen     = NOW(),
-                       username      = EXCLUDED.username,
-                       first_name    = EXCLUDED.first_name,
-                       last_name     = EXCLUDED.last_name,
-                       language_code = EXCLUDED.language_code""",
-                bot_id,
-                u["user_id"],
-                u.get("username"),
-                u.get("first_name"),
-                u.get("last_name"),
-                u.get("language_code"),
-            )
-            if result == "INSERT 1":
-                inserted += 1
+    with timed(log, "upsert_users", extra={"bot_id": bot_id, "count": len(users)}):
+        async with pool.acquire() as conn:
+            for u in users:
+                result = await conn.execute(
+                    """INSERT INTO bot_users (bot_id, user_id, username, first_name, last_name, language_code)
+                       VALUES ($1, $2, $3, $4, $5, $6)
+                       ON CONFLICT (bot_id, user_id) DO UPDATE SET
+                           last_seen     = NOW(),
+                           username      = EXCLUDED.username,
+                           first_name    = EXCLUDED.first_name,
+                           last_name     = EXCLUDED.last_name,
+                           language_code = EXCLUDED.language_code""",
+                    bot_id,
+                    u["user_id"],
+                    u.get("username"),
+                    u.get("first_name"),
+                    u.get("last_name"),
+                    u.get("language_code"),
+                )
+                if result == "INSERT 1":
+                    inserted += 1
     return inserted
 
 
@@ -610,8 +614,9 @@ async def advance_funnel_step(pool: asyncpg.Pool, sub_id: int, next_step: int,
 
 async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     """Get aggregated statistics for a bot."""
-    # Count relay sessions (users who contacted bot via relay)
-    relay_sessions = await pool.fetchval(
+    with timed(log, "get_bot_stats", extra={"bot_id": bot_id}):
+        # Count relay sessions (users who contacted bot via relay)
+        relay_sessions = await pool.fetchval(
         "SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1", bot_id
     )
     # Count relay messages in/out
@@ -2105,7 +2110,7 @@ async def check_and_grant_rewards(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            log_exc_swallow(log, "Сбой уведомления о реферальной награде", referrer_id=referrer_id, level=level)
 
     return granted
 
@@ -2140,7 +2145,7 @@ async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой уведомления о реферальном подарке", referred_id=referred_id)
     return True
 
 
@@ -2231,7 +2236,7 @@ async def notify_if_enabled(
             return
         await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=reply_markup)
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой notify_if_enabled", user_id=user_id, pref=pref)
 
 
 # ── Global Presence Factory ────────────────────────────────────────────────
@@ -2484,10 +2489,10 @@ async def grant_plan_to_user(
             """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
                VALUES ($1, 'grant_plan', $2, $3)""",
             admin_id, user_id,
-            '{"plan":"' + plan + '","months":' + str(months) + ',"expires_at":"' + expires.isoformat() + '"}',
+            json.dumps({"plan": plan, "months": months, "expires_at": expires.isoformat()}),
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id)
 
 
 async def revoke_plan_from_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
