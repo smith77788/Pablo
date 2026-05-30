@@ -468,7 +468,6 @@ async def cb_dm_detail(
     callback_data: DmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     c = await pool.fetchrow(
         "SELECT * FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
         callback_data.campaign_id, callback.from_user.id,
@@ -476,6 +475,7 @@ async def cb_dm_detail(
     if not c:
         await callback.answer("Кампания не найдена", show_alert=True)
         return
+    await callback.answer()
 
     status = c["status"]
     icon = _STATUS_EMOJI.get(status, "❓")

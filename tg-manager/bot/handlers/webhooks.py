@@ -75,7 +75,6 @@ async def cb_webhook_disable(callback: CallbackQuery, callback_data: WebhookCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
 
     result = await bot_api.delete_webhook(http, row["token"])
     if result.get("ok"):

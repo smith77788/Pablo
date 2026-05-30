@@ -375,7 +375,6 @@ async def cb_block_user(callback: CallbackQuery, callback_data: AudCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     await db.block_user(pool, callback_data.bot_id, callback_data.target_id, blocked)
     user = await db.get_user_by_id(pool, callback_data.bot_id, callback_data.target_id)
     if not user:

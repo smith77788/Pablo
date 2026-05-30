@@ -178,7 +178,6 @@ async def cb_commands_delete(callback: CallbackQuery, callback_data: CommandsCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     ok = await bot_api.delete_my_commands(http, row["token"])
     if ok:
         await callback.message.edit_text(

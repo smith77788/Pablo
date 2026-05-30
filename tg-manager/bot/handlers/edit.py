@@ -170,7 +170,6 @@ async def cb_del_photo(callback: CallbackQuery, callback_data: EditCb,
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     ok = await bot_api.delete_my_photo(http, row["token"])
     if ok:
         await callback.message.edit_text(

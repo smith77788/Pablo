@@ -385,7 +385,6 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_proxy_delete(
     callback: CallbackQuery, callback_data: ProxyCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     user_id = callback.from_user.id
     proxy_id = callback_data.proxy_id
 
@@ -396,6 +395,7 @@ async def cb_proxy_delete(
     if not row:
         await callback.answer("Прокси не найден.", show_alert=True)
         return
+    await callback.answer()
 
     await pool.execute(
         "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2",
