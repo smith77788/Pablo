@@ -1109,6 +1109,36 @@ _DELAY_LABELS = {
 }
 
 
+@router.callback_query(MassOpCb.filter(F.action == "bj_redelay"))
+async def cb_bulk_join_redelay(callback: CallbackQuery, state: FSMContext) -> None:
+    """Вернуться к выбору задержки в bulk_join (сохраняя выбранные аккаунты)."""
+    await callback.answer()
+    sd = await state.get_data()
+    links = sd.get("bj_links", [])
+    acc_label = sd.get("bj_acc_label", "?")
+
+    link_preview = "\n".join(f"• {html.escape(ln)}" for ln in links[:5])
+    if len(links) > 5:
+        link_preview += f"\n… и ещё {len(links) - 5}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bj_delay", op_type="fast"))
+    kb.button(text="🛡 Нормально (30-60с)", callback_data=MassOpCb(action="bj_delay", op_type="normal"))
+    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bj_delay", op_type="slow"))
+    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bj_delay", op_type="smart"))
+    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.adjust(2, 2, 1)
+    await callback.message.edit_text(
+        f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
+        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Каналов/групп: <b>{len(links)}</b>\n\n"
+        f"<b>Список:</b>\n{link_preview}\n\n"
+        f"Выберите режим задержки между вступлениями:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(MassOpCb.filter(F.action == "bj_delay"))
 async def cb_bulk_join_delay(
     callback: CallbackQuery,
@@ -1133,7 +1163,7 @@ async def cb_bulk_join_delay(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
-    kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bj_accs", op_type="reselect"))
+    kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bj_redelay"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -1333,6 +1363,36 @@ _DELAY_LABELS_LEAVE = {
 }
 
 
+@router.callback_query(MassOpCb.filter(F.action == "bl_redelay"))
+async def cb_bulk_leave_redelay(callback: CallbackQuery, state: FSMContext) -> None:
+    """Вернуться к выбору задержки в bulk_leave (сохраняя выбранные аккаунты)."""
+    await callback.answer()
+    sd = await state.get_data()
+    channels = sd.get("bl_channels", [])
+    acc_label = sd.get("bl_acc_label", "?")
+
+    ch_preview = "\n".join(f"• {html.escape(ch)}" for ch in channels[:5])
+    if len(channels) > 5:
+        ch_preview += f"\n… и ещё {len(channels) - 5}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bl_delay", op_type="fast"))
+    kb.button(text="🛡 Нормально (15-45с)", callback_data=MassOpCb(action="bl_delay", op_type="normal"))
+    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bl_delay", op_type="slow"))
+    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bl_delay", op_type="smart"))
+    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.adjust(2, 2, 1)
+    await callback.message.edit_text(
+        f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
+        f"Аккаунты: <b>{acc_label}</b>\n"
+        f"Каналов/групп: <b>{len(channels)}</b>\n\n"
+        f"<b>Список:</b>\n{ch_preview}\n\n"
+        f"Выберите режим задержки между выходами:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(MassOpCb.filter(F.action == "bl_delay"))
 async def cb_bulk_leave_delay(
     callback: CallbackQuery,
@@ -1357,7 +1417,7 @@ async def cb_bulk_leave_delay(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
-    kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bl_accs", op_type="reselect"))
+    kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bl_redelay"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
