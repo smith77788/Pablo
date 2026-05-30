@@ -283,4 +283,4 @@ async def run_campaign(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        log_exc_swallow(log, "Сбой уведомления о завершении DM-кампании", campaign_id=campaign_id)

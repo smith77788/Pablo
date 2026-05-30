@@ -19,6 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import DmCb, BotCb, BmCb
 from bot.states import DmCampaignFSM
 from services import task_registry as _treg
+from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 

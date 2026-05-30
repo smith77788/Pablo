@@ -423,7 +423,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
         try:
             await callback.bot.send_message(admin_id, notify, parse_mode="HTML")
         except Exception:
-            pass
+            log_exc_swallow(log, "Ошибка отправки уведомления администратору о запросе подписки")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К планам", callback_data=SubCb(action="menu"))
@@ -603,7 +603,7 @@ async def msg_payment_setting_value(
             await railway_api.set_variable(http, key, value)
             railway_saved = True
     except Exception:
-        pass
+        log_exc_swallow(log, "Ошибка сохранения платёжной настройки в Railway API")
 
     label = _PAY_SETTING_LABELS[key]
     note = "" if railway_saved else "\n\n⚠️ Railway API не настроен — значение активно до перезапуска бота. Настройте Railway Token в /admin для постоянного сохранения."
