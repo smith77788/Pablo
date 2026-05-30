@@ -356,13 +356,12 @@ async def cb_main_menu(callback: CallbackQuery) -> None:
         return
 
     await callback.answer()
-    from bot.callbacks import AdminCb
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Пользователи", callback_data=AdminUserCb(action="list"))
-    kb.button(text="🔐 Аудит логи", callback_data=AdminCb(action="audit_log"))
-    kb.button(text="◀️ Главное меню", callback_data=AdminCb(action="main"))
+    kb.button(text="🔐 Аудит логи", callback_data="adm:audit_log")
+    kb.button(text="◀️ Главное меню", callback_data="adm:main")
     kb.adjust(1)
 
     await callback.message.edit_text(

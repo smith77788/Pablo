@@ -35,7 +35,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     # Gather stats
     accounts = await db.get_tg_accounts(pool, owner_id)
     channels = await db.get_managed_channels(pool, owner_id)
-    bots = await db.get_managed_bots(pool, owner_id)
+    bots = await db.get_bots(pool, owner_id)
 
     # Count distinct accs with channels
     accs_with_chans = len({c["acc_id"] for c in channels if c.get("acc_id")})
@@ -68,7 +68,7 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     accounts = await db.get_tg_accounts(pool, owner_id)
     channels = await db.get_managed_channels(pool, owner_id)
-    bots = await db.get_managed_bots(pool, owner_id)
+    bots = await db.get_bots(pool, owner_id)
 
     # Build account → channels map
     acc_map: dict[int, dict] = {}

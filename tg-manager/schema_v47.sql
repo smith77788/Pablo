@@ -26,3 +26,15 @@ CREATE TABLE IF NOT EXISTS presence_packs (
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pp_owner ON presence_packs(owner_id);
+
+-- Deploy notification log — tracks which builds have been deployed and notified
+CREATE TABLE IF NOT EXISTS deploy_log (
+    id          BIGSERIAL PRIMARY KEY,
+    build       TEXT NOT NULL,
+    commit_sha  TEXT,
+    commit_msg  TEXT,
+    branch      TEXT,
+    notified    BOOLEAN DEFAULT FALSE,
+    deployed_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dl_build ON deploy_log(build);
