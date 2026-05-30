@@ -36,7 +36,7 @@
 - [x] Bulk join/leave file upload — .txt список до 200 строк (r13)
 - [x] Account preview в bulk_join/leave при выборе "все аккаунты" (r13)
 
-## P2 — Telegram UX (ЧАСТИЧНО)
+## P2 — Telegram UX (ГОТОВО)
 - [x] Добавлены Back-кнопки на все lock-screen экраны подписки (d005062)
 - [x] Описания всех разделов BotMother OS меню
 - [x] Онбординг с тремя сценариями для новых пользователей
