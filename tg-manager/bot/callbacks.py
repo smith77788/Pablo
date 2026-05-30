@@ -325,3 +325,8 @@ class StrikeCb(CallbackData, prefix="strk"):
     page: int = 0
 
 
+class TaskCb(CallbackData, prefix="tsk"):
+    action: str          # "list", "cancel", "cancel_all"
+    task_id: Optional[str] = None
+
+
