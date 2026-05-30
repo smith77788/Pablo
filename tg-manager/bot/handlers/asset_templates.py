@@ -721,6 +721,18 @@ async def cb_apply_bot_exec(
             ok = False
         results.append(f"🤖 Команды ({len(cmds)} шт.): {'✅' if ok else '❌'}")
 
+    # Create auto-replies if template has auto_replies
+    if data.get("auto_replies"):
+        ar_list = data["auto_replies"]
+        ok_count = 0
+        for ar in ar_list:
+            try:
+                await db.add_auto_reply(pool, bot_id, "keyword", ar["keyword"], ar["response"])
+                ok_count += 1
+            except Exception as e:
+                log.warning("Failed to create auto_reply %s: %s", ar.get("keyword"), e)
+        results.append(f"💬 Авто-ответы на команды ({ok_count}/{len(ar_list)} шт.): {'✅' if ok_count == len(ar_list) else '⚠️'}")
+
     # Create funnel if template has funnel_steps
     if data.get("funnel_steps"):
         steps = data["funnel_steps"]
