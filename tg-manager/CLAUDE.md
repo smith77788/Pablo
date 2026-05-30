@@ -179,7 +179,7 @@ tg-manager/
 │   ├── callbacks.py               # ВСЕ CallbackData классы — только здесь
 │   ├── states.py                  # ВСЕ FSMState классы — только здесь
 │   ├── keyboards.py               # shared keyboards (main_menu, subscription_locked_markup)
-│   ├── handlers/                  # 44+ файла обработчиков
+│   ├── handlers/                  # 54+ файла обработчиков
 │   │   ├── botmother_menu.py      # главное меню OS — точка входа /menu
 │   │   ├── start.py               # /start, /help, /version, /cancel
 │   │   ├── accounts.py            # Telegram-аккаунты (QR/phone/session)
@@ -354,7 +354,7 @@ await pool.execute(f"UPDATE tg WHERE id={item_id}")
 
 ---
 
-## 5. ВСЕ CALLBACK-ПРЕФИКСЫ (52 штуки, все уникальны)
+## 5. ВСЕ CALLBACK-ПРЕФИКСЫ (57 штук, все уникальны)
 
 ```
 bot  edit  aud  wh   bc   bulk  cmd  tpl  sch  mg
@@ -369,7 +369,7 @@ cln  dm
 
 ---
 
-## 6. ЗАРЕГИСТРИРОВАННЫЕ РОУТЕРЫ В main.py (44+ штук)
+## 6. ЗАРЕГИСТРИРОВАННЫЕ РОУТЕРЫ В main.py (54 штуки)
 
 Порядок регистрации важен — более специфичные роутеры раньше:
 1. `bm_handler` (botmother_menu) — первый
@@ -382,9 +382,10 @@ cln  dm
 
 ---
 
-## 7. ФОНОВЫЕ СЕРВИСЫ (16 штук в main.py + 2 библиотеки)
+## 7. ФОНОВЫЕ СЕРВИСЫ (18 штук в main.py + 2 библиотеки)
 
 ```python
+asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 asyncio.create_task(scheduler.run(pool, http))
 asyncio.create_task(auto_responder.run(pool, http, bot))
 asyncio.create_task(relay_service.run(pool, http))
@@ -393,14 +394,15 @@ asyncio.create_task(payment_checker.run(pool, http, bot))
 asyncio.create_task(ranking_checker.run(pool, bot))
 asyncio.create_task(search_observer.run_confirmation_loop(pool, bot))
 asyncio.create_task(account_monitor.run(pool, bot))
-asyncio.create_task(trust_engine.run(pool))
+asyncio.create_task(trust_engine.run(pool, bot))
 asyncio.create_task(shadowban_monitor.run(pool, bot))
 asyncio.create_task(op_worker.run(pool, bot))
-asyncio.create_task(behavioral_engine.run(pool))
+asyncio.create_task(behavioral_engine.run(pool, bot))
 asyncio.create_task(account_warmer.run_warmup_loop(pool))
 asyncio.create_task(account_health.run_health_check_loop(pool))
 asyncio.create_task(payment_webhook.run(pool, bot))  # HTTP :8080
 asyncio.create_task(task_registry.run_cleanup_loop())
+asyncio.create_task(drift_detector.run(pool, bot))
 ```
 
 **Библиотеки (не фоновые сервисы — используются через прямые вызовы):**

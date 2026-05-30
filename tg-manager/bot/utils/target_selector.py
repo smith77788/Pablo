@@ -32,6 +32,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import db as _db
+from bot.utils.op_helpers import _acc_label as _base_acc_label
 
 # ── Constants ────────────────────────────────────────────────────────────────────
 
@@ -58,14 +59,12 @@ def _chunk(items: list, size: int) -> list[list]:
 
 
 def _acc_label(acc: dict) -> str:
-    """Consistent account label: first_name (phone) with status emoji."""
-    name = acc.get("first_name") or acc.get("phone") or str(acc.get("id", "?"))
-    phone = acc.get("phone", "")
+    """Account label with active/inactive status emoji for target pickers.
+
+    Extends the base _acc_label from op_helpers with a status prefix.
+    """
     prefix = "✅ " if acc.get("is_active") else "❌ "
-    label = prefix + (name or "")
-    if phone and phone != name:
-        label += f" ({phone})"
-    return label
+    return prefix + _base_acc_label(acc)
 
 
 # ── Main selector class ───────────────────────────────────────────────────────────
