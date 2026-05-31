@@ -325,3 +325,8 @@ async def cmd_topology(message: Message) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(TopoCb.filter(F.action == "noop"))
+async def cb_topo_noop(callback: CallbackQuery) -> None:
+    await callback.answer()

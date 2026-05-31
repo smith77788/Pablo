@@ -771,7 +771,7 @@ async def cb_bot_admin_panel(
     kb = InlineKeyboardBuilder()
     kb.button(text="💬 Список авто-ответов", callback_data=BotAdminCb(action="list_replies", bot_id=bot_id))
     kb.button(text="🔑 Обновить токен доступа", callback_data=BotAdminCb(action="regen_token", bot_id=bot_id))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="bots"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await _edit(
         callback,
