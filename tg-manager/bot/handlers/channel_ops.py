@@ -1857,6 +1857,7 @@ async def fsm_invite_usernames_file(message: Message, state: FSMContext, pool: a
         dl = await message.bot.download_file(fi.file_path)
         raw = (dl.read() if hasattr(dl, "read") else bytes(dl)).decode("utf-8", errors="ignore")
     except Exception as e:
+        await state.clear()
         await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
         return
     usernames = _parse_username_list(raw)
@@ -3578,6 +3579,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
         dl = await message.bot.download_file(file_info.file_path)
         raw = (dl.read() if hasattr(dl, "read") else bytes(dl)).decode("utf-8", errors="ignore")
     except Exception as e:
+        await state.clear()
         await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
         return
     usernames = _parse_username_list(raw)
