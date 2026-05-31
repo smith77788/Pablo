@@ -142,6 +142,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
                SELECT id FROM operation_queue
                WHERE status = 'pending'
                  AND (scheduled_for IS NULL OR scheduled_for <= now())
+                 AND (requires_approval IS NOT TRUE)
                ORDER BY created_at ASC
                LIMIT $1
                FOR UPDATE SKIP LOCKED

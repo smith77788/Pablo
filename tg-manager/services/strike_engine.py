@@ -316,6 +316,7 @@ class StrikeResult:
     network_reports: int = 0
     abuse_form_ok: bool = False
     verified_down: bool | None = None   # None = не проверено
+    spambot_escalation: str = "skipped"   # sent | skipped | error
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
     phase_results: dict[str, Any] = field(default_factory=dict)
@@ -563,13 +564,20 @@ async def staggered_strike(
             w3_results = await asyncio.gather(*tasks)
             wave_results.extend(w3_results)
 
-        # Агрегация
+        # Агрегация — явный маппинг ключей aggregate_results → поля StrikeResult
         agg = aggregate_results(wave_results)
-        for k, v in agg.items():
-            if k in ("failed",):
-                continue
-            if hasattr(result, k):
-                setattr(result, k, getattr(result, k, 0) + v)
+        result.peer_reported          += agg.get("peer", 0)
+        result.multi_reason           += agg.get("multi", 0)
+        result.photo_reported          = result.photo_reported or bool(agg.get("photo", 0))
+        result.pinned_reported        += agg.get("pinned", 0)
+        result.msgs_reported          += agg.get("msgs", 0)
+        result.spam_signaled          += agg.get("spam", 0)
+        result.reactions              += agg.get("reacts", 0)
+        result.admins_reported        += agg.get("admins", 0)
+        result.linked_group_reported   = result.linked_group_reported or bool(agg.get("linked_grp", 0))
+        result.bots_reported          += agg.get("bots", 0)
+        result.forwarded              += agg.get("fwd", 0)
+        result.blocked                += agg.get("blocked", 0)
         result.errors = [r.get("error") for r in wave_results if r.get("error")]
 
         # ═══ Фаза: Network nodes (параллельно) ═══
@@ -876,6 +884,7 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"Боты: <b>{r.bots_reported}</b> · "
             f"Forward: <b>{r.forwarded}</b>\n"
             f"  ├ Abuse форма: <b>{'✅' if r.abuse_form_ok else '❌'}</b> · "
+            f"SpamBot: <b>{'✅' if r.spambot_escalation == 'sent' else '❌'}</b> · "
             f"Заблокирован: <b>{r.blocked}</b>\n"
             f"  └ Длительность: <b>{r.duration_s:.0f}с</b> · "
             f"Аккаунтов: <b>{r.unique_accounts}</b>"

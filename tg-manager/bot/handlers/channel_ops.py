@@ -2761,6 +2761,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
         log_exc_swallow(log, "Сбой отправки статуса разведки Strike")
 
     task = asyncio.create_task(_strike_bg_v2(
+        pool=pool,
         status_msg=status_msg,
         bot=callback.bot,
         user_id=callback.from_user.id,
@@ -2780,7 +2781,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
 
 async def _strike_bg_v2(
-    status_msg, bot, user_id: int,
+    pool, status_msg, bot, user_id: int,
     peers: list, viable: list, waves: list, all_intel: dict,
     reason: str, preset: str | None, label: str,
 ) -> None:
@@ -2805,7 +2806,7 @@ async def _strike_bg_v2(
         await _progress("strike", f"Фаза 2-4: Эшелонированная атака — {len(peers)} целей, {len(viable)} аккаунтов")
 
         # Загрузить режим пользователя
-        strike_mode_row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
+        strike_mode_row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", user_id)
         strike_mode = (strike_mode_row["mode"] if strike_mode_row and strike_mode_row.get("mode") else "normal")
 
         plan = strike_engine.StrikePlan(
@@ -2854,7 +2855,7 @@ async def _strike_bg_v2(
 
 
 async def _strike_bg(
-    status_msg, bot, user_id: int,
+    pool, status_msg, bot, user_id: int,
     peers: list, chosen: list, all_intel: dict,
     reason: str, preset: str | None, label: str,
 ) -> None:
@@ -2865,7 +2866,7 @@ async def _strike_bg(
         viable = chosen
     waves = strike_engine.plan_waves(viable, num_waves=3)
     await _strike_bg_v2(
-        status_msg=status_msg, bot=bot, user_id=user_id,
+        pool=pool, status_msg=status_msg, bot=bot, user_id=user_id,
         peers=peers, viable=viable, waves=waves, all_intel=all_intel,
         reason=reason, preset=preset, label=label,
     )

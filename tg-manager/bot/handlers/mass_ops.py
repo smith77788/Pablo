@@ -1006,6 +1006,8 @@ async def _process_bj_links(links: list[str], message: Message, state: FSMContex
 async def fsm_bulk_join_links(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    import re as _re
+    _link_re = _re.compile(r'^(@[\w]{4,}\s*$|https?://t\.me/[\w\-+/]+|[-\d]{8,})')
     raw = message.text or ""
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
@@ -1013,6 +1015,15 @@ async def fsm_bulk_join_links(
         return
     if len(links) > 50:
         await message.answer("⚠️ Максимум 50 ссылок за одну операцию.")
+        return
+    bad = [ln for ln in links if not _link_re.match(ln)]
+    if bad:
+        sample = "\n".join(f"  • <code>{ln[:50]}</code>" for ln in bad[:3])
+        await message.answer(
+            f"⚠️ Неверный формат ссылок ({len(bad)} шт.):\n{sample}\n\n"
+            "Ожидается: @username, https://t.me/... или ID (−1001234567890)",
+            parse_mode="HTML",
+        )
         return
     await _process_bj_links(links, message, state, pool)
 
