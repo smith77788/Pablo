@@ -2739,3 +2739,85 @@ async def get_pending_approvals(pool: asyncpg.Pool, owner_id: int) -> list:
            ORDER BY created_at DESC LIMIT 10""",
         owner_id,
     )
+
+
+# ── Workspaces ────────────────────────────────────────────────────────────────
+
+async def create_workspace(pool: asyncpg.Pool, owner_id: int, name: str, description: str = "") -> int:
+    import secrets as _sec
+    row = await pool.fetchrow(
+        "INSERT INTO workspaces (owner_id, name, description) VALUES ($1,$2,$3) RETURNING id",
+        owner_id, name[:64], description[:256],
+    )
+    ws_id = row["id"]
+    await pool.execute(
+        "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'owner',$2)",
+        ws_id, owner_id,
+    )
+    return ws_id
+
+
+async def get_user_workspaces(pool: asyncpg.Pool, user_id: int) -> list:
+    return await pool.fetch(
+        """SELECT w.id, w.name, w.description, wm.role, w.owner_id,
+                  (SELECT COUNT(*) FROM workspace_members WHERE workspace_id=w.id) AS member_count
+           FROM workspaces w
+           JOIN workspace_members wm ON wm.workspace_id=w.id AND wm.user_id=$1
+           WHERE w.is_active=TRUE
+           ORDER BY w.created_at""",
+        user_id,
+    )
+
+
+async def get_workspace(pool: asyncpg.Pool, ws_id: int) -> dict | None:
+    row = await pool.fetchrow("SELECT * FROM workspaces WHERE id=$1 AND is_active=TRUE", ws_id)
+    return dict(row) if row else None
+
+
+async def get_workspace_members(pool: asyncpg.Pool, ws_id: int) -> list:
+    return await pool.fetch(
+        """SELECT wm.user_id, wm.role, wm.joined_at, pu.username, pu.first_name
+           FROM workspace_members wm
+           LEFT JOIN platform_users pu ON pu.user_id=wm.user_id
+           WHERE wm.workspace_id=$1 ORDER BY wm.joined_at""",
+        ws_id,
+    )
+
+
+async def create_workspace_invite(pool: asyncpg.Pool, ws_id: int, created_by: int) -> str:
+    import secrets as _sec
+    code = _sec.token_urlsafe(12)
+    await pool.execute(
+        "INSERT INTO workspace_invites (workspace_id, invite_code, created_by, uses_left) VALUES ($1,$2,$3,5)",
+        ws_id, code, created_by,
+    )
+    return code
+
+
+async def use_workspace_invite(pool: asyncpg.Pool, code: str, user_id: int) -> int | None:
+    """Use invite code. Returns workspace_id on success, None if invalid/expired."""
+    invite = await pool.fetchrow(
+        "SELECT * FROM workspace_invites WHERE invite_code=$1 AND uses_left>0",
+        code,
+    )
+    if not invite:
+        return None
+    ws_id = invite["workspace_id"]
+    existing = await pool.fetchval(
+        "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, user_id
+    )
+    if not existing:
+        await pool.execute(
+            "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'member',$3)",
+            ws_id, user_id, invite["created_by"],
+        )
+        await pool.execute(
+            "UPDATE workspace_invites SET uses_left=uses_left-1 WHERE invite_code=$1", code
+        )
+    return ws_id
+
+
+async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, user_id
+    )

@@ -408,3 +408,9 @@ class PresencePackFSM(StatesGroup):
     selecting_groups     = State()
     entering_target      = State()
     previewing           = State()
+
+
+class WorkspaceFSM(StatesGroup):
+    entering_name        = State()
+    entering_description = State()
+    entering_invite_code = State()

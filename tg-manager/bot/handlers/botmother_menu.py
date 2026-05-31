@@ -47,6 +47,7 @@ from bot.callbacks import (
     TopoCb,
     VisCb,
     WarmupCb,
+    WorkspaceCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -90,10 +91,11 @@ def _main_menu_kb():
     kb.button(text="🧠 Аналитика",        callback_data=BmCb(action="behavioral"))
     kb.button(text="🗺️ Карта инфры",      callback_data=BmCb(action="topology"))
     kb.button(text="⚔️ Strike",           callback_data=StrikeCb(action="menu"))
+    kb.button(text="🏢 Workspaces",       callback_data=WorkspaceCb(action="menu"))
     kb.button(text="💳 Billing",          callback_data=BmCb(action="billing"))
     kb.button(text="👥 Referral",         callback_data=BmCb(action="referral"))
     kb.button(text="⚙️ Settings",         callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

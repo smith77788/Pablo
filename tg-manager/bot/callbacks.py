@@ -354,3 +354,9 @@ class ApprovalCb(CallbackData, prefix="appr"):
     op_id: int = 0
 
 
+class WorkspaceCb(CallbackData, prefix="ws"):
+    action: str   # menu, create, view, invite, join, members, leave
+    ws_id: int = 0
+    page: int = 0
+
+
