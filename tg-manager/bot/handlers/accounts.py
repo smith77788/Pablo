@@ -2205,13 +2205,17 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
         await msg.edit_text("⏳ Конвертирую tdata в сессию Telethon...")
         try:
             session_str, info = await import_from_tdata(tdata_path)
-        except ImportError as exc:
+        except ImportError:
+            await state.clear()
             await msg.edit_text(
-                f"❌ <b>Пакет opentele не установлен</b>\n\n<code>{escape(str(exc)[:200])}</code>",
+                "❌ <b>Конвертация tdata временно недоступна</b>\n\n"
+                "Пакет <code>opentele</code> не установлен на сервере.\n"
+                "Используйте импорт через строку сессии Telethon вместо tdata.",
                 parse_mode="HTML",
             )
             return
         except Exception as exc:
+            await state.clear()
             await msg.edit_text(
                 f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{escape(str(exc)[:300])}</code>",
                 parse_mode="HTML",
