@@ -95,16 +95,28 @@
 
 ---
 
-## 🟡 НИЗКИЙ ПРИОРИТЕТ (nice to have, r17+)
+## P6 — Critical Bug Fixes r17 (ВСЁ СДЕЛАНО)
 
-- [ ] Telegram Mini App для аналитики
-- [ ] RBAC / Multi-user workspaces
-- [ ] Approval workflows для критических bulk-операций
+- [x] **Strike crash**: `'bool' object has no attribute 'get'` — `_escalate_to_spambot` returns bool, fixed with isinstance check
+- [x] **Strike режимы**: Fast/Normal/Maximum selector — интерактивный UI с чекмарками + schema_v53
+- [x] **Session file upload**: `.session` SQLite import без opentele — чистый sqlite3 из stdlib
+- [x] **AI rate limits**: exponential backoff 2.0s/0.5s + 120s timeout + Retry button
+- [x] **opentele UX**: debounce + inline keyboard с альтернативами при ImportError
+- [x] **Approval workflows**: schema_v51 + approval_flow.py handler
+- [x] **RBAC workspaces**: schema_v52 + workspaces.py (Enterprise-only)
+- [x] **DM campaigns TypeError**: `cb_dm_delete` missing `state` parameter
+- [x] **FSM state leaks**: engagement.py + multigeo.py Cancel кнопки
 
 ---
 
-## ИТОГИ r15 → r16
+## 🟡 НИЗКИЙ ПРИОРИТЕТ (nice to have, r18+)
 
-Все приоритетные задачи r13-r15 выполнены.
-Оставшиеся задачи — низкоприоритетные (nice to have).
-Ожидаются новые указания пользователя для r16.
+- [ ] Telegram Mini App для аналитики
+
+---
+
+## ИТОГИ r16 → r17
+
+Все критические баги исправлены. Новые фичи: Strike режимы, .session импорт,
+AI rate limit backoff, approval workflows, workspaces RBAC.
+Ожидаются новые указания пользователя для r18.

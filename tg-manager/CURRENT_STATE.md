@@ -1,8 +1,59 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-30 (r16)
+Обновлено: 2026-05-31 (r17)
 
-## Статус: ВСЕ ЗАДАЧИ r13-r15 ВЫПОЛНЕНЫ
+## Статус: ВСЕ КРИТИЧЕСКИЕ БАГИ r17 ИСПРАВЛЕНЫ + НОВЫЕ ФИЧИ
+
+### ✅ Выполнено в r17 (2026-05-31)
+
+1. **Strike Engine critical crash fix (inline)**
+   - `_escalate_to_spambot()` возвращает `bool`, а не dict
+   - Исправлена строка 575–579 в `strike_engine.py`: `isinstance(spambot_result, dict)` check
+   - Добавлено поле `mode: str = "normal"` в `StrikePlan` dataclass
+   - `_one_account_strike` получает `mode` параметр с тремя ветками kwargs (fast/normal/maximum)
+   - Все три волны в `staggered_strike` передают `mode=plan.mode`
+
+2. **Strike режимы Fast/Normal/Maximum (551b806)**
+   - `cb_strike_settings` заменён на интерактивный селектор с ✅ чекмарками
+   - Три обработчика: `cb_strike_set_mode_fast/normal/maximum`
+   - Вспомогательная функция `_set_strike_mode` с UPDATE в БД
+   - `schema_v53.sql`: `ALTER TABLE strike_access ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'normal'`
+   - `channel_ops.py`: загрузка режима из БД и передача в `StrikePlan`
+
+3. **Импорт .session файлов (551b806)**
+   - `account_manager.py`: `import_from_session_file()` — читает SQLite Telethon-сессию, паккует в StringSession
+   - `accounts.py`: состояние `waiting_session_file`, кнопка "📂 Session файл (.session)"
+   - Обработчики `cb_import_session_file` и `handle_import_session_file`
+   - Не требует opentele — чистый `sqlite3` из stdlib
+
+4. **AI ассистент — rate limit backoff (6bbb8c8)**
+   - `_call_openrouter`: 2.0s задержка при rate limit (429/rate/limit), 0.5s при других ошибках
+   - `_process_ai_turn`: `asyncio.wait_for(timeout=120.0)` + обработка TimeoutError
+   - При ошибке AI показывается "🔄 Повторить" + "🏠 Меню" кнопки
+   - `cb_ai_retry` обработчик через FSM-историю
+
+5. **opentele error UX + debounce (6bbb8c8)**
+   - `handle_import_tdata`: дебаунс флаг `tdata_processing` в FSM
+   - При ImportError: inline keyboard с альтернативами (String Session / .session файл / Назад)
+
+6. **Approval workflows (f85c60b)**
+   - `schema_v51.sql`: поля `requires_approval`, `approved_at`, `approved_by` в `operation_queue`
+   - `bot/handlers/approval_flow.py`: подтверждение/отмена операций с approval guard
+   - `op_worker.py`: пропуск ops с `requires_approval=TRUE AND status='waiting_approval'`
+
+7. **RBAC Workspaces Enterprise (64c9b3f)**
+   - `schema_v52.sql`: таблицы `workspaces`, `workspace_members`, `workspace_invites`
+   - `bot/handlers/workspaces.py`: create, view, members, invite codes, join, leave
+   - Enterprise-only gate
+   - Кнопка `🏢 Workspaces` в главном меню
+
+8. **Исправления баги (8557263, cb4f77e)**
+   - `dm_campaigns.py`: `cb_dm_delete` → `cb_dm_menu` signature fix (missing `state`)
+   - `engagement.py`: FSM state leaks — добавлены Cancel кнопки
+   - `multigeo.py`: FSM state leaks — добавлены Cancel кнопки
+   - `safe_edit` utility в `op_helpers.py`
+
+---
 
 ### ✅ КОНСОЛИДАЦИЯ: BotMother OS — единственная точка входа
 
@@ -77,20 +128,18 @@
 - Strike Engine V2, Deploy Notifier, Topology Map
 - CSV Import Center, Drift Detection, Bot Admin Sessions
 
-### 🟡 Осталось (низкий приоритет, r17+)
+### 🟡 Осталось (низкий приоритет, r18+)
 
 - Telegram Mini App для аналитики
-- RBAC / Multi-user workspaces
-- Approval workflows для критических bulk-операций
 
 ### 🔄 Текущая ветка
 `claude/telegram-bot-services-xfAh6`
-Last commit: `5b92bdc feat: behavioral engine enhancement — fine-tune formulas + schedule deviation`
+Last commit: `551b806 feat: .session file upload + Strike Fast/Normal/Maximum mode selector`
 
 ### Проект
 - Stack: aiogram 3.13.1, asyncpg, Telethon, Railway
-- DB: 60+ таблиц (v48 schema)
-- Handlers: 47+ файлов
+- DB: 60+ таблиц (v53 schema)
+- Handlers: 54+ файлов
 - Services: 20+ фоновых сервисов
 - Ветка: `claude/telegram-bot-services-xfAh6`
-- Build: `2026.05.30-r16`
+- Build: `2026.05.31-r17`
