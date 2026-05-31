@@ -348,6 +348,54 @@ async def import_from_session_file(session_bytes: bytes, filename: str = "") -> 
 
     return await import_from_session_string(session_string)
 
+async def convert_session_file_to_string(session_bytes: bytes) -> str:
+    """Convert a Telethon .session SQLite file bytes to a StringSession string.
+
+    Unlike import_from_session_file, this does NOT connect to Telegram.
+    Returns the raw StringSession string for use in batch import.
+    Raises ValueError on invalid file.
+    """
+    import sqlite3
+    import struct
+    import base64
+    import tempfile
+    import os
+    from ipaddress import IPv4Address
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".session", delete=False)
+    try:
+        tmp.write(session_bytes)
+        tmp.flush()
+        tmp.close()
+        try:
+            conn = sqlite3.connect(tmp.name)
+            cur = conn.execute(
+                "SELECT dc_id, server_address, port, auth_key FROM sessions LIMIT 1"
+            )
+            row = cur.fetchone()
+            conn.close()
+        except sqlite3.DatabaseError as e:
+            raise ValueError(f"Не является .session файлом: {e}")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    if not row:
+        raise ValueError("Таблица sessions пустая — сессия не авторизована")
+    dc_id, server_address, port, auth_key_bytes = row
+    if not auth_key_bytes or len(auth_key_bytes) != 256:
+        raise ValueError(f"Некорректный auth_key (длина: {len(auth_key_bytes) if auth_key_bytes else 0})")
+    try:
+        ip_bytes = IPv4Address(server_address).packed
+    except Exception:
+        DC_IPS = {1: "149.154.175.53", 2: "149.154.167.51",
+                  3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130"}
+        ip_bytes = IPv4Address(DC_IPS.get(dc_id, DC_IPS[2])).packed
+    packed = struct.pack(">B4sH256s", dc_id, ip_bytes, int(port or 443), bytes(auth_key_bytes))
+    return "1" + base64.urlsafe_b64encode(packed).decode()
+
 async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     """Convert a TDesktop tdata directory to Telethon StringSession via opentele."""
     try:

@@ -2460,7 +2460,8 @@ async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
         "1BVtsOIKAGkB...</code>\n\n"
         "Или загрузите файл:\n"
         "• <b>.txt</b> — одна сессия на строку\n"
-        "• <b>.csv</b> — колонки: <code>session,cluster</code> (cluster — опционально)\n\n"
+        "• <b>.csv</b> — колонки: <code>session,cluster</code> (cluster — опционально)\n"
+        "• <b>.zip</b> — архив с файлами <code>.session</code> (Telethon SQLite)\n\n"
         "Пример CSV:\n"
         "<code>session,cluster\n"
         "1BQANOTEuAGkA...,main\n"
@@ -2711,11 +2712,13 @@ async def fsm_batch_import_file(message: Message, state: FSMContext, pool: async
         await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.")
         return
     filename = (doc.file_name or "").lower()
-    if not (filename.endswith(".txt") or filename.endswith(".csv")):
-        await message.answer("⚠️ Поддерживаются только .txt и .csv файлы.")
+    if not (filename.endswith(".txt") or filename.endswith(".csv") or filename.endswith(".zip")):
+        await message.answer("⚠️ Поддерживаются .txt, .csv и .zip (архив .session файлов).")
         return
-    if doc.file_size and doc.file_size > 500_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 500 КБ.")
+    max_size = 20 * 1024 * 1024 if filename.endswith(".zip") else 500_000
+    if doc.file_size and doc.file_size > max_size:
+        size_label = "20 МБ" if filename.endswith(".zip") else "500 КБ"
+        await message.answer(f"⚠️ Файл слишком большой. Максимум {size_label}.")
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -2725,7 +2728,49 @@ async def fsm_batch_import_file(message: Message, state: FSMContext, pool: async
         await message.answer(f"⚠️ Не удалось прочитать файл: {e}")
         return
 
-    if filename.endswith(".csv"):
+    if filename.endswith(".zip"):
+        import zipfile, io as _io
+        from services.account_manager import convert_session_file_to_string
+        try:
+            with zipfile.ZipFile(_io.BytesIO(raw_bytes)) as zf:
+                session_names = [n for n in zf.namelist() if n.lower().endswith(".session") and not n.startswith("__")]
+        except zipfile.BadZipFile:
+            await message.answer("❌ Повреждённый ZIP-файл.")
+            return
+        if not session_names:
+            await message.answer(
+                "⚠️ ZIP не содержит .session файлов.\n\n"
+                "Убедитесь что архив содержит файлы с расширением <code>.session</code>.",
+                parse_mode="HTML",
+            )
+            return
+        if len(session_names) > 50:
+            session_names = session_names[:50]
+            await message.answer("⚠️ Взяты первые 50 .session файлов из архива.")
+        msg = await message.answer(f"⏳ Читаю {len(session_names)} .session файлов из архива...")
+        pairs: list[tuple[str, str]] = []
+        errors: list[str] = []
+        with zipfile.ZipFile(_io.BytesIO(raw_bytes)) as zf:
+            for name in session_names:
+                try:
+                    file_bytes = zf.read(name)
+                    session_str = await convert_session_file_to_string(file_bytes)
+                    pairs.append((session_str, ""))
+                except Exception as e:
+                    errors.append(f"{name}: {str(e)[:80]}")
+        if errors:
+            err_text = "\n".join(f"  • {e}" for e in errors[:5])
+            await msg.edit_text(
+                f"⚠️ Часть файлов не удалось прочитать ({len(errors)} шт.):\n{err_text}",
+                parse_mode="HTML",
+            )
+        if not pairs:
+            await state.clear()
+            await message.answer("❌ Ни одной валидной .session не найдено в архиве.")
+            return
+        report = _prevalidate_sessions(pairs)
+        await _show_validation_report(message, state, report)
+    elif filename.endswith(".csv"):
         pairs = _parse_sessions_csv(raw_bytes)
         if not pairs:
             await message.answer(
