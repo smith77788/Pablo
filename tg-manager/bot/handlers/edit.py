@@ -48,10 +48,10 @@ async def cb_edit_menu(
 async def cb_name(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(EditProfile.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text("📝 Введите новое имя бота (до 64 символов):")
-    await callback.answer()
 
 
 @router.message(EditProfile.waiting_name, F.text)
@@ -79,12 +79,12 @@ async def msg_name(
 async def cb_desc(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(EditProfile.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
         "📄 Введите новое описание бота (до 512 символов):"
     )
-    await callback.answer()
 
 
 @router.message(EditProfile.waiting_desc, F.text)
@@ -111,10 +111,10 @@ async def msg_desc(
 async def cb_short(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(EditProfile.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text("📃 Введите краткое описание (до 120 символов):")
-    await callback.answer()
 
 
 @router.message(EditProfile.waiting_short, F.text)
@@ -141,13 +141,13 @@ async def msg_short(
 async def cb_photo(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(EditProfile.waiting_photo)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
         "🖼 Отправьте новое фото для бота.\n\n"
         "Отправьте как фото (не файл), квадратное изображение минимум 160×160."
     )
-    await callback.answer()
 
 
 @router.message(EditProfile.waiting_photo, F.photo)
@@ -213,6 +213,7 @@ async def cb_del_photo(
 async def cb_update_token(
     callback: CallbackQuery, callback_data: EditCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(UpdateToken.waiting_token)
     await state.update_data(old_bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -221,7 +222,6 @@ async def cb_update_token(
         "<i>Токен должен быть от того же или нового бота BotFather.</i>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(UpdateToken.waiting_token, F.text)

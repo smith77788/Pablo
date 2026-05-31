@@ -109,11 +109,11 @@ async def cb_check(
 
 @router.callback_query(BulkCb.filter(F.action == "name"))
 async def cb_bulk_name(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_name)
     await callback.message.edit_text(
         "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:", parse_mode="HTML"
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_name, F.text)
@@ -138,11 +138,11 @@ async def msg_bulk_name(
 
 @router.callback_query(BulkCb.filter(F.action == "name_lang"))
 async def cb_bulk_name_lang(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_name_lang)
     await callback.message.edit_text(
         f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML"
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_name_lang, F.text)
@@ -179,12 +179,12 @@ async def msg_bulk_localized_name(
 
 @router.callback_query(BulkCb.filter(F.action == "desc"))
 async def cb_bulk_desc(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_desc)
     await callback.message.edit_text(
         "📄 <b>Описание для всех ботов</b>\n\nВведите новое описание:",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_desc, F.text)
@@ -209,12 +209,12 @@ async def msg_bulk_desc(
 
 @router.callback_query(BulkCb.filter(F.action == "desc_lang"))
 async def cb_bulk_desc_lang(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_desc_lang)
     await callback.message.edit_text(
         f"🌍 <b>Описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_desc_lang, F.text)
@@ -248,12 +248,12 @@ async def msg_bulk_localized_desc(
 
 @router.callback_query(BulkCb.filter(F.action == "short"))
 async def cb_bulk_short(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_short)
     await callback.message.edit_text(
         "📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст (до 120 символов):",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_short, F.text)
@@ -278,12 +278,12 @@ async def msg_bulk_short(
 
 @router.callback_query(BulkCb.filter(F.action == "short_lang"))
 async def cb_bulk_short_lang(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_short_lang)
     await callback.message.edit_text(
         f"🌍 <b>Краткое описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_short_lang, F.text)
@@ -317,6 +317,7 @@ async def msg_bulk_localized_short(
 
 @router.callback_query(BulkCb.filter(F.action == "commands"))
 async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_commands)
     await callback.message.edit_text(
         "🤖 <b>Команды для всех ботов (по умолчанию)</b>\n\n"
@@ -326,7 +327,6 @@ async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
         "about - О боте</code>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_commands, F.text)
@@ -359,12 +359,12 @@ async def msg_bulk_commands(
 
 @router.callback_query(BulkCb.filter(F.action == "commands_lang"))
 async def cb_bulk_commands_lang(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(BulkEdit.waiting_commands_lang)
     await callback.message.edit_text(
         f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(BulkEdit.waiting_commands_lang, F.text)
@@ -411,6 +411,7 @@ async def msg_bulk_localized_commands(
 
 @router.callback_query(BulkCb.filter(F.action == "import"))
 async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(ImportBots.waiting_tokens)
     await callback.message.edit_text(
         "📥 <b>Массовый импорт ботов</b>\n\n"
@@ -420,7 +421,6 @@ async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
         "555555555:CCH...</code>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(ImportBots.waiting_tokens, F.text)

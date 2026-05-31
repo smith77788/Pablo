@@ -69,6 +69,7 @@ async def cb_commands_menu(
 async def cb_commands_add(
     callback: CallbackQuery, callback_data: CommandsCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(SetCommands.waiting_add)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -78,7 +79,6 @@ async def cb_commands_add(
         "Например: <code>help - Помощь</code>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(SetCommands.waiting_add, F.text)
@@ -129,6 +129,7 @@ async def msg_commands_add(
 async def cb_commands_set_all(
     callback: CallbackQuery, callback_data: CommandsCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(SetCommands.waiting_commands)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -139,7 +140,6 @@ async def cb_commands_set_all(
         "about - О боте</code>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(SetCommands.waiting_commands, F.text)
