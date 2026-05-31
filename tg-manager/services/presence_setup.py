@@ -118,7 +118,7 @@ async def seed_channel_via_account(
             acc["session_str"], channel_id,
             text, access_hash=access_hash or 0, _acc=dict(acc),
         )
-        return bool(result.get("id")) if isinstance(result, dict) else bool(result)
+        return bool(result.get("msg_id")) if isinstance(result, dict) else bool(result)
     except Exception as e:
         log.warning("seed_channel_via_account failed for %s: %s", channel_id, e)
         return False

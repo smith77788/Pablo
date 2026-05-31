@@ -1004,10 +1004,11 @@ async def set_channel_username(
 ) -> str:
     """Set public username for channel. Returns '' on success, error string on failure."""
     from telethon.tl.functions.channels import UpdateUsernameRequest
+    from telethon.tl.types import PeerChannel
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_id)
+        entity = await client.get_entity(PeerChannel(channel_id))
         await client(UpdateUsernameRequest(channel=entity, username=username.lstrip("@")))
         return ""
     except Exception as e:

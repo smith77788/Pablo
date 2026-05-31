@@ -197,6 +197,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
         elif op_type == "bulk_create_channels":
             result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
+        elif op_type == "global_presence_full_package":
+            result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
         else:
             result = {"status": "skipped", "reason": f"unknown op_type: {op_type}"}
 
