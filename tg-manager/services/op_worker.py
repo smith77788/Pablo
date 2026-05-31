@@ -66,7 +66,6 @@ async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool
 
     # Exponential backoff: 30s, 60s, 120s, ...
     backoff = min(30 * (2 ** (retry_count - 1)), 600)
-    scheduled_for = f"now() + interval '{backoff} seconds'"
 
     await pool.execute(
         """UPDATE operation_queue
@@ -197,7 +196,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
         elif op_type == "bulk_create_channels":
             result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
-        elif op_type == "global_presence_full_package":
+        elif op_type in ("global_presence_full_package", "global_presence_package"):
             result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
         else:
             result = {"status": "skipped", "reason": f"unknown op_type: {op_type}"}

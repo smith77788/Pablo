@@ -578,15 +578,17 @@ async def cb_alerts(
     text = f"<b>🔔 Алерты</b>  стр. {page + 1}/{total_pages}\n\n" + "\n".join(lines)
 
     kb = InlineKeyboardBuilder()
-    nav = []
+    nav_count = 0
     if page > 0:
-        nav.append(kb.button(text="◀️", callback_data=BmCb(action="alerts", page=page - 1)))
+        kb.button(text="◀️", callback_data=BmCb(action="alerts", page=page - 1))
+        nav_count += 1
     if (page + 1) * limit < total:
-        nav.append(kb.button(text="▶️", callback_data=BmCb(action="alerts", page=page + 1)))
-    if nav:
-        kb.adjust(len(nav))
+        kb.button(text="▶️", callback_data=BmCb(action="alerts", page=page + 1))
+        nav_count += 1
     kb.button(text="🗑 Очистить всё", callback_data=BmCb(action="alerts_clear"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    adjustments = ([nav_count] if nav_count > 0 else []) + [1, 1]
+    kb.adjust(*adjustments)
     await _edit(callback, text, kb.as_markup())
 
 
@@ -1321,7 +1323,7 @@ async def cb_op_reports(
         dt = op["created_at"].strftime("%d.%m %H:%M")
         otype = html.escape(op["op_type"])
         if op["total_items"]:
-            progress = f"{op['done_items']}/{op['total_items']}"
+            progress = f"{op['done_items'] or 0}/{op['total_items']}"
         else:
             progress = "—"
         duration = ""
@@ -1342,15 +1344,17 @@ async def cb_op_reports(
         + "\n".join(lines)
     )
 
-    kb.adjust(1)
-    nav = []
+    nav_count = 0
     if page > 0:
-        nav.append(kb.button(text="◀️", callback_data=BmCb(action="op_reports", page=page - 1)))
+        kb.button(text="◀️", callback_data=BmCb(action="op_reports", page=page - 1))
+        nav_count += 1
     if (page + 1) * limit < total:
-        nav.append(kb.button(text="▶️", callback_data=BmCb(action="op_reports", page=page + 1)))
-    if nav:
-        kb.adjust(len(nav))
+        kb.button(text="▶️", callback_data=BmCb(action="op_reports", page=page + 1))
+        nav_count += 1
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    op_count = len(ops)
+    adjustments = [1] * op_count + ([nav_count] if nav_count > 0 else []) + [1]
+    kb.adjust(*adjustments)
     await _edit(callback, text, kb.as_markup())
 
 

@@ -2160,15 +2160,18 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
 
     doc = message.document
     if not doc:
+        await state.clear()
         await message.answer("⚠️ Отправьте ZIP-файл как документ.")
         return
 
-    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
-        await message.answer("❌ Файл слишком большой. Максимум 20 МБ.")
+    if doc.file_size and doc.file_size > 50 * 1024 * 1024:
+        await state.clear()
+        await message.answer("❌ Файл слишком большой. Максимум 50 МБ.")
         return
 
     name = (doc.file_name or "").lower()
     if not name.endswith(".zip"):
+        await state.clear()
         await message.answer("❌ Ожидается ZIP-архив. Упакуйте папку tdata в .zip и отправьте снова.")
         return
 
@@ -2179,22 +2182,39 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
     extract_dir = os.path.join(tmp_dir, "extracted")
     os.makedirs(extract_dir, exist_ok=True)
 
+    session_str = None
+    info = None
     try:
-        # Download ZIP
-        bot_file = await message.bot.get_file(doc.file_id)
-        await message.bot.download_file(bot_file.file_path, destination=zip_path)
+        # Download ZIP via Bot API
+        try:
+            bot_file = await message.bot.get_file(doc.file_id)
+            import io
+            buf = await message.bot.download_file(bot_file.file_path)
+            with open(zip_path, "wb") as f:
+                f.write(buf.read() if hasattr(buf, "read") else buf)
+        except Exception as exc:
+            await state.clear()
+            await msg.edit_text(
+                f"❌ <b>Ошибка загрузки файла</b>\n\n"
+                f"Telegram не смог передать файл: <code>{escape(str(exc)[:200])}</code>\n\n"
+                f"Убедитесь что ZIP-архив не превышает 50 МБ.",
+                parse_mode="HTML",
+            )
+            return
 
         # Extract
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(extract_dir)
         except zipfile.BadZipFile:
+            await state.clear()
             await msg.edit_text("❌ Файл повреждён или не является ZIP-архивом.")
             return
 
         # Locate tdata folder inside the extract
         tdata_path = _find_tdata_root(extract_dir)
         if not tdata_path:
+            await state.clear()
             await msg.edit_text(
                 "❌ Папка <code>tdata</code> не найдена в архиве.\n\n"
                 "Убедитесь что архив содержит папку <code>tdata</code> с файлом <code>key_datas</code>.",
@@ -2229,7 +2249,8 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
         except Exception:
             log_exc_swallow(log, "Ошибка очистки временной директории импорта")
 
-    await _finalize_import(message, pool, state, session_str, info)
+    if session_str and info:
+        await _finalize_import(message, pool, state, session_str, info)
 
 
 @router.message(SessionImport.waiting_tdata_zip)
