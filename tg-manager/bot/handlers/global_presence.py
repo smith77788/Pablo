@@ -1137,13 +1137,25 @@ async def cb_gp_retry(
         await callback.answer("Нет повторяемых ошибок", show_alert=True)
         return
 
+    # Determine correct op_type from plan's asset_type
+    _asset = plan["asset_type"] if plan else "channel"
+    if _asset == "bot":
+        _retry_op_type = "global_presence_bot"
+    elif _asset == "package":
+        _retry_op_type = "global_presence_package"
+    elif _asset == "full_package":
+        _retry_op_type = "global_presence_full_package"
+    else:
+        _retry_op_type = "global_presence_channel"
+
     # Queue new retry operation
     op_id = await pool.fetchval(
         "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-        "VALUES($1,'global_presence_channel','pending',$2::jsonb,$3) RETURNING id",
+        "VALUES($1,$4,'pending',$2::jsonb,$3) RETURNING id",
         callback.from_user.id,
         json.dumps({"plan_id": plan_id}),
         reset_count,
+        _retry_op_type,
     )
     await db.link_plan_to_operation(pool, plan_id, op_id)
     await callback.answer(f"✅ {reset_count} целей поставлено в очередь на повтор (op #{op_id})", show_alert=True)

@@ -26,7 +26,7 @@ async def _record_reentry_safe(pool, uid: int, days_absent: float) -> None:
     except Exception as e:
         log.debug("record_reentry failed: %s", e)
 
-BUILD_VERSION = "2026.05.30-r15"
+BUILD_VERSION = "2026.05.31-r17"
 
 
 @router.message(Command("version"))
@@ -51,7 +51,8 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
+async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     uid = message.from_user.id
     admin = is_platform_admin(uid)
     try:
