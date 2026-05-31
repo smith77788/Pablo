@@ -109,7 +109,7 @@ async def cb_group_create_acc_chosen(
     state: FSMContext,
 ) -> None:
     acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
@@ -421,7 +421,7 @@ async def cb_group_members_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
@@ -553,7 +553,8 @@ async def cb_group_import_acc(
     """Загрузить группы аккаунта и сохранить в managed_channels."""
     from bot.utils.op_helpers import _acc_label
     acc = await pool.fetchrow(
-        "SELECT id, session_str, phone, first_name, username FROM tg_accounts "
+        "SELECT id, session_str, phone, first_name, username, "
+        "device_model, system_version, app_version FROM tg_accounts "
         "WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
@@ -704,7 +705,7 @@ async def cb_group_announce_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     acc = await pool.fetchrow(
-        "SELECT id, session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:

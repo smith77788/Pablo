@@ -935,13 +935,13 @@ async def _get_accounts_for_filter(
 ) -> list[asyncpg.Record]:
     if filter_type == "account" and acc_id:
         return await pool.fetch(
-            "SELECT id, session_str, first_name, phone FROM tg_accounts "
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
             "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
             acc_id, owner_id,
         )
     if filter_type == "cluster" and cluster:
         return await pool.fetch(
-            "SELECT id, session_str, first_name, phone FROM tg_accounts "
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active=TRUE AND cluster=$2",
             owner_id, cluster,
         )
