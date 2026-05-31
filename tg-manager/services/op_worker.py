@@ -916,6 +916,21 @@ async def _exec_global_presence_bot(
             acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
         )
 
+        # BotFather flood_wait — ждём указанное время и пробуем другим аккаунтом
+        if result.get("error") and result.get("flood_wait"):
+            wait_s = int(result["flood_wait"]) + random.randint(30, 60)
+            log.info("op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying", wait_s)
+            await pool.execute(
+                "UPDATE global_presence_targets SET status='pending' WHERE id=$1", target["id"]
+            )
+            await asyncio.sleep(wait_s)
+            # Switch to next account for retry
+            acc_idx += 1
+            acc = dict(accounts[acc_idx % len(accounts)])
+            result = await account_manager.create_bot_via_botfather(
+                acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
+            )
+
         if result.get("error"):
             await pool.execute(
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
@@ -923,7 +938,7 @@ async def _exec_global_presence_bot(
             )
             failed_count += 1
             await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            await asyncio.sleep(random.uniform(15, 30))
+            await asyncio.sleep(random.uniform(30, 60))
             continue
 
         token = result.get("token", "")
@@ -1054,14 +1069,27 @@ async def _exec_bulk_create_channels(
                    ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
                 owner_id, acc["id"], ch_id, title, username or None,
             )
-            # Set username if pattern provided
+            # Set username if pattern provided — with variant fallback on collision
             if username:
                 await asyncio.sleep(random.uniform(8, 15))
                 err = await account_manager.set_channel_username(
                     acc["session_str"], ch_id, username, _acc=acc
                 )
                 if err:
-                    log.info("op_worker bulk_channels: username '%s' failed: %s", username, err[:80])
+                    log.info("op_worker bulk_channels: username '%s' failed (%s), trying variants", username, err[:80])
+                    # Try up to 3 variants: add numeric suffix
+                    for suffix in (f"_{i+1}", f"_{i+1}x", f"_{i+1}_{random.randint(10,99)}"):
+                        variant = username.rstrip("_") + suffix
+                        await asyncio.sleep(random.uniform(5, 10))
+                        err2 = await account_manager.set_channel_username(
+                            acc["session_str"], ch_id, variant, _acc=acc
+                        )
+                        if not err2:
+                            log.info("op_worker bulk_channels: variant '%s' accepted", variant)
+                            err = None
+                            break
+                    if err:
+                        log.info("op_worker bulk_channels: all username variants failed, channel created without username")
 
             await pool.execute(
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
