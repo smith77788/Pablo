@@ -18,6 +18,13 @@ from services import broadcaster
 router = Router()
 
 
+@router.callback_query(NetBcCb.filter(F.action == "menu"))
+async def cb_net_bc_menu(
+    callback: CallbackQuery, callback_data: NetBcCb, pool: asyncpg.Pool
+) -> None:
+    await cb_net_bc_target(callback, callback_data, pool)
+
+
 @router.callback_query(NetBcCb.filter(F.action == "choose_target"))
 async def cb_net_bc_target(
     callback: CallbackQuery, callback_data: NetBcCb, pool: asyncpg.Pool

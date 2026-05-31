@@ -1084,6 +1084,78 @@ async def cb_seo_apply(
             raise
 
 
+# ── Ручное редактирование поля канала из SEO-меню ─────────────────────────
+
+_SEO_EDIT_PROMPTS = {
+    "edit_title": ("title",    "📛 <b>Введите новое название канала</b> (до 128 символов):"),
+    "edit_about": ("about",    "📄 <b>Введите новое описание канала</b> (до 255 символов):"),
+    "edit_uname": ("username", "🔗 <b>Введите новый username</b> (без @, 5–32 символа, a–z/0–9/_):"),
+}
+
+
+@router.callback_query(SeoCb.filter(F.action.in_({"edit_title", "edit_about", "edit_uname"})))
+async def cb_seo_edit_field(
+    callback: CallbackQuery, callback_data: SeoCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    action = callback_data.action
+    field, prompt = _SEO_EDIT_PROMPTS[action]
+    await state.update_data(
+        seo_edit_field=field,
+        seo_chan_id=callback_data.chan_id,
+        seo_acc_id=callback_data.acc_id,
+    )
+    await state.set_state(SeoFSM.waiting_edit_value)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=SeoCb(action="chan_menu", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
+    await callback.message.edit_text(prompt, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.message(SeoFSM.waiting_edit_value)
+async def fsm_seo_edit_value(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    value = (message.text or "").strip()
+    sd = await state.get_data()
+    field = sd.get("seo_edit_field", "title")
+    chan_id = sd.get("seo_chan_id", 0)
+    acc_id = sd.get("seo_acc_id", 0)
+
+    if not value:
+        await message.answer("⚠️ Значение не может быть пустым. Попробуйте ещё раз:")
+        return
+
+    if field == "title" and len(value) > 128:
+        await message.answer("⚠️ Название не более 128 символов. Попробуйте ещё раз:")
+        return
+    if field == "about" and len(value) > 255:
+        value = value[:255]
+    if field == "username":
+        import re as _re
+        value = value.lstrip("@")
+        if not _re.match(r'^[a-zA-Z][a-zA-Z0-9_]{4,31}$', value):
+            await message.answer(
+                "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:"
+            )
+            return
+
+    await state.clear()
+    ok, err = await _apply_chan_field(pool, message.from_user.id, chan_id, acc_id, field, value)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К каналу", callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+    if ok:
+        await message.answer(
+            f"✅ <b>Обновлено успешно!</b>\nНовое значение: <code>{value[:100]}</code>",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+    else:
+        await message.answer(
+            f"❌ <b>Ошибка обновления:</b> {err}",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+
+
 # ══════════════════════════════════════════════════════════════════
 # SEO ПОЛНЫЙ ГАЙД 2026 — реальные факторы ранжирования
 # ══════════════════════════════════════════════════════════════════

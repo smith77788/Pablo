@@ -221,6 +221,7 @@ class BulkChanFSM(StatesGroup):
 class SeoFSM(StatesGroup):
     waiting_feedback   = State()   # ждём правки к AI-предложению
     waiting_username   = State()   # ждём желаемый username от пользователя
+    waiting_edit_value = State()   # ждём ручное значение для поля (title/about/username)
 
 
 class MyChannelsFSM(StatesGroup):
