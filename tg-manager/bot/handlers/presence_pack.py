@@ -24,6 +24,18 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
+def _jlist(val) -> list:
+    """Safe JSONB→list: asyncpg may return already-parsed list or a JSON string."""
+    if isinstance(val, list):
+        return val
+    if val is None:
+        return []
+    try:
+        return json.loads(val) or []
+    except Exception:
+        return []
+
+
 async def _edit(cb: CallbackQuery, text: str, markup=None):
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
 
@@ -41,8 +53,8 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     packs = await db.get_presence_packs(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
     for p in packs:
-        ch_ids = json.loads(p["channel_ids"] or "[]")
-        gr_ids = json.loads(p["group_ids"] or "[]")
+        ch_ids = _jlist(p["channel_ids"])
+        gr_ids = _jlist(p["group_ids"])
         seed_icon = "🌱" if p["seed_posted"] else "⬜"
         admin_icon = "👑" if p["bot_promoted"] else ""
         status = f"{seed_icon}{admin_icon}"
@@ -413,8 +425,8 @@ async def cb_pack_view(
         return
     await callback.answer()
 
-    ch_ids = json.loads(pack["channel_ids"] or "[]")
-    gr_ids = json.loads(pack["group_ids"] or "[]")
+    ch_ids = _jlist(pack["channel_ids"])
+    gr_ids = _jlist(pack["group_ids"])
 
     ch_rows = await pool.fetch(
         "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])", ch_ids
@@ -481,7 +493,7 @@ async def cb_pack_seed(
         await callback.answer("Пакет не найден", show_alert=True)
         return
 
-    ch_ids = json.loads(pack["channel_ids"] or "[]")
+    ch_ids = _jlist(pack["channel_ids"])
     if not ch_ids:
         await callback.answer("Нет каналов в пакете", show_alert=True)
         return
@@ -498,7 +510,7 @@ async def cb_pack_seed(
             bot_token = bot_row["token"]
 
     # Get group link for cross-linking
-    gr_ids = json.loads(pack["group_ids"] or "[]")
+    gr_ids = _jlist(pack["group_ids"])
     group_link = None
     if gr_ids:
         gr_row = await pool.fetchrow(
@@ -600,8 +612,8 @@ async def cb_pack_promote(
         await callback.answer("Нет бота в пакете. Привяжите бот при создании.", show_alert=True)
         return
 
-    ch_ids = json.loads(pack["channel_ids"] or "[]")
-    gr_ids = json.loads(pack["group_ids"] or "[]")
+    ch_ids = _jlist(pack["channel_ids"])
+    gr_ids = _jlist(pack["group_ids"])
     all_asset_ids = ch_ids + gr_ids
     if not all_asset_ids:
         await callback.answer("Нет каналов/групп в пакете", show_alert=True)
