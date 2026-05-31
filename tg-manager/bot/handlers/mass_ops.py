@@ -22,7 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
-from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar
+from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -71,7 +71,8 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="📋 Очередь операций",              callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Назад",                         callback_data=BmCb(action="operations"))
     kb.adjust(2, 2, 2, 1, 1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🛠️ <b>Построитель операций</b>\n\n"
         "🛠️ <b>Построитель</b> — пошаговый wizard для создания любой операции\n"
         "📤 <b>Публикация</b> — отправить пост во все каналы\n"
@@ -79,7 +80,6 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
         "🚪 <b>Leave</b> — выйти из каналов/групп несколькими аккаунтами\n"
         "✏️ <b>Редактирование ботов</b> — изменить имя/описание всех ботов сразу\n\n"
         "Выберите тип операции:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -97,11 +97,7 @@ async def cb_mass_publish_start(
     await callback.answer()
     from bot.utils.subscription import require_plan
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.message.edit_text(
-            "🔒 <b>Массовая публикация — PRO+</b>\n\nОформите подписку: /subscription",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "🔒 <b>Массовая публикация — PRO+</b>\n\nОформите подписку: /subscription", reply_markup=_back_menu_kb().as_markup())
         return
     await state.set_state(MassPublishFSM.choosing_targets)
     await state.update_data(mp_step="targets")
@@ -112,11 +108,7 @@ async def cb_mass_publish_start(
     kb.button(text="📢+👥 Каналы и группы", callback_data=MassOpCb(action="mp_target", op_type="both"))
     kb.button(text="❌ Отмена",              callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 1, 1)
-    await callback.message.edit_text(
-        "📤 <b>Массовая публикация</b>\n\nШаг 1 из 5: Выберите тип целей:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await safe_edit(callback, "📤 <b>Массовая публикация</b>\n\nШаг 1 из 5: Выберите тип целей:", reply_markup=kb.as_markup())
 
 
 # Step 2: choose filter (all / by account / by cluster)
@@ -137,11 +129,11 @@ async def cb_mp_target_chosen(
     kb.button(text="❌ Отмена",                callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     target_label = _TARGET_LABELS.get(_op_type, _op_type)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"📤 <b>Массовая публикация</b>\n"
         f"Цели: <b>{target_label}</b>\n\n"
         "Шаг 2 из 5: Выберите фильтр аккаунтов:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -161,11 +153,7 @@ async def cb_mp_filter_chosen(
     if filter_type == "account":
         accounts = await _get_active_accounts(pool, callback.from_user.id)
         if not accounts:
-            await callback.message.edit_text(
-                "⚠️ Нет активных аккаунтов.",
-                parse_mode="HTML",
-                reply_markup=_back_menu_kb().as_markup(),
-            )
+            await safe_edit(callback, "⚠️ Нет активных аккаунтов.", reply_markup=_back_menu_kb().as_markup())
             return
         kb = InlineKeyboardBuilder()
         for acc in accounts:
@@ -175,11 +163,11 @@ async def cb_mp_filter_chosen(
             )
         kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
         kb.adjust(1)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"📤 <b>Массовая публикация</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 2б: Выберите аккаунт:",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -205,11 +193,11 @@ async def cb_mp_filter_chosen(
             )
         kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
         kb.adjust(1)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"📤 <b>Массовая публикация</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 2б: Выберите кластер:",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -358,7 +346,8 @@ async def cb_mp_timing(
     kb.button(text="🔍 Dry Run",   callback_data=MassOpCb(action="dry_run"))
     kb.button(text="❌ Отмена",    callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"📤 <b>Предпросмотр публикации</b>\n\n"
         f"Тип целей: <b>{target_label}</b>\n"
         f"Фильтр: <b>{filter_label}</b>\n"
@@ -367,7 +356,6 @@ async def cb_mp_timing(
         f"Расчётное время: ~{estimated_mins} мин\n\n"
         f"Текст:\n<i>{preview_text}</i>\n\n"
         "Подтвердить запуск?",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -403,11 +391,7 @@ async def cb_mp_confirm(
 
     total = len(targets_with_dialogs)
     if total == 0:
-        await callback.message.edit_text(
-            "⚠️ Нет подходящих каналов/групп для рассылки.",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "⚠️ Нет подходящих каналов/групп для рассылки.", reply_markup=_back_menu_kb().as_markup())
         return
 
     # Log operation to DB if table exists
@@ -495,11 +479,7 @@ async def cb_cancel_op(
     kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
     if not rows:
-        await callback.message.edit_text(
-            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
+        await safe_edit(callback, "📋 <b>Очередь операций</b>\n\nОчередь пуста.", reply_markup=kb.as_markup())
         return
     _STATUS_ICONS = {
         "pending":   "⏳",
@@ -525,11 +505,7 @@ async def cb_cancel_op(
         lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
         if status in ("pending", "running"):
             kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
-    await callback.message.edit_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 @router.callback_query(MassOpCb.filter(F.action == "retry_op"))
@@ -563,11 +539,7 @@ async def cb_retry_op(
     kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
     if not rows:
-        await callback.message.edit_text(
-            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
+        await safe_edit(callback, "📋 <b>Очередь операций</b>\n\nОчередь пуста.", reply_markup=kb.as_markup())
         return
     _STATUS_ICONS = {
         "pending":   "⏳",
@@ -603,11 +575,7 @@ async def cb_retry_op(
             kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
         elif status == "failed":
             kb.button(text=f"🔁 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
-    await callback.message.edit_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -643,7 +611,8 @@ async def cb_dry_run(
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🔍 <b>Предпросмотр операции</b>\n\n"
         f"Тип: Публикация в {target_label.lower()}\n"
         f"Фильтр: {filter_label}\n"
@@ -651,7 +620,6 @@ async def cb_dry_run(
         f"Расчётное время: ~{estimated_mins} мин\n"
         f"Задержка между постами: {delay_label}\n\n"
         f"<i>Операция ещё не выполнена — это только предпросмотр.</i>",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -687,11 +655,7 @@ async def cb_queue(
     kb.adjust(2)
 
     if not rows:
-        await callback.message.edit_text(
-            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
+        await safe_edit(callback, "📋 <b>Очередь операций</b>\n\nОчередь пуста.", reply_markup=kb.as_markup())
         return
 
     _STATUS_ICONS = {
@@ -733,11 +697,7 @@ async def cb_queue(
         elif status == "failed":
             kb.button(text=f"🔁 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
 
-    await callback.message.edit_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -752,11 +712,7 @@ async def cb_bulk_bot_edit_start(
     from bot.keyboards import subscription_locked_markup
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
-        await callback.message.edit_text(
-            "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription",
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="operations")),
-        )
+        await safe_edit(callback, "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription", reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="operations")))
         return
     await callback.answer()
     await state.set_state(BulkBotEditFSM.choosing_field)
@@ -768,11 +724,7 @@ async def cb_bulk_bot_edit_start(
     kb.button(text="⌨️ Команды",         callback_data=MassOpCb(action="bbe_field", op_type="commands"))
     kb.button(text="❌ Отмена",          callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
-    await callback.message.edit_text(
-        "✏️ <b>Массовое редактирование ботов</b>\n\nВыберите поле для изменения:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await safe_edit(callback, "✏️ <b>Массовое редактирование ботов</b>\n\nВыберите поле для изменения:", reply_markup=kb.as_markup())
 
 
 @router.callback_query(MassOpCb.filter(F.action == "bbe_field"))
@@ -794,11 +746,7 @@ async def cb_bbe_field_chosen(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="bulk_bot_edit"))
-    await callback.message.edit_text(
-        f"✏️ <b>Массовое редактирование</b>\n\nВведите новое <b>{field_label}</b> для всех ботов:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await safe_edit(callback, f"✏️ <b>Массовое редактирование</b>\n\nВведите новое <b>{field_label}</b> для всех ботов:", reply_markup=kb.as_markup())
 
 
 @router.message(BulkBotEditFSM.waiting_value)
@@ -845,11 +793,7 @@ async def cb_bbe_confirm(
         callback.from_user.id,
     )
     if not bots:
-        await callback.message.edit_text(
-            "⚠️ У вас нет добавленных ботов.",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "⚠️ У вас нет добавленных ботов.", reply_markup=_back_menu_kb().as_markup())
         return
 
     total = len(bots)
@@ -1016,24 +960,20 @@ async def cb_bulk_join_start(
     await callback.answer()
     from bot.utils.subscription import require_plan
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.message.edit_text(
-            "🔒 <b>Массовый join — PRO+</b>\n\nОформите подписку: /subscription",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "🔒 <b>Массовый join — PRO+</b>\n\nОформите подписку: /subscription", reply_markup=_back_menu_kb().as_markup())
         return
 
     await state.set_state(BulkJoinFSM.waiting_links)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🔗 <b>Массовый join — Шаг 1/4</b>\n\n"
         "Введите ссылки или юзернеймы каналов/групп — <b>по одному на строку</b>:\n\n"
         "<code>@channel_name\n"
         "https://t.me/channel_name\n"
         "https://t.me/+InviteHash</code>\n\n"
         "Или <b>загрузите .txt файл</b> со списком (макс. 50 строк).",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1158,13 +1098,13 @@ async def cb_bulk_join_accs(
     kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
     acc_section = f"\n<b>Аккаунты:</b>\n{acc_list_preview}" if acc_list_preview else ""
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>{acc_section}\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
         f"<b>Список каналов:</b>\n{link_preview}\n\n"
         f"Выберите режим задержки между вступлениями:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1196,13 +1136,13 @@ async def cb_bulk_join_redelay(callback: CallbackQuery, state: FSMContext) -> No
     kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bj_delay", op_type="smart"))
     kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
         f"<b>Список:</b>\n{link_preview}\n\n"
         f"Выберите режим задержки между вступлениями:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1234,14 +1174,14 @@ async def cb_bulk_join_delay(
     kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bj_redelay"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🔗 <b>Массовый join — Шаг 4/4 (Подтверждение)</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(links)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n"
         f"Операций: <b>{n}</b> (~{time_est})\n\n"
         f"<b>Список:</b>\n{link_preview}",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1282,14 +1222,14 @@ async def cb_bulk_join_confirm(
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Меню", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
         f"Тип: 🔗 Массовый join\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
         f"Каналов: <b>{len(links)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n\n"
         f"Воркер запустит её автоматически.",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1305,24 +1245,20 @@ async def cb_bulk_leave_start(
     await callback.answer()
     from bot.utils.subscription import require_plan
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.message.edit_text(
-            "🔒 <b>Массовый leave — PRO+</b>\n\nОформите подписку: /subscription",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "🔒 <b>Массовый leave — PRO+</b>\n\nОформите подписку: /subscription", reply_markup=_back_menu_kb().as_markup())
         return
 
     await state.set_state(BulkLeaveFSM.waiting_channels)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🚪 <b>Массовый leave — Шаг 1/4</b>\n\n"
         "Введите юзернеймы или ID каналов/групп — <b>по одному на строку</b>:\n\n"
         "<code>@channel_name\n"
         "-1001234567890\n"
         "username</code>\n\n"
         "Или <b>загрузите .txt файл</b> со списком каналов.",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1445,13 +1381,13 @@ async def cb_bulk_leave_accs(
     kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
     bl_acc_section = f"\n<b>Аккаунты:</b>\n{bl_acc_list_preview}" if bl_acc_list_preview else ""
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>{bl_acc_section}\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
         f"<b>Список каналов:</b>\n{ch_preview}\n\n"
         f"Выберите режим задержки между выходами:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1483,13 +1419,13 @@ async def cb_bulk_leave_redelay(callback: CallbackQuery, state: FSMContext) -> N
     kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bl_delay", op_type="smart"))
     kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
         f"<b>Список:</b>\n{ch_preview}\n\n"
         f"Выберите режим задержки между выходами:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1521,14 +1457,14 @@ async def cb_bulk_leave_delay(
     kb.button(text="◀️ Изменить задержку", callback_data=MassOpCb(action="bl_redelay"))
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"🚪 <b>Массовый leave — Шаг 4/4 (Подтверждение)</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n"
         f"Операций: <b>{n}</b> (~{time_est})\n\n"
         f"<b>Список:</b>\n{ch_preview}",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1569,14 +1505,14 @@ async def cb_bulk_leave_confirm(
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Меню", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
         f"Тип: 🚪 Массовый leave\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
         f"Каналов: <b>{len(channels)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n\n"
         f"Воркер запустит её автоматически.",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1632,14 +1568,14 @@ async def cb_build_start(
         )
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🛠️ <b>Построитель операций</b>\n\n"
         "Шаг 1/4: Выберите тип операции\n\n"
         "📤 <b>Публикация</b> — разослать пост по каналам\n"
         "🔗 <b>Join</b> — вступить в каналы (STARTER+)\n"
         "🚪 <b>Leave</b> — выйти из каналов (STARTER+)\n"
         "✏️ <b>Редактирование ботов</b> — обновить профиль ботов (PRO)\n",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1667,11 +1603,7 @@ async def cb_ob_type_chosen(
     if not await require_plan(pool, callback.from_user.id, required_plan):
         await callback.answer()
         plan_label = "PRO" if required_plan == "pro" else "STARTER+"
-        await callback.message.edit_text(
-            f"🔒 <b>{meta['label']} — {plan_label}</b>\n\nОформите подписку: /subscription",
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup(required_plan, back_callback=MassOpCb(action="build")),
-        )
+        await safe_edit(callback, f"🔒 <b>{meta['label']} — {plan_label}</b>\n\nОформите подписку: /subscription", reply_markup=subscription_locked_markup(required_plan, back_callback=MassOpCb(action="build")))
         return
 
     await callback.answer()
@@ -1686,10 +1618,10 @@ async def cb_ob_type_chosen(
         kb.button(text="📢+👥 Каналы и группы", callback_data=MassOpCb(action="ob_target", op_type="both"))
         kb.button(text="◀️ Назад",               callback_data=MassOpCb(action="build"))
         kb.adjust(2, 1, 1)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"🛠️ <b>Построитель: {meta['icon']} {meta['label']}</b>\n\n"
             "Шаг 2/4: Выберите тип целей для публикации:",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
 
@@ -1703,12 +1635,12 @@ async def cb_ob_type_chosen(
             else "<code>@channel_name\n-1001234567890\nusername</code>"
         )
         kb.button(text="◀️ Назад", callback_data=MassOpCb(action="build"))
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"🛠️ <b>Построитель: {meta['icon']} {meta['label']}</b>\n\n"
             f"Шаг 2/4: Введите каналы/группы для {action_word} — по одному на строку:\n\n"
             f"{example}\n\n"
             "Максимум 50 записей.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
 
@@ -1719,10 +1651,10 @@ async def cb_ob_type_chosen(
         kb.button(text="⌨️ Команды",          callback_data=MassOpCb(action="ob_target", op_type="commands"))
         kb.button(text="◀️ Назад",            callback_data=MassOpCb(action="build"))
         kb.adjust(2, 2, 1)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"🛠️ <b>Построитель: {meta['icon']} {meta['label']}</b>\n\n"
             "Шаг 2/4: Выберите поле для массового редактирования:",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
 
@@ -1749,11 +1681,11 @@ async def cb_ob_target_chosen(
 
     if op_type == "mass_publish":
         target_label = _TARGET_LABELS.get(target, target)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"🛠️ <b>Построитель: {meta.get('icon','')} {meta.get('label','')}</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 3/4: Введите текст поста (поддерживается HTML):",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
     elif op_type == "bulk_bot_edit":
@@ -1764,11 +1696,11 @@ async def cb_ob_target_chosen(
             "commands":   "команды (формат: /cmd - описание, по одному на строку)",
         }
         field_label = _FIELD_LABELS_OB.get(target, target)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"🛠️ <b>Построитель: {meta.get('icon','')} {meta.get('label','')}</b>\n"
             f"Поле: <b>{field_label}</b>\n\n"
             f"Шаг 3/4: Введите новое значение для всех ботов:",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
 
@@ -1911,10 +1843,7 @@ async def cb_ob_confirm(
         params = {"field": target, "value": ob_param, "source": "builder"}
         total_items = 1  # воркер посчитает реальное кол-во ботов при запуске
     else:
-        await callback.message.edit_text(
-            "⚠️ Неизвестный тип операции.",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "⚠️ Неизвестный тип операции.", reply_markup=_back_menu_kb().as_markup())
         return
 
     try:
@@ -1929,10 +1858,7 @@ async def cb_ob_confirm(
         )
     except Exception as e:
         log.error("ob_confirm insert error: %s", e)
-        await callback.message.edit_text(
-            "⚠️ Ошибка создания операции. Попробуйте ещё раз.",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
+        await safe_edit(callback, "⚠️ Ошибка создания операции. Попробуйте ещё раз.", reply_markup=_back_menu_kb().as_markup())
         return
 
     icon = meta.get("icon", "")
@@ -1941,12 +1867,12 @@ async def cb_ob_confirm(
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Меню",             callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
         f"Тип: {icon} <b>{label}</b>\n"
         f"Статус: ⏳ Ожидает выполнения\n\n"
         f"Воркер запустит операцию автоматически.\n"
         f"Следить за прогрессом: <b>Очередь операций</b>",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

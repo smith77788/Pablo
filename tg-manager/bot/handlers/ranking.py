@@ -17,6 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import RankCb, VisCb, BmCb
 from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
+from bot.utils.op_helpers import safe_edit
 from bot.utils.subscription import get_plan, locked_text
 from database import db
 from services.logger import log_exc_swallow
@@ -125,9 +126,9 @@ async def cb_rank_menu(
     plan = await get_plan(pool, callback.from_user.id)
     if plan == "free":
         await callback.answer()
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             locked_text("Трекер позиций в поиске", "starter"),
-            parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 "starter", back_callback=BmCb(action="visibility")
             ),
@@ -160,9 +161,9 @@ async def cb_rank_add(
 
     if limit == 0:
         await callback.answer()
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             locked_text("Трекер позиций в поиске", "starter"),
-            parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 "starter", back_callback=BmCb(action="visibility")
             ),
@@ -188,13 +189,13 @@ async def cb_rank_add(
         text="❌ Отмена",
         callback_data=RankCb(action="menu", bot_id=bot_id),
     )
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🔑 <b>Добавить ключевое слово</b>\n\n"
         "Введите ключевое слово или фразу для отслеживания:\n\n"
         "<i>Примеры: крипто бот, tg магазин, ai assistant</i>\n"
         "<i>Максимум 50 символов.</i>\n\n"
         "<i>Для отмены нажмите кнопку ниже или /cancel.</i>",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -343,10 +344,10 @@ async def cb_rank_history(
     kb.adjust(1)
 
     if not rankings:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"📈 <b>История позиций: «{kw_safe}»</b>\n\n"
             "Данных пока нет. Проверка будет выполнена при следующем цикле.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -371,9 +372,9 @@ async def cb_rank_history(
         else:
             lines.append(f"• {date_label} — <b>#{pos}</b>{arrow}  <code>{bar}</code>")
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -409,11 +410,11 @@ async def cb_rank_check_now(
 
     # Check for active account first
     if not await _has_active_account(pool, owner_id):
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ <b>Нет подключённого аккаунта</b>\n\n"
             "Для проверки позиций нужен хотя бы один подключённый аккаунт Telegram.\n"
             "Подключите аккаунт через /accounts",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -421,18 +422,18 @@ async def cb_rank_check_now(
     # Fetch the bot's username
     bot_row = await db.get_bot(pool, bot_id, owner_id)
     if not bot_row:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ Бот не найден.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
 
     username = (bot_row.get("username") or "").lstrip("@")
     if not username:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ У бота нет username — поиск невозможен.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -450,10 +451,10 @@ async def cb_rank_check_now(
         log.warning("Ошибка при запросе tg_accounts: %s", exc)
 
     if not account:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ <b>Нет подключённого аккаунта</b>\n\n"
             "Для автоматической проверки подключите аккаунт Telegram: /accounts",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -466,9 +467,9 @@ async def cb_rank_check_now(
         keywords = list(all_keywords)
 
     if not keywords:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "ℹ️ Нет ключевых слов для проверки.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -539,10 +540,10 @@ async def cb_rank_check_now(
 
     except ImportError:
         log.warning("account_manager service not available")
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ Сервис проверки позиций ещё не подключён.\n\n"
             "Позиции будут обновляться автоматически при следующем плановом цикле.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -572,9 +573,9 @@ async def cb_rank_check_now(
     )
     result_kb.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=result_kb.as_markup(),
     )
 
@@ -601,11 +602,11 @@ async def cb_rank_check_all(
 
     # Warn if no active accounts
     if not await _has_active_account(pool, owner_id):
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ <b>Нет подключённого аккаунта</b>\n\n"
             "Для проверки позиций нужен хотя бы один подключённый аккаунт Telegram.\n"
             "Подключите аккаунт через /accounts",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -616,25 +617,25 @@ async def cb_rank_check_all(
         results = await ranking_checker.check_bot_keywords(pool, bot_id, owner_id)
     except ImportError:
         log.warning("ranking_checker service not available")
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ Сервис проверки позиций недоступен.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
     except Exception as exc:
         log.warning("check_all error: %s", exc)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ Ошибка при проверке. Попробуйте позже.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
 
     if not results:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "ℹ️ Нет активных ключевых слов для проверки.",
-            parse_mode="HTML",
             reply_markup=back_kb.as_markup(),
         )
         return
@@ -662,9 +663,9 @@ async def cb_rank_check_all(
     )
     result_kb.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=result_kb.as_markup(),
     )
 
@@ -686,9 +687,9 @@ async def cb_rank_dashboard(
     owner_id = callback.from_user.id
     plan = await get_plan(pool, owner_id)
     if plan == "free":
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             locked_text("Трекер позиций в поиске", "starter"),
-            parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 "starter", back_callback=BmCb(action="visibility")
             ),
@@ -709,9 +710,9 @@ async def cb_rank_dashboard(
     kb.adjust(1)
 
     if not keywords:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "📊 <b>Дашборд позиций</b>\n\nУ вас пока нет отслеживаемых ключевых слов.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -753,9 +754,9 @@ async def cb_rank_dashboard(
             f"\n<i>...и ещё {total - DASHBOARD_LIMIT} слов (показаны первые {DASHBOARD_LIMIT})</i>"
         )
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -882,9 +883,7 @@ async def _render_rank_menu(
 
     kb.row(*back_to_bot(bot_id).inline_keyboard[0])
 
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 async def _show_rank_menu(
@@ -895,9 +894,9 @@ async def _show_rank_menu(
     """Render the ranking menu; used after removal and other redirects."""
     plan = await get_plan(pool, callback.from_user.id)
     if plan == "free":
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             locked_text("Трекер позиций в поиске", "starter"),
-            parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 "starter", back_callback=BmCb(action="visibility")
             ),
@@ -959,9 +958,7 @@ async def cb_rank_notify_settings(
     )
     kb.adjust(1)
 
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── action="notify_toggle" — переключить уведомления ──────────────────────
@@ -1016,9 +1013,7 @@ async def cb_rank_notify_toggle(
     )
     kb.adjust(1)
 
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1080,9 +1075,7 @@ async def vis_dashboard(
     kb.button(text="◀️ Назад", callback_data=_BmCb(action="visibility"))
     kb.adjust(2, 2, 1, 1)
 
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── VisCb(action="all_positions") — Все позиции всех ботов ───────────────────
@@ -1118,9 +1111,9 @@ async def vis_all_positions(
     kb.adjust(2)
 
     if not rows:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "📊 <b>Позиции в поиске</b>\n\nДанных пока нет. Добавьте ключевые слова и запустите проверку.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1169,9 +1162,9 @@ async def vis_all_positions(
             else:
                 lines.append(f"  • «{kw_safe}» → #{pos}{delta_str}{arrow}{alert}")
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1192,9 +1185,9 @@ async def vis_select_bot(
     if not bots:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "👁️ <b>Visibility Engine</b>\n\nУ вас пока нет ботов.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1209,9 +1202,9 @@ async def vis_select_bot(
     kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🔍 <b>Позиции по боту</b>\n\nВыберите бота:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1256,9 +1249,9 @@ async def vis_by_bot(
     kb.adjust(2)
 
     if not rows:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"🔍 <b>Позиции — {html.escape(label)}</b>\n\nДанных пока нет.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1297,9 +1290,9 @@ async def vis_by_bot(
         else:
             lines.append(f"  • «{kw_safe}» → #{pos}{delta_str}{arrow}")
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1321,9 +1314,9 @@ async def vis_add_keyword_start(
     if not bots:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "➕ <b>Добавить ключевое слово</b>\n\nСначала добавьте бота через /start.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1340,9 +1333,9 @@ async def vis_add_keyword_start(
     kb.button(text="❌ Отмена", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "➕ <b>Добавить ключевое слово</b>\n\nШаг 1/3: Выберите бота:",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1362,12 +1355,12 @@ async def vis_pick_bot(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=VisCb(action="dashboard"))
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "➕ <b>Добавить ключевое слово</b>\n\n"
         "Шаг 2/3: Введите ключевое слово или фразу:\n\n"
         "<i>Примеры: крипто бот, tg магазин, ai assistant</i>\n"
         "<i>Максимум 50 символов.</i>",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -1428,9 +1421,9 @@ async def vis_receive_region(
         await state.clear()
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ К дашборду", callback_data=VisCb(action="dashboard"))
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "❌ Добавление ключевого слова отменено.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1444,9 +1437,9 @@ async def vis_receive_region(
     owner_id = callback.from_user.id
 
     if not bot_id or not keyword:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "⚠️ Ошибка: данные не найдены. Начните заново.",
-            parse_mode="HTML",
         )
         return
 
@@ -1478,16 +1471,16 @@ async def vis_receive_region(
 
     kw_safe = html.escape(keyword)
     if saved:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"✅ Ключевое слово <b>«{kw_safe}»</b> добавлено для региона <b>{region.upper()}</b>.\n\n"
             "Позиция будет определена при следующей проверке.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
     else:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"ℹ️ Слово <b>«{kw_safe}»</b> уже отслеживается для этого бота.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
 
@@ -1510,9 +1503,9 @@ async def vis_trends(
         if not bots:
             kb = InlineKeyboardBuilder()
             kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
-            await callback.message.edit_text(
+            await safe_edit(
+                callback,
                 "📈 <b>Тренды позиций</b>\n\nНет ботов.",
-                parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
             return
@@ -1528,9 +1521,9 @@ async def vis_trends(
                 )
             sel_kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
             sel_kb.adjust(1)
-            await callback.message.edit_text(
+            await safe_edit(
+                callback,
                 "📈 <b>Тренды позиций</b>\n\nВыберите бота:",
-                parse_mode="HTML",
                 reply_markup=sel_kb.as_markup(),
             )
             return
@@ -1576,9 +1569,9 @@ async def vis_trends(
     kb2.adjust(2)
 
     if not history_rows:
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             f"📈 <b>Тренд позиций — {html.escape(label)}</b>\n\nИстория пока пуста.",
-            parse_mode="HTML",
             reply_markup=kb2.as_markup(),
         )
         return
@@ -1623,9 +1616,9 @@ async def vis_trends(
 
         lines.append(f"{trend_line}{verdict}")
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=kb2.as_markup(),
     )
 
@@ -1680,9 +1673,7 @@ async def _render_vis_alerts(
     kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
     kb.adjust(1)
 
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(VisCb.filter(F.action == "alerts_toggle"))
@@ -1727,13 +1718,13 @@ async def vis_alerts_threshold(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=VisCb(action="alerts"))
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "✏️ <b>Изменить порог алертов</b>\n\n"
         "Введите два числа через пробел:\n"
         "<code>порог_падения порог_роста</code>\n\n"
         "<i>Пример: <code>10 5</code>\n"
         "Уведомление при падении ниже #10 и росте выше #5</i>",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 

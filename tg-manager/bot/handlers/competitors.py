@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import CompCb, BmCb
 from bot.states import AddCompetitorFSM
+from bot.utils.op_helpers import safe_edit
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -53,9 +54,7 @@ async def comp_menu(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not rows:
         lines.append("Список пуст. Добавьте конкурентов для мониторинга.")
 
-    await cb.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(cb, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 @router.callback_query(CompCb.filter(F.action == "add"))
@@ -64,7 +63,8 @@ async def comp_add(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AddCompetitorFSM.waiting_username)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=CompCb(action="menu"))
-    await cb.message.edit_text(
+    await safe_edit(
+        cb,
         "Введите @username канала конкурента:\n\n"
         "💡 Например: <code>@durov</code> или просто <code>durov</code>\n"
         "<i>Только username, не ссылка.</i>",
@@ -135,11 +135,9 @@ async def _save_competitor(
             username,
             label,
         )
-        await cb.message.edit_text(
-            f"✅ @{username} добавлен.", reply_markup=kb.as_markup()
-        )
+        await safe_edit(cb, f"✅ @{username} добавлен.", reply_markup=kb.as_markup())
     except Exception as e:
-        await cb.message.edit_text(f"❌ Ошибка: {e}", reply_markup=kb.as_markup())
+        await safe_edit(cb, f"❌ Ошибка: {e}", reply_markup=kb.as_markup())
 
 
 @router.callback_query(CompCb.filter(F.action == "refresh"))
@@ -155,12 +153,10 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not rows:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=CompCb(action="menu"))
-        await cb.message.edit_text(
-            "Список конкурентов пуст.", reply_markup=kb.as_markup()
-        )
+        await safe_edit(cb, "Список конкурентов пуст.", reply_markup=kb.as_markup())
         return
 
-    await cb.message.edit_text(f"🔄 Обновляю данные для {len(rows)} конкурентов...")
+    await safe_edit(cb, f"🔄 Обновляю данные для {len(rows)} конкурентов...")
 
     updated = 0
     async with aiohttp.ClientSession() as sess:
@@ -190,7 +186,8 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
-    await cb.message.edit_text(
+    await safe_edit(
+        cb,
         f"✅ Обновлено {updated} из {len(rows)} конкурентов.",
         reply_markup=kb.as_markup(),
     )
@@ -211,4 +208,4 @@ async def comp_delete(
         log_exc_swallow(log, "Не удалось удалить конкурента")
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
-    await cb.message.edit_text("🗑 Конкурент удалён.", reply_markup=kb.as_markup())
+    await safe_edit(cb, "🗑 Конкурент удалён.", reply_markup=kb.as_markup())

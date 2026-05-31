@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import HealthCb, BotCb, BmCb
+from bot.utils.op_helpers import safe_edit
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -193,7 +194,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="infrastructure"))
     kb.adjust(2, 2, 2, 2, 2, 1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── Accounts health ────────────────────────────────────────────────────────────
@@ -247,9 +248,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
     kb = _back_kb()
     kb.adjust(1)
-    await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ── Bots health ────────────────────────────────────────────────────────────────
@@ -318,9 +317,7 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = _back_kb()
     kb.adjust(1)
-    await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ── Flood log ──────────────────────────────────────────────────────────────────
@@ -362,9 +359,7 @@ async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = _back_kb()
     kb.adjust(1)
-    await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ── Trust score trends ─────────────────────────────────────────────────────────
@@ -420,9 +415,7 @@ async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = _back_kb()
     kb.adjust(1)
-    await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ── Health score trends ────────────────────────────────────────────────────────
@@ -499,7 +492,7 @@ async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     text = "\n".join(lines)
     if len(text) > 3800:
         text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── Sparkline charts ─────────────────────────────────────────────────────────────
@@ -537,10 +530,10 @@ async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not rows:
         kb = _back_kb()
         kb.adjust(1)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "📉 <b>Sparkline — тренды здоровья</b>\n\n"
             "ℹ️ Данные ещё накапливаются. Зайдите позже.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -582,7 +575,7 @@ async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     text = "\n".join(lines)
     if len(text) > 3800:
         text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── Comparison chart ──────────────────────────────────────────────────────────────
@@ -623,10 +616,10 @@ async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     if not rows:
         kb = _back_kb()
         kb.adjust(1)
-        await callback.message.edit_text(
+        await safe_edit(
+            callback,
             "📊 <b>Сравнение аккаунтов</b>\n\n"
             "ℹ️ Нет данных. Добавьте аккаунты через 🏗️ Infrastructure → 📱 Аккаунты.",
-            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -658,7 +651,7 @@ async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     text = "\n".join(lines)
     if len(text) > 3800:
         text = text[:3750] + "\n\n<i>... показаны первые аккаунты</i>"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 @router.callback_query(HealthCb.filter(F.action == "recommendations"))
 async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -839,7 +832,7 @@ async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool)
     kb.button(text="🔄 Авто-ротация", callback_data=HealthCb(action="auto_rotate_confirm"))
     kb.button(text="🔄 Обновить", callback_data=HealthCb(action="recommendations"))
     kb.adjust(1)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── Auto-rotation ──────────────────────────────────────────────────────────────
@@ -872,7 +865,8 @@ async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) ->
     kb.button(text="❌ Отмена", callback_data=HealthCb(action="recommendations"))
     kb.adjust(1)
 
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
         "Система проверит все аккаунты и применит защитные меры:\n\n"
         f"🔴 Критически низкий trust (<0.3): <b>{critical}</b> акк.\n"
@@ -882,7 +876,6 @@ async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) ->
         f"🌊 Уже в кулдауне: <b>{cooldown}</b> акк.\n"
         "   → Пропустить\n\n"
         "⚠️ Аккаунты в кулдауне не будут использоваться для операций автоматически.",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -922,13 +915,13 @@ async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❤️ К панели здоровья", callback_data=HealthCb(action="menu"))
     kb.adjust(1)
-    await callback.message.edit_text(
+    await safe_edit(
+        callback,
         "✅ <b>Авто-ротация выполнена</b>\n\n"
         f"🔴 Критических → 72ч кулдаун: <b>{crit_n}</b>\n"
         f"🟡 С низким trust → 24ч кулдаун: <b>{low_n}</b>\n\n"
         "Эти аккаунты не будут использоваться в операциях до окончания кулдауна.\n"
         "Trust score восстановится со временем при отсутствии операций.",
-        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 

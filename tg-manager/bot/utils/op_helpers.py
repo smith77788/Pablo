@@ -42,3 +42,27 @@ def _progress_text(title: str, done: int, total: int, ok: int, err: int) -> str:
 def _format_duration(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)
     return f"{m} мин {s:02d}с" if m else f"{s}с"
+
+
+async def safe_edit(
+    callback: "CallbackQuery",
+    text: str,
+    reply_markup=None,
+    parse_mode: str = "HTML",
+) -> None:
+    """Edit message only if content changed, otherwise answer silently."""
+    msg = callback.message
+    if msg is None:
+        await callback.answer()
+        return
+    current = msg.text or msg.caption or ""
+    if current == text and msg.reply_markup == reply_markup:
+        await callback.answer()
+        return
+    try:
+        await msg.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            await callback.answer()
+        else:
+            raise
