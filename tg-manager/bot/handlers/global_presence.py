@@ -75,26 +75,42 @@ async def cb_gp_menu(
         return
     await callback.answer()
     await state.clear()
+
+    # Show active/recent plans count
+    recent_plans = await db.get_global_presence_plans(pool, callback.from_user.id, limit=3)
+    running_count = sum(1 for p in recent_plans if p["status"] in ("running", "queued"))
+    plans_hint = ""
+    if running_count:
+        plans_hint = f"\n⚡ <b>Активных операций: {running_count}</b> — <a href='tg://callback'>Мои планы ↓</a>\n"
+    elif recent_plans:
+        last = recent_plans[0]
+        status_map = {"done": "✅ завершён", "failed": "❌ ошибка", "cancelled": "🚫 отменён", "queued": "⏳ в очереди"}
+        last_status = status_map.get(last["status"], last["status"])
+        plans_hint = f"\n📋 Последний план #{last['id']}: {last_status}\n"
+
     await state.set_state(GlobalPresenceFSM.choosing_asset_type)
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Каналы",              callback_data=GeoPresenceCb(action="asset", item="channel"))
-    kb.button(text="👥 Группы",              callback_data=GeoPresenceCb(action="asset", item="group"))
-    kb.button(text="🤖 Боты",                callback_data=GeoPresenceCb(action="asset", item="bot"))
-    kb.button(text="📦 Пакет (кан+гр)",     callback_data=GeoPresenceCb(action="asset", item="package"))
-    kb.button(text="📦 Полный (кан+гр+бот)", callback_data=GeoPresenceCb(action="asset", item="full_package"))
-    kb.button(text="❌ Отмена",              callback_data=GeoPresenceCb(action="cancel"))
-    kb.adjust(2, 2, 1, 1)
+    kb.button(text="📡 Каналы",               callback_data=GeoPresenceCb(action="asset", item="channel"))
+    kb.button(text="👥 Группы",               callback_data=GeoPresenceCb(action="asset", item="group"))
+    kb.button(text="🤖 Боты (BotFather)",     callback_data=GeoPresenceCb(action="asset", item="bot"))
+    kb.button(text="📦 Пакет (Канал+Группа)", callback_data=GeoPresenceCb(action="asset", item="package"))
+    kb.button(text="🌐 Полный пакет (К+Г+Б)", callback_data=GeoPresenceCb(action="asset", item="full_package"))
+    if recent_plans:
+        kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    kb.adjust(2, 1, 1, 1, 1)
     await callback.message.edit_text(
-        "🌍 <b>Global Presence Factory</b>\n\n"
-        "Создайте Telegram-присутствие в любом городе мира за несколько шагов — "
-        "каналы, группы, боты или пакеты для выбранных стран и регионов.\n\n"
-        "<b>Шаг 1/8 — Тип актива</b>\n"
-        "• <b>Каналы</b> — создать каналы под каждый город\n"
-        "• <b>Группы</b> — создать супергруппы\n"
-        "• <b>Боты</b> — зарегистрировать ботов через BotFather\n"
-        "• <b>Пакет</b> — канал + группа на каждый город\n"
-        "• <b>Полный пакет</b> — канал + группа + бот на каждый город\n\n"
-        "Что создаём?",
+        f"🌍 <b>Global Presence Factory</b>\n"
+        f"{'─' * 28}\n"
+        f"Создайте Telegram-инфраструктуру сразу в сотнях городов — "
+        f"каналы, группы и боты с локализованными названиями и username.\n"
+        f"{plans_hint}\n"
+        f"<b>Шаг 1/8 — Выберите тип актива:</b>\n"
+        f"📡 <b>Каналы</b> — публичные каналы под каждый город\n"
+        f"👥 <b>Группы</b> — супергруппы для обсуждений\n"
+        f"🤖 <b>Боты</b> — боты через BotFather (нужны аккаунты)\n"
+        f"📦 <b>Пакет</b> — канал <i>и</i> группа на каждый город\n"
+        f"🌐 <b>Полный пакет</b> — канал + группа + бот на каждый город",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )

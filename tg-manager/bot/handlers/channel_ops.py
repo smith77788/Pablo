@@ -2678,7 +2678,8 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     label = REPORT_REASONS.get(reason, reason)
 
     accounts = await _get_accounts(pool, callback.from_user.id)
-    chosen = [a for a in accounts if a["id"] in selected_ids and a["is_active"]]
+    # Convert asyncpg.Record to plain dict to prevent KeyError in strike_engine
+    chosen = [dict(a) for a in accounts if a["id"] in selected_ids and a["is_active"]]
 
     if not chosen:
         await callback.message.edit_text("⚠️ Нет выбранных аккаунтов.", parse_mode="HTML")

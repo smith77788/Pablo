@@ -43,23 +43,33 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     for p in packs:
         ch_ids = json.loads(p["channel_ids"] or "[]")
         gr_ids = json.loads(p["group_ids"] or "[]")
-        seeded = "🌱" if p["seed_posted"] else "⬜"
+        seed_icon = "🌱" if p["seed_posted"] else "⬜"
+        admin_icon = "👑" if p["bot_promoted"] else ""
+        status = f"{seed_icon}{admin_icon}"
         kb.button(
-            text=f"{seeded} {p['name']} ({len(ch_ids)}ch/{len(gr_ids)}gr)",
+            text=f"{status} {p['name']} ({len(ch_ids)}📡 {len(gr_ids)}👥)",
             callback_data=PackCb(action="view", pack_id=p["id"]),
         )
 
-    kb.button(text="➕ Создать pack", callback_data=PackCb(action="create"))
+    kb.button(text="➕ Создать пакет", callback_data=PackCb(action="create"))
     kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
     kb.adjust(1)
 
-    count_text = f"У вас {len(packs)} пакетов" if packs else "Пакетов пока нет"
+    if packs:
+        legend = "🌱 — посты опубликованы | 👑 — бот admin | ⬜ — ожидает"
+        count_text = f"Пакетов: {len(packs)}\n<i>{legend}</i>"
+    else:
+        count_text = (
+            "Пакетов пока нет.\n\n"
+            "💡 <b>Что такое Presence Pack?</b>\n"
+            "Это связка из бота + каналов + групп в единую воронку. "
+            "Создайте пакет, назначьте бота администратором, опубликуйте "
+            "посевные посты — и вся инфраструктура будет работать синхронно."
+        )
     await _edit(
         callback,
         f"🗂 <b>Presence Packs</b>\n\n"
-        f"Связывайте бота, каналы и группы в единую воронку. "
-        f"Посевные посты, взаимные ссылки, назначение бота admin — всё в одном месте.\n\n"
-        f"{count_text}.",
+        f"{count_text}",
         markup=kb.as_markup(),
     )
 
@@ -419,14 +429,25 @@ async def cb_pack_view(
     ch_list = "\n".join(f"  • {_row_label(r)}" for r in ch_rows[:8]) or "  —"
     gr_list = "\n".join(f"  • {_row_label(r)}" for r in gr_rows[:5]) or "  —"
 
-    bot_info = f"@{pack['bot_username']}" if pack.get("bot_username") else "—"
+    bot_info = f"@{pack['bot_username']}" if pack.get("bot_username") else "не привязан"
     target = pack.get("target_url") or "—"
     target_label = pack.get("target_label") or ""
+    seed_status = "✅ Опубликованы" if pack["seed_posted"] else "⬜ Не опубликованы"
+    promoted_status = "✅ Назначен" if pack["bot_promoted"] else "⬜ Не назначен"
+
+    # Build next-step guidance
+    next_steps = []
+    if not pack["bot_promoted"] and pack.get("bot_id"):
+        next_steps.append("1️⃣ Назначьте бота администратором каналов (👑)")
+    if not pack["seed_posted"]:
+        next_steps.append("2️⃣ Опубликуйте начальные посты (🌱)")
+    guidance = ("\n\n💡 <b>Следующие шаги:</b>\n" + "\n".join(next_steps)) if next_steps else "\n\n✅ <b>Пакет полностью настроен!</b>"
 
     pack_id = callback_data.pack_id
     kb = InlineKeyboardBuilder()
+    if not pack["bot_promoted"] and pack.get("bot_id"):
+        kb.button(text="👑 Назначить бота admin", callback_data=PackCb(action="promote", pack_id=pack_id))
     kb.button(text="🌱 Посеять начальные посты", callback_data=PackCb(action="seed", pack_id=pack_id))
-    kb.button(text="👑 Назначить бота admin", callback_data=PackCb(action="promote", pack_id=pack_id))
     kb.button(text="🔄 Синх. зеркала", callback_data=PackCb(action="mirror", pack_id=pack_id))
     kb.button(text="🗑 Удалить", callback_data=PackCb(action="confirm_delete", pack_id=pack_id))
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
@@ -434,13 +455,15 @@ async def cb_pack_view(
 
     await _edit(
         callback,
-        f"🗂 <b>{escape(pack['name'])}</b>\n\n"
+        f"🗂 <b>{escape(pack['name'])}</b>\n"
+        f"{'─' * 28}\n"
         f"🤖 Бот: {escape(bot_info)}\n"
         f"🎯 Цель: {escape(target_label or target)}\n"
-        f"🌱 Посевные посты: {'✅' if pack['seed_posted'] else '⬜'}\n"
-        f"👑 Бот admin: {'✅' if pack['bot_promoted'] else '⬜'}\n\n"
+        f"🌱 Посевные посты: {seed_status}\n"
+        f"👑 Бот admin: {promoted_status}\n\n"
         f"📡 Каналы ({len(ch_ids)}):\n{ch_list}\n\n"
-        f"👥 Группы ({len(gr_ids)}):\n{gr_list}",
+        f"👥 Группы ({len(gr_ids)}):\n{gr_list}"
+        f"{guidance}",
         markup=kb.as_markup(),
     )
 
@@ -492,6 +515,7 @@ async def cb_pack_seed(
 
     success = 0
     fail = 0
+    fail_details: list[str] = []
     for ch in channels:
         post_text = presence_setup.build_seed_post(
             channel_title=ch["title"] or ch.get("username") or pack["name"],
@@ -501,9 +525,14 @@ async def cb_pack_seed(
             target_label=pack.get("target_label"),
             pack_description=pack.get("description"),
         )
+        chan_name = ch.get("title") or f"@{ch.get('username')}" if ch.get("username") else f"id{ch['channel_id']}"
         posted = False
         if bot_token:
-            chan_target = f"@{ch['username']}" if ch.get("username") else ch["channel_id"]
+            # Bot API requires @username or -100{channel_id} format
+            if ch.get("username"):
+                chan_target = f"@{ch['username']}"
+            else:
+                chan_target = int(f"-100{ch['channel_id']}")
             posted = await presence_setup.seed_channel_post(http, bot_token, chan_target, post_text)
         if not posted:
             posted = await presence_setup.seed_channel_via_account(
@@ -513,22 +542,50 @@ async def cb_pack_seed(
             success += 1
         else:
             fail += 1
+            fail_details.append(chan_name)
         await asyncio.sleep(2)
 
-    await db.mark_presence_pack_seeded(pool, callback_data.pack_id, owner_id)
+    if success > 0:
+        await db.mark_presence_pack_seeded(pool, callback_data.pack_id, owner_id)
 
     pack_id = callback_data.pack_id
     kb = InlineKeyboardBuilder()
+    if fail > 0:
+        kb.button(text="🔁 Повторить посев", callback_data=PackCb(action="seed", pack_id=pack_id))
     kb.button(text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id))
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
-    await _edit(
-        callback,
-        f"🌱 <b>Посевные посты опубликованы</b>\n\n"
-        f"✅ Успешно: {success} | ❌ Ошибок: {fail}\n\n"
-        f"Каналы содержат начальный пост с ссылками на бота, группу и целевой ресурс.",
-        markup=kb.as_markup(),
-    )
+
+    fail_hint = ""
+    if fail > 0 and fail_details:
+        names = ", ".join(fail_details[:3])
+        extra = f" (+{len(fail_details)-3})" if len(fail_details) > 3 else ""
+        fail_hint = (
+            f"\n\n⚠️ Не удалось опубликовать в: <b>{escape(names)}{extra}</b>\n"
+            f"💡 Причины: бот не является администратором канала, или аккаунт не участник. "
+            f"Нажмите «👑 Назначить бота admin» и повторите посев."
+        )
+    elif fail > 0:
+        fail_hint = "\n\n⚠️ Некоторые посты не опубликованы — убедитесь что бот является admin в каналах."
+
+    if success == 0:
+        result_text = (
+            f"❌ <b>Посев не удался</b>\n\n"
+            f"Ни один пост не был опубликован.\n"
+            f"💡 Попробуйте:\n"
+            f"1. Нажмите <b>👑 Назначить бота admin</b> — дайте боту права публикации\n"
+            f"2. Убедитесь что аккаунты являются участниками каналов\n"
+            f"3. Повторите посев{fail_hint}"
+        )
+    else:
+        result_text = (
+            f"🌱 <b>Посев завершён</b>\n\n"
+            f"✅ Опубликовано: {success} | ❌ Ошибок: {fail}\n\n"
+            f"Каналы содержат начальный пост с взаимными ссылками."
+            f"{fail_hint}"
+        )
+
+    await _edit(callback, result_text, markup=kb.as_markup())
 
 
 # ── Promote Bot as Admin ───────────────────────────────────────────────────
