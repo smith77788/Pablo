@@ -688,13 +688,13 @@ async def cb_net_broadcast_confirm(
 
 @router.callback_query(NetworkCb.filter(F.action == "broadcast_cancel"))
 async def cb_net_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К сети", callback_data=NetworkCb(action="menu"))
     await callback.message.edit_text(
         "❌ Рассылка отменена.", reply_markup=kb.as_markup()
     )
-    await callback.answer()
 
 
 # ── Clone Settings (ENTERPRISE) ───────────────────────────────────────────────

@@ -62,6 +62,7 @@ async def cb_bc_menu(
 async def cb_compose(
     callback: CallbackQuery, callback_data: BroadcastCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(Broadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -79,7 +80,6 @@ async def cb_compose(
         parse_mode="HTML",
         reply_markup=_bc_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.message(Broadcast.waiting_message)
@@ -225,13 +225,13 @@ async def cb_test(
 async def cb_add_button(
     callback: CallbackQuery, callback_data: BroadcastCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(Broadcast.waiting_button_text)
     await callback.message.edit_text(
         "🔗 <b>Добавить кнопку к рассылке</b>\n\nВведите текст кнопки:",
         parse_mode="HTML",
         reply_markup=_bc_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.message(Broadcast.waiting_button_text, F.text)

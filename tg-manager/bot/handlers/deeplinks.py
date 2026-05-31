@@ -108,6 +108,7 @@ async def cb_dl_view(
 async def cb_dl_create(
     callback: CallbackQuery, callback_data: DeepLinkCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(CreateDeepLink.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -117,7 +118,6 @@ async def cb_dl_create(
         parse_mode="HTML",
         reply_markup=_dl_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.message(CreateDeepLink.waiting_name, F.text)
@@ -188,6 +188,7 @@ async def cb_dl_delete(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
 
+    await callback.answer("🗑 Диплинк удалён.")
     await db.delete_deep_link(pool, callback_data.link_id, callback_data.bot_id)
     links = await db.get_deep_links(pool, callback_data.bot_id)
     total_refs = await db.get_referral_total(pool, callback_data.bot_id)
@@ -196,14 +197,13 @@ async def cb_dl_delete(
         parse_mode="HTML",
         reply_markup=deeplinks_menu(callback_data.bot_id, links),
     )
-    await callback.answer("🗑 Диплинк удалён.")
 
 
 @router.callback_query(DeepLinkCb.filter(F.action == "leaders"))
 async def cb_dl_leaders(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-
+    await callback.answer()
     leaders = await db.get_referral_leaderboard(pool, callback_data.bot_id, limit=10)
     total = await db.get_referral_total(pool, callback_data.bot_id)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -228,4 +228,3 @@ async def cb_dl_leaders(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()

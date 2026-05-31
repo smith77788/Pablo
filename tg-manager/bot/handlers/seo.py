@@ -264,6 +264,7 @@ async def cb_seo_keywords(callback: CallbackQuery, callback_data: SeoCb,
 
 @router.callback_query(SeoCb.filter(F.action == "tips"))
 async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
+    await callback.answer()
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Запустить анализ",
               callback_data=SeoCb(action="analyze", bot_id=callback_data.bot_id))
@@ -297,7 +298,6 @@ async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 # ══════════════════════════════════════════════════════════════════

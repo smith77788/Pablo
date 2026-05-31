@@ -280,10 +280,10 @@ async def cb_net_bc_confirm(
 
 @router.callback_query(NetBcCb.filter(F.action == "cancel"))
 async def cb_net_bc_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
     await callback.message.edit_text(
         "❌ Рассылка отменена.", reply_markup=kb.as_markup()
     )
-    await callback.answer()
