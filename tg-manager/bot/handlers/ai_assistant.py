@@ -5,6 +5,7 @@ ACTION-инструменты запрашивают подтверждение 
 """
 
 from __future__ import annotations
+import asyncio
 import json
 import logging
 import os
@@ -18,7 +19,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import AiCb
+from bot.callbacks import AiCb, BmCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
@@ -537,6 +538,9 @@ async def _call_openrouter(
                     max_tokens,
                     type(e).__name__,
                 )
+                # Small delay before trying next model to avoid hammering the API
+                retry_delay = 2.0 if "429" in err_str or "rate" in err_str or "limit" in err_str else 0.5
+                await asyncio.sleep(retry_delay)
                 continue
             log.exception("OpenRouter API error with model %s: %s", model, e)
             return (
@@ -573,7 +577,18 @@ async def _process_ai_turn(
     messages.append({"role": "user", "content": user_content})
     thinking = await message.answer(thinking_text, parse_mode="HTML")
 
-    reply = await _call_openrouter(messages, pool, message.from_user.id, http)
+    try:
+        reply = await asyncio.wait_for(
+            _call_openrouter(messages, pool, message.from_user.id, http),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        await thinking.edit_text(
+            "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
+            "Все модели заняты или перегружены. Попробуйте через 1-2 минуты.",
+            parse_mode="HTML",
+        )
+        return
 
     if isinstance(reply, dict) and reply.get("__pending__"):
         # AI wants to perform an action — show confirmation
@@ -637,6 +652,16 @@ async def _process_ai_turn(
         str_reply = reply if isinstance(reply, str) else str(reply)
         messages.append({"role": "assistant", "content": str_reply})
         await state.update_data(messages=messages, turns=turns + 1)
+
+        if "AI-ассистент временно недоступен" in str_reply:
+            kb = InlineKeyboardBuilder()
+            kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
+            kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
+            kb.adjust(2)
+            await _edit_or_answer_long(
+                thinking, message, str_reply, reply_markup=kb.as_markup()
+            )
+            return
 
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
@@ -736,6 +761,55 @@ async def cb_ai_cancel_action(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.message.edit_text(
         "❌ Действие отменено. Можете задать новый вопрос или задачу.",
         reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AiCb.filter(F.action == "retry"))
+async def cb_ai_retry(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    messages: list = data.get("messages", [])
+    if not messages:
+        await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.")
+        return
+    # Find last user message
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    if not last_user:
+        await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.")
+        return
+    # Remove last assistant message if present so we don't duplicate it
+    retry_messages = messages[:-1] if messages[-1].get("role") == "assistant" else messages
+    await callback.message.edit_text("⏳ <b>Повторяю запрос...</b>", parse_mode="HTML")
+    try:
+        reply = await asyncio.wait_for(
+            _call_openrouter(retry_messages, pool, callback.from_user.id, http),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        await callback.message.edit_text(
+            "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
+            "Все модели заняты или перегружены. Попробуйте через 1-2 минуты.",
+            parse_mode="HTML",
+        )
+        return
+    if isinstance(reply, str):
+        str_reply = reply
+    else:
+        str_reply = str(reply)
+    kb = InlineKeyboardBuilder()
+    if "AI-ассистент временно недоступен" in str_reply:
+        kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
+        kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
+        kb.adjust(2)
+    else:
+        kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
+    await callback.message.edit_text(
+        str_reply[:4000], parse_mode="HTML", reply_markup=kb.as_markup()
     )
 
 

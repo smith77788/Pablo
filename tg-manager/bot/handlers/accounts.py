@@ -87,6 +87,7 @@ class SessionImport(StatesGroup):
     waiting_string_session = State()
     waiting_pyrogram_json = State()
     waiting_tdata_zip = State()
+    waiting_session_file = State()   # загрузка .session файла
     waiting_batch_sessions = State()
     waiting_batch_confirm = State()
 
@@ -2046,6 +2047,7 @@ async def cb_import_menu(
     kb.button(text="🔑 String Session (Telethon)",  callback_data=AccCb(action="import_string"))
     kb.button(text="📄 Session JSON (Pyrogram)",    callback_data=AccCb(action="import_pyrogram"))
     kb.button(text="📦 tdata (ZIP-архив)",          callback_data=AccCb(action="import_tdata"))
+    kb.button(text="📂 Session файл (.session)",    callback_data=AccCb(action="import_session_file"))
     kb.button(text="📋 Батч-импорт (несколько)",   callback_data=AccCb(action="import_batch"))
     kb.button(text="◀️ Мои аккаунты",              callback_data=AccCb(action="menu"))
     kb.adjust(1)
@@ -2182,6 +2184,13 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
         await message.answer("❌ Ожидается ZIP-архив. Упакуйте папку tdata в .zip и отправьте снова.")
         return
 
+    # Дебаунс: если уже обрабатываем — игнорируем повторную отправку
+    sd = await state.get_data()
+    if sd.get("tdata_processing"):
+        await message.answer("⏳ Уже обрабатываю предыдущий файл, подождите...")
+        return
+    await state.update_data(tdata_processing=True)
+
     msg = await message.answer("⏳ Загружаю архив...")
 
     tmp_dir = tempfile.mkdtemp(prefix="tdata_import_")
@@ -2234,11 +2243,19 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
             session_str, info = await import_from_tdata(tdata_path)
         except ImportError:
             await state.clear()
+            kb = InlineKeyboardBuilder()
+            kb.button(text="🔑 Импорт через String Session", callback_data=AccCb(action="import_string"))
+            kb.button(text="📂 Импорт .session файла",       callback_data=AccCb(action="import_session_file"))
+            kb.button(text="◀️ Назад",                        callback_data=AccCb(action="import_menu"))
+            kb.adjust(1)
             await msg.edit_text(
-                "❌ <b>Конвертация tdata временно недоступна</b>\n\n"
-                "Пакет <code>opentele</code> не установлен на сервере.\n"
-                "Используйте импорт через строку сессии Telethon вместо tdata.",
+                "❌ <b>tdata импорт недоступен</b>\n\n"
+                "Пакет <code>opentele</code> не установлен на сервере.\n\n"
+                "<b>Альтернативные способы импорта:</b>\n"
+                "• <b>String Session</b> — скопируйте строку сессии из вашего скрипта\n"
+                "• <b>.session файл</b> — загрузите SQLite-файл Telethon напрямую",
                 parse_mode="HTML",
+                reply_markup=kb.as_markup(),
             )
             return
         except Exception as exc:
@@ -2249,6 +2266,7 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
             )
             return
     finally:
+        await state.update_data(tdata_processing=False)
         # Always clean up temp files
         import shutil
         try:
@@ -2267,6 +2285,84 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
 async def handle_import_tdata_wrong_type(message: Message) -> None:
     await message.answer(
         "⚠️ Отправьте ZIP-файл как документ (не фото, не текст).\n\n"
+        "Используйте вложение → Файл при отправке."
+    )
+
+
+# ── Import: .session file (Telethon SQLite) ───────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "import_session_file"))
+async def cb_import_session_file(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(SessionImport.waiting_session_file)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
+    await callback.message.edit_text(
+        "📂 <b>Импорт .session файла (Telethon)</b>\n\n"
+        "Отправьте файл <code>.session</code> — это SQLite-база которую создаёт Telethon.\n\n"
+        "<b>Где найти:</b>\n"
+        "• В директории вашего Python-скрипта с Telethon\n"
+        "• Файл называется как номер телефона или любое другое имя с расширением <code>.session</code>\n\n"
+        "⚠️ Максимальный размер: <b>1 МБ</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(SessionImport.waiting_session_file, F.document)
+async def handle_import_session_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    from services.account_manager import import_from_session_file
+
+    doc = message.document
+    if not doc:
+        await message.answer("⚠️ Отправьте .session файл как документ.")
+        return
+
+    filename = (doc.file_name or "").lower()
+    if not filename.endswith(".session"):
+        await state.clear()
+        await message.answer(
+            "❌ Ожидается файл с расширением <code>.session</code>.\n"
+            "Убедитесь что отправляете правильный файл.",
+            parse_mode="HTML",
+        )
+        return
+
+    if doc.file_size and doc.file_size > 1_048_576:
+        await state.clear()
+        await message.answer("❌ Файл слишком большой. Максимум 1 МБ.")
+        return
+
+    msg = await message.answer("⏳ Читаю .session файл...")
+    try:
+        file_info = await message.bot.get_file(doc.file_id)
+        downloaded = await message.bot.download_file(file_info.file_path)
+        raw_bytes = downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
+    except Exception as e:
+        await state.clear()
+        await msg.edit_text(f"❌ Не удалось скачать файл: {escape(str(e)[:200])}", parse_mode="HTML")
+        return
+
+    await msg.edit_text("⏳ Конвертирую .session → StringSession...")
+    try:
+        session_str, info = await import_from_session_file(raw_bytes, filename)
+    except Exception as exc:
+        await state.clear()
+        await msg.edit_text(
+            f"❌ <b>Ошибка чтения .session файла</b>\n\n"
+            f"<code>{escape(str(exc)[:300])}</code>\n\n"
+            "Убедитесь что файл является валидным Telethon .session файлом.",
+            parse_mode="HTML",
+        )
+        return
+
+    await _finalize_import(message, pool, state, session_str, info)
+
+
+@router.message(SessionImport.waiting_session_file)
+async def handle_import_session_file_wrong_type(message: Message) -> None:
+    await message.answer(
+        "⚠️ Отправьте .session файл как документ (не фото, не текст).\n\n"
         "Используйте вложение → Файл при отправке."
     )
 
