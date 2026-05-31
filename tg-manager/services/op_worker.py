@@ -804,7 +804,7 @@ async def _exec_global_presence_channel(
             # ── Почитай daily rhythm и избегай ночных часов пиков ──
             tod_factor = session_simulator.time_of_day_factor()  # 2-5x at night, 0.75x at peak
             chaos = session_simulator.chaos_factor()  # 0.7-1.3
-            jitter = session_simulator.micro_jitter()  # ±10% микро-шум
+            jitter = session_simulator.chaos_factor(1.0, 0.1)  # ±10% микро-шум (sync float)
 
             if i % 5 == 4:
                 # Длинная пауза каждые 5 операций (имитация человеческого перерыва)
@@ -847,6 +847,12 @@ async def _exec_global_presence_bot(
         return {"status": "failed", "reason": f"plan {plan_id} not found"}
 
     account_selection = plan["account_selection"] or {}
+    if isinstance(account_selection, str):
+        import json as _json
+        try:
+            account_selection = _json.loads(account_selection)
+        except Exception:
+            account_selection = {}
     selected_acc_ids = account_selection.get("account_ids") or []
 
     accounts = []

@@ -594,9 +594,10 @@ async def msg_gp_custom_geo_file(
         parse_mode="HTML",
     )
 
+    _msg = message
     class FakeCallback:
-        from_user = message.from_user
-        message = message
+        from_user = _msg.from_user
+        message = _msg
         async def answer(self, *a, **kw): pass
 
     await _show_accounts_step(FakeCallback(), state, pool, page=0, send_new=True, original_message=message)
@@ -617,9 +618,10 @@ async def msg_gp_custom_geo(
     await state.update_data(geo_preset="custom", geo_list=geo_list)
     await state.set_state(GlobalPresenceFSM.choosing_accounts)
 
+    _msg = message
     class FakeCallback:
-        from_user = message.from_user
-        message = message
+        from_user = _msg.from_user
+        message = _msg
         async def answer(self, *a, **kw): pass
 
     await _show_accounts_step(FakeCallback(), state, pool, page=0, send_new=True, original_message=message)

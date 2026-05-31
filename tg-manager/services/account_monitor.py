@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import asyncpg
 from aiogram import Bot
@@ -15,6 +16,10 @@ _INTERVAL = 3600        # check every hour
 _MIN_ACCOUNTS = 2       # alert threshold
 _LOW_TRUST_THRESHOLD = 0.3   # trust_score below this triggers alert
 _STALE_RUNNING_HOURS = 3     # running ops older than this are considered stuck
+_ALERT_COOLDOWN = 86400      # 24h between repeated low-account alerts per owner
+
+# In-memory cooldown: owner_id → last_alert_ts
+_low_account_alerted: dict[int, float] = {}
 
 
 async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -32,9 +37,14 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
     if not rows:
         return
 
+    now = time.time()
     for row in rows:
         owner_id = row["owner_id"]
         active_count = row["active_count"]
+        last_sent = _low_account_alerted.get(owner_id, 0)
+        if now - last_sent < _ALERT_COOLDOWN:
+            continue
+        _low_account_alerted[owner_id] = now
         await db.notify_if_enabled(
             pool, bot, owner_id, "flood_warning",
             f"⚠️ <b>Внимание: мало активных аккаунтов</b>\n\n"
