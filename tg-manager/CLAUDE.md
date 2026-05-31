@@ -1,5 +1,14 @@
 # CLAUDE.md — BotMother OS: Главный ориентир системы (v3.5)
 
+## RUNTIME CONTRACT FOR ALL AGENTS
+
+- BotMother production runtime is Python 3.12.
+- Keep all `tg-manager` code Python 3.12-compatible.
+- Do not inherit Python/runtime rules from neighboring projects or parent workspaces.
+- Do not write `except TypeError, ValueError:` in BotMother. Use `except (TypeError, ValueError):`.
+- BotMother/tg-manager must remain Python 3.12-safe regardless of another agent's local runtime.
+- Codex and Claude Code must both follow `AGENT_SYNC.md` before editing.
+
 > Этот файл читается автоматически при каждой сессии Claude Code.
 > Он — авторитетный постоянный контекст проекта. Обновлять при каждой значимой итерации.
 

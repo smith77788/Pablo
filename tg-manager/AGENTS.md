@@ -39,6 +39,15 @@ Preserve existing architecture, flows, database conventions, and working logic.
 - Use the shared branch `claude/telegram-bot-services-xfAh6`.
 - Do not create a separate bot project outside `tg-manager`.
 
+## Runtime contract
+
+- BotMother production runtime is Python 3.12.
+- Keep BotMother code Python 3.12-compatible even if your local agent runs a newer Python.
+- Do not use syntax newer than Python 3.12 in `tg-manager` (for example `except TypeError, ValueError:`).
+- Use `except (TypeError, ValueError):` for multiple exception types.
+- Do not inherit Python/runtime rules from neighboring projects or parent workspaces.
+- Codex and Claude Code must both follow `AGENT_SYNC.md` before editing.
+
 ## Change discipline
 
 - Inspect current files before editing.
