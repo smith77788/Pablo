@@ -1038,14 +1038,14 @@ async def _exec_bulk_create_channels(
                 acc["session_str"], title, about=about, _acc=acc
             )
 
-        if isinstance(result, dict) and result.get("id"):
-            ch_id = result["id"]
+        if isinstance(result, dict) and result.get("channel_id") and not result.get("error"):
+            ch_id = result["channel_id"]
             # Save to managed_channels
             await pool.execute(
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
                    VALUES($1,$2,$3,$4,$5)
                    ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
-                owner_id, acc_id, ch_id, title, username or None,
+                owner_id, acc["id"], ch_id, title, username or None,
             )
             # Set username if pattern provided
             if username:

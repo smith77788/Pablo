@@ -1694,7 +1694,8 @@ async def cb_behavioral(
             }
             for r in rows:
                 try:
-                    meta = _json.loads(r["meta"]) if r["meta"] else {}
+                    raw = r["meta"]
+                    meta = raw if isinstance(raw, dict) else (_json.loads(raw) if raw else {})
                 except Exception:
                     log_exc_swallow(log, "Не удалось распарсить meta JSON аномалии")
                     meta = {}
