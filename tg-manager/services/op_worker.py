@@ -164,6 +164,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     op_type = row["op_type"]
     params = row["params"] if isinstance(row["params"], dict) else json.loads(row["params"] or "{}")
 
+    # Skip operations waiting for user approval
+    if row.get("requires_approval") and row.get("status") == "waiting_approval":
+        async with _active_lock:
+            _active_op_ids.discard(op_id)
+        return
+
     try:
         # Уведомить пользователя о старте
         try:

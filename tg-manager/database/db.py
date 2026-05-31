@@ -2706,3 +2706,36 @@ async def delete_presence_pack(pool: asyncpg.Pool, pack_id: int, owner_id: int) 
     await pool.execute(
         "DELETE FROM presence_packs WHERE id=$1 AND owner_id=$2", pack_id, owner_id
     )
+
+
+async def enqueue_op_with_approval(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    op_type: str,
+    params: dict,
+    total_items: int,
+    threshold: int = 20,
+) -> int:
+    """Enqueue operation. If total_items > threshold, set requires_approval=TRUE."""
+    import json as _json
+    needs_approval = total_items > threshold
+    status = "waiting_approval" if needs_approval else "pending"
+    row = await pool.fetchrow(
+        """INSERT INTO operation_queue
+           (owner_id, op_type, params, total_items, status, requires_approval, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,now()) RETURNING id""",
+        owner_id, op_type,
+        _json.dumps(params) if isinstance(params, dict) else params,
+        total_items, status, needs_approval,
+    )
+    return row["id"]
+
+
+async def get_pending_approvals(pool: asyncpg.Pool, owner_id: int) -> list:
+    return await pool.fetch(
+        """SELECT id, op_type, total_items, created_at
+           FROM operation_queue
+           WHERE owner_id=$1 AND status='waiting_approval'
+           ORDER BY created_at DESC LIMIT 10""",
+        owner_id,
+    )

@@ -62,6 +62,7 @@ from bot.handlers import strike as strike_handler
 from bot.handlers import active_tasks as active_tasks_handler
 from bot.handlers import topology as topology_handler
 from bot.handlers import presence_pack as presence_pack_handler
+from bot.handlers import approval_flow as approval_flow_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -191,6 +192,7 @@ async def main() -> None:
     dp.include_router(dm_campaigns_handler.router)
     dp.include_router(strike_handler.router)
     dp.include_router(active_tasks_handler.router)
+    dp.include_router(approval_flow_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)

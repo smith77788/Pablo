@@ -349,3 +349,8 @@ class BotAdminCb(CallbackData, prefix="badm"):
     reply_id: int = 0
 
 
+class ApprovalCb(CallbackData, prefix="appr"):
+    action: str   # "confirm", "cancel"
+    op_id: int = 0
+
+
