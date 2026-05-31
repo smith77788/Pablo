@@ -51,6 +51,7 @@ async def cb_templates_list(
 async def cb_template_add(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(AddTemplate.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -58,7 +59,6 @@ async def cb_template_add(
         "Введите название шаблона (например: <i>Акция</i>, <i>Приветствие</i>):",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(AddTemplate.waiting_name, F.text)

@@ -171,6 +171,7 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "trig_keyword"))
 async def cb_fn_trig_keyword(callback: CallbackQuery, callback_data: FunnelCb,
                               state: FSMContext) -> None:
+    await callback.answer()
     data = await state.get_data()
     bot_id = callback_data.bot_id or data.get("bot_id", 0)
     await state.update_data(bot_id=bot_id)
@@ -180,7 +181,6 @@ async def cb_fn_trig_keyword(callback: CallbackQuery, callback_data: FunnelCb,
         parse_mode="HTML",
         reply_markup=_fn_back_cancel_kb(bot_id, "create"),
     )
-    await callback.answer()
 
 
 @router.message(CreateFunnel.waiting_keyword, F.text)
@@ -215,6 +215,7 @@ async def msg_fn_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool
 @router.callback_query(FunnelCb.filter(F.action == "add_step"))
 async def cb_fn_add_step(callback: CallbackQuery, callback_data: FunnelCb,
                          state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(CreateFunnel.waiting_step_text)
     await state.update_data(
         bot_id=callback_data.bot_id,
@@ -229,7 +230,6 @@ async def cb_fn_add_step(callback: CallbackQuery, callback_data: FunnelCb,
         parse_mode="HTML",
         reply_markup=_fn_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.message(CreateFunnel.waiting_step_text, F.text)
@@ -317,6 +317,7 @@ async def cb_fn_toggle(callback: CallbackQuery, callback_data: FunnelCb,
 @router.callback_query(FunnelCb.filter(F.action == "delete"))
 async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
                        pool: asyncpg.Pool) -> None:
+    await callback.answer("🗑 Цепочка удалена.")
     await db.delete_funnel(pool, callback_data.funnel_id, callback_data.bot_id)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     funnels = await db.get_funnels(pool, callback_data.bot_id)
@@ -328,7 +329,6 @@ async def cb_fn_delete(callback: CallbackQuery, callback_data: FunnelCb,
         parse_mode="HTML",
         reply_markup=funnels_list(callback_data.bot_id, funnels),
     )
-    await callback.answer("🗑 Цепочка удалена.")
 
 
 # ── Broadcast to funnel subscribers ───────────────────────────────────────

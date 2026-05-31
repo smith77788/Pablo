@@ -72,6 +72,7 @@ async def cb_ar_add(callback: CallbackQuery, callback_data: AutoReplyCb,
 @router.callback_query(AutoReplyCb.filter(F.action == "trig_start"))
 async def cb_trig_start(callback: CallbackQuery, callback_data: AutoReplyCb,
                         state: FSMContext) -> None:
+    await callback.answer()
     await state.update_data(trigger_type="start", keyword=None)
     await state.set_state(AddAutoReply.waiting_text)
     await callback.message.edit_text(
@@ -79,12 +80,12 @@ async def cb_trig_start(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "trig_keyword"))
 async def cb_trig_keyword(callback: CallbackQuery, callback_data: AutoReplyCb,
                           state: FSMContext) -> None:
+    await callback.answer()
     await state.update_data(trigger_type="keyword")
     await state.set_state(AddAutoReply.waiting_keyword)
     await callback.message.edit_text(
@@ -98,12 +99,12 @@ async def cb_trig_keyword(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "trig_any"))
 async def cb_trig_any(callback: CallbackQuery, callback_data: AutoReplyCb,
                       state: FSMContext) -> None:
+    await callback.answer()
     await state.update_data(trigger_type="any", keyword=None)
     await state.set_state(AddAutoReply.waiting_text)
     await callback.message.edit_text(
@@ -111,7 +112,6 @@ async def cb_trig_any(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=_ar_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.message(AddAutoReply.waiting_keyword, F.text)

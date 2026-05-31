@@ -69,6 +69,7 @@ async def cb_schedule_menu(
 async def cb_schedule_create(
     callback: CallbackQuery, callback_data: ScheduleCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(ScheduleBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
@@ -79,7 +80,6 @@ async def cb_schedule_create(
         parse_mode="HTML",
         reply_markup=_sch_cancel_kb(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 @router.message(ScheduleBroadcast.waiting_message)
