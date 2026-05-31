@@ -441,7 +441,7 @@ async def cb_rank_check_now(
     account: asyncpg.Record | None = None
     try:
         account = await pool.fetchrow(
-            "SELECT id, session_str FROM tg_accounts "
+            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active=TRUE "
             "ORDER BY last_used ASC NULLS FIRST LIMIT 1",
             owner_id,

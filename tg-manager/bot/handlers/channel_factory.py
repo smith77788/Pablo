@@ -564,7 +564,8 @@ async def cb_chanf_do_create(
         )
         return
     acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT id, session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         acc_id, callback.from_user.id,
     )
     if not acc:
@@ -580,7 +581,7 @@ async def cb_chanf_do_create(
         acc["session_str"],
         title=data["title"],
         about=data.get("about", ""),
-        _acc=acc,
+        _acc=dict(acc),
     )
 
     if "error" in result:
@@ -794,7 +795,8 @@ async def cb_chanf_do_bulk_create(
     about = data.get("about", "")
 
     acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT id, session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         acc_id, callback.from_user.id,
     )
     if not acc:
@@ -804,6 +806,7 @@ async def cb_chanf_do_bulk_create(
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
+    acc = dict(acc)
 
     from services import account_manager
     results_ok: list[str] = []

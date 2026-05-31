@@ -310,7 +310,7 @@ async def _show_preview(
     total_channels = 0
     acc_count = 0
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
         callback.from_user.id,
         acc_ids,
@@ -376,7 +376,7 @@ async def cb_mpub_confirm_send(
     post_text: str = data.get("post_text", "")
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
         callback.from_user.id,
         acc_ids,
