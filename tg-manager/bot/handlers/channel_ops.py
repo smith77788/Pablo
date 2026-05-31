@@ -1926,12 +1926,12 @@ async def cb_members_kick(
 @router.message(InviteUsersFSM.waiting_channel_id)
 async def fsm_kick_user_id(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
-    await state.clear()
     try:
         user_id = int((message.text or "").strip())
     except ValueError:
         await message.answer("⚠️ Введите числовой Telegram ID.")
         return
+    await state.clear()
     acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
     if not acc:
         await message.answer("⚠️ Аккаунт не найден.")
@@ -3475,7 +3475,7 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
         attempt = 0
         for i, acc in enumerate(accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
-            actual_value = f"{value}{i+1}" if field == "username" and i > 0 else value
+            actual_value = f"{value}{i+1}" if field == "username" else value
             try:
                 if field == "username":
                     result = await account_manager.update_account_username(acc["session_str"], actual_value, _acc=dict(acc))
@@ -4151,10 +4151,12 @@ async def cb_my_chans_leave(
 ) -> None:
     await callback.answer()
     data = await state.get_data()
+    acc = None
     session = data.get("my_chans_session")
     if not session:
         acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            "SELECT id, session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
             callback_data.acc_id, callback.from_user.id,
         )
         session = acc["session_str"] if acc else None
@@ -4163,7 +4165,7 @@ async def cb_my_chans_leave(
         return
     from services import account_manager
     progress = await callback.message.edit_text("⏳ Покидаю канал...", parse_mode="HTML")
-    ok = await account_manager.leave_channel(session, str(callback_data.channel_id), _acc=acc)
+    ok = await account_manager.leave_channel(session, str(callback_data.channel_id), _acc=dict(acc) if acc else None)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку", callback_data=ChanCb(action="my_chans_page", page=0, acc_id=callback_data.acc_id))
     await progress.edit_text(

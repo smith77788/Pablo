@@ -210,11 +210,11 @@ async def _show_accounts_menu(
 
     # Filter display
     if status_filter == "active":
-        shown = [a for a in all_accounts if (a.get("acc_status") or "active") == "active" and a.get("is_active", True)]
+        shown = [a for a in (all_accounts or []) if (a.get("acc_status") or "active") == "active" and a.get("is_active", True)]
     elif status_filter == "problem":
-        shown = [a for a in all_accounts if (a.get("acc_status") or "active") != "active" or not a.get("is_active", True)]
+        shown = [a for a in (all_accounts or []) if (a.get("acc_status") or "active") != "active" or not a.get("is_active", True)]
     else:
-        shown = list(all_accounts)
+        shown = list(all_accounts or [])
 
     kb = InlineKeyboardBuilder()
 
@@ -371,6 +371,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
                 parse_mode="HTML",
             )
         elif "TG_API_ID" in err or "TG_API_HASH" in err:
+            await state.clear()
             await message.answer(
                 "⚙️ <b>API-ключи не настроены.</b>\n\n"
                 "Обратитесь к администратору платформы — "
@@ -378,6 +379,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
                 parse_mode="HTML",
             )
         else:
+            await state.clear()
             await message.answer(
                 f"❌ Ошибка при отправке кода: <code>{escape(err[:200])}</code>",
                 parse_mode="HTML",
@@ -444,6 +446,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
             )
             return
         except Exception as exc2:
+            await state.clear()
             await callback.message.answer(
                 f"❌ Не удалось выслать код: <code>{escape(str(exc2)[:200])}</code>",
                 parse_mode="HTML",
@@ -753,6 +756,7 @@ async def handle_code(message: Message, pool: asyncpg.Pool, state: FSMContext) -
                 reply_markup=_cancel_markup(),
             )
         else:
+            await state.clear()
             await message.answer(
                 f"❌ Ошибка подтверждения кода: <code>{escape(err[:200])}</code>",
                 parse_mode="HTML",
@@ -798,6 +802,7 @@ async def handle_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) ->
                 "❌ Неверный пароль 2FA. Попробуйте снова:"
             )
             return
+        await state.clear()
         await message.answer(
             f"❌ Ошибка 2FA: <code>{escape(err[:200])}</code>",
             parse_mode="HTML",
@@ -1655,7 +1660,7 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             continue
         try:
             result = await account_manager.check_account_status_full(
-                session_str, _acc=acc, check_spambot=False
+                session_str, _acc=dict(acc), check_spambot=False
             )
             if result.get("status") == "session_expired":
                 dead_ids.append(acc["id"])
@@ -1769,7 +1774,7 @@ async def cb_dialogs(
     # Загружаем на одну страницу больше, чтобы проверить наличие следующей
     fetch_limit = _DIALOGS_PAGE_SIZE + 1
     try:
-        dialogs = await get_dialogs(session_str, limit=fetch_limit + page_offset, offset=0)
+        dialogs = await get_dialogs(session_str, limit=fetch_limit + page_offset, offset=0, _acc=dict(acc))
     except Exception as exc:
         err = str(exc)
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
@@ -1983,7 +1988,7 @@ async def handle_send_msg_text(
 
     await message.answer("⏳ Отправляю сообщение…")
 
-    ok = await send_message_via_account(session_str, chat_id, text)
+    ok = await send_message_via_account(session_str, chat_id, text, _acc=dict(acc))
 
     await state.clear()
 
@@ -2083,6 +2088,7 @@ async def handle_import_string(message: Message, state: FSMContext, pool: asyncp
     try:
         session_str, info = await import_from_session_string(session_str)
     except Exception as exc:
+        await state.clear()
         await msg.edit_text(
             f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
             "Проверьте строку сессии и попробуйте снова.",
@@ -2119,6 +2125,7 @@ async def handle_import_pyrogram(message: Message, state: FSMContext, pool: asyn
     try:
         session_str, info = await import_from_pyrogram_json(json_str)
     except Exception as exc:
+        await state.clear()
         await msg.edit_text(
             f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
             "Проверьте JSON и попробуйте снова.",
@@ -2251,6 +2258,9 @@ async def handle_import_tdata(message: Message, state: FSMContext, pool: asyncpg
 
     if session_str and info:
         await _finalize_import(message, pool, state, session_str, info)
+    else:
+        await state.clear()
+        await message.answer("❌ Конвертация завершилась без результата. Попробуйте снова.")
 
 
 @router.message(SessionImport.waiting_tdata_zip)
@@ -2579,6 +2589,7 @@ async def _show_validation_report(
 
     if not valid:
         lines.append("\n❌ Нет валидных сессий для импорта.")
+        await state.clear()
         kb = InlineKeyboardBuilder()
         kb.button(text="📋 Ещё батч-импорт", callback_data=AccCb(action="import_batch"))
         kb.adjust(1)
