@@ -291,6 +291,7 @@ class StrikePlan:
     waves: list[list[dict]] = field(default_factory=list)  # аккаунты по волнам
     started_at: float = 0.0
     phase: str = "init"
+    mode: str = "normal"   # fast | normal | maximum
 
 
 @dataclass
@@ -411,9 +412,11 @@ async def _one_account_strike(
     acc_index: int,
     wave_num: int,
     sem: asyncio.Semaphore,
+    mode: str = "normal",
 ) -> dict:
     """
-    Один аккаунт выполняет полную 12-векторную атаку.
+    Один аккаунт выполняет полную атаку.
+    Режим задаёт набор векторов: fast (6), normal (12), maximum (12+).
     С задержкой на основе позиции в волне (staggered start).
     С ретраями при FloodWait.
     """
@@ -426,6 +429,29 @@ async def _one_account_strike(
     text = texts[acc_index % len(texts)]
     msg_texts = assign_texts(preset or reason, 15)
 
+    if mode == "fast":
+        kwargs: dict = dict(
+            join_first=False, negative_react=False, report_admins=False,
+            report_linked_group=False, report_linked_bots=False,
+            forward_to_bot=False, block_after=False, multi_reason=True,
+            max_msg_reports=30, report_photo=True, report_pinned=True,
+        )
+    elif mode == "maximum":
+        kwargs = dict(
+            join_first=(wave_num == 0), negative_react=True, report_admins=True,
+            report_linked_group=(wave_num == 0), report_linked_bots=True,
+            forward_to_bot=(wave_num <= 1), block_after=(wave_num >= 2),
+            multi_reason=True, max_msg_reports=100, report_photo=True, report_pinned=True,
+        )
+    else:  # normal
+        kwargs = dict(
+            join_first=(wave_num == 0), negative_react=(wave_num <= 1),
+            report_admins=(wave_num <= 1), report_linked_group=(wave_num == 0),
+            report_linked_bots=True, forward_to_bot=(wave_num <= 1),
+            block_after=(wave_num >= 2), multi_reason=True,
+            max_msg_reports=60, report_photo=True, report_pinned=True,
+        )
+
     async with sem:
         for attempt in range(_MAX_RETRIES + 1):
             try:
@@ -433,19 +459,9 @@ async def _one_account_strike(
                     acc["session_str"], peer_username, reason,
                     message=text,
                     msg_messages=msg_texts,
-                    max_msg_reports=60,
-                    block_after=(wave_num >= 2),    # блокировать только в последней волне
-                    multi_reason=True,
-                    join_first=(wave_num == 0),      # входить только в первой волне
-                    negative_react=(wave_num <= 1),  # реакции в первых двух волнах
-                    report_admins=(wave_num <= 1),
-                    report_linked_bots=True,
-                    forward_to_bot=(wave_num <= 1),
-                    report_photo=True,
-                    report_pinned=True,
-                    report_linked_group=(wave_num == 0),
                     wave_num=wave_num,
                     _acc=acc,
+                    **kwargs,
                 )
                 # Добавляем метаданные аккаунта
                 result["_acc_id"] = acc.get("id")
@@ -502,7 +518,7 @@ async def staggered_strike(
             texts_w1 = assign_texts(plan.preset or plan.reason, len(plan.waves[0]))
             tasks = [
                 _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w1, i, 0, sem)
+                                    texts_w1, i, 0, sem, mode=plan.mode)
                 for i, acc in enumerate(plan.waves[0])
             ]
             wave_results = await asyncio.gather(*tasks)
@@ -521,7 +537,7 @@ async def staggered_strike(
             texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
             tasks = [
                 _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w2, i, 1, sem)
+                                    texts_w2, i, 1, sem, mode=plan.mode)
                 for i, acc in enumerate(plan.waves[1])
             ]
             w2_results = await asyncio.gather(*tasks)
@@ -541,7 +557,7 @@ async def staggered_strike(
             texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
             tasks = [
                 _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w3, i, 2, sem)
+                                    texts_w3, i, 2, sem, mode=plan.mode)
                 for i, acc in enumerate(plan.waves[2])
             ]
             w3_results = await asyncio.gather(*tasks)

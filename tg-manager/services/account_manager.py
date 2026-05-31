@@ -289,6 +289,65 @@ async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
 
     return await import_from_session_string(session_string)
 
+async def import_from_session_file(session_bytes: bytes, filename: str = "") -> tuple[str, dict]:
+    """Convert a Telethon .session SQLite file to StringSession.
+
+    The .session file is a SQLite database with a 'sessions' table:
+    dc_id INTEGER, server_address TEXT, port INTEGER, auth_key BLOB
+    """
+    import sqlite3
+    import struct
+    import base64
+    import tempfile
+    import os
+    from ipaddress import IPv4Address
+    from telethon.sessions import StringSession
+
+    # Write bytes to temp file for sqlite3 to open
+    tmp = tempfile.NamedTemporaryFile(suffix=".session", delete=False)
+    try:
+        tmp.write(session_bytes)
+        tmp.flush()
+        tmp.close()
+
+        try:
+            conn = sqlite3.connect(tmp.name)
+            cur = conn.execute(
+                "SELECT dc_id, server_address, port, auth_key FROM sessions LIMIT 1"
+            )
+            row = cur.fetchone()
+            conn.close()
+        except sqlite3.DatabaseError as e:
+            raise ValueError(f"Файл не является корректным .session файлом: {e}")
+
+        if not row:
+            raise ValueError("Таблица sessions пустая — сессия не авторизована.")
+
+        dc_id, server_address, port, auth_key_bytes = row
+        if not auth_key_bytes or len(auth_key_bytes) != 256:
+            raise ValueError(
+                f"Некорректный auth_key в сессии (длина: {len(auth_key_bytes) if auth_key_bytes else 0}, нужно 256)."
+            )
+
+        # Build StringSession in Telethon format (version 1)
+        try:
+            ip_bytes = IPv4Address(server_address).packed
+        except Exception:
+            DC_IPS = {1: "149.154.175.53", 2: "149.154.167.51",
+                      3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130"}
+            ip_bytes = IPv4Address(DC_IPS.get(dc_id, DC_IPS[2])).packed
+
+        packed = struct.pack(">B4sH256s", dc_id, ip_bytes, int(port or 443), bytes(auth_key_bytes))
+        session_string = "1" + base64.urlsafe_b64encode(packed).decode()
+
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    return await import_from_session_string(session_string)
+
 async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     """Convert a TDesktop tdata directory to Telethon StringSession via opentele."""
     try:

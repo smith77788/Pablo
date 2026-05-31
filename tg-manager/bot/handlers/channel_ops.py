@@ -2804,10 +2804,15 @@ async def _strike_bg_v2(
     try:
         await _progress("strike", f"Фаза 2-4: Эшелонированная атака — {len(peers)} целей, {len(viable)} аккаунтов")
 
+        # Загрузить режим пользователя
+        strike_mode_row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
+        strike_mode = (strike_mode_row["mode"] if strike_mode_row and strike_mode_row.get("mode") else "normal")
+
         plan = strike_engine.StrikePlan(
             targets=peers, accounts=viable, reason=reason, preset=preset,
             label=label, intel=all_intel, waves=waves,
             started_at=time.time(), phase="strike",
+            mode=strike_mode,
         )
         results = await strike_engine.staggered_strike(plan, progress_cb=_progress)
 

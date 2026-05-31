@@ -154,26 +154,61 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         await callback.answer("Нет доступа.", show_alert=True)
         return
     await callback.answer()
+
+    row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
+    current_mode = (row["mode"] if row and row["mode"] else "normal")
+
+    mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
+    mode_desc = {
+        "fast": "6 векторов · быстро · безопаснее для аккаунтов",
+        "normal": "12 векторов · стандартный баланс",
+        "maximum": "12 векторов + расширенное давление · максимальная интенсивность",
+    }
+    current_label = mode_labels.get(current_mode, "🔥 Нормальный")
+    current_desc = mode_desc.get(current_mode, "")
+
     kb = InlineKeyboardBuilder()
+    for m, label in mode_labels.items():
+        checked = "✅ " if m == current_mode else ""
+        kb.button(text=f"{checked}{label}", callback_data=StrikeCb(action=f"set_mode_{m}"))
     kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+    kb.adjust(1)
+
     await callback.message.edit_text(
-        "⚙️ <b>Настройки Strike</b>\n\n"
-        "Режим: <b>🔥 Максимальный (всегда)</b>\n\n"
-        "① Все доступные причины жалоб: <b>вкл</b>\n"
-        "② Жалоба на фото профиля: <b>вкл</b>\n"
-        "③ Вход → жалобы изнутри: <b>вкл</b>\n"
-        "④ Закреплённые сообщения: <b>вкл</b>\n"
-        "⑤ Последние 50 сообщений: <b>вкл</b>\n"
-        "⑥ channels.ReportSpam: <b>вкл</b>\n"
-        "⑦ Реакции 👎💩 на все посты: <b>вкл</b>\n"
-        "⑧ Жалобы на всех админов: <b>вкл</b>\n"
-        "⑨ Связанная группа обсуждений: <b>вкл</b>\n"
-        "⑩ Связанные боты: <b>вкл</b>\n"
-        "⑪ Forward в @stopCA / @notoscam: <b>вкл</b>\n"
-        "⑫ Заглушить + заблокировать + выйти: <b>вкл</b>" + _DISCLAIMER,
+        f"⚙️ <b>Настройки Strike — Режим</b>\n\n"
+        f"Текущий режим: <b>{current_label}</b>\n"
+        f"<i>{current_desc}</i>\n\n"
+        f"<b>⚡ Быстрый</b> — 6 векторов: ReportPeer + ReportPhoto + ReportPinned + ReportMessages. "
+        f"Не входит в канал, не реагирует, быстрее выполняется.\n\n"
+        f"<b>🔥 Нормальный</b> — 12 векторов по умолчанию: все виды жалоб, вход в канал, "
+        f"реакции 👎, жалобы на администраторов, пересылка в @SpamBot.\n\n"
+        f"<b>💀 Максимальный</b> — 12 векторов + усиленное давление: до 100 сообщений, "
+        f"все связанные ресурсы, максимальная интенсивность." + _DISCLAIMER,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+async def _set_strike_mode(callback: CallbackQuery, pool: asyncpg.Pool, mode: str) -> None:
+    await pool.execute("UPDATE strike_access SET mode=$1 WHERE user_id=$2", mode, callback.from_user.id)
+    mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
+    await callback.answer(f"✅ Режим: {mode_labels.get(mode, mode)}", show_alert=True)
+    await cb_strike_settings(callback, pool)
+
+
+@router.callback_query(StrikeCb.filter(F.action == "set_mode_fast"))
+async def cb_strike_set_mode_fast(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await _set_strike_mode(callback, pool, "fast")
+
+
+@router.callback_query(StrikeCb.filter(F.action == "set_mode_normal"))
+async def cb_strike_set_mode_normal(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await _set_strike_mode(callback, pool, "normal")
+
+
+@router.callback_query(StrikeCb.filter(F.action == "set_mode_maximum"))
+async def cb_strike_set_mode_maximum(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await _set_strike_mode(callback, pool, "maximum")
 
 
 # ── payment flow ──────────────────────────────────────────────────────────────
