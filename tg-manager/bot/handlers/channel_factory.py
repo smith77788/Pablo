@@ -166,7 +166,8 @@ async def cb_chanf_import_acc(
 ) -> None:
     """Step 2: загрузить каналы аккаунта и сохранить в систему."""
     acc = await pool.fetchrow(
-        "SELECT id, session_str, phone, first_name, username FROM tg_accounts "
+        "SELECT id, session_str, phone, first_name, username, "
+        "device_model, system_version, app_version FROM tg_accounts "
         "WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
@@ -1006,8 +1007,8 @@ async def cb_chanf_be_confirm(
         return
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone FROM tg_accounts "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
         callback.from_user.id, acc_ids,
     )
 
@@ -1188,7 +1189,8 @@ async def cb_chanf_stats_acc(
 ) -> None:
     """Step 2: load channel list for chosen account."""
     acc = await pool.fetchrow(
-        "SELECT id, session_str, first_name, phone, username "
+        "SELECT id, session_str, first_name, phone, username, "
+        "device_model, system_version, app_version "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
@@ -1234,7 +1236,8 @@ async def cb_chanf_stats_chan(
 ) -> None:
     """Step 3: show basic stats for the chosen channel."""
     acc = await pool.fetchrow(
-        "SELECT id, session_str, first_name, phone, username "
+        "SELECT id, session_str, first_name, phone, username, "
+        "device_model, system_version, app_version "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
