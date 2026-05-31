@@ -475,7 +475,12 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
                 dialogs.append({
                     "id": entity.id,
                     "title": entity.title,
-                    "type": "channel" if isinstance(entity, Channel) and getattr(entity, "broadcast", False) else "group",
+                    "type": (
+                        "channel" if isinstance(entity, Channel) and getattr(entity, "broadcast", False)
+                        else "megagroup" if isinstance(entity, Channel) and getattr(entity, "megagroup", False)
+                        else "supergroup" if isinstance(entity, Channel)
+                        else "group"
+                    ),
                     "members": getattr(entity, "participants_count", 0) or 0,
                     "username": getattr(entity, "username", "") or "",
                     "access_hash": getattr(entity, "access_hash", 0) or 0,

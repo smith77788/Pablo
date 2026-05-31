@@ -1076,6 +1076,7 @@ async def cb_plan_confirm(
         )
     except Exception as e:
         log.error("plan_confirm insert error: %s", e)
+        await state.clear()
         await callback.answer("Ошибка при создании задачи. Попробуйте снова.", show_alert=True)
         return
     await callback.answer()
@@ -1406,7 +1407,7 @@ async def cb_op_detail(
     if op["result"]:
         import json as _json
         try:
-            res = op["result"] if isinstance(op["result"], dict) else _json.loads(op["result"])
+            res = op["result"] if isinstance(op["result"], (dict, list)) else (_json.loads(op["result"]) if isinstance(op["result"], str) else {})
             summary = res.get("summary", "")
             if summary:
                 lines.append(f"\n✅ <b>Итог:</b> {html.escape(summary)}")
@@ -1695,7 +1696,7 @@ async def cb_behavioral(
             for r in rows:
                 try:
                     raw = r["meta"]
-                    meta = raw if isinstance(raw, dict) else (_json.loads(raw) if raw else {})
+                    meta = raw if isinstance(raw, (dict, list)) else (_json.loads(raw) if isinstance(raw, str) else {})
                 except Exception:
                     log_exc_swallow(log, "Не удалось распарсить meta JSON аномалии")
                     meta = {}

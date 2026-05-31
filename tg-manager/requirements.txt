@@ -10,4 +10,4 @@ aiohttp-socks>=0.7.3
 pypdf>=4.3.1
 python-docx>=1.1.2
 openpyxl>=3.1.5
-opentele>=1.15.1
+# opentele removed — pyaes fails to build on Python 3.13; tdata shows graceful error

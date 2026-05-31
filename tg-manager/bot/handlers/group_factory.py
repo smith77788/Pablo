@@ -37,8 +37,9 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
 # ── Menu ───────────────────────────────────────────────────────────────────
 
 @router.callback_query(GroupFCb.filter(F.action == "menu"))
-async def cb_group_menu(callback: CallbackQuery) -> None:
+async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Создать группу",        callback_data=GroupFCb(action="create"))
     kb.button(text="📥 Импорт из Telegram",    callback_data=GroupFCb(action="import"))
@@ -264,7 +265,7 @@ async def cb_group_do_create(
         return
 
     acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         acc_id, callback.from_user.id,
     )
     if not acc:
@@ -351,7 +352,7 @@ async def cb_group_list_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
@@ -464,7 +465,7 @@ async def cb_group_members_list(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         callback_data.acc_id, callback.from_user.id,
     )
     if not acc:
@@ -772,7 +773,7 @@ async def cb_group_do_announce(
         return
 
     acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         acc_id, callback.from_user.id,
     )
     if not acc:
