@@ -180,6 +180,7 @@ async def cb_multigeo_desc(
 async def cb_lang_name(
     callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(MultigeoEdit.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -188,7 +189,6 @@ async def cb_lang_name(
         "Отправьте <code>-</code> чтобы сбросить.",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(MultigeoEdit.waiting_name, F.text)
@@ -220,6 +220,7 @@ async def msg_multigeo_name(
 async def cb_lang_short(
     callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(MultigeoEdit.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -228,7 +229,6 @@ async def cb_lang_short(
         "Отправьте <code>-</code> чтобы сбросить.",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(MultigeoEdit.waiting_short, F.text)
@@ -260,6 +260,7 @@ async def msg_multigeo_short(
 async def cb_lang_desc(
     callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(MultigeoEdit.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
@@ -268,7 +269,6 @@ async def cb_lang_desc(
         "Отправьте <code>-</code> чтобы сбросить.",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(MultigeoEdit.waiting_desc, F.text)

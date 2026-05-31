@@ -161,6 +161,7 @@ async def cb_exp_create(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action.in_({"type_start", "type_reply"})))
 async def cb_exp_type(callback: CallbackQuery, callback_data: ExperimentCb,
                        state: FSMContext) -> None:
+    await callback.answer()
     exp_type = "start_message" if callback_data.action == "type_start" else "auto_reply"
     await state.update_data(exp_type=exp_type)
     await state.set_state(CreateExperiment.waiting_name)
@@ -172,7 +173,6 @@ async def cb_exp_type(callback: CallbackQuery, callback_data: ExperimentCb,
         parse_mode="HTML",
         reply_markup=cancel_kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.message(CreateExperiment.waiting_name, F.text)
@@ -236,6 +236,7 @@ async def msg_variant_content(message: Message, state: FSMContext, pool: asyncpg
 @router.callback_query(ExperimentCb.filter(F.action == "add_variant"))
 async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
                           state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(CreateExperiment.waiting_variant_name)
     await state.update_data(bot_id=callback_data.bot_id, exp_id=callback_data.exp_id)
     cancel_kb = InlineKeyboardBuilder()
@@ -245,7 +246,6 @@ async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
         parse_mode="HTML",
         reply_markup=cancel_kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "start"))
@@ -269,7 +269,7 @@ async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "pause"))
 async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
                         pool: asyncpg.Pool) -> None:
-
+    await callback.answer("⏸ Эксперимент приостановлен.")
     await db.set_experiment_status(pool, callback_data.exp_id, "paused")
     exp = await db.get_experiment(pool, callback_data.exp_id)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
@@ -278,13 +278,12 @@ async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
         text, parse_mode="HTML",
         reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "paused"),
     )
-    await callback.answer("⏸ Эксперимент приостановлен.")
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "resume"))
 async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
-
+    await callback.answer("▶️ Эксперимент возобновлён.")
     await db.set_experiment_status(pool, callback_data.exp_id, "active")
     exp = await db.get_experiment(pool, callback_data.exp_id)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
@@ -293,7 +292,6 @@ async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
         text, parse_mode="HTML",
         reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "active"),
     )
-    await callback.answer("▶️ Эксперимент возобновлён.")
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "pick_winner"))
@@ -316,7 +314,7 @@ async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "set_winner"))
 async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
-
+    await callback.answer("🏆 Победитель выбран! Эксперимент завершён.", show_alert=True)
     await pool.execute(
         "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
         callback_data.exp_id, callback_data.variant_id,
@@ -328,13 +326,12 @@ async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
         text, parse_mode="HTML",
         reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "completed"),
     )
-    await callback.answer("🏆 Победитель выбран! Эксперимент завершён.", show_alert=True)
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "delete"))
 async def cb_exp_delete(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
-
+    await callback.answer("🗑 Эксперимент удалён.")
     await db.delete_experiment(pool, callback_data.exp_id, callback_data.bot_id)
     exps = await db.get_experiments(pool, callback_data.bot_id)
     await callback.message.edit_text(
@@ -342,4 +339,3 @@ async def cb_exp_delete(callback: CallbackQuery, callback_data: ExperimentCb,
         parse_mode="HTML",
         reply_markup=experiments_menu(callback_data.bot_id, exps),
     )
-    await callback.answer("🗑 Эксперимент удалён.")

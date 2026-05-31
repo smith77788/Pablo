@@ -85,6 +85,7 @@ async def cb_engage_info(callback: CallbackQuery, callback_data: EngageCb) -> No
 async def cb_reactivate_cold(
     callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="cold")
     await callback.message.edit_text(
@@ -96,13 +97,13 @@ async def cb_reactivate_cold(
         "• «Соскучились по тебе! Возвращайся — специальное предложение ждёт»</i>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(EngageCb.filter(F.action == "reactivate_lost"))
 async def cb_reactivate_lost(
     callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="lost")
     await callback.message.edit_text(
@@ -114,7 +115,6 @@ async def cb_reactivate_lost(
         "• «Последний шанс! Не потеряй доступ к [название функции]»</i>",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(ReactivateBroadcast.waiting_message, F.text)
