@@ -573,8 +573,10 @@ async def staggered_strike(
 
         # ═══ Фаза: SpamBot escalation ═══
         spambot_result = await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
-        if spambot_result:
+        if isinstance(spambot_result, dict):
             result.spambot_escalation = spambot_result.get("status", "unknown")
+        elif spambot_result is True:
+            result.spambot_escalation = "sent"
         else:
             result.spambot_escalation = "skipped"
 

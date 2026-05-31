@@ -176,6 +176,19 @@ async def cb_multigeo_desc(
 # ── Per-language edit: name ───────────────────────────────────────────────
 
 
+@router.callback_query(MultigeoCb.filter(F.action == "cancel_fsm"))
+async def cb_multigeo_cancel_fsm(
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Отменено.",
+        parse_mode="HTML",
+        reply_markup=_after_save_markup(callback_data.bot_id),
+    )
+
+
 @router.callback_query(MultigeoCb.filter(F.action == "lang_name"))
 async def cb_lang_name(
     callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
@@ -184,10 +197,13 @@ async def cb_lang_name(
     await state.set_state(MultigeoEdit.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MultigeoCb(action="cancel_fsm", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         f"📝 Введите новое имя для языка <code>{lang_label}</code>.\n\n"
         "Отправьте <code>-</code> чтобы сбросить.",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -224,10 +240,13 @@ async def cb_lang_short(
     await state.set_state(MultigeoEdit.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MultigeoCb(action="cancel_fsm", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         f"📋 Введите краткое описание для языка <code>{lang_label}</code>.\n\n"
         "Отправьте <code>-</code> чтобы сбросить.",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -264,10 +283,13 @@ async def cb_lang_desc(
     await state.set_state(MultigeoEdit.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
     lang_label = (callback_data.lang or "").upper()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MultigeoCb(action="cancel_fsm", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         f"📄 Введите описание для языка <code>{lang_label}</code>.\n\n"
         "Отправьте <code>-</code> чтобы сбросить.",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

@@ -28,6 +28,7 @@ async def cb_note_edit(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
+    await callback.answer()
     raw_note = row.get("note") or "(нет заметки)"
     current = raw_note.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await state.set_state(EditNote.waiting_text)
@@ -42,7 +43,6 @@ async def cb_note_edit(
         "Отправьте новый текст заметки:",
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.message(EditNote.waiting_text, F.text)

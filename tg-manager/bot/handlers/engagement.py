@@ -88,6 +88,8 @@ async def cb_reactivate_cold(
     await callback.answer()
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="cold")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=EngageCb(action="cancel_fsm", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         "❄️ <b>Реактивация холодных (7–30 дн)</b>\n\n"
         "Пользователи не заходили от 7 до 30 дней.\n\n"
@@ -96,6 +98,7 @@ async def cb_reactivate_cold(
         "• «Привет! Давно не виделись 👋 У нас появилось кое-что новое!»\n"
         "• «Соскучились по тебе! Возвращайся — специальное предложение ждёт»</i>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -106,6 +109,8 @@ async def cb_reactivate_lost(
     await callback.answer()
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="lost")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=EngageCb(action="cancel_fsm", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         "💀 <b>Реактивация потерянных (30+ дн)</b>\n\n"
         "Пользователи не заходили более месяца.\n\n"
@@ -114,6 +119,19 @@ async def cb_reactivate_lost(
         "• «Давно не виделись! Мы изменились — загляни и убедись 🚀»\n"
         "• «Последний шанс! Не потеряй доступ к [название функции]»</i>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(EngageCb.filter(F.action == "cancel_fsm"))
+async def cb_engage_cancel_fsm(
+    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Отменено.",
+        reply_markup=back_to_bot(callback_data.bot_id),
     )
 
 

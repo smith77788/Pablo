@@ -132,7 +132,6 @@ async def cb_stats(
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=audience_menu(row["bot_id"])
     )
-    await callback.answer()
 
 
 @router.callback_query(AudCb.filter(F.action == "export"))
@@ -144,8 +143,6 @@ async def cb_export(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
-
     await callback.answer("⏳ Генерирую CSV…")
 
     rows = await db.get_audience_full(pool, row["bot_id"])
@@ -208,7 +205,6 @@ async def cb_scan(
     await callback.answer()
 
     await callback.message.edit_text("⚡ Сканирую все доступные апдейты…")
-    await callback.answer()
 
     from database import db as _db
     from services import bot_api as _api
@@ -282,7 +278,6 @@ async def cb_compare_result(
         parse_mode="HTML",
         reply_markup=back_to_bot(row_a["bot_id"]),
     )
-    await callback.answer()
 
 
 # ── Send to specific user ──────────────────────────────────────────────────

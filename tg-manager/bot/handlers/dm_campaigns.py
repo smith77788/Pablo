@@ -54,7 +54,9 @@ async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
 # ── Menu ──────────────────────────────────────────────────────────────────────
 
 @router.callback_query(DmCb.filter(F.action == "menu"))
-async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    # Clear any lingering FSM state (e.g. user pressed "cancel" mid-wizard)
+    await state.clear()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         await _edit(callback, locked_text("DM-кампании", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="main")))
@@ -555,10 +557,11 @@ async def cb_dm_delete(
     callback: CallbackQuery,
     callback_data: DmCb,
     pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     await callback.answer("🗑️ Удалено")
     await pool.execute(
         "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
         callback_data.campaign_id, callback.from_user.id,
     )
-    await cb_dm_menu(callback, pool)
+    await cb_dm_menu(callback, pool, state)
