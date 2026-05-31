@@ -427,7 +427,7 @@ async def cb_dm_launch_or_draft(
         )
         # Запустить асинхронно уже после установки статуса
         _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
-        _treg.register(callback.from_user.id, "dm_campaign", f"DM «{name[:30]}»", _t)
+        _treg.register(callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t)
         await _edit(
             callback,
             f"🚀 Кампания <b>«{html.escape(name)}»</b> запущена!\n\n"
@@ -518,9 +518,17 @@ async def cb_dm_pause(
     pool: asyncpg.Pool,
 ) -> None:
     await callback.answer("⏸️ Поставлена на паузу")
+    campaign_id = callback_data.campaign_id
+    # Cancel the running asyncio task so the background coroutine actually stops.
+    # The task's CancelledError handler in _launch_campaign will update status→paused.
+    # We also update DB status here as a safety net in case the task already finished.
+    for entry in _treg.list_tasks(callback.from_user.id):
+        if entry.kind == "dm_campaign" and f"#{campaign_id}" in entry.label:
+            entry.task.cancel()
+            break
     await pool.execute(
         "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
-        callback_data.campaign_id, callback.from_user.id,
+        campaign_id, callback.from_user.id,
     )
     await cb_dm_detail(callback, callback_data, pool)
 
