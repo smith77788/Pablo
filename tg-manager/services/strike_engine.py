@@ -945,8 +945,12 @@ def _build_vector_diagnostics(r: StrikeResult) -> list[str]:
     """Build compact diagnostics for vectors that produced zero effect."""
     notes: list[str] = []
     err_blob = " ".join(r.errors or [])
+    recon = r.phase_results.get("recon", {})
+    recon_msgs = int(recon.get("msgs", 0) or 0)
 
     if r.msgs_fetched == 0:
+        if recon_msgs > 0:
+            notes.append("history_access_mismatch")
         notes.append("history_unavailable")
     elif r.msgs_reported == 0:
         notes.append("history_loaded_but_no_actions")
