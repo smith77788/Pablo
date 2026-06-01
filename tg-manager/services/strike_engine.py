@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import random
 import time
@@ -628,6 +629,12 @@ async def staggered_strike(
         result.forwarded              += agg.get("fwd", 0)
         result.blocked                += agg.get("blocked", 0)
         result.errors = [r.get("error") for r in wave_results if r.get("error")]
+        for wave_result in wave_results:
+            result.errors.extend(wave_result.get("errors", [])[:3])
+            if wave_result.get("rate_limited"):
+                result.errors.append(
+                    f"account {wave_result.get('_acc_id', '?')}: Telegram rate limit"
+                )
 
         # ═══ Фаза: Network nodes (параллельно) ═══
         if progress_cb:
@@ -961,7 +968,8 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"Аккаунтов: <b>{r.unique_accounts}</b>"
         )
         if r.errors:
-            lines.append(f"  ⚠️ Ошибок: {len(r.errors)}")
+            sample = html.escape("; ".join(r.errors[:3])[:220])
+            lines.append(f"  ⚠️ Ошибок: {len(r.errors)} · <code>{sample}</code>")
         if r.verified_down is not None:
             lines.append(f"  🔍 Проверка: {'✅ УДАЛЁН' if r.verified_down else '⚠️ Всё ещё активен'}")
     return "\n".join(lines)

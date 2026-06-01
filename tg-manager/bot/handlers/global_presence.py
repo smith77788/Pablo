@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 import asyncpg
 from aiogram import F, Router
@@ -34,7 +33,10 @@ def _back_cancel_row() -> list:
 
 
 async def _edit(cb: CallbackQuery, text: str, markup=None) -> None:
-    await cb.answer()
+    try:
+        await cb.answer()
+    except Exception:
+        log.debug("global_presence: callback answer already sent or expired", exc_info=True)
     try:
         await cb.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     except Exception:
@@ -301,7 +303,7 @@ async def _show_name_pattern_step(
         + bot_note
         + "\n\n"
         + (f"💡 Последний ввод: <code>{prefill}</code>\n\n" if prefill else "")
-        + f"Введите паттерн:",
+        + "Введите паттерн:",
         markup=_cancel_kb(),
     )
 
@@ -390,7 +392,7 @@ async def _show_username_pattern_step(
         f"Правила: 5–32 символа, a-z, 0-9, подчёркивание.\n\n"
         f"Примеры:\n{ex_text}\n\n"
         + (f"💡 Последний ввод: <code>{prefill}</code>\n\n" if prefill else "")
-        + f"Введите паттерн или пропустите:",
+        + "Введите паттерн или пропустите:",
         markup=kb.as_markup(),
     )
 
@@ -914,6 +916,12 @@ async def cb_gp_launch(
     geo_preset = sd.get("geo_preset", "")
 
     if not geo_list or not selected_acc_ids:
+        log.warning(
+            "global_presence launch rejected: missing data user_id=%s geo_count=%d selected_accounts=%d",
+            callback.from_user.id,
+            len(geo_list),
+            len(selected_acc_ids),
+        )
         await _edit(callback, "❌ Недостаточно данных для запуска. Начните сначала.")
         await state.clear()
         return
@@ -964,6 +972,15 @@ async def cb_gp_launch(
 
     # Link operation to plan
     await db.link_plan_to_operation(pool, plan_id, op_id)
+    log.info(
+        "global_presence launch queued: user_id=%s asset_type=%s plan_id=%s op_id=%s targets=%d accounts=%d",
+        callback.from_user.id,
+        asset_type,
+        plan_id,
+        op_id,
+        len(targets),
+        len(selected_acc_ids),
+    )
 
     # For package/full_package: also queue group (and bot for full) creation
     op_id2, op_id3 = None, None
@@ -988,6 +1005,13 @@ async def cb_gp_launch(
             len(grp_targets),
         )
         await db.link_plan_to_operation(pool, plan_id2, op_id2)
+        log.info(
+            "global_presence package group queued: user_id=%s plan_id=%s op_id=%s targets=%d",
+            callback.from_user.id,
+            plan_id2,
+            op_id2,
+            len(grp_targets),
+        )
 
     # For full_package: also queue bot creation
     if asset_type == "full_package":
@@ -1011,6 +1035,13 @@ async def cb_gp_launch(
             len(bot_targets),
         )
         await db.link_plan_to_operation(pool, plan_id3, op_id3)
+        log.info(
+            "global_presence full_package bot queued: user_id=%s plan_id=%s op_id=%s targets=%d",
+            callback.from_user.id,
+            plan_id3,
+            op_id3,
+            len(bot_targets),
+        )
 
     await state.clear()
 
@@ -1045,6 +1076,29 @@ async def cb_gp_launch(
 
 
 # ── Progress & Report ──────────────────────────────────────────────────────
+
+@router.callback_query(GeoPresenceCb.filter(F.action == "launch"))
+async def cb_gp_launch_stale(callback: CallbackQuery, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    log.warning(
+        "global_presence stale launch callback: user_id=%s state=%s data=%s",
+        callback.from_user.id,
+        current_state,
+        callback.data,
+    )
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🌍 Открыть Global Presence", callback_data=GeoPresenceCb(action="menu"))
+    kb.adjust(1)
+    await callback.answer("Сессия мастера устарела. Начните запуск заново.", show_alert=True)
+    await callback.message.edit_text(
+        "⚠️ <b>Запуск не принят</b>\n\n"
+        "Сессия мастера устарела или бот перезапускался между шагами. "
+        "Откройте Global Presence и соберите план еще раз.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "progress"))
 async def cb_gp_progress(

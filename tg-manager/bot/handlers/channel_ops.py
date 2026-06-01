@@ -1127,7 +1127,6 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
         flood = result.get("flood_wait", 0)
         await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood))
 
-    ch_titles = [ch_map.get(cid, {}).get("title", f"id={cid}") for cid in selected_ids]
     lines = [f"📤 <b>Результаты публикации</b>\n", f"Каналов: {total} · ✅ {ok} · ❌ {err}\n"]
     await progress_msg.edit_text(
         "\n".join(lines),
@@ -4323,6 +4322,8 @@ async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg
 async def cb_bulk_chan_exec(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    from services import account_manager
+
     await callback.answer()
     data = await state.get_data()
     op = data.get("bulk_op", "")
@@ -4627,8 +4628,6 @@ async def cb_my_chans_item(
     await callback.answer()
     ch_id = callback_data.channel_id
     acc_id = callback_data.acc_id
-    data = await state.get_data()
-    session = data.get("my_chans_session")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📤 Опубликовать пост",  callback_data=ChanCb(action="my_chans_post",   channel_id=ch_id, acc_id=acc_id))
@@ -4870,7 +4869,7 @@ async def cb_cinv_pick_channel(
     await callback.answer()
     ch_id = callback_data.channel_id
     row = await pool.fetchrow(
-        "SELECT title, username, access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+        "SELECT title, username, access_hash, acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
         callback.from_user.id, ch_id,
     )
     display = (f"@{row['username']}" if row and row["username"] else (row["title"] if row else str(ch_id)))
@@ -4884,6 +4883,7 @@ async def cb_cinv_pick_channel(
         channel_identifier=channel_identifier,
         channel_display=display,
         access_hash=access_hash,
+        primary_acc_id=(row["acc_id"] if row else 0) or 0,
     )
     accounts = await _get_accounts(pool, callback.from_user.id)
     if not accounts:
@@ -4954,10 +4954,14 @@ async def cb_cinv_proceed(
 ) -> None:
     data = await state.get_data()
     selected_accs = data.get("selected_accs", [])
+    primary_acc_id = int(data.get("primary_acc_id") or 0)
     channel_display = data.get("channel_display", "?")
     if not selected_accs:
         await callback.answer("Выберите хотя бы один аккаунт.", show_alert=True)
         return
+    if primary_acc_id and primary_acc_id not in selected_accs:
+        selected_accs = [primary_acc_id, *selected_accs]
+        await state.update_data(selected_accs=selected_accs)
     await callback.answer()
     msg = await callback.message.edit_text(
         f"⏳ Подсчёт контактов с {len(selected_accs)} аккаунт(ов)...",
@@ -5007,10 +5011,13 @@ async def cb_cinv_run(
 ) -> None:
     data = await state.get_data()
     selected_accs = data.get("selected_accs", [])
+    primary_acc_id = int(data.get("primary_acc_id") or 0)
     channel_id = data.get("channel_id", 0)
     channel_identifier = data.get("channel_identifier", "")
     channel_display = data.get("channel_display", "?")
     access_hash = data.get("access_hash", 0)
+    if primary_acc_id and primary_acc_id not in selected_accs:
+        selected_accs = [primary_acc_id, *selected_accs]
     if not selected_accs or not channel_identifier:
         await callback.answer("Недостаточно данных. Начните заново.", show_alert=True)
         return
@@ -5022,6 +5029,14 @@ async def cb_cinv_run(
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
         "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
         selected_accs, callback.from_user.id,
+    )
+    selected_order = {acc_id: idx for idx, acc_id in enumerate(selected_accs)}
+    acc_rows = sorted(
+        acc_rows,
+        key=lambda acc: (
+            0 if primary_acc_id and acc["id"] == primary_acc_id else 1,
+            selected_order.get(acc["id"], 9999),
+        ),
     )
     if not acc_rows:
         await callback.message.edit_text("⚠️ Аккаунты не найдены или деактивированы.")
@@ -5137,6 +5152,7 @@ async def _cinv_bg_inner(
     _n_accs = len(acc_rows)
     _has_join_step = _n_accs > 1 and pool is not None
     _total_steps = 3 if _has_join_step else 2
+    invite_accounts = list(acc_rows)
 
     # Progress message — edited throughout instead of spamming new messages
     _pm = None
@@ -5161,20 +5177,20 @@ async def _cinv_bg_inner(
     if len(acc_rows) > 1 and pool is not None:
         primary = acc_rows[0]
         primary_dict = dict(primary)
+        ready_accounts = [primary]
 
-        # Resolve join identifier (@username or invite link)
+        # Resolve join identifier. Prefer invite link so private channels work.
         join_identifier: str | None = None
-        if channel_identifier and channel_identifier.startswith("@"):
+        try:
+            invite_link = await _am.get_channel_invite_link(
+                primary["session_str"], chan_target, _acc=primary_dict, access_hash=access_hash
+            )
+            if invite_link:
+                join_identifier = invite_link
+        except Exception as e:
+            log.warning("cinv get_invite_link: %s", e)
+        if not join_identifier and channel_identifier and channel_identifier.startswith("@"):
             join_identifier = channel_identifier
-        else:
-            try:
-                invite_link = await _am.get_channel_invite_link(
-                    primary["session_str"], chan_target, _acc=primary_dict
-                )
-                if invite_link:
-                    join_identifier = invite_link
-            except Exception as e:
-                log.warning("cinv get_invite_link: %s", e)
 
         # Join ALL co-accounts in PARALLEL — no sequential waits between them
         if join_identifier or (channel_id and access_hash):
@@ -5200,14 +5216,17 @@ async def _cinv_bg_inner(
                     log.warning("cinv co-account join acc=%s: %s", other["id"], e)
                     return False
 
+            join_candidates = list(acc_rows[1:])
             join_results = await asyncio.gather(
-                *[_join_one(other) for other in acc_rows[1:]],
+                *[_join_one(other) for other in join_candidates],
                 return_exceptions=False,
             )
+            joined_acc_ids = {acc["id"] for acc, ok in zip(join_candidates, join_results) if ok}
             added_ok = sum(1 for r in join_results if r)
             log.info("cinv: joined %d/%d co-accounts to %s", added_ok, len(acc_rows) - 1, chan_target)
         else:
             added_ok = 0
+            joined_acc_ids = set()
             log.warning("cinv: no join_identifier and no channel_id+access_hash — skipping co-account joins")
 
         # Brief wait before promoting (let server register membership)
@@ -5217,26 +5236,32 @@ async def _cinv_bg_inner(
         # Short delays only — we already waited enough in the join phase
         promo_ok = 0
         for idx, other in enumerate(acc_rows[1:]):
+            if other["id"] not in joined_acc_ids:
+                continue
             tg_uid = other.get("tg_user_id")
             if not tg_uid:
                 try:
-                    row = await pool.fetchrow(
-                        "SELECT tg_user_id FROM tg_accounts WHERE id=$1", other["id"]
-                    )
-                    tg_uid = row["tg_user_id"] if row else None
+                    tg_uid = await _am.get_own_user_id(other["session_str"], _acc=dict(other))
+                    if tg_uid:
+                        await pool.execute(
+                            "UPDATE tg_accounts SET tg_user_id=$1 WHERE id=$2",
+                            tg_uid,
+                            other["id"],
+                        )
                 except Exception:
                     log_exc_swallow(log, "Сбой получения tg_user_id для promote_to_admin")
             if tg_uid:
                 try:
                     ok = await _am.promote_to_admin(
                         primary["session_str"],
-                        channel_id if channel_id else 0,
+                        channel_id if channel_id else channel_identifier,
                         tg_uid,
                         _acc=primary_dict,
                         access_hash=access_hash,
                     )
                     if ok:
                         promo_ok += 1
+                        ready_accounts.append(other)
                         log.info("cinv: promoted co-account %s to admin", tg_uid)
                     else:
                         log.warning("cinv promote failed for user %s", tg_uid)
@@ -5248,6 +5273,7 @@ async def _cinv_bg_inner(
 
         if promo_ok > 0:
             log.info("cinv: promoted %d co-accounts to admin in %s", promo_ok, chan_target)
+        invite_accounts = ready_accounts
 
     # 1. Collect contacts from ALL accounts in PARALLEL
     _contacts_step = 2 if _has_join_step else 1
@@ -5293,9 +5319,15 @@ async def _cinv_bg_inner(
         )
         return
 
-    # 3. Split contacts round-robin among accounts
-    n = len(acc_rows)
-    chunks = [identifiers[i::n] for i in range(n)]
+    # 3. Split contacts round-robin among prepared admin accounts.
+    per_account_cap = 25 if len(invite_accounts) == 1 else 35
+    total_cap = max(1, len(invite_accounts)) * per_account_cap
+    invite_identifiers = identifiers[:total_cap]
+    skipped_by_cap = max(0, len(identifiers) - len(invite_identifiers))
+    n = len(invite_accounts)
+    chunks = [invite_identifiers[i::n][:per_account_cap] for i in range(n)]
+    if skipped_by_cap:
+        log.info("cinv: skipped %d contacts by conservative per-run caps", skipped_by_cap)
 
     # 4. Invite in PARALLEL — each account works on its own chunk simultaneously
     _invite_step = _total_steps
@@ -5312,8 +5344,9 @@ async def _cinv_bg_inner(
         try:
             log.info("cinv: account %s inviting %d users to %s", acc["id"], len(chunk), chan_target)
             res = await _am.invite_users_to_channel(
-                acc["session_str"], channel_id if channel_id else 0, chunk,
+                acc["session_str"], channel_id if channel_id else channel_identifier, chunk,
                 _acc=dict(acc), access_hash=access_hash,
+                batch_size=8, batch_delay=random.uniform(240, 480),
             )
             invited = res.get("invited", 0)
             failed = len(res.get("failed", []))
@@ -5327,7 +5360,7 @@ async def _cinv_bg_inner(
             return 0, len(chunk)
 
     invite_results = await asyncio.gather(
-        *[_invite_one(acc, chunk) for acc, chunk in zip(acc_rows, chunks)],
+        *[_invite_one(acc, chunk) for acc, chunk in zip(invite_accounts, chunks)],
         return_exceptions=False,
     )
     total_invited = sum(r[0] for r in invite_results)
@@ -5335,7 +5368,7 @@ async def _cinv_bg_inner(
 
     # 5. Notify user — edit the progress message with final summary + per-account breakdown
     _breakdown_lines = []
-    for acc, (ok, fail), chunk in zip(acc_rows, invite_results, chunks):
+    for acc, (ok, fail), chunk in zip(invite_accounts, invite_results, chunks):
         name = (acc.get("first_name") or f"acc{acc['id']}")[:16]
         _breakdown_lines.append(f"  {html.escape(name)}: {ok}/{len(chunk)}")
     _breakdown = "\n".join(_breakdown_lines) if _breakdown_lines else ""

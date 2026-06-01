@@ -14,6 +14,7 @@ from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
+from bot.middlewares.user_activity import UserActivityLogMiddleware
 from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
 from bot.handlers import commands as cmd_handler
 from bot.handlers import templates as tpl_handler
@@ -141,6 +142,9 @@ async def main() -> None:
         session=bot_session,
     )
     dp = Dispatcher(storage=MemoryStorage())
+    activity_log_middleware = UserActivityLogMiddleware()
+    dp.message.outer_middleware(activity_log_middleware)
+    dp.callback_query.outer_middleware(activity_log_middleware)
 
     dp.include_router(bm_handler.router)
     dp.include_router(bot_factory_handler.router)

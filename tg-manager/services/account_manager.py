@@ -1132,14 +1132,45 @@ async def set_channel_username(
         except Exception:
             log_exc_swallow(log, "Сбой в set_channel_username")
 
-async def get_channel_invite_link(session_string: str, channel_id: int,
-                                  _acc: dict | None = None) -> str:
+def _normalize_channel_id(channel_ref: int | str) -> int:
+    cid = abs(int(channel_ref))
+    raw = str(cid)
+    if raw.startswith("100") and len(raw) > 10:
+        return int(raw[3:])
+    return cid
+
+
+async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int = 0):
+    from telethon.tl.types import InputPeerChannel
+
+    if access_hash and isinstance(channel_ref, int) and channel_ref > 0:
+        return InputPeerChannel(channel_id=channel_ref, access_hash=access_hash)
+
+    if isinstance(channel_ref, str) and not channel_ref.lstrip("-").isdigit():
+        return await client.get_entity(channel_ref)
+
+    target_id = _normalize_channel_id(channel_ref)
+    try:
+        return await client.get_entity(target_id)
+    except Exception:
+        async for dlg in client.iter_dialogs(limit=500):
+            eid = getattr(dlg.entity, "id", None)
+            if eid and abs(int(eid)) == target_id:
+                ah = getattr(dlg.entity, "access_hash", 0)
+                if ah:
+                    return InputPeerChannel(channel_id=target_id, access_hash=ah)
+                return dlg.entity
+    raise ValueError(f"Channel {channel_ref} not found in account dialogs")
+
+
+async def get_channel_invite_link(session_string: str, channel_id: int | str,
+                                  _acc: dict | None = None, access_hash: int = 0) -> str:
     """Get (or create) an invite link for the channel. Returns link string or ''."""
     from telethon.tl.functions.messages import ExportChatInviteRequest
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(channel_id)
+        entity = await _resolve_channel_peer(client, channel_id, access_hash)
         result = await client(ExportChatInviteRequest(peer=entity))
         return getattr(result, "link", "") or ""
     except Exception as e:
@@ -1207,7 +1238,7 @@ async def get_channel_members(
 
 async def invite_users_to_channel(
     session_string: str,
-    channel_id: int,
+    channel_id: int | str,
     usernames: list[str],
     _acc: dict | None = None,
     access_hash: int = 0,
@@ -1223,7 +1254,6 @@ async def invite_users_to_channel(
     Returns {invited: int, failed: list[str], batches: int, error?: str}.
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
-    from telethon.tl.types import InputPeerChannel
     from telethon.errors import (
         FloodWaitError, PeerFloodError, UserBannedInChannelError,
         ChatAdminRequiredError, UserPrivacyRestrictedError,
@@ -1242,21 +1272,10 @@ async def invite_users_to_channel(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
         # Resolve channel entity
-        if access_hash and isinstance(channel_id, int) and channel_id > 0:
-            channel_peer = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
-        else:
-            try:
-                channel_peer = await client.get_entity(channel_id)
-            except Exception:
-                channel_peer = None
-                async for dlg in client.iter_dialogs(limit=300):
-                    eid = getattr(dlg.entity, "id", None)
-                    if eid and abs(eid) == abs(int(channel_id)):
-                        ah = getattr(dlg.entity, "access_hash", 0)
-                        channel_peer = InputPeerChannel(channel_id=abs(eid), access_hash=ah)
-                        break
-                if not channel_peer:
-                    return {"invited": 0, "failed": [], "batches": 0,
+        try:
+            channel_peer = await _resolve_channel_peer(client, channel_id, access_hash)
+        except Exception:
+            return {"invited": 0, "failed": [], "batches": 0,
                             "error": f"Канал {channel_id} не найден в диалогах аккаунта"}
 
         # Split into batches of batch_size
@@ -1288,7 +1307,7 @@ async def invite_users_to_channel(
                         except Exception:
                             pass
                     if idx < len(batch) - 1:
-                        await asyncio.sleep(random.uniform(3, 12) * session_simulator.chaos_factor())
+                        await asyncio.sleep(random.uniform(35, 95) * session_simulator.chaos_factor())
                 except ChatAdminRequiredError:
                     for u in batch[idx + 1:] + [u2 for b2 in batches[b_idx + 1:] for u2 in b2]:
                         failed.append(f"{u.strip()}: нет прав администратора")
@@ -1299,7 +1318,8 @@ async def invite_users_to_channel(
                     for u in batch[idx + 1:]:
                         failed.append(f"{u.strip()}: PeerFlood")
                     abort = True
-                    break
+                    return {"invited": invited, "failed": failed, "batches": batches_done,
+                            "error": "PeerFlood: account stopped to avoid spamblock escalation"}
                 except UserBannedInChannelError:
                     failed.append(f"{uname}: забанен в канале")
                 except (UserPrivacyRestrictedError, UserNotMutualContactError):
@@ -1396,6 +1416,23 @@ async def join_channel_by_id(
             pass
 
 
+async def get_own_user_id(session_string: str, _acc: dict | None = None) -> int:
+    """Return Telegram user id for a session, or 0 when the session is invalid."""
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=10.0)
+        return int(me.id) if me else 0
+    except Exception as e:
+        log.warning("get_own_user_id error acc=%s: %s", (_acc or {}).get("id", "?"), e)
+        return 0
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
@@ -1458,7 +1495,7 @@ async def kick_from_channel(
 
 async def promote_to_admin(
     session_string: str,
-    channel_id: int,
+    channel_id: int | str,
     user_id: int,
     _acc: dict | None = None,
     access_hash: int = 0,
@@ -1476,18 +1513,14 @@ async def promote_to_admin(
     User must already be a member. Returns True on success.
     """
     from telethon.tl.functions.channels import EditAdminRequest
-    from telethon.tl.types import ChatAdminRights, InputPeerChannel, PeerUser
+    from telethon.tl.types import ChatAdminRights, PeerUser
     from telethon.errors import ChatAdminRequiredError, UserNotParticipantError
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
-        # Resolve channel with access_hash when available
-        if access_hash and isinstance(channel_id, int) and channel_id > 0:
-            channel = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
-        else:
-            channel = await client.get_entity(channel_id)
+        channel = await _resolve_channel_peer(client, channel_id, access_hash)
 
         rights = ChatAdminRights(
             post_messages=post_messages,
@@ -2063,6 +2096,7 @@ async def report_peer_deep_v2(  # noqa: C901
         InputReportReasonSpam, InputReportReasonViolence, InputReportReasonPornography,
         InputReportReasonChildAbuse, InputReportReasonCopyright, InputReportReasonOther,
         Channel, ChannelParticipantsAdmins, ReactionEmoji, InputMessagesFilterPinned,
+        ReportResultAddComment, ReportResultChooseOption, ReportResultReported,
     )
 
     _RPP = None
@@ -2083,6 +2117,7 @@ async def report_peer_deep_v2(  # noqa: C901
         "pinned_reported": 0, "msg_reported": 0, "msgs_fetched": 0, "spam_signaled": 0,
         "reactions_sent": 0, "admins_reported": 0, "linked_group_reported": False,
         "bots_reported": 0, "forwarded": 0, "blocked": False, "joined": False,
+        "rate_limited": False, "errors": [],
     }
 
     # ── Reason map ────────────────────────────────────────────────────────
@@ -2129,12 +2164,69 @@ async def report_peer_deep_v2(  # noqa: C901
     peer = peer_username.lstrip("@")
     acc_id = (_acc or {}).get("id", "?")
 
+    def _record_error(stage: str, err: object) -> None:
+        text = str(err)[:120]
+        R["errors"].append(f"{stage}: {text}")
+        if "FLOOD" in text.upper() or "TOO_MUCH" in text.upper():
+            R["rate_limited"] = True
+
     def _flood(err: str, default: float = 30.0) -> float:
         m = _re.search(r'(\d+)', err)
         return min(120.0, float(m.group(1))) if m else default
 
     async def _timed(coro, timeout: float = 15.0):
         return await asyncio.wait_for(coro, timeout=timeout)
+
+    def _select_report_option(options: list) -> bytes | None:
+        hints = {
+            "spam": ("spam", "спам"),
+            "violence": ("violence", "violent", "насил", "жест"),
+            "pornography": ("porn", "sexual", "adult", "порно", "сексу"),
+            "childabuse": ("child", "minor", "children", "дет"),
+            "copyright": ("copyright", "автор"),
+            "drugs": ("drug", "нарко"),
+            "personal": ("personal", "private", "личн"),
+            "fake": ("fake", "scam", "fraud", "фейк", "мошен"),
+            "other": ("other", "другое"),
+        }.get(reason, ())
+        for opt in options:
+            text = (getattr(opt, "text", "") or "").lower()
+            if any(hint in text for hint in hints):
+                return getattr(opt, "option", None)
+        if options:
+            return getattr(options[0], "option", None)
+        return None
+
+    async def _report_message_ids(peer_obj, msg_ids: list[int], comment: str, stage: str) -> bool:
+        try:
+            first = await client(MsgReportRequest(peer=peer_obj, id=msg_ids, option=b"", message=""))
+            if isinstance(first, ReportResultReported):
+                return True
+            if isinstance(first, ReportResultChooseOption):
+                option = _select_report_option(first.options)
+                if not option:
+                    _record_error(stage, "Telegram returned no report option")
+                    return False
+                second = await client(MsgReportRequest(peer=peer_obj, id=msg_ids, option=option, message=comment))
+                if isinstance(second, ReportResultReported):
+                    return True
+                if isinstance(second, ReportResultAddComment):
+                    final = await client(MsgReportRequest(
+                        peer=peer_obj, id=msg_ids, option=second.option, message=comment
+                    ))
+                    return isinstance(final, ReportResultReported)
+                _record_error(stage, f"unexpected result {type(second).__name__}")
+                return False
+            if isinstance(first, ReportResultAddComment):
+                final = await client(MsgReportRequest(
+                    peer=peer_obj, id=msg_ids, option=first.option, message=comment
+                ))
+                return isinstance(final, ReportResultReported)
+            _record_error(stage, f"unexpected result {type(first).__name__}")
+            return False
+        except Exception as e:
+            _record_error(stage, e)
+            raise
 
     client = _make_client(session_string, _acc)
     try:
@@ -2178,8 +2270,7 @@ async def report_peer_deep_v2(  # noqa: C901
                     except Exception:
                         pass
                 elif "REPORT_TOO_MUCH" in err.upper() or "too_many" in err.lower():
-                    if idx == 0:
-                        R["peer_reported"] = True
+                    _record_error("peer", err)
                     break
                 else:
                     log.warning("rpv2[1/peer idx=%d] acc=%s: %s", idx, acc_id, err[:100])
@@ -2324,12 +2415,11 @@ async def report_peer_deep_v2(  # noqa: C901
                 for ip, pid in enumerate(pinned_ids):
                     try:
                         await asyncio.sleep(random.betavariate(2, 4) * 1.5 + 0.3)
-                        await client(MsgReportRequest(
-                            peer=entity, id=[pid],
-                            reason=all_reasons[ip % len(all_reasons)],
-                            message=msg_pool[ip % len(msg_pool)],
-                        ))
-                        R["pinned_reported"] += 1
+                        ok = await _report_message_ids(
+                            entity, [pid], msg_pool[ip % len(msg_pool)], f"pin:{pid}"
+                        )
+                        if ok:
+                            R["pinned_reported"] += 1
                     except Exception as e:
                         err = str(e)
                         if "FLOOD_WAIT" in err.upper():
@@ -2397,18 +2487,19 @@ async def report_peer_deep_v2(  # noqa: C901
             chunks = [msg_ids[i:i + 5] for i in range(0, len(msg_ids), 5)]
             random.shuffle(chunks)
             for ci, chunk in enumerate(chunks):
-                r_obj = all_reasons[ci % len(all_reasons)]
                 cmsg = msg_pool[ci % len(msg_pool)]
                 try:
-                    await client(MsgReportRequest(peer=_ipeer6, id=chunk, reason=r_obj, message=cmsg))
-                    R["msg_reported"] += len(chunk)
+                    ok = await _report_message_ids(_ipeer6, chunk, cmsg, f"msg_chunk:{ci}")
+                    if ok:
+                        R["msg_reported"] += len(chunk)
                 except Exception as e:
                     err = str(e)
                     if "FLOOD_WAIT" in err.upper():
                         await asyncio.sleep(_flood(err, 15))
                         try:
-                            await client(MsgReportRequest(peer=_ipeer6, id=chunk[:2], reason=r_obj, message=cmsg))
-                            R["msg_reported"] += min(2, len(chunk))
+                            ok = await _report_message_ids(_ipeer6, chunk[:2], cmsg, f"msg_retry:{ci}")
+                            if ok:
+                                R["msg_reported"] += min(2, len(chunk))
                         except Exception:
                             pass
                     elif "REPORT_TOO_MUCH" in err.upper():
