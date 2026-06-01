@@ -477,13 +477,15 @@ async def _mpub_bg(
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as _ce:
+        _is_user = bool(_ce.args and _ce.args[0] == "user_requested")
+        _pub_msg = (
+            f"📤 <b>Публикация отменена</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}"
+            if _is_user else
+            f"📤 <b>Публикация прервана (перезапуск)</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}\n\n<i>Повторите операцию.</i>"
+        )
         try:
-            await bot.send_message(
-                user_id,
-                f"📤 <b>Публикация отменена</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}",
-                parse_mode="HTML",
-            )
+            await bot.send_message(user_id, _pub_msg, parse_mode="HTML")
         except Exception:
             log_exc_swallow(log, "сбой send_message при отмене публикации")
     except Exception as exc:

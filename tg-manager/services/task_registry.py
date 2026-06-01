@@ -71,7 +71,7 @@ def cancel_task(user_id: int, task_id: str) -> bool:
     """Cancel task by id. Returns True if found and cancelled."""
     entry = _registry.get(user_id, {}).get(task_id)
     if entry and not entry.is_done():
-        entry.task.cancel()
+        entry.task.cancel(msg="user_requested")
         return True
     return False
 
@@ -80,7 +80,7 @@ def cancel_all(user_id: int) -> int:
     """Cancel all active tasks for a user. Returns count cancelled."""
     count = 0
     for entry in list_tasks(user_id):
-        entry.task.cancel()
+        entry.task.cancel(msg="user_requested")
         count += 1
     return count
 

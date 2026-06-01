@@ -2869,10 +2869,15 @@ async def _strike_bg_v2(
         kb.adjust(2)
         await status_msg.edit_text(summary_text, parse_mode="HTML", reply_markup=kb.as_markup())
 
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as _ce:
+        _is_user = bool(_ce.args and _ce.args[0] == "user_requested")
+        _cancel_msg = (
+            "⚔️ <b>Strike отменён пользователем.</b>"
+            if _is_user else
+            "⚔️ <b>Strike прерван (перезапуск сервиса).</b>\n\n<i>Повторите операцию.</i>"
+        )
         try:
-            await bot.send_message(
-                user_id, "⚔️ <b>Strike отменён пользователем.</b>", parse_mode="HTML")
+            await bot.send_message(user_id, _cancel_msg, parse_mode="HTML")
         except Exception:
             log_exc_swallow(log, "Сбой отправки уведомления об отмене Strike", user_id=user_id)
     except Exception as exc:
@@ -4631,16 +4636,18 @@ async def _cinv_bg(
     try:
         await _cinv_bg_inner(bot, user_id, acc_rows, channel_id, channel_identifier,
                              access_hash, channel_display, pool, _am)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as _ce:
+        _is_user = bool(_ce.args and _ce.args[0] == "user_requested")
+        _cinv_msg = (
+            "❌ <b>Инвайт отменён</b>\n\nОперация прервана пользователем."
+            if _is_user else
+            "❌ <b>Инвайт прерван (перезапуск сервиса).</b>\n\n<i>Повторите операцию.</i>"
+        )
         try:
-            await bot.send_message(
-                user_id,
-                "❌ <b>Инвайт отменён</b>\n\nОперация прервана пользователем.",
-                parse_mode="HTML",
-            )
+            await bot.send_message(user_id, _cinv_msg, parse_mode="HTML")
         except Exception:
             log_exc_swallow(log, "Сбой уведомления об отмене инвайта")
-        log.info("_cinv_bg: cancelled by user %s", user_id)
+        log.info("_cinv_bg: cancelled (%s) user=%s", "user" if _is_user else "system", user_id)
     except Exception as exc:
         try:
             await bot.send_message(
