@@ -15,13 +15,13 @@ router = Router()
 async def _relay_menu_text(row: asyncpg.Record, sessions: list) -> tuple[str, object]:
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     relay_on = row.get("relay_enabled", False)
-    status = "🟢 Активен" if relay_on else "🔴 Выключен"
+    status = "🟢 Включено" if relay_on else "🔴 Выключено"
     text = (
-        f"📨 <b>Inbox — {label}</b>\n\n"
+        f"📨 <b>Диалоги — {label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
-        "Inbox — это как личная переписка через вашего бота. Когда пользователь пишет боту, его сообщение пересылается вам. Вы отвечаете — и ответ уходит пользователю от имени бота. Это живое общение, но через бота.\n\n"
+        "Живой чат через бота. Когда пользователь пишет вашему боту, сообщение пересылается вам сюда. Вы отвечаете — ответ уходит пользователю от имени бота.\n\n"
         "💡 <b>Как пользоваться:</b>\n"
-        "Включите Inbox → пользователи пишут боту → вы получаете их сообщения → отвечайте «ответом на сообщение» (Reply) прямо здесь.\n\n"
+        "Включите → пользователи пишут боту → вы получаете их сообщения → отвечайте «ответом на сообщение» прямо здесь.\n\n"
         f"Статус: {status}\n"
         f"Открытых диалогов: <b>{len(sessions)}</b>"
     )
@@ -54,8 +54,8 @@ async def cb_relay_toggle(
         return
     new_state = not row.get("relay_enabled", False)
     await db.enable_relay(pool, callback_data.bot_id, new_state)
-    status = "включён ✅" if new_state else "отключён ❌"
-    await callback.answer(f"Inbox {status}")
+    status = "включены ✅" if new_state else "отключены ❌"
+    await callback.answer(f"Диалоги {status}")
     # Reload row with updated state
     row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     sessions = await db.get_relay_sessions(pool, callback_data.bot_id)

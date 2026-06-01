@@ -125,8 +125,8 @@ def _comms_kb():
     kb.button(text="📢 Рассылка по боту",  callback_data=BotCb(action="list", page=0))
     kb.button(text="🌐 Сетевая рассылка",  callback_data=NetBcCb(action="choose_target"))
     kb.button(text="📅 Расписание",        callback_data=BmCb(action="schedules"))
-    kb.button(text="📨 DM-кампании",       callback_data=DmCb(action="menu"))
-    kb.button(text="💬 Входящие (Relay)",  callback_data=BmCb(action="pick_bot_for", sub="relay"))
+    kb.button(text="📨 Личные сообщения",   callback_data=DmCb(action="menu"))
+    kb.button(text="💬 Диалоги с ботом",   callback_data=BmCb(action="pick_bot_for", sub="relay"))
     kb.button(text="📢 Авто-ответы",       callback_data=BmCb(action="pick_bot_for", sub="ar"))
     kb.button(text="🔗 Воронки",           callback_data=BmCb(action="pick_bot_for", sub="fn"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
@@ -166,10 +166,10 @@ def _settings_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Команды бота",    callback_data=BmCb(action="pick_bot_for", sub="cmd"))
     kb.button(text="🔔 Уведомления",     callback_data=BmCb(action="notifications"))
-    kb.button(text="💳 Billing",         callback_data=SubCb(action="menu"))
-    kb.button(text="👥 Referral",        callback_data=RefCb(action="menu"))
-    kb.button(text="🤖 AI Assistant",    callback_data=AiCb(action="start"))
-    kb.button(text="🏢 Workspaces",      callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="💳 Подписка",          callback_data=SubCb(action="menu"))
+    kb.button(text="👥 Рефералы",         callback_data=RefCb(action="menu"))
+    kb.button(text="🤖 ИИ Помощник",     callback_data=AiCb(action="start"))
+    kb.button(text="🏢 Пространства",    callback_data=WorkspaceCb(action="menu"))
     kb.button(text="📄 Шаблоны",         callback_data=AssetTplCb(action="menu"))
     kb.button(text="◀️ Назад",           callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1, 1)
@@ -210,11 +210,11 @@ def _wip_kb(back_action: str = "main"):
 _MAIN_MENU_TEXT = (
     "🏠 <b>BotMother OS</b>\n\n"
     "📱 <b>Активы</b> — аккаунты, боты, каналы, группы, кластеры\n"
-    "⚡ <b>Операции</b> — strike, presence, публикация, очередь\n"
-    "📢 <b>Рассылки & Связь</b> — рассылки, DM, relay, авто-ответы\n"
+    "⚡ <b>Операции</b> — атаки, присутствие, публикация, очередь\n"
+    "📢 <b>Рассылки & Связь</b> — рассылки, личные сообщения, диалоги\n"
     "📊 <b>Аналитика</b> — позиции, SEO, конкуренты, поведение\n"
     "🛡️ <b>Мониторинг</b> — здоровье, разогрев, парсер, прокси\n"
-    "⚙️ <b>Настройки</b> — billing, AI, уведомления, команды"
+    "⚙️ <b>Настройки</b> — подписка, ИИ, уведомления, команды"
 )
 
 # ── /menu command ─────────────────────────────────────────────────────────
@@ -276,7 +276,7 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
             if (row["running_ops"] or 0) > 0:
                 parts.append(f"⚙️ {row['running_ops']} активных оп.")
             if (row["in_cooldown"] or 0) > 0:
-                parts.append(f"⏳ {row['in_cooldown']} в кулдауне")
+                parts.append(f"⏳ {row['in_cooldown']} на паузе")
             if (row["new_alerts"] or 0) > 0:
                 parts.append(f"🔔 {row['new_alerts']} новых алертов")
             if parts:
@@ -403,9 +403,9 @@ async def cb_comms(callback: CallbackQuery, callback_data: BmCb) -> None:
         "📢 <b>Рассылка по боту</b> — разослать сообщение всем пользователям бота\n"
         "🌐 <b>Сетевая рассылка</b> — одновременно через несколько ботов\n"
         "📅 <b>Расписание</b> — запланированные рассылки\n"
-        "📨 <b>DM-кампании</b> — личные сообщения через Telegram-аккаунты\n"
-        "💬 <b>Входящие (Relay)</b> — ответы на сообщения пользователей\n"
-        "📢 <b>Авто-ответы</b> — триггеры по ключевым словам\n"
+        "📨 <b>Личные сообщения</b> — писать людям напрямую через Telegram-аккаунты\n"
+        "💬 <b>Диалоги с ботом</b> — отвечать пользователям от имени бота\n"
+        "📢 <b>Авто-ответы</b> — автоматические ответы по ключевым словам\n"
         "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
         _comms_kb(),
     )
@@ -423,9 +423,9 @@ async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
         "📢 <b>Рассылка по боту</b> — разослать сообщение всем пользователям бота\n"
         "🌐 <b>Сетевая рассылка</b> — одновременно через несколько ботов\n"
         "📅 <b>Расписание</b> — запланированные рассылки\n"
-        "📨 <b>DM-кампании</b> — личные сообщения через Telegram-аккаунты\n"
-        "💬 <b>Входящие (Relay)</b> — ответы на сообщения пользователей\n"
-        "📢 <b>Авто-ответы</b> — триггеры по ключевым словам\n"
+        "📨 <b>Личные сообщения</b> — писать людям напрямую через Telegram-аккаунты\n"
+        "💬 <b>Диалоги с ботом</b> — отвечать пользователям от имени бота\n"
+        "📢 <b>Авто-ответы</b> — автоматические ответы по ключевым словам\n"
         "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
         _comms_kb(),
     )
@@ -440,8 +440,8 @@ async def cb_inbox(callback: CallbackQuery, callback_data: BmCb) -> None:
     await _edit(
         callback,
         "📢 <b>Рассылки & Связь</b>\n\n"
-        "💬 <b>Входящие (Relay)</b> — ответы на сообщения пользователей ботов\n"
-        "📢 <b>Авто-ответы</b> — триггеры по ключевым словам\n"
+        "💬 <b>Диалоги с ботом</b> — отвечать пользователям от имени бота\n"
+        "📢 <b>Авто-ответы</b> — автоматические ответы по ключевым словам\n"
         "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
         _comms_kb(),
     )
@@ -456,8 +456,8 @@ async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
     await _edit(
         callback,
         "🛡️ <b>Мониторинг — здоровье аккаунтов и инфраструктуры</b>\n\n"
-        "❤️ <b>Здоровье</b> — статус и тренды health_score аккаунтов\n"
-        "🌡 <b>Разогрев</b> — прогрев новых аккаунтов перед операциями\n"
+        "❤️ <b>Здоровье</b> — состояние и статистика аккаунтов\n"
+        "🌡 <b>Разогрев</b> — подготовка новых аккаунтов к работе\n"
         "🔍 <b>Парсер аудитории</b> — сбор участников из каналов и групп\n"
         "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением\n"
         "🌐 <b>Прокси</b> — управление прокси для аккаунтов\n"
@@ -476,7 +476,7 @@ async def cb_ai_assistant(callback: CallbackQuery, callback_data: BmCb) -> None:
     kb.button(text="🤖 Открыть AI-ассистент", callback_data=AiCb(action="start"))
     kb.button(text="◀️ Назад",                callback_data=BmCb(action="settings"))
     kb.adjust(1)
-    await _edit(callback, "<b>🤖 AI Assistant</b>\n\nИнтеллектуальный помощник для управления ботами.", kb.as_markup())
+    await _edit(callback, "<b>🤖 ИИ Помощник</b>\n\nНейросеть для создания текстов и управления ботами.", kb.as_markup())
 
 
 # ── Billing (backward compat) ─────────────────────────────────────────────
@@ -489,7 +489,7 @@ async def cb_billing(callback: CallbackQuery, callback_data: BmCb) -> None:
     kb.button(text="💳 Управление подпиской", callback_data=SubCb(action="menu"))
     kb.button(text="◀️ Назад",               callback_data=BmCb(action="settings"))
     kb.adjust(1)
-    await _edit(callback, "<b>💳 Billing</b>\n\nУправление подпиской и тарифными планами.", kb.as_markup())
+    await _edit(callback, "<b>💳 Подписка</b>\n\nУправление тарифным планом и оплата.", kb.as_markup())
 
 
 # ── Referral (backward compat) ────────────────────────────────────────────
@@ -502,7 +502,7 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
     kb.button(text="👥 Реферальная программа", callback_data=RefCb(action="menu"))
     kb.button(text="◀️ Назад",                callback_data=BmCb(action="settings"))
     kb.adjust(1)
-    await _edit(callback, "<b>👥 Referral</b>\n\nРеферальная программа и партнёрские вознаграждения.", kb.as_markup())
+    await _edit(callback, "<b>👥 Реферальная программа</b>\n\nПриглашайте друзей и получайте бонусы.", kb.as_markup())
 
 
 # ── Settings ──────────────────────────────────────────────────────────────
@@ -515,11 +515,11 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
         callback,
         "⚙️ <b>Настройки</b>\n\n"
         "🤖 <b>Команды бота</b> — /start, /help и другие команды\n"
-        "🔔 <b>Уведомления</b> — флуд, позиции, ошибки\n"
-        "💳 <b>Billing</b> — подписка и тарифные планы\n"
-        "👥 <b>Referral</b> — реферальная программа\n"
-        "🤖 <b>AI Assistant</b> — ИИ-помощник для контента\n"
-        "🏢 <b>Workspaces</b> — мульти-пользовательские пространства\n"
+        "🔔 <b>Уведомления</b> — предупреждения, позиции, ошибки\n"
+        "💳 <b>Подписка</b> — тарифный план и оплата\n"
+        "👥 <b>Рефералы</b> — реферальная программа\n"
+        "🤖 <b>ИИ Помощник</b> — нейросеть для создания контента\n"
+        "🏢 <b>Пространства</b> — работа в команде\n"
         "📄 <b>Шаблоны</b> — сохранённые конфигурации операций",
         _settings_kb(),
     )

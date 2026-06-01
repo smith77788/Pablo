@@ -166,29 +166,29 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"
-        f"🩺 Health score: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
+        f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
         f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
-        f"⭐ Средний trust: <b>{stats['avg_trust']}</b>\n"
-        f"🌊 В кулдауне: <b>{stats['in_cooldown']}</b>"
+        f"⭐ Средняя надёжность: <b>{stats['avg_trust']}</b>\n"
+        f"⏸ На паузе: <b>{stats['in_cooldown']}</b>"
     )
     if stats["critical"] or stats["low_trust"]:
         alerts = []
         if stats["critical"]:
-            alerts.append(f"🔴 Критический trust: <b>{stats['critical']}</b>")
+            alerts.append(f"🔴 Критическая надёжность: <b>{stats['critical']}</b>")
         if stats["low_trust"]:
-            alerts.append(f"🟡 Низкий trust: <b>{stats['low_trust']}</b>")
+            alerts.append(f"🟡 Низкая надёжность: <b>{stats['low_trust']}</b>")
         text += "\n\n" + " | ".join(alerts)
-    text += f"\n📋 Flood за 7д: <b>{flood_7d}</b>"
+    text += f"\n📋 Блокировок за 7д: <b>{flood_7d}</b>"
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📱 Аккаунты",       callback_data=HealthCb(action="accounts"))
     kb.button(text="🤖 Боты",           callback_data=HealthCb(action="bots_health"))
     kb.button(text="🔍 Реальная проверка", callback_data=HealthCb(action="real_check"))
-    kb.button(text="📈 Тренд trust",    callback_data=HealthCb(action="trust_trend"))
-    kb.button(text="📊 Тренд health",   callback_data=HealthCb(action="health_trend"))
-    kb.button(text="📉 Sparklines",     callback_data=HealthCb(action="sparklines"))
-    kb.button(text="📊 Сравнить все",   callback_data=HealthCb(action="compare"))
-    kb.button(text="🌊 Flood log",      callback_data=HealthCb(action="flood_log"))
+    kb.button(text="📈 Тренд надёжности", callback_data=HealthCb(action="trust_trend"))
+    kb.button(text="📊 Тренд здоровья",  callback_data=HealthCb(action="health_trend"))
+    kb.button(text="📉 Графики здоровья", callback_data=HealthCb(action="sparklines"))
+    kb.button(text="📊 Сравнить все",    callback_data=HealthCb(action="compare"))
+    kb.button(text="🌊 История блокировок", callback_data=HealthCb(action="flood_log"))
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
@@ -237,14 +237,14 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
             if flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
                 time_str = flood_until.strftime("%H:%M")
-                lines.append(f"❌ @{name} ({phone}) | <b>КУЛДАУН до {time_str}</b>{hs_str}")
+                lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b>{hs_str}")
             elif trust < 0.5:
                 lines.append(
-                    f"⚠️ @{name} ({phone}) | trust: <b>{trust:.2f}</b> | flood: {flood_cnt}{hs_str}"
+                    f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}"
                 )
             else:
                 lines.append(
-                    f"✅ @{name} ({phone}) | trust: <b>{trust:.2f}</b> | flood: {flood_cnt}{hs_str}"
+                    f"✅ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}"
                 )
 
     kb = _back_kb()
@@ -277,7 +277,11 @@ async def cb_health_real_check(
     from services.account_manager import check_account_status_full
     from services.logger import log_exc_swallow
 
-    status_emoji = {"active": "✅", "spamblock": "🚫", "cooldown": "⏳",
+    status_label = {
+        "active": "активен", "spamblock": "спам-ограничения", "cooldown": "пауза",
+        "banned": "заблокирован Telegram", "deactivated": "удалён", "session_expired": "сессия истекла", "error": "ошибка"
+    }
+    status_emoji = {"active": "✅", "spamblock": "🚫", "cooldown": "⏸",
                     "banned": "⛔", "deactivated": "🗑", "session_expired": "🔑", "error": "⚠️"}
 
     results = []
@@ -313,7 +317,9 @@ async def cb_health_real_check(
             log_exc_swallow(log, f"real_check: DB update failed acc={acc['id']}")
 
         emoji = status_emoji.get(status, "❓")
-        extra = f" — {reason[:60]}" if status not in ("active",) and reason else ""
+        label = status_label.get(status, status)
+        reason_part = f": {reason[:50]}" if status not in ("active",) and reason else ""
+        extra = f" — {label}{reason_part}" if status != "active" else ""
         results.append(f"{emoji} <b>{name}</b>{extra}")
 
     active_count = sum(1 for r in results if r.startswith("✅"))
@@ -425,9 +431,9 @@ async def cb_flood_log(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         rows = []
         table_available = False
 
-    lines = ["🌊 <b>Flood log</b>\n"]
+    lines = ["🌊 <b>История блокировок</b>\n"]
     if not table_available:
-        lines.append("ℹ️ Таблица flood-событий ещё не создана.\nFlood-события будут записываться автоматически.")
+        lines.append("ℹ️ Таблица блокировок ещё не создана. Данные появятся автоматически.")
     elif not rows:
         lines.append("Нет flood-событий за последнее время.")
     else:
@@ -472,7 +478,7 @@ async def cb_trust_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         rows = []
         table_ok = False
 
-    lines = ["📈 <b>Тренд доверия аккаунтов (7 дней)</b>\n"]
+    lines = ["📈 <b>Тренд надёжности аккаунтов (7 дней)</b>\n"]
     if not table_ok:
         lines.append("ℹ️ История ещё накапливается. Данные появятся через 30 минут.")
     elif not rows:
@@ -529,12 +535,12 @@ async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         rows = []
         table_ok = False
 
-    lines = ["📊 <b>Тренд здоровья аккаунтов (Health Score)</b>\n"]
+    lines = ["📊 <b>Тренд здоровья аккаунтов</b>\n"]
     if not table_ok:
         lines.append("ℹ️ История здоровья накапливается. Первые данные появятся в течение часа.")
     elif not rows:
         lines.append("Нет данных за последние 7 дней.\n"
-                     "Система сохраняет снапшоты health_score каждый час.")
+                     "Система сохраняет снимки состояния каждый час.")
     else:
         for r in rows:
             name = r["username"] or r["first_name"] or r["phone"] or "—"
@@ -636,7 +642,7 @@ async def cb_health_sparklines(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         accounts[key]["values"].append(val)
 
     # Build lines
-    lines = ["📉 <b>Sparklines — Health Score за 14 дней</b>\n"]
+    lines = ["📉 <b>Графики здоровья за 14 дней</b>\n"]
     lines.append("<code>" + "·" * 14 + "</code>  ← каждый символ = 1 день\n")
 
     for key, data in sorted(accounts.items(), key=lambda x: sum(x[1]["values"]) / max(len(x[1]["values"]), 1), reverse=True):

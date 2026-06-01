@@ -414,6 +414,50 @@ async def cb_unban(callback: CallbackQuery, callback_data: AdminUserCb, pool: as
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
 
 
+@router.callback_query(AdminUserCb.filter(F.action == "export_csv"))
+async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Экспорт всех пользователей платформы в CSV-файл."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️ Только администратор", show_alert=True)
+        return
+
+    await callback.answer("⏳ Генерирую CSV…")
+
+    try:
+        users = await db.get_all_platform_users(pool, limit=10000, offset=0)
+    except Exception as e:
+        log_exc_swallow(log, "Ошибка экспорта CSV пользователей")
+        await callback.message.answer(f"❌ Ошибка: {e}")
+        return
+
+    import csv
+    import io
+    from aiogram.types import BufferedInputFile
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["user_id", "username", "first_name", "current_plan",
+                     "is_banned", "registered_at", "plan_expires_at"])
+    for u in users:
+        writer.writerow([
+            u["user_id"],
+            u["username"] or "",
+            u["first_name"] or "",
+            u["current_plan"] or "free",
+            "да" if u["is_banned"] else "нет",
+            u["registered_at"].strftime("%Y-%m-%d %H:%M") if u.get("registered_at") else "",
+            u["plan_expires_at"].strftime("%Y-%m-%d %H:%M") if u.get("plan_expires_at") else "",
+        ])
+
+    data = buf.getvalue().encode("utf-8-sig")
+    file = BufferedInputFile(data, filename="platform_users.csv")
+    await callback.message.answer_document(
+        file,
+        caption=f"📥 <b>Все пользователи платформы</b>\n{len(users)} записей",
+        parse_mode="HTML",
+    )
+
+
 @router.callback_query(AdminUserCb.filter(F.action == "main_menu"))
 async def cb_main_menu(callback: CallbackQuery) -> None:
     """Вернуться в админ-меню."""

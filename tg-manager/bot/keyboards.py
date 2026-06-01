@@ -217,7 +217,7 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
     kb.button(
         text="💬 Авто-ответы", callback_data=AutoReplyCb(action="menu", bot_id=bot_id)
     )
-    kb.button(text="📨 Inbox", callback_data=RelayCb(action="menu", bot_id=bot_id))
+    kb.button(text="💬 Диалоги", callback_data=RelayCb(action="menu", bot_id=bot_id))
     kb.button(text="🔗 Цепочки", callback_data=FunnelCb(action="list", bot_id=bot_id))
     kb.button(text="🌐 Вебхук", callback_data=WebhookCb(action="menu", bot_id=bot_id))
     kb.button(text="⚖️ Сравнить", callback_data=AudCb(action="compare", bot_id=bot_id))
@@ -727,7 +727,7 @@ def relay_menu(
     bot_id: int, relay_enabled: bool, sessions: list
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    toggle = "🔴 Отключить inbox" if relay_enabled else "🟢 Включить inbox"
+    toggle = "🔴 Отключить диалоги" if relay_enabled else "🟢 Включить диалоги"
     kb.button(text=toggle, callback_data=RelayCb(action="toggle", bot_id=bot_id))
     for s in sessions:
         name = (

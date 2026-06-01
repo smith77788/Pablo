@@ -489,6 +489,7 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     body = "\n".join(lines) if lines else "Нет зарегистрированных пользователей."
     kb.button(text="📋 Полный список", callback_data=AdminUserCb(action="list"))
+    kb.button(text="📥 Экспорт CSV", callback_data=AdminUserCb(action="export_csv"))
     kb.button(text="◀️ Назад", callback_data="adm:main")
     kb.adjust(1)
     await callback.message.edit_text(
