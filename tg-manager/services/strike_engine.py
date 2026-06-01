@@ -763,6 +763,8 @@ async def submit_abuse_form(
         "darknet": "darknet criminal services and illegal marketplace",
         "violence": "promotion of violence and terrorism",
         "spam": "mass spam and platform abuse",
+        "pornography": "illegal pornographic content and adult material without age verification",
+        "escort": "prostitution, illegal escort services and sexual exploitation",
         "other": "Terms of Service violation and harmful illegal content",
     }.get(reason, "Terms of Service violation and harmful illegal content")
 

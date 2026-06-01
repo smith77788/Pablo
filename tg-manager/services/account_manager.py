@@ -2626,12 +2626,20 @@ async def strike_map_target(
         intel["access_hash"] = getattr(entity, "access_hash", 0) or 0
         intel["members"]     = getattr(entity, "participants_count", 0) or 0
 
-        # Полная инфо о канале (описание, linked_chat_id)
+        # Полная инфо о канале (описание, linked_chat_id) + refresh entity
         try:
             full = await client(GetFullChannelRequest(entity))
             fc = full.full_chat
             intel["description"]    = (getattr(fc, "about", "") or "")[:500]
             intel["linked_group_id"] = getattr(fc, "linked_chat_id", None)
+            # Refresh entity из ответа (более актуальный access_hash)
+            _fc = next(
+                (c for c in getattr(full, "chats", []) if getattr(c, "id", None) == entity.id),
+                None
+            )
+            if _fc:
+                entity = _fc
+                intel["access_hash"] = getattr(entity, "access_hash", 0) or 0
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Все администраторы (до 200)
