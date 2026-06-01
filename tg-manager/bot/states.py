@@ -376,6 +376,13 @@ class OpBuilderFSM(StatesGroup):
     choosing_op_type = State()   # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit
     choosing_targets = State()   # выбор целей (каналы/аккаунты/ссылки)
     entering_params = State()    # ввод дополнительных параметров (текст поста / ссылки)
+
+
+class QuickPostFSM(StatesGroup):
+    writing_text = State()       # шаг 1: ввод текста поста
+    picking_channels = State()   # шаг 2: выбор каналов
+    picking_timing = State()     # шаг 3: задержка между постами
+    confirming = State()         # шаг 4: предпросмотр и подтверждение
     confirming = State()         # финальное подтверждение перед записью в operation_queue
 
 

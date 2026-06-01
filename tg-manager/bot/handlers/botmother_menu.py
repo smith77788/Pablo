@@ -36,6 +36,7 @@ from bot.callbacks import (
     NetworkCb,
     ParserCb,
     ProxyCb,
+    QuickPostCb,
     RankCb,
     RefCb,
     RelayCb,
@@ -111,12 +112,13 @@ def _operations_kb():
     kb.button(text="🌍 Присутствие",        callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="🗂 Presence Packs",     callback_data=PackCb(action="menu"))
     kb.button(text="📤 Публикация",         callback_data=MassPubCb(action="menu"))
+    kb.button(text="✍️ Создать пост",       callback_data=QuickPostCb(action="start"))
     kb.button(text="⚡ Массовые действия",  callback_data=BmCb(action="bulk_ops"))
     kb.button(text="🛠️ Построитель",        callback_data=MassOpCb(action="menu"))
     kb.button(text="📋 Очередь",            callback_data=MassOpCb(action="queue"))
     kb.button(text="⏱️ Планировщик",        callback_data=BmCb(action="op_planner"))
     kb.button(text="◀️ Назад",              callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 1, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -382,7 +384,8 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
         "⚡ <b>Операции — действия над аккаунтами и каналами</b>\n\n"
         "⚔️ <b>Strike</b> — целевые операции по каналам/группам\n"
         "🌍 <b>Присутствие</b> — Global Presence Factory\n"
-        "📤 <b>Публикация</b> — массовая публикация в каналы\n"
+        "📤 <b>Публикация</b> — массовая публикация во все каналы\n"
+        "✍️ <b>Создать пост</b> — пошаговый мастер публикации\n"
         "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
         "🛠️ <b>Построитель</b> — собрать операцию из блоков\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"

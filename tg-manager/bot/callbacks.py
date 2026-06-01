@@ -360,3 +360,10 @@ class WorkspaceCb(CallbackData, prefix="ws"):
     page: int = 0
 
 
+class QuickPostCb(CallbackData, prefix="qp"):
+    action: str   # start, cancel, toggle, page, sel_all, desel_all, chans_done,
+                  # back_to_text, back_to_chans, back_to_timing, timing, publish
+    val: int = 0  # channel_id for toggle; delay_s for timing
+    page: int = 0
+
+
