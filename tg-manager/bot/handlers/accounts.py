@@ -2142,6 +2142,30 @@ async def handle_import_pyrogram(message: Message, state: FSMContext, pool: asyn
 @router.callback_query(AccCb.filter(F.action == "import_tdata"))
 async def cb_import_tdata(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    # Check opentele availability before showing instructions
+    try:
+        import opentele  # noqa: F401
+        _opentele_ok = True
+    except ImportError:
+        _opentele_ok = False
+
+    if not _opentele_ok:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔑 Импорт через String Session", callback_data=AccCb(action="import_string"))
+        kb.button(text="📄 Импорт .session файла", callback_data=AccCb(action="import_session_file"))
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="import_menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "❌ <b>tdata импорт недоступен</b>\n\n"
+            "Пакет <code>opentele</code> не установлен на сервере.\n\n"
+            "<b>Альтернативные способы импорта:</b>\n"
+            "• <b>String Session</b> — скопируйте строку сессии из вашего скрипта\n"
+            "• <b>.session файл</b> — загрузите SQLite-файл Telethon напрямую",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     await state.set_state(SessionImport.waiting_tdata_zip)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))

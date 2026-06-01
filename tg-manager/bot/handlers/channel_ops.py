@@ -110,6 +110,13 @@ from database import db
 log = logging.getLogger(__name__)
 router = Router()
 
+_DISCLAIMER = (
+    "\n\n<i>⚠️ <b>Важно:</b> Strike Module является инструментом для подачи "
+    "законных жалоб через официальные механизмы Telegram Trust &amp; Safety. "
+    "Результат зависит исключительно от решения модераторов Telegram. "
+    "Использование модуля не гарантирует удаление или блокировку ресурса.</i>"
+)
+
 # Store active background tasks for cancellation: (user_id, task_type) → Task
 _active_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
