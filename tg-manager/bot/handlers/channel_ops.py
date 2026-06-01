@@ -2916,14 +2916,15 @@ def _normalize_peer(p: str) -> str:
 
 def _reason_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    # Быстрые пресеты
+    # Быстрые пресеты (7 штук: drugs/terrorism/fraud/csam/weapons/darknet/escort)
     for key, (reason, label) in _REPORT_PRESETS.items():
         kb.button(text=label, callback_data=f"chan:br_preset:{key}")
-    # Стандартные причины TG
+    # Стандартные причины TG (6 штук)
     for key, label in REPORT_REASONS.items():
         kb.button(text=label, callback_data=f"chan:br_reason:{key}")
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
-    kb.adjust(3, 3, 2, 2, 2, 1)
+    # 7 пресетов + 6 причин + 1 отмена = 14 кнопок
+    kb.adjust(4, 3, 3, 3, 1)
     return kb
 
 
