@@ -1720,6 +1720,8 @@ async def report_peer_deep(
             try:
                 await client(JoinChannelRequest(entity))
                 result["joined"] = True
+                # Обновляем entity после join — access hash обновляется в сессии
+                entity = await client.get_entity(peer_username.lstrip("@"))
                 await asyncio.sleep(random.uniform(2.0, 4.5))
             except Exception as e:
                 log.warning("report_peer_deep[3/join]: %s", e)
@@ -2128,6 +2130,8 @@ async def report_peer_deep_v2(
                 await session_simulator.action_hesitation(0.15)
                 await client(JoinChannelRequest(entity))
                 result["joined"] = True
+                # Обновляем entity — после join access hash меняется в сессии
+                entity = await client.get_entity(peer_username.lstrip("@"))
                 # Человеческая пауза после входа — "читает канал"
                 await asyncio.sleep(random.uniform(3.0, 7.0))
             except Exception as e:
@@ -2175,6 +2179,8 @@ async def report_peer_deep_v2(
                 try:
                     await client(JoinChannelRequest(entity))
                     result["joined"] = True
+                    # Обновляем entity после успешного join
+                    entity = await client.get_entity(peer_username.lstrip("@"))
                     await asyncio.sleep(random.uniform(1.5, 3.5))
                 except Exception as _je:
                     log.info("rpv2[5/join_retry]: %s — продолжаем без вступления", _je)
