@@ -351,7 +351,7 @@ async def cb_mp_timing(
         f"📤 <b>Предпросмотр публикации</b>\n\n"
         f"Тип целей: <b>{target_label}</b>\n"
         f"Фильтр: <b>{filter_label}</b>\n"
-        f"Найдено: <b>{channel_count}</b> каналов/групп\n"
+        f"Ожидается: <b>~{channel_count}</b> каналов/групп\n"
         f"Задержка: <b>{delay_label}</b>\n"
         f"Расчётное время: ~{estimated_mins} мин\n\n"
         f"Текст:\n<i>{preview_text}</i>\n\n"
@@ -616,7 +616,7 @@ async def cb_dry_run(
         f"🔍 <b>Предпросмотр операции</b>\n\n"
         f"Тип: Публикация в {target_label.lower()}\n"
         f"Фильтр: {filter_label}\n"
-        f"Каналов найдено: <b>{channel_count}</b>\n"
+        f"Каналов ожидается: <b>~{channel_count}</b>\n"
         f"Расчётное время: ~{estimated_mins} мин\n"
         f"Задержка между постами: {delay_label}\n\n"
         f"<i>Операция ещё не выполнена — это только предпросмотр.</i>",
@@ -909,13 +909,22 @@ async def _count_targets(
     pool: asyncpg.Pool, owner_id: int,
     target: str, filter_type: str, acc_id: int | None, cluster: str | None,
 ) -> int:
-    """Count number of matching dialogs without fetching all messages."""
+    """Estimate number of matching dialogs. Real count requires fetching Telethon dialogs (slow)."""
     accounts = await _get_accounts_for_filter(pool, owner_id, filter_type, acc_id, cluster)
     if not accounts:
         return 0
-    # For preview purposes, estimate 3 dialogs per account to avoid long delays
-    # A real count would require fetching all dialogs from Telethon
-    return len(accounts) * 3
+    # Use managed_channels count from DB as a better estimate than flat multiplier
+    try:
+        if target in ("channels", "both"):
+            db_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                owner_id,
+            ) or 0
+            if db_count > 0:
+                return db_count
+    except Exception:
+        pass
+    return max(len(accounts), 1) * 3
 
 
 async def _create_op_record(

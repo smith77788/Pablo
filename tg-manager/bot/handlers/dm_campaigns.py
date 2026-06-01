@@ -408,6 +408,42 @@ async def cb_dm_launch_or_draft(
     cohort_type = sd.get("dm_cohort_type", "")
     status = "draft" if callback_data.action == "save_draft" else "running"
 
+    # Block launch if audience is empty (allow save_draft regardless)
+    if status == "running":
+        try:
+            audience_cnt = 0
+            if target_type == "bot_users" and target_id:
+                audience_cnt = await pool.fetchval(
+                    "SELECT COUNT(DISTINCT user_id) FROM bot_users WHERE bot_id=$1 AND user_id > 0",
+                    target_id,
+                ) or 0
+            elif target_type == "cohort" and target_id:
+                cohort_sql = {
+                    "hot":  "last_seen >= now() - INTERVAL '1 day'",
+                    "warm": "last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
+                    "cold": "last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
+                    "lost": "last_seen < now() - INTERVAL '30 days'",
+                }.get(cohort_type, "last_seen >= now() - INTERVAL '7 days'")
+                audience_cnt = await pool.fetchval(
+                    f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
+                    target_id,
+                ) or 0
+            elif target_type == "crm":
+                audience_cnt = await pool.fetchval(
+                    "SELECT COUNT(DISTINCT tg_user_id) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
+                    callback.from_user.id,
+                ) or 0
+            if audience_cnt == 0:
+                await _edit(
+                    callback,
+                    "⚠️ <b>Аудитория пуста — кампания не запущена</b>\n\n"
+                    "В выбранной аудитории нет получателей.\n"
+                    "Сохраните как черновик или выберите другую аудиторию.",
+                )
+                return
+        except Exception:
+            log_exc_swallow(log, "Ошибка проверки аудитории перед запуском DM-кампании")
+
     import json as _json
     params_dict = {}
     if cohort_type:

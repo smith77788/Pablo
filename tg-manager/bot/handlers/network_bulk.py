@@ -60,6 +60,7 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 async def _check_enterprise(callback: CallbackQuery, pool: asyncpg.Pool) -> bool:
     if await require_plan(pool, callback.from_user.id, "enterprise"):
         return True
+    await callback.answer()
     await callback.message.edit_text(
         locked_text("Массовые операции", "enterprise"),
         parse_mode="HTML",

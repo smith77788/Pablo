@@ -39,8 +39,18 @@ CREATE TABLE IF NOT EXISTS strike_access (
     user_id      BIGINT PRIMARY KEY,
     purchased_at TIMESTAMPTZ DEFAULT now(),
     payment_ref  TEXT,
-    granted_by   BIGINT
-)
+    granted_by   BIGINT,
+    mode         TEXT DEFAULT 'normal'
+);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='strike_access' AND column_name='mode'
+    ) THEN
+        ALTER TABLE strike_access ADD COLUMN mode TEXT DEFAULT 'normal';
+    END IF;
+END $$;
 """
 
 
