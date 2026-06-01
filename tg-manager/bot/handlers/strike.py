@@ -191,7 +191,14 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 
 async def _set_strike_mode(callback: CallbackQuery, pool: asyncpg.Pool, mode: str) -> None:
-    await pool.execute("UPDATE strike_access SET mode=$1 WHERE user_id=$2", mode, callback.from_user.id)
+    await _ensure_table(pool)
+    # Upsert — works for purchased users AND enterprise/admin (no row in strike_access)
+    await pool.execute(
+        """INSERT INTO strike_access (user_id, mode)
+           VALUES ($1, $2)
+           ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode""",
+        callback.from_user.id, mode,
+    )
     mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
     await callback.answer(f"✅ Режим: {mode_labels.get(mode, mode)}", show_alert=True)
     await cb_strike_settings(callback, pool)

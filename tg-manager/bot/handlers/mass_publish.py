@@ -304,27 +304,15 @@ async def _show_preview(
     post_text: str = data.get("post_text", "")
     dry_run: bool = data.get("dry_run", False)
 
-    # Count total channels
-    from services import account_manager
-
-    total_channels = 0
-    acc_count = 0
-    accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        callback.from_user.id,
-        acc_ids,
+    # Count total channels from DB (fast, no Telegram connections)
+    channel_counts = await pool.fetch(
+        "SELECT acc_id, COUNT(*) AS cnt FROM managed_channels "
+        "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
+        "GROUP BY acc_id",
+        callback.from_user.id, acc_ids,
     )
-    for acc in accounts:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        channels = [
-            d
-            for d in dialogs
-            if d.get("type") in ("channel", "megagroup", "supergroup")
-        ]
-        total_channels += len(channels)
-        if channels:
-            acc_count += 1
+    total_channels = sum(r["cnt"] for r in channel_counts)
+    acc_count = len(channel_counts)
 
     effective_delay = 60 if delay_s < 0 else delay_s  # smart = ~60s avg
     estimated_s = total_channels * effective_delay
@@ -335,9 +323,13 @@ async def _show_preview(
     # Truncate post text for preview
     preview_text = post_text[:300] + ("..." if len(post_text) > 300 else "")
 
+    channels_hint = (
+        "\n⚠️ <i>Каналы не импортированы. При запуске найдём через Telegram.</i>"
+        if total_channels == 0 else ""
+    )
     preview_msg = (
         f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
-        f"Целевых каналов: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'})\n"
+        f"Каналов в БД: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'}){channels_hint}\n"
         f"Задержка: <b>{timing_label}</b>\n"
         f"Расчётное время: ~{_format_duration(estimated_s)}\n\n"
         f"Текст поста:\n"
@@ -376,25 +368,35 @@ async def cb_mpub_confirm_send(
     post_text: str = data.get("post_text", "")
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
-        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        "SELECT a.id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
         callback.from_user.id,
         acc_ids,
     )
 
     from services import account_manager
 
-    # Gather all (acc, channel) pairs first
+    # Gather all (acc, channel) pairs: first try managed_channels DB, fallback to dialogs
     pairs: list[tuple[asyncpg.Record, dict]] = []
     for acc in accounts:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        channels = [
-            d
-            for d in dialogs
-            if d.get("type") in ("channel", "megagroup", "supergroup")
-        ]
-        for ch in channels:
-            pairs.append((acc, ch))
+        acc_dict = dict(acc)
+        db_channels = await pool.fetch(
+            "SELECT channel_id AS id, title, access_hash FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id=$2",
+            callback.from_user.id, acc["id"],
+        )
+        if db_channels:
+            for ch in db_channels:
+                pairs.append((acc_dict, dict(ch)))
+        else:
+            # Fallback: live dialogs if managed_channels empty
+            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc_dict) or []
+            channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+            for ch in channels:
+                pairs.append((acc_dict, ch))
 
     total = len(pairs)
     if total == 0:

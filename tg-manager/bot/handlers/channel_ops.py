@@ -239,9 +239,12 @@ def _human_delay(min_s: float, max_s: float) -> float:
 
 async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT id, session_str, phone, first_name, username, is_active, "
-        "trust_score, flood_count_7d, cooldown_until, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE owner_id=$1 ORDER BY added_at",
+        "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
+        "a.trust_score, a.flood_count_7d, a.cooldown_until, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a "
+        "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 ORDER BY a.added_at",
         owner_id,
     )
 
@@ -2743,7 +2746,7 @@ async def cb_br_preset(callback: CallbackQuery, state: FSMContext, pool: asyncpg
     await callback.answer()
     preset_key = callback.data.split(":", 2)[2]
     reason, _ = _REPORT_PRESETS.get(preset_key, ("other", ""))
-    await state.update_data(reason=reason)
+    await state.update_data(reason=reason, preset=preset_key)
     await state.set_state(BulkReportFSM.selecting_accounts)
     data = await state.get_data()
     accounts = await _get_accounts(pool, callback.from_user.id)

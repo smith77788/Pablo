@@ -2250,13 +2250,26 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[6/get_msgs] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 7. channels.ReportSpam ────────────────────────────────────
+        # channels.reportSpam(channel, participant, ids) requires a USER as participant.
+        # We collect message senders from the fetched msgs to use as participant.
         if _CSR and msgs and is_channel:
             spam_ids = [m.id for m in msgs[:15] if m and m.id]
-            if spam_ids:
+            # Find a sender entity: prefer messages with from_id (non-anonymous posts)
+            _spam_participant = None
+            for _sm in msgs[:10]:
+                _fid = getattr(_sm, "from_id", None)
+                if _fid is not None:
+                    try:
+                        _spam_participant = await _timed(client.get_entity(_fid), 8.0)
+                        break
+                    except Exception:
+                        pass
+            if spam_ids and _spam_participant:
                 try:
                     await asyncio.sleep(random.uniform(0.3, 1.0))
-                    await client(_CSR(channel=entity, participant=entity, id=spam_ids))
+                    await client(_CSR(channel=entity, participant=_spam_participant, id=spam_ids))
                     R["spam_signaled"] += len(spam_ids)
+                    log.info("rpv2[7] spam_signaled=%d acc=%s", len(spam_ids), acc_id)
                 except Exception as e:
                     log.warning("rpv2[7/spam] acc=%s: %s", acc_id, str(e)[:80])
 
