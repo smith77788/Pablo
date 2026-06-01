@@ -964,7 +964,9 @@ async def parallel_strike(
                 log.warning("parallel_strike acc %s: %s", acc.get("id"), e)
                 return {"peer_reported": False, "error": str(e)[:100]}
 
-    results = await asyncio.gather(*[_one(acc, txt) for acc, txt in zip(accounts, texts)])
+    results = _safe_gather_results(
+        await asyncio.gather(*[_one(acc, txt) for acc, txt in zip(accounts, texts)], return_exceptions=True)
+    )
     return list(results)
 
 
