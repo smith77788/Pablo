@@ -54,20 +54,13 @@ LANGUAGES = [
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
-    kb.button(text="🤖 Мои боты", callback_data=BotCb(action="list", page=0))
-    kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
-    kb.button(text="🌐 Сеть & операции", callback_data=NetworkCb(action="menu"))
-    kb.button(text="📱 Мои аккаунты", callback_data=AccCb(action="menu"))
-    kb.button(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu"))
-    kb.button(text="💳 Подписка", callback_data=SubCb(action="menu"))
-    kb.button(text="🔗 Реф. программа", callback_data=RefCb(action="menu"))
-    kb.button(text="🤖 AI-ассистент", callback_data=AiCb(action="start"))
+    kb.button(text="🏠 BotMother OS",    callback_data=BmCb(action="main"))
+    kb.button(text="➕ Добавить бота",   callback_data=BotCb(action="add"))
     kb.button(text="⚡ Активные задачи", callback_data=TaskCb(action="list"))
-    kb.button(text="❓ Справка", callback_data=BotCb(action="help"))
+    kb.button(text="❓ Справка",         callback_data=BotCb(action="help"))
     if is_admin:
         kb.button(text="⚙️ Админка", callback_data="adm:main")
-    kb.adjust(1, 2, 2, 2, 2, 2, 2, 1 if not is_admin else 2)
+    kb.adjust(1, 2, 2, 1 if not is_admin else 2)
     return kb.as_markup()
 
 
