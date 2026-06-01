@@ -3272,15 +3272,16 @@ async def _strike_bg_v2(
             try:
                 _row_id = await pool.fetchval(
                     """INSERT INTO strike_history(owner_id, target, reason, preset,
-                       accounts_used, peer_reported, msgs_reported, pinned_reported,
-                       admins_reported, network_nodes, network_reports, blocked,
-                       verified_down, duration_s, abuse_form_ok, spambot_escalation)
-                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                       accounts_used, peer_reported, msgs_reported, msgs_fetched,
+                       pinned_reported, admins_reported, network_nodes, network_reports,
+                       blocked, verified_down, duration_s, abuse_form_ok, spambot_escalation)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                        RETURNING id""",
                     user_id, r.target, reason, preset or None,
-                    r.unique_accounts, r.peer_reported, r.msgs_reported, r.pinned_reported,
-                    r.admins_reported, r.network_nodes, r.network_reports, r.blocked,
-                    r.verified_down, r.duration_s, r.abuse_form_ok, r.spambot_escalation,
+                    r.unique_accounts, r.peer_reported, r.msgs_reported,
+                    getattr(r, "msgs_fetched", 0),
+                    r.pinned_reported, r.admins_reported, r.network_nodes, r.network_reports,
+                    r.blocked, r.verified_down, r.duration_s, r.abuse_form_ok, r.spambot_escalation,
                 )
                 if _row_id:
                     _history_ids[r.target] = _row_id
