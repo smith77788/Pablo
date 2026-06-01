@@ -565,9 +565,14 @@ async def _exec_bulk_leave(
                 return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
                         "summary": f"Отменено. Вышли: {ok_count}, ошибок: {fail_count}"}
             step += 1
+            t0 = time.monotonic()
+            flood_wait = 0
             try:
-                await account_manager.leave_channel(acc["session_str"], channel, _acc=acc_dict)
+                left = await account_manager.leave_channel(acc["session_str"], channel, _acc=acc_dict)
+                if not left:
+                    raise Exception(f"leave_channel returned False for {channel}")
                 ok_count += 1
+                dur_ms = int((time.monotonic() - t0) * 1000)
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','left')",
@@ -576,16 +581,38 @@ async def _exec_bulk_leave(
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
+                await _audit(pool, owner_id, "leave", "success",
+                             operation_id=op_id, account_id=acc["id"],
+                             target=str(channel), duration_ms=dur_ms)
+                try:
+                    from services.flood_engine import record_success
+                    await record_success(acc["id"], "leave")
+                except Exception:
+                    log_exc_swallow(log, f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}")
             except Exception as e:
                 fail_count += 1
+                err_str = str(e)[:200]
+                if "FloodWait" in err_str or "flood_wait" in err_str.lower() or "A wait of" in err_str:
+                    try:
+                        flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])))
+                    except Exception:
+                        flood_wait = 60
+                    try:
+                        from services.flood_engine import record_flood
+                        await record_flood(pool, acc["id"], flood_wait, "leave", op_id)
+                    except Exception:
+                        log_exc_swallow(log, f"Сбой записи flood в flood_engine для аккаунта {acc['id']}")
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, step, str(channel), str(e)[:200],
+                    op_id, step, str(channel), err_str,
                 )
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                 )
+                await _audit(pool, owner_id, "leave", "flood_wait" if flood_wait else "error",
+                             operation_id=op_id, account_id=acc["id"],
+                             target=str(channel), error_msg=err_str, flood_wait_s=flood_wait or None)
             # Apply pacing based on delay_mode from params
             delay_mode = params.get("delay_mode", "smart")
             chaos = session_simulator.chaos_factor()
@@ -598,6 +625,8 @@ async def _exec_bulk_leave(
                 pause = random.uniform(60, 120) * chaos * tod
             else:  # smart
                 pause = random.uniform(15, 45) * chaos * tod
+            if flood_wait:
+                pause = max(pause, float(flood_wait) + random.uniform(10, 30))
             await asyncio.sleep(pause)
 
     return {
