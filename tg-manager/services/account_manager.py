@@ -2160,7 +2160,8 @@ async def report_peer_deep_v2(  # noqa: C901
 
     tg_reason = _rm.get(reason, InputReportReasonOther())
     all_reasons: list = [tg_reason] + [_rm[k] for k in _escalation.get(reason, []) if k in _rm]
-    msg_pool: list[str] = msg_messages or ([message] if message else [""])
+    _raw_pool: list[str] = msg_messages or ([message] if message else [])
+    msg_pool: list[str] = [t for t in _raw_pool if t.strip()] or ["Report: inappropriate content"]
     peer = peer_username.lstrip("@")
     acc_id = (_acc or {}).get("id", "?")
 
@@ -2189,12 +2190,19 @@ async def report_peer_deep_v2(  # noqa: C901
             "fake": ("fake", "scam", "fraud", "фейк", "мошен"),
             "other": ("other", "другое"),
         }.get(reason, ())
+        opt_texts = [f"'{(getattr(o,'text','') or '')}'" for o in options]
+        log.debug("rpv2 option_select reason=%s available=%s", reason, opt_texts)
         for opt in options:
             text = (getattr(opt, "text", "") or "").lower()
             if any(hint in text for hint in hints):
-                return getattr(opt, "option", None)
+                val = getattr(opt, "option", None)
+                if val is not None:
+                    return val
         if options:
-            return getattr(options[0], "option", None)
+            val = getattr(options[0], "option", None)
+            if val is not None:
+                return val
+        log.warning("rpv2 option_select: no option bytes in %s", opt_texts)
         return None
 
     async def _report_message_ids(peer_obj, msg_ids: list[int], comment: str, stage: str) -> bool:
@@ -2211,7 +2219,7 @@ async def report_peer_deep_v2(  # noqa: C901
                     return True
                 if isinstance(result, ReportResultChooseOption):
                     opt = _select_report_option(result.options)
-                    if not opt:
+                    if opt is None:
                         _record_error(stage, f"no selectable option at depth {depth}")
                         return False
                     current_option = opt
@@ -2600,13 +2608,15 @@ async def report_peer_deep_v2(  # noqa: C901
                     log.warning("rpv2[10/get_linked] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 11. Linked bots ────────────────────────────────────────────
+        _service_bots = {"stopca", "notoscam", "spambot", "spam_bot", "officialscambot"}
         if report_linked_bots and is_channel:
             bot_re = _re.compile(r'@([A-Za-z]\w{4,31}[Bb]ot)\b')
             scan = (getattr(full_chat, "about", "") or "") if full_chat else ""
             for m in msgs[:10]:
                 if m and m.text:
                     scan += " " + m.text
-            for bi, bname in enumerate(list(set(bot_re.findall(scan)))[:6]):
+            _bot_candidates = [b for b in set(bot_re.findall(scan)) if b.lower() not in _service_bots]
+            for bi, bname in enumerate(_bot_candidates[:6]):
                 try:
                     bent = await _timed(client.get_entity(bname), 8.0)
                     await client(ReportPeerRequest(
