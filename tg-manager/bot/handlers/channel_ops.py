@@ -2837,34 +2837,50 @@ async def _strike_bg_v2(
         )
         results = await strike_engine.staggered_strike(plan, progress_cb=_progress)
 
-        # ── Фаза 5: Верификация ──
-        await _progress("verify", "Фаза 5: Проверка результата...")
+        # ── Сохранение в историю (до верификации — не теряем при рестарте) ──
+        _history_ids: dict[str, int] = {}
         for r in results:
             try:
-                is_down = await strike_engine.verify_target_takedown(
-                    viable[0], r.target, max_attempts=3,
-                    delay_range=strike_engine._VERIFY_WAIT,
-                )
-                r.verified_down = is_down
-            except Exception:
-                r.verified_down = None
-
-        # ── Сохранение в историю ──
-        for r in results:
-            try:
-                await pool.execute(
+                _row_id = await pool.fetchval(
                     """INSERT INTO strike_history(owner_id, target, reason, preset,
                        accounts_used, peer_reported, msgs_reported, pinned_reported,
                        admins_reported, network_nodes, network_reports, blocked,
                        verified_down, duration_s, abuse_form_ok, spambot_escalation)
-                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                       RETURNING id""",
                     user_id, r.target, reason, preset or None,
                     r.unique_accounts, r.peer_reported, r.msgs_reported, r.pinned_reported,
                     r.admins_reported, r.network_nodes, r.network_reports, r.blocked,
                     r.verified_down, r.duration_s, r.abuse_form_ok, r.spambot_escalation,
                 )
+                if _row_id:
+                    _history_ids[r.target] = _row_id
             except Exception:
                 log_exc_swallow(log, "Сбой сохранения истории Strike")
+
+        # ── Фаза 5: Верификация ──
+        await _progress("verify", "Фаза 5: Проверка результата...")
+        _verify_acc = viable[0] if viable else None
+        for r in results:
+            try:
+                if _verify_acc is None:
+                    r.verified_down = None
+                    continue
+                is_down = await strike_engine.verify_target_takedown(
+                    _verify_acc, r.target, max_attempts=1,
+                    delay_range=(10, 20),
+                )
+                r.verified_down = is_down
+                if r.target in _history_ids:
+                    try:
+                        await pool.execute(
+                            "UPDATE strike_history SET verified_down=$1 WHERE id=$2",
+                            r.verified_down, _history_ids[r.target],
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "Сбой обновления verified_down в истории")
+            except Exception:
+                r.verified_down = None
 
         # ── Финальный отчёт ──
         summary_text = strike_engine.format_strike_summary(results)
