@@ -625,7 +625,9 @@ async def cb_alerts(
 
     if not rows and page == 0:
         kb = InlineKeyboardBuilder()
+        kb.button(text="🔄 Обновить", callback_data=BmCb(action="alerts"))
         kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
+        kb.adjust(1)
         await _edit(callback, "<b>🔔 Алерты</b>\n\nАлертов нет. Система работает нормально. ✅", kb.as_markup())
         return
 
@@ -969,7 +971,8 @@ async def cb_plan_type(
             "Примеры:\n"
             "• <code>25.06.2026 14:30</code>\n"
             "• <code>25.06 14:30</code>  (текущий год)\n"
-            "• <code>14:30</code>  (сегодня)",
+            "• <code>14:30</code>  (сегодня)\n\n"
+            "<i>⏰ Время указывается в UTC (МСК = UTC+3)</i>",
             parse_mode="HTML",
             reply_markup=kb_cancel.as_markup(),
         )
@@ -988,7 +991,8 @@ async def fsm_plan_waiting_text(message: Message, state: FSMContext) -> None:
     await message.answer(
         "🕐 <b>Когда выполнить?</b>\n\n"
         "Введите дату и время:\n"
-        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ДД.ММ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>",
+        "<code>ДД.ММ.ГГГГ ЧЧ:ММ</code>  или  <code>ДД.ММ ЧЧ:ММ</code>  или  <code>ЧЧ:ММ</code>\n\n"
+        "<i>⏰ Время указывается в UTC (МСК = UTC+3)</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

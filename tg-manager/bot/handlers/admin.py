@@ -56,7 +56,8 @@ def _admin_main_kb():
     kb.button(text="💰 Цены на подписки",        callback_data="adm:prices")
     kb.button(text="⚙️ Методы оплаты",          callback_data="adm:pay_cfg")
     kb.button(text="📨 Рассылка всем юзерам",    callback_data="adm:broadcast")
-    kb.button(text="🔔 Уведомления о новых",     callback_data="adm:notify_toggle")
+    _notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
+    kb.button(text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle")
     kb.button(text="🚫 Заблокировать юзера",     callback_data="adm:block_ask")
     kb.button(text="✅ Разблокировать юзера",    callback_data="adm:unblock_ask")
     kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")

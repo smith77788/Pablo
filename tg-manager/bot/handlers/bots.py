@@ -191,6 +191,7 @@ async def msg_token(
 
         await info_msg.edit_text(
             f"⚠️ Бот @{safe_uname} уже добавлен.",
+            parse_mode="HTML",
             reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
         )
         return
