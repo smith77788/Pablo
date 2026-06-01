@@ -557,6 +557,16 @@ async def staggered_strike(
     for target in plan.targets:
         intel = plan.intel.get(target, {})
         result = StrikeResult(target=target, unique_accounts=len(plan.accounts))
+        result.phase_results["recon"] = {
+            "msgs": len(intel.get("latest_msg_ids", []) or []),
+            "pinned": len(intel.get("pinned_msg_ids", []) or []),
+            "admins": len(intel.get("admin_ids", []) or []),
+            "nodes": (
+                len(intel.get("mentioned_usernames", []) or [])
+                + len(intel.get("bot_usernames", []) or [])
+                + (1 if intel.get("linked_group_id") else 0)
+            ),
+        }
         t_start = time.time()
 
         if progress_cb:
@@ -931,6 +941,33 @@ def aggregate_results(results: list[dict]) -> dict:
     return s
 
 
+def _build_vector_diagnostics(r: StrikeResult) -> list[str]:
+    """Build compact diagnostics for vectors that produced zero effect."""
+    notes: list[str] = []
+    err_blob = " ".join(r.errors or [])
+
+    if r.msgs_fetched == 0:
+        notes.append("history_unavailable")
+    elif r.msgs_reported == 0:
+        notes.append("history_loaded_but_no_actions")
+
+    if r.pinned_reported == 0:
+        notes.append("no_pinned_actions")
+    if r.admins_reported == 0:
+        notes.append("no_admin_actions")
+    if r.network_nodes == 0:
+        notes.append("no_network_nodes")
+    if r.bots_reported == 0 and r.forwarded == 0:
+        notes.append("no_bot_vectors")
+
+    if "ReportResultChooseOption" in err_blob:
+        notes.append("telegram_dynamic_report_flow")
+    if "FLOOD" in err_blob.upper() or "TOO_MUCH" in err_blob.upper():
+        notes.append("rate_limited")
+
+    return notes[:5]
+
+
 def format_strike_summary(results: list[StrikeResult]) -> str:
     """Форматирует итоговый отчёт об атаке в HTML."""
     lines = ["⚔️ <b>Strike — Итоговый отчёт</b>\n"]
@@ -967,9 +1004,32 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"  └ Длительность: <b>{r.duration_s:.0f}с</b> · "
             f"Аккаунтов: <b>{r.unique_accounts}</b>"
         )
+        recon = r.phase_results.get("recon", {})
+        lines.append(
+            "  🧭 Разведка: "
+            f"сообщений <b>{int(recon.get('msgs', 0))}</b> · "
+            f"закрепов <b>{int(recon.get('pinned', 0))}</b> · "
+            f"админов <b>{int(recon.get('admins', 0))}</b> · "
+            f"узлов <b>{int(recon.get('nodes', 0))}</b>"
+        )
+        vector_hits = sum(
+            [
+                1 if r.msgs_reported > 0 else 0,
+                1 if r.pinned_reported > 0 else 0,
+                1 if r.admins_reported > 0 else 0,
+                1 if r.spam_signaled > 0 else 0,
+                1 if r.network_nodes > 0 else 0,
+                1 if (r.bots_reported > 0 or r.forwarded > 0) else 0,
+            ]
+        )
+        lines.append(f"  📊 Покрытие векторов: <b>{vector_hits}/6</b>")
         if r.errors:
             sample = html.escape("; ".join(r.errors[:3])[:220])
             lines.append(f"  ⚠️ Ошибок: {len(r.errors)} · <code>{sample}</code>")
+        diagnostics = _build_vector_diagnostics(r)
+        if diagnostics:
+            diag_text = html.escape(", ".join(diagnostics))
+            lines.append(f"  🧪 Диагностика: <code>{diag_text}</code>")
         if r.verified_down is not None:
             lines.append(f"  🔍 Проверка: {'✅ УДАЛЁН' if r.verified_down else '⚠️ Всё ещё активен'}")
     return "\n".join(lines)
