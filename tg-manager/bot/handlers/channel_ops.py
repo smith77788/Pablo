@@ -4971,9 +4971,15 @@ async def cb_cinv_proceed(
         "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
         selected_accs, callback.from_user.id,
     )
+    async def _fetch_one(acc) -> list:
+        try:
+            return await _am.get_contacts(acc["session_str"], _acc=dict(acc))
+        except Exception:
+            return []
+
+    all_contact_lists = await asyncio.gather(*[_fetch_one(a) for a in acc_rows])
     unique_ids: set[int] = set()
-    for acc in acc_rows:
-        contacts = await _am.get_contacts(acc["session_str"], _acc=dict(acc))
+    for contacts in all_contact_lists:
         for c in contacts:
             unique_ids.add(c["user_id"])
 
