@@ -4873,10 +4873,13 @@ async def cb_cinv_pick_channel(
     )
     display = (f"@{row['username']}" if row and row["username"] else (row["title"] if row else str(ch_id)))
     access_hash = (row["access_hash"] if row else 0) or 0
+    # Используем @username как join_identifier если есть — co-accounts могут вступить без invite link
+    _username = row["username"] if row else None
+    channel_identifier = f"@{_username}" if _username else str(ch_id)
 
     await state.update_data(
         channel_id=ch_id,
-        channel_identifier=str(ch_id),
+        channel_identifier=channel_identifier,
         channel_display=display,
         access_hash=access_hash,
     )
