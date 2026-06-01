@@ -360,7 +360,18 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
     lines = ["📜 <b>История Strike (последние 15)</b>\n"]
     for r in rows:
-        status = "🟢" if r["verified_down"] else ("🟡" if r["verified_down"] is None else "🔴")
+        # 🟢 = подтверждено удаление, ⚔️ = полный удар, 🟡 = только ReportPeer, 🔴 = не прошёл
+        _pr = r["peer_reported"] or 0
+        _mr = r["msgs_reported"] or 0
+        _mf = r["msgs_fetched"] or 0
+        if r["verified_down"]:
+            status = "🟢"
+        elif _pr > 0 and (_mr > 0 or _mf > 0):
+            status = "⚔️"
+        elif _pr > 0:
+            status = "🟡"
+        else:
+            status = "🔴"
         ts = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "?"
         msgs_r = r["msgs_reported"] or 0
         msgs_f = r["msgs_fetched"] or 0

@@ -928,7 +928,16 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
     """Форматирует итоговый отчёт об атаке в HTML."""
     lines = ["⚔️ <b>Strike — Итоговый отчёт</b>\n"]
     for r in results:
-        status = "🟢" if r.verified_down else ("🟡" if r.verified_down is None else "🔴")
+        # Приоритет: если подтверждено удаление → 🟢, иначе оцениваем эффективность удара.
+        # 🔴 только если peer_reported=0 (удар вообще не прошёл).
+        if r.verified_down:
+            status = "🟢"  # подтверждено удаление
+        elif r.peer_reported > 0 and (r.msgs_reported > 0 or r.pinned_reported > 0 or r.msgs_fetched > 0):
+            status = "⚔️"  # полноценный удар (жалобы + сообщения)
+        elif r.peer_reported > 0:
+            status = "🟡"  # частичный удар (только ReportPeer, без сообщений)
+        else:
+            status = "🔴"  # удар не прошёл (нет даже базовой жалобы)
         lines.append(
             f"{status} <code>{r.target}</code>\n"
             f"  ├ Жалоб на канал: <b>{r.peer_reported}</b> "
