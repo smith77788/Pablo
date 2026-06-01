@@ -493,6 +493,20 @@ async def _one_account_strike(
         }
 
 
+def _safe_gather_results(raw: list) -> list[dict]:
+    """Фильтрует результаты gather(return_exceptions=True): re-raise CancelledError, остальные → error dict."""
+    out = []
+    for r in raw:
+        if isinstance(r, asyncio.CancelledError):
+            raise r
+        if isinstance(r, BaseException):
+            log.warning("strike wave task failed: %s", r)
+            out.append({"peer_reported": False, "error": str(r)[:80]})
+        else:
+            out.append(r)
+    return out
+
+
 async def staggered_strike(
     plan: StrikePlan,
     progress_cb=None,
@@ -522,7 +536,7 @@ async def staggered_strike(
                                     texts_w1, i, 0, sem, mode=plan.mode)
                 for i, acc in enumerate(plan.waves[0])
             ]
-            wave_results = await asyncio.gather(*tasks)
+            wave_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
 
         # Пауза между волнами
         if len(plan.waves) > 1:
@@ -541,7 +555,7 @@ async def staggered_strike(
                                     texts_w2, i, 1, sem, mode=plan.mode)
                 for i, acc in enumerate(plan.waves[1])
             ]
-            w2_results = await asyncio.gather(*tasks)
+            w2_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
             wave_results.extend(w2_results)
 
         # Пауза перед финальной волной
@@ -561,7 +575,7 @@ async def staggered_strike(
                                     texts_w3, i, 2, sem, mode=plan.mode)
                 for i, acc in enumerate(plan.waves[2])
             ]
-            w3_results = await asyncio.gather(*tasks)
+            w3_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
             wave_results.extend(w3_results)
 
         # Агрегация — явный маппинг ключей aggregate_results → поля StrikeResult
@@ -678,7 +692,16 @@ async def strike_network_nodes_v2(
         acc = accounts[i % len(accounts)]
         tasks.append(_attack_single_node(acc, node, reason, preset, sem))
 
-    results = await asyncio.gather(*tasks)
+    results_raw = await asyncio.gather(*tasks, return_exceptions=True)
+    results = []
+    for r in results_raw:
+        if isinstance(r, asyncio.CancelledError):
+            raise r
+        if isinstance(r, BaseException):
+            log.warning("strike_network_node task failed: %s", r)
+            results.append({"ok": False, "reports": 0})
+        else:
+            results.append(r)
     nodes_hit = sum(1 for r in results if r.get("ok"))
     total_rep = sum(r.get("reports", 0) for r in results)
     return {"nodes_attacked": nodes_hit, "total_reports": total_rep}
