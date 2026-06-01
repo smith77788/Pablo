@@ -501,8 +501,16 @@ async def cb_dm_detail(
         f"🏁 Конец: {finished}",
     ]
 
+    # Progress bar for running/paused campaigns
+    if total > 0 and status in ("running", "paused"):
+        bar_len = 10
+        filled = int(sent * bar_len / total)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        lines.append(f"\n[{bar}] {pct}%")
+
     kb = InlineKeyboardBuilder()
     if status == "running":
+        kb.button(text="🔄 Обновить", callback_data=DmCb(action="detail", campaign_id=c["id"]))
         kb.button(text="⏸️ Поставить на паузу", callback_data=DmCb(action="pause", campaign_id=c["id"]))
     elif status in ("paused", "draft"):
         kb.button(text="▶️ Запустить/продолжить", callback_data=DmCb(action="resume", campaign_id=c["id"]))

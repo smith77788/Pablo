@@ -222,6 +222,7 @@ async def run_campaign(
     acc_idx = 0
     sent = 0
     failed = 0
+    _notified_milestones: set[int] = set()  # 25, 50, 75
 
     for user_id in targets:
         # Проверить не отменена ли кампания
@@ -291,6 +292,23 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
                 campaign_id,
             )
+
+        # Milestone progress notifications (25%, 50%, 75%)
+        if total > 0:
+            _done = sent + failed
+            _pct = int(_done * 100 / total)
+            for _milestone in (25, 50, 75):
+                if _pct >= _milestone and _milestone not in _notified_milestones:
+                    _notified_milestones.add(_milestone)
+                    try:
+                        await bot.send_message(
+                            owner_id,
+                            f"📨 <b>DM «{campaign['name']}»</b> — {_milestone}%\n"
+                            f"✅ {sent} отправлено · ❌ {failed} ошибок · 📊 {total} всего",
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
 
         # Humanized delay
         delay = random.uniform(_MIN_DELAY, _MAX_DELAY)
