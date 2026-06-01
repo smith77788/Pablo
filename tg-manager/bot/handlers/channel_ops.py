@@ -2628,8 +2628,9 @@ async def cb_br_toggle(callback: CallbackQuery, state: FSMContext, pool: asyncpg
     active = [a for a in accounts if a["is_active"]]
     peers = data.get("peers", [data.get("peer", "")])
     extra = f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
+    peer_display = data.get("peer") or (data.get("peers") or [""])[0]
     await _show_bulk_report_account_picker(
-        callback.message, active, selected, data["peer"], data["reason"], edit=True, extra_info=extra
+        callback.message, active, selected, peer_display, data.get("reason", "spam"), edit=True, extra_info=extra
     )
 
 
@@ -2643,8 +2644,9 @@ async def cb_br_selall(callback: CallbackQuery, state: FSMContext, pool: asyncpg
     data = await state.get_data()
     peers = data.get("peers", [data.get("peer", "")])
     extra = f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
+    peer_display = data.get("peer") or (data.get("peers") or [""])[0]
     await _show_bulk_report_account_picker(
-        callback.message, active, selected, data["peer"], data["reason"], edit=True, extra_info=extra
+        callback.message, active, selected, peer_display, data.get("reason", "spam"), edit=True, extra_info=extra
     )
 
 
@@ -2657,8 +2659,9 @@ async def cb_br_selno(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     data = await state.get_data()
     peers = data.get("peers", [data.get("peer", "")])
     extra = f"Ресурсов: <b>{len(peers)}</b>" if len(peers) > 1 else None
+    peer_display = data.get("peer") or (data.get("peers") or [""])[0]
     await _show_bulk_report_account_picker(
-        callback.message, active, [], data["peer"], data["reason"], edit=True, extra_info=extra
+        callback.message, active, [], peer_display, data.get("reason", "spam"), edit=True, extra_info=extra
     )
 
 
@@ -2793,16 +2796,20 @@ async def _strike_bg_v2(
     reason: str, preset: str | None, label: str,
 ) -> None:
     """Фоновое выполнение Strike v2 — эшелонированная атака с верификацией."""
+    import json as _json
     from services import strike_engine
+
+    # Закреплённый заголовок — не зависит от status_msg.text (устаревает после edit_text)
+    _header = (
+        f"⚔️ <b>Strike v2</b> — {html.escape(label)}\n"
+        f"🎯 Целей: <b>{len(peers)}</b> · Аккаунтов: <b>{len(viable)}</b>"
+    )
 
     async def _progress(phase: str, detail: str) -> None:
         try:
-            current_text = status_msg.text or ""
-            base_lines = current_text.split("\n")
-            header = "\n".join(base_lines[:5]) if len(base_lines) > 5 else current_text
             await status_msg.edit_text(
-                f"{header}\n\n"
-                f"⚡ <b>{detail}</b>\n"
+                f"{_header}\n\n"
+                f"⚡ <b>{html.escape(detail)}</b>\n\n"
                 f"<i>Для отмены: /tasks</i>",
                 parse_mode="HTML",
             )
@@ -2836,11 +2843,30 @@ async def _strike_bg_v2(
             except Exception:
                 r.verified_down = None
 
+        # ── Сохранение в историю ──
+        for r in results:
+            try:
+                await pool.execute(
+                    """INSERT INTO strike_history(owner_id, target, reason, preset,
+                       accounts_used, peer_reported, msgs_reported, pinned_reported,
+                       admins_reported, network_nodes, network_reports, blocked,
+                       verified_down, duration_s, abuse_form_ok, spambot_escalation)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                    user_id, r.target, reason, preset or None,
+                    r.unique_accounts, r.peer_reported, r.msgs_reported, r.pinned_reported,
+                    r.admins_reported, r.network_nodes, r.network_reports, r.blocked,
+                    r.verified_down, r.duration_s, r.abuse_form_ok, r.spambot_escalation,
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой сохранения истории Strike")
+
         # ── Финальный отчёт ──
         summary_text = strike_engine.format_strike_summary(results)
         summary_text += "\n\n" + _DISCLAIMER
         kb = InlineKeyboardBuilder()
+        kb.button(text="📋 История", callback_data="strike:history")
         kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        kb.adjust(2)
         await status_msg.edit_text(summary_text, parse_mode="HTML", reply_markup=kb.as_markup())
 
     except asyncio.CancelledError:
