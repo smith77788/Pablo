@@ -43,7 +43,7 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
     """)
     history_batch = []
     for row in rows:
-        age_bonus = min(_AGE_BONUS_CAP, (row["age_days"] or 0) * _AGE_BONUS_PER_DAY)
+        age_bonus = min(_AGE_BONUS_CAP, float(row["age_days"] or 0) * _AGE_BONUS_PER_DAY)
         penalty = _FLOOD_PENALTY * (row["flood_count_7d"] or 0)
         score = max(0.1, min(1.0, 1.0 + age_bonus - penalty))
         # In cooldown → cap score at 0.2

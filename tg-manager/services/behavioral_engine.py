@@ -549,7 +549,7 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
     """
     try:
         exps = await pool.fetch(
-            "SELECT id, bot_id FROM ab_experiments WHERE status='active'"
+            "SELECT id, bot_id FROM experiments WHERE status='active'"
         )
     except Exception:
         return
@@ -582,7 +582,7 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
             winner_id = v0["id"] if ctr0 >= ctr1 else v1["id"]
 
             await pool.execute(
-                "UPDATE ab_experiments SET status='completed', winner_variant_id=$1 WHERE id=$2",
+                "UPDATE experiments SET status='completed', winner_variant_id=$1 WHERE id=$2",
                 winner_id, exp["id"],
             )
             concluded += 1
