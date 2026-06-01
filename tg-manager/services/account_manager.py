@@ -2108,6 +2108,7 @@ async def report_peer_deep_v2(  # noqa: C901
         "violence":   ["childabuse", "spam", "drugs", "fake", "other"],
         "terrorism":  ["childabuse", "violence", "spam", "drugs", "other"],
         "pornography": ["childabuse", "spam", "other", "violence"],
+        "escort":     ["pornography", "childabuse", "spam", "other"],
         "spam":       ["other", "violence", "personal", "fake"],
         "other":      ["spam", "violence", "pornography", "drugs"],
         "copyright":  ["spam", "other"],
@@ -2119,6 +2120,7 @@ async def report_peer_deep_v2(  # noqa: C901
         "childabuse": "stopCA", "csam": "stopCA", "drugs": "stopCA",
         "violence": "notoscam", "other": "notoscam", "spam": "notoscam",
         "pornography": "notoscam", "fraud": "notoscam",
+        "escort": "notoscam",
     }
 
     tg_reason = _rm.get(reason, InputReportReasonOther())

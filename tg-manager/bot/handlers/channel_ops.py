@@ -140,6 +140,7 @@ _REPORT_PRESETS = {
     "csam":      ("childabuse",  "🚨 CSAM"),
     "weapons":   ("violence",    "🔫 Оружие"),
     "darknet":   ("other",       "🕸 Даркнет-услуги"),
+    "escort":    ("pornography", "🟤 Эскорт/проституция"),
 }
 
 

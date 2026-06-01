@@ -229,6 +229,33 @@ TEXTS: dict[str, list[str]] = {
         "このチャンネルはTelegramの利用規約に違反しています。",
         "هذه القناة تنتهك شروط خدمة تيليجرام بشكل متكرر.",
     ],
+    "escort": [
+        "Канал открыто рекламирует проституцию и незаконные эскорт-услуги.",
+        "This channel openly advertises prostitution and illegal escort services.",
+        "Ce canal fait la promotion ouverte de la prostitution et de services d'escorte illégaux.",
+        "Dieser Kanal bewirbt offen Prostitution und illegale Escort-Dienstleistungen.",
+        "Este canal promueve activamente la prostitución y servicios de acompañamiento ilegales.",
+        "Illegal commercial sex services openly advertised — violates laws and Telegram ToS.",
+        "Канал систематически публикует рекламу эскорт-услуг с ценами и контактами.",
+        "Open advertisement of paid sexual services — prostitution and human trafficking.",
+        "Незаконная торговля сексуальными услугами — прейскурант, фото, контакты в открытом доступе.",
+        "Channel systematically advertising commercial sexual exploitation of individuals.",
+        "Prostitution marketplace actively recruiting clients — violates local and international law.",
+        "Канал является площадкой для организации проституции и сексуальной эксплуатации.",
+        "Illegal escort and prostitution advertising with explicit pricing and contact info.",
+        "Commercial sex services promoted openly — likely involves trafficking and exploitation.",
+        "Канал рекламирует сексуальные услуги за деньги в нарушение законодательства.",
+        "Sex trafficking and prostitution openly advertised — immediate removal required.",
+        "Этот канал используется для организации платных сексуальных услуг.",
+        "Platform for sexual exploitation — prostitution and escort services illegally advertised.",
+        "Questo canale promuove prostituzione e servizi di escort illegali apertamente.",
+        "Este canal es un mercado ilegal de servicios sexuales comerciales.",
+        "Canale di promozione illegale di prostituzione — rimozione immediata necessaria.",
+        "Kanal mit illegaler Prostitutionswerbung — sofortige Löschung erforderlich.",
+        "Канал пропагандирует и организует незаконные сексуальные услуги за вознаграждение.",
+        "Active sex services marketplace — content violates Telegram's policies entirely.",
+        "Открытая реклама проституции: анкеты, фото, расценки — нарушение закона и ToS.",
+    ],
 }
 
 # Маппинг пресетов на базовые причины
@@ -239,6 +266,7 @@ PRESET_TO_REASON = {
     "csam":      "childabuse",
     "weapons":   "violence",
     "darknet":   "other",
+    "escort":    "pornography",
 }
 PRESET_TEXTS = {
     "drugs":     TEXTS["drugs"],
@@ -247,6 +275,7 @@ PRESET_TEXTS = {
     "fraud":     TEXTS["fraud"],
     "weapons":   TEXTS["weapons"],
     "darknet":   TEXTS["darknet"],
+    "escort":    TEXTS["escort"],
 }
 
 # Приоритетные причины для эскалации (наиболее эффективные)
@@ -259,6 +288,7 @@ _REASON_PRIORITY = {
     "weapons": 3,
     "fraud": 4,
     "pornography": 5,
+    "escort":   5,
     "spam": 6,
     "other": 7,
 }
