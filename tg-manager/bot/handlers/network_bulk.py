@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import logging
 import aiohttp
 import asyncpg
 from aiogram import Router, F
@@ -13,8 +14,10 @@ from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text, is_platform_admin
 from database import db
 from services import bot_api
+from services.logger import log_exc_swallow
 
 router = Router()
+log = logging.getLogger(__name__)
 
 _LANG_HINT = (
     "Введите код языка (<code>ru</code>, <code>en</code>, <code>uk</code>, <code>de</code>…) "
@@ -25,14 +28,24 @@ _LANG_HINT = (
 async def _apply_all(
     pool: asyncpg.Pool, user_id: int, http: aiohttp.ClientSession, method, *args
 ) -> tuple[int, int, int]:
-    bots = await db.get_bots(pool, user_id)
+    try:
+        bots = await db.get_bots(pool, user_id)
+    except Exception:
+        log_exc_swallow(log, "_apply_all: get_bots failed")
+        return 0, 0, 0
     if not bots:
         return 0, 0, 0
     results = await asyncio.gather(
         *(method(http, b["token"], *args) for b in bots),
         return_exceptions=True,
     )
-    ok = sum(1 for r in results if r is True)
+    ok = 0
+    for b, r in zip(bots, results):
+        if isinstance(r, Exception):
+            label = f"@{b['username']}" if b.get("username") else str(b.get("bot_id", "?"))
+            log.warning("network_bulk: %s failed for %s: %s", method.__name__, label, r)
+        elif r is True:
+            ok += 1
     return ok, len(results) - ok, len(results)
 
 
@@ -64,20 +77,33 @@ async def cb_bulk_check(
 ) -> None:
     if not await _check_enterprise(callback, pool):
         return
-    bots = await db.get_bots(pool, callback.from_user.id)
+    try:
+        bots = await db.get_bots(pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_bulk_check: get_bots failed")
+        await callback.answer("Ошибка загрузки ботов.", show_alert=True)
+        return
     if not bots:
         await callback.answer("Нет ботов для проверки.", show_alert=True)
         return
     await callback.answer()
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
-    tokens = [b["token"] for b in bots]
-    results = await bot_api.batch_get_me(http, tokens)
+    log.info("network_bulk: bulk_check user=%s bots=%d", callback.from_user.id, len(bots))
+    try:
+        tokens = [b["token"] for b in bots]
+        results = await bot_api.batch_get_me(http, tokens)
+    except Exception:
+        log_exc_swallow(log, "cb_bulk_check: batch_get_me failed")
+        await callback.message.edit_text("❌ Ошибка проверки токенов. Попробуйте позже.",
+                                         reply_markup=network_ops_menu())
+        return
     ok_labels, fail_labels = [], []
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         (ok_labels if results.get(b["token"]) else fail_labels).append(
             f"{'✅' if results.get(b['token']) else '❌'} {label}"
         )
+    log.info("network_bulk: check done ok=%d fail=%d", len(ok_labels), len(fail_labels))
     lines = ok_labels + fail_labels
     text = (
         f"🔍 <b>Проверка токенов</b>\n"
@@ -111,9 +137,9 @@ async def msg_bulk_name(
     name = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_name, name
-    )
+    log.info("network_bulk: set_name user=%s", message.from_user.id)
+    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_name, name)
+    log.info("network_bulk: set_name done ok=%d fail=%d total=%d", ok, fail, total)
     await msg.edit_text(
         _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
         parse_mode="HTML",
@@ -424,26 +450,37 @@ async def msg_import_tokens(
         )
         return
     progress = await message.answer(f"⏳ Проверяю {len(lines)} токенов…")
-    import asyncio as _aio
-
-    results = await _aio.gather(
-        *(bot_api.get_me(http, t) for t in lines), return_exceptions=True
-    )
+    log.info("network_bulk: import_tokens user=%s count=%d", message.from_user.id, len(lines))
+    try:
+        results = await asyncio.gather(
+            *(bot_api.get_me(http, t) for t in lines), return_exceptions=True
+        )
+    except Exception:
+        log_exc_swallow(log, "msg_import_tokens: gather failed")
+        await progress.edit_text("❌ Ошибка проверки токенов. Попробуйте позже.")
+        return
     added, skipped, failed = [], [], []
     for token, info in zip(lines, results):
         if isinstance(info, Exception) or not info:
+            log.warning("network_bulk: token check failed %s: %s", token[:20], info)
             failed.append(f"❌ {token[:25]}…")
             continue
-        ok = await db.add_bot(
-            pool,
-            token=token,
-            bot_id=info["id"],
-            username=info.get("username", ""),
-            first_name=info.get("first_name", ""),
-            added_by=message.from_user.id,
-        )
+        try:
+            ok = await db.add_bot(
+                pool,
+                token=token,
+                bot_id=info["id"],
+                username=info.get("username", ""),
+                first_name=info.get("first_name", ""),
+                added_by=message.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "msg_import_tokens: add_bot failed")
+            ok = False
         label = f"@{info.get('username') or info.get('first_name', str(info['id']))}"
         (added if ok else skipped).append(f"{'✅' if ok else '⚠️'} {label}")
+    log.info("network_bulk: import done added=%d skipped=%d failed=%d",
+             len(added), len(skipped), len(failed))
     parts = []
     if added:
         parts.append(f"✅ Добавлено: <b>{len(added)}</b>")

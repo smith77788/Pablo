@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import random
 import string
@@ -18,8 +19,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import StrikeCb, ChanCb, BmCb
+from services.logger import log_exc_swallow
 
 router = Router(name="strike")
+log = logging.getLogger(__name__)
 
 _PRICE_USD = 250
 _table_ok = False
@@ -72,7 +75,10 @@ async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
         return True
     await _ensure_table(pool)
     row = await pool.fetchrow("SELECT 1 FROM strike_access WHERE user_id=$1", user_id)
-    return row is not None
+    result = row is not None
+    if result:
+        log.debug("strike access: user=%s has_access=%s", user_id, result)
+    return result
 
 
 def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
@@ -99,7 +105,11 @@ def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
 @router.callback_query(StrikeCb.filter(F.action == "menu"))
 async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    access = await _has_access(pool, callback.from_user.id)
+    try:
+        access = await _has_access(pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_menu: _has_access failed")
+        access = False
 
     if access:
         text = (
@@ -150,13 +160,21 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(StrikeCb.filter(F.action == "settings"))
 async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    access = await _has_access(pool, callback.from_user.id)
+    try:
+        access = await _has_access(pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_settings: _has_access failed")
+        access = False
     if not access:
         await callback.answer("Нет доступа.", show_alert=True)
         return
     await callback.answer()
 
-    row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
+    try:
+        row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_settings: fetchrow mode failed")
+        row = None
     current_mode = row.get("mode", "normal") if row else "normal"
 
     mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
@@ -191,14 +209,19 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 
 async def _set_strike_mode(callback: CallbackQuery, pool: asyncpg.Pool, mode: str) -> None:
-    await _ensure_table(pool)
-    # Upsert — works for purchased users AND enterprise/admin (no row in strike_access)
-    await pool.execute(
-        """INSERT INTO strike_access (user_id, mode)
-           VALUES ($1, $2)
-           ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode""",
-        callback.from_user.id, mode,
-    )
+    try:
+        await _ensure_table(pool)
+        await pool.execute(
+            """INSERT INTO strike_access (user_id, mode)
+               VALUES ($1, $2)
+               ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode""",
+            callback.from_user.id, mode,
+        )
+        log.info("strike mode set user=%s mode=%s", callback.from_user.id, mode)
+    except Exception:
+        log_exc_swallow(log, "set_strike_mode: DB failed")
+        await callback.answer("Ошибка сохранения режима.", show_alert=True)
+        return
     mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
     await callback.answer(f"✅ Режим: {mode_labels.get(mode, mode)}", show_alert=True)
     await cb_strike_settings(callback, pool)
@@ -225,33 +248,44 @@ async def cb_strike_set_mode_maximum(callback: CallbackQuery, pool: asyncpg.Pool
 @router.callback_query(StrikeCb.filter(F.action == "buy"))
 async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     # Уже есть доступ?
-    if await _has_access(pool, callback.from_user.id):
+    try:
+        _already = await _has_access(pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_buy: _has_access failed")
+        _already = False
+    if _already:
         await callback.answer("⚔️ Strike уже активен!", show_alert=True)
         return
     await callback.answer()
 
     wallet = _tron_wallet()
     ref = _gen_ref()
-    for _ in range(5):
-        existing = await pool.fetchrow(
-            "SELECT id FROM payments WHERE reference=$1", ref
-        )
-        if not existing:
-            break
-        ref = _gen_ref()
+    try:
+        for _ in range(5):
+            existing = await pool.fetchrow(
+                "SELECT id FROM payments WHERE reference=$1", ref
+            )
+            if not existing:
+                break
+            ref = _gen_ref()
 
-    await pool.execute(
-        """INSERT INTO payments
-               (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                wallet_address, reference)
-           VALUES ($1, 'strike', 0, 'USDT_TRC20', $2, $3, $4, $5)
-           ON CONFLICT (reference) DO NOTHING""",
-        callback.from_user.id,
-        float(_PRICE_USD),
-        float(_PRICE_USD),
-        wallet or "NOT_CONFIGURED",
-        ref,
-    )
+        await pool.execute(
+            """INSERT INTO payments
+                   (user_id, plan, period_months, currency, amount_crypto, amount_usd,
+                    wallet_address, reference)
+               VALUES ($1, 'strike', 0, 'USDT_TRC20', $2, $3, $4, $5)
+               ON CONFLICT (reference) DO NOTHING""",
+            callback.from_user.id,
+            float(_PRICE_USD),
+            float(_PRICE_USD),
+            wallet or "NOT_CONFIGURED",
+            ref,
+        )
+        log.info("strike buy: payment record created user=%s ref=%s", callback.from_user.id, ref)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_buy: DB insert failed")
+        await callback.message.edit_text("❌ Ошибка создания платежа. Попробуйте позже.")
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Проверить оплату", callback_data=StrikeCb(action="check_pay"))
@@ -286,7 +320,14 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
 
-    if await _has_access(pool, callback.from_user.id):
+    try:
+        has_acc = await _has_access(pool, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_strike_check_pay: _has_access failed")
+        has_acc = False
+
+    if has_acc:
+        log.info("strike check_pay: already active user=%s", callback.from_user.id)
         kb = InlineKeyboardBuilder()
         kb.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
@@ -296,12 +337,16 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         )
         return
 
-    row = await pool.fetchrow(
-        "SELECT status, reference, created_at FROM payments "
-        "WHERE user_id=$1 AND plan='strike' "
-        "ORDER BY created_at DESC LIMIT 1",
-        callback.from_user.id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT status, reference, created_at FROM payments "
+            "WHERE user_id=$1 AND plan='strike' "
+            "ORDER BY created_at DESC LIMIT 1",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_strike_check_pay: fetchrow failed")
+        row = None
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=StrikeCb(action="check_pay"))
@@ -337,15 +382,19 @@ import html as _html
 
 async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Общий хелпер: показывает историю Strike."""
-    rows = await pool.fetch(
-        """SELECT id, target, reason, preset, accounts_used, peer_reported, msgs_reported,
-                  COALESCE(msgs_fetched, 0) AS msgs_fetched,
-                  network_nodes, verified_down, duration_s, created_at
-           FROM strike_history
-           WHERE owner_id=$1
-           ORDER BY created_at DESC LIMIT 10""",
-        callback.from_user.id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT id, target, reason, preset, accounts_used, peer_reported, msgs_reported,
+                      COALESCE(msgs_fetched, 0) AS msgs_fetched,
+                      network_nodes, verified_down, duration_s, created_at
+               FROM strike_history
+               WHERE owner_id=$1
+               ORDER BY created_at DESC LIMIT 10""",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "_show_strike_history: fetch failed")
+        rows = []
 
     kb = InlineKeyboardBuilder()
 
@@ -440,14 +489,20 @@ async def cb_strike_rerun(
         await callback.answer("Нет доступа.", show_alert=True)
         return
     history_id = callback_data.page
-    row = await pool.fetchrow(
-        "SELECT target, reason, preset FROM strike_history WHERE id=$1 AND owner_id=$2",
-        history_id, callback.from_user.id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT target, reason, preset FROM strike_history WHERE id=$1 AND owner_id=$2",
+            history_id, callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_strike_rerun: fetchrow failed")
+        await callback.answer("Ошибка загрузки записи.", show_alert=True)
+        return
     if not row:
         await callback.answer("Запись не найдена.", show_alert=True)
         return
     await callback.answer()
+    log.info("strike rerun: user=%s target=%s", callback.from_user.id, row["target"])
 
     target = row["target"]
     reason = row["reason"]

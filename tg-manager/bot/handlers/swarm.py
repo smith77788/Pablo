@@ -1,5 +1,7 @@
 """Swarm routing management."""
 
+import logging
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 import asyncpg
@@ -7,8 +9,10 @@ from bot.callbacks import SwarmCb, BmCb
 from bot.keyboards import swarm_menu, back_to_bot, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
+from services.logger import log_exc_swallow
 
 router = Router()
+log = logging.getLogger(__name__)
 
 ROLE_LABELS = {
     "entry": "🚪 Entry — точка входа трафика",
@@ -33,7 +37,12 @@ async def cb_swarm_menu(
             ),
         )
         return
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_menu: get_bot failed bot=%s", callback_data.bot_id)
+        await callback.answer("Ошибка загрузки бота.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -42,7 +51,11 @@ async def cb_swarm_menu(
     swarm_status = "🟢 Активен в Swarm" if row.get("swarm_enabled") else "⚫ Не в Swarm"
     role = ROLE_LABELS.get(row.get("bot_role", "general"), "⚙️ General")
     cluster = row.get("cluster") or "default"
-    mode = await db.get_system_mode(pool)
+    try:
+        mode = await db.get_system_mode(pool)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_menu: get_system_mode failed")
+        mode = "manual"
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
@@ -63,17 +76,37 @@ async def cb_swarm_toggle(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_toggle: get_bot failed")
+        await callback.answer("Ошибка.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
     new_state = not row.get("swarm_enabled", False)
-    await db.toggle_swarm(pool, callback_data.bot_id, new_state)
-    row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        await db.toggle_swarm(pool, callback_data.bot_id, new_state)
+        log.info("swarm toggle: bot=%s new_state=%s user=%s",
+                 callback_data.bot_id, new_state, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_toggle: toggle_swarm failed")
+        await callback.answer("Ошибка сохранения.", show_alert=True)
+        return
+    try:
+        row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_toggle: get_bot (refresh) failed")
+        row2 = row
     label = f"@{row2['username']}" if row2["username"] else row2["first_name"]
     swarm_status = "🟢 Активен в Swarm" if new_state else "⚫ Не в Swarm"
     role = ROLE_LABELS.get(row2.get("bot_role", "general"), "⚙️ General")
-    mode = await db.get_system_mode(pool)
+    try:
+        mode = await db.get_system_mode(pool)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_toggle: get_system_mode failed")
+        mode = "manual"
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
         f"Статус: {swarm_status}\n"
@@ -91,18 +124,30 @@ async def cb_swarm_stats(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_stats: get_bot failed")
+        await callback.answer("Ошибка.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
     await callback.answer()
-    stats = await db.get_routing_stats(pool, callback_data.bot_id, days=7)
-    metrics = await pool.fetchrow(
-        "SELECT * FROM bot_metrics WHERE bot_id=$1", callback_data.bot_id
-    )
+    try:
+        stats = await db.get_routing_stats(pool, callback_data.bot_id, days=7)
+        metrics = await pool.fetchrow(
+            "SELECT * FROM bot_metrics WHERE bot_id=$1", callback_data.bot_id
+        )
+        mode = await db.get_system_mode(pool)
+        config = await db.get_mode_routing_config(mode)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_stats: DB fetch failed")
+        stats = {"total": 0, "routed": 0, "kept": 0}
+        metrics = None
+        mode = "manual"
+        config = {"routing_enabled": False, "routing_probability": 0.0}
     label = f"@{row['username']}" if row["username"] else row["first_name"]
-    mode = await db.get_system_mode(pool)
-    config = await db.get_mode_routing_config(mode)
     # Use 0 as default; also guard against DB returning NULL in numeric columns
     score = float(metrics["score"] or 0) if metrics else 0.0
     ctr = float(metrics["ctr"] or 0) if metrics else 0.0
@@ -137,8 +182,15 @@ async def cb_swarm_role(
     if role not in ("entry", "conversion", "retention", "general"):
         await callback.answer("Неверная роль", show_alert=True)
         return
-    await db.set_bot_role(pool, callback_data.bot_id, role)
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        await db.set_bot_role(pool, callback_data.bot_id, role)
+        log.info("swarm role: bot=%s role=%s user=%s",
+                 callback_data.bot_id, role, callback.from_user.id)
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_swarm_role: DB failed")
+        await callback.answer("Ошибка сохранения роли.", show_alert=True)
+        return
     label = (
         f"@{row['username']}"
         if row and row["username"]
@@ -190,7 +242,11 @@ async def cb_set_mode(
         text="◀️ Назад", callback_data=SC(action="menu", bot_id=callback_data.bot_id)
     )
     kb.adjust(1)
-    current = await db.get_system_mode(pool)
+    try:
+        current = await db.get_system_mode(pool)
+    except Exception:
+        log_exc_swallow(log, "cb_set_mode: get_system_mode failed")
+        current = "manual"
     await callback.message.edit_text(
         f"🌐 <b>Системный режим (текущий: {current.upper()})</b>\n\n"
         "Режим определяет поведение всего swarm:\n"
@@ -217,8 +273,14 @@ async def cb_change_mode(
     if mode not in valid_modes:
         await callback.answer("Неизвестный режим.", show_alert=True)
         return
-    await db.set_system_mode(pool, mode)
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        await db.set_system_mode(pool, mode)
+        log.info("swarm mode changed: mode=%s user=%s", mode, callback.from_user.id)
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_change_mode: DB failed")
+        await callback.answer("Ошибка сохранения режима.", show_alert=True)
+        return
     if not row:
         await callback.answer("Режим изменён.", show_alert=True)
         return
