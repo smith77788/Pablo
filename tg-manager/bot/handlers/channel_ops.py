@@ -5121,18 +5121,15 @@ async def _cinv_bg_inner(
     chan_target = channel_id if channel_id else channel_identifier
 
     # 0. Auto-add co-accounts to channel, then promote to admin
-    # IMPORTANT: Accounts must be members before they can be promoted to admin
     if len(acc_rows) > 1 and pool is not None:
         primary = acc_rows[0]
         primary_dict = dict(primary)
 
-        # First, ensure all co-accounts are members by having them join the channel
-        # Use the primary account's username (@username) or generate invite link
-        join_identifier = None
+        # Resolve join identifier (@username or invite link)
+        join_identifier: str | None = None
         if channel_identifier and channel_identifier.startswith("@"):
             join_identifier = channel_identifier
         else:
-            # Try to get invite link from primary account
             try:
                 invite_link = await _am.get_channel_invite_link(
                     primary["session_str"], chan_target, _acc=primary_dict
@@ -5142,33 +5139,45 @@ async def _cinv_bg_inner(
             except Exception as e:
                 log.warning("cinv get_invite_link: %s", e)
 
-        # Add each co-account to the channel (with human-like delays)
-        added_ok = 0
-        for idx, other in enumerate(acc_rows[1:]):
-            if join_identifier:
+        # Join ALL co-accounts in PARALLEL — no sequential waits between them
+        if join_identifier or (channel_id and access_hash):
+            async def _join_one(other: dict) -> bool:
                 try:
-                    result = await _am.join_channel(
-                        other["session_str"], join_identifier, _acc=dict(other)
-                    )
-                    if not result.get("error"):
-                        added_ok += 1
+                    if join_identifier:
+                        result = await _am.join_channel(
+                            other["session_str"], join_identifier, _acc=dict(other)
+                        )
+                        ok = not result.get("error")
+                    else:
+                        result = await _am.join_channel_by_id(
+                            other["session_str"], channel_id, access_hash, _acc=dict(other)
+                        )
+                        ok = result.get("ok", False)
+                    if ok:
                         log.info("cinv: co-account %s joined %s", other["id"], chan_target)
+                    else:
+                        log.warning("cinv join error acc=%s: %s", other["id"],
+                                    result.get("error") or result.get("error_msg", "unknown"))
+                    return ok
                 except Exception as e:
-                    log.warning("cinv co-account join: %s", e)
-            # Human-like delay between joins: 30-120 sec (not uniform!)
-            if idx < len(acc_rows) - 2:  # not after last account
-                delay = random.uniform(30, 120) * session_simulator.chaos_factor()
-                await asyncio.sleep(delay)
+                    log.warning("cinv co-account join acc=%s: %s", other["id"], e)
+                    return False
 
-        if added_ok > 0:
-            log.info("cinv: added %d co-accounts as members in %s (took ~%ds per account)",
-                     added_ok, chan_target, int(added_ok * 75))
+            join_results = await asyncio.gather(
+                *[_join_one(other) for other in acc_rows[1:]],
+                return_exceptions=False,
+            )
+            added_ok = sum(1 for r in join_results if r)
+            log.info("cinv: joined %d/%d co-accounts to %s", added_ok, len(acc_rows) - 1, chan_target)
+        else:
+            added_ok = 0
+            log.warning("cinv: no join_identifier and no channel_id+access_hash — skipping co-account joins")
 
-        # Wait before promoting to admin (realistic: don't do it instantly)
-        if len(acc_rows) > 1:
-            await asyncio.sleep(random.uniform(15, 45))
+        # Brief wait before promoting (let server register membership)
+        await asyncio.sleep(random.uniform(3, 8))
 
-        # Now promote co-accounts to admin (they are members now)
+        # Promote co-accounts to admin SEQUENTIALLY (primary makes the API calls)
+        # Short delays only — we already waited enough in the join phase
         promo_ok = 0
         for idx, other in enumerate(acc_rows[1:]):
             tg_uid = other.get("tg_user_id")
@@ -5193,25 +5202,32 @@ async def _cinv_bg_inner(
                         promo_ok += 1
                         log.info("cinv: promoted co-account %s to admin", tg_uid)
                     else:
-                        log.warning("cinv promote failed for user %s (no rights or not member)", tg_uid)
+                        log.warning("cinv promote failed for user %s", tg_uid)
                 except Exception as e:
                     log.warning("cinv auto-promote acc=%s: %s", other["id"], e)
-            # Human-like delay between promotions: 20-90 sec
+            # Short pause between promotes — primary account, one request at a time
             if idx < len(acc_rows) - 2:
-                delay = random.uniform(20, 90) * session_simulator.chaos_factor()
-                await asyncio.sleep(delay)
+                await asyncio.sleep(random.uniform(5, 12))
 
         if promo_ok > 0:
             log.info("cinv: promoted %d co-accounts to admin in %s", promo_ok, chan_target)
 
-    # 1. Collect and deduplicate contacts
-    contacts_map: dict[int, dict] = {}
-    for acc in acc_rows:
+    # 1. Collect contacts from ALL accounts in PARALLEL
+    async def _get_contacts_one(acc: dict) -> list:
         try:
-            for c in await _am.get_contacts(acc["session_str"], _acc=dict(acc)):
-                contacts_map[c["user_id"]] = c
+            return await _am.get_contacts(acc["session_str"], _acc=dict(acc))
         except Exception as e:
             log.warning("cinv get_contacts acc=%s: %s", acc["id"], e)
+            return []
+
+    all_contact_lists = await asyncio.gather(
+        *[_get_contacts_one(acc) for acc in acc_rows],
+        return_exceptions=False,
+    )
+    contacts_map: dict[int, dict] = {}
+    for contacts in all_contact_lists:
+        for c in contacts:
+            contacts_map[c["user_id"]] = c
 
     if not contacts_map:
         try:
@@ -5245,45 +5261,39 @@ async def _cinv_bg_inner(
             log_exc_swallow(log, "Сбой уведомления об отсутствии идентификаторов")
         return
 
-    # 3. Split list among accounts (round-robin distribution)
+    # 3. Split contacts round-robin among accounts
     n = len(acc_rows)
     chunks = [identifiers[i::n] for i in range(n)]
 
-    total_invited = 0
-    total_failed = 0
-
-    # Wait before starting invites (let the channel settle after admin promotions)
-    await asyncio.sleep(random.uniform(20, 60))
-
-    for idx, (acc, chunk) in enumerate(zip(acc_rows, chunks)):
+    # 4. Invite in PARALLEL — each account works on its own chunk simultaneously
+    async def _invite_one(acc: dict, chunk: list) -> tuple[int, int]:
         if not chunk:
-            continue
+            return 0, 0
         try:
             log.info("cinv: account %s inviting %d users to %s", acc["id"], len(chunk), chan_target)
             res = await _am.invite_users_to_channel(
                 acc["session_str"], channel_id if channel_id else 0, chunk,
                 _acc=dict(acc), access_hash=access_hash,
             )
-            total_invited += res.get("invited", 0)
-            total_failed += len(res.get("failed", []))
-            # Hard stop if account has no admin rights
+            invited = res.get("invited", 0)
+            failed = len(res.get("failed", []))
             if res.get("error"):
                 log.warning("cinv hard error acc=%s: %s", acc["id"], res["error"])
-                # Still try other accounts but log the issue
-                total_failed += max(0, len(chunk) - res.get("invited", 0))
-            log.info("cinv: account %s invited=%d failed=%d",
-                     acc["id"], res.get("invited", 0), len(res.get("failed", [])))
+                failed += max(0, len(chunk) - invited)
+            log.info("cinv: account %s invited=%d failed=%d", acc["id"], invited, failed)
+            return invited, failed
         except Exception as e:
             log.warning("cinv invite acc=%s: %s", acc["id"], e)
-            total_failed += len(chunk)
+            return 0, len(chunk)
 
-        # Human-like delay between different accounts inviting (don't hammer at once)
-        # Wait 2-8 minutes between accounts to avoid looking like a botnet
-        if idx < len(acc_rows) - 1:
-            delay = random.uniform(120, 480) * session_simulator.chaos_factor()
-            await asyncio.sleep(delay)
+    invite_results = await asyncio.gather(
+        *[_invite_one(acc, chunk) for acc, chunk in zip(acc_rows, chunks)],
+        return_exceptions=False,
+    )
+    total_invited = sum(r[0] for r in invite_results)
+    total_failed = sum(r[1] for r in invite_results)
 
-    # 4. Notify user
+    # 5. Notify user
     try:
         await bot.send_message(
             user_id,
