@@ -2361,7 +2361,7 @@ async def report_peer_deep_v2(  # noqa: C901
                     limit=max_msg_reports, max_id=0, min_id=0, hash=0,
                 )), 25.0)
                 msgs = [m for m in getattr(_hist, "messages", [])
-                        if m and not getattr(m, "action", None)]
+                        if m and m.id and not getattr(m, "action", None)]
                 log.info("rpv2[6/GetHistory] fetched=%d target=%s acc=%s joined=%s ah=%s",
                          len(msgs), peer, acc_id, R["joined"], _ah6)
             except Exception as _gh_e:
@@ -2369,7 +2369,7 @@ async def report_peer_deep_v2(  # noqa: C901
                             acc_id, _ah6, str(_gh_e)[:80])
                 try:
                     raw = await _timed(client.get_messages(_ipeer6, limit=max_msg_reports), 20.0)
-                    msgs = list(raw) if raw else []
+                    msgs = [m for m in (raw or []) if m and m.id and not getattr(m, "action", None)]
                     log.info("rpv2[6/fallback] fetched=%d acc=%s", len(msgs), acc_id)
                 except Exception as _fb_e:
                     log.warning("rpv2[6/fallback] acc=%s: %s", acc_id, str(_fb_e)[:80])
