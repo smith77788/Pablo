@@ -240,7 +240,7 @@ def _human_delay(min_s: float, max_s: float) -> float:
 async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
         "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
-        "a.trust_score, a.flood_count_7d, a.cooldown_until, "
+        "a.trust_score, a.flood_count_7d, a.cooldown_until, a.tg_user_id, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
@@ -1860,10 +1860,12 @@ async def cb_members_invite(
     access_hash = (channel_row["access_hash"] if channel_row else 0) or 0
 
     # Все данные сохраняем в FSM state — никаких in-memory dict
+    # primary_acc_id = аккаунт-владелец канала, он будет повышать остальных до админа
     await state.update_data(
         channel_id=callback_data.channel_id,
         access_hash=access_hash,
         channel_display=channel_display,
+        primary_acc_id=callback_data.acc_id,
         inv_selected_accounts=[],
     )
     await state.set_state(InviteUsersFSM.choosing_accounts)
@@ -2128,9 +2130,11 @@ def _format_invite_progress(
         inv = st["invited"]
         fail = st["failed"]
         tot = st["total"]
+        phase = st.get("phase", "")
         icon = "✅" if st["done"] else "⏳"
         err_s = f" ⚠️ {html.escape(st.get('error', '')[:40])}" if st.get("error") else ""
-        lines.append(f"{icon} <b>{name}</b>: ✅{inv} ❌{fail} / {tot}{err_s}")
+        phase_s = f" [{phase}]" if phase and not st["done"] else ""
+        lines.append(f"{icon} <b>{name}</b>: ✅{inv} ❌{fail}/{tot}{phase_s}{err_s}")
     lines += ["", "<i>Для отмены: /tasks</i>"]
     return "\n".join(lines)
 
@@ -2141,7 +2145,15 @@ async def _run_invite_bg(
     pool,
     fsm_data: dict,
 ) -> None:
-    """Параллельный инвайт через N аккаунтов. Все данные берутся из fsm_data."""
+    """Параллельный инвайт через N аккаунтов.
+
+    Preflight для каждого не-основного аккаунта:
+      1. Вступить в канал (join_channel_by_id)
+      2. Основной аккаунт повышает его до admin (invite_users=True)
+    Затем все аккаунты инвайтят свою часть списка параллельно.
+    """
+    from services import account_manager as _am
+
     is_cb = hasattr(trigger, "message")
     user_id = trigger.from_user.id
     msg_obj = trigger.message if is_cb else trigger
@@ -2150,6 +2162,7 @@ async def _run_invite_bg(
     access_hash = fsm_data.get("access_hash", 0)
     channel_display = fsm_data.get("channel_display") or str(channel_id)
     selected_acc_ids = fsm_data.get("inv_selected_accounts") or []
+    primary_acc_id = fsm_data.get("primary_acc_id")
 
     if not channel_id:
         await msg_obj.answer(
@@ -2158,23 +2171,19 @@ async def _run_invite_bg(
         )
         return
 
-    # Загружаем выбранные аккаунты
+    # ── Загружаем аккаунты (включая tg_user_id для promote_to_admin) ──────
+    _acc_q = (
+        "SELECT a.id, a.tg_user_id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE"
+    )
     if selected_acc_ids:
         accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE",
-            user_id, selected_acc_ids,
+            _acc_q + " AND a.id = ANY($2::bigint[])", user_id, selected_acc_ids,
         )
     else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=TRUE LIMIT 1",
-            user_id,
-        )
+        accounts = await pool.fetch(_acc_q + " LIMIT 1", user_id)
 
     if not accounts:
         await msg_obj.answer(
@@ -2186,7 +2195,10 @@ async def _run_invite_bg(
     n_acc = len(accounts)
     total = len(usernames)
 
-    # Равномерно распределяем список по аккаунтам
+    # Определяем основной аккаунт (владелец/admin канала)
+    primary_acc = next((a for a in accounts if a["id"] == primary_acc_id), accounts[0])
+
+    # Равномерно распределяем список
     chunk_size = max(1, (total + n_acc - 1) // n_acc)
     slices: list[list[str]] = [
         usernames[i * chunk_size:(i + 1) * chunk_size]
@@ -2199,7 +2211,7 @@ async def _run_invite_bg(
         sl_len = len(slices[i]) if i < len(slices) else 0
         acc_status[acc["id"]] = {
             "name": acc["first_name"] or acc["phone"] or f"id={acc['id']}",
-            "invited": 0, "failed": 0, "done": False, "total": sl_len,
+            "invited": 0, "failed": 0, "done": False, "total": sl_len, "phase": "ожидание",
         }
 
     status_msg = await msg_obj.answer(
@@ -2207,9 +2219,51 @@ async def _run_invite_bg(
         parse_mode="HTML",
     )
 
+    async def _upd(aid: int, phase: str) -> None:
+        acc_status[aid]["phase"] = phase
+        try:
+            await status_msg.edit_text(
+                _format_invite_progress(channel_display, acc_status, total),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
     async def _run_one(acc: asyncpg.Record, unames: list[str]) -> None:
         acc_dict = dict(acc)
         aid = acc_dict["id"]
+        is_primary = (aid == primary_acc["id"])
+
+        # ── Preflight: join + promote (только для не-основных аккаунтов) ──
+        if not is_primary:
+            await _upd(aid, "🔗 вступление...")
+            join_res = await _am.join_channel_by_id(
+                acc_dict["session_str"], channel_id, access_hash, _acc=acc_dict,
+            )
+            if not join_res.get("ok"):
+                acc_status[aid]["error"] = join_res.get("error", "join failed")[:50]
+                acc_status[aid]["done"] = True
+                acc_status[aid]["phase"] = "❌ join"
+                await _upd(aid, "❌ join")
+                return
+
+            # tg_user_id: из БД или из get_me(), который join_channel_by_id вызвал
+            tg_uid = acc_dict.get("tg_user_id") or join_res.get("tg_user_id") or 0
+
+            if tg_uid:
+                await _upd(aid, "👑 права...")
+                promoted = await _am.promote_to_admin(
+                    primary_acc["session_str"], channel_id, tg_uid,
+                    _acc=dict(primary_acc), access_hash=access_hash,
+                    post_messages=False, invite_users=True,
+                )
+                if not promoted:
+                    log.warning("invite preflight: promote failed acc=%s uid=%s", aid, tg_uid)
+                    # Не прерываем — для групп admin не обязателен
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+
+        # ── Invite ────────────────────────────────────────────────────────
+        await _upd(aid, "📨 инвайт...")
 
         async def _progress(_done: int, _total: int, inv: int, fail_cnt: int) -> None:
             acc_status[aid]["invited"] = inv
@@ -2223,8 +2277,7 @@ async def _run_invite_bg(
                 pass
 
         try:
-            from services import account_manager
-            result = await account_manager.invite_users_to_channel(
+            result = await _am.invite_users_to_channel(
                 acc_dict["session_str"], channel_id, unames,
                 _acc=acc_dict, access_hash=access_hash,
                 batch_size=min(100, len(unames)),
@@ -2234,14 +2287,15 @@ async def _run_invite_bg(
             acc_status[aid]["invited"] = result.get("invited", 0)
             acc_status[aid]["failed"] = len(result.get("failed") or [])
             if result.get("error"):
-                acc_status[aid]["error"] = str(result["error"])[:60]
+                acc_status[aid]["error"] = str(result["error"])[:50]
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            acc_status[aid]["error"] = str(exc)[:60]
+            acc_status[aid]["error"] = str(exc)[:50]
             log.exception("invite_one acc=%s: %s", aid, exc)
         finally:
             acc_status[aid]["done"] = True
+            acc_status[aid]["phase"] = "✅" if not acc_status[aid].get("error") else "❌"
 
     async def _bg() -> None:
         tasks: list[asyncio.Task] = []
@@ -2279,7 +2333,7 @@ async def _run_invite_bg(
             await status_msg.edit_text(
                 f"✅ <b>Инвайт завершён</b>\n\n"
                 f"Канал: <code>{html.escape(channel_display)}</code>\n"
-                f"Аккаунтов: <b>{n_acc}</b>  Всего: <b>{total}</b>\n"
+                f"Аккаунтов: <b>{n_acc}</b>  Пользователей: <b>{total}</b>\n"
                 f"✅ Приглашено: <b>{total_inv}</b>  ❌ Ошибок: <b>{total_fail}</b>",
                 parse_mode="HTML", reply_markup=kb.as_markup(),
             )

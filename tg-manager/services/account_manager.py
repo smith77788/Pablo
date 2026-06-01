@@ -1344,6 +1344,58 @@ async def invite_users_to_channel(
         except Exception:
             pass
 
+async def join_channel_by_id(
+    session_string: str,
+    channel_id: int,
+    access_hash: int = 0,
+    _acc: dict | None = None,
+) -> dict:
+    """Вступить в канал по channel_id + access_hash. Preflight перед инвайтом.
+
+    Возвращает {ok, tg_user_id, already_member, error?, flood_wait?}.
+    Если аккаунт уже участник — ok=True, already_member=True.
+    """
+    from telethon.tl.functions.channels import JoinChannelRequest
+    from telethon.tl.types import InputChannel
+    from telethon.errors import FloodWaitError, UserBannedInChannelError, ChannelPrivateError
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        me = await asyncio.wait_for(client.get_me(), timeout=10.0)
+        tg_user_id = me.id if me else 0
+
+        try:
+            if access_hash and channel_id:
+                ch_input = InputChannel(channel_id=channel_id, access_hash=access_hash)
+            else:
+                ch_input = await asyncio.wait_for(client.get_entity(channel_id), timeout=10.0)
+            await asyncio.wait_for(client(JoinChannelRequest(channel=ch_input)), timeout=20.0)
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+            return {"ok": True, "tg_user_id": tg_user_id, "already_member": False}
+        except Exception as e:
+            err = str(e)
+            if "ALREADY_PARTICIPANT" in err.upper() or "already" in err.lower():
+                return {"ok": True, "tg_user_id": tg_user_id, "already_member": True}
+            if isinstance(e, FloodWaitError):
+                return {"ok": False, "tg_user_id": tg_user_id,
+                        "error": f"FloodWait {e.seconds}s", "flood_wait": e.seconds}
+            if isinstance(e, UserBannedInChannelError):
+                return {"ok": False, "tg_user_id": tg_user_id, "error": "забанен в канале"}
+            if isinstance(e, ChannelPrivateError):
+                return {"ok": False, "tg_user_id": tg_user_id, "error": "канал приватный"}
+            return {"ok": False, "tg_user_id": tg_user_id, "error": err[:100]}
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        return {"ok": False, "tg_user_id": 0, "error": str(e)[:100]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
 
