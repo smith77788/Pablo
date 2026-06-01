@@ -594,17 +594,18 @@ async def cb_do_create(
         )
         return
 
-    title_s = html.escape(result["title"])
-    channel_id = result["channel_id"]
+    title_s = html.escape(result.get("title") or "—")
+    channel_id = result.get("channel_id") or 0
     invite = result.get("invite_link", "")
     kb = InlineKeyboardBuilder()
     kb.button(text="✏️ Управлять", callback_data=ChanCb(action="manage_channel", acc_id=acc_id, channel_id=channel_id))
     kb.button(text="◀️ Меню", callback_data=ChanCb(action="menu"))
     kb.adjust(1)
+    _type_label = (result.get("type") or "канал").capitalize()
     await callback.message.edit_text(
-        f"✅ <b>{result['type'].capitalize()} создан!</b>\n\n"
+        f"✅ <b>{_type_label} создан!</b>\n\n"
         f"Название: <b>{title_s}</b>\n"
-        f"ID: <code>{channel_id}</code>\n"
+        f"ID: <code>{channel_id or '—'}</code>\n"
         + (f"Ссылка: {html.escape(invite)}" if invite else ""),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -883,7 +884,7 @@ async def cb_do_bulk_create(
         if "error" in result:
             results_err.append(f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}")
         else:
-            results_ok.append(f"✅ {html.escape(title)}: id={result['channel_id']}")
+            results_ok.append(f"✅ {html.escape(title)}: id={result.get('channel_id', '?')}")
         done_ops += 1
         global_idx += 1
         try:
@@ -1904,11 +1905,15 @@ async def _exec_invite_usernames(
     result = await account_manager.invite_users_to_channel(
         acc["session_str"], data["channel_id"], usernames, _acc=acc
     )
-    lines = [f"✅ Приглашено: <b>{result['invited']}</b>"]
-    if result["failed"]:
-        lines.append(f"❌ Ошибки ({len(result['failed'])}):")
-        for f_item in result["failed"][:5]:
-            lines.append(f"  • {html.escape(f_item)}")
+    if result.get("error"):
+        lines = [f"❌ <b>Ошибка:</b> {html.escape(str(result['error'])[:120])}"]
+    else:
+        lines = [f"✅ Приглашено: <b>{result.get('invited', 0)}</b>"]
+        failed_list = result.get("failed") or []
+        if failed_list:
+            lines.append(f"❌ Ошибки ({len(failed_list)}):")
+            for f_item in failed_list[:5]:
+                lines.append(f"  • {html.escape(str(f_item))}")
     await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
 
 
@@ -2146,9 +2151,10 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
         if "error" in result:
             results_err.append(f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}")
         else:
-            token = result["token"]
+            token = result.get("token") or "—"
+            bot_username = result.get("username") or "?"
             results_ok.append(
-                f"✅ {acc_label}: @{html.escape(result['username'])} — <code>{token}</code>"
+                f"✅ {acc_label}: @{html.escape(bot_username)} — <code>{token}</code>"
             )
         done_ops += 1
         try:
