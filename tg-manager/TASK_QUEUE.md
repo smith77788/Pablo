@@ -109,14 +109,27 @@
 
 ---
 
-## 🟡 НИЗКИЙ ПРИОРИТЕТ (nice to have, r18+)
+## P7 — Strike + Contact Invite Fixes r18 (ВСЁ СДЕЛАНО)
+
+- [x] **Strike Сообщений: 0**: pre-fetch history перед join + ID-matching в chats[]
+- [x] **Strike Фото: ❌**: InputPhoto() вместо приватного _get_input_photo() (r17/schema_v55)
+- [x] **Strike пресет escort**: 25 текстов на 6 языках, escalation, abuse form
+- [x] **Strike статус-иконка**: ⚔️/🟡/🟢/🔴 по эффективности удара, не факту удаления
+- [x] **Contact invite параллельный**: asyncio.gather для join + contacts + invite
+- [x] **Contact invite channel_identifier**: @username вместо numeric ID при выборе канала
+- [x] **Strike recon entity refresh**: GetFullChannelRequest.chats[0] в strike_map_target
+- [x] **Strike abuse_form**: pornography и escort в reason_text dict
+
+---
+
+## 🟡 НИЗКИЙ ПРИОРИТЕТ (nice to have, r19+)
 
 - [ ] Telegram Mini App для аналитики
 
 ---
 
-## ИТОГИ r16 → r17
+## ИТОГИ r17 → r18
 
-Все критические баги исправлены. Новые фичи: Strike режимы, .session импорт,
-AI rate limit backoff, approval workflows, workspaces RBAC.
-Ожидаются новые указания пользователя для r18.
+Strike: исправлен Сообщений: 0 (pre-fetch + entity refresh), добавлен пресет escort.
+Contact invite: параллельный join/contacts/invite (был последовательный — 40+ мин).
+Ожидаются новые указания пользователя для r19.

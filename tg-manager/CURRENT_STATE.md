@@ -1,6 +1,39 @@
 # CURRENT STATE
 
-Обновлено: 2026-05-31 (r17)
+Обновлено: 2026-06-01 (r18 in progress)
+
+## Статус: Strike + Contact Invite фиксы r18
+
+### ✅ Выполнено в r18 (2026-06-01)
+
+1. **Strike: pre-fetch history до join** (`92a9b3b`)
+   - Шаг 2.5: GetHistoryRequest ДО вступления — публичные каналы читаемы анонимно
+   - Anti-bot (CAS/ComBot) банит новых участников, но не анонимных читателей
+   - 4-й fallback в шаге 6: при 0 msgs → использует pre-fetched messages
+   - ID-matching в join_resp.chats[] и GetFullChannel.chats[] (по entity.id, не [0])
+
+2. **Strike: пресет escort/проституция** (`563ca0b`)
+   - TEXTS["escort"] — 25 текстов на 6 языках
+   - PRESET_TO_REASON["escort"] = "pornography" 
+   - Escalation: pornography → childabuse → spam → other
+   - `🟤 Эскорт/проституция` в UI выбора пресета
+
+3. **Strike: abuse_form + recon** (`34611db`)
+   - submit_abuse_form: reason_text для pornography и escort
+   - strike_map_target: entity refresh из GetFullChannelRequest.chats[0]
+
+4. **Strike: статус-иконка** (`3bd0f26`)
+   - ⚔️ = полный удар (peer_reported + сообщения), 🟡 = только ReportPeer,
+     🟢 = подтверждено удаление, 🔴 = удар не прошёл
+
+5. **Contact invite: channel_identifier** (`8465f45`)
+   - При выборе канала из managed list устанавливает @username вместо numeric ID
+   - co-accounts вступают без лишнего get_channel_invite_link
+
+6. **Contact invite: channel_id при ручном вводе** (`108f5ce`)
+   - Числовой ID теперь корректно сохраняется как channel_id, не 0
+
+---
 
 ## Статус: ВСЕ КРИТИЧЕСКИЕ БАГИ r17 ИСПРАВЛЕНЫ + НОВЫЕ ФИЧИ
 
