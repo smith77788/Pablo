@@ -2208,6 +2208,28 @@ async def report_peer_deep_v2(  # noqa: C901
             except Exception as e:
                 log.warning("rpv2[2/photo] acc=%s: %s", acc_id, str(e)[:80])
 
+        # ── 2.5. Pre-fetch history (АНОНИМНО, до вступления) ─────────
+        # Публичные каналы читаемы без вступления. Получаем историю ДО join-а,
+        # чтобы обойти anti-bot защиту (CAS/ComBot), банящую новых участников.
+        _prefetch_msgs: list = []
+        if is_channel:
+            try:
+                from telethon.tl.functions.messages import GetHistoryRequest as _GHR_PRE
+                _pre_hist = await _timed(client(_GHR_PRE(
+                    peer=entity,
+                    offset_id=0, offset_date=0, add_offset=0,
+                    limit=max_msg_reports, max_id=0, min_id=0, hash=0,
+                )), 20.0)
+                _prefetch_msgs = [
+                    m for m in getattr(_pre_hist, "messages", [])
+                    if m and m.id and not getattr(m, "action", None)
+                ]
+                if _prefetch_msgs:
+                    log.info("rpv2[2.5] anon_prefetch=%d acc=%s target=%s",
+                             len(_prefetch_msgs), acc_id, peer)
+            except Exception as _pre_e:
+                log.debug("rpv2[2.5] skipped acc=%s: %s", acc_id, str(_pre_e)[:60])
+
         # ── 3. Join channel — ОБЯЗАТЕЛЬНО до message reporting ────────
         if join_first and is_channel:
             _need_refresh = True   # нужен ли дополнительный entity-refresh
@@ -2220,7 +2242,12 @@ async def report_peer_deep_v2(  # noqa: C901
                 # это надёжнее отдельного GetChannelsRequest (нет проблем с кэшем).
                 _fresh = getattr(_join_resp, "chats", [])
                 if _fresh:
-                    entity = _fresh[0]
+                    # Ищем наш канал по ID — в chats[1] может быть linked group
+                    _matched = next(
+                        (c for c in _fresh if getattr(c, "id", None) == entity.id),
+                        _fresh[0]
+                    )
+                    entity = _matched
                     _need_refresh = False
                     log.info("rpv2[3] entity from join_resp acc=%s ah=%s",
                              acc_id, getattr(entity, "access_hash", "?"))
@@ -2272,7 +2299,11 @@ async def report_peer_deep_v2(  # noqa: C901
                 # GetFullChannelRequest тоже возвращает chats — ещё один refresh point
                 _fc_chats = getattr(fc_res, "chats", [])
                 if _fc_chats:
-                    entity = _fc_chats[0]
+                    _fc_match = next(
+                        (c for c in _fc_chats if getattr(c, "id", None) == entity.id),
+                        _fc_chats[0]
+                    )
+                    entity = _fc_match
                     log.info("rpv2[4] entity from GetFullChannel acc=%s ah=%s",
                              acc_id, getattr(entity, "access_hash", "?"))
             except Exception as e:
@@ -2349,6 +2380,10 @@ async def report_peer_deep_v2(  # noqa: C901
                         log.info("rpv2[6/entity_fb] fetched=%d acc=%s", len(msgs), acc_id)
                 except Exception as _ef:
                     log.warning("rpv2[6/entity_fb] acc=%s: %s", acc_id, str(_ef)[:80])
+            # Четвёртый fallback: анонимный pre-fetch (до вступления — обходит ban-on-join)
+            if not msgs and _prefetch_msgs:
+                msgs = _prefetch_msgs
+                log.info("rpv2[6/pre_fallback] using anon pre-join msgs=%d acc=%s", len(msgs), acc_id)
 
             R["msgs_fetched"] = len(msgs)
             msg_ids = [m.id for m in msgs if m and m.id]
