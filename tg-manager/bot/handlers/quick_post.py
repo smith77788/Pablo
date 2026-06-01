@@ -19,7 +19,6 @@ import asyncpg
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -27,7 +26,6 @@ from bot.callbacks import QuickPostCb
 from bot.states import QuickPostFSM
 from bot.handlers.mass_publish import _mpub_bg
 from services import task_registry as _treg
-from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
