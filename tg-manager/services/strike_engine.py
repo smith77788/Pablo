@@ -303,6 +303,7 @@ class StrikeResult:
     peer_reported: int = 0
     multi_reason: int = 0
     msgs_reported: int = 0
+    msgs_fetched: int = 0
     pinned_reported: int = 0
     photo_reported: bool = False
     admins_reported: int = 0
@@ -588,6 +589,7 @@ async def staggered_strike(
         result.photo_reported          = result.photo_reported or bool(agg.get("photo", 0))
         result.pinned_reported        += agg.get("pinned", 0)
         result.msgs_reported          += agg.get("msgs", 0)
+        result.msgs_fetched           += agg.get("msgs_fetched", 0)
         result.spam_signaled          += agg.get("spam", 0)
         result.reactions              += agg.get("reacts", 0)
         result.admins_reported        += agg.get("admins", 0)
@@ -864,7 +866,7 @@ def aggregate_results(results: list[dict]) -> dict:
     """Суммирует результаты атаки."""
     s = {
         "peer": 0, "multi": 0, "photo": 0, "pinned": 0,
-        "msgs": 0, "spam": 0, "reacts": 0, "admins": 0,
+        "msgs": 0, "msgs_fetched": 0, "spam": 0, "reacts": 0, "admins": 0,
         "linked_grp": 0, "bots": 0, "fwd": 0, "blocked": 0, "failed": 0,
     }
     for r in results:
@@ -879,6 +881,7 @@ def aggregate_results(results: list[dict]) -> dict:
         s["photo"]     += 1 if r.get("photo_reported") else 0
         s["pinned"]    += r.get("pinned_reported", 0)
         s["msgs"]      += r.get("msg_reported", 0)
+        s["msgs_fetched"] += r.get("msgs_fetched", 0)
         s["spam"]      += r.get("spam_signaled", 0)
         s["reacts"]    += r.get("reactions_sent", 0)
         s["admins"]    += r.get("admins_reported", 0)
@@ -898,8 +901,9 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"{status} <code>{r.target}</code>\n"
             f"  ├ Жалоб на канал: <b>{r.peer_reported}</b> "
             f"(+{r.multi_reason} доп. причин)\n"
-            f"  ├ Сообщений: <b>{r.msgs_reported}</b> · "
-            f"Закреплённых: <b>{r.pinned_reported}</b> · "
+            f"  ├ Сообщений: <b>{r.msgs_reported}</b>"
+            f"{'/' + str(r.msgs_fetched) if r.msgs_fetched > r.msgs_reported else ''}"
+            f" · Закреплённых: <b>{r.pinned_reported}</b> · "
             f"Фото: <b>{'✅' if r.photo_reported else '❌'}</b>\n"
             f"  ├ Админов: <b>{r.admins_reported}</b> · "
             f"Реакций: <b>{r.reactions}</b> · "

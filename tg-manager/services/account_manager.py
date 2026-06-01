@@ -2080,7 +2080,7 @@ async def report_peer_deep_v2(  # noqa: C901
     # ── Result ────────────────────────────────────────────────────────────
     R: dict = {
         "peer_reported": False, "multi_reason_sent": 0, "photo_reported": False,
-        "pinned_reported": 0, "msg_reported": 0, "spam_signaled": 0,
+        "pinned_reported": 0, "msg_reported": 0, "msgs_fetched": 0, "spam_signaled": 0,
         "reactions_sent": 0, "admins_reported": 0, "linked_group_reported": False,
         "bots_reported": 0, "forwarded": 0, "blocked": False, "joined": False,
     }
@@ -2190,11 +2190,21 @@ async def report_peer_deep_v2(  # noqa: C901
                 photos = await _timed(client.get_profile_photos(entity, limit=1), 10.0)
                 if photos:
                     await asyncio.sleep(random.uniform(0.4, 1.2))
+                    _p = photos[0]
+                    # Не используем client._get_input_photo (приватный метод).
+                    # Строим InputPhoto напрямую из атрибутов объекта.
+                    from telethon.tl.types import InputPhoto as _InputPhoto
+                    _photo_input = _InputPhoto(
+                        id=_p.id,
+                        access_hash=_p.access_hash,
+                        file_reference=_p.file_reference,
+                    )
                     await client(_RPP(
-                        peer=entity, photo_id=client._get_input_photo(photos[0]),
+                        peer=entity, photo_id=_photo_input,
                         reason=tg_reason, message=msg_pool[0],
                     ))
                     R["photo_reported"] = True
+                    log.info("rpv2[2/photo] reported acc=%s", acc_id)
             except Exception as e:
                 log.warning("rpv2[2/photo] acc=%s: %s", acc_id, str(e)[:80])
 
@@ -2259,6 +2269,12 @@ async def report_peer_deep_v2(  # noqa: C901
             try:
                 fc_res = await _timed(client(GetFullChannelRequest(entity)))
                 full_chat = fc_res.full_chat
+                # GetFullChannelRequest тоже возвращает chats — ещё один refresh point
+                _fc_chats = getattr(fc_res, "chats", [])
+                if _fc_chats:
+                    entity = _fc_chats[0]
+                    log.info("rpv2[4] entity from GetFullChannel acc=%s ah=%s",
+                             acc_id, getattr(entity, "access_hash", "?"))
             except Exception as e:
                 log.warning("rpv2[4/full] acc=%s: %s", acc_id, str(e)[:80])
 
@@ -2324,7 +2340,17 @@ async def report_peer_deep_v2(  # noqa: C901
                     log.info("rpv2[6/fallback] fetched=%d acc=%s", len(msgs), acc_id)
                 except Exception as _fb_e:
                     log.warning("rpv2[6/fallback] acc=%s: %s", acc_id, str(_fb_e)[:80])
+            # Третий fallback: entity напрямую (Telethon резолвит сам без InputPeerChannel)
+            if not msgs:
+                try:
+                    raw2 = await _timed(client.get_messages(entity, limit=max_msg_reports), 20.0)
+                    msgs = [m for m in (raw2 or []) if m and not getattr(m, "action", None)]
+                    if msgs:
+                        log.info("rpv2[6/entity_fb] fetched=%d acc=%s", len(msgs), acc_id)
+                except Exception as _ef:
+                    log.warning("rpv2[6/entity_fb] acc=%s: %s", acc_id, str(_ef)[:80])
 
+            R["msgs_fetched"] = len(msgs)
             msg_ids = [m.id for m in msgs if m and m.id]
             log.info("rpv2[6] msg_ids=%d target=%s acc=%s joined=%s",
                      len(msg_ids), peer, acc_id, R["joined"])
