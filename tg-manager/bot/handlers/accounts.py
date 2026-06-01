@@ -367,6 +367,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
         if "FloodWait" in type(exc).__name__ or "flood" in err.lower():
             m = re.search(r"(\d+)", err)
             wait = m.group(1) if m else "?"
+            await state.clear()
             await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
                 parse_mode="HTML",
@@ -428,6 +429,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
             import re as _re
             m = _re.search(r"(\d+)", err)
             wait = m.group(1) if m else "?"
+            await state.clear()
             await callback.message.answer(
                 f"⏳ Слишком много запросов. Подождите <b>{wait} сек</b> и попробуйте снова.",
                 parse_mode="HTML",

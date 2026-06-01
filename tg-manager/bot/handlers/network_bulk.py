@@ -463,7 +463,7 @@ async def msg_import_tokens(
     added, skipped, failed = [], [], []
     for token, info in zip(lines, results):
         if isinstance(info, Exception) or not info:
-            log.warning("network_bulk: token check failed %s: %s", token[:20], info)
+            log.warning("network_bulk: token check failed [REDACTED]: %s", info)
             failed.append(f"❌ {token[:25]}…")
             continue
         try:
