@@ -4837,15 +4837,17 @@ async def fsm_cinv_channel_input(
     raw = message.text.strip()
     try:
         ch_id = int(raw)
-        identifier = ch_id
+        identifier = str(ch_id)
         display = str(ch_id)
         access_hash = 0
+        _channel_id = ch_id
     except ValueError:
         identifier = raw if raw.startswith("@") else f"@{raw}"
         display = identifier
         access_hash = 0
+        _channel_id = 0
 
-    await state.update_data(channel_identifier=str(identifier), channel_display=display, channel_id=0, access_hash=access_hash)
+    await state.update_data(channel_identifier=identifier, channel_display=display, channel_id=_channel_id, access_hash=access_hash)
     accounts = await _get_accounts(pool, message.from_user.id)
     if not accounts:
         await message.answer("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts")
