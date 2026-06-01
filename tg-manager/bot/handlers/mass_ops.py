@@ -798,6 +798,7 @@ async def cb_bbe_confirm(
 
     total = len(bots)
     ok_count, err_count = 0, 0
+    _consecutive_errors = 0
     progress_msg = await callback.message.edit_text(
         f"⏳ Редактирую ботов... 0/{total}",
         parse_mode="HTML",
@@ -806,6 +807,7 @@ async def cb_bbe_confirm(
     import aiohttp
     for idx, bot in enumerate(bots, 1):
         token = bot["token"]
+        _call_ok = False
         try:
             async with aiohttp.ClientSession() as session:
                 if field == "name":
@@ -831,16 +833,21 @@ async def cb_bbe_confirm(
                     payload = {"commands": json.dumps(commands)}
                 else:
                     err_count += 1
+                    _consecutive_errors += 1
                     continue
 
                 async with session.post(url, data=payload) as resp:
                     result = await resp.json()
                     if result.get("ok"):
                         ok_count += 1
+                        _call_ok = True
+                        _consecutive_errors = 0
                     else:
                         err_count += 1
+                        _consecutive_errors += 1
         except Exception:
             err_count += 1
+            _consecutive_errors += 1
 
         try:
             await progress_msg.edit_text(
@@ -849,7 +856,9 @@ async def cb_bbe_confirm(
             )
         except Exception:
             log_exc_swallow(log, "Не удалось обновить прогресс массового редактирования ботов")
-        await asyncio.sleep(1)
+        # exponential backoff: 1s normal, 2/4/8...s after consecutive errors (cap 30s)
+        _delay = min(1.0 * (2 ** _consecutive_errors), 30.0) if _consecutive_errors > 0 else 1.0
+        await asyncio.sleep(_delay)
 
     await progress_msg.edit_text(
         f"✅ <b>Массовое редактирование завершено</b>\n\n"

@@ -18,6 +18,7 @@ from database import db
 from services.geo_data import GEO_PRESETS, parse_custom_geo_list
 from services.presence_planner import render_pattern, build_targets, estimate_duration_minutes
 from services.username_engine import slugify
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -79,7 +80,11 @@ async def cb_gp_menu(
     await state.clear()
 
     # Show active/recent plans count
-    recent_plans = await db.get_global_presence_plans(pool, callback.from_user.id, limit=3)
+    try:
+        recent_plans = await db.get_global_presence_plans(pool, callback.from_user.id, limit=3)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_menu: get_global_presence_plans failed")
+        recent_plans = []
     running_count = sum(1 for p in recent_plans if p["status"] in ("running", "queued"))
     plans_hint = ""
     if running_count:
@@ -656,11 +661,15 @@ async def _show_accounts_step(
     selected_ids: list[int] = sd.get("selected_acc_ids") or []
 
     offset = page * _ACC_PAGE_SIZE
-    accounts = await pool.fetch(
-        "SELECT id, phone, trust_score, is_active FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST LIMIT $2 OFFSET $3",
-        user_id, _ACC_PAGE_SIZE + 1, offset,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, phone, trust_score, is_active FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST LIMIT $2 OFFSET $3",
+            user_id, _ACC_PAGE_SIZE + 1, offset,
+        )
+    except Exception:
+        log_exc_swallow(log, "_show_accounts_step: pool.fetch failed")
+        accounts = []
     has_more = len(accounts) > _ACC_PAGE_SIZE
     accounts = accounts[:_ACC_PAGE_SIZE]
 
@@ -753,10 +762,14 @@ async def cb_gp_acc_all(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
-    all_accs = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    try:
+        all_accs = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_acc_all: pool.fetch failed")
+        all_accs = []
     await state.update_data(selected_acc_ids=[a["id"] for a in all_accs])
     await _show_accounts_step(callback, state, pool)
 
@@ -798,9 +811,13 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
 
     # Load account phones for display
     if selected_acc_ids:
-        acc_rows = await pool.fetch(
-            "SELECT phone FROM tg_accounts WHERE id = ANY($1)", selected_acc_ids
-        )
+        try:
+            acc_rows = await pool.fetch(
+                "SELECT phone FROM tg_accounts WHERE id = ANY($1)", selected_acc_ids
+            )
+        except Exception:
+            log_exc_swallow(log, "_show_preview: pool.fetch accounts failed")
+            acc_rows = []
         acc_phones = [r["phone"] for r in acc_rows]
     else:
         acc_phones = []
@@ -1110,20 +1127,36 @@ async def cb_gp_progress(
         await callback.answer("Укажите ID плана", show_alert=True)
         return
 
-    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    try:
+        plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_progress: get_global_presence_plan failed")
+        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
         return
     await callback.answer()
 
-    stats = await db.get_global_presence_stats(pool, plan_id)
-    op_id = plan.get("op_id")
-
-    op_status = "—"
-    if op_id:
-        op_row = await pool.fetchrow("SELECT status, done_items, total_items FROM operation_queue WHERE id=$1", op_id)
-        if op_row:
-            op_status = op_row["status"]
+    try:
+        stats = await db.get_global_presence_stats(pool, plan_id)
+        op_id = plan.get("op_id")
+        op_status = "—"
+        if op_id:
+            op_row = await pool.fetchrow("SELECT status, done_items, total_items FROM operation_queue WHERE id=$1", op_id)
+            if op_row:
+                op_status = op_row["status"]
+        current_row = await pool.fetchrow(
+            "SELECT city FROM global_presence_targets WHERE plan_id=$1 AND status='running' LIMIT 1",
+            plan_id,
+        )
+        current_city = current_row["city"] if current_row else "—"
+    except Exception:
+        log_exc_swallow(log, "cb_gp_progress: stats/operation fetch failed")
+        stats = {"total": 0, "done": 0, "failed": 0, "pending": 0}
+        op_id = None
+        op_status = "—"
+        current_city = "—"
 
     total = stats["total"]
     done = stats["done"]
@@ -1133,13 +1166,6 @@ async def cb_gp_progress(
     pct = int(done / total * 100) if total else 0
     bar_filled = pct // 10
     bar = "█" * bar_filled + "░" * (10 - bar_filled)
-
-    # Find currently running city
-    current_row = await pool.fetchrow(
-        "SELECT city FROM global_presence_targets WHERE plan_id=$1 AND status='running' LIMIT 1",
-        plan_id,
-    )
-    current_city = current_row["city"] if current_row else "—"
 
     # Estimate remaining
     remaining = pending
@@ -1181,12 +1207,22 @@ async def cb_gp_retry(
     callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
 ) -> None:
     plan_id = callback_data.plan_id
-    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    try:
+        plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_retry: get_global_presence_plan failed")
+        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
         return
 
-    reset_count = await db.reset_failed_targets(pool, plan_id)
+    try:
+        reset_count = await db.reset_failed_targets(pool, plan_id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_retry: reset_failed_targets failed")
+        await callback.answer("Ошибка сброса целей", show_alert=True)
+        return
     if reset_count == 0:
         await callback.answer("Нет повторяемых ошибок", show_alert=True)
         return
@@ -1202,16 +1238,21 @@ async def cb_gp_retry(
     else:
         _retry_op_type = "global_presence_channel"
 
-    # Queue new retry operation
-    op_id = await pool.fetchval(
-        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-        "VALUES($1,$4,'pending',$2::jsonb,$3) RETURNING id",
-        callback.from_user.id,
-        json.dumps({"plan_id": plan_id}),
-        reset_count,
-        _retry_op_type,
-    )
-    await db.link_plan_to_operation(pool, plan_id, op_id)
+    try:
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
+            "VALUES($1,$4,'pending',$2::jsonb,$3) RETURNING id",
+            callback.from_user.id,
+            json.dumps({"plan_id": plan_id}),
+            reset_count,
+            _retry_op_type,
+        )
+        await db.link_plan_to_operation(pool, plan_id, op_id)
+        log.info("cb_gp_retry: plan=%d reset=%d op=%d user=%s", plan_id, reset_count, op_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_retry: operation_queue insert failed")
+        await callback.answer("Ошибка постановки в очередь", show_alert=True)
+        return
     await callback.answer(f"✅ {reset_count} целей поставлено в очередь на повтор (op #{op_id})", show_alert=True)
 
 
@@ -1220,25 +1261,34 @@ async def cb_gp_report(
     callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
 ) -> None:
     plan_id = callback_data.plan_id
-    plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    try:
+        plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_report: get_global_presence_plan failed")
+        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
         return
     await callback.answer()
 
-    stats = await db.get_global_presence_stats(pool, plan_id)
-
-    # Get created channels
-    done_targets = await pool.fetch(
-        "SELECT city, planned_name, planned_username, result_asset_id "
-        "FROM global_presence_targets WHERE plan_id=$1 AND status='done' ORDER BY id LIMIT 20",
-        plan_id,
-    )
-    failed_targets = await pool.fetch(
-        "SELECT city, planned_name, error_message "
-        "FROM global_presence_targets WHERE plan_id=$1 AND status='failed' LIMIT 10",
-        plan_id,
-    )
+    try:
+        stats = await db.get_global_presence_stats(pool, plan_id)
+        done_targets = await pool.fetch(
+            "SELECT city, planned_name, planned_username, result_asset_id "
+            "FROM global_presence_targets WHERE plan_id=$1 AND status='done' ORDER BY id LIMIT 20",
+            plan_id,
+        )
+        failed_targets = await pool.fetch(
+            "SELECT city, planned_name, error_message "
+            "FROM global_presence_targets WHERE plan_id=$1 AND status='failed' LIMIT 10",
+            plan_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_gp_report: stats/targets fetch failed")
+        stats = {"total": 0, "done": 0, "failed": 0, "pending": 0}
+        done_targets = []
+        failed_targets = []
 
     done_lines = "\n".join(
         f"  ✅ {t['city'] or '?'}: {t['planned_name'] or '?'}"
@@ -1279,7 +1329,11 @@ async def cb_gp_plans_list(
     callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
-    plans = await db.get_global_presence_plans(pool, callback.from_user.id, limit=8)
+    try:
+        plans = await db.get_global_presence_plans(pool, callback.from_user.id, limit=8)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_plans_list: get_global_presence_plans failed")
+        plans = []
     if not plans:
         kb = InlineKeyboardBuilder()
         kb.button(text="➕ Создать план", callback_data=GeoPresenceCb(action="menu"))
