@@ -1,0 +1,78 @@
+{
+  "name": "BotMother Set Webhook",
+  "nodes": [
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "parameters": {}
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000002",
+      "name": "Set Webhook to n8n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot8900276504:AAFGmcIqv12GVqudr1NU_QAP2gdovw0EDuQ/setWebhook",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "https://claudex.app.n8n.cloud/webhook/mexahi3mbot-monitor"
+            },
+            {
+              "name": "allowed_updates",
+              "value": "[\"message\",\"callback_query\"]"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000003",
+      "name": "Delete Webhook (Restore Railway)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot8900276504:AAFGmcIqv12GVqudr1NU_QAP2gdovw0EDuQ/deleteWebhook",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "drop_pending_updates",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000004",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 140],
+      "parameters": {
+        "content": "## ⚙️ Webhook Manager\n\n**Нода «Set Webhook to n8n»**\nПеренаправляет все обновления @MEXAHI3MBOT в воркфлоу Monitor.\nЗапусти ПОСЛЕ активации воркфлоу Monitor!\n\n**Нода «Delete Webhook (Restore Railway)»**\nВосстанавливает режим polling на Railway после окончания аудита.\n\n⚠️ Запускай ноды по ОДНОЙ через правую кнопку → Execute node",
+        "height": 110,
+        "width": 500,
+        "color": 6
+      }
+    }
+  ],
+  "connections": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["botmother", "audit"]
+}
