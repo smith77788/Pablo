@@ -46,7 +46,10 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
     if user_ids is None:
         user_ids = await db.get_audience_user_ids(pool, bot_id)
     sent = failed = 0
-    await db.update_broadcast(pool, broadcast_id, 0, 0, "running")
+    try:
+        await db.update_broadcast(pool, broadcast_id, 0, 0, "running")
+    except Exception as _e:
+        logger.warning("Broadcast %d: failed to mark running: %s", broadcast_id, _e)
 
     # Pre-load user data for placeholder rendering if needed
     has_placeholders = "{{" in text
@@ -101,8 +104,12 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
 
         await asyncio.sleep(BROADCAST_DELAY)
 
-    await db.update_broadcast(pool, broadcast_id, sent, failed, "done")
-    _running.pop(broadcast_id, None)
+    try:
+        await db.update_broadcast(pool, broadcast_id, sent, failed, "done")
+    except Exception as _e:
+        logger.warning("Broadcast %d: failed to mark done: %s", broadcast_id, _e)
+    finally:
+        _running.pop(broadcast_id, None)
     logger.info("Broadcast %d done: sent=%d failed=%d", broadcast_id, sent, failed)
 
 

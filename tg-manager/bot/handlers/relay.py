@@ -151,7 +151,10 @@ async def cb_relay_session(
         f"Бот: {safe_bot}\n\n"
         f"<b>Последние сообщения:</b>\n{history_text}"
     )
-    templates = await db.get_templates(pool, callback.from_user.id)
+    try:
+        templates = await db.get_templates(pool, callback.from_user.id)
+    except Exception:
+        templates = []
     await callback.message.edit_text(
         text,
         parse_mode="HTML",

@@ -158,6 +158,13 @@ async def cb_confirm(
     bc_id = await db.create_broadcast(
         pool, row["bot_id"], text, total, callback.from_user.id, photo_file_id
     )
+    if not bc_id:
+        await callback.message.edit_text(
+            "❌ Не удалось создать рассылку (ошибка БД). Попробуйте позже.",
+            reply_markup=back_to_bot(callback_data.bot_id),
+        )
+        await state.clear()
+        return
 
     broadcaster.start(
         pool,

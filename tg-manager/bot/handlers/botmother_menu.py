@@ -506,9 +506,9 @@ async def cb_pick_bot_for(
         elif sub == "fn":
             cd = FunnelCb(action="list", bot_id=bot["bot_id"])
         elif sub == "cmd":
-            cd = CommandsCb(action="list", bot_id=bot["bot_id"])
+            cd = CommandsCb(action="menu", bot_id=bot["bot_id"])
         else:  # ar
-            cd = AutoReplyCb(action="list", bot_id=bot["bot_id"])
+            cd = AutoReplyCb(action="menu", bot_id=bot["bot_id"])
         kb.button(text=f"🤖 @{name}", callback_data=cd)
     kb.button(text="◀️ Назад", callback_data=BmCb(action=back_action))
     kb.adjust(1)
