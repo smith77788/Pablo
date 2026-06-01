@@ -338,19 +338,19 @@ import html as _html
 async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Общий хелпер: показывает историю Strike."""
     rows = await pool.fetch(
-        """SELECT target, reason, accounts_used, peer_reported, msgs_reported,
+        """SELECT id, target, reason, preset, accounts_used, peer_reported, msgs_reported,
                   COALESCE(msgs_fetched, 0) AS msgs_fetched,
                   network_nodes, verified_down, duration_s, created_at
            FROM strike_history
            WHERE owner_id=$1
-           ORDER BY created_at DESC LIMIT 15""",
+           ORDER BY created_at DESC LIMIT 10""",
         callback.from_user.id,
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
 
     if not rows:
+        kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
             "📜 <b>История атак</b>\n\nАтак ещё не было.",
             parse_mode="HTML",
@@ -358,7 +358,9 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         )
         return
 
-    lines = ["📜 <b>История Strike (последние 15)</b>\n"]
+    lines = ["📜 <b>История Strike (последние 10)</b>\n"]
+    rerun_rows = []  # rows eligible for re-run buttons (unique targets, max 5)
+    seen_targets: set[str] = set()
     for r in rows:
         # 🟢 = подтверждено удаление, ⚔️ = полный удар, 🟡 = только ReportPeer, 🔴 = не прошёл
         _pr = r["peer_reported"] or 0
@@ -376,11 +378,29 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         msgs_r = r["msgs_reported"] or 0
         msgs_f = r["msgs_fetched"] or 0
         msgs_str = f"{msgs_r}/{msgs_f}" if msgs_f > msgs_r else str(msgs_r)
+        preset_label = f" [{r['preset']}]" if r["preset"] else ""
         lines.append(
             f"{status} <code>{_html.escape(r['target'])}</code> · {ts}\n"
-            f"   {r['reason']} · {r['accounts_used']} акк · "
+            f"   {r['reason']}{preset_label} · {r['accounts_used']} акк · "
             f"{r['peer_reported']} жалоб · сообщ: {msgs_str} · {int(r['duration_s'] or 0)}с"
         )
+        # Collect distinct targets for re-run buttons (first occurrence wins)
+        if r["target"] not in seen_targets and len(rerun_rows) < 5:
+            seen_targets.add(r["target"])
+            rerun_rows.append(r)
+
+    # Re-run buttons: one per unique target (max 5), compact label
+    if rerun_rows:
+        lines.append("\n<i>Нажмите 🔁 чтобы повторить удар по той же цели:</i>")
+        for r in rerun_rows:
+            short = r["target"][:20]
+            kb.button(
+                text=f"🔁 {short}",
+                callback_data=StrikeCb(action="rerun", page=r["id"]),
+            )
+        kb.adjust(2)
+
+    kb.row(InlineKeyboardButton(text="◀️ Назад", callback_data=StrikeCb(action="menu").pack()))
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -406,6 +426,58 @@ async def cb_strike_history_shortcut(callback: CallbackQuery, pool: asyncpg.Pool
         return
     await callback.answer()
     await _show_strike_history(callback, pool)
+
+
+# ── re-run: повтор удара по той же цели ──────────────────────────────────────
+
+
+@router.callback_query(StrikeCb.filter(F.action == "rerun"))
+async def cb_strike_rerun(
+    callback: CallbackQuery, callback_data: StrikeCb,
+    pool: asyncpg.Pool, state: FSMContext,
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    history_id = callback_data.page
+    row = await pool.fetchrow(
+        "SELECT target, reason, preset FROM strike_history WHERE id=$1 AND owner_id=$2",
+        history_id, callback.from_user.id,
+    )
+    if not row:
+        await callback.answer("Запись не найдена.", show_alert=True)
+        return
+    await callback.answer()
+
+    target = row["target"]
+    reason = row["reason"]
+    preset = row["preset"]
+
+    # Pre-fill FSM state for the account picker (same flow as regular bulk report)
+    await state.update_data(
+        peer=target,
+        peers=[target],
+        reason=reason,
+        preset=preset,
+        selected_ids=[],
+    )
+
+    from bot.handlers.channel_ops import _show_bulk_report_account_picker, _get_accounts
+    accounts = await _get_accounts(pool, callback.from_user.id)
+    active = [a for a in accounts if a["is_active"]]
+    if not active:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов. Добавьте или активируйте аккаунты.",
+            parse_mode="HTML",
+        )
+        return
+
+    preset_info = f"пресет: <b>{preset}</b>" if preset else f"причина: <b>{reason}</b>"
+    await _show_bulk_report_account_picker(
+        callback.message, active, [], target, reason,
+        edit=True,
+        extra_info=f"🔁 Повтор Strike · {preset_info}",
+    )
 
 
 # ── admin grant ───────────────────────────────────────────────────────────────

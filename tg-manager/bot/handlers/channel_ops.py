@@ -5133,8 +5133,31 @@ async def _cinv_bg_inner(
     pool, _am,
 ) -> None:
     chan_target = channel_id if channel_id else channel_identifier
+    _ch_disp = html.escape(channel_display)
+    _n_accs = len(acc_rows)
+    _has_join_step = _n_accs > 1 and pool is not None
+    _total_steps = 3 if _has_join_step else 2
+
+    # Progress message — edited throughout instead of spamming new messages
+    _pm = None
+    _join_done = "✅ Аккаунты подключены\n" if _has_join_step else ""
+
+    async def _upd(text: str) -> None:
+        nonlocal _pm
+        try:
+            if _pm is None:
+                _pm = await bot.send_message(user_id, text, parse_mode="HTML")
+            else:
+                await _pm.edit_text(text, parse_mode="HTML")
+        except Exception:
+            pass
 
     # 0. Auto-add co-accounts to channel, then promote to admin
+    if _has_join_step:
+        await _upd(
+            f"⚙️ <b>Инвайт · {_ch_disp}</b>\n\n"
+            f"📶 <b>Шаг 1/{_total_steps}:</b> Подключаю {_n_accs - 1} доп. аккаунта к каналу..."
+        )
     if len(acc_rows) > 1 and pool is not None:
         primary = acc_rows[0]
         primary_dict = dict(primary)
@@ -5227,6 +5250,13 @@ async def _cinv_bg_inner(
             log.info("cinv: promoted %d co-accounts to admin in %s", promo_ok, chan_target)
 
     # 1. Collect contacts from ALL accounts in PARALLEL
+    _contacts_step = 2 if _has_join_step else 1
+    await _upd(
+        f"⚙️ <b>Инвайт · {_ch_disp}</b>\n\n"
+        f"{_join_done}"
+        f"📇 <b>Шаг {_contacts_step}/{_total_steps}:</b> Собираю контакты с {_n_accs} аккаунтов..."
+    )
+
     async def _get_contacts_one(acc: dict) -> list:
         try:
             return await _am.get_contacts(acc["session_str"], _acc=dict(acc))
@@ -5244,14 +5274,7 @@ async def _cinv_bg_inner(
             contacts_map[c["user_id"]] = c
 
     if not contacts_map:
-        try:
-            await bot.send_message(
-                user_id,
-                "⚠️ <b>Инвайт: нет контактов</b>\n\nНи у одного аккаунта не найдено контактов.",
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Сбой уведомления об отсутствии контактов")
+        await _upd("⚠️ <b>Инвайт: нет контактов</b>\n\nНи у одного аккаунта не найдено контактов.")
         return
 
     # 2. Build identifier list: @username preferred, phone as fallback
@@ -5264,15 +5287,10 @@ async def _cinv_bg_inner(
             identifiers.append(ph if ph.startswith("+") else f"+{ph}")
 
     if not identifiers:
-        try:
-            await bot.send_message(
-                user_id,
-                "⚠️ <b>Инвайт: нет идентификаторов</b>\n\n"
-                "У контактов нет username и телефонов — невозможно пригласить.",
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Сбой уведомления об отсутствии идентификаторов")
+        await _upd(
+            "⚠️ <b>Инвайт: нет идентификаторов</b>\n\n"
+            "У контактов нет username и телефонов — невозможно пригласить."
+        )
         return
 
     # 3. Split contacts round-robin among accounts
@@ -5280,6 +5298,14 @@ async def _cinv_bg_inner(
     chunks = [identifiers[i::n] for i in range(n)]
 
     # 4. Invite in PARALLEL — each account works on its own chunk simultaneously
+    _invite_step = _total_steps
+    await _upd(
+        f"⚙️ <b>Инвайт · {_ch_disp}</b>\n\n"
+        f"{_join_done}"
+        f"✅ Контактов: <b>{len(identifiers):,}</b> ({len(contacts_map)} уник.)\n"
+        f"📨 <b>Шаг {_invite_step}/{_total_steps}:</b> Рассылаю инвайты ({_n_accs} аккаунтов)..."
+    )
+
     async def _invite_one(acc: dict, chunk: list) -> tuple[int, int]:
         if not chunk:
             return 0, 0
@@ -5307,16 +5333,16 @@ async def _cinv_bg_inner(
     total_invited = sum(r[0] for r in invite_results)
     total_failed = sum(r[1] for r in invite_results)
 
-    # 5. Notify user
-    try:
-        await bot.send_message(
-            user_id,
-            f"✅ <b>Инвайт завершён!</b>\n\n"
-            f"Канал: <b>{html.escape(channel_display)}</b>\n"
-            f"Контактов обработано: <b>{len(identifiers):,}</b>\n"
-            f"Приглашено: <b>{total_invited}</b>\n"
-            f"Не удалось: <b>{total_failed}</b>",
-            parse_mode="HTML",
-        )
-    except Exception:
-        log_exc_swallow(log, "Сбой отправки итогов инвайта")
+    # 5. Notify user — edit the progress message with final summary + per-account breakdown
+    _breakdown_lines = []
+    for acc, (ok, fail), chunk in zip(acc_rows, invite_results, chunks):
+        name = (acc.get("first_name") or f"acc{acc['id']}")[:16]
+        _breakdown_lines.append(f"  {html.escape(name)}: {ok}/{len(chunk)}")
+    _breakdown = "\n".join(_breakdown_lines) if _breakdown_lines else ""
+
+    await _upd(
+        f"✅ <b>Инвайт завершён!</b>\n\n"
+        f"Канал: <b>{_ch_disp}</b>\n"
+        f"Контактов: <b>{len(identifiers):,}</b> · приглашено: <b>{total_invited}</b> · ошибок: <b>{total_failed}</b>"
+        + (f"\n\n📊 <b>Разбивка:</b>\n{_breakdown}" if _breakdown else "")
+    )
