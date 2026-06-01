@@ -1837,28 +1837,54 @@ async def cb_members_view(
     )
 
 
+_invite_pending: dict[int, dict] = {}
+
+
 @router.callback_query(ChanCb.filter(F.action == "members_invite"))
 async def cb_members_invite(
-    callback: CallbackQuery, callback_data: ChanCb, state: FSMContext
+    callback: CallbackQuery, callback_data: ChanCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    # Получаем данные канала заранее — после state.clear() FSM данные недоступны
+    channel_row = None
+    if callback_data.channel_id:
+        channel_row = await pool.fetchrow(
+            "SELECT title, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            callback_data.channel_id, callback.from_user.id,
+        )
+    _invite_pending[callback.from_user.id] = {
+        "acc_id": callback_data.acc_id,
+        "channel_id": callback_data.channel_id,
+        "access_hash": (channel_row["access_hash"] if channel_row else 0) or 0,
+        "channel_display": (channel_row["title"] if channel_row else None) or str(callback_data.channel_id),
+    }
     await state.set_state(InviteUsersFSM.waiting_usernames)
     await state.update_data(acc_id=callback_data.acc_id, channel_id=callback_data.channel_id)
     kb = InlineKeyboardBuilder()
+    kb.button(text="📎 Загрузить .txt файл", callback_data="invite:hint:file")
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "➕ <b>Пригласить пользователей</b>\n\n"
         "Введите username'ы через запятую или по одному на строку:\n"
-        "<code>@user1, @user2, @user3</code>",
+        "<code>@user1, @user2, @user3</code>\n\n"
+        "Или отправьте <b>.txt файл</b> (до 1 МБ).\n\n"
+        "⚠️ Telegram позволяет приглашать не более <b>200 человек в сутки</b> на один аккаунт.\n"
+        "Система автоматически разобьёт список на батчи с паузами.",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(F.data == "invite:hint:file")
+async def cb_invite_hint_file(callback: CallbackQuery) -> None:
+    await callback.answer("Отправьте .txt файл со списком username'ов", show_alert=True)
 
 
 @router.message(InviteUsersFSM.waiting_usernames, F.document)
 async def fsm_invite_usernames_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     doc = message.document
-    if not doc or (doc.file_size and doc.file_size > 100_000):
-        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+    if not doc or (doc.file_size and doc.file_size > 1_000_000):
+        await message.answer("⚠️ Файл слишком большой. Максимум 1 МБ.")
         return
     try:
         fi = await message.bot.get_file(doc.file_id)
@@ -1872,10 +1898,7 @@ async def fsm_invite_usernames_file(message: Message, state: FSMContext, pool: a
     if not usernames:
         await message.answer("⚠️ Файл не содержит распознанных usernames.")
         return
-    if len(usernames) > 300:
-        usernames = usernames[:300]
-        await message.answer("⚠️ Взяты первые 300 пользователей из файла.")
-    await _exec_invite_usernames(usernames, message, state, pool)
+    await _show_invite_count_menu(usernames, message, state)
 
 
 @router.message(InviteUsersFSM.waiting_usernames, F.text)
@@ -1885,36 +1908,218 @@ async def fsm_invite_usernames(message: Message, state: FSMContext, pool: asyncp
     if not usernames:
         await message.answer("⚠️ Список пуст. Начните заново: /ops")
         return
-    await _exec_invite_usernames(usernames, message, state, pool)
+    await _show_invite_count_menu(usernames, message, state)
 
 
-async def _exec_invite_usernames(
-    usernames: list[str], message, state: FSMContext, pool
+async def _show_invite_count_menu(
+    usernames: list[str], message, state: FSMContext
 ) -> None:
-    data = await state.get_data()
-    await state.clear()
-    if not usernames:
-        await message.answer("⚠️ Список пуст. Начните заново: /ops")
-        return
-    acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
-    if not acc:
-        await message.answer("⚠️ Аккаунт не найден.")
-        return
-    msg = await message.answer(f"⏳ Приглашаю {len(usernames)} пользователей...")
-    from services import account_manager
-    result = await account_manager.invite_users_to_channel(
-        acc["session_str"], data["channel_id"], usernames, _acc=acc
+    """Показать меню выбора количества людей для инвайта."""
+    total = len(usernames)
+    # Сохраняем список в FSM state
+    await state.update_data(usernames=usernames)
+    await state.set_state(InviteUsersFSM.choosing_count)
+
+    # Кнопки выбора количества
+    opts = []
+    for n in [50, 100, 200]:
+        if n <= total:
+            opts.append(n)
+    if total not in opts and total > 0:
+        opts.append(total)
+
+    kb = InlineKeyboardBuilder()
+    for n in opts:
+        kb.button(text=f"👥 {n} человек", callback_data=f"invite:count:{n}")
+    if total > 200:
+        kb.button(text=f"📋 Все {total} (батчами по 100)", callback_data=f"invite:count:all")
+    kb.button(text="✏️ Своё число", callback_data="invite:count:custom")
+    kb.button(text="❌ Отмена", callback_data="invite:count:cancel")
+    kb.adjust(2)
+
+    await message.answer(
+        f"➕ <b>Выбор количества для инвайта</b>\n\n"
+        f"Загружено пользователей: <b>{total}</b>\n"
+        f"⚠️ Лимит Telegram: <b>200/сутки</b> на аккаунт\n\n"
+        f"Сколько человек пригласить?",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
     )
-    if result.get("error"):
-        lines = [f"❌ <b>Ошибка:</b> {html.escape(str(result['error'])[:120])}"]
+
+
+@router.callback_query(F.data.startswith("invite:count:"))
+async def cb_invite_count(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    action = callback.data.split("invite:count:")[1]
+
+    if action == "cancel":
+        await state.clear()
+        await callback.message.edit_text("❌ Инвайт отменён.", reply_markup=_back_kb().as_markup())
+        return
+
+    if action == "custom":
+        await state.set_state(InviteUsersFSM.waiting_custom_count)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data="invite:count:cancel")
+        await callback.message.edit_text(
+            "✏️ Введите число пользователей для инвайта (1–500):",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    data = await state.get_data()
+    usernames: list[str] = data.get("usernames", [])
+
+    if action == "all":
+        limit = len(usernames)
     else:
-        lines = [f"✅ Приглашено: <b>{result.get('invited', 0)}</b>"]
-        failed_list = result.get("failed") or []
-        if failed_list:
-            lines.append(f"❌ Ошибки ({len(failed_list)}):")
-            for f_item in failed_list[:5]:
-                lines.append(f"  • {html.escape(str(f_item))}")
-    await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+        try:
+            limit = int(action)
+        except ValueError:
+            limit = min(100, len(usernames))
+
+    limit = max(1, min(limit, len(usernames)))
+    selected = usernames[:limit]
+    await state.clear()
+    await _run_invite_bg(selected, callback, pool)
+
+
+@router.message(InviteUsersFSM.waiting_custom_count, F.text)
+async def fsm_invite_custom_count(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    try:
+        limit = int((message.text or "").strip())
+        if limit < 1:
+            raise ValueError
+    except ValueError:
+        await message.answer("⚠️ Введите целое число от 1 до 500.")
+        return
+
+    data = await state.get_data()
+    usernames: list[str] = data.get("usernames", [])
+    limit = min(limit, len(usernames))
+    selected = usernames[:limit]
+    await state.clear()
+    await _run_invite_bg(selected, message, pool)
+
+
+async def _run_invite_bg(
+    usernames: list[str],
+    trigger,  # CallbackQuery or Message
+    pool,
+) -> None:
+    """Запускает инвайтинг в фоне с прогресс-обновлениями."""
+    is_cb = hasattr(trigger, "message")
+    user_id = trigger.from_user.id
+    msg_obj = trigger.message if is_cb else trigger
+
+    data_store = getattr(msg_obj, "_invite_state_data", None)
+    # Получаем acc_id и channel_id из контекста. Используем хранилище _active_tasks как временный proxy.
+    # acc_id/channel_id уже сохранены в FSM state перед _show_invite_count_menu
+    # но state уже clear()'ед, поэтому получаем из pool через другой путь.
+    # ВАЖНО: данные переданы через usernames в args — channel_id нужен отдельно.
+    # Получаем его из _invite_pending_data dict.
+    pending = _invite_pending.pop(user_id, {})
+    acc_id = pending.get("acc_id")
+    channel_id = pending.get("channel_id")
+    access_hash = pending.get("access_hash", 0)
+    channel_display = pending.get("channel_display", str(channel_id))
+
+    if not acc_id or not channel_id:
+        await msg_obj.answer("⚠️ Данные сессии потеряны. Начните заново: /ops")
+        return
+
+    acc = await db.get_account_for_telethon(pool, acc_id, user_id)
+    if not acc:
+        await msg_obj.answer("⚠️ Аккаунт не найден.")
+        return
+
+    total = len(usernames)
+    batch_size = min(100, total)  # безопасный батч
+
+    status_msg = await msg_obj.answer(
+        f"⏳ <b>Инвайт запущен</b>\n\n"
+        f"Канал: <code>{html.escape(channel_display)}</code>\n"
+        f"Пользователей: <b>{total}</b> (батчи по {batch_size})\n\n"
+        f"<i>Для отмены: /tasks</i>",
+        parse_mode="HTML",
+    )
+
+    async def _bg():
+        from services import account_manager
+        _ok = 0
+        _fail = 0
+
+        async def _progress(done: int, total_: int, inv: int, fail_cnt: int) -> None:
+            nonlocal _ok, _fail
+            _ok, _fail = inv, fail_cnt
+            pct = int(done / total_ * 100) if total_ else 0
+            bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+            try:
+                await status_msg.edit_text(
+                    f"⏳ <b>Инвайт в процессе</b>\n\n"
+                    f"Канал: <code>{html.escape(channel_display)}</code>\n"
+                    f"{bar} {pct}%\n"
+                    f"✅ Приглашено: <b>{inv}</b>  ❌ Ошибок: <b>{fail_cnt}</b>\n"
+                    f"Всего: {done}/{total_}\n\n<i>Для отмены: /tasks</i>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        try:
+            result = await account_manager.invite_users_to_channel(
+                acc["session_str"], channel_id, usernames,
+                _acc=acc, access_hash=access_hash,
+                batch_size=batch_size, batch_delay=65.0,
+                progress_cb=_progress,
+            )
+            inv = result.get("invited", 0)
+            fail_list = result.get("failed") or []
+            batches = result.get("batches", 1)
+            err = result.get("error", "")
+
+            lines = [f"✅ <b>Инвайт завершён</b>\n"]
+            lines.append(f"Канал: <code>{html.escape(channel_display)}</code>")
+            lines.append(f"Приглашено: <b>{inv}</b> / {total}")
+            lines.append(f"Батчей выполнено: <b>{batches}</b>")
+            if fail_list:
+                lines.append(f"Ошибок: <b>{len(fail_list)}</b>")
+                for f_item in fail_list[:5]:
+                    lines.append(f"  • {html.escape(str(f_item)[:80])}")
+                if len(fail_list) > 5:
+                    lines.append(f"  <i>...и ещё {len(fail_list) - 5}</i>")
+            if err:
+                lines.append(f"\n⚠️ {html.escape(str(err)[:150])}")
+
+            kb = InlineKeyboardBuilder()
+            kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+            await status_msg.edit_text(
+                "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+            )
+        except asyncio.CancelledError:
+            try:
+                await trigger.bot.send_message(
+                    user_id,
+                    f"❌ <b>Инвайт отменён</b>\n\n✅ Приглашено: {_ok}  ❌ Ошибок: {_fail}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        except Exception as exc:
+            log.exception("invite bg error: %s", exc)
+            try:
+                await trigger.bot.send_message(
+                    user_id,
+                    f"⚠️ <b>Ошибка инвайта</b>\n\n<code>{html.escape(str(exc)[:200])}</code>\n"
+                    f"✅ Приглашено до ошибки: {_ok}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    task = asyncio.create_task(_bg())
+    _treg.register(user_id, "invite", f"Инвайт в {channel_display[:30]}", task)
+
+
 
 
 @router.callback_query(ChanCb.filter(F.action == "members_kick"))

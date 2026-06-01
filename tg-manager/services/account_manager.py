@@ -1206,13 +1206,21 @@ async def get_channel_members(
             log_exc_swallow(log, "Сбой в get_channel_members")
 
 async def invite_users_to_channel(
-    session_string: str, channel_id: int, usernames: list[str], _acc: dict | None = None,
+    session_string: str,
+    channel_id: int,
+    usernames: list[str],
+    _acc: dict | None = None,
     access_hash: int = 0,
+    batch_size: int = 100,
+    batch_delay: float = 60.0,
+    progress_cb=None,
 ) -> dict:
-    """Invite a list of users (@username or phone) to a channel/supergroup.
+    """Invite users to a channel with batching (max batch_size per round).
 
-    Returns {invited: int, failed: list[str], error?: str}.
-    Uses access_hash for reliable entity resolution without dialog cache.
+    Telegram hard limit: ~200 invites/day per account per channel.
+    batch_size <= 100 is safe; batch_delay is pause between batches (seconds).
+    progress_cb(done, total, invited, failed_count) — optional async callback.
+    Returns {invited: int, failed: list[str], batches: int, error?: str}.
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
     from telethon.tl.types import InputPeerChannel
@@ -1222,21 +1230,24 @@ async def invite_users_to_channel(
         UserNotMutualContactError, UserChannelsTooMuchError,
     )
     from services import session_simulator
-    client = _make_client(session_string, _acc)
+
+    # Clamp batch_size to Telegram safe limit
+    batch_size = max(1, min(batch_size, 200))
     invited = 0
-    failed = []
+    failed: list[str] = []
+    batches_done = 0
+    client = _make_client(session_string, _acc)
+
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
-        # Resolve channel entity — use access_hash when available (fastest, no cache needed)
+        # Resolve channel entity
         if access_hash and isinstance(channel_id, int) and channel_id > 0:
             channel_peer = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
         else:
-            # Fallback: try to get entity (requires entity in Telethon cache)
             try:
                 channel_peer = await client.get_entity(channel_id)
             except Exception:
-                # Last resort: iterate dialogs to find the channel
                 channel_peer = None
                 async for dlg in client.iter_dialogs(limit=300):
                     eid = getattr(dlg.entity, "id", None)
@@ -1245,51 +1256,93 @@ async def invite_users_to_channel(
                         channel_peer = InputPeerChannel(channel_id=abs(eid), access_hash=ah)
                         break
                 if not channel_peer:
-                    return {"invited": 0, "failed": [], "error": f"Канал {channel_id} не найден в диалогах аккаунта"}
+                    return {"invited": 0, "failed": [], "batches": 0,
+                            "error": f"Канал {channel_id} не найден в диалогах аккаунта"}
 
-        for idx, username in enumerate(usernames):
+        # Split into batches of batch_size
+        batches = [usernames[i:i + batch_size] for i in range(0, len(usernames), batch_size)]
+        total = len(usernames)
+        done = 0
+        abort = False
+
+        for b_idx, batch in enumerate(batches):
+            if abort:
+                for u in batch:
+                    failed.append(f"{u.strip()}: пропущен (аккаунт ограничен)")
+                continue
+
+            if b_idx > 0:
+                log.info("invite batch %d/%d: cooldown %.0fs", b_idx + 1, len(batches), batch_delay)
+                await asyncio.sleep(batch_delay)
+
+            for idx, username in enumerate(batch):
+                uname = username.strip()
+                try:
+                    user = await asyncio.wait_for(client.get_entity(uname), timeout=10.0)
+                    await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
+                    invited += 1
+                    done += 1
+                    if progress_cb and done % 10 == 0:
+                        try:
+                            await progress_cb(done, total, invited, len(failed))
+                        except Exception:
+                            pass
+                    if idx < len(batch) - 1:
+                        await asyncio.sleep(random.uniform(3, 12) * session_simulator.chaos_factor())
+                except ChatAdminRequiredError:
+                    for u in batch[idx + 1:] + [u2 for b2 in batches[b_idx + 1:] for u2 in b2]:
+                        failed.append(f"{u.strip()}: нет прав администратора")
+                    abort = True
+                    return {"invited": invited, "failed": failed, "batches": batches_done,
+                            "error": "Нет прав администратора. Назначьте аккаунт администратором с правом 'Добавление участников'."}
+                except PeerFloodError:
+                    for u in batch[idx + 1:]:
+                        failed.append(f"{u.strip()}: PeerFlood")
+                    abort = True
+                    break
+                except UserBannedInChannelError:
+                    failed.append(f"{uname}: забанен в канале")
+                except (UserPrivacyRestrictedError, UserNotMutualContactError):
+                    failed.append(f"{uname}: настройки конфиденциальности")
+                except UserChannelsTooMuchError:
+                    failed.append(f"{uname}: слишком много каналов")
+                except FloodWaitError as e:
+                    wait_s = min(int(e.seconds), 600)
+                    log.warning("invite FloodWait %ds acc=%s", wait_s, (_acc or {}).get("id", "?"))
+                    await asyncio.sleep(wait_s + random.uniform(5, 15))
+                    # Retry once after flood
+                    try:
+                        user = await asyncio.wait_for(client.get_entity(uname), timeout=10.0)
+                        await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
+                        invited += 1
+                    except Exception:
+                        failed.append(f"{uname}: FloodWait+retry_fail")
+                except Exception as e:
+                    failed.append(f"{uname}: {str(e)[:60]}")
+                    await asyncio.sleep(random.uniform(3, 8))
+
+            batches_done += 1
+            log.info("invite batch %d/%d done: +%d invited, %d failed total",
+                     b_idx + 1, len(batches), invited, len(failed))
+
+        if progress_cb:
             try:
-                user = await client.get_entity(username.strip())
-                await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
-                invited += 1
-                # Human-like delay between invites
-                if idx < len(usernames) - 1:
-                    await asyncio.sleep(random.uniform(3, 15) * session_simulator.chaos_factor())
-            except ChatAdminRequiredError:
-                # Account has no invite_users right — mark remaining as failed
-                for u in usernames[idx + 1:]:
-                    failed.append(f"{u.strip()}: нет прав администратора")
-                return {
-                    "invited": invited, "failed": failed,
-                    "error": "Нет прав администратора для инвайта. Убедитесь что аккаунт назначен администратором с правом 'Добавление участников'.",
-                }
-            except PeerFloodError:
-                for u in usernames[idx + 1:]:
-                    failed.append(f"{u.strip()}: аккаунт ограничен (PeerFlood)")
-                return {"invited": invited, "failed": failed,
-                        "error": "PeerFlood — аккаунт временно ограничен Telegram"}
-            except UserBannedInChannelError:
-                failed.append(f"{username}: забанен в канале")
-            except (UserPrivacyRestrictedError, UserNotMutualContactError):
-                failed.append(f"{username}: настройки конфиденциальности")
-            except UserChannelsTooMuchError:
-                failed.append(f"{username}: слишком много каналов")
-            except FloodWaitError as e:
-                log.warning("invite_users FloodWait %ds", e.seconds)
-                await asyncio.sleep(min(e.seconds, 300))
-            except Exception as e:
-                failed.append(f"{username}: {str(e)[:60]}")
-                await asyncio.sleep(random.uniform(5, 15))
+                await progress_cb(total, total, invited, len(failed))
+            except Exception:
+                pass
 
-        return {"invited": invited, "failed": failed}
+        return {"invited": invited, "failed": failed, "batches": batches_done}
+
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        log.exception("invite_users_to_channel outer error: %s", e)
-        return {"invited": invited, "failed": failed, "error": str(e)[:150]}
+        log.exception("invite_users_to_channel error: %s", e)
+        return {"invited": invited, "failed": failed, "batches": batches_done, "error": str(e)[:150]}
     finally:
         try:
             await client.disconnect()
         except Exception:
-            log_exc_swallow(log, "Сбой в invite_users_to_channel")
+            pass
 
 async def get_contacts(session_string: str, _acc: dict | None = None) -> list[dict]:
     """Fetch contacts list from a Telegram account.
@@ -2094,19 +2147,31 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[2/photo] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 3. Join channel — ОБЯЗАТЕЛЬНО до message reporting ────────
-        # join_first=True означает: подписаться перед репортингом сообщений.
-        # После join обновляем entity — access hash меняется в сессии Telethon.
+        # join_first=True: подписываемся перед репортингом сообщений.
+        # ВАЖНО: join и entity-refresh разделены — если join упал, entity
+        # всё равно обновляется (access hash актуален из текущей сессии).
         if join_first and is_channel:
             try:
                 await asyncio.sleep(random.uniform(0.3, 0.8))
                 await _timed(client(JoinChannelRequest(entity)))
                 R["joined"] = True
-                # КРИТИЧНО: обновить entity после join
-                entity = await _timed(client.get_entity(peer))
-                log.info("rpv2[3] joined+refreshed acc=%s target=%s", acc_id, peer)
+                log.info("rpv2[3] joined acc=%s target=%s", acc_id, peer)
                 await asyncio.sleep(random.uniform(3.0, 7.0) if wave_num == 0 else random.uniform(1.0, 2.5))
             except Exception as e:
-                log.warning("rpv2[3/join] acc=%s target=%s: %s — продолжаем без join", acc_id, peer, str(e)[:100])
+                err = str(e)
+                # ALREADY_PARTICIPANT = аккаунт уже в канале (после прошлой атаки)
+                if "ALREADY_PARTICIPANT" in err.upper() or "already" in err.lower():
+                    R["joined"] = True
+                    log.info("rpv2[3] already_participant acc=%s target=%s", acc_id, peer)
+                else:
+                    log.warning("rpv2[3/join] acc=%s target=%s: %s", acc_id, peer, err[:100])
+            # ВСЕГДА обновляем entity после join-секции — отдельный try
+            # чтобы join-ошибка не блокировала refresh
+            try:
+                entity = await _timed(client.get_entity(peer))
+                log.info("rpv2[3] entity refreshed acc=%s joined=%s", acc_id, R["joined"])
+            except Exception as e:
+                log.warning("rpv2[3/refresh] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 4. Full channel info ───────────────────────────────────────
         full_chat = None
