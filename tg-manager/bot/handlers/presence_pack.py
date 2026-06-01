@@ -390,6 +390,9 @@ async def cb_pack_confirm_create(
         bot_id=sd.get("pack_bot_id"),
         bot_username=sd.get("pack_bot_username"),
     )
+    if not pack_id:
+        await callback.message.answer("❌ Ошибка создания пакета. Попробуйте ещё раз.")
+        return
     ch_ids = sd.get("pack_channel_ids") or []
     gr_ids = sd.get("pack_group_ids") or []
     await db.update_presence_pack_channels(pool, pack_id, owner_id, ch_ids, gr_ids)

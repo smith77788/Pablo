@@ -189,6 +189,8 @@ async def cb_net_bc_confirm(
                 bc_id = await db.create_broadcast(
                     pool, bot["bot_id"], text, len(ids), callback.from_user.id
                 )
+                if not bc_id:
+                    continue
                 broadcaster.start(
                     pool,
                     http,
@@ -216,6 +218,8 @@ async def cb_net_bc_confirm(
             bc_id = await db.create_broadcast(
                 pool, bot_id, text, len(ids), callback.from_user.id
             )
+            if not bc_id:
+                continue
             broadcaster.start(
                 pool, http, bc_id, token_map[bot_id], bot_id, text, None, ids, None
             )
@@ -233,6 +237,8 @@ async def cb_net_bc_confirm(
                 bc_id = await db.create_broadcast(
                     pool, bot["bot_id"], text, len(ids), callback.from_user.id
                 )
+                if not bc_id:
+                    continue
                 broadcaster.start(
                     pool,
                     http,
@@ -259,6 +265,8 @@ async def cb_net_bc_confirm(
                 bc_id = await db.create_broadcast(
                     pool, bot["bot_id"], text, len(ids), callback.from_user.id
                 )
+                if not bc_id:
+                    continue
                 broadcaster.start(
                     pool,
                     http,
