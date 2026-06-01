@@ -2199,44 +2199,59 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[2/photo] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 3. Join channel — ОБЯЗАТЕЛЬНО до message reporting ────────
-        # join_first=True: подписываемся перед репортингом сообщений.
-        # ВАЖНО: join и entity-refresh разделены — если join упал, entity
-        # всё равно обновляется (access hash актуален из текущей сессии).
         if join_first and is_channel:
+            _need_refresh = True   # нужен ли дополнительный entity-refresh
             try:
                 await asyncio.sleep(random.uniform(0.3, 0.8))
-                await _timed(client(JoinChannelRequest(entity)))
+                _join_resp = await _timed(client(JoinChannelRequest(entity)))
                 R["joined"] = True
                 log.info("rpv2[3] joined acc=%s target=%s", acc_id, peer)
+                # PRIMARY: ответ JoinChannelRequest содержит актуальный entity из сервера —
+                # это надёжнее отдельного GetChannelsRequest (нет проблем с кэшем).
+                _fresh = getattr(_join_resp, "chats", [])
+                if _fresh:
+                    entity = _fresh[0]
+                    _need_refresh = False
+                    log.info("rpv2[3] entity from join_resp acc=%s ah=%s",
+                             acc_id, getattr(entity, "access_hash", "?"))
                 await asyncio.sleep(random.uniform(3.0, 7.0) if wave_num == 0 else random.uniform(1.0, 2.5))
             except Exception as e:
                 err = str(e)
-                # ALREADY_PARTICIPANT = аккаунт уже в канале (после прошлой атаки)
                 if "ALREADY_PARTICIPANT" in err.upper() or "already" in err.lower():
                     R["joined"] = True
                     log.info("rpv2[3] already_participant acc=%s target=%s", acc_id, peer)
                 else:
                     log.warning("rpv2[3/join] acc=%s target=%s: %s", acc_id, peer, err[:100])
-            # Принудительное обновление entity через GetChannelsRequest — обходит кэш Telethon.
-            # client.get_entity() после JoinChannelRequest может вернуть устаревший кэш,
-            # из-за чего get_messages/GetHistoryRequest возвращают 0 сообщений.
-            try:
-                from telethon.tl.functions.channels import GetChannelsRequest as _GCR
-                from telethon.tl.types import InputChannel as _IC
-                _gcr = await _timed(client(_GCR([_IC(entity.id, entity.access_hash)])), 10.0)
-                if _gcr and _gcr.chats:
-                    entity = _gcr.chats[0]
-                    log.info("rpv2[3] entity force-refreshed via GetChannelsRequest acc=%s ah=%s",
-                             acc_id, getattr(entity, "access_hash", "?"))
-                else:
-                    raise ValueError("empty chats in GetChannelsRequest response")
-            except Exception as _gcr_e:
-                log.warning("rpv2[3/refresh_gcr] acc=%s: %s — fallback get_entity", acc_id, str(_gcr_e)[:80])
+            # FALLBACK refresh: когда join не дал свежий entity (join_resp.chats пустой,
+            # ALREADY_PARTICIPANT, или join упал).
+            # Используем get_input_entity — берёт access_hash из сессии (надёжнее для членов).
+            if _need_refresh:
                 try:
-                    entity = await _timed(client.get_entity(peer), 8.0)
-                    log.info("rpv2[3] entity refreshed via get_entity acc=%s", acc_id)
-                except Exception as e2:
-                    log.warning("rpv2[3/refresh] acc=%s: %s", acc_id, str(e2)[:80])
+                    from telethon.tl.functions.channels import GetChannelsRequest as _GCR
+                    # get_input_entity для канала в котором аккаунт уже состоит
+                    # возвращает InputChannel из session cache с правильным access_hash
+                    _ie = None
+                    try:
+                        _ie = await _timed(client.get_input_entity(peer), 5.0)
+                    except Exception as _gie:
+                        log.warning("rpv2[3/gie] acc=%s: %s", acc_id, str(_gie)[:60])
+                        from telethon.tl.types import InputChannel as _IC
+                        _ie = _IC(entity.id, entity.access_hash)
+                    _gcr = await _timed(client(_GCR([_ie])), 10.0)
+                    if _gcr and _gcr.chats:
+                        entity = _gcr.chats[0]
+                        log.info("rpv2[3/gcr] entity refreshed acc=%s ah=%s",
+                                 acc_id, getattr(entity, "access_hash", "?"))
+                    else:
+                        raise ValueError("gcr empty")
+                except Exception as _gcr_e:
+                    log.warning("rpv2[3/gcr] acc=%s: %s — fallback get_entity", acc_id, str(_gcr_e)[:80])
+                    try:
+                        entity = await _timed(client.get_entity(peer), 8.0)
+                        log.info("rpv2[3/get_entity] acc=%s ah=%s",
+                                 acc_id, getattr(entity, "access_hash", "?"))
+                    except Exception as e2:
+                        log.warning("rpv2[3/get_entity] acc=%s: %s", acc_id, str(e2)[:80])
 
         # ── 4. Full channel info ───────────────────────────────────────
         full_chat = None
@@ -2286,7 +2301,10 @@ async def report_peer_deep_v2(  # noqa: C901
         if is_channel:
             from telethon.tl.functions.messages import GetHistoryRequest as _GHR
             from telethon.tl.types import InputPeerChannel as _IPC6
-            _ipeer6 = _IPC6(channel_id=entity.id, access_hash=entity.access_hash)
+            _ah6 = getattr(entity, "access_hash", 0)
+            log.info("rpv2[6] building InputPeerChannel id=%s ah=%s joined=%s acc=%s",
+                     entity.id, _ah6, R["joined"], acc_id)
+            _ipeer6 = _IPC6(channel_id=entity.id, access_hash=_ah6)
             try:
                 _hist = await _timed(client(_GHR(
                     peer=_ipeer6,
@@ -2295,10 +2313,11 @@ async def report_peer_deep_v2(  # noqa: C901
                 )), 25.0)
                 msgs = [m for m in getattr(_hist, "messages", [])
                         if m and not getattr(m, "action", None)]
-                log.info("rpv2[6/GetHistory] fetched=%d target=%s acc=%s joined=%s",
-                         len(msgs), peer, acc_id, R["joined"])
+                log.info("rpv2[6/GetHistory] fetched=%d target=%s acc=%s joined=%s ah=%s",
+                         len(msgs), peer, acc_id, R["joined"], _ah6)
             except Exception as _gh_e:
-                log.warning("rpv2[6/GetHistory] acc=%s: %s — fallback get_messages", acc_id, str(_gh_e)[:80])
+                log.warning("rpv2[6/GetHistory] acc=%s ah=%s: %s — fallback get_messages",
+                            acc_id, _ah6, str(_gh_e)[:80])
                 try:
                     raw = await _timed(client.get_messages(_ipeer6, limit=max_msg_reports), 20.0)
                     msgs = list(raw) if raw else []
