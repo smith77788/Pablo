@@ -191,7 +191,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
-    kb.button(text="◀️ Назад",          callback_data=BmCb(action="infrastructure"))
+    kb.button(text="◀️ Назад",          callback_data=BmCb(action="monitoring"))
     kb.adjust(2, 2, 2, 2, 2, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())

@@ -422,7 +422,7 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         _lock_kb = InlineKeyboardBuilder()
         _lock_kb.button(text="💳 Оформить подписку", callback_data=SubCb(action="menu"))
-        _lock_kb.button(text="◀️ Назад", callback_data=BmCb(action="infrastructure"))
+        _lock_kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
         _lock_kb.adjust(1)
         await callback.message.edit_text(
             "🔒 <b>Операции с аккаунтами — STARTER</b>\n\n"

@@ -50,7 +50,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     )
     kb.button(text="📋 Активные планы", callback_data=WarmupCb(action="active_plans"))
     kb.button(text="▶️ Запустить сейчас", callback_data=WarmupCb(action="run_now"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="infrastructure"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
     kb.adjust(1)
 
     await callback.message.edit_text(

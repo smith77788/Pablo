@@ -130,7 +130,7 @@ async def cb_rank_menu(
             callback,
             locked_text("Трекер позиций в поиске", "starter"),
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="visibility")
+                "starter", back_callback=BmCb(action="analytics")
             ),
         )
         return
@@ -165,7 +165,7 @@ async def cb_rank_add(
             callback,
             locked_text("Трекер позиций в поиске", "starter"),
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="visibility")
+                "starter", back_callback=BmCb(action="analytics")
             ),
         )
         return
@@ -691,7 +691,7 @@ async def cb_rank_dashboard(
             callback,
             locked_text("Трекер позиций в поиске", "starter"),
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="visibility")
+                "starter", back_callback=BmCb(action="analytics")
             ),
         )
         return
@@ -898,7 +898,7 @@ async def _show_rank_menu(
             callback,
             locked_text("Трекер позиций в поиске", "starter"),
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="visibility")
+                "starter", back_callback=BmCb(action="analytics")
             ),
         )
         return
@@ -1072,7 +1072,7 @@ async def vis_dashboard(
     kb.button(text="🔔 Настройки алертов", callback_data=VisCb(action="alerts"))
     from bot.callbacks import BmCb as _BmCb
 
-    kb.button(text="◀️ Назад", callback_data=_BmCb(action="visibility"))
+    kb.button(text="◀️ Назад", callback_data=_BmCb(action="analytics"))
     kb.adjust(2, 2, 1, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())

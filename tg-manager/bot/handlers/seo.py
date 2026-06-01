@@ -113,7 +113,7 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
         await callback.answer()
         await callback.message.edit_text(
             locked_text("SEO и аналитика поиска", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -451,7 +451,7 @@ async def cb_seo_chan_menu(
         await callback.answer()
         await callback.message.edit_text(
             locked_text("SEO-оптимизация канала", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     chan_id = callback_data.chan_id

@@ -42,7 +42,7 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(
         text="📋 Список чатов аккаунта", callback_data=CleanerCb(action="list_chats")
     )
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="infrastructure"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
     kb.adjust(1)
 
     await callback.message.edit_text(

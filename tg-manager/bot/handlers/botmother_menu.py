@@ -1746,7 +1746,7 @@ async def cb_behavioral(
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
-        await _edit(callback, locked_text("Поведенческая аналитика", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="main")))
+        await _edit(callback, locked_text("Поведенческая аналитика", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="analytics")))
         return
     await callback.answer()
     sub = callback_data.sub or "attention"
@@ -2053,7 +2053,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Текстовая карта связей: кластеры → боты → каналы."""
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Карта инфраструктуры", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="infrastructure")))
+        await _edit(callback, locked_text("Карта инфраструктуры", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="analytics")))
         return
     await callback.answer("⏳ Строю карту...")
     uid = callback.from_user.id
@@ -2136,6 +2136,6 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     topo_kb = InlineKeyboardBuilder()
     topo_kb.button(text="🔄 Обновить", callback_data=BmCb(action="topology"))
-    topo_kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    topo_kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     topo_kb.adjust(2)
     await _edit(callback, topo_text, topo_kb.as_markup())

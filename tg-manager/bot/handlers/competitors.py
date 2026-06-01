@@ -33,7 +33,7 @@ async def comp_menu(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить", callback_data=CompCb(action="add"))
     kb.button(text="🔄 Обновить", callback_data=CompCb(action="refresh"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     kb.adjust(2, 1)
 
     lines = ["🏆 <b>Конкуренты</b>\n"]
