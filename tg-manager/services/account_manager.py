@@ -1615,7 +1615,7 @@ async def post_to_channel(
             log_exc_swallow(log, "Сбой в post_to_channel")
 
 async def send_reaction(
-    session_string: str, channel_id: int, msg_id: int, emoji: str,
+    session_string: str, channel_id: int | str, msg_id: int, emoji: str,
     _acc: dict | None = None,
 ) -> bool:
     """Send a reaction emoji to a specific message."""
@@ -2198,31 +2198,33 @@ async def report_peer_deep_v2(  # noqa: C901
         return None
 
     async def _report_message_ids(peer_obj, msg_ids: list[int], comment: str, stage: str) -> bool:
+        """Handle Telegram's multi-level report option flow (up to 4 nested ChooseOption)."""
         try:
-            first = await client(MsgReportRequest(peer=peer_obj, id=msg_ids, option=b"", message=""))
-            if isinstance(first, ReportResultReported):
-                return True
-            if isinstance(first, ReportResultChooseOption):
-                option = _select_report_option(first.options)
-                if not option:
-                    _record_error(stage, "Telegram returned no report option")
-                    return False
-                second = await client(MsgReportRequest(peer=peer_obj, id=msg_ids, option=option, message=comment))
-                if isinstance(second, ReportResultReported):
+            current_option = b""
+            for depth in range(4):
+                result = await client(MsgReportRequest(
+                    peer=peer_obj, id=msg_ids,
+                    option=current_option,
+                    message=comment if depth > 0 else "",
+                ))
+                if isinstance(result, ReportResultReported):
                     return True
-                if isinstance(second, ReportResultAddComment):
+                if isinstance(result, ReportResultChooseOption):
+                    opt = _select_report_option(result.options)
+                    if not opt:
+                        _record_error(stage, f"no selectable option at depth {depth}")
+                        return False
+                    current_option = opt
+                    continue
+                if isinstance(result, ReportResultAddComment):
                     final = await client(MsgReportRequest(
-                        peer=peer_obj, id=msg_ids, option=second.option, message=comment
+                        peer=peer_obj, id=msg_ids,
+                        option=result.option, message=comment,
                     ))
                     return isinstance(final, ReportResultReported)
-                _record_error(stage, f"unexpected result {type(second).__name__}")
+                _record_error(stage, f"unexpected result {type(result).__name__}")
                 return False
-            if isinstance(first, ReportResultAddComment):
-                final = await client(MsgReportRequest(
-                    peer=peer_obj, id=msg_ids, option=first.option, message=comment
-                ))
-                return isinstance(final, ReportResultReported)
-            _record_error(stage, f"unexpected result {type(first).__name__}")
+            _record_error(stage, "max option depth exceeded")
             return False
         except Exception as e:
             _record_error(stage, e)

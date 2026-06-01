@@ -20,6 +20,7 @@ import asyncio
 import html
 import logging
 import random
+import re
 import time
 import aiohttp
 import asyncpg
@@ -221,6 +222,27 @@ _REPORT_MESSAGES: dict[str, list[str]] = {
 }
 
 REACTION_EMOJIS = ["👍", "❤️", "🔥", "🎉", "😮", "😢", "👎", "💯", "🤔", "🤩"]
+
+
+def _parse_tme_post_link(text: str) -> tuple[int | str | None, int | None]:
+    """Parse a t.me post link → (channel_ref, msg_id).
+
+    Supports:
+      https://t.me/channelname/123      → ("channelname", 123)
+      https://t.me/c/1234567890/123     → (-1001234567890, 123)  private channel
+      t.me/channelname/123              → same without https
+    Returns (None, None) if input is not a valid link.
+    """
+    t = text.strip()
+    # Private channel: t.me/c/<channel_id>/<msg_id>
+    m = re.match(r"(?:https?://)?t\.me/c/(\d+)/(\d+)", t)
+    if m:
+        return int(f"-100{m.group(1)}"), int(m.group(2))
+    # Public channel: t.me/<username>/<msg_id>
+    m = re.match(r"(?:https?://)?t\.me/([a-zA-Z0-9_]+)/(\d+)", t)
+    if m:
+        return m.group(1), int(m.group(2))
+    return None, None
 
 
 def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
@@ -2698,19 +2720,38 @@ async def cb_react_channel(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     await callback.message.edit_text(
-        "👍 <b>ID сообщения</b>\n\nВведите ID сообщения, на которое хотите поставить реакцию:",
+        "👍 <b>Сообщение для реакции</b>\n\n"
+        "Введите <b>ссылку на пост</b> или <b>ID сообщения</b>:\n\n"
+        "• <code>https://t.me/channelname/123</code>\n"
+        "• <code>https://t.me/c/1234567890/123</code> (приватный канал)\n"
+        "• <code>123</code> (ID сообщения в выбранном канале)",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
 
 @router.message(SendReactionFSM.waiting_msg_id)
 async def fsm_react_msg_id(message: Message, state: FSMContext) -> None:
-    try:
-        msg_id = int((message.text or "").strip())
-    except ValueError:
-        await message.answer("⚠️ Введите числовой ID сообщения.")
-        return
-    await state.update_data(msg_id=msg_id)
+    text = (message.text or "").strip()
+    channel_ref, msg_id = _parse_tme_post_link(text)
+    if msg_id is not None:
+        # Link provided — override channel ref if parsed from link
+        updates: dict = {"msg_id": msg_id}
+        if channel_ref is not None:
+            updates["channel_ref"] = channel_ref
+        await state.update_data(**updates)
+    else:
+        try:
+            msg_id = int(text)
+        except ValueError:
+            await message.answer(
+                "⚠️ Укажите ссылку на пост или числовой ID.\n\n"
+                "Примеры:\n"
+                "• <code>https://t.me/channelname/123</code>\n"
+                "• <code>123</code>",
+                parse_mode="HTML",
+            )
+            return
+        await state.update_data(msg_id=msg_id)
     await state.set_state(SendReactionFSM.choosing_emoji)
     kb = InlineKeyboardBuilder()
     for emoji in REACTION_EMOJIS:
@@ -2734,9 +2775,11 @@ async def cb_do_react(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     if not acc:
         await callback.message.edit_text("⚠️ Аккаунт не найден.")
         return
+    # channel_ref overrides channel_id when post link was pasted
+    channel = data.get("channel_ref") or data.get("channel_id")
     from services import account_manager
     ok = await account_manager.send_reaction(
-        acc["session_str"], data["channel_id"], data["msg_id"], emoji, _acc=acc
+        acc["session_str"], channel, data["msg_id"], emoji, _acc=acc
     )
     await callback.message.edit_text(
         f"✅ Реакция {emoji} отправлена!" if ok else "❌ Ошибка отправки реакции.",
