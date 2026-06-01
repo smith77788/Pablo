@@ -431,6 +431,7 @@ async def _one_account_strike(
     msg_texts = assign_texts(preset or reason, 15)
 
     if mode == "fast":
+        # fast: нет join, нет доп. векторов — только быстрые жалобы
         kwargs: dict = dict(
             join_first=False, negative_react=False, report_admins=False,
             report_linked_group=False, report_linked_bots=False,
@@ -438,15 +439,17 @@ async def _one_account_strike(
             max_msg_reports=30, report_photo=True, report_pinned=True,
         )
     elif mode == "maximum":
+        # maximum: join во всех волнах — нужен для msg reporting
         kwargs = dict(
-            join_first=(wave_num == 0), negative_react=True, report_admins=True,
+            join_first=True, negative_react=True, report_admins=True,
             report_linked_group=(wave_num == 0), report_linked_bots=True,
             forward_to_bot=(wave_num <= 1), block_after=(wave_num >= 2),
             multi_reason=True, max_msg_reports=100, report_photo=True, report_pinned=True,
         )
     else:  # normal
+        # normal: join во всех волнах — без join MsgReportRequest не работает
         kwargs = dict(
-            join_first=(wave_num == 0), negative_react=(wave_num <= 1),
+            join_first=True, negative_react=(wave_num <= 1),
             report_admins=(wave_num <= 1), report_linked_group=(wave_num == 0),
             report_linked_bots=True, forward_to_bot=(wave_num <= 1),
             block_after=(wave_num >= 2), multi_reason=True,

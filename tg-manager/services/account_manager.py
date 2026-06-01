@@ -1924,7 +1924,7 @@ async def report_peer_deep(
             log_exc_swallow(log, "Сбой в report_peer_deep")
     return result
 
-async def report_peer_deep_v2(
+async def report_peer_deep_v2(  # noqa: C901
     session_string: str,
     peer_username: str,
     reason: str,
@@ -1944,412 +1944,355 @@ async def report_peer_deep_v2(
     wave_num: int = 0,
     _acc: dict | None = None,
 ) -> dict:
-    """12-векторная атака v2 — улучшенная версия с адаптивным таймингом.
-
-    Отличия от v1:
-      - Human-like задержки через session_simulator (не фиксированные)
-      - FloodWait-устойчивость: перехват и backoff внутри функции
-      - Волновая логика: join_first только в wave 0, block_after в последней
-      - Больше сообщений: max_msg_reports до 60 (было 50)
-      - Лучшая обработка ошибок: каждый вектор изолирован
-      - Увеличен пул причин: geo, fake, personal + базовые
-      - Ретраи при временных ошибках соединения
-    """
+    """Bulletproof 12-vector deep strike. Every vector isolated, entity refreshed after join."""
     import re as _re
-    from services import session_simulator
 
     from telethon.tl.functions.account import ReportPeerRequest
     from telethon.tl.functions.messages import ReportRequest as MsgReportRequest
     from telethon.tl.functions.contacts import BlockRequest
     from telethon.tl.functions.channels import (
-        JoinChannelRequest, LeaveChannelRequest, GetParticipantsRequest,
-        GetFullChannelRequest,
+        JoinChannelRequest, LeaveChannelRequest, GetParticipantsRequest, GetFullChannelRequest,
     )
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import (
-        InputReportReasonSpam, InputReportReasonViolence,
-        InputReportReasonPornography, InputReportReasonChildAbuse,
-        InputReportReasonCopyright, InputReportReasonOther,
-        Channel, ChannelParticipantsAdmins, ReactionEmoji,
-        InputMessagesFilterPinned,
+        InputReportReasonSpam, InputReportReasonViolence, InputReportReasonPornography,
+        InputReportReasonChildAbuse, InputReportReasonCopyright, InputReportReasonOther,
+        Channel, ChannelParticipantsAdmins, ReactionEmoji, InputMessagesFilterPinned,
     )
 
-    # Optional imports
-    _has_photo_report = False
+    _RPP = None
     try:
-        from telethon.tl.functions.account import ReportProfilePhotoRequest
-        _has_photo_report = True
+        from telethon.tl.functions.account import ReportProfilePhotoRequest as _RPP
     except ImportError:
         pass
 
-    _has_chan_spam = False
-    ChanSpamRequest = None
+    _CSR = None
     try:
         from telethon.tl.functions.channels import ReportSpamRequest as _CSR
-        ChanSpamRequest = _CSR
-        _has_chan_spam = True
     except ImportError:
         pass
 
-    # Build reason map
-    reason_map: dict = {
-        "spam":        InputReportReasonSpam(),
-        "violence":    InputReportReasonViolence(),
-        "pornography": InputReportReasonPornography(),
-        "childabuse":  InputReportReasonChildAbuse(),
-        "copyright":   InputReportReasonCopyright(),
-        "other":       InputReportReasonOther(),
+    # ── Result ────────────────────────────────────────────────────────────
+    R: dict = {
+        "peer_reported": False, "multi_reason_sent": 0, "photo_reported": False,
+        "pinned_reported": 0, "msg_reported": 0, "spam_signaled": 0,
+        "reactions_sent": 0, "admins_reported": 0, "linked_group_reported": False,
+        "bots_reported": 0, "forwarded": 0, "blocked": False, "joined": False,
     }
-    for _type_name, _key in [
-        ("InputReportReasonIllegalDrugs", "drugs"),
-        ("InputReportReasonPersonalDetails", "personal"),
-        ("InputReportReasonFake", "fake"),
-        ("InputReportReasonGeoIrrelevant", "geo"),
-    ]:
+
+    # ── Reason map ────────────────────────────────────────────────────────
+    _rm: dict = {
+        "spam": InputReportReasonSpam(), "violence": InputReportReasonViolence(),
+        "pornography": InputReportReasonPornography(), "childabuse": InputReportReasonChildAbuse(),
+        "copyright": InputReportReasonCopyright(), "other": InputReportReasonOther(),
+    }
+    for _tn, _rk in [("InputReportReasonIllegalDrugs", "drugs"),
+                      ("InputReportReasonPersonalDetails", "personal"),
+                      ("InputReportReasonFake", "fake"),
+                      ("InputReportReasonGeoIrrelevant", "geo")]:
         try:
             import telethon.tl.types as _tlt
-            reason_map[_key] = getattr(_tlt, _type_name)()
+            _rm[_rk] = getattr(_tlt, _tn)()
         except Exception:
-            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
+            pass
+
     _escalation: dict[str, list[str]] = {
-        "childabuse":  ["pornography", "violence", "drugs", "spam", "other"],
-        "csam":        ["pornography", "violence", "drugs", "spam", "other"],
-        "drugs":       ["childabuse", "violence", "spam", "other"],
-        "violence":    ["childabuse", "spam", "drugs", "fake", "other"],
-        "terrorism":   ["childabuse", "violence", "spam", "drugs", "other"],
+        "childabuse": ["pornography", "violence", "drugs", "spam", "other"],
+        "csam":       ["pornography", "violence", "drugs", "spam", "other"],
+        "drugs":      ["childabuse", "violence", "spam", "other"],
+        "violence":   ["childabuse", "spam", "drugs", "fake", "other"],
+        "terrorism":  ["childabuse", "violence", "spam", "drugs", "other"],
         "pornography": ["childabuse", "spam", "other", "violence"],
-        "spam":        ["other", "violence", "personal", "fake"],
-        "other":       ["spam", "violence", "pornography", "drugs"],
-        "copyright":   ["spam", "other"],
-        "fraud":       ["spam", "other", "fake", "violence"],
-        "weapons":     ["violence", "spam", "other"],
-        "darknet":     ["spam", "other", "drugs"],
+        "spam":       ["other", "violence", "personal", "fake"],
+        "other":      ["spam", "violence", "pornography", "drugs"],
+        "copyright":  ["spam", "other"],
+        "fraud":      ["spam", "other", "fake", "violence"],
+        "weapons":    ["violence", "spam", "other"],
+        "darknet":    ["spam", "other", "drugs"],
+    }
+    _fwd_bots: dict[str, str] = {
+        "childabuse": "stopCA", "csam": "stopCA", "drugs": "stopCA",
+        "violence": "notoscam", "other": "notoscam", "spam": "notoscam",
+        "pornography": "notoscam", "fraud": "notoscam",
     }
 
-    _report_bots: dict[str, str] = {
-        "childabuse": "stopCA",
-        "csam":       "stopCA",
-        "drugs":      "stopCA",
-        "violence":   "notoscam",
-        "other":      "notoscam",
-        "spam":       "notoscam",
-        "pornography": "notoscam",
-        "fraud":      "notoscam",
-    }
+    tg_reason = _rm.get(reason, InputReportReasonOther())
+    all_reasons: list = [tg_reason] + [_rm[k] for k in _escalation.get(reason, []) if k in _rm]
+    msg_pool: list[str] = msg_messages or ([message] if message else [""])
+    peer = peer_username.lstrip("@")
+    acc_id = (_acc or {}).get("id", "?")
 
-    tg_reason = reason_map.get(reason, InputReportReasonOther())
-    all_reasons_cycle = [tg_reason]
-    for sec_key in _escalation.get(reason, []):
-        if sec_key in reason_map:
-            all_reasons_cycle.append(reason_map[sec_key])
+    def _flood(err: str, default: float = 30.0) -> float:
+        m = _re.search(r'(\d+)', err)
+        return min(120.0, float(m.group(1))) if m else default
 
-    result = {
-        "peer_reported":          False,
-        "multi_reason_sent":      0,
-        "photo_reported":         False,
-        "pinned_reported":        0,
-        "msg_reported":           0,
-        "spam_signaled":          0,
-        "reactions_sent":         0,
-        "admins_reported":        0,
-        "linked_group_reported":  False,
-        "bots_reported":          0,
-        "forwarded":              0,
-        "blocked":                False,
-        "joined":                 False,
-    }
-    msg_pool = msg_messages or [message] or [""]
+    async def _timed(coro, timeout: float = 15.0):
+        return await asyncio.wait_for(coro, timeout=timeout)
 
     client = _make_client(session_string, _acc)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(peer_username.lstrip("@"))
-        is_channel = isinstance(entity, Channel)
+        await _timed(client.connect(), _CONNECT_TIMEOUT)
 
-        # ── 1. ReportPeer — все причины по кругу с human-like задержками ────
-        for idx, r_obj in enumerate(all_reasons_cycle if multi_reason else [tg_reason]):
+        # Resolve entity — без этого вся атака невозможна
+        try:
+            entity = await _timed(client.get_entity(peer))
+        except Exception as e:
+            log.warning("rpv2[0/entity] acc=%s target=%s: %s", acc_id, peer, e)
+            return R
+
+        is_channel = isinstance(entity, Channel)
+        log.info("rpv2 start acc=%s target=%s is_channel=%s wave=%d", acc_id, peer, is_channel, wave_num)
+
+        # ── 1. ReportPeer (все причины) ───────────────────────────────
+        reasons_to_send = all_reasons if multi_reason else [tg_reason]
+        for idx, r_obj in enumerate(reasons_to_send):
+            if idx > 0:
+                await asyncio.sleep(random.betavariate(2, 5) * 2.0 + 0.3)
             try:
-                if idx > 0:
-                    # Human-like задержка между жалобами
-                    delay = random.betavariate(2, 5) * 2.0 + 0.3
-                    await asyncio.sleep(delay)
-                # Pre-action hesitation (12% вероятность)
-                if random.random() < 0.12:
-                    await asyncio.sleep(random.uniform(1.0, 4.0))
                 await client(ReportPeerRequest(
-                    peer=entity,
-                    reason=r_obj,
+                    peer=entity, reason=r_obj,
                     message=msg_pool[idx % len(msg_pool)],
                 ))
                 if idx == 0:
-                    result["peer_reported"] = True
+                    R["peer_reported"] = True
                 else:
-                    result["multi_reason_sent"] += 1
+                    R["multi_reason_sent"] += 1
             except Exception as e:
                 err = str(e)
                 if "FLOOD_WAIT" in err.upper():
-                    wait_s = _extract_flood_wait(err, 30)
-                    await asyncio.sleep(wait_s + random.uniform(1, 5))
-                    # Ретрай после FloodWait
+                    await asyncio.sleep(_flood(err) + random.uniform(1, 3))
                     try:
-                        await client(ReportPeerRequest(
-                            peer=entity, reason=r_obj,
-                            message=msg_pool[idx % len(msg_pool)],
-                        ))
+                        await client(ReportPeerRequest(peer=entity, reason=r_obj,
+                                                       message=msg_pool[idx % len(msg_pool)]))
                         if idx == 0:
-                            result["peer_reported"] = True
+                            R["peer_reported"] = True
                         else:
-                            result["multi_reason_sent"] += 1
+                            R["multi_reason_sent"] += 1
                     except Exception:
-                        log_exc_swallow(log, "Сбой в report_peer_deep_v2")
+                        pass
+                elif "REPORT_TOO_MUCH" in err.upper() or "too_many" in err.lower():
+                    if idx == 0:
+                        R["peer_reported"] = True
+                    break
                 else:
-                    log.warning("rpv2[1/peer idx=%d]: %s", idx, e)
+                    log.warning("rpv2[1/peer idx=%d] acc=%s: %s", idx, acc_id, err[:100])
+        log.info("rpv2[1] peer=%s multi=%d acc=%s", R["peer_reported"], R["multi_reason_sent"], acc_id)
+        await asyncio.sleep(random.uniform(0.5, 1.5))
 
-        await session_simulator.short_pause(0.5, 1.5)
-
-        # ── 2. Report Profile Photo ────────────────────────────────────────
-        if report_photo and _has_photo_report:
+        # ── 2. Фото профиля ───────────────────────────────────────────
+        if report_photo and _RPP:
             try:
-                from telethon.tl.functions.account import ReportProfilePhotoRequest as _RPP
-                photos = await client.get_profile_photos(entity, limit=1)
+                photos = await _timed(client.get_profile_photos(entity, limit=1), 10.0)
                 if photos:
                     await asyncio.sleep(random.uniform(0.4, 1.2))
                     await client(_RPP(
-                        peer=entity,
-                        photo_id=client._get_input_photo(photos[0]),
-                        reason=tg_reason,
-                        message=msg_pool[0],
+                        peer=entity, photo_id=client._get_input_photo(photos[0]),
+                        reason=tg_reason, message=msg_pool[0],
                     ))
-                    result["photo_reported"] = True
+                    R["photo_reported"] = True
             except Exception as e:
-                log.warning("rpv2[2/photo]: %s", e)
+                log.warning("rpv2[2/photo] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 3. Join channel (только для первой волны) ──────────────────────
-        if join_first and is_channel and wave_num == 0:
+        # ── 3. Join channel — ОБЯЗАТЕЛЬНО до message reporting ────────
+        # join_first=True означает: подписаться перед репортингом сообщений.
+        # После join обновляем entity — access hash меняется в сессии Telethon.
+        if join_first and is_channel:
             try:
-                await session_simulator.action_hesitation(0.15)
-                await client(JoinChannelRequest(entity))
-                result["joined"] = True
-                # Обновляем entity — после join access hash меняется в сессии
-                entity = await client.get_entity(peer_username.lstrip("@"))
-                # Человеческая пауза после входа — "читает канал"
-                await asyncio.sleep(random.uniform(3.0, 7.0))
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+                await _timed(client(JoinChannelRequest(entity)))
+                R["joined"] = True
+                # КРИТИЧНО: обновить entity после join
+                entity = await _timed(client.get_entity(peer))
+                log.info("rpv2[3] joined+refreshed acc=%s target=%s", acc_id, peer)
+                await asyncio.sleep(random.uniform(3.0, 7.0) if wave_num == 0 else random.uniform(1.0, 2.5))
             except Exception as e:
-                log.warning("rpv2[3/join]: %s", e)
+                log.warning("rpv2[3/join] acc=%s target=%s: %s — продолжаем без join", acc_id, peer, str(e)[:100])
 
-        # Get full channel info
+        # ── 4. Full channel info ───────────────────────────────────────
         full_chat = None
-        try:
-            full_result = await client(GetFullChannelRequest(entity))
-            full_chat = full_result.full_chat
-        except Exception:
-            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
-        # ── 4. Pinned messages — приоритет для модераторов ─────────────────
-        pinned_msgs = []
+        if is_channel:
+            try:
+                fc_res = await _timed(client(GetFullChannelRequest(entity)))
+                full_chat = fc_res.full_chat
+            except Exception as e:
+                log.warning("rpv2[4/full] acc=%s: %s", acc_id, str(e)[:80])
+
+        # ── 5. Pinned messages ────────────────────────────────────────
         if report_pinned and is_channel:
             try:
-                pinned_msgs = await client.get_messages(
-                    entity, filter=InputMessagesFilterPinned(), limit=25
+                pinned = await _timed(
+                    client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=25), 15.0
                 )
-                pinned_ids = [m.id for m in pinned_msgs if m and m.id]
-                for idx_p, pid in enumerate(pinned_ids):
-                    r_obj = all_reasons_cycle[idx_p % len(all_reasons_cycle)]
+                pinned_ids = [m.id for m in pinned if m and m.id]
+                log.info("rpv2[5] pinned=%d acc=%s", len(pinned_ids), acc_id)
+                for ip, pid in enumerate(pinned_ids):
                     try:
                         await asyncio.sleep(random.betavariate(2, 4) * 1.5 + 0.3)
                         await client(MsgReportRequest(
                             peer=entity, id=[pid],
-                            reason=r_obj,
-                            message=msg_pool[idx_p % len(msg_pool)],
+                            reason=all_reasons[ip % len(all_reasons)],
+                            message=msg_pool[ip % len(msg_pool)],
                         ))
-                        result["pinned_reported"] += 1
+                        R["pinned_reported"] += 1
                     except Exception as e:
                         err = str(e)
                         if "FLOOD_WAIT" in err.upper():
-                            await asyncio.sleep(_extract_flood_wait(err, 15))
+                            await asyncio.sleep(_flood(err, 15))
+                        elif "REPORT_TOO_MUCH" in err.upper():
+                            break
                         else:
-                            log.warning("rpv2[4/pinned %d]: %s", pid, e)
+                            log.warning("rpv2[5/pin] acc=%s pid=%d: %s", acc_id, pid, err[:80])
             except Exception as e:
-                log.warning("rpv2[4/get_pinned]: %s", e)
+                log.warning("rpv2[5/get_pinned] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 5. Recent messages (чанки по 5, до max_msg_reports) ────────────
+        # ── 6. Recent messages ────────────────────────────────────────
         msgs: list = []
         if is_channel:
-            # Если join не удался — пробуем ещё раз перед get_messages
-            if not result.get("joined") and is_channel:
-                try:
-                    await client(JoinChannelRequest(entity))
-                    result["joined"] = True
-                    # Обновляем entity после успешного join
-                    entity = await client.get_entity(peer_username.lstrip("@"))
-                    await asyncio.sleep(random.uniform(1.5, 3.5))
-                except Exception as _je:
-                    log.info("rpv2[5/join_retry]: %s — продолжаем без вступления", _je)
             try:
-                msgs = await client.get_messages(entity, limit=max_msg_reports)
+                raw = await _timed(client.get_messages(entity, limit=max_msg_reports), 20.0)
+                msgs = list(raw) if raw else []
                 msg_ids = [m.id for m in msgs if m and m.id]
-                log.info("rpv2[5]: %d сообщений для %s (joined=%s)", len(msg_ids), peer_username, result.get("joined"))
+                log.info("rpv2[6] fetched=%d target=%s acc=%s joined=%s",
+                         len(msg_ids), peer, acc_id, R["joined"])
                 if not msg_ids:
-                    log.warning("rpv2[5]: 0 сообщений найдено для %s — msgs_reported=0", peer_username)
-                # Shuffle chunks for variety
-                chunks = [msg_ids[i:i+5] for i in range(0, len(msg_ids), 5)]
+                    log.warning("rpv2[6] 0 msgs target=%s acc=%s — channel restricts history", peer, acc_id)
+
+                chunks = [msg_ids[i:i + 5] for i in range(0, len(msg_ids), 5)]
                 random.shuffle(chunks)
-                for chunk_idx, chunk in enumerate(chunks):
-                    r_obj = all_reasons_cycle[chunk_idx % len(all_reasons_cycle)]
-                    chunk_msg = msg_pool[chunk_idx % len(msg_pool)]
+                for ci, chunk in enumerate(chunks):
+                    r_obj = all_reasons[ci % len(all_reasons)]
+                    cmsg = msg_pool[ci % len(msg_pool)]
                     try:
-                        await client(MsgReportRequest(
-                            peer=entity, id=chunk,
-                            reason=r_obj, message=chunk_msg,
-                        ))
-                        result["msg_reported"] += len(chunk)
+                        await client(MsgReportRequest(peer=entity, id=chunk, reason=r_obj, message=cmsg))
+                        R["msg_reported"] += len(chunk)
                     except Exception as e:
                         err = str(e)
                         if "FLOOD_WAIT" in err.upper():
-                            await asyncio.sleep(_extract_flood_wait(err, 15))
-                            # Ретрай с меньшим чанком
+                            await asyncio.sleep(_flood(err, 15))
                             try:
-                                await client(MsgReportRequest(
-                                    peer=entity, id=chunk[:2],
-                                    reason=r_obj, message=chunk_msg,
-                                ))
-                                result["msg_reported"] += min(2, len(chunk))
+                                await client(MsgReportRequest(peer=entity, id=chunk[:2], reason=r_obj, message=cmsg))
+                                R["msg_reported"] += min(2, len(chunk))
                             except Exception:
-                                log_exc_swallow(log, "Сбой в report_peer_deep_v2")
+                                pass
+                        elif "REPORT_TOO_MUCH" in err.upper():
+                            log.info("rpv2[6] REPORT_TOO_MUCH ci=%d, stopping", ci)
+                            break
                         else:
-                            log.warning("rpv2[5/msg_chunk %d]: err=%s", chunk_idx, err[:120])
-                    # Human-like пауза между чанками
+                            log.warning("rpv2[6/chunk ci=%d] acc=%s: %s", ci, acc_id, err[:100])
                     await asyncio.sleep(random.betavariate(2, 5) * 1.2 + 0.3)
+                log.info("rpv2[6] msg_reported=%d acc=%s", R["msg_reported"], acc_id)
             except Exception as e:
-                log.warning("rpv2[5/get_msgs]: %s", e)
+                log.warning("rpv2[6/get_msgs] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 6. channels.ReportSpam ─────────────────────────────────────────
-        if _has_chan_spam and ChanSpamRequest and msgs and is_channel:
+        # ── 7. channels.ReportSpam ────────────────────────────────────
+        if _CSR and msgs and is_channel:
             spam_ids = [m.id for m in msgs[:15] if m and m.id]
             if spam_ids:
                 try:
                     await asyncio.sleep(random.uniform(0.3, 1.0))
-                    await client(ChanSpamRequest(
-                        channel=entity,
-                        participant=entity,
-                        id=spam_ids,
-                    ))
-                    result["spam_signaled"] += len(spam_ids)
+                    await client(_CSR(channel=entity, participant=entity, id=spam_ids))
+                    R["spam_signaled"] += len(spam_ids)
                 except Exception as e:
-                    log.warning("rpv2[6/chan_spam]: %s", e)
+                    log.warning("rpv2[7/spam] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 7. Negative reactions (разнообразные эмодзи) ────────────────────
+        # ── 8. Negative reactions ─────────────────────────────────────
         if negative_react and msgs:
-            reaction_sets = [
-                ["👎", "💩", "🤮"],
-                ["👎", "🤬", "💩"],
-                ["👎", "🤮"],
-                ["💩", "🤬"],
-                ["👎"],
-            ]
-            reactions_pool = reaction_sets[wave_num % len(reaction_sets)]
-            for r_idx, m in enumerate(msgs[:20]):
+            pools = [["👎", "💩", "🤮"], ["👎", "🤬", "💩"], ["👎", "🤮"], ["💩", "🤬"], ["👎"]]
+            rpool = pools[wave_num % len(pools)]
+            for ri, m in enumerate(msgs[:20]):
                 if not (m and m.id):
                     continue
-                emoji = reactions_pool[r_idx % len(reactions_pool)]
                 try:
                     await client(SendReactionRequest(
-                        peer=entity,
-                        msg_id=m.id,
-                        reaction=[ReactionEmoji(emoticon=emoji)],
+                        peer=entity, msg_id=m.id,
+                        reaction=[ReactionEmoji(emoticon=rpool[ri % len(rpool)])],
                     ))
-                    result["reactions_sent"] += 1
+                    R["reactions_sent"] += 1
                     await asyncio.sleep(random.betavariate(2, 4) * 0.8 + 0.15)
                 except Exception as e:
-                    log.warning("rpv2[7/react]: %s", e)
+                    log.warning("rpv2[8/react] acc=%s: %s", acc_id, str(e)[:60])
 
-        # ── 8. Report admins ───────────────────────────────────────────────
+        # ── 9. Report admins ──────────────────────────────────────────
         if report_admins and is_channel:
             try:
-                admins_result = await client(GetParticipantsRequest(
-                    channel=entity,
-                    filter=ChannelParticipantsAdmins(),
+                adm = await _timed(client(GetParticipantsRequest(
+                    channel=entity, filter=ChannelParticipantsAdmins(),
                     offset=0, limit=50, hash=0,
-                ))
-                admin_users = getattr(admins_result, "users", [])
-                # Shuffle admins to vary report order
-                random.shuffle(admin_users)
-                for a_idx, usr in enumerate(admin_users):
+                )))
+                admins = list(getattr(adm, "users", []))
+                random.shuffle(admins)
+                log.info("rpv2[9] admins=%d target=%s acc=%s", len(admins), peer, acc_id)
+                for ai, usr in enumerate(admins):
                     try:
                         await asyncio.sleep(random.betavariate(2, 4) * 1.0 + 0.3)
-                        r_obj = all_reasons_cycle[a_idx % len(all_reasons_cycle)]
                         await client(ReportPeerRequest(
-                            peer=usr,
-                            reason=r_obj,
-                            message=msg_pool[a_idx % len(msg_pool)],
+                            peer=usr, reason=all_reasons[ai % len(all_reasons)],
+                            message=msg_pool[ai % len(msg_pool)],
                         ))
-                        result["admins_reported"] += 1
+                        R["admins_reported"] += 1
                     except Exception as e:
-                        log.warning("rpv2[8/admin]: %s", e)
+                        err = str(e)
+                        if "FLOOD_WAIT" in err.upper():
+                            await asyncio.sleep(_flood(err, 10))
+                        else:
+                            log.warning("rpv2[9/admin ai=%d] acc=%s: %s", ai, acc_id, err[:80])
             except Exception as e:
-                log.warning("rpv2[8/get_admins]: %s", e)
+                log.warning("rpv2[9/get_admins] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 9. Linked discussion group ─────────────────────────────────────
+        # ── 10. Linked discussion group ────────────────────────────────
         if report_linked_group and full_chat:
             linked_id = getattr(full_chat, "linked_chat_id", None)
             if linked_id:
                 try:
-                    linked_entity = await client.get_entity(int(linked_id))
-                    for idx_lg in range(min(4, len(all_reasons_cycle))):
+                    lent = await _timed(client.get_entity(int(linked_id)), 10.0)
+                    for li in range(min(4, len(all_reasons))):
                         try:
                             await asyncio.sleep(random.betavariate(2, 5) * 1.2 + 0.4)
-                            r_obj = all_reasons_cycle[idx_lg]
                             await client(ReportPeerRequest(
-                                peer=linked_entity,
-                                reason=r_obj,
-                                message=msg_pool[idx_lg % len(msg_pool)],
+                                peer=lent, reason=all_reasons[li],
+                                message=msg_pool[li % len(msg_pool)],
                             ))
-                            result["linked_group_reported"] = True
+                            R["linked_group_reported"] = True
                         except Exception as e:
-                            log.warning("rpv2[9/linked reason %d]: %s", idx_lg, e)
+                            log.warning("rpv2[10/linked li=%d] acc=%s: %s", li, acc_id, str(e)[:80])
                 except Exception as e:
-                    log.warning("rpv2[9/get_linked]: %s", e)
+                    log.warning("rpv2[10/get_linked] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 10. Linked bots ────────────────────────────────────────────────
+        # ── 11. Linked bots ────────────────────────────────────────────
         if report_linked_bots and is_channel:
             bot_re = _re.compile(r'@([A-Za-z]\w{4,31}[Bb]ot)\b')
-            scan_text = ""
-            if full_chat:
-                scan_text += (getattr(full_chat, "about", "") or "") + " "
-            # Scan more messages for bots
-            for m in (msgs or [])[:10]:
+            scan = (getattr(full_chat, "about", "") or "") if full_chat else ""
+            for m in msgs[:10]:
                 if m and m.text:
-                    scan_text += m.text + " "
-            found_bots = list(set(bot_re.findall(scan_text)))[:6]
-            for b_idx, bot_uname in enumerate(found_bots):
+                    scan += " " + m.text
+            for bi, bname in enumerate(list(set(bot_re.findall(scan)))[:6]):
                 try:
-                    bot_entity = await client.get_entity(bot_uname)
-                    r_obj = all_reasons_cycle[b_idx % len(all_reasons_cycle)]
+                    bent = await _timed(client.get_entity(bname), 8.0)
                     await client(ReportPeerRequest(
-                        peer=bot_entity, reason=r_obj,
-                        message=msg_pool[b_idx % len(msg_pool)],
+                        peer=bent, reason=all_reasons[bi % len(all_reasons)],
+                        message=msg_pool[bi % len(msg_pool)],
                     ))
-                    result["bots_reported"] += 1
+                    R["bots_reported"] += 1
                     await asyncio.sleep(random.uniform(0.4, 1.2))
                 except Exception as e:
-                    log.warning("rpv2[10/bot %s]: %s", bot_uname, e)
+                    log.warning("rpv2[11/bot %s] acc=%s: %s", bname, acc_id, str(e)[:80])
 
-        # ── 11. Forward evidence to @stopCA / @notoscam ─────────────────────
+        # ── 12. Forward evidence ───────────────────────────────────────
         if forward_to_bot and msgs:
-            bot_username = _report_bots.get(reason, "notoscam")
+            bot_uname = _fwd_bots.get(reason, "notoscam")
             try:
-                bot_ent = await client.get_entity(bot_username)
-                evidence_msgs = [m for m in msgs[:8] if m and not m.service]
-                for em in evidence_msgs:
+                fbot = await _timed(client.get_entity(bot_uname), 8.0)
+                for em in [m for m in msgs[:8] if m and not m.service]:
                     try:
-                        await client.forward_messages(bot_ent, em)
-                        result["forwarded"] += 1
+                        await client.forward_messages(fbot, em)
+                        R["forwarded"] += 1
                         await asyncio.sleep(random.uniform(0.3, 1.0))
                     except Exception as e:
-                        log.warning("rpv2[11/fwd]: %s", e)
+                        log.warning("rpv2[12/fwd] acc=%s: %s", acc_id, str(e)[:60])
             except Exception as e:
-                log.warning("rpv2[11/get_bot]: %s", e)
+                log.warning("rpv2[12/fbot] acc=%s: %s", acc_id, str(e)[:80])
 
-        # ── 12. Mute + Block + Leave ───────────────────────────────────────
+        # ── 13. Mute + Leave + Block ───────────────────────────────────
         try:
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
@@ -2358,30 +2301,37 @@ async def report_peer_deep_v2(
                 settings=InputPeerNotifySettings(mute_until=2_147_483_647),
             ))
         except Exception:
-            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
-        if result["joined"]:
+            pass
+        if R["joined"]:
             try:
                 await client(LeaveChannelRequest(entity))
             except Exception:
-                log_exc_swallow(log, "Сбой в report_peer_deep_v2")
+                pass
         if block_after:
             try:
                 await asyncio.sleep(random.uniform(0.5, 1.5))
                 await client(BlockRequest(id=entity))
-                result["blocked"] = True
+                R["blocked"] = True
             except Exception as e:
-                log.warning("rpv2[12/block]: %s", e)
+                log.warning("rpv2[13/block] acc=%s: %s", acc_id, str(e)[:80])
 
+        log.info("rpv2 DONE acc=%s target=%s | peer=%s msgs=%d admins=%d pinned=%d joined=%s",
+                 acc_id, peer, R["peer_reported"], R["msg_reported"],
+                 R["admins_reported"], R["pinned_reported"], R["joined"])
+
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        log.exception("report_peer_deep_v2 error: %s", e)
-        # Добавляем информацию об ошибке в результат
-        result["_fatal_error"] = str(e)[:200]
+        log.exception("rpv2 FATAL acc=%s target=%s: %s", acc_id, peer, e)
+        R["_fatal_error"] = str(e)[:200]
     finally:
         try:
             await client.disconnect()
         except Exception:
-            log_exc_swallow(log, "Сбой в report_peer_deep_v2")
-    return result
+            pass
+    return R
+
+
 
 def _extract_flood_wait(err_str: str, default: float = 30.0) -> float:
     """Извлекает секунды ожидания из ошибки FloodWait."""
