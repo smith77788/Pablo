@@ -182,7 +182,7 @@ async def cmd_accounts(message: Message) -> None:
     await message.answer(
         "📱 <b>Аккаунты</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 🏗️ Infrastructure → 📱 Аккаунты</code>",
+        "<code>BotMother → ⚙️ Мониторинг → 📱 Аккаунты</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
@@ -1040,7 +1040,7 @@ async def cb_set_proxy(
         text = (
             "🌐 <b>Назначение прокси</b>\n\n"
             "У вас нет добавленных прокси.\n"
-            "Добавьте прокси через <b>🏗️ Infrastructure → 🌐 Прокси</b>."
+            "Добавьте прокси через <b>⚙️ Мониторинг → 🌐 Прокси</b>."
         )
     else:
         text = (

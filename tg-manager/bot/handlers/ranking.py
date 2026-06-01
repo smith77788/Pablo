@@ -108,7 +108,7 @@ async def cmd_ranking(message: Message) -> None:
     await message.answer(
         "📊 <b>Трекер позиций</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 👁️ Visibility → 📊 Позиции</code>",
+        "<code>BotMother → 📊 Аналитика → 📊 Позиции</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )

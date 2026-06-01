@@ -1409,7 +1409,7 @@ async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
         kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
         await callback.message.edit_text(
             "📈 <b>Нет данных о позициях</b>\n\n"
-            "Добавьте ключевые слова в разделе BotMother → Visibility → Keywords. "
+            "Добавьте ключевые слова в разделе BotMother → 📊 Аналитика → Ключевые слова. "
             "После первых проверок здесь появится динамика.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
@@ -1569,7 +1569,7 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
                   callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
         await callback.message.edit_text(
             "📊 <b>Нет ключевых слов для сравнения</b>\n\n"
-            "Добавьте отслеживаемые ключевые слова через Visibility → Keywords.",
+            "Добавьте отслеживаемые ключевые слова через 📊 Аналитика → Ключевые слова.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
         return

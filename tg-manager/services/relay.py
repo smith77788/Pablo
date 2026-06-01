@@ -80,28 +80,59 @@ async def _process_bot(
                 continue
 
             chat_id = msg.get("chat", {}).get("id")
-            text = msg.get("text") or msg.get("caption")
-            if not chat_id or not text:
+            if not chat_id:
                 continue
 
             user_id = from_user.get("id")
             username = from_user.get("username")
             first_name = from_user.get("first_name", "")
-            user_label = f"@{username}" if username else first_name
+            last_name = from_user.get("last_name", "")
+            phone = None
+
+            # Handle contact message — capture phone number
+            contact = msg.get("contact")
+            if contact and contact.get("user_id") == user_id:
+                phone = contact.get("phone_number")
+
+            # Build user label: @username > "Name" > ID
+            if username:
+                user_label = f"@{username}"
+            elif first_name or last_name:
+                user_label = f"{first_name} {last_name}".strip()
+            else:
+                user_label = f"ID:{user_id}"
+
+            text = msg.get("text") or msg.get("caption")
+            # Skip non-text, non-contact messages
+            if not text and not phone:
+                continue
 
             session_id = await db.get_or_create_relay_session(
                 pool, bot_id, user_id, username, first_name
             )
 
-            # Forward to operator with context header
+            # Save phone to bot_users if freshly shared
+            if phone:
+                try:
+                    await pool.execute(
+                        "UPDATE bot_users SET phone=$1 WHERE bot_id=$2 AND user_id=$3",
+                        phone, bot_id, user_id,
+                    )
+                except Exception:
+                    log.debug("relay: failed to save phone for user %d", user_id)
+
+            display_text = text or f"📱 Поделился телефоном: {phone}"
+
+            # Forward to operator with enriched context header
+            phone_line = f"\n📱 Телефон: <code>{phone}</code>" if phone else ""
             fwd_text = (
                 f"📨 <b>{bot_label}</b>  |  👤 {user_label}\n"
-                f"<i>ID: {user_id}</i>\n\n"
-                f"{text}\n\n"
+                f"<i>ID: {user_id}</i>{phone_line}\n\n"
+                f"{display_text}\n\n"
                 f"<i>← Reply здесь чтобы ответить пользователю</i>"
             )
             fwd_msg_id = await _send_via_management(http, operator_id, fwd_text)
-            await db.save_relay_message(pool, session_id, "in", text, fwd_msg_id)
+            await db.save_relay_message(pool, session_id, "in", display_text, fwd_msg_id)
 
     except Exception:
         log.exception("Relay error for bot %d", bot_id)

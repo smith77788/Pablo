@@ -700,7 +700,7 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await _edit(
             callback,
             "<b>📋 Отчёт по позициям</b>\n\nНет отслеживаемых ключевых слов.\n\n"
-            "Добавьте слова через <b>👁️ Visibility → 🔍 Ключевые слова</b>.",
+            "Добавьте слова через <b>📊 Аналитика → 🔍 Ключевые слова</b>.",
             kb.as_markup(),
         )
         return
@@ -1283,7 +1283,7 @@ def _analyze_error(error_msg: str) -> dict:
     if any(w in msg for w in ("auth", "unauthorized", "session", "key", "token")):
         result["cause"] = "Проблема с авторизацией аккаунта или бота"
         result["recommendation"] = (
-            "Проверьте аккаунт в разделе Infrastructure → Аккаунты. "
+            "Проверьте аккаунт в разделе ⚙️ Мониторинг → Аккаунты. "
             "Возможно, сессия истекла — используйте кнопку «Переподключить»."
         )
         return result
@@ -1627,7 +1627,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await _edit(
             callback,
             "<b>📅 Расписание рассылок</b>\n\nУ вас нет ботов.\n"
-            "Добавьте бота через <b>🏗️ Infrastructure → 🤖 Мои боты</b>.",
+            "Добавьте бота через <b>📱 Активы → 🤖 Мои боты</b>.",
             kb.as_markup(),
         )
         return

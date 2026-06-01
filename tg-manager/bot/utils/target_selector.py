@@ -362,7 +362,7 @@ async def show_bot_picker(
         targets = [t for t in targets if t.id not in exclude_ids]
 
     if not targets:
-        return ("⚠️ У вас нет ботов. Добавьте бота через 🏗️ Infrastructure → 🤖 Мои боты.",
+        return ("⚠️ У вас нет ботов. Добавьте бота через 📱 Активы → 🤖 Мои боты.",
                 InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=back_callback).as_markup())
 
     kb = TargetSelector.quick_pick_kb(targets, callback_factory, back_callback)
@@ -385,7 +385,7 @@ async def show_account_picker(
     targets = await TargetSelector.fetch_accounts(pool, owner_id, active_only=active_only)
     if not targets:
         tail = "" if active_only else ""
-        msg = "⚠️ Нет активных аккаунтов. Добавьте аккаунт через 🏗️ Infrastructure → 📱 Аккаунты."
+        msg = "⚠️ Нет активных аккаунтов. Добавьте аккаунт через ⚙️ Мониторинг → 📱 Аккаунты."
         if not active_only:
             msg = "⚠️ У вас нет аккаунтов."
         return (msg, InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=back_callback).as_markup())

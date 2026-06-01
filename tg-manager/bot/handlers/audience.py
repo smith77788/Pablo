@@ -530,14 +530,20 @@ async def cb_block_user(
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
         return
-    u_label = f"@{user['username']}" if user.get("username") else str(user["user_id"])
+    _uname = user.get("username")
+    _fname = (user.get("first_name") or "").strip()
+    _lname = (user.get("last_name") or "").strip()
+    _full_name = f"{_fname} {_lname}".strip() or None
+    u_label = f"@{_uname}" if _uname else (_full_name or str(user["user_id"]))
     action_text = "заблокирован" if blocked else "разблокирован"
-    first = user.get("first_name") or ""
     lang = user.get("language_code") or "—"
+    phone_line = f"\n📱 Телефон: <code>{user['phone']}</code>" if user.get("phone") else ""
     await callback.message.edit_text(
         f"👤 <b>Пользователь {u_label}</b>\n"
-        f"Имя: {first}\n"
-        f"Язык: {lang}\n"
+        f"ID: <code>{user['user_id']}</code>\n"
+        + (f"Имя: {_full_name}\n" if _full_name else "")
+        + phone_line
+        + f"\nЯзык: {lang}\n"
         f"Статус: {'🚫 Заблокирован' if blocked else '✅ Активен'}",
         parse_mode="HTML",
         reply_markup=user_profile_menu(

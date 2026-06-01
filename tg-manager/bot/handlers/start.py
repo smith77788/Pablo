@@ -120,7 +120,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
             "→ ➕ Добавить бота → вставить токен от @BotFather\n"
             "→ Рассылки, аудитория, авто-ответы, CRM\n\n"
             "📡 <b>Хочу управлять каналами</b>\n"
-            "→ /menu → 🏗️ Infrastructure → 📡 Каналы\n"
+            "→ /menu → 📱 Активы → 📡 Каналы\n"
             "→ Импорт, создание, публикация во все каналы\n\n"
             "📱 <b>Хочу операции через аккаунт</b>\n"
             "→ /accounts → добавить аккаунт\n"

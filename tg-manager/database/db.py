@@ -121,20 +121,22 @@ async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> in
         async with pool.acquire() as conn:
             for u in users:
                 result = await conn.execute(
-                    """INSERT INTO bot_users (bot_id, user_id, username, first_name, last_name, language_code)
-                       VALUES ($1, $2, $3, $4, $5, $6)
+                    """INSERT INTO bot_users (bot_id, user_id, username, first_name, last_name, language_code, phone)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)
                        ON CONFLICT (bot_id, user_id) DO UPDATE SET
                            last_seen     = NOW(),
                            username      = EXCLUDED.username,
                            first_name    = EXCLUDED.first_name,
                            last_name     = EXCLUDED.last_name,
-                           language_code = EXCLUDED.language_code""",
+                           language_code = EXCLUDED.language_code,
+                           phone         = COALESCE(EXCLUDED.phone, bot_users.phone)""",
                     bot_id,
                     u["user_id"],
                     u.get("username"),
                     u.get("first_name"),
                     u.get("last_name"),
                     u.get("language_code"),
+                    u.get("phone"),
                 )
                 if result == "INSERT 1":
                     inserted += 1
@@ -2341,6 +2343,59 @@ async def link_plan_to_operation(pool: asyncpg.Pool, plan_id: int, op_id: int) -
         "UPDATE global_presence_plans SET op_id=$1, status='queued', updated_at=now() WHERE id=$2",
         op_id, plan_id,
     )
+
+
+async def cancel_global_presence_plan(
+    pool: asyncpg.Pool, plan_id: int, owner_id: int
+) -> bool:
+    """Cancel a plan and its linked operation. Returns True if the plan was found and owned."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            plan = await conn.fetchrow(
+                "SELECT op_id FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+                plan_id, owner_id,
+            )
+            if not plan:
+                return False
+            await conn.execute(
+                "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
+                plan_id,
+            )
+            await conn.execute(
+                "UPDATE global_presence_targets SET status='cancelled' WHERE plan_id=$1 AND status='pending'",
+                plan_id,
+            )
+            if plan["op_id"]:
+                await conn.execute(
+                    "UPDATE operation_queue SET status='cancelled', finished_at=now() "
+                    "WHERE id=$1 AND status NOT IN ('done','failed','cancelled')",
+                    plan["op_id"],
+                )
+    return True
+
+
+async def sync_plan_status_from_op(pool: asyncpg.Pool, plan_id: int) -> str | None:
+    """If operation is done/failed but plan still running, fix plan status. Returns new status or None."""
+    row = await pool.fetchrow(
+        """SELECT p.status AS plan_status, p.op_id, o.status AS op_status
+           FROM global_presence_plans p
+           LEFT JOIN operation_queue o ON o.id=p.op_id
+           WHERE p.id=$1""",
+        plan_id,
+    )
+    if not row:
+        return None
+    if row["plan_status"] not in ("running", "queued"):
+        return None
+    op_status = row["op_status"]
+    if op_status in ("done", "failed", "cancelled"):
+        new_status = op_status
+        await pool.execute(
+            "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
+            new_status, plan_id,
+        )
+        return new_status
+    return None
 
 
 # ── Operation Reports and Statistics ──────────────────────────────────────

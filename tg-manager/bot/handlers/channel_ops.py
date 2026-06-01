@@ -407,7 +407,7 @@ async def cmd_ops(message: Message) -> None:
     await message.answer(
         "⚡ <b>Операции с аккаунтами</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 🏗️ Infrastructure → 📡 Каналы & операции</code>",
+        "<code>BotMother → 📱 Активы → 📡 Каналы & операции</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
@@ -1333,7 +1333,12 @@ async def cb_post_show_dialogs(
         await callback.message.edit_text("❌ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
-    dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    owned = await account_manager.scan_owned_assets(acc["session_str"], _acc=acc)
+    dialogs = [
+        {**ch, "type": "channel"} for ch in owned.get("channels", [])
+    ] + [
+        {**gr, "type": "megagroup"} for gr in owned.get("groups", [])
+    ]
     if not dialogs:
         await callback.message.edit_text(
             "ℹ️ Нет доступных каналов/групп.",
@@ -4605,7 +4610,15 @@ async def _show_my_chans_page(
         except Exception:
             log_exc_swallow(log, "Сбой отображения статуса загрузки каналов")
         try:
-            raw = await account_manager.get_dialogs(session_str, limit=200, _acc=acc_row)
+            owned = await account_manager.scan_owned_assets(session_str, _acc=acc_row)
+            raw_channels = owned.get("channels", [])
+            raw_groups   = owned.get("groups", [])
+            # Merge into uniform format with type info
+            raw = []
+            for ch in raw_channels:
+                raw.append({**ch, "type": "channel"})
+            for gr in raw_groups:
+                raw.append({**gr, "type": "megagroup"})
         except Exception as e:
             kb = _back_kb()
             try:

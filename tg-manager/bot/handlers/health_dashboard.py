@@ -183,6 +183,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="📱 Аккаунты",       callback_data=HealthCb(action="accounts"))
     kb.button(text="🤖 Боты",           callback_data=HealthCb(action="bots_health"))
+    kb.button(text="🔍 Реальная проверка", callback_data=HealthCb(action="real_check"))
     kb.button(text="📈 Тренд trust",    callback_data=HealthCb(action="trust_trend"))
     kb.button(text="📊 Тренд health",   callback_data=HealthCb(action="health_trend"))
     kb.button(text="📉 Sparklines",     callback_data=HealthCb(action="sparklines"))
@@ -192,7 +193,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())
 
@@ -249,6 +250,86 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     kb = _back_kb()
     kb.adjust(1)
     await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+# ── Real Telegram health check ─────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "real_check"))
+async def cb_health_real_check(
+    callback: CallbackQuery, pool: asyncpg.Pool,
+) -> None:
+    """Run check_account_status_full() for all accounts — actual Telegram verification."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, phone, first_name, username, trust_score, device_model, "
+        "system_version, app_version, proxy_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY id",
+        user_id,
+    )
+    if not accounts:
+        await safe_edit(callback, "📱 Нет активных аккаунтов для проверки.", reply_markup=_back_kb().as_markup())
+        return
+
+    await safe_edit(callback, f"🔍 <b>Проверяю {len(accounts)} аккаунтов через Telegram…</b>\n\nЭто может занять 30-60 секунд.", reply_markup=None)
+
+    from services.account_manager import check_account_status_full
+    from services.logger import log_exc_swallow
+
+    status_emoji = {"active": "✅", "spamblock": "🚫", "cooldown": "⏳",
+                    "banned": "⛔", "deactivated": "🗑", "session_expired": "🔑", "error": "⚠️"}
+
+    results = []
+    for acc in accounts:
+        name = acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}"
+        try:
+            res = await asyncio.wait_for(
+                check_account_status_full(acc["session_str"], dict(acc), check_spambot=True),
+                timeout=30.0,
+            )
+            status = res.get("status", "error")
+            reason = res.get("reason", "")
+        except asyncio.TimeoutError:
+            status = "error"
+            reason = "Таймаут"
+        except Exception as e:
+            log_exc_swallow(log, f"real_check failed acc={acc['id']}")
+            status = "error"
+            reason = str(e)[:60]
+
+        # Update acc_status in DB
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
+                status, acc["id"],
+            )
+            if status == "spamblock":
+                await pool.execute(
+                    "UPDATE tg_accounts SET trust_score=LEAST(trust_score, 0.3) WHERE id=$1",
+                    acc["id"],
+                )
+        except Exception:
+            log_exc_swallow(log, f"real_check: DB update failed acc={acc['id']}")
+
+        emoji = status_emoji.get(status, "❓")
+        extra = f" — {reason[:60]}" if status not in ("active",) and reason else ""
+        results.append(f"{emoji} <b>{name}</b>{extra}")
+
+    active_count = sum(1 for r in results if r.startswith("✅"))
+    problem_count = len(results) - active_count
+
+    text = (
+        f"🔍 <b>Реальная проверка завершена</b>\n\n"
+        f"Аккаунтов: {len(results)} | ✅ OK: {active_count} | ⚠️ Проблем: {problem_count}\n\n"
+        + "\n".join(results[:20])
+        + (f"\n…и ещё {len(results) - 20}" if len(results) > 20 else "")
+    )
+
+    kb = _back_kb()
+    kb.button(text="📱 Обновить список", callback_data=HealthCb(action="accounts"))
+    kb.adjust(1)
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── Bots health ────────────────────────────────────────────────────────────────
@@ -619,7 +700,7 @@ async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         await safe_edit(
             callback,
             "📊 <b>Сравнение аккаунтов</b>\n\n"
-            "ℹ️ Нет данных. Добавьте аккаунты через 🏗️ Infrastructure → 📱 Аккаунты.",
+            "ℹ️ Нет данных. Добавьте аккаунты через ⚙️ Мониторинг → 📱 Аккаунты.",
             reply_markup=kb.as_markup(),
         )
         return
@@ -775,7 +856,7 @@ async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool)
     # Health-aware general recommendations
     general: list[str] = []
     if len(accounts) == 0:
-        general.append("ℹ️ Нет подключённых аккаунтов.\n   Добавьте через Infrastructure → 📱 Аккаунты.")
+        general.append("ℹ️ Нет подключённых аккаунтов.\n   Добавьте через ⚙️ Мониторинг → 📱 Аккаунты.")
     elif critical_count == 0 and not recs:
         general.append("✅ <b>Все аккаунты в норме</b> — проблем не обнаружено.")
         general.append("💪 Продолжайте соблюдать safe pacing и мониторинг.")
@@ -812,9 +893,9 @@ async def cb_health_recommendations(callback: CallbackQuery, pool: asyncpg.Pool)
         if "relog" in health_tips:
             tips_text.append("💡 <b>Совет:</b> Используйте кнопку 🔄 Релог в списке аккаунтов для быстрого переподключения.")
         if "proxy_check" in health_tips:
-            tips_text.append("💡 <b>Совет:</b> Проверьте прокси в Infrastructure → 🌐 Прокси. Скомпрометированные IP снижают trust.")
+            tips_text.append("💡 <b>Совет:</b> Проверьте прокси в ⚙️ Мониторинг → 🌐 Прокси. Скомпрометированные IP снижают trust.")
         if "shadowban_check" in health_tips:
-            tips_text.append("💡 <b>Совет:</b> Откройте Visibility → 🔔 Алерты — проверьте restriction events.")
+            tips_text.append("💡 <b>Совет:</b> Откройте 📊 Аналитика → 🔔 Алерты — проверьте restriction events.")
         if "intensity_reduce" in health_tips:
             tips_text.append("💡 <b>Совет:</b> Используйте pacing_mode=safe в bulk-операциях для автоматических безопасных задержек.")
         if "pacing_safe" in health_tips:

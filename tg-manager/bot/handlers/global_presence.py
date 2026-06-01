@@ -1191,13 +1191,29 @@ async def cb_gp_progress(
         f"Операция: #{op_id or '—'} ({op_status})"
     )
 
+    # Auto-sync plan status if operation finished but plan stuck
+    synced_status = None
+    if plan["status"] in ("running", "queued") and op_status in ("done", "failed", "cancelled"):
+        try:
+            synced_status = await db.sync_plan_status_from_op(pool, plan_id)
+            if synced_status:
+                plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+        except Exception:
+            pass
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
+    if plan["status"] in ("running", "queued"):
+        kb.button(text="🚫 Отменить план", callback_data=GeoPresenceCb(action="cancel_plan", plan_id=plan_id))
     if failed > 0:
         kb.button(text="🔁 Повторить ошибки", callback_data=GeoPresenceCb(action="retry", plan_id=plan_id))
     kb.button(text="📋 Отчёт", callback_data=GeoPresenceCb(action="report", plan_id=plan_id))
     kb.button(text="◀️ Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.adjust(2)
+
+    if synced_status:
+        sync_note = {"done": "✅ завершён", "failed": "❌ ошибка", "cancelled": "🚫 отменён"}.get(synced_status, synced_status)
+        text += f"\n\n<i>Статус синхронизирован: операция {sync_note}</i>"
 
     await _edit(callback, text, markup=kb.as_markup())
 
@@ -1322,6 +1338,55 @@ async def cb_gp_report(
     await _edit(callback, text, markup=kb.as_markup())
 
 
+@router.callback_query(GeoPresenceCb.filter(F.action == "cancel_plan"))
+async def cb_gp_cancel_plan(
+    callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
+) -> None:
+    """Cancel a running or queued global presence plan."""
+    plan_id = callback_data.plan_id
+    if not plan_id:
+        await callback.answer("Укажите ID плана", show_alert=True)
+        return
+
+    try:
+        plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_cancel_plan: get_global_presence_plan failed")
+        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        return
+    if not plan:
+        await callback.answer("План не найден", show_alert=True)
+        return
+
+    if plan["status"] in ("done", "cancelled", "failed"):
+        await callback.answer(f"План уже завершён ({plan['status']})", show_alert=True)
+        return
+
+    try:
+        ok = await db.cancel_global_presence_plan(pool, plan_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_gp_cancel_plan: cancel failed")
+        await callback.answer("Ошибка при отмене", show_alert=True)
+        return
+
+    if not ok:
+        await callback.answer("Не удалось отменить план", show_alert=True)
+        return
+
+    await callback.answer("🚫 План отменён")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
+    kb.adjust(2)
+    await _edit(
+        callback,
+        f"🚫 <b>Global Presence Plan #{plan_id} отменён</b>\n\n"
+        f"Незавершённые операции остановлены.\n"
+        f"Уже созданные каналы/группы остаются активными.",
+        markup=kb.as_markup(),
+    )
+
+
 # ── Plans List ─────────────────────────────────────────────────────────────
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "plans_list"))
@@ -1346,15 +1411,19 @@ async def cb_gp_plans_list(
         )
         return
 
+    import re as _re
+    import json as _json
+
     status_emoji = {"queued": "⏳", "running": "⚡", "done": "✅", "failed": "❌",
                     "cancelled": "🚫", "draft": "📝"}
     kb = InlineKeyboardBuilder()
     for plan in plans:
         emoji = status_emoji.get(plan["status"], "❓")
-        import json as _json
         geo_sel = plan["geo_selection"] if isinstance(plan["geo_selection"], dict) else _json.loads(plan["geo_selection"] or "{}")
         count = geo_sel.get("count", "?")
-        label = f"{emoji} #{plan['id']} — {plan['name_pattern'][:20]} ({count} городов)"
+        # Strip {{PLACEHOLDER}} syntax from name_pattern for cleaner display
+        display_name = _re.sub(r"\{\{[^}]+\}\}", "[город]", plan["name_pattern"] or "").strip()[:24]
+        label = f"{emoji} #{plan['id']} — {display_name} ({count} городов)"
         kb.button(text=label, callback_data=GeoPresenceCb(action="progress", plan_id=plan["id"]))
     kb.button(text="➕ Новый план", callback_data=GeoPresenceCb(action="menu"))
     kb.adjust(1)
