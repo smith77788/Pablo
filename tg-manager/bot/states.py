@@ -417,3 +417,8 @@ class WorkspaceFSM(StatesGroup):
     entering_name        = State()
     entering_description = State()
     entering_invite_code = State()
+
+
+class AiTemplateGenFSM(StatesGroup):
+    waiting_prompt = State()   # user describes desired template
+    waiting_name   = State()   # user enters name after preview

@@ -1,10 +1,13 @@
-"""Audience collection, stats, comparison, CSV export, and user management."""
+"""Audience collection, stats, comparison, CSV export/XLSX export, and user management."""
 
 from __future__ import annotations
 import csv
 import io
 import asyncpg
 import aiohttp
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
@@ -186,6 +189,103 @@ async def cb_export(
     await callback.message.answer_document(
         BufferedInputFile(content, filename=filename),
         caption=f"📤 Аудитория <b>{label}</b> — {len(rows)} записей",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(AudCb.filter(F.action == "export_xlsx"))
+async def cb_export_xlsx(
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+) -> None:
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Генерирую Excel…")
+
+    rows = await db.get_audience_full(pool, row["bot_id"])
+    stats = await db.get_audience_stats(pool, row["bot_id"])
+
+    label = f"@{row['username']}" if row["username"] else row["first_name"]
+    safe_label = row["username"] or str(row["bot_id"])
+
+    wb = Workbook()
+    # ── Sheet 1: Аудитория ──────────────────────────────────────────────────
+    ws = wb.active
+    ws.title = "Аудитория"
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="2563EB")
+    center = Alignment(horizontal="center", vertical="center")
+    thin = Side(style="thin", color="D1D5DB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    headers = ["user_id", "username", "first_name", "last_name", "language_code",
+               "first_seen", "last_seen", "is_active"]
+    col_widths = [14, 22, 20, 20, 14, 22, 22, 12]
+
+    for col_idx, (h, w) in enumerate(zip(headers, col_widths), start=1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center
+        cell.border = border
+        ws.column_dimensions[get_column_letter(col_idx)].width = w
+
+    ws.freeze_panes = "A2"
+    ws.row_dimensions[1].height = 20
+
+    alt_fill = PatternFill("solid", fgColor="EFF6FF")
+    for r_idx, r in enumerate(rows, start=2):
+        data = [
+            r["user_id"],
+            r["username"] or "",
+            r["first_name"] or "",
+            r["last_name"] or "",
+            r["language_code"] or "",
+            r["first_seen"].strftime("%Y-%m-%d %H:%M") if r["first_seen"] else "",
+            r["last_seen"].strftime("%Y-%m-%d %H:%M") if r["last_seen"] else "",
+            "Да" if r["is_active"] else "Нет",
+        ]
+        row_fill = alt_fill if r_idx % 2 == 0 else None
+        for c_idx, val in enumerate(data, start=1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=val)
+            cell.border = border
+            if row_fill:
+                cell.fill = row_fill
+
+    # ── Sheet 2: Статистика ─────────────────────────────────────────────────
+    ws2 = wb.create_sheet("Статистика")
+    ws2.column_dimensions["A"].width = 30
+    ws2.column_dimensions["B"].width = 18
+
+    stat_header_fill = PatternFill("solid", fgColor="059669")
+    ws2.cell(row=1, column=1, value="Показатель").font = Font(bold=True, color="FFFFFF")
+    ws2.cell(row=1, column=1).fill = stat_header_fill
+    ws2.cell(row=1, column=2, value="Значение").font = Font(bold=True, color="FFFFFF")
+    ws2.cell(row=1, column=2).fill = stat_header_fill
+
+    stat_rows = [
+        ("Бот", label),
+        ("Всего активных", stats.get("active", 0)),
+        ("Неактивных (отписались)", stats.get("inactive", 0)),
+        ("Новых за 24ч", stats.get("new_24h", 0)),
+        ("Новых за 7 дней", stats.get("new_7d", 0)),
+        ("Новых за 30 дней", stats.get("new_30d", 0)),
+    ]
+    for s_idx, (k, v) in enumerate(stat_rows, start=2):
+        ws2.cell(row=s_idx, column=1, value=k).border = border
+        ws2.cell(row=s_idx, column=2, value=v).border = border
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"audience_{safe_label}.xlsx"
+
+    await callback.message.answer_document(
+        BufferedInputFile(buf.read(), filename=filename),
+        caption=f"📊 <b>Аудитория {label}</b>\n{len(rows)} пользователей · Excel-файл с форматированием",
         parse_mode="HTML",
     )
 

@@ -302,9 +302,12 @@ def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(
         text="📤 Экспорт CSV", callback_data=AudCb(action="export", bot_id=bot_id)
     )
+    kb.button(
+        text="📊 Экспорт Excel", callback_data=AudCb(action="export_xlsx", bot_id=bot_id)
+    )
     kb.button(text="⚖️ Сравнить", callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -492,7 +495,11 @@ def templates_list(templates: list, bot_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="➕ Новый шаблон",
             callback_data=TemplateCb(action="add", bot_id=bot_id).pack(),
-        )
+        ),
+        InlineKeyboardButton(
+            text="✨ AI-текст",
+            callback_data=TemplateCb(action="ai_gen", bot_id=bot_id).pack(),
+        ),
     )
     if bot_id:
         kb.row(
