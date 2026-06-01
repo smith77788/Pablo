@@ -2827,7 +2827,7 @@ async def _strike_bg_v2(
 
         # Загрузить режим пользователя
         strike_mode_row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", user_id)
-        strike_mode = (strike_mode_row["mode"] if strike_mode_row and strike_mode_row.get("mode") else "normal")
+        strike_mode = strike_mode_row.get("mode", "normal") if strike_mode_row else "normal"
 
         plan = strike_engine.StrikePlan(
             targets=peers, accounts=viable, reason=reason, preset=preset,

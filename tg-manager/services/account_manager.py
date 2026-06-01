@@ -2170,9 +2170,20 @@ async def report_peer_deep_v2(
         # ── 5. Recent messages (чанки по 5, до max_msg_reports) ────────────
         msgs: list = []
         if is_channel:
+            # Если join не удался — пробуем ещё раз перед get_messages
+            if not result.get("joined") and is_channel:
+                try:
+                    await client(JoinChannelRequest(entity))
+                    result["joined"] = True
+                    await asyncio.sleep(random.uniform(1.5, 3.5))
+                except Exception as _je:
+                    log.info("rpv2[5/join_retry]: %s — продолжаем без вступления", _je)
             try:
                 msgs = await client.get_messages(entity, limit=max_msg_reports)
                 msg_ids = [m.id for m in msgs if m and m.id]
+                log.info("rpv2[5]: %d сообщений для %s (joined=%s)", len(msg_ids), peer_username, result.get("joined"))
+                if not msg_ids:
+                    log.warning("rpv2[5]: 0 сообщений найдено для %s — msgs_reported=0", peer_username)
                 # Shuffle chunks for variety
                 chunks = [msg_ids[i:i+5] for i in range(0, len(msg_ids), 5)]
                 random.shuffle(chunks)
@@ -2199,7 +2210,7 @@ async def report_peer_deep_v2(
                             except Exception:
                                 log_exc_swallow(log, "Сбой в report_peer_deep_v2")
                         else:
-                            log.warning("rpv2[5/msg_chunk %d]: %s", chunk_idx, e)
+                            log.warning("rpv2[5/msg_chunk %d]: err=%s", chunk_idx, err[:120])
                     # Human-like пауза между чанками
                     await asyncio.sleep(random.betavariate(2, 5) * 1.2 + 0.3)
             except Exception as e:

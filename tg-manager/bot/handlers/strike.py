@@ -157,7 +157,7 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.answer()
 
     row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
-    current_mode = (row["mode"] if row and row["mode"] else "normal")
+    current_mode = row.get("mode", "normal") if row else "normal"
 
     mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
     mode_desc = {
