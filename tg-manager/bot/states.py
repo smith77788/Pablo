@@ -163,6 +163,7 @@ class EditChannelFSM(StatesGroup):
 
 class InviteUsersFSM(StatesGroup):
     waiting_channel_id = State()
+    choosing_accounts = State()
     waiting_usernames = State()
     choosing_count = State()
     waiting_custom_count = State()

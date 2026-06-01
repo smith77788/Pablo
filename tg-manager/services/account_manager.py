@@ -2165,13 +2165,26 @@ async def report_peer_deep_v2(  # noqa: C901
                     log.info("rpv2[3] already_participant acc=%s target=%s", acc_id, peer)
                 else:
                     log.warning("rpv2[3/join] acc=%s target=%s: %s", acc_id, peer, err[:100])
-            # ВСЕГДА обновляем entity после join-секции — отдельный try
-            # чтобы join-ошибка не блокировала refresh
+            # Принудительное обновление entity через GetChannelsRequest — обходит кэш Telethon.
+            # client.get_entity() после JoinChannelRequest может вернуть устаревший кэш,
+            # из-за чего get_messages/GetHistoryRequest возвращают 0 сообщений.
             try:
-                entity = await _timed(client.get_entity(peer))
-                log.info("rpv2[3] entity refreshed acc=%s joined=%s", acc_id, R["joined"])
-            except Exception as e:
-                log.warning("rpv2[3/refresh] acc=%s: %s", acc_id, str(e)[:80])
+                from telethon.tl.functions.channels import GetChannelsRequest as _GCR
+                from telethon.tl.types import InputChannel as _IC
+                _gcr = await _timed(client(_GCR([_IC(entity.id, entity.access_hash)])), 10.0)
+                if _gcr and _gcr.chats:
+                    entity = _gcr.chats[0]
+                    log.info("rpv2[3] entity force-refreshed via GetChannelsRequest acc=%s ah=%s",
+                             acc_id, getattr(entity, "access_hash", "?"))
+                else:
+                    raise ValueError("empty chats in GetChannelsRequest response")
+            except Exception as _gcr_e:
+                log.warning("rpv2[3/refresh_gcr] acc=%s: %s — fallback get_entity", acc_id, str(_gcr_e)[:80])
+                try:
+                    entity = await _timed(client.get_entity(peer), 8.0)
+                    log.info("rpv2[3] entity refreshed via get_entity acc=%s", acc_id)
+                except Exception as e2:
+                    log.warning("rpv2[3/refresh] acc=%s: %s", acc_id, str(e2)[:80])
 
         # ── 4. Full channel info ───────────────────────────────────────
         full_chat = None
@@ -2185,8 +2198,10 @@ async def report_peer_deep_v2(  # noqa: C901
         # ── 5. Pinned messages ────────────────────────────────────────
         if report_pinned and is_channel:
             try:
+                from telethon.tl.types import InputPeerChannel as _IPC5
+                _ipeer5 = _IPC5(channel_id=entity.id, access_hash=entity.access_hash)
                 pinned = await _timed(
-                    client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=25), 15.0
+                    client.get_messages(_ipeer5, filter=InputMessagesFilterPinned(), limit=25), 15.0
                 )
                 pinned_ids = [m.id for m in pinned if m and m.id]
                 log.info("rpv2[5] pinned=%d acc=%s", len(pinned_ids), acc_id)
@@ -2211,43 +2226,64 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[5/get_pinned] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 6. Recent messages ────────────────────────────────────────
+        # Используем GetHistoryRequest с явным InputPeerChannel — обходит кэш Telethon.
+        # После JoinChannelRequest client.get_messages(entity) может вернуть 0 сообщений,
+        # если entity устарел. Явный InputPeerChannel(id, access_hash) гарантирует
+        # прямой запрос к серверу с актуальным access_hash.
         msgs: list = []
         if is_channel:
+            from telethon.tl.functions.messages import GetHistoryRequest as _GHR
+            from telethon.tl.types import InputPeerChannel as _IPC6
+            _ipeer6 = _IPC6(channel_id=entity.id, access_hash=entity.access_hash)
             try:
-                raw = await _timed(client.get_messages(entity, limit=max_msg_reports), 20.0)
-                msgs = list(raw) if raw else []
-                msg_ids = [m.id for m in msgs if m and m.id]
-                log.info("rpv2[6] fetched=%d target=%s acc=%s joined=%s",
-                         len(msg_ids), peer, acc_id, R["joined"])
-                if not msg_ids:
-                    log.warning("rpv2[6] 0 msgs target=%s acc=%s — channel restricts history", peer, acc_id)
+                _hist = await _timed(client(_GHR(
+                    peer=_ipeer6,
+                    offset_id=0, offset_date=0, add_offset=0,
+                    limit=max_msg_reports, max_id=0, min_id=0, hash=0,
+                )), 25.0)
+                msgs = [m for m in getattr(_hist, "messages", [])
+                        if m and not getattr(m, "action", None)]
+                log.info("rpv2[6/GetHistory] fetched=%d target=%s acc=%s joined=%s",
+                         len(msgs), peer, acc_id, R["joined"])
+            except Exception as _gh_e:
+                log.warning("rpv2[6/GetHistory] acc=%s: %s — fallback get_messages", acc_id, str(_gh_e)[:80])
+                try:
+                    raw = await _timed(client.get_messages(_ipeer6, limit=max_msg_reports), 20.0)
+                    msgs = list(raw) if raw else []
+                    log.info("rpv2[6/fallback] fetched=%d acc=%s", len(msgs), acc_id)
+                except Exception as _fb_e:
+                    log.warning("rpv2[6/fallback] acc=%s: %s", acc_id, str(_fb_e)[:80])
 
-                chunks = [msg_ids[i:i + 5] for i in range(0, len(msg_ids), 5)]
-                random.shuffle(chunks)
-                for ci, chunk in enumerate(chunks):
-                    r_obj = all_reasons[ci % len(all_reasons)]
-                    cmsg = msg_pool[ci % len(msg_pool)]
-                    try:
-                        await client(MsgReportRequest(peer=entity, id=chunk, reason=r_obj, message=cmsg))
-                        R["msg_reported"] += len(chunk)
-                    except Exception as e:
-                        err = str(e)
-                        if "FLOOD_WAIT" in err.upper():
-                            await asyncio.sleep(_flood(err, 15))
-                            try:
-                                await client(MsgReportRequest(peer=entity, id=chunk[:2], reason=r_obj, message=cmsg))
-                                R["msg_reported"] += min(2, len(chunk))
-                            except Exception:
-                                pass
-                        elif "REPORT_TOO_MUCH" in err.upper():
-                            log.info("rpv2[6] REPORT_TOO_MUCH ci=%d, stopping", ci)
-                            break
-                        else:
-                            log.warning("rpv2[6/chunk ci=%d] acc=%s: %s", ci, acc_id, err[:100])
-                    await asyncio.sleep(random.betavariate(2, 5) * 1.2 + 0.3)
-                log.info("rpv2[6] msg_reported=%d acc=%s", R["msg_reported"], acc_id)
-            except Exception as e:
-                log.warning("rpv2[6/get_msgs] acc=%s: %s", acc_id, str(e)[:80])
+            msg_ids = [m.id for m in msgs if m and m.id]
+            log.info("rpv2[6] msg_ids=%d target=%s acc=%s joined=%s",
+                     len(msg_ids), peer, acc_id, R["joined"])
+            if not msg_ids:
+                log.warning("rpv2[6] 0 msgs target=%s acc=%s — channel may restrict history", peer, acc_id)
+
+            chunks = [msg_ids[i:i + 5] for i in range(0, len(msg_ids), 5)]
+            random.shuffle(chunks)
+            for ci, chunk in enumerate(chunks):
+                r_obj = all_reasons[ci % len(all_reasons)]
+                cmsg = msg_pool[ci % len(msg_pool)]
+                try:
+                    await client(MsgReportRequest(peer=_ipeer6, id=chunk, reason=r_obj, message=cmsg))
+                    R["msg_reported"] += len(chunk)
+                except Exception as e:
+                    err = str(e)
+                    if "FLOOD_WAIT" in err.upper():
+                        await asyncio.sleep(_flood(err, 15))
+                        try:
+                            await client(MsgReportRequest(peer=_ipeer6, id=chunk[:2], reason=r_obj, message=cmsg))
+                            R["msg_reported"] += min(2, len(chunk))
+                        except Exception:
+                            pass
+                    elif "REPORT_TOO_MUCH" in err.upper():
+                        log.info("rpv2[6] REPORT_TOO_MUCH ci=%d, stopping", ci)
+                        break
+                    else:
+                        log.warning("rpv2[6/chunk ci=%d] acc=%s: %s", ci, acc_id, err[:100])
+                await asyncio.sleep(random.betavariate(2, 5) * 1.2 + 0.3)
+            log.info("rpv2[6] msg_reported=%d acc=%s", R["msg_reported"], acc_id)
 
         # ── 7. channels.ReportSpam ────────────────────────────────────
         # channels.reportSpam(channel, participant, ids) requires a USER as participant.
