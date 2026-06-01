@@ -82,102 +82,111 @@ async def _fire_cross_nav(
 
 def _main_menu_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏗️ Infrastructure",   callback_data=BmCb(action="infrastructure"))
-    kb.button(text="👁️ Visibility",       callback_data=BmCb(action="visibility"))
-    kb.button(text="⚙️ Operations",       callback_data=BmCb(action="operations"))
-    kb.button(text="📢 Broadcasts",       callback_data=BmCb(action="broadcasts"))
-    kb.button(text="💬 Inbox / Relay",    callback_data=BmCb(action="inbox"))
-    kb.button(text="🤖 AI Assistant",     callback_data=BmCb(action="ai_assistant"))
-    kb.button(text="🧠 Аналитика",        callback_data=BmCb(action="behavioral"))
-    kb.button(text="🗺️ Карта инфры",      callback_data=BmCb(action="topology"))
-    kb.button(text="⚔️ Strike",           callback_data=StrikeCb(action="menu"))
-    kb.button(text="🏢 Workspaces",       callback_data=WorkspaceCb(action="menu"))
-    kb.button(text="💳 Billing",          callback_data=BmCb(action="billing"))
-    kb.button(text="👥 Referral",         callback_data=BmCb(action="referral"))
-    kb.button(text="⚙️ Settings",         callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.button(text="📱 Активы",           callback_data=BmCb(action="assets"))
+    kb.button(text="⚡ Операции",         callback_data=BmCb(action="operations"))
+    kb.button(text="📢 Рассылки & Связь", callback_data=BmCb(action="comms"))
+    kb.button(text="📊 Аналитика",        callback_data=BmCb(action="analytics"))
+    kb.button(text="🛡️ Мониторинг",       callback_data=BmCb(action="monitoring"))
+    kb.button(text="⚙️ Настройки",        callback_data=BmCb(action="settings"))
+    kb.adjust(2, 2, 2)
     return kb.as_markup()
 
 
-def _infrastructure_kb():
+def _assets_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="📱 Аккаунты",          callback_data=AccCb(action="menu"))
-    kb.button(text="🤖 Мои боты",          callback_data=BotCb(action="list", page=0))
-    kb.button(text="📡 Каналы & операции", callback_data=ChanCb(action="menu"))
-    kb.button(text="👥 Группы",            callback_data=GroupFCb(action="menu"))
-    kb.button(text="🔗 Кластеры",          callback_data=ClustMCb(action="menu"))
-    kb.button(text="🌐 Прокси",            callback_data=ProxyCb(action="menu"))
-    kb.button(text="❤️ Здоровье",          callback_data=HealthCb(action="menu"))
-    kb.button(text="🌡 Разогрев аккаунтов", callback_data=WarmupCb(action="menu"))
-    kb.button(text="🔍 Парсер аудитории",  callback_data=ParserCb(action="menu"))
-    kb.button(text="📊 Аналитика инфры",   callback_data=InfraCb(action="menu"))
-    kb.button(text="🧹 Очиститель",        callback_data=CleanerCb(action="menu"))
-    kb.button(text="🗺️ Топология",         callback_data=TopoCb(action="menu"))
-    kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1, 1, 1)
-    return kb.as_markup()
-
-
-def _visibility_kb():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔍 Ключевые слова", callback_data=BmCb(action="pick_bot_for", sub="rank"))
-    kb.button(text="📊 Позиции (все)",  callback_data=VisCb(action="dashboard"))
-    kb.button(text="🏆 Конкуренты",     callback_data=CompCb(action="menu"))
-    kb.button(text="📈 SEO-оптимизация",callback_data=ChanFactCb(action="seo_pick"))
-    kb.button(text="🔔 Алерты",         callback_data=BmCb(action="alerts"))
-    kb.button(text="📋 Отчёты",         callback_data=BmCb(action="vis_reports"))
-    kb.button(text="◀️ Назад",          callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1)
+    kb.button(text="📱 Аккаунты",    callback_data=AccCb(action="menu"))
+    kb.button(text="🤖 Мои боты",    callback_data=BotCb(action="list", page=0))
+    kb.button(text="📡 Каналы",      callback_data=ChanCb(action="menu"))
+    kb.button(text="👥 Группы",      callback_data=GroupFCb(action="menu"))
+    kb.button(text="🔗 Кластеры",    callback_data=ClustMCb(action="menu"))
+    kb.button(text="◀️ Назад",       callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 
 def _operations_kb():
     from bot.callbacks import PackCb
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌍 Присутствие в мире", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="⚔️ Strike",            callback_data=StrikeCb(action="menu"))
+    kb.button(text="🌍 Присутствие",        callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="🗂 Presence Packs",     callback_data=PackCb(action="menu"))
-    kb.button(text="⚡ Массовые действия",   callback_data=BmCb(action="bulk_ops"))
+    kb.button(text="📤 Публикация",         callback_data=MassPubCb(action="menu"))
+    kb.button(text="⚡ Массовые действия",  callback_data=BmCb(action="bulk_ops"))
     kb.button(text="🛠️ Построитель",        callback_data=MassOpCb(action="menu"))
-    kb.button(text="📋 Очередь",             callback_data=MassOpCb(action="queue"))
-    kb.button(text="⏱️ Планировщик",         callback_data=BmCb(action="op_planner"))
-    kb.button(text="📈 Прогноз нагрузки",   callback_data=BmCb(action="capacity"))
-    kb.button(text="📄 Шаблоны",             callback_data=AssetTplCb(action="menu"))
-    kb.button(text="📊 Отчёты",              callback_data=BmCb(action="op_reports"))
-    kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1, 1)
+    kb.button(text="📋 Очередь",            callback_data=MassOpCb(action="queue"))
+    kb.button(text="⏱️ Планировщик",        callback_data=BmCb(action="op_planner"))
+    kb.button(text="◀️ Назад",              callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
-def _broadcasts_kb():
+def _comms_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="📢 Рассылка по боту",  callback_data=BotCb(action="list", page=0))
     kb.button(text="🌐 Сетевая рассылка",  callback_data=NetBcCb(action="choose_target"))
     kb.button(text="📅 Расписание",        callback_data=BmCb(action="schedules"))
     kb.button(text="📨 DM-кампании",       callback_data=DmCb(action="menu"))
+    kb.button(text="💬 Входящие (Relay)",  callback_data=BmCb(action="pick_bot_for", sub="relay"))
+    kb.button(text="📢 Авто-ответы",       callback_data=BmCb(action="pick_bot_for", sub="ar"))
+    kb.button(text="🔗 Воронки",           callback_data=BmCb(action="pick_bot_for", sub="fn"))
     kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 1, 1, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
-def _inbox_kb():
+def _analytics_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="💬 Входящие диалоги", callback_data=BmCb(action="pick_bot_for", sub="relay"))
+    kb.button(text="🔍 Ключевые слова",   callback_data=BmCb(action="pick_bot_for", sub="rank"))
+    kb.button(text="📊 Позиции",          callback_data=VisCb(action="dashboard"))
+    kb.button(text="🏆 Конкуренты",       callback_data=CompCb(action="menu"))
+    kb.button(text="📈 SEO",              callback_data=ChanFactCb(action="seo_pick"))
+    kb.button(text="🔔 Алерты",           callback_data=BmCb(action="alerts"))
+    kb.button(text="📋 Отчёты",           callback_data=BmCb(action="vis_reports"))
+    kb.button(text="🧠 Поведение [PRO]",  callback_data=BmCb(action="behavioral"))
+    kb.button(text="🗺️ Топология",        callback_data=TopoCb(action="menu"))
     kb.button(text="◀️ Назад",            callback_data=BmCb(action="main"))
-    kb.adjust(1)
+    kb.adjust(2, 2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def _monitoring_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❤️ Здоровье",         callback_data=HealthCb(action="menu"))
+    kb.button(text="🌡 Разогрев",          callback_data=WarmupCb(action="menu"))
+    kb.button(text="🔍 Парсер аудитории", callback_data=ParserCb(action="menu"))
+    kb.button(text="🧹 Очиститель",        callback_data=CleanerCb(action="menu"))
+    kb.button(text="🌐 Прокси",            callback_data=ProxyCb(action="menu"))
+    kb.button(text="📊 Аналитика инфры",  callback_data=InfraCb(action="menu"))
+    kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
 def _settings_kb():
     kb = InlineKeyboardBuilder()
-    # ── Настройки ботов ───────────────────────────────────
-    kb.button(text="📢 Авто-ответы",        callback_data=BmCb(action="pick_bot_for", sub="ar"))
-    kb.button(text="🔗 Воронки",            callback_data=BmCb(action="pick_bot_for", sub="fn"))
-    kb.button(text="🤖 Команды бота",       callback_data=BmCb(action="pick_bot_for", sub="cmd"))
-    kb.button(text="🔔 Уведомления",        callback_data=BmCb(action="notifications"))
-    # ── Навигация ─────────────────────────────────────────
-    kb.button(text="◀️ Назад",             callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 1)
+    kb.button(text="🤖 Команды бота",    callback_data=BmCb(action="pick_bot_for", sub="cmd"))
+    kb.button(text="🔔 Уведомления",     callback_data=BmCb(action="notifications"))
+    kb.button(text="💳 Billing",         callback_data=SubCb(action="menu"))
+    kb.button(text="👥 Referral",        callback_data=RefCb(action="menu"))
+    kb.button(text="🤖 AI Assistant",    callback_data=AiCb(action="start"))
+    kb.button(text="🏢 Workspaces",      callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="📄 Шаблоны",         callback_data=AssetTplCb(action="menu"))
+    kb.button(text="◀️ Назад",           callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
+
+
+# keep old function as alias so back-buttons from other handlers still work
+def _infrastructure_kb():
+    return _assets_kb()
+
+
+def _broadcasts_kb():
+    return _comms_kb()
+
+
+def _visibility_kb():
+    return _analytics_kb()
 
 
 def _bulk_ops_kb():
@@ -199,19 +208,13 @@ def _wip_kb(back_action: str = "main"):
 
 
 _MAIN_MENU_TEXT = (
-    "🏠 <b>BotMother OS</b> — Главное меню\n\n"
-    "Это операционная система для управления Telegram-активами.\n"
-    "Выберите раздел:\n\n"
-    "🏗️ <b>Infrastructure</b> — аккаунты, боты, каналы, группы\n"
-    "👁️ <b>Visibility</b> — позиции в поиске, SEO, конкуренты\n"
-    "⚙️ <b>Operations</b> — массовые действия, 🌍 присутствие в мире\n"
-    "📢 <b>Broadcasts</b> — рассылки пользователям ботов\n"
-    "💬 <b>Inbox</b> — ответы на входящие сообщения\n"
-    "🤖 <b>AI</b> — ИИ-помощник для контента\n"
-    "🧠 <b>Аналитика</b> — поведенческий анализ (PRO)\n"
-    "💳 <b>Billing</b> — подписка и оплата\n"
-    "👥 <b>Referral</b> — пригласить друзей\n"
-    "⚙️ <b>Settings</b> — авто-ответы и уведомления"
+    "🏠 <b>BotMother OS</b>\n\n"
+    "📱 <b>Активы</b> — аккаунты, боты, каналы, группы, кластеры\n"
+    "⚡ <b>Операции</b> — strike, presence, публикация, очередь\n"
+    "📢 <b>Рассылки & Связь</b> — рассылки, DM, relay, авто-ответы\n"
+    "📊 <b>Аналитика</b> — позиции, SEO, конкуренты, поведение\n"
+    "🛡️ <b>Мониторинг</b> — здоровье, разогрев, парсер, прокси\n"
+    "⚙️ <b>Настройки</b> — billing, AI, уведомления, команды"
 )
 
 # ── /menu command ─────────────────────────────────────────────────────────
@@ -284,47 +287,85 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
     await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
 
 
-# ── Infrastructure ────────────────────────────────────────────────────────
+# ── Assets ────────────────────────────────────────────────────────────────
+
+
+@router.callback_query(BmCb.filter(F.action == "assets"))
+async def cb_assets(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    import asyncio
+    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0))
+    await _edit(
+        callback,
+        "📱 <b>Активы — ваша инфраструктура</b>\n\n"
+        "📱 <b>Аккаунты</b> — Telegram-аккаунты для операций\n"
+        "🤖 <b>Мои боты</b> — боты с аудиторией, рассылками, воронками\n"
+        "📡 <b>Каналы</b> — создание, импорт, публикация в каналы\n"
+        "👥 <b>Группы</b> — создание и управление группами\n"
+        "🔗 <b>Кластеры</b> — объединить активы в сеть",
+        _assets_kb(),
+    )
+
+
+# ── Infrastructure (alias, backward compat) ───────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "infrastructure"))
 async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
     import asyncio
-    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "infrastructure", 0))
+    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0))
     await _edit(
         callback,
-        "🏗️ <b>Infrastructure — ваша инфраструктура</b>\n\n"
+        "📱 <b>Активы — ваша инфраструктура</b>\n\n"
         "📱 <b>Аккаунты</b> — Telegram-аккаунты для операций\n"
         "🤖 <b>Мои боты</b> — боты с аудиторией, рассылками, воронками\n"
         "📡 <b>Каналы</b> — создание, импорт, публикация в каналы\n"
         "👥 <b>Группы</b> — создание и управление группами\n"
-        "🔗 <b>Кластеры</b> — объединить ботов в сеть\n"
-        "🌐 <b>Прокси</b> — прокси для аккаунтов\n"
-        "❤️ <b>Здоровье</b> — статус аккаунтов и ботов\n"
-        "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением\n"
-        "🗺️ <b>Топология</b> — граф связей между аккаунтами, каналами, ботами",
-        _infrastructure_kb(),
+        "🔗 <b>Кластеры</b> — объединить активы в сеть",
+        _assets_kb(),
     )
 
 
-# ── Visibility ────────────────────────────────────────────────────────────
+# ── Analytics ─────────────────────────────────────────────────────────────
+
+
+@router.callback_query(BmCb.filter(F.action == "analytics"))
+async def cb_analytics(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    import asyncio
+    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "analytics", 0))
+    await _edit(
+        callback,
+        "📊 <b>Аналитика — видимость и поведение</b>\n\n"
+        "🔍 <b>Ключевые слова</b> — по каким запросам находят ваш бот\n"
+        "📊 <b>Позиции</b> — история позиций в поиске Telegram\n"
+        "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
+        "📈 <b>SEO</b> — оптимизация каналов под поиск\n"
+        "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
+        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [PRO]\n"
+        "🗺️ <b>Топология</b> — граф связей активов",
+        _analytics_kb(),
+    )
+
+
+# ── Visibility (alias, backward compat) ───────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "visibility"))
 async def cb_visibility(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    import asyncio
-    asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "visibility", 0))
     await _edit(
         callback,
-        "👁️ <b>Visibility — видимость в поиске Telegram</b>\n\n"
-        "🔍 <b>Ключевые слова</b> — отслеживать по каким запросам находят ваш бот\n"
+        "📊 <b>Аналитика — видимость и поведение</b>\n\n"
+        "🔍 <b>Ключевые слова</b> — по каким запросам находят ваш бот\n"
         "📊 <b>Позиции</b> — история позиций в поиске Telegram\n"
         "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
+        "📈 <b>SEO</b> — оптимизация каналов под поиск\n"
         "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
-        "📋 <b>Отчёты</b> — сводные отчёты за 7/30 дней",
-        _visibility_kb(),
+        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [PRO]\n"
+        "🗺️ <b>Топология</b> — граф связей активов",
+        _analytics_kb(),
     )
 
 
@@ -338,18 +379,39 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
     await _edit(
         callback,
-        "⚙️ <b>Operations — массовые операции</b>\n\n"
+        "⚡ <b>Операции — действия над аккаунтами и каналами</b>\n\n"
+        "⚔️ <b>Strike</b> — целевые операции по каналам/группам\n"
+        "🌍 <b>Присутствие</b> — Global Presence Factory\n"
+        "📤 <b>Публикация</b> — массовая публикация в каналы\n"
         "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
         "🛠️ <b>Построитель</b> — собрать операцию из блоков\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
-        "⏱️ <b>Планировщик</b> — запустить операцию по расписанию\n"
-        "📄 <b>Шаблоны</b> — сохранённые конфигурации операций\n"
-        "📊 <b>Отчёты</b> — история и статистика выполненных операций",
+        "⏱️ <b>Планировщик</b> — запустить операцию по расписанию",
         _operations_kb(),
     )
 
 
-# ── Broadcasts ────────────────────────────────────────────────────────────
+# ── Comms ─────────────────────────────────────────────────────────────────
+
+
+@router.callback_query(BmCb.filter(F.action == "comms"))
+async def cb_comms(callback: CallbackQuery, callback_data: BmCb) -> None:
+    await callback.answer()
+    await _edit(
+        callback,
+        "📢 <b>Рассылки & Связь</b>\n\n"
+        "📢 <b>Рассылка по боту</b> — разослать сообщение всем пользователям бота\n"
+        "🌐 <b>Сетевая рассылка</b> — одновременно через несколько ботов\n"
+        "📅 <b>Расписание</b> — запланированные рассылки\n"
+        "📨 <b>DM-кампании</b> — личные сообщения через Telegram-аккаунты\n"
+        "💬 <b>Входящие (Relay)</b> — ответы на сообщения пользователей\n"
+        "📢 <b>Авто-ответы</b> — триггеры по ключевым словам\n"
+        "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
+        _comms_kb(),
+    )
+
+
+# ── Broadcasts (alias, backward compat) ───────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "broadcasts"))
@@ -357,17 +419,19 @@ async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     await _edit(
         callback,
-        "📢 <b>Broadcasts — рассылки</b>\n\n"
+        "📢 <b>Рассылки & Связь</b>\n\n"
         "📢 <b>Рассылка по боту</b> — разослать сообщение всем пользователям бота\n"
         "🌐 <b>Сетевая рассылка</b> — одновременно через несколько ботов\n"
-        "📅 <b>Расписание</b> — запланированные рассылки\n\n"
-        "<i>Каждый бот имеет свою аудиторию. "
-        "Выберите бота → Рассылка → введите текст.</i>",
-        _broadcasts_kb(),
+        "📅 <b>Расписание</b> — запланированные рассылки\n"
+        "📨 <b>DM-кампании</b> — личные сообщения через Telegram-аккаунты\n"
+        "💬 <b>Входящие (Relay)</b> — ответы на сообщения пользователей\n"
+        "📢 <b>Авто-ответы</b> — триггеры по ключевым словам\n"
+        "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
+        _comms_kb(),
     )
 
 
-# ── Inbox / Relay ─────────────────────────────────────────────────────────
+# ── Inbox (alias, backward compat) ────────────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "inbox"))
@@ -375,33 +439,47 @@ async def cb_inbox(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     await _edit(
         callback,
-        "💬 <b>Inbox / Relay — входящие сообщения</b>\n\n"
-        "Здесь вы можете отвечать на входящие сообщения "
-        "пользователей ваших ботов в режиме реального времени.\n\n"
-        "<b>Как работает Relay:</b>\n"
-        "1. Пользователь пишет вашему боту\n"
-        "2. Сообщение приходит вам сюда\n"
-        "3. Вы отвечаете — ответ уходит через бота\n\n"
-        "Выберите бота для управления входящими:",
-        _inbox_kb(),
+        "📢 <b>Рассылки & Связь</b>\n\n"
+        "💬 <b>Входящие (Relay)</b> — ответы на сообщения пользователей ботов\n"
+        "📢 <b>Авто-ответы</b> — триггеры по ключевым словам\n"
+        "🔗 <b>Воронки</b> — автоматические цепочки сообщений",
+        _comms_kb(),
     )
 
 
-# ── AI Assistant ──────────────────────────────────────────────────────────
+# ── Monitoring ────────────────────────────────────────────────────────────
+
+
+@router.callback_query(BmCb.filter(F.action == "monitoring"))
+async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
+    await callback.answer()
+    await _edit(
+        callback,
+        "🛡️ <b>Мониторинг — здоровье аккаунтов и инфраструктуры</b>\n\n"
+        "❤️ <b>Здоровье</b> — статус и тренды health_score аккаунтов\n"
+        "🌡 <b>Разогрев</b> — прогрев новых аккаунтов перед операциями\n"
+        "🔍 <b>Парсер аудитории</b> — сбор участников из каналов и групп\n"
+        "🧹 <b>Очиститель</b> — сброс аккаунта перед переназначением\n"
+        "🌐 <b>Прокси</b> — управление прокси для аккаунтов\n"
+        "📊 <b>Аналитика инфры</b> — расширенная статистика инфраструктуры",
+        _monitoring_kb(),
+    )
+
+
+# ── AI Assistant (backward compat) ────────────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "ai_assistant"))
 async def cb_ai_assistant(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
-    # Direct redirect to AI assistant
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Открыть AI-ассистент", callback_data=AiCb(action="start"))
-    kb.button(text="◀️ Назад",                callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад",                callback_data=BmCb(action="settings"))
     kb.adjust(1)
     await _edit(callback, "<b>🤖 AI Assistant</b>\n\nИнтеллектуальный помощник для управления ботами.", kb.as_markup())
 
 
-# ── Billing ───────────────────────────────────────────────────────────────
+# ── Billing (backward compat) ─────────────────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "billing"))
@@ -409,12 +487,12 @@ async def cb_billing(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
     kb.button(text="💳 Управление подпиской", callback_data=SubCb(action="menu"))
-    kb.button(text="◀️ Назад",               callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад",               callback_data=BmCb(action="settings"))
     kb.adjust(1)
     await _edit(callback, "<b>💳 Billing</b>\n\nУправление подпиской и тарифными планами.", kb.as_markup())
 
 
-# ── Referral ──────────────────────────────────────────────────────────────
+# ── Referral (backward compat) ────────────────────────────────────────────
 
 
 @router.callback_query(BmCb.filter(F.action == "referral"))
@@ -422,7 +500,7 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Реферальная программа", callback_data=RefCb(action="menu"))
-    kb.button(text="◀️ Назад",                callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад",                callback_data=BmCb(action="settings"))
     kb.adjust(1)
     await _edit(callback, "<b>👥 Referral</b>\n\nРеферальная программа и партнёрские вознаграждения.", kb.as_markup())
 
@@ -435,12 +513,14 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
     await callback.answer()
     await _edit(
         callback,
-        "⚙️ <b>Settings — настройки ботов</b>\n\n"
-        "• 📢 Авто-ответы — триггер по ключевым словам\n"
-        "• 🔗 Воронки — автоматические цепочки сообщений\n"
-        "• 🤖 Команды — /start, /help и другие команды бота\n"
-        "• 🔔 Уведомления — флуд, позиции, ошибки\n\n"
-        "<i>Настройки аккаунтов (Прокси, Прогрев, Здоровье) — в разделе 🏗️ Infrastructure</i>",
+        "⚙️ <b>Настройки</b>\n\n"
+        "🤖 <b>Команды бота</b> — /start, /help и другие команды\n"
+        "🔔 <b>Уведомления</b> — флуд, позиции, ошибки\n"
+        "💳 <b>Billing</b> — подписка и тарифные планы\n"
+        "👥 <b>Referral</b> — реферальная программа\n"
+        "🤖 <b>AI Assistant</b> — ИИ-помощник для контента\n"
+        "🏢 <b>Workspaces</b> — мульти-пользовательские пространства\n"
+        "📄 <b>Шаблоны</b> — сохранённые конфигурации операций",
         _settings_kb(),
     )
 
@@ -467,10 +547,10 @@ async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
 # ── Bot picker (Visibility / Inbox / Settings) ───────────────────────────
 
 _PICK_META = {
-    "rank":  ("🔍 Трекер позиций",    "visibility"),
-    "relay": ("💬 Входящие диалоги",  "inbox"),
-    "ar":    ("📢 Авто-ответы",       "settings"),
-    "fn":    ("🔗 Воронки",           "settings"),
+    "rank":  ("🔍 Трекер позиций",    "analytics"),
+    "relay": ("💬 Входящие диалоги",  "comms"),
+    "ar":    ("📢 Авто-ответы",       "comms"),
+    "fn":    ("🔗 Воронки",           "comms"),
     "cmd":   ("🤖 Команды бота",      "settings"),
 }
 
@@ -542,7 +622,7 @@ async def cb_alerts(
 
     if not rows and page == 0:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
         await _edit(callback, "<b>🔔 Алерты</b>\n\nАлертов нет. Система работает нормально. ✅", kb.as_markup())
         return
 
@@ -588,7 +668,7 @@ async def cb_alerts(
         kb.button(text="▶️", callback_data=BmCb(action="alerts", page=page + 1))
         nav_count += 1
     kb.button(text="🗑 Очистить всё", callback_data=BmCb(action="alerts_clear"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     adjustments = ([nav_count] if nav_count > 0 else []) + [1, 1]
     kb.adjust(*adjustments)
     await _edit(callback, text, kb.as_markup())
@@ -599,7 +679,7 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await pool.execute("DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id)
     await callback.answer("Алерты очищены", show_alert=True)
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     await _edit(callback, "<b>🔔 Алерты</b>\n\nВсе алерты очищены.", kb.as_markup())
 
 
@@ -609,14 +689,14 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
-        await _edit(callback, locked_text("Отчёты по позициям", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="visibility")))
+        await _edit(callback, locked_text("Отчёты по позициям", "starter"), subscription_locked_markup("starter", back_callback=BmCb(action="analytics")))
         return
     await callback.answer()
     kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
 
     if not kws:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
         await _edit(
             callback,
             "<b>📋 Отчёт по позициям</b>\n\nНет отслеживаемых ключевых слов.\n\n"
@@ -698,7 +778,7 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📥 Скачать CSV", callback_data=BmCb(action="vis_reports_csv"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="visibility"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     await _edit(callback, text, kb.as_markup())
 
