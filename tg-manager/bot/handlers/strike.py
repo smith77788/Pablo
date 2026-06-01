@@ -335,15 +335,11 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 import html as _html
 
 
-@router.callback_query(StrikeCb.filter(F.action == "history"))
-async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
-    await callback.answer()
-
+async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Общий хелпер: показывает историю Strike."""
     rows = await pool.fetch(
         """SELECT target, reason, accounts_used, peer_reported, msgs_reported,
+                  COALESCE(msgs_fetched, 0) AS msgs_fetched,
                   network_nodes, verified_down, duration_s, created_at
            FROM strike_history
            WHERE owner_id=$1
@@ -351,9 +347,10 @@ async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         callback.from_user.id,
     )
 
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+
     if not rows:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
             "📜 <b>История атак</b>\n\nАтак ещё не было.",
             parse_mode="HTML",
@@ -365,19 +362,29 @@ async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     for r in rows:
         status = "🟢" if r["verified_down"] else ("🟡" if r["verified_down"] is None else "🔴")
         ts = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "?"
+        msgs_r = r["msgs_reported"] or 0
+        msgs_f = r["msgs_fetched"] or 0
+        msgs_str = f"{msgs_r}/{msgs_f}" if msgs_f > msgs_r else str(msgs_r)
         lines.append(
             f"{status} <code>{_html.escape(r['target'])}</code> · {ts}\n"
             f"   {r['reason']} · {r['accounts_used']} акк · "
-            f"{r['peer_reported']} жалоб · {int(r['duration_s'] or 0)}с"
+            f"{r['peer_reported']} жалоб · сообщ: {msgs_str} · {int(r['duration_s'] or 0)}с"
         )
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(StrikeCb.filter(F.action == "history"))
+async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await _show_strike_history(callback, pool)
 
 
 # Обработчик кнопки "История" из финального отчёта (callback_data="strike:history")
@@ -387,43 +394,7 @@ async def cb_strike_history_shortcut(callback: CallbackQuery, pool: asyncpg.Pool
         await callback.answer("Нет доступа.", show_alert=True)
         return
     await callback.answer()
-
-    rows = await pool.fetch(
-        """SELECT target, reason, accounts_used, peer_reported, msgs_reported,
-                  network_nodes, verified_down, duration_s, created_at
-           FROM strike_history
-           WHERE owner_id=$1
-           ORDER BY created_at DESC LIMIT 15""",
-        callback.from_user.id,
-    )
-
-    if not rows:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
-        await callback.message.edit_text(
-            "📜 <b>История атак</b>\n\nАтак ещё не было.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-        return
-
-    lines = ["📜 <b>История Strike (последние 15)</b>\n"]
-    for r in rows:
-        status = "🟢" if r["verified_down"] else ("🟡" if r["verified_down"] is None else "🔴")
-        ts = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "?"
-        lines.append(
-            f"{status} <code>{_html.escape(r['target'])}</code> · {ts}\n"
-            f"   {r['reason']} · {r['accounts_used']} акк · "
-            f"{r['peer_reported']} жалоб · {int(r['duration_s'] or 0)}с"
-        )
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
-    await callback.message.edit_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await _show_strike_history(callback, pool)
 
 
 # ── admin grant ───────────────────────────────────────────────────────────────
