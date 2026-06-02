@@ -8,6 +8,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import NetworkCb
 from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
@@ -126,8 +127,13 @@ async def cb_bulk_name(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:", parse_mode="HTML"
+        "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -156,8 +162,13 @@ async def cb_bulk_name_lang(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_name_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML"
+        f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -198,9 +209,13 @@ async def cb_bulk_desc(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_desc)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "📄 <b>Описание для всех ботов</b>\n\nВведите новое описание:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -229,9 +244,13 @@ async def cb_bulk_desc_lang(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_desc_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🌍 <b>Описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

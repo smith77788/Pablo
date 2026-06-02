@@ -31,10 +31,11 @@ async def cb_net_bc_target(
 ) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        from bot.callbacks import NetworkCb
         await callback.message.edit_text(
             locked_text("Сетевая рассылка v2", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=NetworkCb(action="menu")),
         )
         return
     bots = await db.get_bots(pool, callback.from_user.id)
@@ -82,9 +83,12 @@ async def cb_net_bc_segment(
 
     await state.set_state(NetworkBroadcastV2.waiting_message)
     await state.update_data(segment=segment, lang="")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetBcCb(action="choose_target"))
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка</b>\n\nЦель: {desc}\n\nНапишите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -108,9 +112,12 @@ async def cb_net_bc_type_msg(
 
     await state.set_state(NetworkBroadcastV2.waiting_message)
     await state.update_data(segment=segment, lang=lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetBcCb(action="choose_target"))
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка</b>\n\nСегмент: {label}\n\nНапишите текст сообщения:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
