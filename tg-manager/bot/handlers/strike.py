@@ -19,8 +19,51 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import StrikeCb, ChanCb, BmCb
-from bot.states import MiniStrikeFSM
+from bot.states import MiniStrikeFSM, StrikeEmailFSM
 from services.logger import log_exc_swallow
+
+# SMTP авто-определение по домену почты
+_SMTP_PRESETS: dict[str, tuple[str, int]] = {
+    "gmail.com":      ("smtp.gmail.com", 587),
+    "googlemail.com": ("smtp.gmail.com", 587),
+    "outlook.com":    ("smtp-mail.outlook.com", 587),
+    "hotmail.com":    ("smtp-mail.outlook.com", 587),
+    "live.com":       ("smtp-mail.outlook.com", 587),
+    "yahoo.com":      ("smtp.mail.yahoo.com", 587),
+    "yahoo.co.uk":    ("smtp.mail.yahoo.com", 587),
+    "yandex.ru":      ("smtp.yandex.ru", 465),
+    "yandex.com":     ("smtp.yandex.ru", 465),
+    "mail.ru":        ("smtp.mail.ru", 465),
+    "bk.ru":          ("smtp.mail.ru", 465),
+    "list.ru":        ("smtp.mail.ru", 465),
+    "icloud.com":     ("smtp.mail.me.com", 587),
+    "me.com":         ("smtp.mail.me.com", 587),
+    "protonmail.com": ("smtp.protonmail.com", 587),
+    "proton.me":      ("smtp.protonmail.com", 587),
+}
+
+_APP_PASSWORD_TIPS: dict[str, str] = {
+    "gmail.com": (
+        "Для Gmail нужен <b>пароль приложения</b>, не обычный пароль.\n"
+        "Google Account → Безопасность → Двухэтапная верификация → "
+        "Пароли приложений → Создать."
+    ),
+    "googlemail.com": (
+        "Для Gmail нужен <b>пароль приложения</b>, не обычный пароль.\n"
+        "Google Account → Безопасность → Двухэтапная верификация → "
+        "Пароли приложений → Создать."
+    ),
+    "outlook.com": (
+        "Для Outlook: включи двухфакторную аутентификацию, затем создай "
+        "пароль приложения в настройках безопасности аккаунта Microsoft."
+    ),
+    "yandex.ru": (
+        "Для Яндекс: Настройки → Безопасность → Пароли приложений → Создать новый."
+    ),
+    "mail.ru": (
+        "Для Mail.ru: Настройки → Безопасность → Пароли для внешних приложений."
+    ),
+}
 
 router = Router(name="strike")
 log = logging.getLogger(__name__)
@@ -193,7 +236,8 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     for m, label in mode_labels.items():
         checked = "✅ " if m == current_mode else ""
         kb.button(text=f"{checked}{label}", callback_data=StrikeCb(action=f"set_mode_{m}"))
-    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+    kb.button(text="📧 Email аккаунты", callback_data=StrikeCb(action="emails"))
+    kb.button(text="◀️ Назад",          callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -807,3 +851,283 @@ async def cb_mini_strike_run(
     kb.adjust(1)
 
     await msg.edit_text(report_text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMAIL ACCOUNT MANAGEMENT
+# Добавление, просмотр, удаление почтовых ящиков для репортов
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Показать список email аккаунтов с кнопками управления."""
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at
+               FROM strike_email_accounts
+               WHERE owner_id=$1
+               ORDER BY added_at""",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "_show_email_list: DB fetch failed")
+        rows = []
+
+    kb = InlineKeyboardBuilder()
+    lines = ["📧 <b>Email аккаунты для репортов</b>\n"]
+
+    if not rows:
+        lines.append(
+            "Пока нет ни одного email.\n\n"
+            "Добавь Gmail, Outlook, Yandex или любой другой — "
+            "система будет отправлять жалобы с каждого ящика."
+        )
+    else:
+        lines.append(f"Добавлено: <b>{len(rows)}</b> ящиков\n")
+        for r in rows:
+            status = "✅" if r["is_active"] else "⛔"
+            fails = f" · ошибок: {r['fail_count']}" if r["fail_count"] else ""
+            lines.append(f"{status} <code>{r['email']}</code> ({r['smtp_host']}:{r['smtp_port']}){fails}")
+            # Кнопки: toggle + delete
+            toggle_label = "⛔ Выключить" if r["is_active"] else "✅ Включить"
+            kb.button(
+                text=toggle_label,
+                callback_data=StrikeCb(action="email_toggle", page=r["id"]),
+            )
+            kb.button(
+                text=f"🗑 {r['email'][:20]}",
+                callback_data=StrikeCb(action="email_del", page=r["id"]),
+            )
+        kb.adjust(2)
+
+    kb.row(InlineKeyboardButton(
+        text="➕ Добавить email",
+        callback_data=StrikeCb(action="email_add").pack(),
+    ))
+    kb.row(InlineKeyboardButton(
+        text="◀️ Настройки",
+        callback_data=StrikeCb(action="settings").pack(),
+    ))
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(StrikeCb.filter(F.action == "emails"))
+async def cb_strike_emails(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await _show_email_list(callback, pool)
+
+
+@router.callback_query(StrikeCb.filter(F.action == "email_toggle"))
+async def cb_email_toggle(
+    callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    email_id = callback_data.page
+    try:
+        row = await pool.fetchrow(
+            "SELECT is_active FROM strike_email_accounts WHERE id=$1 AND owner_id=$2",
+            email_id, callback.from_user.id,
+        )
+        if not row:
+            await callback.answer("Не найдено.", show_alert=True)
+            return
+        new_val = not row["is_active"]
+        await pool.execute(
+            "UPDATE strike_email_accounts SET is_active=$1, fail_count=0 WHERE id=$2",
+            new_val, email_id,
+        )
+        await callback.answer("✅ Включён" if new_val else "⛔ Выключен")
+    except Exception:
+        log_exc_swallow(log, "cb_email_toggle: DB failed")
+        await callback.answer("Ошибка.", show_alert=True)
+        return
+    await _show_email_list(callback, pool)
+
+
+@router.callback_query(StrikeCb.filter(F.action == "email_del"))
+async def cb_email_del(
+    callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    email_id = callback_data.page
+    try:
+        await pool.execute(
+            "DELETE FROM strike_email_accounts WHERE id=$1 AND owner_id=$2",
+            email_id, callback.from_user.id,
+        )
+        await callback.answer("🗑 Удалён")
+    except Exception:
+        log_exc_swallow(log, "cb_email_del: DB failed")
+        await callback.answer("Ошибка.", show_alert=True)
+        return
+    await _show_email_list(callback, pool)
+
+
+@router.callback_query(StrikeCb.filter(F.action == "email_add"))
+async def cb_email_add(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(StrikeEmailFSM.awaiting_email)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=StrikeCb(action="emails"))
+    await callback.message.edit_text(
+        "📧 <b>Добавить email аккаунт</b>\n\n"
+        "Введите ваш email-адрес:\n"
+        "<code>user@gmail.com</code>\n\n"
+        "<b>Поддерживаются:</b> Gmail, Outlook, Яндекс, Mail.ru, Yahoo, iCloud, ProtonMail\n\n"
+        "⚠️ Для Gmail и Outlook нужен <b>пароль приложения</b> "
+        "(не обычный пароль) — объясним как получить.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(StrikeEmailFSM.awaiting_email)
+async def msg_email_input(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _has_access(pool, message.from_user.id):
+        await state.clear()
+        return
+
+    raw = (message.text or "").strip().lower()
+    if "@" not in raw or "." not in raw.split("@")[-1]:
+        await message.answer("⚠️ Некорректный email. Введите ещё раз.")
+        return
+
+    domain = raw.split("@")[-1]
+    preset = _SMTP_PRESETS.get(domain)
+    if preset:
+        smtp_host, smtp_port = preset
+        smtp_note = f"🔍 Определён автоматически: <b>{smtp_host}:{smtp_port}</b>"
+    else:
+        smtp_host, smtp_port = f"smtp.{domain}", 587
+        smtp_note = f"⚠️ Неизвестный провайдер. Попробуем: <b>{smtp_host}:{smtp_port}</b>"
+
+    tip = _APP_PASSWORD_TIPS.get(domain, "")
+
+    await state.update_data(email=raw, smtp_host=smtp_host, smtp_port=smtp_port)
+    await state.set_state(StrikeEmailFSM.awaiting_password)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=StrikeCb(action="emails"))
+
+    await message.answer(
+        f"📧 Email: <code>{raw}</code>\n"
+        f"{smtp_note}\n\n"
+        f"{tip}\n\n" if tip else "" +
+        "Теперь введите <b>пароль приложения</b>:\n"
+        "<i>⚠️ Сообщение с паролем будет сразу удалено из чата.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(StrikeEmailFSM.awaiting_password)
+async def msg_password_input(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _has_access(pool, message.from_user.id):
+        await state.clear()
+        return
+
+    password = (message.text or "").strip()
+
+    # Немедленно удаляем сообщение с паролем
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if not password or len(password) < 4:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=StrikeCb(action="emails"))
+        await message.answer(
+            "⚠️ Слишком короткий пароль. Попробуйте ещё раз.",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    sd = await state.get_data()
+    email = sd.get("email", "")
+    smtp_host = sd.get("smtp_host", "")
+    smtp_port = sd.get("smtp_port", 587)
+    await state.clear()
+
+    if not email or not smtp_host:
+        await message.answer("⚠️ Сессия истекла. Начните заново.")
+        return
+
+    # Тест подключения
+    status_msg = await message.answer(
+        f"🔄 Проверяю подключение к <b>{smtp_host}:{smtp_port}</b>...",
+        parse_mode="HTML",
+    )
+
+    def _test_smtp() -> None:
+        import smtplib, ssl as _ssl
+        ctx = _ssl.create_default_context()
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=20) as srv:
+                srv.login(email, password)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as srv:
+                srv.ehlo()
+                srv.starttls(context=ctx)
+                srv.login(email, password)
+
+    try:
+        await asyncio.to_thread(_test_smtp)
+        # Сохранить в БД
+        await pool.execute(
+            """INSERT INTO strike_email_accounts
+               (owner_id, email, smtp_host, smtp_port, smtp_pass)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (owner_id, email)
+               DO UPDATE SET smtp_host=$3, smtp_port=$4, smtp_pass=$5,
+                             is_active=TRUE, fail_count=0""",
+            message.from_user.id, email, smtp_host, smtp_port, password,
+        )
+        domain = email.split("@")[-1]
+        tip = _APP_PASSWORD_TIPS.get(domain, "")
+        await status_msg.edit_text(
+            f"✅ <b>Email добавлен: {email}</b>\n\n"
+            f"Подключение к {smtp_host}:{smtp_port} — успешно\n\n"
+            f"Теперь при каждом мини-страйке жалоба будет отправляться "
+            f"с этого ящика на abuse@telegram.org{' и NCMEC' if '' else ''}.",
+            parse_mode="HTML",
+        )
+        log.info("strike: email added user=%s email=%s", message.from_user.id, email)
+    except Exception as e:
+        err = str(e)[:120]
+        log.warning("strike: email test failed %s: %s", email, err)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔁 Попробовать снова", callback_data=StrikeCb(action="email_add"))
+        kb.button(text="◀️ Список email",      callback_data=StrikeCb(action="emails"))
+        kb.adjust(1)
+        await status_msg.edit_text(
+            f"❌ <b>Не удалось подключиться</b>\n\n"
+            f"Email: <code>{email}</code>\n"
+            f"SMTP: {smtp_host}:{smtp_port}\n"
+            f"Ошибка: <code>{err}</code>\n\n"
+            f"<b>Возможные причины:</b>\n"
+            f"• Неверный пароль приложения\n"
+            f"• Для Gmail/Outlook нужен именно пароль приложения, не обычный\n"
+            f"• SMTP заблокирован провайдером\n"
+            f"• Двухфакторная аутентификация не включена",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )

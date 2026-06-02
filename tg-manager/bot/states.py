@@ -432,5 +432,10 @@ class AiTemplateGenFSM(StatesGroup):
 
 
 class MiniStrikeFSM(StatesGroup):
-    awaiting_target   = State()  # ввод username/ссылки
-    awaiting_category = State()  # выбор категории (stores target in FSM data)
+    awaiting_target   = State()
+    awaiting_category = State()
+
+
+class StrikeEmailFSM(StatesGroup):
+    awaiting_email    = State()  # ввод email-адреса
+    awaiting_password = State()  # ввод пароля (stores email + smtp in FSM data)

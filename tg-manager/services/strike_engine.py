@@ -1355,43 +1355,82 @@ async def execute_mini_strike(
         result["errors"].append(f"Telethon: {str(e)[:100]}")
         log.exception("mini_strike: telethon failed target=%s", target_clean)
 
-    # ── Phase 2: Email abuse@telegram.org ────────────────────────────────────
+    # ── Phase 2+3: Email из всех настроенных ящиков ──────────────────────────
     await _prog(
         f"📧 <b>Фаза 2/4:</b> Email → abuse@telegram.org...\n"
         f"   Telethon: <b>{result['total_tg_reports']}</b> репортов отправлено"
     )
-    smtp_ready = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
-    from_addr = REPORT_FROM_EMAIL or SMTP_USER
-    if smtp_ready:
-        body_tg = _build_abuse_tg_email(target_clean, cat, report_time)
-        ok, err = await _send_email(
-            SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
-            from_addr, "abuse@telegram.org",
-            f"{cat['email_subject']} — @{target_clean}",
-            body_tg,
-        )
-        result["emails"].append({"to": "abuse@telegram.org", "ok": ok, "err": err})
-        if ok:
-            result["total_emails"] += 1
 
-        # ── Phase 3: NCMEC (только CSAM) ─────────────────────────────────────
+    # Загружаем email-аккаунты из БД (добавляются через Settings → Email аккаунты)
+    db_emails: list[dict] = []
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        db_emails = [dict(r) for r in rows]
+    except Exception as e:
+        log.debug("mini_strike: email accounts fetch skipped: %s", e)
+
+    body_tg = _build_abuse_tg_email(target_clean, cat, report_time)
+
+    if db_emails:
+        for ea in db_emails:
+            ok, err = await _send_email(
+                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                ea["email"], "abuse@telegram.org",
+                f"{cat['email_subject']} — @{target_clean}",
+                body_tg,
+            )
+            result["emails"].append({
+                "from": ea["email"], "to": "abuse@telegram.org", "ok": ok, "err": err,
+            })
+            if ok:
+                result["total_emails"] += 1
+                try:
+                    await pool.execute(
+                        "UPDATE strike_email_accounts SET last_used_at=now(), fail_count=0 WHERE id=$1",
+                        ea["id"],
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    await pool.execute(
+                        """UPDATE strike_email_accounts
+                           SET fail_count = fail_count + 1,
+                               is_active = CASE WHEN fail_count + 1 >= 3 THEN FALSE ELSE is_active END
+                           WHERE id=$1""",
+                        ea["id"],
+                    )
+                except Exception:
+                    pass
+
+        # Phase 3: NCMEC (только CSAM, отправляем с первого рабочего ящика)
         if cat.get("ncmec"):
             await _prog("📧 <b>Фаза 3/4:</b> NCMEC CyberTipline — экстренный CSAM-репорт...")
-            ncmec_addr = NCMEC_EMAIL or "cybertipline@ncmec.org"
+            ncmec_addr = "cybertipline@ncmec.org"
             body_ncmec = _build_ncmec_email(target_clean, report_time)
-            ok_n, err_n = await _send_email(
-                SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
-                from_addr, ncmec_addr,
-                f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
-                body_ncmec,
-            )
-            result["emails"].append({"to": ncmec_addr, "ok": ok_n, "err": err_n})
-            if ok_n:
-                result["total_emails"] += 1
+            for ea in db_emails:
+                ok_n, err_n = await _send_email(
+                    ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                    ea["email"], ncmec_addr,
+                    f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
+                    body_ncmec,
+                )
+                result["emails"].append({
+                    "from": ea["email"], "to": ncmec_addr, "ok": ok_n, "err": err_n,
+                })
+                if ok_n:
+                    result["total_emails"] += 1
+                    break  # Достаточно одного NCMEC-репорта
     else:
         result["emails"].append({
             "to": "abuse@telegram.org", "ok": False,
-            "err": "SMTP не настроен (нужны SMTP_HOST/SMTP_USER/SMTP_PASS в Railway env)",
+            "err": "Email не настроены. Добавьте в Strike → ⚙️ Настройки → 📧 Email аккаунты",
         })
 
     # ── Phase 4: Abuse form telegram.org/support ──────────────────────────────
