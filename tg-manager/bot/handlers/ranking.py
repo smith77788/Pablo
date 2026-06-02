@@ -759,7 +759,17 @@ async def cb_rank_dashboard(
         if pos is None:
             lines.append(f"❓ {bot_safe} — «{kw_safe}»")
         else:
-            lines.append(f"#{pos} {bot_safe} — «{kw_safe}»")
+            if pos <= 3:
+                rank_emoji = "🥇"
+            elif pos <= 5:
+                rank_emoji = "🟢"
+            elif pos <= 10:
+                rank_emoji = "🟡"
+            elif pos <= 15:
+                rank_emoji = "🟠"
+            else:
+                rank_emoji = "🔴"
+            lines.append(f"{rank_emoji} <b>#{pos}</b> {bot_safe} — «{kw_safe}»")
 
     if total > DASHBOARD_LIMIT:
         lines.append(
