@@ -9,7 +9,11 @@ import asyncpg
 from bot.callbacks import AutoReplyCb, AutoCb
 from bot.keyboards import auto_reply_menu, auto_reply_trigger_menu, auto_reply_view, back_to_bot, auto_reply_copy_target
 from bot.states import AddAutoReply
+from bot.utils.subscription import get_plan
 from database import db
+
+# Auto-reply rule limits per plan
+_AR_LIMITS: dict[str, int] = {"free": 5, "starter": 20, "pro": 100, "enterprise": 9999}
 
 router = Router()
 
@@ -43,6 +47,16 @@ async def cb_ar_menu(callback: CallbackQuery, callback_data: AutoReplyCb,
     await callback.answer()
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    if not replies:
+        await callback.message.edit_text(
+            f"🤖 <b>Авто-ответы — {label}</b>\n\n"
+            "📭 <b>Правил пока нет</b>\n\n"
+            "Авто-ответы позволяют боту автоматически отвечать пользователям. Например: если написали «цена» — бот отвечает прайсом, /start — бот присылает приветствие.\n\n"
+            "Нажмите <b>➕ Добавить правило</b> чтобы настроить первое.",
+            parse_mode="HTML",
+            reply_markup=auto_reply_menu(callback_data.bot_id, replies),
+        )
+        return
     await callback.message.edit_text(
         f"🤖 <b>Авто-ответы — {label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
@@ -144,9 +158,24 @@ async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         await message.answer("⚠️ Текст ответа не может быть пустым. Введите снова:", reply_markup=_ar_cancel_kb(data.get("bot_id", 0)))
         return
     data = await state.get_data()
+    bot_id = data["bot_id"]
+    # Check subscription rule limit
+    plan = await get_plan(pool, message.from_user.id)
+    limit = _AR_LIMITS.get(plan, 5)
+    existing = await db.get_auto_replies(pool, bot_id)
+    if len(existing) >= limit:
+        await state.clear()
+        await message.answer(
+            f"⚠️ <b>Лимит правил достигнут</b>\n\n"
+            f"Ваш план <b>{plan.upper()}</b> позволяет максимум <b>{limit}</b> авто-ответов на бота.\n\n"
+            "Удалите неиспользуемые правила или обновите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=back_to_bot(bot_id),
+        )
+        return
     await state.clear()
     await db.add_auto_reply(
-        pool, data["bot_id"], data["trigger_type"],
+        pool, bot_id, data["trigger_type"],
         data.get("keyword"), text,
     )
     trigger_label = {
@@ -157,7 +186,7 @@ async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await message.answer(
         f"✅ Правило добавлено!\n\nТриггер: <b>{trigger_label}</b>",
         parse_mode="HTML",
-        reply_markup=back_to_bot(data["bot_id"]),
+        reply_markup=back_to_bot(bot_id),
     )
 
 
@@ -192,8 +221,7 @@ async def cb_ar_view(callback: CallbackQuery, callback_data: AutoReplyCb,
 @router.callback_query(AutoReplyCb.filter(F.action == "toggle"))
 async def cb_ar_toggle(callback: CallbackQuery, callback_data: AutoReplyCb,
                        pool: asyncpg.Pool) -> None:
-
-    await callback.answer()
+    await callback.answer("✅ Статус изменён.")
     await db.toggle_auto_reply(pool, callback_data.reply_id, callback_data.bot_id)
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -205,14 +233,44 @@ async def cb_ar_toggle(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=auto_reply_menu(callback_data.bot_id, replies),
     )
-    await callback.answer("✅ Статус изменён.")
+
+
+@router.callback_query(AutoReplyCb.filter(F.action == "delete_confirm"))
+async def cb_ar_delete_confirm(callback: CallbackQuery, callback_data: AutoReplyCb,
+                                pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    replies = await db.get_auto_replies(pool, callback_data.bot_id)
+    r = next((x for x in replies if x["id"] == callback_data.reply_id), None)
+    trigger_info = ""
+    if r:
+        trigger_info = {
+            "start": "/start",
+            "keyword": f"🔑 {_html.escape(r['keyword'] or '')}",
+            "any": "💬 Любое сообщение",
+        }.get(r["trigger_type"], "")
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Да, удалить",
+        callback_data=AutoReplyCb(action="delete", bot_id=callback_data.bot_id, reply_id=callback_data.reply_id),
+    )
+    kb.button(
+        text="◀️ Отмена",
+        callback_data=AutoReplyCb(action="view", bot_id=callback_data.bot_id, reply_id=callback_data.reply_id),
+    )
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"⚠️ <b>Подтвердите удаление правила</b>\n\n"
+        f"Триггер: {trigger_info}\n\n"
+        "Правило будет удалено без возможности восстановления.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "delete"))
 async def cb_ar_delete(callback: CallbackQuery, callback_data: AutoReplyCb,
                        pool: asyncpg.Pool) -> None:
-
-    await callback.answer()
+    await callback.answer("🗑 Правило удалено.")
     await db.delete_auto_reply(pool, callback_data.reply_id, callback_data.bot_id)
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -224,7 +282,6 @@ async def cb_ar_delete(callback: CallbackQuery, callback_data: AutoReplyCb,
         parse_mode="HTML",
         reply_markup=auto_reply_menu(callback_data.bot_id, replies),
     )
-    await callback.answer("🗑 Правило удалено.")
 
 
 @router.callback_query(AutoReplyCb.filter(F.action == "copy_to"))

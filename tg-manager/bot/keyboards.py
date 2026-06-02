@@ -796,7 +796,7 @@ def auto_reply_view(
     )
     kb.button(
         text="🗑 Удалить",
-        callback_data=AutoReplyCb(action="delete", bot_id=bot_id, reply_id=reply_id),
+        callback_data=AutoReplyCb(action="delete_confirm", bot_id=bot_id, reply_id=reply_id),
     )
     kb.button(text="◀️ Назад", callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
@@ -959,7 +959,7 @@ def tag_detail_menu(bot_id: int, tag: str) -> InlineKeyboardMarkup:
     )
     kb.button(
         text="🗑 Удалить тег у всех",
-        callback_data=CrmCb(action="delete_tag_all", bot_id=bot_id, tag=tag),
+        callback_data=CrmCb(action="delete_tag_confirm", bot_id=bot_id, tag=tag),
     )
     kb.button(text="◀️ Назад", callback_data=CrmCb(action="menu", bot_id=bot_id))
     kb.adjust(1)

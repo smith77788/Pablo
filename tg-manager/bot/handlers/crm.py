@@ -60,6 +60,18 @@ async def cb_crm_menu(
         else (row["first_name"] or str(row["bot_id"]))
     )
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if not tags:
+        empty_hint = (
+            "📭 <b>Тегов пока нет</b>\n\n"
+            "Теги позволяют сегментировать пользователей бота — например «покупатель», «VIP», «новичок».\n\n"
+            "Нажмите <b>➕ Новый тег</b> чтобы создать первый тег."
+        )
+        await callback.message.edit_text(
+            f"🏷 <b>CRM — {safe_label}</b>\n\n{empty_hint}",
+            parse_mode="HTML",
+            reply_markup=crm_menu(callback_data.bot_id, tags),
+        )
+        return
     await callback.message.edit_text(
         f"🏷 <b>CRM — {safe_label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
@@ -130,6 +142,34 @@ async def cb_tag_detail(
     )
 
 
+@router.callback_query(CrmCb.filter(F.action == "delete_tag_confirm"))
+async def cb_delete_tag_confirm(
+    callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    tag = callback_data.tag or ""
+    safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    user_ids = await db.get_users_by_tag(pool, callback_data.bot_id, tag)
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Да, удалить",
+        callback_data=CrmCb(action="delete_tag_all", bot_id=callback_data.bot_id, tag=tag),
+    )
+    kb.button(
+        text="◀️ Отмена",
+        callback_data=CrmCb(action="tag_detail", bot_id=callback_data.bot_id, tag=tag),
+    )
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"⚠️ <b>Подтвердите удаление тега</b>\n\n"
+        f"Тег: <b>{safe_tag}</b>\n"
+        f"Пользователей с этим тегом: <b>{len(user_ids)}</b>\n\n"
+        "Тег будет удалён у всех пользователей. Это действие необратимо.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(CrmCb.filter(F.action == "delete_tag_all"))
 async def cb_delete_tag_all(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
@@ -178,6 +218,16 @@ async def cb_auto_menu(
         else (row["first_name"] or str(row["bot_id"]))
     )
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if not rules:
+        await callback.message.edit_text(
+            f"⚙️ <b>Автоматизация — {safe_label}</b>\n\n"
+            "📭 <b>Правил пока нет</b>\n\n"
+            "Правила автоматически выполняют действия при наступлении триггера — например, отправляют сообщение новому пользователю или добавляют тег по ключевому слову.\n\n"
+            "Нажмите <b>➕ Новое правило</b> чтобы создать первое.",
+            parse_mode="HTML",
+            reply_markup=automation_menu(callback_data.bot_id, rules),
+        )
+        return
     await callback.message.edit_text(
         f"⚙️ <b>Автоматизация — {safe_label}</b>\n\n"
         f"Активных правил: <b>{sum(1 for r in rules if r['is_active'])}</b> из {len(rules)}\n\n"
@@ -210,7 +260,7 @@ async def cb_auto_view(
     kb.button(
         text="🗑 Удалить",
         callback_data=AutoCb(
-            action="delete", bot_id=callback_data.bot_id, rule_id=rule["id"]
+            action="delete_confirm", bot_id=callback_data.bot_id, rule_id=rule["id"]
         ),
     )
     kb.button(
@@ -252,6 +302,37 @@ async def cb_auto_toggle(
         f"⚙️ <b>Автоматизация</b>\n\nПравил: {len(rules)}",
         parse_mode="HTML",
         reply_markup=automation_menu(callback_data.bot_id, rules),
+    )
+
+
+@router.callback_query(AutoCb.filter(F.action == "delete_confirm"))
+async def cb_auto_delete_confirm(
+    callback: CallbackQuery, callback_data: AutoCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    rules = await db.get_automation_rules(pool, callback_data.bot_id)
+    rule = next((r for r in rules if r["id"] == callback_data.rule_id), None)
+    safe_name = (
+        rule["name"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        if rule
+        else str(callback_data.rule_id)
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Да, удалить",
+        callback_data=AutoCb(action="delete", bot_id=callback_data.bot_id, rule_id=callback_data.rule_id),
+    )
+    kb.button(
+        text="◀️ Отмена",
+        callback_data=AutoCb(action="view", bot_id=callback_data.bot_id, rule_id=callback_data.rule_id),
+    )
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"⚠️ <b>Подтвердите удаление правила</b>\n\n"
+        f"Правило: <b>{safe_name}</b>\n\n"
+        "Правило будет удалено без возможности восстановления.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
