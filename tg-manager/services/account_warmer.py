@@ -87,7 +87,7 @@ async def create_warmup_plan(
 
 async def get_active_plans(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     rows = await pool.fetch(
-        """SELECT wp.*, a.phone, a.first_name
+        """SELECT wp.*, a.phone, a.first_name, a.trust_score
            FROM account_warmup_plans wp
            JOIN tg_accounts a ON a.id = wp.account_id
            WHERE wp.owner_id=$1 AND wp.status='active'
