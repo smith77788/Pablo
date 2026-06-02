@@ -380,7 +380,10 @@ async def cb_group_list_acc(
 
     if not groups:
         await callback.message.edit_text(
-            "📋 У этого аккаунта нет групп.",
+            "📋 <b>Мои группы</b>\n\n"
+            "⚠️ У этого аккаунта нет групп в Telegram.\n\n"
+            "💡 Создайте первую группу через <b>➕ Создать группу</b> "
+            "или подключите существующие через <b>📥 Импорт из Telegram</b>.",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -448,7 +451,10 @@ async def cb_group_members_acc(
 
     if not groups:
         await callback.message.edit_text(
-            "📋 У этого аккаунта нет групп.",
+            "👥 <b>Участники групп</b>\n\n"
+            "⚠️ У этого аккаунта нет групп в Telegram.\n\n"
+            "💡 Создайте первую группу через <b>➕ Создать группу</b> "
+            "или подключите существующие через <b>📥 Импорт из Telegram</b>.",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -599,7 +605,10 @@ async def cb_group_import_acc(
     ]
     if not groups:
         await callback.message.edit_text(
-            "ℹ️ У этого аккаунта нет групп в Telegram.",
+            "📥 <b>Импорт групп</b>\n\n"
+            "ℹ️ У этого аккаунта нет групп в Telegram.\n\n"
+            "💡 Чтобы появились группы — создайте новую через <b>➕ Создать группу</b> "
+            "или вступите в существующие группы через этот аккаунт в Telegram.",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

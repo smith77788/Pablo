@@ -53,16 +53,32 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 
 @router.callback_query(BulkCb.filter(F.action == "menu"))
 async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-
     await callback.answer()
-    total = len(await db.get_bots(pool, callback.from_user.id))
+    try:
+        bots = await db.get_bots(pool, callback.from_user.id)
+    except Exception:
+        bots = []
+    total = len(bots)
+    if total == 0:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🤖 Перейти к ботам", callback_data="bots_list")
+        kb.button(text="◀️ Назад", callback_data="bm_main")
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "📦 <b>Массовые операции</b>\n\n"
+            "⚠️ У вас пока нет ботов.\n\n"
+            "Добавьте хотя бы одного бота в разделе 🤖 Мои боты, "
+            "чтобы выполнять массовые операции.",
+            parse_mode="HTML",
+            reply_markup=bulk_menu(),
+        )
+        return
     await callback.message.edit_text(
         f"📦 <b>Массовые операции</b>\n\nБотов в системе: <b>{total}</b>\n\n"
         "Выбранное действие применяется ко всем ботам сразу:",
         parse_mode="HTML",
         reply_markup=bulk_menu(),
     )
-    await callback.answer()
 
 
 # ── Token check ───────────────────────────────────────────────────────────
@@ -72,12 +88,20 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_check(
     callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-
-    bots = await db.get_bots(pool, callback.from_user.id)
-    if not bots:
-        await callback.answer("Нет ботов для проверки.", show_alert=True)
-        return
     await callback.answer()
+    try:
+        bots = await db.get_bots(pool, callback.from_user.id)
+    except Exception:
+        bots = []
+    if not bots:
+        await callback.message.edit_text(
+            "📦 <b>Проверка токенов</b>\n\n"
+            "⚠️ Нет ботов для проверки.\n\n"
+            "Добавьте бота в разделе 🤖 Мои боты.",
+            parse_mode="HTML",
+            reply_markup=bulk_menu(),
+        )
+        return
 
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
 
@@ -102,7 +126,6 @@ async def cb_check(
         text += f"\n…и ещё {len(lines) - 50}"
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=bulk_menu())
-    await callback.answer()
 
 
 # ── Bulk name (default) ───────────────────────────────────────────────────
@@ -129,9 +152,13 @@ async def msg_bulk_name(
     name = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_name, name
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_name, name
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
         parse_mode="HTML",
@@ -179,9 +206,13 @@ async def msg_bulk_localized_name(
     name = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_name, name, lang
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_name, name, lang
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
         parse_mode="HTML",
@@ -213,9 +244,13 @@ async def msg_bulk_desc(
     desc = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_description, desc
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_description, desc
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, "Описание обновлено"),
         parse_mode="HTML",
@@ -259,9 +294,13 @@ async def msg_bulk_localized_desc(
     desc = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_description, desc, lang
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_description, desc, lang
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Описание [{lang or 'default'}]"),
         parse_mode="HTML",
@@ -293,9 +332,13 @@ async def msg_bulk_short(
     short = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_short_description, short
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_short_description, short
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, "Краткое описание обновлено"),
         parse_mode="HTML",
@@ -339,9 +382,13 @@ async def msg_bulk_localized_short(
     short = message.text.strip()
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_short_description, short, lang
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_short_description, short, lang
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Краткое [{lang or 'default'}]"),
         parse_mode="HTML",
@@ -385,9 +432,13 @@ async def msg_bulk_commands(
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю команды ко всем ботам…")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_my_commands, commands, ""
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_my_commands, commands, ""
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, "Команды установлены"),
         parse_mode="HTML",
@@ -445,9 +496,13 @@ async def msg_bulk_localized_commands(
         return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам…")
-    ok, fail, total = await _apply_all(
-        pool, message.from_user.id, http, bot_api.set_my_commands, commands, lang
-    )
+    try:
+        ok, fail, total = await _apply_all(
+            pool, message.from_user.id, http, bot_api.set_my_commands, commands, lang
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}", reply_markup=bulk_menu())
+        return
     await msg.edit_text(
         _result_text(ok, fail, total, f"Команды [{lang or 'default'}]"),
         parse_mode="HTML",
@@ -500,14 +555,17 @@ async def msg_import_tokens(
         if isinstance(info, Exception) or not info:
             failed.append(f"❌ {token[:25]}…")
             continue
-        ok = await db.add_bot(
-            pool,
-            token=token,
-            bot_id=info["id"],
-            username=info.get("username", ""),
-            first_name=info.get("first_name", ""),
-            added_by=message.from_user.id,
-        )
+        try:
+            ok = await db.add_bot(
+                pool,
+                token=token,
+                bot_id=info["id"],
+                username=info.get("username", ""),
+                first_name=info.get("first_name", ""),
+                added_by=message.from_user.id,
+            )
+        except Exception:
+            ok = False
         label = f"@{info.get('username') or info.get('first_name', str(info['id']))}"
         if ok:
             added.append(f"✅ {label}")

@@ -84,8 +84,10 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not rows:
         lines.append(
-            "Нет кластеров. Назначьте кластер боту через раздел <b>Мои боты</b>."
+            "Нет кластеров.\n\n"
+            "Создайте кластер через <b>➕ Создать кластер</b> и назначьте ботов через раздел <b>Мои боты</b>."
         )
+        kb.button(text="➕ Создать кластер", callback_data=ClustMCb(action="create"))
     else:
         for row in rows:
             cluster_name = row["cluster"]
@@ -132,7 +134,10 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     lines = ["📊 <b>Статистика кластеров</b>\n"]
     if not rows:
-        lines.append("Нет кластеров с ботами.")
+        lines.append(
+            "Нет кластеров с ботами.\n\n"
+            "Создайте кластер и назначьте ботов через раздел <b>Мои боты</b>."
+        )
     else:
         for row in rows:
             lines.append(
@@ -246,9 +251,13 @@ async def cb_cluster_view(
 
     lines = [f"🔗 <b>Кластер: {_html.escape(cluster_name)}</b>\n"]
     kb = InlineKeyboardBuilder()
+    bot_count = len(rows)
 
     if not rows:
-        lines.append("Нет ботов в этом кластере.")
+        lines.append(
+            "Нет ботов в этом кластере.\n\n"
+            "Назначьте ботов через раздел <b>Мои боты → Редактировать</b>."
+        )
     else:
         for bot_rec in rows:
             name = (
@@ -259,6 +268,10 @@ async def cb_cluster_view(
     kb.button(
         text="📢 Рассылка по кластеру",
         callback_data=NetBcCb(action="menu", segment="cluster"),
+    )
+    kb.button(
+        text="🗑 Удалить кластер",
+        callback_data=ClustMCb(action="delete_confirm", cluster_name=cluster_name),
     )
     kb.button(text="◀️ Назад", callback_data=ClustMCb(action="list"))
     kb.adjust(1)
@@ -287,4 +300,73 @@ async def cb_cluster_broadcast(
         .button(text="◀️ Назад", callback_data=ClustMCb(action="list"))
         .adjust(1)
         .as_markup(),
+    )
+
+
+# ── Delete cluster — confirm ───────────────────────────────────────────────────
+
+
+@router.callback_query(ClustMCb.filter(F.action == "delete_confirm"))
+async def cb_cluster_delete_confirm(
+    callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    cluster_name = callback_data.cluster_name or ""
+
+    # Count bots assigned to this cluster
+    bot_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
+        user_id,
+        cluster_name,
+    )
+
+    warning = ""
+    if bot_count:
+        warning = (
+            f"\n\n⚠️ <b>Внимание:</b> в кластере {bot_count} бот(ов). "
+            "После удаления они останутся активными, но потеряют привязку к кластеру."
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🗑 Да, удалить",
+        callback_data=ClustMCb(action="delete", cluster_name=cluster_name),
+    )
+    kb.button(
+        text="◀️ Отмена",
+        callback_data=ClustMCb(action="view", cluster_name=cluster_name),
+    )
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🗑 <b>Удалить кластер «{_html.escape(cluster_name)}»?</b>{warning}\n\n"
+        "Это действие необратимо.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Delete cluster — execute ───────────────────────────────────────────────────
+
+
+@router.callback_query(ClustMCb.filter(F.action == "delete"))
+async def cb_cluster_delete(
+    callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    cluster_name = callback_data.cluster_name or ""
+
+    # Detach bots from cluster before deleting
+    await pool.execute(
+        "UPDATE managed_bots SET cluster=NULL WHERE added_by=$1 AND cluster=$2",
+        user_id,
+        cluster_name,
+    )
+
+    await callback.message.edit_text(
+        f"✅ Кластер <b>{_html.escape(cluster_name)}</b> удалён.",
+        parse_mode="HTML",
+        reply_markup=_menu_kb().as_markup(),
     )

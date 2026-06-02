@@ -107,6 +107,7 @@ async def cb_swarm_toggle(
     except Exception:
         log_exc_swallow(log, "cb_swarm_toggle: get_system_mode failed")
         mode = "manual"
+    await callback.answer("✅ Статус обновлён")
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
         f"Статус: {swarm_status}\n"
@@ -116,7 +117,6 @@ async def cb_swarm_toggle(
         parse_mode="HTML",
         reply_markup=swarm_menu(callback_data.bot_id, row2),
     )
-    await callback.answer("✅ Статус обновлён")
 
 
 @router.callback_query(SwarmCb.filter(F.action == "stats"))
@@ -154,6 +154,13 @@ async def cb_swarm_stats(
     conv = float(metrics["conversion_rate"] or 0) if metrics else 0.0
     ret_d1 = float(metrics["retention_d1"] or 0) if metrics else 0.0
 
+    no_data_hint = (
+        "\n\n💡 <i>Пока нет данных о роутинге. Включите Swarm и подождите, "
+        "пока пользователи начнут взаимодействовать с ботом.</i>"
+        if stats.get("total", 0) == 0
+        else ""
+    )
+
     await callback.message.edit_text(
         f"📊 <b>Routing Stats — {label}</b>\n\n"
         f"🌐 Режим: <b>{mode.upper()}</b>\n"
@@ -167,7 +174,8 @@ async def cb_swarm_stats(
         f"  Score: {round(score, 3)}\n"
         f"  CTR: {round(ctr * 100, 1)}%\n"
         f"  Conversion: {round(conv * 100, 1)}%\n"
-        f"  D1 Retention: {round(ret_d1 * 100, 1)}%",
+        f"  D1 Retention: {round(ret_d1 * 100, 1)}%"
+        f"{no_data_hint}",
         parse_mode="HTML",
         reply_markup=back_to_bot(callback_data.bot_id),
     )
@@ -183,6 +191,15 @@ async def cb_swarm_role(
         await callback.answer("Неверная роль", show_alert=True)
         return
     try:
+        # Check current role before updating
+        current_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+        current_role = current_row.get("bot_role", "general") if current_row else None
+        if current_role == role:
+            role_label = ROLE_LABELS.get(role, role)
+            await callback.answer(
+                f"Роль уже установлена: {role_label}", show_alert=True
+            )
+            return
         await db.set_bot_role(pool, callback_data.bot_id, role)
         log.info("swarm role: bot=%s role=%s user=%s",
                  callback_data.bot_id, role, callback.from_user.id)
@@ -201,6 +218,7 @@ async def cb_swarm_role(
     )
     role_label = ROLE_LABELS.get(role, role)
     mode = await db.get_system_mode(pool)
+    await callback.answer(f"✅ Роль изменена: {role_label}")
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
         f"Статус: {swarm_status}\n"
@@ -210,7 +228,6 @@ async def cb_swarm_role(
         parse_mode="HTML",
         reply_markup=swarm_menu(callback_data.bot_id, row),
     )
-    await callback.answer(f"✅ Роль: {role_label}")
 
 
 MODE_DESCRIPTIONS = {
@@ -284,8 +301,8 @@ async def cb_change_mode(
     if not row:
         await callback.answer("Режим изменён.", show_alert=True)
         return
-    await callback.answer(f"✅ Режим изменён: {mode.upper()}")
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+    await callback.answer(f"✅ Режим изменён: {mode.upper()}")
     await callback.message.edit_text(
         f"🧬 <b>Swarm — {label}</b>\n\n"
         f"Статус: {'🟢 Включён' if row.get('swarm_enabled') else '⚫ Отключён'}\n"

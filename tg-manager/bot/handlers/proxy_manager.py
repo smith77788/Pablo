@@ -145,7 +145,13 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
 
     if not rows:
-        lines.append("Нет добавленных прокси.")
+        lines.append(
+            "Нет добавленных прокси.\n\n"
+            "Нажмите <b>➕ Добавить прокси</b>, чтобы добавить первый прокси-сервер.\n"
+            "Поддерживаются форматы: <code>socks5://host:port</code>, "
+            "<code>socks5://user:pass@host:port</code>, <code>http://host:port</code>."
+        )
+        kb.button(text="➕ Добавить прокси", callback_data=ProxyCb(action="add"))
     else:
         for row in rows:
             if row["is_alive"] is True:
@@ -317,7 +323,9 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not rows:
         await callback.message.edit_text(
-            "📋 Нет активных прокси для проверки.",
+            "📋 Нет активных прокси для проверки.\n\n"
+            "Добавьте прокси через <b>➕ Добавить прокси</b>.",
+            parse_mode="HTML",
             reply_markup=_menu_kb().as_markup(),
         )
         return
