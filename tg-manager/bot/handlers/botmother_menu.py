@@ -424,7 +424,7 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
             if parts:
                 ops_line = "\n\n<i>" + " · ".join(parts) + "</i>"
     except Exception:
-        pass
+        log_exc_swallow(log, "botmother_menu: ops status line fetch failed")
 
     await _edit(
         callback,

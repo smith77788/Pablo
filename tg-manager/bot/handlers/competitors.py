@@ -153,10 +153,12 @@ async def comp_skip_label(
     await state.clear()
     username = data.get("username", "")
     if not username:
+        err_kb = InlineKeyboardBuilder()
+        err_kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
         await safe_edit(
             cb,
             "⚠️ Ошибка: данные не найдены. Начните заново.",
-            reply_markup=_back_to_list_kb(),
+            reply_markup=err_kb.as_markup(),
         )
         return
     await _save_competitor(cb, pool, username, None)
@@ -196,13 +198,6 @@ async def comp_got_label(
         )
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}", reply_markup=kb.as_markup())
-
-
-def _back_to_list_kb() -> "InlineKeyboardMarkup":  # type: ignore[name-defined]
-    from aiogram.types import InlineKeyboardMarkup
-    kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ К списку", callback_data=CompCb(action="menu"))
-    return kb.as_markup()
 
 
 async def _save_competitor(
