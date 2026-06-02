@@ -75,6 +75,7 @@ def _admin_main_kb():
     kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
+    kb.button(text="🐛 Отчёты об ошибках",         callback_data="adm:error_reports")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
     kb.adjust(2)
     return kb.as_markup()
@@ -453,6 +454,34 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "ON CONFLICT(admin_id) DO UPDATE SET state='cleanup',data=''",
             callback.from_user.id,
         )
+
+    elif action == "error_reports":
+        await _adm_error_reports(callback, pool, page=0, status="new")
+
+    elif action.startswith("error_reports:"):
+        # Формат: error_reports:page:status  или  error_report:ID
+        parts = action.split(":")
+        if len(parts) == 3:
+            page = int(parts[1])
+            status = parts[2]
+            await _adm_error_reports(callback, pool, page=page, status=status)
+        else:
+            await callback.answer("Некорректный формат.", show_alert=True)
+
+    elif action.startswith("error_report:"):
+        parts = action.split(":")
+        report_id = int(parts[1])
+        await _adm_show_error_report(callback, pool, report_id)
+
+    elif action.startswith("err_status:"):
+        # Формат: err_status:ID:new_status
+        parts = action.split(":")
+        if len(parts) >= 3:
+            report_id = int(parts[1])
+            new_status = parts[2]
+            await _adm_set_error_report_status(callback, pool, report_id, new_status)
+        else:
+            await callback.answer("Некорректный формат.", show_alert=True)
 
     elif action == "audit_log":
         try:
@@ -1252,6 +1281,170 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb()
     )
+
+
+# ── Error Reports Admin UI ────────────────────────────────────────────────────
+
+_ERR_STATUS_LABELS: dict[str, str] = {
+    "new":       "🆕 Новые",
+    "viewing":   "👁 Просматриваются",
+    "fixing":    "🔧 В работе",
+    "fixed":     "✅ Исправлены",
+    "duplicate": "🔄 Дубликаты",
+}
+_PAGE_SIZE = 8
+
+
+def _error_reports_kb(
+    reports: list,
+    page: int,
+    status: str,
+    total: int,
+) -> object:
+    kb = InlineKeyboardBuilder()
+
+    # Фильтр по статусу
+    for st, label in _ERR_STATUS_LABELS.items():
+        marker = "▶ " if st == status else ""
+        kb.button(text=f"{marker}{label}", callback_data=f"adm:error_reports:{page}:{st}")
+    kb.adjust(3)
+
+    # Список отчётов
+    for r in reports:
+        dt = r["created_at"].strftime("%d.%m %H:%M") if r.get("created_at") else "?"
+        user_label = f"@{r['username']}" if r.get("username") else f"id{r['user_id']}"
+        desc_short = (r["description"] or "")[:28].replace("\n", " ")
+        kb.button(
+            text=f"#{r['id']} {user_label} — {desc_short}",
+            callback_data=f"adm:error_report:{r['id']}",
+        )
+    kb.adjust(1)
+
+    # Пагинация
+    nav_btns: list[dict] = []
+    if page > 0:
+        nav_btns.append({"text": "◀ Пред.", "callback_data": f"adm:error_reports:{page - 1}:{status}"})
+    if (page + 1) * _PAGE_SIZE < total:
+        nav_btns.append({"text": "След. ▶", "callback_data": f"adm:error_reports:{page + 1}:{status}"})
+    for btn in nav_btns:
+        kb.button(text=btn["text"], callback_data=btn["callback_data"])
+    if nav_btns:
+        kb.adjust(len(nav_btns))
+
+    kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
+    return kb.as_markup()
+
+
+async def _adm_error_reports(
+    callback: CallbackQuery, pool: asyncpg.Pool, page: int, status: str
+) -> None:
+    """Показать список отчётов об ошибках."""
+    offset = page * _PAGE_SIZE
+    try:
+        reports = await db.get_error_reports(pool, status=status, limit=_PAGE_SIZE, offset=offset)
+        # Общий счётчик для пагинации
+        if status == "all":
+            total = await pool.fetchval("SELECT COUNT(*) FROM error_reports") or 0
+        else:
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM error_reports WHERE status=$1", status
+            ) or 0
+    except Exception as e:
+        log_exc_swallow(log, "Ошибка загрузки error_reports")
+        await callback.message.edit_text(
+            f"❌ Не удалось загрузить отчёты: <code>{e}</code>",
+            parse_mode="HTML", reply_markup=_back_kb(),
+        )
+        return
+
+    status_label = _ERR_STATUS_LABELS.get(status, status)
+    lines = [
+        f"🐛 <b>Отчёты об ошибках — {status_label}</b>",
+        f"Всего: <b>{total}</b> · Страница {page + 1}",
+        "",
+    ]
+    if not reports:
+        lines.append("Нет отчётов с таким статусом.")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_error_reports_kb(reports, page, status, total),
+    )
+
+
+async def _adm_show_error_report(
+    callback: CallbackQuery, pool: asyncpg.Pool, report_id: int
+) -> None:
+    """Показать детальный вид одного отчёта об ошибке."""
+    try:
+        report = await db.get_error_report(pool, report_id)
+    except Exception as e:
+        log_exc_swallow(log, f"Ошибка загрузки отчёта #{report_id}")
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        return
+
+    if not report:
+        await callback.answer("Отчёт не найден.", show_alert=True)
+        return
+
+    dt = report["created_at"].strftime("%d.%m.%Y %H:%M") if report.get("created_at") else "?"
+    user_label = f"@{report['username']}" if report.get("username") else f"id{report['user_id']}"
+    status_label = _ERR_STATUS_LABELS.get(report["status"], report["status"])
+    notes_block = f"\n📝 <b>Заметки:</b> {report['notes']}" if report.get("notes") else ""
+
+    text = (
+        f"🐛 <b>Отчёт #{report['id']}</b>\n\n"
+        f"👤 Пользователь: {user_label} (<code>{report['user_id']}</code>)\n"
+        f"📅 Дата: {dt}\n"
+        f"🔖 Статус: {status_label}\n"
+        f"{notes_block}\n\n"
+        f"📋 <b>Описание:</b>\n{report['description']}"
+    )
+
+    kb = InlineKeyboardBuilder()
+    # Кнопки смены статуса
+    for st, label in _ERR_STATUS_LABELS.items():
+        if st != report["status"]:
+            kb.button(text=f"→ {label}", callback_data=f"adm:err_status:{report_id}:{st}")
+    kb.adjust(2)
+    kb.button(text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new")
+    kb.button(text="◀️ Главное меню",     callback_data="adm:main")
+    kb.adjust(1)
+
+    # Если есть скриншот — отправляем фото отдельно, затем редактируем сообщение
+    if report.get("screenshot_id"):
+        try:
+            await callback.message.answer_photo(
+                photo=report["screenshot_id"],
+                caption=f"📸 Скриншот к отчёту #{report['id']}",
+            )
+        except Exception:
+            log_exc_swallow(log, f"Не удалось отправить скриншот для отчёта #{report_id}")
+        text += "\n\n📸 Скриншот отправлен выше."
+
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+async def _adm_set_error_report_status(
+    callback: CallbackQuery, pool: asyncpg.Pool, report_id: int, new_status: str
+) -> None:
+    """Изменить статус отчёта об ошибке."""
+    try:
+        ok = await db.update_error_report_status(pool, report_id, new_status)
+    except Exception as e:
+        log_exc_swallow(log, f"Ошибка обновления статуса отчёта #{report_id}")
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        return
+
+    if not ok:
+        await callback.answer("Отчёт не найден.", show_alert=True)
+        return
+
+    label = _ERR_STATUS_LABELS.get(new_status, new_status)
+    await callback.answer(f"✅ Статус изменён: {label}", show_alert=False)
+    # Перезагрузить детальный вид
+    await _adm_show_error_report(callback, pool, report_id)
 
 
 # ── New user tracker (called from start.py or inline) ─────────────────────────

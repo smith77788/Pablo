@@ -3086,3 +3086,131 @@ async def get_pressure_cache(pool: asyncpg.Pool, owner_id: int) -> dict | None:
         "breakdown": breakdown,
         "computed_at": row["computed_at"],
     }
+
+
+# ── Strike Email Accounts ─────────────────────────────────────────────────────
+
+async def get_strike_email_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
+    """Получить все email-аккаунты пользователя для Strike-репортов."""
+    return await pool.fetch(
+        """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at, added_at
+           FROM strike_email_accounts
+           WHERE owner_id=$1
+           ORDER BY added_at""",
+        owner_id,
+    )
+
+
+async def add_strike_email_account(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    email: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_pass: str,
+) -> int:
+    """Добавить email-аккаунт (или обновить если уже существует). Возвращает id."""
+    row = await pool.fetchrow(
+        """INSERT INTO strike_email_accounts
+               (owner_id, email, smtp_host, smtp_port, smtp_pass)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (owner_id, email)
+           DO UPDATE SET smtp_host=$3, smtp_port=$4, smtp_pass=$5,
+                         is_active=TRUE, fail_count=0
+           RETURNING id""",
+        owner_id, email, smtp_host, smtp_port, smtp_pass,
+    )
+    return row["id"]
+
+
+async def delete_strike_email_account(
+    pool: asyncpg.Pool, owner_id: int, email_id: int
+) -> bool:
+    """Удалить email-аккаунт. Возвращает True если запись была найдена и удалена."""
+    result = await pool.execute(
+        "DELETE FROM strike_email_accounts WHERE id=$1 AND owner_id=$2",
+        email_id, owner_id,
+    )
+    return result != "DELETE 0"
+
+
+async def update_strike_email_fail_count(
+    pool: asyncpg.Pool, email_id: int, increment: int = 1
+) -> None:
+    """Увеличить счётчик ошибок для email-аккаунта."""
+    await pool.execute(
+        """UPDATE strike_email_accounts
+           SET fail_count = fail_count + $2,
+               last_used_at = NOW()
+           WHERE id=$1""",
+        email_id, increment,
+    )
+
+
+# ── Error Reports ─────────────────────────────────────────────────────────────
+
+async def get_error_reports(
+    pool: asyncpg.Pool,
+    status: str | None = "new",
+    limit: int = 10,
+    offset: int = 0,
+) -> list[asyncpg.Record]:
+    """Получить список отчётов об ошибках для администратора с пагинацией.
+
+    Если status=None — возвращает отчёты всех статусов.
+    """
+    if status is None:
+        rows = await pool.fetch(
+            """SELECT er.id, er.user_id, er.description, er.screenshot_id,
+                      er.status, er.notes, er.created_at,
+                      pu.username, pu.first_name
+               FROM error_reports er
+               LEFT JOIN platform_users pu ON pu.user_id = er.user_id
+               ORDER BY er.created_at DESC
+               LIMIT $1 OFFSET $2""",
+            limit, offset,
+        )
+    else:
+        rows = await pool.fetch(
+            """SELECT er.id, er.user_id, er.description, er.screenshot_id,
+                      er.status, er.notes, er.created_at,
+                      pu.username, pu.first_name
+               FROM error_reports er
+               LEFT JOIN platform_users pu ON pu.user_id = er.user_id
+               WHERE er.status = $1
+               ORDER BY er.created_at DESC
+               LIMIT $2 OFFSET $3""",
+            status, limit, offset,
+        )
+    return rows
+
+
+async def get_error_report(pool: asyncpg.Pool, report_id: int) -> asyncpg.Record | None:
+    """Получить один отчёт об ошибке по ID."""
+    return await pool.fetchrow(
+        """SELECT er.id, er.user_id, er.description, er.screenshot_id,
+                  er.status, er.notes, er.assignee_id, er.created_at, er.updated_at,
+                  pu.username, pu.first_name
+           FROM error_reports er
+           LEFT JOIN platform_users pu ON pu.user_id = er.user_id
+           WHERE er.id = $1""",
+        report_id,
+    )
+
+
+async def update_error_report_status(
+    pool: asyncpg.Pool,
+    report_id: int,
+    status: str,
+    notes: str | None = None,
+) -> bool:
+    """Обновить статус отчёта об ошибке. Возвращает True если запись найдена."""
+    result = await pool.execute(
+        """UPDATE error_reports
+           SET status=$2,
+               notes=COALESCE($3, notes),
+               updated_at=NOW()
+           WHERE id=$1""",
+        report_id, status, notes,
+    )
+    return result != "UPDATE 0"
