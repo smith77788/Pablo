@@ -1019,9 +1019,16 @@ async def cb_bulk_post_chans_start(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_menu"))
+        empty_kb.adjust(1)
         await callback.message.edit_text(
-            "❌ Нет подключённых аккаунтов.\n\n/ops → Подключить аккаунт",
-            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для публикации постов в каналы нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -1053,7 +1060,9 @@ async def cb_bulk_post_chans_acc(
     channels = [d for d in (dialogs or []) if d.get("type") in ("channel", "megagroup", "supergroup")]
     if not channels:
         await callback.message.edit_text(
-            "❌ У этого аккаунта нет каналов/групп.",
+            "ℹ️ <b>Нет каналов у этого аккаунта</b>\n\n"
+            "Этот аккаунт не состоит ни в одном канале или группе.\n\n"
+            "Вступите в канал через 🔗 <b>Вступить</b> или создайте новый через 📢 <b>Создать канал</b>.",
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
@@ -3097,9 +3106,16 @@ async def cb_bulk_report_start(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов. Добавьте: /accounts",
-            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для массовой подачи жалоб нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
         )
         return
     await state.update_data(active_ids=[a["id"] for a in active])
