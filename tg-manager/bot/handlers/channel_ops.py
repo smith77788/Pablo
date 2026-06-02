@@ -1241,7 +1241,7 @@ async def cb_leave_pick_account(
 ) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
-        await callback.message.edit_text("🔒 /subscription")
+        await callback.message.edit_text("🔒 /subscription", reply_markup=_back_kb().as_markup())
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
@@ -1317,7 +1317,7 @@ async def cb_post_pick_account(
 ) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
-        await callback.message.edit_text("🔒 /subscription")
+        await callback.message.edit_text("🔒 /subscription", reply_markup=_back_kb().as_markup())
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
@@ -2435,7 +2435,7 @@ async def cb_profile_pick_account(
 ) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
-        await callback.message.edit_text("🔒 /subscription")
+        await callback.message.edit_text("🔒 /subscription", reply_markup=_back_kb().as_markup())
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
@@ -2687,7 +2687,7 @@ async def cb_react_pick_account(
 ) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
-        await callback.message.edit_text("🔒 /subscription")
+        await callback.message.edit_text("🔒 /subscription", reply_markup=_back_kb().as_markup())
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
