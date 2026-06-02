@@ -34,7 +34,13 @@ def _build_text_and_kb(user_id: int):
     kb = InlineKeyboardBuilder()
 
     if not tasks:
-        text = "✅ <b>Активных задач нет</b>\n\nВсе операции завершены."
+        text = (
+            "✅ <b>Активных задач нет</b>\n\n"
+            "Все фоновые операции завершены.\n\n"
+            "<i>ℹ️ Операции из очереди (bulk join/leave/publish) "
+            "продолжают выполняться через op_worker и видны в "
+            "📋 Очередь операций.</i>"
+        )
     else:
         lines = [f"⚡ <b>Активные задачи</b> ({len(tasks)}):\n"]
         for entry in tasks:
@@ -47,6 +53,10 @@ def _build_text_and_kb(user_id: int):
                 callback_data=TaskCb(action="cancel", task_id=entry.task_id),
             )
         text = "\n".join(lines)
+        text += (
+            "\n\n<i>♻️ После перезапуска бота задачи из op_worker "
+            "возобновятся автоматически. Прогрев — в течение 1 часа.</i>"
+        )
         if len(tasks) > 1:
             kb.button(text="🛑 Отменить всё", callback_data=TaskCb(action="cancel_all"))
 

@@ -226,6 +226,24 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
         lines.append("📊 <b>Изменённые файлы:</b>")
         lines.append(f"<pre>{diff_preview}</pre>")
 
+    # Pending/running ops that will auto-resume
+    try:
+        resume_ops = await pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue WHERE status IN ('pending','running')"
+        ) or 0
+        warmup_plans = await pool.fetchval(
+            "SELECT COUNT(*) FROM account_warmup_plans WHERE status='active'"
+        ) or 0
+        if resume_ops or warmup_plans:
+            lines.append("")
+            lines.append("♻️ <b>Авто-возобновление:</b>")
+            if resume_ops:
+                lines.append(f"  📋 Операций в очереди: <b>{resume_ops}</b> — возобновятся через ~30с")
+            if warmup_plans:
+                lines.append(f"  🌡 Планов прогрева: <b>{warmup_plans}</b> — подхватятся в течение 1ч")
+    except Exception:
+        pass
+
     lines.append("")
     lines.append(f"🤖 <i>BotMother OS — Build {BUILD_VERSION}</i>")
 

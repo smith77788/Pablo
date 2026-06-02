@@ -88,7 +88,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="🗂️ Реестр ассетов",         callback_data=InfraCb(action="asset_registry"))
     kb.button(text="❤️ Здоровье аккаунтов",    callback_data=InfraCb(action="health"))
-    kb.button(text="⚡ Flood Intelligence",      callback_data=InfraCb(action="flood"))
+    kb.button(text="⚡ Флуд-защита и лимиты",    callback_data=InfraCb(action="flood"))
     kb.button(text="📋 Лог операций",            callback_data=InfraCb(action="audit"))
     kb.button(text="📊 Статистика за сегодня",   callback_data=InfraCb(action="daily_stats"))
     kb.button(text="🎯 Возможности аккаунтов",   callback_data=InfraCb(action="capabilities"))
@@ -97,7 +97,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
 
     await callback.message.edit_text(
-        "📊 <b>Infrastructure Analytics</b>\n\n"
+        "📊 <b>Аналитика инфраструктуры</b>\n\n"
         f"🤖 Активных аккаунтов: <b>{acc_total}</b>\n"
         f"⚡ Flood событий (24ч): <b>{floods_24h}</b>\n"
         f"⚙️ Операций сегодня: <b>{ops_today}</b>\n"

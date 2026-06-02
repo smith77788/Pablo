@@ -1,5 +1,6 @@
 """Мониторинг конкурирующих каналов."""
 
+import html as _html
 import re
 import asyncio
 import logging
@@ -67,9 +68,10 @@ async def comp_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) ->
             r["last_checked"].strftime("%d.%m %H:%M") if r["last_checked"] else "—"
         )
         members_str = _members_trend(r["last_members"], r["prev_members"])
-        label = r["label"] or r["username"]
+        label = _html.escape(r["label"] or r["username"])
+        username = _html.escape(r["username"] or "")
         lines.append(
-            f"• @{r['username']} <i>({label})</i>\n"
+            f"• @{username} <i>({label})</i>\n"
             f"  Подписчики: <b>{members_str}</b> | обновлено: {checked}"
         )
         kb.button(

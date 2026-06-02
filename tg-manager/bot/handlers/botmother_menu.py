@@ -1904,9 +1904,24 @@ async def cb_behavioral(
             user_id,
         )
         if not rows:
-            text = "<b>⚠️ Аномалии</b>\n\nАномалий не обнаружено. Сканирование выполняется каждые 15 минут."
+            text = "<b>⚠️ Аномалии</b>\n\nАномалий не обнаружено.\n<i>Сканирование каждые 15 минут.</i>"
         else:
-            lines = ["<b>⚠️ Аномалии поведенческого слоя</b>\n"]
+            # Resolve entity names for anomaly rows
+            _anom_bot_ids  = [r["entity_id"] for r in rows if r["entity_type"] == "bot"]
+            _anom_chan_ids  = [r["entity_id"] for r in rows if r["entity_type"] == "channel"]
+            _anom_kw_ids   = [r["entity_id"] for r in rows if r["entity_type"] == "keyword"]
+            _anom_names: dict[tuple, str] = {}
+            if _anom_bot_ids:
+                for b in await pool.fetch("SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm FROM managed_bots WHERE bot_id = ANY($1)", _anom_bot_ids):
+                    _anom_names[("bot", b["bot_id"])] = f"@{b['nm']}"
+            if _anom_chan_ids:
+                for c in await pool.fetch("SELECT channel_id, COALESCE(username, title, channel_id::text) AS nm FROM managed_channels WHERE channel_id = ANY($1)", _anom_chan_ids):
+                    _anom_names[("channel", c["channel_id"])] = c["nm"]
+            if _anom_kw_ids:
+                for k in await pool.fetch("SELECT id, keyword FROM tracked_keywords WHERE id = ANY($1)", _anom_kw_ids):
+                    _anom_names[("keyword", k["id"])] = k["keyword"]
+
+            _ETYPE_RU = {"menu": "Навигация", "keyword": "Поиск", "bot": "Бот", "channel": "Канал", "account": "Аккаунт"}
             _anom_icon = {
                 "decay_spike":       "📉",
                 "affinity_dropout":  "🔍",
@@ -1915,6 +1930,16 @@ async def cb_behavioral(
                 "pattern_deviation": "📊",
                 "schedule_deviation":"🕐",
             }
+
+            def _resolve_entity(etype: str, eid: int) -> str:
+                nm = _anom_names.get((etype, eid))
+                if nm:
+                    return html.escape(nm)
+                if eid == 0:
+                    return _ETYPE_RU.get(etype, etype)
+                return f"{_ETYPE_RU.get(etype, etype)} #{eid}"
+
+            lines = ["<b>⚠️ Аномалии поведенческого слоя</b>\n"]
             for r in rows:
                 try:
                     raw = r["meta"]
@@ -1924,45 +1949,35 @@ async def cb_behavioral(
                     meta = {}
                 atype = meta.get("type", "unknown")
                 icon = _anom_icon.get(atype, "⚠️")
-                ts = r["occurred_at"].strftime("%m-%d %H:%M") if r["occurred_at"] else "—"
+                ts = r["occurred_at"].strftime("%d.%m %H:%M") if r["occurred_at"] else "—"
+                ename = _resolve_entity(r["entity_type"], r["entity_id"])
                 if atype == "decay_spike":
-                    etype = r["entity_type"]
-                    eid = r["entity_id"]
                     dr = meta.get("decay_rate", 0)
-                    at = meta.get("attention_score", 0)
-                    lines.append(f"{icon} <b>Угасание</b> {etype}#{eid}  dr={dr:.2f} att={at:.1f}  <i>{ts}</i>")
+                    lines.append(f"{icon} <b>Угасание активности</b> — {ename}\n   Скорость угасания: {dr:.2f} | <i>{ts}</i>")
                 elif atype == "affinity_dropout":
                     kw = html.escape(meta.get("keyword", "?"))
                     days = meta.get("days_absent", 0)
-                    aff = meta.get("affinity_score", 0)
-                    lines.append(f"{icon} <b>Брошенный поиск</b> «{kw}»  {days}д без поиска  aff={aff:.1f}  <i>{ts}</i>")
+                    lines.append(f"{icon} <b>Заброшенный поиск</b> — «{kw}»\n   {days} дн. без активности | <i>{ts}</i>")
                 elif atype == "reentry_burst":
                     cnt = meta.get("count", 0)
-                    etype = r["entity_type"]
-                    eid = r["entity_id"]
-                    lines.append(f"{icon} <b>Бурст</b> {etype}#{eid}  ×{cnt} за час  <i>{ts}</i>")
+                    lines.append(f"{icon} <b>Всплеск активности</b> — {ename}\n   {cnt} раз за 1 час | <i>{ts}</i>")
                 elif atype == "velocity_spike":
-                    etype = r["entity_type"]
-                    eid = r["entity_id"]
                     ratio = meta.get("ratio", 0)
                     cur = meta.get("current_hour", 0)
                     avg = meta.get("avg_hourly", 0)
-                    lines.append(f"{icon} <b>Скачок</b> {etype}#{eid}  ×{ratio:.1f}  ({cur}/ч при норме {avg:.0f}/ч)  <i>{ts}</i>")
+                    lines.append(f"{icon} <b>Аномальный темп</b> — {ename}\n   {cur}/ч (норма {avg:.0f}/ч, рост ×{ratio:.1f}) | <i>{ts}</i>")
                 elif atype == "pattern_deviation":
                     subtypes = meta.get("subtypes", [])
-                    etype = r["entity_type"]
-                    eid = r["entity_id"]
-                    sub_str = ", ".join(subtypes)
-                    lines.append(f"{icon} <b>Отклонение</b> {etype}#{eid}  {sub_str}  <i>{ts}</i>")
+                    _sub_labels = {"attention": "внимание", "ecosystem": "экосистема"}
+                    sub_str = ", ".join(_sub_labels.get(s, s) for s in subtypes)
+                    lines.append(f"{icon} <b>Отклонение паттерна</b> — {ename}\n   {sub_str} | <i>{ts}</i>")
                 elif atype == "schedule_deviation":
-                    etype = r["entity_type"]
-                    eid = r["entity_id"]
                     unusual = meta.get("unusual_hour", "?")
                     normal = meta.get("normal_hours", [])
                     normal_str = ", ".join(f"{h}:00" for h in normal[:4])
-                    lines.append(f"{icon} <b>Необычное время</b> {etype}#{eid}  в {unusual}:00 (обычно {normal_str})  <i>{ts}</i>")
+                    lines.append(f"{icon} <b>Необычное время</b> — {ename}\n   {unusual}:00 (обычно {normal_str}) | <i>{ts}</i>")
                 else:
-                    lines.append(f"{icon} {atype}  <i>{ts}</i>")
+                    lines.append(f"{icon} <b>Аномалия</b> — {ename} | <i>{ts}</i>")
             text = "\n".join(lines)
         await _edit(callback, text, _behavioral_kb(sub))
         return
@@ -2056,13 +2071,26 @@ async def cb_behavioral(
                 for k in kwname_rows:
                     names[("keyword", k["id"])] = k["keyword"]
 
+            _ETYPE_LABELS = {
+                "menu": "📱 Навигация",
+                "keyword": "🔍 Поиск",
+                "bot": "🤖 Бот",
+                "channel": "📡 Канал",
+                "account": "👤 Аккаунт",
+            }
             lines = [f"<b>{title}</b>\n"]
             for r in rows:
                 etype = r["entity_type"]
                 eid = r["entity_id"]
                 score_val = r.get(label, 0) or 0
-                entity_name = names.get((etype, eid), f"{etype} #{eid}")
-                lines.append(f"• {html.escape(entity_name)} — {score_val:.1f}")
+                raw_name = names.get((etype, eid))
+                if raw_name:
+                    entity_name = raw_name
+                elif eid == 0:
+                    entity_name = _ETYPE_LABELS.get(etype, etype)
+                else:
+                    entity_name = f"{_ETYPE_LABELS.get(etype, etype)} #{eid}"
+                lines.append(f"• {html.escape(entity_name)} — <b>{score_val:.1f}</b>")
             text = "\n".join(lines)
 
     await _edit(callback, text, _behavioral_kb(sub))
