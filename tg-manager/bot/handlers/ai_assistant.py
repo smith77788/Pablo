@@ -441,7 +441,7 @@ async def _call_ai_providers(
         client = AsyncOpenAI(
             api_key=provider.api_key,
             base_url=provider.base_url,
-            timeout=60.0,
+            timeout=25.0,
         )
         current_messages = list(base_messages)
         try:
@@ -634,14 +634,26 @@ async def _process_ai_turn(
     try:
         reply = await asyncio.wait_for(
             _call_ai_providers(messages, pool, message.from_user.id, http),
-            timeout=120.0,
+            timeout=75.0,
         )
     except asyncio.TimeoutError:
-        await thinking.edit_text(
-            "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
-            "Все модели заняты или перегружены. Попробуйте через 1-2 минуты.",
-            parse_mode="HTML",
-        )
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
+        kb.button(text="❌ Выйти", callback_data=AiCb(action="stop"))
+        kb.adjust(2)
+        try:
+            await thinking.edit_text(
+                "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
+                "Все модели заняты или перегружены. Попробуйте ещё раз.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            await message.answer(
+                "⏰ <b>AI-ассистент не ответил вовремя.</b> Попробуйте ещё раз.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
         return
 
     if isinstance(reply, dict) and reply.get("__pending__"):
@@ -1056,13 +1068,17 @@ async def cb_ai_retry(
     try:
         reply = await asyncio.wait_for(
             _call_ai_providers(retry_messages, pool, callback.from_user.id, http),
-            timeout=120.0,
+            timeout=75.0,
         )
     except asyncio.TimeoutError:
+        kb_to = InlineKeyboardBuilder()
+        kb_to.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
+        kb_to.button(text="❌ Выйти", callback_data=AiCb(action="stop"))
+        kb_to.adjust(2)
         await callback.message.edit_text(
-            "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
-            "Все модели заняты или перегружены. Попробуйте через 1-2 минуты.",
+            "⏰ <b>AI-ассистент не ответил вовремя.</b> Попробуйте ещё раз.",
             parse_mode="HTML",
+            reply_markup=kb_to.as_markup(),
         )
         return
     if isinstance(reply, str):

@@ -2255,8 +2255,24 @@ async def report_peer_deep_v2(  # noqa: C901
         await _timed(client.connect(), _CONNECT_TIMEOUT)
 
         # Resolve entity — без этого вся атака невозможна
+        # Для приватных invite-ссылок (+HASH) сразу вступаем через ImportChatInviteRequest
+        _invite_hash: str | None = None
+        if peer.startswith("+") and not peer.lstrip("+").isdigit():
+            _invite_hash = peer.lstrip("+")
         try:
-            entity = await _timed(client.get_entity(peer))
+            if _invite_hash:
+                from telethon.tl.functions.messages import ImportChatInviteRequest as _ICIR
+                try:
+                    _inv_result = await _timed(client(_ICIR(hash=_invite_hash)), 20.0)
+                    entity = _inv_result.chats[0]
+                    R["joined"] = True
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                    entity = await _timed(client.get_entity(entity.id), 15.0)
+                except Exception:
+                    # Already a member — try get_entity directly
+                    entity = await _timed(client.get_entity(peer), 15.0)
+            else:
+                entity = await _timed(client.get_entity(peer))
         except Exception as e:
             log.warning("rpv2[0/entity] acc=%s target=%s: %s", acc_id, peer, e)
             return R
@@ -2346,7 +2362,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.debug("rpv2[2.5] skipped acc=%s: %s", acc_id, str(_pre_e)[:60])
 
         # ── 3. Join channel — ОБЯЗАТЕЛЬНО до message reporting ────────
-        if join_first and is_channel:
+        if join_first and is_channel and not R["joined"]:
             _need_refresh = True   # нужен ли дополнительный entity-refresh
             try:
                 await asyncio.sleep(random.uniform(0.3, 0.8))

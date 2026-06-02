@@ -665,24 +665,32 @@ async def msg_mini_strike_target(
         await message.answer("⚠️ Введите username канала.", parse_mode="HTML")
         return
 
-    # Нормализация
-    target = (
-        raw.lstrip("@")
+    # Нормализация — обрабатываем публичные username и приватные invite-ссылки (+HASH)
+    normalized = (
+        raw
         .replace("https://t.me/", "")
         .replace("http://t.me/", "")
         .split("?")[0]
         .split("/")[0]
         .strip()
     )
-    if not target or len(target) < 3:
-        await message.answer("⚠️ Некорректный username. Попробуйте ещё раз.")
+    # Если начинается с '+' — это invite hash (приватная ссылка), сохраняем как есть
+    if normalized.startswith("+"):
+        target = normalized  # "+HASH"
+        target_display = f"<code>{normalized}</code>"
+    else:
+        target = normalized.lstrip("@")
+        target_display = f"<code>@{target}</code>"
+
+    if not target or len(target) < 4:
+        await message.answer("⚠️ Некорректный username или ссылка. Попробуйте ещё раз.")
         return
 
     await state.update_data(target=target)
     await state.set_state(MiniStrikeFSM.awaiting_category)
 
     await message.answer(
-        f"🎯 Цель: <code>@{target}</code>\n\n"
+        f"🎯 Цель: {target_display}\n\n"
         "Выберите категорию нарушения:",
         parse_mode="HTML",
         reply_markup=_category_kb(target).as_markup(),
