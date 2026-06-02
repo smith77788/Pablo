@@ -174,6 +174,10 @@ async def cb_delete_tag_confirm(
 async def cb_delete_tag_all(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
 ) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
     tag = callback_data.tag or ""
     await callback.answer(f"🗑 Тег «{tag}» удалён.")
     await pool.execute(
