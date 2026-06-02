@@ -513,6 +513,12 @@ async def _one_account_strike(
                 result["_acc_id"] = acc.get("id")
                 result["_acc_trust"] = acc.get("trust_score", 0)
                 result["_wave"] = wave_num
+                # Фиксируем успех в Infrastructure Memory
+                try:
+                    from services.infra_memory import record_account_op
+                    record_account_op(acc["id"], "strike", success=True)
+                except Exception:
+                    pass
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
@@ -543,6 +549,12 @@ async def _one_account_strike(
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
                 log.warning("strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str)
+                # Фиксируем ошибку в Infrastructure Memory
+                try:
+                    from services.infra_memory import record_account_op
+                    record_account_op(acc["id"], "strike", success=False, error=err_str)
+                except Exception:
+                    pass
                 return {
                     "peer_reported": False, "error": err_str,
                     "_acc_id": acc.get("id"), "_wave": wave_num,

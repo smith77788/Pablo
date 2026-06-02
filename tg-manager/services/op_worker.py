@@ -390,9 +390,23 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n{summary}",
                 reply_markup=kb.as_markup(),
             )
+            # Фиксируем успех в Infrastructure Memory для всех аккаунтов из params
+            try:
+                from services.infra_memory import record_account_op
+                for _acc_id in (params.get("account_ids") or []):
+                    record_account_op(int(_acc_id), op_type, success=True)
+            except Exception:
+                pass
 
         except Exception as e:
             log.exception("op_worker: op %d failed: %s", op_id, e)
+            # Фиксируем ошибку в Infrastructure Memory
+            try:
+                from services.infra_memory import record_account_op
+                for _acc_id in (params.get("account_ids") or []):
+                    record_account_op(int(_acc_id), op_type, success=False, error=str(e)[:100])
+            except Exception:
+                pass
             # Попытаться поставить на повтор перед тем как помечать как failed
             requeued = await _maybe_requeue(pool, op_id, e)
             if not requeued:
