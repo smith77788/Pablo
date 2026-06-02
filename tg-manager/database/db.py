@@ -213,7 +213,7 @@ async def update_broadcast(pool: asyncpg.Pool, broadcast_id: int,
     await pool.execute(
         """UPDATE broadcasts
            SET sent_count=$2, failed_count=$3, status=$4,
-               finished_at=CASE WHEN $4 IN ('done','cancelled') THEN NOW() ELSE NULL END
+               finished_at=CASE WHEN $4 IN ('done','cancelled','failed','partial') THEN NOW() ELSE NULL END
            WHERE id=$1""",
         broadcast_id, sent, failed, status,
     )

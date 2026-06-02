@@ -104,13 +104,35 @@ async def run(pool: asyncpg.Pool, session: aiohttp.ClientSession,
 
         await asyncio.sleep(BROADCAST_DELAY)
 
+    total = user_count
+    if total == 0 or sent == total:
+        final_status = "done"
+    elif sent == 0:
+        final_status = "failed"
+    else:
+        final_status = "partial"
+
     try:
-        await db.update_broadcast(pool, broadcast_id, sent, failed, "done")
+        await db.update_broadcast(pool, broadcast_id, sent, failed, final_status)
     except Exception as _e:
-        logger.warning("Broadcast %d: failed to mark done: %s", broadcast_id, _e)
+        logger.warning("Broadcast %d: failed to mark %s: %s", broadcast_id, final_status, _e)
     finally:
         _running.pop(broadcast_id, None)
-    logger.info("Broadcast %d done: sent=%d failed=%d", broadcast_id, sent, failed)
+    logger.info(
+        "Broadcast %d %s: sent=%d failed=%d total=%d",
+        broadcast_id, final_status, sent, failed, total,
+    )
+
+
+def _on_broadcast_done(broadcast_id: int, task: asyncio.Task) -> None:
+    """Log unhandled exceptions from broadcast tasks so they aren't silently swallowed."""
+    _running.pop(broadcast_id, None)
+    exc = task.exception() if not task.cancelled() else None
+    if exc:
+        logger.error(
+            "Broadcast %d raised unhandled exception: %s",
+            broadcast_id, exc, exc_info=exc,
+        )
 
 
 def start(pool: asyncpg.Pool, session: aiohttp.ClientSession,
@@ -123,6 +145,7 @@ def start(pool: asyncpg.Pool, session: aiohttp.ClientSession,
         name=f"broadcast-{broadcast_id}",
     )
     _running[broadcast_id] = task
+    task.add_done_callback(lambda t: _on_broadcast_done(broadcast_id, t))
 
 
 def cancel(broadcast_id: int) -> bool:

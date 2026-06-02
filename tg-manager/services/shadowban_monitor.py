@@ -15,6 +15,8 @@ import logging
 import asyncpg
 from aiogram import Bot
 
+from database.db import notify_if_enabled
+
 log = logging.getLogger(__name__)
 
 _INTERVAL = 1800  # check every 30 minutes
@@ -164,7 +166,7 @@ async def _check_search_visibility(pool: asyncpg.Pool, bot: Bot) -> None:
             bot_id=bot_id,
         )
         try:
-            await bot.send_message(owner_id, message)
+            await notify_if_enabled(pool, bot, owner_id, "restriction", message)
             await _mark_alerted(pool, owner_id, event_type, bot_id)
         except Exception as exc:
             log.warning(
@@ -206,7 +208,7 @@ async def _check_account_restrictions(pool: asyncpg.Pool, bot: Bot) -> None:
             account_id=account_id,
         )
         try:
-            await bot.send_message(owner_id, message)
+            await notify_if_enabled(pool, bot, owner_id, "restriction", message)
             await _mark_alerted(pool, owner_id, "account_restricted", account_id)
         except Exception as exc:
             log.warning(
