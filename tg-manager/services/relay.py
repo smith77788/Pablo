@@ -14,6 +14,9 @@ log = logging.getLogger(__name__)
 # bot_id → last processed update_id
 _offsets: dict[int, int] = {}
 
+# Hard cap on concurrent relay sessions to prevent memory leak
+_MAX_RELAY_SESSIONS = 200
+
 
 async def _send_via_management(
     http: aiohttp.ClientSession, operator_id: int, text: str
@@ -21,15 +24,32 @@ async def _send_via_management(
     """Send message to operator via management bot. Returns message_id."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": operator_id, "text": text, "parse_mode": "HTML"}
-    try:
-        async with http.post(
-            url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-        ) as resp:
-            data = await resp.json()
-        return data["result"]["message_id"] if data.get("ok") else None
-    except Exception:
-        log.exception("Failed to forward message to operator %d", operator_id)
-        return None
+    for attempt in range(3):
+        try:
+            async with http.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                data = await resp.json()
+            if data.get("ok"):
+                return data["result"]["message_id"]
+            # Telegram rate-limit: retry_after is in parameters
+            retry_after = (data.get("parameters") or {}).get("retry_after")
+            if retry_after:
+                log.warning(
+                    "relay: FloodWait %ds forwarding to operator %d (attempt %d)",
+                    retry_after, operator_id, attempt + 1,
+                )
+                await asyncio.sleep(retry_after + 5)
+                continue
+            log.warning(
+                "relay: sendMessage not ok for operator %d: %s",
+                operator_id, data.get("description"),
+            )
+            return None
+        except Exception:
+            log.exception("Failed to forward message to operator %d", operator_id)
+            return None
+    return None
 
 
 async def _process_bot(
@@ -57,6 +77,20 @@ async def _process_bot(
         updates = data.get("result", []) if data.get("ok") else []
         if not updates:
             return
+
+        # Guard: don't allow unbounded growth of tracked bots in memory
+        if len(_offsets) > _MAX_RELAY_SESSIONS:
+            # Evict bots that are no longer in the active set
+            active_ids = set(_offsets.keys())
+            active_ids.discard(bot_id)
+            to_evict = active_ids - {bot_id}
+            if to_evict:
+                evict_id = next(iter(to_evict))
+                _offsets.pop(evict_id, None)
+                log.warning(
+                    "relay: _offsets hit cap %d — evicted bot_id=%d",
+                    _MAX_RELAY_SESSIONS, evict_id,
+                )
 
         bot_row = await pool.fetchrow(
             "SELECT username, first_name FROM managed_bots WHERE bot_id=$1", bot_id
@@ -119,7 +153,7 @@ async def _process_bot(
                         phone, bot_id, user_id,
                     )
                 except Exception:
-                    log.debug("relay: failed to save phone for user %d", user_id)
+                    log.exception("relay: failed to save phone for user %d bot %d", user_id, bot_id)
 
             display_text = text or f"📱 Поделился телефоном: {phone}"
 
@@ -139,10 +173,23 @@ async def _process_bot(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    _cleanup_counter = 0
     while True:
         try:
             bots = await db.get_bots_with_relay(pool)
             if bots:
+                active_bot_ids = {b["bot_id"] for b in bots}
+
+                # Periodically evict _offsets for bots no longer in active relay set
+                _cleanup_counter += 1
+                if _cleanup_counter >= 20:  # every ~10 minutes
+                    _cleanup_counter = 0
+                    stale = set(_offsets.keys()) - active_bot_ids
+                    for stale_id in stale:
+                        _offsets.pop(stale_id, None)
+                    if stale:
+                        log.info("relay: evicted %d stale offset entries: %s", len(stale), stale)
+
                 await asyncio.gather(
                     *(
                         _process_bot(pool, http, b["bot_id"], b["token"], b["added_by"])

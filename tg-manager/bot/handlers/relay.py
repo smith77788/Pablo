@@ -1,5 +1,6 @@
 """Hermes Relay inbox handler — manage relay, route operator replies back to users."""
 
+import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 import aiohttp
@@ -8,6 +9,8 @@ from bot.callbacks import RelayCb
 from bot.keyboards import relay_menu, relay_session_view
 from database import db
 from services import bot_api
+
+log = logging.getLogger(__name__)
 
 router = Router()
 
@@ -154,6 +157,7 @@ async def cb_relay_session(
     try:
         templates = await db.get_templates(pool, callback.from_user.id)
     except Exception:
+        log.exception("relay: failed to fetch templates for user %d", callback.from_user.id)
         templates = []
     await callback.message.edit_text(
         text,
