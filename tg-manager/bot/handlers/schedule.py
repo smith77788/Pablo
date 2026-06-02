@@ -213,4 +213,5 @@ async def cb_schedule_use_template(
         f"📋 Шаблон: <b>{safe_name}</b>\n\n"
         "Введите дату и время отправки (формат: ДД.ММ.ГГГГ ЧЧ:ММ):",
         parse_mode="HTML",
+        reply_markup=_sch_cancel_kb(callback_data.bot_id),
     )
