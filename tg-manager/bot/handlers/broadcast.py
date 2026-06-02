@@ -574,4 +574,5 @@ async def cb_segment_select(
         f"🎯 Сегмент: <b>{segment_label}</b> ({len(user_ids)} польз.)\n\n"
         "Напишите сообщение или отправьте фото для этого сегмента:",
         parse_mode="HTML",
+        reply_markup=_bc_cancel_kb(callback_data.bot_id),
     )
