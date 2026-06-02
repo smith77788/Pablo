@@ -112,6 +112,10 @@ _active_lock = asyncio.Lock()
 # Track last progress milestone notified per op (25/50/75%)
 _progress_milestones: dict[int, int] = {}
 
+# Cache for _is_cancelled: op_id -> (result: bool, checked_at: float)
+_cancel_cache: dict[int, tuple[bool, float]] = {}
+_CANCEL_CACHE_TTL = 5.0  # seconds between DB checks in tight loops
+
 
 async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str) -> None:
     """Периодически проверяет прогресс и уведомляет на 25/50/75% (один раз каждый milestone)."""
@@ -124,6 +128,8 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
                     "SELECT total_items, done_items, status FROM operation_queue WHERE id=$1", op_id
                 )
                 if not row or row["status"] not in ("running", "pending"):
+                    break
+                if row["status"] == "cancelled":
                     break
                 total = row["total_items"] or 0
                 done = row["done_items"] or 0
@@ -155,12 +161,15 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
                     parse_mode="HTML",
                     reply_markup=kb.as_markup(),
                 )
-            except Exception:
-                log_exc_swallow(log, f"_progress_monitor: уведомление op={op_id} owner={owner_id} не отправлено")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("_progress_monitor: error for op %d: %s", op_id, e)
     except asyncio.CancelledError:
         pass
     finally:
         _progress_milestones.pop(op_id, None)
+        _cancel_cache.pop(op_id, None)
 
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -175,9 +184,20 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
 
 
 async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
-    """Check if operation was cancelled by user."""
+    """Check if operation was cancelled by user.
+
+    Uses a 5-second in-memory cache to avoid hammering the DB in tight loops.
+    """
+    now = time.monotonic()
+    cached = _cancel_cache.get(op_id)
+    if cached is not None:
+        result, checked_at = cached
+        if now - checked_at < _CANCEL_CACHE_TTL:
+            return result
     row = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
-    return row and row["status"] == "cancelled"
+    result = bool(row and row["status"] == "cancelled")
+    _cancel_cache[op_id] = (result, now)
+    return result
 
 
 async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:

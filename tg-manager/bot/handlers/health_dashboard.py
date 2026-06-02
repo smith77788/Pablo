@@ -186,6 +186,51 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception:
         tag_count = 0
 
+    # Top-3 accounts by trust score
+    top3_line = ""
+    try:
+        top3_rows = await pool.fetch(
+            """SELECT first_name, username, phone, trust_score
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE AND trust_score IS NOT NULL
+               ORDER BY trust_score DESC NULLS LAST LIMIT 3""",
+            user_id,
+        )
+        if top3_rows:
+            def _acc_short(r) -> str:
+                return html.escape(
+                    r["username"] or r["first_name"] or (r["phone"] or "")[-4:] or "?"
+                )
+            labels = ", ".join(
+                f"{_acc_short(r)} ({float(r['trust_score']):.2f})" for r in top3_rows
+            )
+            top3_line = f"\n📊 Топ по надёжности: {labels}"
+    except Exception:
+        pass
+
+    # Cooldown and problem accounts summary
+    extra_alerts: list[str] = []
+    try:
+        cooldown_cnt = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND cooldown_until > now()",
+            user_id,
+        )
+        if (cooldown_cnt or 0) > 0:
+            extra_alerts.append(f"⚠️ {cooldown_cnt} аккаунт{'а' if cooldown_cnt < 5 else 'ов'} на кулдауне")
+    except Exception:
+        pass
+    try:
+        problem_cnt = await pool.fetchval(
+            """SELECT COUNT(*) FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND COALESCE(acc_status,'active') IN ('banned','spamblock')""",
+            user_id,
+        )
+        if (problem_cnt or 0) > 0:
+            extra_alerts.append(f"🚨 {problem_cnt} проблемных аккаунта")
+    except Exception:
+        pass
+
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"
         f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
@@ -194,6 +239,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
         f"⭐ Средняя надёжность: <b>{stats['avg_trust']}</b>\n"
         f"⏸ На паузе: <b>{stats['in_cooldown']}</b>"
+        + top3_line
     )
     if stats["critical"] or stats["low_trust"]:
         alerts = []
@@ -202,6 +248,8 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         if stats["low_trust"]:
             alerts.append(f"🟡 Низкая надёжность: <b>{stats['low_trust']}</b>")
         text += "\n\n" + " | ".join(alerts)
+    if extra_alerts:
+        text += "\n" + "  ".join(extra_alerts)
     text += f"\n📋 Блокировок за 7д: <b>{flood_7d}</b>"
 
     kb = InlineKeyboardBuilder()
