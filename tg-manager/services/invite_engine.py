@@ -116,7 +116,7 @@ async def _generate_links(
                     }
                 )
         except Exception as e:
-            log.debug("invite_engine: acc %d gen error: %s", acc["id"], e)
+            log.warning("invite_engine: acc %d gen error: %s", acc["id"], e)
 
     return results
 

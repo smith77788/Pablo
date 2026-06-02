@@ -334,7 +334,8 @@ async def get_pending_scheduled(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT s.*, m.token FROM scheduled_broadcasts s
            JOIN managed_bots m ON m.bot_id=s.bot_id
-           WHERE s.status='pending' AND s.execute_at <= NOW()""",
+           WHERE s.status='pending' AND s.execute_at <= NOW()
+           ORDER BY s.execute_at ASC LIMIT 100""",
     )
 
 

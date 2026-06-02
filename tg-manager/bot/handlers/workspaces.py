@@ -150,7 +150,7 @@ async def msg_ws_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await state.update_data(ws_name=name)
     await state.set_state(WorkspaceFSM.entering_description)
     kb = InlineKeyboardBuilder()
-    kb.button(text="⏭ Пропустить", callback_data=WorkspaceCb(action="create"))
+    kb.button(text="⏭ Пропустить", callback_data=WorkspaceCb(action="skip_desc"))
     kb.button(text="❌ Отмена", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await message.answer(
@@ -172,6 +172,24 @@ async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     kb.button(text="⬅️ К списку",          callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await message.answer(
+        f"✅ <b>Workspace создан!</b>\n\n🏢 {name}\n\nID: <code>{ws_id}</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(WorkspaceCb.filter(F.action == "skip_desc"))
+async def cb_ws_skip_desc(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    name = data.get("ws_name", "Workspace")
+    await state.clear()
+    ws_id = await db.create_workspace(pool, callback.from_user.id, name, "")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏢 Открыть workspace", callback_data=WorkspaceCb(action="view", ws_id=ws_id))
+    kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
         f"✅ <b>Workspace создан!</b>\n\n🏢 {name}\n\nID: <code>{ws_id}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
