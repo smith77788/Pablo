@@ -352,6 +352,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
             elif op_type in ("global_presence_full_package", "global_presence_package"):
                 result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "strike":
+                result = await _exec_strike(pool, bot, op_id, owner_id, params)
             else:
                 log.warning("op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped", op_type, op_id, owner_id)
                 result = {
@@ -1395,4 +1397,116 @@ async def _exec_bulk_create_channels(
         "created": created_count,
         "failed": failed_count,
         "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+    }
+
+
+async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:
+    """Выполнить Strike-операцию через staggered_strike() из strike_engine.
+
+    Параметры params:
+      target          — username или ссылка (@channel или t.me/channel)
+      reason          — причина жалобы (spam/violence/fraud/csam/...)
+      preset          — пресет (content_spam/threat_real/fake_docs/...)
+      num_waves       — количество волн (default 3)
+      accounts_per_wave — аккаунтов на волну (default 5)
+      negative_react  — добавлять негативные реакции (default True)
+      account_ids     — конкретные id аккаунтов (опционально, если не указаны — авто)
+    """
+    from services.strike_engine import StrikePlan, staggered_strike, format_strike_summary
+
+    target = params.get("target", "")
+    reason = params.get("reason", "spam")
+    preset = params.get("preset")
+    num_waves = int(params.get("num_waves", 3))
+    accounts_per_wave = int(params.get("accounts_per_wave", 5))
+    negative_react = bool(params.get("negative_react", True))
+    account_ids: list[int] = [int(x) for x in params.get("account_ids", [])]
+
+    if not target:
+        return {
+            "status": "failed",
+            "summary": "⚠️ Strike: не указана цель (target)",
+        }
+
+    # Загрузить аккаунты
+    if account_ids:
+        accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, "
+            "a.device_model, a.system_version, a.app_version, "
+            "a.trust_score, a.cooldown_until, a.tags, a.pool, p.proxy_url "
+            "FROM tg_accounts a "
+            "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.id = ANY($1) AND a.owner_id=$2 AND a.is_active=TRUE "
+            "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+            "ORDER BY a.trust_score DESC NULLS LAST",
+            account_ids, owner_id,
+        )
+    else:
+        accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, "
+            "a.device_model, a.system_version, a.app_version, "
+            "a.trust_score, a.cooldown_until, a.tags, a.pool, p.proxy_url "
+            "FROM tg_accounts a "
+            "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+            "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+            "ORDER BY a.trust_score DESC NULLS LAST",
+            owner_id,
+        )
+
+    if not accounts:
+        return {
+            "status": "failed",
+            "summary": "⚠️ Strike: нет активных аккаунтов без cooldown",
+        }
+
+    accounts_list = [dict(a) for a in accounts]
+
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        len(accounts_list), op_id,
+    )
+
+    plan = StrikePlan(
+        target=target,
+        reason=reason,
+        preset=preset,
+        num_waves=num_waves,
+        accounts_per_wave=accounts_per_wave,
+        negative_react=negative_react,
+        owner_id=owner_id,
+    )
+
+    try:
+        results = await staggered_strike(
+            accounts=accounts_list,
+            target=target,
+            plan=plan,
+            pool=pool,
+        )
+    except Exception as e:
+        log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
+        return {
+            "status": "failed",
+            "summary": f"❌ Strike завершился с ошибкой: {str(e)[:200]}",
+        }
+
+    await pool.execute(
+        "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+        len(accounts_list), op_id,
+    )
+
+    summary_text = format_strike_summary(results)
+    total_reported = sum(
+        1 for r in results
+        if getattr(r, "peer_reported", False) or (isinstance(r, dict) and r.get("peer_reported"))
+    )
+
+    return {
+        "status": "done",
+        "target": target,
+        "waves": num_waves,
+        "accounts_used": len(accounts_list),
+        "total_reported": total_reported,
+        "summary": summary_text[:500] if summary_text else f"⚡ Strike по {target} завершён. Аккаунтов: {len(accounts_list)}",
     }
