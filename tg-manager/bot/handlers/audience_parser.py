@@ -30,8 +30,9 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ParserCb
-from bot.utils.subscription import require_plan
+from bot.callbacks import ParserCb, BmCb
+from bot.keyboards import subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services.logger import log_exc_swallow
 
@@ -79,9 +80,9 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
-            "🔒 <b>Парсер аудитории — PRO</b>\n\nДля доступа оформите подписку: /subscription",
+            locked_text("Парсер аудитории", "pro"),
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="main")),
         )
         return
 
