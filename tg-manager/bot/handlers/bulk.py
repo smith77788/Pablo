@@ -7,6 +7,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import BulkCb
 from bot.keyboards import bulk_menu, main_menu
 from bot.states import BulkEdit, ImportBots
@@ -111,8 +112,13 @@ async def cb_check(
 async def cb_bulk_name(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:", parse_mode="HTML"
+        "✏️ <b>Имя для всех ботов</b>\n\nВведите новое имя:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -140,8 +146,13 @@ async def msg_bulk_name(
 async def cb_bulk_name_lang(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_name_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}", parse_mode="HTML"
+        f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -181,9 +192,13 @@ async def msg_bulk_localized_name(
 async def cb_bulk_desc(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_desc)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "📄 <b>Описание для всех ботов</b>\n\nВведите новое описание:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -211,9 +226,13 @@ async def msg_bulk_desc(
 async def cb_bulk_desc_lang(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_desc_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🌍 <b>Описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -250,9 +269,13 @@ async def msg_bulk_localized_desc(
 async def cb_bulk_short(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_short)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст (до 120 символов):",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -280,9 +303,13 @@ async def msg_bulk_short(
 async def cb_bulk_short_lang(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_short_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🌍 <b>Краткое описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -319,6 +346,9 @@ async def msg_bulk_localized_short(
 async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_commands)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "🤖 <b>Команды для всех ботов (по умолчанию)</b>\n\n"
         "Отправьте список команд, каждая с новой строки:\n\n"
@@ -326,6 +356,7 @@ async def cb_bulk_commands(callback: CallbackQuery, state: FSMContext) -> None:
         "help - Помощь\n"
         "about - О боте</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -361,9 +392,13 @@ async def msg_bulk_commands(
 async def cb_bulk_commands_lang(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(BulkEdit.waiting_commands_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -413,6 +448,9 @@ async def msg_bulk_localized_commands(
 async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(ImportBots.waiting_tokens)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "📥 <b>Массовый импорт ботов</b>\n\n"
         "Отправьте токены ботов — по одному на строке:\n\n"
@@ -420,6 +458,7 @@ async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
         "987654321:BBG...\n"
         "555555555:CCH...</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
