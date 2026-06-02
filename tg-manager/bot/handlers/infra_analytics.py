@@ -25,6 +25,14 @@ from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb
 from services import infra_pressure
 from database import db as _db
 
+_ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
+    "accounts": ("📱 Аккаунты",  AccCb(action="menu")),
+    "warmup":   ("🌡 Разогрев",  WarmupCb(action="menu")),
+    "cleaner":  ("🧹 Очистка",   CleanerCb(action="menu")),
+    "proxies":  ("🌐 Прокси",    ProxyCb(action="menu")),
+    "tasks":    ("⚡ Задачи",    TaskCb(action="list")),
+}
+
 log = logging.getLogger(__name__)
 router = Router()
 
@@ -671,6 +679,33 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(InfraCb.filter(F.action == "advisor"))
+async def cb_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    from services import infra_advisor
+    recs = await infra_advisor.get_recommendations(pool, callback.from_user.id)
+    text = infra_advisor.format_recommendations(recs)
+    kb = InlineKeyboardBuilder()
+    seen: set[str] = set()
+    action_cbs = []
+    for rec in recs:
+        action = rec.get("action", "")
+        if action and action in _ADVISOR_ACTION_BUTTONS and action not in seen:
+            seen.add(action)
+            label, cb_data = _ADVISOR_ACTION_BUTTONS[action]
+            action_cbs.append((label, cb_data))
+        if len(action_cbs) >= 3:
+            break
+    for label, cb_data in action_cbs:
+        kb.button(text=label, callback_data=cb_data)
+    if action_cbs:
+        kb.adjust(min(len(action_cbs), 3))
+    kb.button(text="🔄 Обновить", callback_data=InfraCb(action="advisor"))
+    kb.button(text="◀️ Назад",   callback_data=InfraCb(action="menu"))
+    kb.adjust(*([min(len(action_cbs), 3)] if action_cbs else []), 2)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_apply"))

@@ -307,7 +307,6 @@ async def cb_health(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer()
     await callback.answer("⏳ Проверяю…")
     info = await bot_api.get_me(http, row["token"])
     if info:

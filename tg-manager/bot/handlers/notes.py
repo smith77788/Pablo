@@ -36,7 +36,7 @@ async def cb_note_edit(
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import BotCb
     _kb = InlineKeyboardBuilder()
-    _kb.button(text="❌ Отмена", callback_data=BotCb(action="view", bot_id=callback_data.bot_id))
+    _kb.button(text="❌ Отмена", callback_data=BotCb(action="select", bot_id=callback_data.bot_id))
     _kb.adjust(1)
     await callback.message.edit_text(
         f"📝 <b>Заметка к боту</b>\n\nТекущая: <i>{current}</i>\n\n"
