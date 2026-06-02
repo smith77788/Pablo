@@ -1106,6 +1106,7 @@ async def _show_bpchans_page(msg, state: FSMContext, edit: bool = False) -> None
             callback_data=f"chan:cpsdone:{data['bpchans_acc_id']}",
         )
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_post_chans"))
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(1)
 
     text = (
@@ -4542,9 +4543,12 @@ async def fsm_bulk_chan_value(message: Message, state: FSMContext, pool: asyncpg
         import re
         base_uname = value.lstrip("@")
         if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]{3,}$', base_uname):
+            kb_cancel = InlineKeyboardBuilder()
+            kb_cancel.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
             await message.answer(
                 "⚠️ Username должен начинаться с буквы, содержать только a–z, 0–9, _ и быть длиной 5+ символов.\n"
-                "Введите базовый username заново:"
+                "Введите базовый username заново:",
+                reply_markup=kb_cancel.as_markup(),
             )
             await state.set_state(BulkChanFSM.waiting_value)
             await state.update_data(bulk_op=op, bulk_selected=selected_ids)
