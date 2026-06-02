@@ -215,7 +215,7 @@ tg-manager/\
 `    `├── bot\_api.py                 # Bot API wrapper\
 `    `└── railway\_api.py             # Railway API интеграция
 ### 3\.3 Авто-миграция БД
-create\_pool() автоматически выполняет все schema\_v\*.sql в порядке версии. Текущая последняя версия: **v61**
+create\_pool() автоматически выполняет все schema\_v\*.sql в порядке версии. Текущая последняя версия: **v64**
 
 Правило: новая схема → новый файл schema\_v{N+1}.sql в корне tg-manager/.
 
@@ -607,6 +607,17 @@ if not await require\_plan(pool, callback.from\_user.id, "starter"):\
 - **Pool filter в Mass Ops** — выполнение операций только по пулу аккаунтов
 - **Health Dashboard обновлён** — пулы, теги в списке аккаунтов + Pressure Score
 - **Free Mode** — глобальный бесплатный доступ + toggle в /admin (schema\_v59)
+### ✅ AI, память и провайдеры — ГОТОВО (r18)
+- **AI Memory System** — /remember, /memory, /forget команды + auto-save [MEMORY:] тегов (schema\_v63)
+- **AI Provider Failover** — OpenRouter, Groq, Gemini failover (services/ai\_providers.py)
+- **AI 📚 Память кнопка** — просмотр/удаление записей памяти из чата
+- **Broadcast Stats** — детальная статистика рассылки (delivery%, failed, pending) + 📊 кнопка
+- **Quick Post Save Template** — кнопка 💾 на шаге подтверждения сохраняет пост в шаблоны
+- **Op Queue Retry/Clear** — 🔁 повтор и 🗑 очистка завершённых операций в очереди
+- **Warmup Level** — отслеживание уровня прогрева (light/medium/deep) в БД (schema\_v64)
+- **Per-owner Semaphore** — max 3 параллельных операции на владельца (op\_worker.py)
+- **Scheduler Missed Fix** — рассылки с опозданием >1ч помечаются 'missed', не запускаются
+- **Admin Error Counter** — кнопка 🐛 показывает число новых отчётов об ошибках
 ### ✅ UX и надёжность — ГОТОВО (r17)
 - Кнопки ◀️ Назад добавлены во все оставшиеся dead-end экраны (30+ файлов)
 - ❌ Отмена во всех FSM prompt'ах (bulk, network\_bulk, crm, schedule, templates и др.)
@@ -798,5 +809,5 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **FSM state bug fix** — OpBuilderFSM.confirming, дублирующие State()
 - ✅ **account\_warmer crash fix** — None session\_str early return
 
-*Последнее обновление: 2026-06-02 (r17)* *Следующий build-номер: r18*
+*Последнее обновление: 2026-06-02 (r18)* *Следующий build-номер: r19*
 
