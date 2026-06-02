@@ -71,21 +71,46 @@ async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
 
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Новая кампания", callback_data=DmCb(action="new"))
+
+    # Build campaign cards with status + counts + quick action buttons
+    campaign_lines = []
     for c in campaigns:
         icon = _STATUS_EMOJI.get(c["status"], "❓")
+        status_label = _STATUS_LABELS.get(c["status"], c["status"])
         total = c["total_targets"] or 0
         sent = c["sent_count"] or 0
-        label = f"{icon} {c['name'][:22]} ({sent}/{total})"
-        kb.button(text=label, callback_data=DmCb(action="detail", campaign_id=c["id"]))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(1)
+        fail = c["fail_count"] or 0
+        pct = int(sent * 100 / total) if total > 0 else 0
+        name_short = c["name"][:28]
+        campaign_lines.append(
+            f"{icon} <b>{name_short}</b> — {status_label}\n"
+            f"   📤 {sent}/{total} ({pct}%) | ❌ {fail}"
+        )
+        # Row: detail + quick action
+        kb.button(text=f"{icon} {c['name'][:20]}", callback_data=DmCb(action="detail", campaign_id=c["id"]))
+        if c["status"] == "running":
+            kb.button(text="⏸", callback_data=DmCb(action="pause", campaign_id=c["id"]))
+        elif c["status"] in ("paused", "draft"):
+            kb.button(text="▶️", callback_data=DmCb(action="resume", campaign_id=c["id"]))
+        else:
+            kb.button(text="🗑", callback_data=DmCb(action="delete", campaign_id=c["id"]))
 
-    count = len(campaigns)
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    # Adjust: [new], then [detail, action] pairs, then [back]
+    if campaigns:
+        kb.adjust(1, *([2] * len(campaigns)), 1)
+    else:
+        kb.adjust(1)
+
+    running_count = sum(1 for c in campaigns if c["status"] == "running")
+    cards_text = ("\n\n" + "\n\n".join(campaign_lines)) if campaign_lines else ""
     text = (
         "<b>📨 DM-кампании</b>\n\n"
         "Отправляйте персонализированные сообщения своим подписчикам.\n\n"
         "📌 <i>Аудитория: подписчики ваших ботов и CRM-контакты.</i>\n"
-        f"Активных кампаний: <b>{count}</b>"
+        f"Кампаний: <b>{len(campaigns)}</b>"
+        + (f" | Активных: <b>{running_count}</b>" if running_count else "")
+        + cards_text
     )
     await _edit(callback, text, kb.as_markup())
 

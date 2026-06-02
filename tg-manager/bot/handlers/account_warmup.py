@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import logging
+from datetime import datetime, timezone, timedelta
 
 import asyncpg
 from aiogram import F, Router
@@ -192,16 +193,41 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
     lines = ["📋 <b>Активные планы разогрева</b>\n"]
     kb = InlineKeyboardBuilder()
+    now_utc = datetime.now(timezone.utc)
     for plan in plans:
         label = plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
-        pct = round(plan["current_day"] / max(plan["target_days"], 1) * 100)
+        current_day = plan["current_day"] or 0
+        target_days = max(plan["target_days"] or 1, 1)
+        pct = round(current_day / target_days * 100)
         bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+
+        # Days remaining ETA
+        days_left = max(target_days - current_day, 0)
+        eta_str = f"⏳ Осталось: {days_left} дн." if days_left > 0 else "🏁 Завершается"
+
+        # Next session: last_action_at + 24h (warmup runs every ~24h)
         last_run = plan.get("last_action_at")
-        last_str = f"\n  Последний сеанс: {last_run.strftime('%d.%m %H:%M')}" if last_run else ""
+        if last_run:
+            last_run_aware = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+            next_run = last_run_aware + timedelta(hours=24)
+            if next_run > now_utc:
+                diff = next_run - now_utc
+                diff_h = int(diff.total_seconds() // 3600)
+                diff_m = int((diff.total_seconds() % 3600) // 60)
+                next_str = f"⏰ Следующий сеанс: через {diff_h}ч {diff_m}м"
+            else:
+                next_str = "⏰ Следующий сеанс: скоро"
+            last_str = f"\n  Последний сеанс: {last_run_aware.strftime('%d.%m %H:%M')}"
+        else:
+            next_str = "⏰ Следующий сеанс: ещё не запускался"
+            last_str = ""
+
         lines.append(
             f"• <b>{html.escape(label)}</b>\n"
-            f"  [{bar}] День {plan['current_day']}/{plan['target_days']}\n"
-            f"  Режим: {plan['plan_type']} | {plan['daily_actions']} действий/день"
+            f"  [{bar}] День {current_day}/{target_days} ({pct}%)\n"
+            f"  Режим: {plan['plan_type']} | {plan['daily_actions']} действий/день\n"
+            f"  {eta_str}\n"
+            f"  {next_str}"
             f"{last_str}"
         )
         kb.button(

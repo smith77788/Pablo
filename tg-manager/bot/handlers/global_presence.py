@@ -678,6 +678,35 @@ async def _show_accounts_step(
     has_more = len(accounts) > _ACC_PAGE_SIZE
     accounts = accounts[:_ACC_PAGE_SIZE]
 
+    geo_preset = sd.get("geo_preset", "—")
+    geo_label = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset)
+    geo_list = sd.get("geo_list") or []
+    n_cities = len(geo_list)
+
+    # No accounts — show a clear message with instructions
+    if not accounts and page == 0:
+        no_acc_kb = InlineKeyboardBuilder()
+        no_acc_kb.button(text="📱 Добавить аккаунт", callback_data=GeoPresenceCb(action="cancel"))
+        no_acc_kb.button(text="◀️ Назад к гео", callback_data=GeoPresenceCb(action="back_to_geo"))
+        no_acc_kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+        no_acc_kb.adjust(1)
+        no_acc_text = (
+            f"🌍 <b>Global Presence Factory</b>\n\n"
+            f"<b>Шаг 6/8 — Аккаунты</b>\n\n"
+            f"⚠️ <b>У вас нет активных аккаунтов</b>\n\n"
+            f"Для запуска Global Presence необходимо добавить хотя бы один аккаунт "
+            f"в разделе <b>Infrastructure → Аккаунты</b>.\n\n"
+            f"📍 Гео: {geo_label} ({n_cities} городов) — настроено"
+        )
+        if send_new and original_message:
+            await original_message.answer(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")
+        elif hasattr(callback, "message") and callback.message:
+            try:
+                await callback.message.edit_text(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")
+            except Exception:
+                await callback.message.answer(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")
+        return
+
     kb = InlineKeyboardBuilder()
     for acc in accounts:
         check = "✅" if acc["id"] in selected_ids else "⬜"
@@ -711,11 +740,6 @@ async def _show_accounts_step(
     done_row.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     done_row.adjust(1)
     kb.attach(done_row)
-
-    geo_preset = sd.get("geo_preset", "—")
-    geo_label = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset)
-    geo_list = sd.get("geo_list") or []
-    n_cities = len(geo_list)
 
     text = (
         f"🌍 <b>Global Presence Factory</b>\n\n"
@@ -899,10 +923,40 @@ async def cb_gp_confirm_preview(
     await state.set_state(GlobalPresenceFSM.confirming)
 
     sd = await state.get_data()
-    n_cities = len(sd.get("geo_list") or [])
+    asset_type = sd.get("asset_type", "channel")
+    name_pattern = sd.get("name_pattern", "")
+    username_pattern = sd.get("username_pattern")
+    geo_list: list[dict] = sd.get("geo_list") or []
+    selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
+    template_name = sd.get("template_name") or "Нет"
+    geo_preset = sd.get("geo_preset", "")
+
+    n_cities = len(geo_list)
+    n_accs = len(selected_acc_ids)
+    geo_label = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset or "Кастомный список")
+
+    _asset_label = {
+        "channel": "Каналы", "group": "Группы", "bot": "Боты (BotFather)",
+        "package": "Пакет (Канал+Группа)", "full_package": "Полный пакет (Канал+Группа+Бот)",
+    }
+    _asset_count_label = {
+        "channel": "каналов", "group": "групп", "bot": "ботов",
+        "package": "пакетов (×2 актива)", "full_package": "пакетов (×3 актива)",
+    }
+    asset_type_label = _asset_label.get(asset_type, asset_type)
+    count_label = _asset_count_label.get(asset_type, "активов")
+
+    estimated = estimate_duration_minutes(n_cities)
+    hours = estimated // 60
+    mins = estimated % 60
+    duration_str = f"~{hours}ч {mins}м" if hours else f"~{mins}м"
+
     warning = ""
     if n_cities > 20:
-        warning = f"\n\n⚠️ <b>Внимание:</b> Вы создаёте {n_cities} каналов. Это займёт значительное время. Убедитесь что у вас достаточно аккаунтов."
+        warning = (
+            f"\n\n⚠️ <b>Внимание:</b> Вы создаёте {n_cities} {count_label}. "
+            f"Это займёт значительное время. Убедитесь что у вас достаточно аккаунтов ({n_accs})."
+        )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить", callback_data=GeoPresenceCb(action="launch"))
@@ -912,9 +966,19 @@ async def cb_gp_confirm_preview(
 
     await _edit(
         callback,
-        f"🌍 <b>Финальное подтверждение</b>\n\n"
-        f"Это создаст Telegram-инфраструктуру в <b>{n_cities} городах</b>.\n"
-        f"Операция будет запущена через очередь — вы получите уведомление о завершении.{warning}\n\n"
+        f"🌍 <b>Финальное подтверждение</b>\n"
+        f"{'─' * 28}\n\n"
+        f"<b>Что будет создано:</b>\n"
+        f"📦 Тип: {asset_type_label}\n"
+        f"📍 Гео: {geo_label} ({n_cities} городов)\n"
+        f"🔤 Паттерн: <code>{name_pattern}</code>\n"
+        f"🔗 Username: <code>{username_pattern or '—'}</code>\n"
+        f"📋 Шаблон: {template_name}\n"
+        f"👤 Аккаунтов: {n_accs} (round-robin)\n"
+        f"⏱️ ETA: {duration_str} (safe mode)\n\n"
+        f"🔢 Итого: <b>{n_cities} {count_label}</b> будет создано.\n"
+        f"Операция запустится через очередь — вы получите уведомление о завершении."
+        f"{warning}\n\n"
         f"<b>Запустить?</b>",
         markup=kb.as_markup(),
     )
@@ -1083,7 +1147,8 @@ async def cb_gp_launch(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
-    kb.button(text="◀️ Меню", callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
+    kb.button(text="◀️ Назад к меню", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
     await _edit(
