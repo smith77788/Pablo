@@ -1,5 +1,6 @@
 """Add, list, select, delete managed bots."""
 
+import re
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
@@ -11,6 +12,8 @@ from bot.states import AddBot
 from bot.utils.subscription import get_bot_limit
 from database import db
 from services import bot_api
+
+_TOKEN_RE = re.compile(r"^\d{8,10}:[A-Za-z0-9_-]{35,}$")
 
 router = Router()
 
@@ -65,10 +68,18 @@ async def cb_list(
         "• Каждый бот управляется независимо"
     )
     if not bots:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
+        empty_kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+        empty_kb.adjust(1)
         await callback.message.edit_text(
-            "У вас пока нет добавленных ботов.\nНажмите «➕ Добавить бота»." + hint,
+            "🤖 <b>Мои боты</b>\n\n"
+            "У вас пока нет добавленных ботов.\n\n"
+            "💡 Нажмите <b>➕ Добавить бота</b> и вставьте токен от @BotFather."
+            + hint,
             parse_mode="HTML",
-            reply_markup=main_menu(is_admin=admin),
+            reply_markup=empty_kb.as_markup(),
         )
     else:
         await callback.message.edit_text(
@@ -164,6 +175,22 @@ async def msg_token(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     token = message.text.strip()
+
+    # Validate token format before hitting Telegram API
+    if not _TOKEN_RE.match(token):
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        _fmt_kb = InlineKeyboardBuilder()
+        _fmt_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
+        await message.answer(
+            "❌ <b>Неверный формат токена</b>\n\n"
+            "Токен должен выглядеть так:\n"
+            "<code>123456789:AAF_xxxxxxxxxxxxxxxxxxxxxxxxxxx</code>\n\n"
+            "Получить токен можно у @BotFather → /newbot или /token.",
+            parse_mode="HTML",
+            reply_markup=_fmt_kb.as_markup(),
+        )
+        return
+
     info_msg = await message.answer("⏳ Проверяю токен...")
 
     bot_info = await bot_api.get_me(http, token)
@@ -277,10 +304,13 @@ async def cb_delete(
 async def cb_confirm_delete(
     callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
 ) -> None:
-
+    await callback.answer()
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:
-        await callback.answer("✅ Бот удалён.")
-        await callback.message.edit_text("✅ Бот удалён.", reply_markup=main_menu())
+        await callback.message.edit_text("✅ <b>Бот удалён.</b>", parse_mode="HTML", reply_markup=main_menu())
     else:
-        await callback.answer("Не удалось удалить.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось удалить бота.</b>\n\nВозможно, бот уже был удалён.",
+            parse_mode="HTML",
+            reply_markup=main_menu(),
+        )

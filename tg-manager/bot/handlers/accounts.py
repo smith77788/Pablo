@@ -916,11 +916,18 @@ async def _finalize_login(
         await state.clear()
         return
 
+    # Check for duplicate phone before insert (ON CONFLICT will update, but warn user)
+    normalized_phone = info.get("phone") or phone
+    existing = await pool.fetchrow(
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND phone=$2",
+        message.from_user.id, normalized_phone,
+    )
+
     try:
         await db.add_tg_account(
             pool,
             owner_id=message.from_user.id,
-            phone=info.get("phone") or phone,
+            phone=normalized_phone,
             session_str=session_str,
             tg_user_id=info.get("tg_user_id"),
             first_name=info.get("first_name", ""),
@@ -939,6 +946,10 @@ async def _finalize_login(
 
     await cleanup_pending(phone)
     await state.clear()
+
+    # If phone already existed — it's a session update (relog), not a new account
+    if existing and not relog_acc_id:
+        relog_acc_id = existing["id"]
 
     display_name = escape(info.get("first_name") or info.get("username") or phone)
     kb = InlineKeyboardBuilder()
@@ -1635,7 +1646,27 @@ async def cb_remove_confirm(
     pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
-    await db.remove_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+
+    # Check for active operations before deletion
+    acc_id = callback_data.acc_id
+    assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)
+    active_ops = assets.get("ops", [])
+    if active_ops:
+        op_list = ", ".join(escape(op.get("op_type") or "операция") for op in active_ops[:3])
+        suffix = f" и ещё {len(active_ops) - 3}" if len(active_ops) > 3 else ""
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            f"⚠️ <b>Нельзя удалить аккаунт</b>\n\n"
+            f"Есть активные операции: <b>{op_list}{suffix}</b>\n\n"
+            f"Дождитесь завершения или отмените операции, затем удалите аккаунт.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    await db.remove_tg_account(pool, acc_id, callback.from_user.id)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
@@ -2353,7 +2384,7 @@ async def handle_send_msg_text(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("❌ Сообщение не может быть пустым. Введите текст:")
+        await message.answer("❌ Сообщение не может быть пустым. Введите текст:", reply_markup=_cancel_markup())
         return
 
     data = await state.get_data()
