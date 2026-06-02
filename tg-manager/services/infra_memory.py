@@ -277,8 +277,8 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        updated_at = NOW()""",
                 rec.account_id, rec.action_type,
                 rec.successes, rec.failures,
-                rec.last_success_at if rec.last_success_at else None,
-                rec.last_failure_at if rec.last_failure_at else None,
+                rec.last_success_at if rec.last_success_at > 0 else None,
+                rec.last_failure_at if rec.last_failure_at > 0 else None,
                 rec.last_errors,
             )
         except Exception as e:
@@ -311,8 +311,8 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                 rec.proxy_url, rec.action_type,
                 rec.successes, rec.failures,
                 rec.avg_latency_ms,
-                rec.last_success_at if rec.last_success_at else None,
-                rec.last_failure_at if rec.last_failure_at else None,
+                rec.last_success_at if rec.last_success_at > 0 else None,
+                rec.last_failure_at if rec.last_failure_at > 0 else None,
             )
         except Exception as e:
             log.warning("infra_memory flush proxy %s/%s: %s", key[0], key[1], e)

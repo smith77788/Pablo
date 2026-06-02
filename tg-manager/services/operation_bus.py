@@ -125,9 +125,11 @@ async def submit(
 
     row = await pool.fetchrow(
         """INSERT INTO operation_queue
-               (owner_id, op_type, status, params, total_items,
+               (owner_id, op_type, status, params,
+                total_items, done_items,
                 scheduled_for, template_id, max_retries, created_at)
-           VALUES ($1, $2, 'pending', $3::jsonb, $4,
+           VALUES ($1, $2, 'pending', $3::jsonb,
+                   $4, 0,
                    $5::timestamptz, $6, $7, NOW())
            RETURNING id""",
         owner_id,

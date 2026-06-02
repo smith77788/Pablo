@@ -1434,9 +1434,19 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
     target = params.get("target", "").strip()
     reason = params.get("reason", "spam")
     preset = params.get("preset") or None
-    num_waves = int(params.get("num_waves", 3))
-    account_ids: list[int] = [int(x) for x in (params.get("account_ids") or [])]
     label = params.get("label") or f"queued_strike_{op_id}"
+
+    try:
+        num_waves = max(1, int(params.get("num_waves", 3)))
+    except (ValueError, TypeError):
+        num_waves = 3
+
+    account_ids: list[int] = []
+    for _x in (params.get("account_ids") or []):
+        try:
+            account_ids.append(int(_x))
+        except (ValueError, TypeError):
+            log.warning("_exec_strike op=%d: invalid account_id=%r, skipped", op_id, _x)
 
     if not target:
         return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
@@ -1492,10 +1502,13 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
         reason=reason,
         preset=preset,
         label=label,
-        intel={},        # нет pre-fetched intel — strike_engine соберёт при выполнении
+        # intel пустой: queued Strike не делает pre-recon.
+        # staggered_strike безопасно обрабатывает intel={} — каждый аккаунт
+        # самостоятельно вызывает GetFullChannel/GetHistory при выполнении.
+        intel={},
         waves=waves,
         started_at=_time.time(),
-        phase="strike",
+        phase="recon",   # начальная фаза: strike_engine начнёт со сбора данных
         mode="normal",
         owner_id=owner_id,
     )
