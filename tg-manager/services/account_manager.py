@@ -2615,6 +2615,32 @@ async def report_peer_deep_v2(  # noqa: C901
                 except Exception as e:
                     log.warning("rpv2[7/spam] acc=%s: %s", acc_id, str(e)[:80])
 
+        # ── 7.5. Increment view counters (алгоритмический сигнал) ────────
+        # GetMessagesViewsRequest с increment=True увеличивает счётчик просмотров поста.
+        # Это ключевой сигнал для алгоритмов Telegram — 100+ аккаунтов просматривают
+        # канал одновременно с жалобами создаёт аномалию, которую системы детектируют.
+        if msgs and is_channel:
+            try:
+                from telethon.tl.functions.messages import GetMessagesViewsRequest as _GMV
+                _view_ids = [m.id for m in msgs[:50] if m and m.id]
+                # Отправляем батчами по 25 — лимит TG API
+                for _vi in range(0, len(_view_ids), 25):
+                    _batch = _view_ids[_vi:_vi + 25]
+                    try:
+                        await _timed(client(_GMV(peer=entity, id=_batch, increment=True)), 15.0)
+                        await asyncio.sleep(random.uniform(0.3, 0.8))
+                    except Exception as _ve:
+                        if "FLOOD_WAIT" in str(_ve).upper():
+                            await asyncio.sleep(_flood(str(_ve), 10))
+                        else:
+                            log.debug("rpv2[7.5/views batch] acc=%s: %s", acc_id, str(_ve)[:60])
+                log.info("rpv2[7.5] view_increment=%d acc=%s target=%s",
+                         len(_view_ids), acc_id, peer)
+            except ImportError:
+                log.debug("rpv2[7.5] GetMessagesViewsRequest not available")
+            except Exception as _gve:
+                log.debug("rpv2[7.5/views] acc=%s: %s", acc_id, str(_gve)[:80])
+
         # ── 8. Negative reactions ─────────────────────────────────────
         if negative_react and msgs:
             pools = [["👎", "💩", "🤮"], ["👎", "🤬", "💩"], ["👎", "🤮"], ["💩", "🤬"], ["👎"]]
@@ -2722,7 +2748,17 @@ async def report_peer_deep_v2(  # noqa: C901
                 except Exception as e:
                     log.warning("rpv2[12/fbot %s] acc=%s: %s", bot_uname, acc_id, str(e)[:80])
 
-        # ── 13. Mute + Leave + Block ───────────────────────────────────
+        # ── 13. ReadHistory + Mute + Leave + Block ────────────────────────
+        # ReadHistory до выхода: сигнал "пользователь дочитал канал до конца" —
+        # в связке с view_increment создаёт поведенческий паттерн живого читателя.
+        if R["joined"] and is_channel and msgs:
+            try:
+                from telethon.tl.functions.channels import ReadHistoryRequest as _RHR
+                _last_id = max((m.id for m in msgs if m and m.id), default=0)
+                if _last_id:
+                    await _timed(client(_RHR(channel=entity, max_id=_last_id)), 10.0)
+            except Exception:
+                pass
         try:
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
