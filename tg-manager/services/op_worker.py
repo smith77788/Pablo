@@ -477,11 +477,8 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                 except Exception as e:
                     total_failed += 1
                     err_str = str(e)[:200]
-                    if "FloodWait" in err_str or "flood_wait" in err_str.lower() or "A wait of" in err_str:
-                        try:
-                            flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])) or "60")
-                        except (TypeError, ValueError):
-                            flood_wait = 60
+                    flood_wait = _extract_flood_wait(e, err_str)
+                    if flood_wait:
                         try:
                             from services.flood_engine import record_flood
                             await record_flood(pool, acc_dict["id"], flood_wait, "publish", op_id)
