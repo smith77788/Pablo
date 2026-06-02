@@ -202,7 +202,62 @@ async def cb_confirm_leave(
         )
         return
 
-    msg = await callback.message.edit_text("⏳ Выхожу из чатов...")
+    label = acc.get("first_name") or acc["phone"]
+
+    # Guard: check for managed assets associated with this account
+    try:
+        asset_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE acc_id=$1", acc_id
+        ) or 0
+    except Exception:
+        asset_count = 0
+
+    if asset_count > 0:
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="⚠️ Всё равно очистить",
+            callback_data=CleanerCb(action="force_leave", account_id=acc_id),
+        )
+        kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            f"⚠️ <b>Внимание: активы обнаружены!</b>\n\n"
+            f"Аккаунт <b>{html.escape(label)}</b> управляет "
+            f"<b>{asset_count}</b> каналами/группами в системе.\n\n"
+            "Очистка аккаунта может нарушить работу этих ресурсов.\n"
+            "Сначала открепите каналы от этого аккаунта.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Guard: check for active operations in queue
+    try:
+        active_ops = await pool.fetchval(
+            """SELECT COUNT(*) FROM operation_queue
+               WHERE owner_id=$1 AND status IN ('pending', 'running')""",
+            callback.from_user.id,
+        ) or 0
+    except Exception:
+        active_ops = 0
+
+    if active_ops > 0:
+        await callback.message.edit_text(
+            f"⏳ <b>Операции в очереди</b>\n\n"
+            f"Сейчас выполняется {active_ops} активных операций.\n"
+            "Дождитесь завершения перед очисткой аккаунта.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    await _do_leave(callback.message, acc, pool)
+
+
+async def _do_leave(message, acc: asyncpg.Record, pool: asyncpg.Pool) -> None:
+    """Execute leave_all_chats and display result."""
+    label = acc.get("first_name") or acc["phone"]
+    msg = await message.edit_text("⏳ Выхожу из чатов...")
 
     last_n = {"n": 0}
 
@@ -220,7 +275,9 @@ async def cb_confirm_leave(
 
     result = await leave_all_chats(acc["session_str"], dict(acc), progress_cb=progress)
 
-    label = acc.get("first_name") or acc["phone"]
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=CleanerCb(action="menu"))
+
     await msg.edit_text(
         f"✅ <b>Очистка завершена</b>\n\n"
         f"Аккаунт: <b>{html.escape(label)}</b>\n"
@@ -228,8 +285,30 @@ async def cb_confirm_leave(
         f"Пропущено: <b>{result['skipped']}</b>\n"
         + (f"Ошибок: <b>{len(result['errors'])}</b>" if result.get("errors") else ""),
         parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
+        reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "force_leave"))
+async def cb_force_leave(
+    callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
+) -> None:
+    """Force leave all chats even if account has managed assets (user confirmed warning)."""
+    await callback.answer("⏳ Принудительная очистка...")
+    acc_id = callback_data.account_id
+
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+        "FROM tg_accounts WHERE id=$1",
+        acc_id,
+    )
+    if not acc:
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
+        )
+        return
+
+    await _do_leave(callback.message, acc, pool)
 
 
 @router.callback_query(CleanerCb.filter(F.action == "do_del_contacts"))
