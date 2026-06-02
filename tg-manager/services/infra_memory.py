@@ -366,9 +366,50 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
         log.warning("infra_memory load_from_db failed for owner=%d: %s", owner_id, e)
 
 
+async def load_all_from_db(pool: asyncpg.Pool) -> None:
+    """Загрузить всю историю из БД при старте без фильтрации по owner_id.
+
+    Вызывается один раз из run_flush_loop перед первым sleep,
+    чтобы восстановить learned patterns после рестарта бота.
+    Не перезаписывает уже накопленные in-memory данные.
+    """
+    try:
+        rows = await pool.fetch(
+            """SELECT account_id, action_type,
+                      successes, failures,
+                      EXTRACT(EPOCH FROM last_success_at) as last_success_ts,
+                      EXTRACT(EPOCH FROM last_failure_at) as last_failure_ts,
+                      last_errors
+               FROM infra_memory_accounts
+               WHERE successes + failures > 0"""
+        )
+        loaded = 0
+        for row in rows:
+            key = (row["account_id"], row["action_type"])
+            if key in _account_memory:
+                continue  # не перетирать свежие in-memory данные
+            rec = _AccountActionRecord(
+                account_id=row["account_id"],
+                action_type=row["action_type"],
+                successes=row["successes"] or 0,
+                failures=row["failures"] or 0,
+                last_success_at=float(row["last_success_ts"] or 0),
+                last_failure_at=float(row["last_failure_ts"] or 0),
+                last_errors=list(row["last_errors"] or []),
+            )
+            _account_memory[key] = rec
+            loaded += 1
+        log.info("infra_memory: loaded %d records from DB on startup", loaded)
+    except Exception as e:
+        # Таблица может не существовать до первой миграции — это нормально
+        log.info("infra_memory: load_all_from_db skipped (%s)", type(e).__name__)
+
+
 async def run_flush_loop(pool: asyncpg.Pool) -> None:
-    """Фоновый цикл: периодически записывает in-memory данные в БД."""
+    """Фоновый цикл: загружает историю при старте, затем периодически пишет dirty-данные в БД."""
     log.info("infra_memory: flush loop started (interval=%ds)", _FLUSH_INTERVAL)
+    # Один раз — загрузить всё при старте
+    await load_all_from_db(pool)
     while True:
         try:
             await asyncio.sleep(_FLUSH_INTERVAL)

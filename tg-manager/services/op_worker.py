@@ -1418,86 +1418,90 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
     """Выполнить Strike-операцию через staggered_strike() из strike_engine.
 
     Параметры params:
-      target          — username или ссылка (@channel или t.me/channel)
-      reason          — причина жалобы (spam/violence/fraud/csam/...)
-      preset          — пресет (content_spam/threat_real/fake_docs/...)
-      num_waves       — количество волн (default 3)
-      accounts_per_wave — аккаунтов на волну (default 5)
-      negative_react  — добавлять негативные реакции (default True)
-      account_ids     — конкретные id аккаунтов (опционально, если не указаны — авто)
+      target        — username или ссылка (@channel или t.me/channel)
+      reason        — причина жалобы (spam/violence/fraud/csam/...)
+      preset        — пресет (content_spam/threat_real/fake_docs/...)
+      num_waves     — количество волн для plan_waves() (default 3)
+      account_ids   — конкретные id аккаунтов (опционально, если не указаны — авто)
+      label         — метка операции (опционально)
     """
-    from services.strike_engine import StrikePlan, staggered_strike, format_strike_summary
+    from services.strike_engine import (
+        StrikePlan, staggered_strike, format_strike_summary,
+        preflight_accounts, plan_waves,
+    )
+    import time as _time
 
-    target = params.get("target", "")
+    target = params.get("target", "").strip()
     reason = params.get("reason", "spam")
-    preset = params.get("preset")
+    preset = params.get("preset") or None
     num_waves = int(params.get("num_waves", 3))
-    accounts_per_wave = int(params.get("accounts_per_wave", 5))
-    negative_react = bool(params.get("negative_react", True))
-    account_ids: list[int] = [int(x) for x in params.get("account_ids", [])]
+    account_ids: list[int] = [int(x) for x in (params.get("account_ids") or [])]
+    label = params.get("label") or f"queued_strike_{op_id}"
 
     if not target:
-        return {
-            "status": "failed",
-            "summary": "⚠️ Strike: не указана цель (target)",
-        }
+        return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
 
-    # Загрузить аккаунты
+    # ── Загрузить аккаунты ─────────────────────────────────────────────────────
     if account_ids:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, "
+        raw_accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
             "a.device_model, a.system_version, a.app_version, "
             "a.trust_score, a.cooldown_until, a.tags, a.pool, p.proxy_url "
             "FROM tg_accounts a "
             "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.id = ANY($1) AND a.owner_id=$2 AND a.is_active=TRUE "
-            "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+            "WHERE a.id = ANY($1) AND a.owner_id=$2 "
             "ORDER BY a.trust_score DESC NULLS LAST",
             account_ids, owner_id,
         )
     else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, "
+        raw_accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
             "a.device_model, a.system_version, a.app_version, "
             "a.trust_score, a.cooldown_until, a.tags, a.pool, p.proxy_url "
             "FROM tg_accounts a "
             "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=TRUE "
-            "AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+            "WHERE a.owner_id=$1 "
             "ORDER BY a.trust_score DESC NULLS LAST",
             owner_id,
         )
 
-    if not accounts:
+    if not raw_accounts:
+        return {"status": "failed", "summary": "⚠️ Strike: нет аккаунтов"}
+
+    accounts_dicts = [dict(a) for a in raw_accounts]
+
+    # ── Pre-flight: фильтр cooldown + flood-state + сортировка ────────────────
+    viable = preflight_accounts(accounts_dicts)
+    if not viable:
         return {
             "status": "failed",
-            "summary": "⚠️ Strike: нет активных аккаунтов без cooldown",
+            "summary": "⚠️ Strike: все аккаунты в cooldown или неактивны",
         }
 
-    accounts_list = [dict(a) for a in accounts]
+    # ── Волны ─────────────────────────────────────────────────────────────────
+    waves = plan_waves(viable, num_waves=num_waves)
 
     await pool.execute(
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
-        len(accounts_list), op_id,
+        len(viable), op_id,
     )
 
     plan = StrikePlan(
-        target=target,
+        targets=[target],
+        accounts=viable,
         reason=reason,
         preset=preset,
-        num_waves=num_waves,
-        accounts_per_wave=accounts_per_wave,
-        negative_react=negative_react,
+        label=label,
+        intel={},        # нет pre-fetched intel — strike_engine соберёт при выполнении
+        waves=waves,
+        started_at=_time.time(),
+        phase="strike",
+        mode="normal",
         owner_id=owner_id,
     )
 
     try:
-        results = await staggered_strike(
-            accounts=accounts_list,
-            target=target,
-            plan=plan,
-            pool=pool,
-        )
+        results = await staggered_strike(plan, pool=pool)
     except Exception as e:
         log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
         return {
@@ -1507,20 +1511,18 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
 
     await pool.execute(
         "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-        len(accounts_list), op_id,
+        len(viable), op_id,
     )
 
     summary_text = format_strike_summary(results)
-    total_reported = sum(
-        1 for r in results
-        if getattr(r, "peer_reported", False) or (isinstance(r, dict) and r.get("peer_reported"))
-    )
+    total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
 
     return {
         "status": "done",
         "target": target,
-        "waves": num_waves,
-        "accounts_used": len(accounts_list),
+        "waves_planned": num_waves,
+        "accounts_used": len(viable),
         "total_reported": total_reported,
-        "summary": summary_text[:500] if summary_text else f"⚡ Strike по {target} завершён. Аккаунтов: {len(accounts_list)}",
+        "summary": (summary_text[:500] if summary_text
+                    else f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}"),
     }
