@@ -25,14 +25,15 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 # Публичные каналы/группы для "прогрева" (вступление, чтение)
+# Используем только проверенные публичные каналы
 _WARMUP_PUBLIC_CHANNELS = [
     "@telegram", "@durov", "@tginfo",
     "@bbcrussian", "@rian_ru", "@rbc_news",
-    "@rt_russian", "@lentach", "@meduzaio",
-    "@varlamov", "@topor", "@breakingmash",
-    "@ru_python", "@linuxoid", "@android_ru",
-    "@gamedev_ru", "@tg_dev_news", "@proglib",
-    "@sport_ru", "@kinomania", "@music_world_ru",
+    "@lentach", "@meduzaio", "@breakingmash",
+    "@varlamov", "@proglib", "@linuxoid",
+    "@reuters", "@bbc", "@guardian",
+    "@techcrunch", "@hackernoon", "@wired",
+    "@spacex", "@nasa", "@nature",
 ]
 
 _WARMUP_SEARCH_QUERIES = [
