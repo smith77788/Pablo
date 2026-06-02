@@ -166,6 +166,7 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
            LEFT JOIN account_flood_log fl ON fl.account_id = a.id
            LEFT JOIN operation_audit oa ON oa.account_id = a.id
            WHERE a.owner_id = $1
+             AND a.is_active = TRUE
            GROUP BY a.id, a.trust_score, a.flood_count_7d, a.acc_status, a.added_at""",
         owner_id,
     )
@@ -335,9 +336,14 @@ async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:
 
 
 async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> None:
-    """Фоновый цикл: каждый час пересчитывает здоровье и сохраняет снапшоты."""
+    """Фоновый цикл: каждый час пересчитывает здоровье и сохраняет снапшоты.
+
+    Использует time-anchored sleep чтобы избежать наслаивания циклов:
+    если сам health check занял N секунд, следующий sleep = max(0, interval_s - N).
+    """
     cycle = 0
     while True:
+        started_at = time.monotonic()
         try:
             owners = await pool.fetch(
                 "SELECT DISTINCT owner_id FROM tg_accounts WHERE is_active=TRUE"
@@ -359,6 +365,7 @@ async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> N
                     log.debug("account_health: cleaned %d old snapshots", cleaned)
 
             cycle += 1
-        except Exception as e:
-            log.warning("account_health loop error: %s", e)
-        await asyncio.sleep(interval_s)
+        except Exception:
+            log.exception("account_health loop error")
+        elapsed = time.monotonic() - started_at
+        await asyncio.sleep(max(0.0, interval_s - elapsed))

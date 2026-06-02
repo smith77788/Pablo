@@ -23,10 +23,15 @@ _RESCORE_INTERVAL = 900  # 15 minutes
 # ── Background runner ─────────────────────────────────────────────────────
 
 async def run(pool: asyncpg.Pool, bot=None) -> None:
-    """Main loop: periodically recompute behavioral scores and detect anomalies."""
+    """Main loop: periodically recompute behavioral scores and detect anomalies.
+
+    Uses time-anchored sleep to prevent cycle overlap: if a cycle takes longer
+    than _RESCORE_INTERVAL the next sleep is 0 rather than stacking up.
+    """
     log.info("behavioral_engine started")
     cycle = 0
     while True:
+        started_at = asyncio.get_event_loop().time()
         try:
             await _recompute_scores(pool)
             # Anomaly detection every 12 cycles (~3 hours)
@@ -38,7 +43,8 @@ async def run(pool: asyncpg.Pool, bot=None) -> None:
             cycle += 1
         except Exception:
             log.exception("behavioral_engine error")
-        await asyncio.sleep(_RESCORE_INTERVAL)
+        elapsed = asyncio.get_event_loop().time() - started_at
+        await asyncio.sleep(max(0.0, _RESCORE_INTERVAL - elapsed))
 
 
 # ── Score recomputation ───────────────────────────────────────────────────
@@ -484,8 +490,10 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
         if schedule_anomalies:
             log.info("behavioral_engine schedule deviation: %d anomalies", len(schedule_anomalies))
 
+    except asyncpg.UndefinedTableError:
+        log.debug("behavioral_engine anomaly detection skipped (table may not exist yet)")
     except Exception:
-        log.debug("behavioral_engine anomaly detection skipped (table may not exist)")
+        log.exception("behavioral_engine anomaly detection error")
 
 
 # ── Query helpers (used by dashboard) ────────────────────────────────────
@@ -551,7 +559,11 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
         exps = await pool.fetch(
             "SELECT id, bot_id FROM experiments WHERE status='active'"
         )
+    except asyncpg.UndefinedTableError:
+        log.debug("_auto_conclude_experiments: experiments table not ready yet")
+        return
     except Exception:
+        log.exception("_auto_conclude_experiments: failed to fetch experiments")
         return
 
     concluded = 0
