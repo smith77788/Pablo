@@ -29,9 +29,8 @@ def _dl_cancel_kb(bot_id: int) -> object:
 async def cb_dl_menu(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-
+    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
         await callback.message.edit_text(
             locked_text("Диплинки и рефералы", "starter"),
             parse_mode="HTML",
@@ -40,12 +39,24 @@ async def cb_dl_menu(
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.answer("Бот не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Бот не найден. Возможно, он был удалён.",
+            parse_mode="HTML",
+        )
         return
     links = await db.get_deep_links(pool, callback_data.bot_id)
     total_refs = await db.get_referral_total(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     total_clicks = sum(lnk["click_count"] for lnk in links)
+    if not links:
+        empty_hint = (
+            "\n\n💡 <b>Создайте первый диплинк!</b>\n"
+            "Нажмите «➕ Создать диплинк» и придумайте метку источника — "
+            "например <code>instagram</code> или <code>youtube</code>. "
+            "Поделитесь ссылкой и смотрите, откуда приходят подписчики."
+        )
+    else:
+        empty_hint = ""
     await callback.message.edit_text(
         f"🔗 <b>Диплинки — {label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
@@ -55,7 +66,8 @@ async def cb_dl_menu(
         f"Ссылок создано: <b>{len(links)}</b>\n"
         f"Кликов всего: <b>{total_clicks}</b>\n"
         f"Рефералов: <b>{total_refs}</b>\n\n"
-        "Формат ссылки: <code>t.me/username?start=ПАРАМЕТР</code>",
+        f"Формат ссылки: <code>t.me/username?start=ПАРАМЕТР</code>"
+        f"{empty_hint}",
         parse_mode="HTML",
         reply_markup=deeplinks_menu(callback_data.bot_id, links),
     )
@@ -65,10 +77,13 @@ async def cb_dl_menu(
 async def cb_dl_view(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-
+    await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.answer("Бот не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Бот не найден. Возможно, он был удалён.",
+            parse_mode="HTML",
+        )
         return
     links = await db.get_deep_links(pool, callback_data.bot_id)
     link = next((l for l in links if l["id"] == callback_data.link_id), None)
@@ -188,13 +203,19 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
 async def cb_dl_delete(
     callback: CallbackQuery, callback_data: DeepLinkCb, pool: asyncpg.Pool
 ) -> None:
-
     await callback.answer("🗑 Диплинк удалён.")
     await db.delete_deep_link(pool, callback_data.link_id, callback_data.bot_id)
     links = await db.get_deep_links(pool, callback_data.bot_id)
     total_refs = await db.get_referral_total(pool, callback_data.bot_id)
+    if not links:
+        empty_hint = (
+            "\n\n💡 <b>Список пуст.</b> Нажмите «➕ Создать диплинк», "
+            "чтобы добавить новую ссылку с меткой источника."
+        )
+    else:
+        empty_hint = ""
     await callback.message.edit_text(
-        f"🔗 <b>Диплинки</b>\n\nСсылок: {len(links)} | Рефералов: {total_refs}",
+        f"🔗 <b>Диплинки</b>\n\nСсылок: {len(links)} | Рефералов: {total_refs}{empty_hint}",
         parse_mode="HTML",
         reply_markup=deeplinks_menu(callback_data.bot_id, links),
     )

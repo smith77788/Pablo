@@ -102,9 +102,8 @@ async def _exp_text(exp, variants: list) -> str:
 @router.callback_query(ExperimentCb.filter(F.action == "list"))
 async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
                        pool: asyncpg.Pool) -> None:
-
+    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"), parse_mode="HTML",
             reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="main")),
@@ -112,18 +111,27 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.answer("Бот не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML")
         return
     exps = await db.get_experiments(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     active = sum(1 for e in exps if e["status"] == "active")
+    if not exps:
+        empty_hint = (
+            "\n\n💡 <b>Начните первый эксперимент!</b>\n"
+            "Нажмите «➕ Новый эксперимент» — создайте 2 варианта текста и запустите тест. "
+            "Через несколько дней выберите победителя по статистике."
+        )
+    else:
+        empty_hint = ""
     await callback.message.edit_text(
         f"🧪 <b>A/B Тесты — {label}</b>\n\n"
         "📌 <b>Что это?</b>\n"
         "A/B тест — это когда вы показываете разным пользователям разные версии сообщения и смотрите, какая лучше работает. Например: одним пришёл заголовок «Привет!», другим «Добро пожаловать!» — и вы видите, после какого больше людей остаётся.\n\n"
         "💡 <b>Как использовать:</b>\n"
         "Создайте эксперимент → добавьте 2+ варианта → запустите → через несколько дней выберите победителя.\n\n"
-        f"Экспериментов: <b>{len(exps)}</b> | Активных: <b>{active}</b>",
+        f"Экспериментов: <b>{len(exps)}</b> | Активных: <b>{active}</b>"
+        f"{empty_hint}",
         parse_mode="HTML",
         reply_markup=experiments_menu(callback_data.bot_id, exps),
     )
@@ -132,10 +140,10 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "view"))
 async def cb_exp_view(callback: CallbackQuery, callback_data: ExperimentCb,
                        pool: asyncpg.Pool) -> None:
-
+    await callback.answer()
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
-        await callback.answer("Эксперимент не найден.", show_alert=True)
+        await callback.message.edit_text("❌ Эксперимент не найден.", parse_mode="HTML")
         return
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
@@ -251,10 +259,26 @@ async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "start"))
 async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
                         pool: asyncpg.Pool) -> None:
-
+    await callback.answer()
+    # Guard: don't start if already active
+    exp = await db.get_experiment(pool, callback_data.exp_id)
+    if not exp:
+        await callback.message.edit_text("❌ Эксперимент не найден.", parse_mode="HTML")
+        return
+    if exp["status"] == "active":
+        await callback.message.edit_text(
+            "⚠️ Этот эксперимент уже активен.",
+            parse_mode="HTML",
+            reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "active"),
+        )
+        return
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if len(variants) < 2:
-        await callback.answer("Нужно минимум 2 варианта для запуска.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Нужно минимум 2 варианта для запуска эксперимента.",
+            parse_mode="HTML",
+            reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, exp["status"]),
+        )
         return
     await db.set_experiment_status(pool, callback_data.exp_id, "active")
     exp = await db.get_experiment(pool, callback_data.exp_id)
@@ -263,7 +287,6 @@ async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
         text, parse_mode="HTML",
         reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "active"),
     )
-    await callback.answer("✅ Эксперимент запущен!")
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "pause"))
@@ -297,10 +320,10 @@ async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "pick_winner"))
 async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
                           pool: asyncpg.Pool) -> None:
-
+    await callback.answer()
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if not variants:
-        await callback.answer("Нет вариантов.", show_alert=True)
+        await callback.message.edit_text("❌ Нет вариантов.", parse_mode="HTML")
         return
     exp = await db.get_experiment(pool, callback_data.exp_id)
     safe_name = _html_escape(exp['name'])
@@ -326,6 +349,23 @@ async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
         text, parse_mode="HTML",
         reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "completed"),
     )
+    # Notify the bot owner about experiment completion
+    owner_id = await db.get_bot_owner(pool, callback_data.bot_id)
+    if owner_id and owner_id != callback.from_user.id:
+        winner_variant = next((v for v in variants if v["id"] == callback_data.variant_id), None)
+        winner_name = _html_escape(winner_variant["name"]) if winner_variant else "—"
+        safe_exp_name = _html_escape(exp["name"])
+        try:
+            await callback.bot.send_message(
+                owner_id,
+                f"🏆 <b>Эксперимент завершён!</b>\n\n"
+                f"Эксперимент: <b>{safe_exp_name}</b>\n"
+                f"Победитель: <b>{winner_name}</b>\n\n"
+                f"Результаты доступны в разделе A/B Тесты.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "delete"))
@@ -334,8 +374,15 @@ async def cb_exp_delete(callback: CallbackQuery, callback_data: ExperimentCb,
     await callback.answer("🗑 Эксперимент удалён.")
     await db.delete_experiment(pool, callback_data.exp_id, callback_data.bot_id)
     exps = await db.get_experiments(pool, callback_data.bot_id)
+    if not exps:
+        empty_hint = (
+            "\n\n💡 <b>Список пуст.</b> Нажмите «➕ Новый эксперимент», "
+            "чтобы создать первый A/B тест."
+        )
+    else:
+        empty_hint = ""
     await callback.message.edit_text(
-        f"🧪 <b>A/B Эксперименты</b>\n\nВсего: {len(exps)}",
+        f"🧪 <b>A/B Эксперименты</b>\n\nВсего: {len(exps)}{empty_hint}",
         parse_mode="HTML",
         reply_markup=experiments_menu(callback_data.bot_id, exps),
     )

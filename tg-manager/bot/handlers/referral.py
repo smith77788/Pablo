@@ -65,8 +65,13 @@ def _build_dashboard(stats: dict, bot_username: str) -> str:
     return "\n".join(lines)
 
 
-def _dashboard_keyboard() -> object:
+def _dashboard_keyboard(share_url: str | None = None) -> object:
     kb = InlineKeyboardBuilder()
+    if share_url:
+        kb.button(
+            text="📤 Поделиться ссылкой",
+            url=f"https://t.me/share/url?url={share_url}&text=Присоединяйся+к+BotMother+по+моей+реферальной+ссылке!",
+        )
     kb.button(text="🏆 Топ рефереров", callback_data=RefCb(action="leaderboard"))
     kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
     kb.adjust(1)
@@ -94,9 +99,17 @@ async def cb_ref_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     uid = callback.from_user.id
     stats = await db.get_referral_stats(pool, uid)
     me = await callback.bot.get_me()
-    text = _build_dashboard(stats, me.username or "bot")
+    bot_username = me.username or "bot"
+    share_url = f"https://t.me/{bot_username}?start={stats['code']}"
+    text = _build_dashboard(stats, bot_username)
+    if stats["total"] == 0:
+        text += (
+            "\n\n💡 <b>Как начать?</b>\n"
+            "Скопируйте свою реферальную ссылку и поделитесь ею с друзьями, "
+            "коллегами или аудиторией. Каждый приглашённый получит 7 дней Starter бесплатно!"
+        )
     await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=_dashboard_keyboard()
+        text, parse_mode="HTML", reply_markup=_dashboard_keyboard(share_url=share_url)
     )
 
 
