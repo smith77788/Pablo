@@ -87,15 +87,38 @@ async def cb_fn_list(callback: CallbackQuery, callback_data: FunnelCb,
     await callback.answer()
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]
+
+    # Fetch active subscriber counts for each funnel
+    subscriber_counts: dict = {}
+    for f in funnels:
+        cnt = await pool.fetchval(
+            "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1 AND completed=false",
+            f["id"],
+        ) or 0
+        subscriber_counts[f["id"]] = int(cnt)
+
+    if not funnels:
+        empty_text = (
+            f"🔗 <b>Цепочки сообщений — {label}</b>\n\n"
+            "📌 <b>Что это?</b>\n"
+            "Цепочка — серия сообщений, которые бот автоматически отправляет пользователю с нужной задержкой.\n\n"
+            "💡 У вас пока нет цепочек.\n"
+            "Нажмите <b>➕ Создать</b>, чтобы добавить первую воронку!"
+        )
+    else:
+        total_active_subs = sum(subscriber_counts.values())
+        empty_text = (
+            f"🔗 <b>Цепочки сообщений — {label}</b>\n\n"
+            "📌 <b>Что это?</b>\n"
+            "Цепочка (воронка) — это серия сообщений, которые бот отправляет пользователю автоматически одно за другим с нужной задержкой. Например: сразу после /start — приветствие, через 10 минут — первый урок, через 1 день — напоминание.\n\n"
+            "💡 <b>Как использовать:</b>\n"
+            "Создайте цепочку → добавьте шаги с текстом и задержкой → включите. Бот сам будет вести пользователей по шагам.\n\n"
+            f"Цепочек создано: <b>{len(funnels)}</b> | Активных подписчиков: <b>{total_active_subs}</b>"
+        )
     await callback.message.edit_text(
-        f"🔗 <b>Цепочки сообщений — {label}</b>\n\n"
-        "📌 <b>Что это?</b>\n"
-        "Цепочка (воронка) — это серия сообщений, которые бот отправляет пользователю автоматически одно за другим с нужной задержкой. Например: сразу после /start — приветствие, через 10 минут — первый урок, через 1 день — напоминание.\n\n"
-        "💡 <b>Как использовать:</b>\n"
-        "Создайте цепочку → добавьте шаги с текстом и задержкой → включите. Бот сам будет вести пользователей по шагам.\n\n"
-        f"Цепочек создано: <b>{len(funnels)}</b>",
+        empty_text,
         parse_mode="HTML",
-        reply_markup=funnels_list(callback_data.bot_id, funnels),
+        reply_markup=funnels_list(callback_data.bot_id, funnels, subscriber_counts),
     )
 
 
@@ -155,16 +178,25 @@ async def cb_fn_trig_start(callback: CallbackQuery, callback_data: FunnelCb,
     bot_id = callback_data.bot_id or data.get("bot_id", 0)
     row = await db.create_funnel(pool, bot_id, funnel_name, "start")
     funnel_id = row["id"]
-    await state.update_data(funnel_id=funnel_id, bot_id=bot_id, current_step=0)
-    await state.set_state(CreateFunnel.waiting_step_text)
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="➕ Добавить шаг",
+        callback_data=FunnelCb(action="add_step", bot_id=bot_id, funnel_id=funnel_id, step=0),
+    )
+    kb.button(
+        text="◀️ К списку",
+        callback_data=FunnelCb(action="list", bot_id=bot_id),
+    )
+    kb.adjust(1)
     await callback.message.edit_text(
+        "✅ <b>Воронка создана!</b>\n\n"
+        f"🔗 <b>{funnel_name}</b>\n"
         "▶️ Триггер: <b>/start</b>\n\n"
-        "Цепочка создана! Теперь добавьте первый шаг.\n\n"
-        "Введите текст сообщения для шага 1 "
-        "(поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
-        "<code>&lt;a href=...&gt;</code>):",
+        "Добавьте первый шаг или вернитесь к списку воронок.",
         parse_mode="HTML",
-        reply_markup=_fn_cancel_kb(bot_id),
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -197,16 +229,25 @@ async def msg_fn_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool
     bot_id = data["bot_id"]
     row = await db.create_funnel(pool, bot_id, funnel_name, "keyword", keyword)
     funnel_id = row["id"]
-    await state.update_data(funnel_id=funnel_id, current_step=0)
-    await state.set_state(CreateFunnel.waiting_step_text)
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="➕ Добавить шаг",
+        callback_data=FunnelCb(action="add_step", bot_id=bot_id, funnel_id=funnel_id, step=0),
+    )
+    kb.button(
+        text="◀️ К списку",
+        callback_data=FunnelCb(action="list", bot_id=bot_id),
+    )
+    kb.adjust(1)
     await message.answer(
+        "✅ <b>Воронка создана!</b>\n\n"
+        f"🔗 <b>{funnel_name}</b>\n"
         f"🔑 Ключевое слово: <code>{keyword}</code>\n\n"
-        "Цепочка создана! Теперь добавьте первый шаг.\n\n"
-        "Введите текст сообщения для шага 1 "
-        "(поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, "
-        "<code>&lt;a href=...&gt;</code>):",
+        "Добавьте первый шаг или вернитесь к списку воронок.",
         parse_mode="HTML",
-        reply_markup=_fn_cancel_kb(bot_id),
+        reply_markup=kb.as_markup(),
     )
 
 

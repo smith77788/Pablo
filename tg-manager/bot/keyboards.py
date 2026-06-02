@@ -803,13 +803,17 @@ def auto_reply_view(
     return kb.as_markup()
 
 
-def funnels_list(bot_id: int, funnels: list) -> InlineKeyboardMarkup:
+def funnels_list(bot_id: int, funnels: list, subscriber_counts: dict | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for f in funnels[:8]:
         icon = "✅" if f["is_active"] else "❌"
         trigger = "/start" if f["trigger_type"] == "start" else f"🔑{f['keyword']}"
+        subs = ""
+        if subscriber_counts is not None:
+            cnt = subscriber_counts.get(f["id"], 0)
+            subs = f" 👥{cnt}"
         kb.button(
-            text=f"{icon} {f['name']} [{trigger}]",
+            text=f"{icon} {f['name']} [{trigger}]{subs}",
             callback_data=FunnelCb(action="view", bot_id=bot_id, funnel_id=f["id"]),
         )
     kb.adjust(1)

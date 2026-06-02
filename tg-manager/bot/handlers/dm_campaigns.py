@@ -104,12 +104,20 @@ async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
 
     running_count = sum(1 for c in campaigns if c["status"] == "running")
     cards_text = ("\n\n" + "\n\n".join(campaign_lines)) if campaign_lines else ""
+    if not campaigns:
+        empty_hint = (
+            "\n\n💡 У вас пока нет кампаний.\n"
+            "Нажмите <b>➕ Новая кампания</b>, чтобы создать первую рассылку!"
+        )
+    else:
+        empty_hint = ""
     text = (
         "<b>📨 DM-кампании</b>\n\n"
         "Отправляйте персонализированные сообщения своим подписчикам.\n\n"
         "📌 <i>Аудитория: подписчики ваших ботов и CRM-контакты.</i>\n"
         f"Кампаний: <b>{len(campaigns)}</b>"
         + (f" | Активных: <b>{running_count}</b>" if running_count else "")
+        + empty_hint
         + cards_text
     )
     await _edit(callback, text, kb.as_markup())
@@ -135,7 +143,9 @@ async def cb_dm_new(callback: CallbackQuery, state: FSMContext) -> None:
 async def fsm_dm_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name:
-        await message.answer("⚠️ Введите название:")
+        _cancel_kb = InlineKeyboardBuilder()
+        _cancel_kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
+        await message.answer("⚠️ Введите название:", reply_markup=_cancel_kb.as_markup())
         return
     await state.update_data(dm_name=name)
     await state.set_state(DmCampaignFSM.waiting_text)
@@ -155,7 +165,9 @@ async def fsm_dm_name(message: Message, state: FSMContext) -> None:
 async def fsm_dm_text(message: Message, state: FSMContext) -> None:
     text = message.text or message.caption or ""
     if not text.strip():
-        await message.answer("⚠️ Текст не может быть пустым:")
+        _cancel_kb = InlineKeyboardBuilder()
+        _cancel_kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
+        await message.answer("⚠️ Текст не может быть пустым:", reply_markup=_cancel_kb.as_markup())
         return
     await state.update_data(dm_text=text.strip())
     await state.set_state(DmCampaignFSM.choosing_target)
