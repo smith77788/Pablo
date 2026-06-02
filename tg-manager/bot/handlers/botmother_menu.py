@@ -2276,3 +2276,11 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     topo_kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     topo_kb.adjust(2)
     await _edit(callback, topo_text, topo_kb.as_markup())
+
+
+# ── Noop handler (страница / индикатор) ───────────────────────────────────────
+
+@router.callback_query(F.data == "bm:noop")
+async def cb_noop(callback: CallbackQuery) -> None:
+    """Заглушка для кнопок-индикаторов (страница X/Y) — просто отвечаем без действий."""
+    await callback.answer()

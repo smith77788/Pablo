@@ -454,6 +454,30 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             callback.from_user.id,
         )
 
+    elif action == "audit_log":
+        try:
+            rows = await pool.fetch(
+                """SELECT occurred_at, user_id, operation, status, details
+                   FROM operation_audit
+                   ORDER BY occurred_at DESC LIMIT 20"""
+            )
+        except Exception:
+            rows = []
+        if rows:
+            lines = []
+            for r in rows:
+                dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
+                uid = r.get("user_id") or "?"
+                op = r.get("operation") or "?"
+                status = r.get("status") or "?"
+                lines.append(f"<code>{dt}</code> uid:{uid} {op} [{status}]")
+            text = "🔐 <b>Аудит логи (последние 20)</b>\n\n" + "\n".join(lines)
+        else:
+            text = "🔐 <b>Аудит логи</b>\n\nЗаписей нет или таблица пуста."
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data="adm:users")
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
     elif action == "exit":
         await callback.message.edit_text(
             "👋 Вышли из админки.",
