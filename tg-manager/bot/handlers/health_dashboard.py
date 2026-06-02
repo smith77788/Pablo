@@ -173,10 +173,24 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     p_bar_filled = round(p_score / 10)
     p_bar = "█" * p_bar_filled + "░" * (10 - p_bar_filled)
 
+    # Pool and tag diversity
+    from database import db as _db
+    try:
+        distinct_pools = await _db.get_distinct_pools(pool, user_id)
+        pool_count = len(distinct_pools)
+    except Exception:
+        pool_count = 0
+    try:
+        distinct_tags = await _db.get_distinct_tags(pool, user_id)
+        tag_count = len(distinct_tags)
+    except Exception:
+        tag_count = 0
+
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"
         f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
         f"🌡 Давление: {p_emoji} <b>{p_score}/100</b> — {p_label}  [{p_bar}]\n"
+        f"🏊 Пулов: <b>{pool_count}</b> | 🏷 Тегов: <b>{tag_count}</b>\n"
         f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
         f"⭐ Средняя надёжность: <b>{stats['avg_trust']}</b>\n"
         f"⏸ На паузе: <b>{stats['in_cooldown']}</b>"
@@ -221,6 +235,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         """
         SELECT a.id, a.phone, a.first_name, a.username, a.trust_score, a.cooldown_until,
                COALESCE(a.flood_count_7d, 0) AS flood_count_7d, a.is_active,
+               a.pool, a.tags,
                (SELECT ROUND(h.health_score::numeric, 1)
                 FROM account_health_history h
                 WHERE h.account_id = a.id
@@ -247,16 +262,21 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
             hs_str = f" | health: {health:.0f}" if health is not None else ""
 
+            # Pool and tags info
+            pool_str = f" | 🏊 {acc['pool']}" if acc.get("pool") else ""
+            tags_list = acc.get("tags") or []
+            tags_str = f" | 🏷 {', '.join(tags_list[:3])}" if tags_list else ""
+
             if flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
                 time_str = flood_until.strftime("%H:%M")
-                lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b>{hs_str}")
+                lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b>{hs_str}{pool_str}{tags_str}")
             elif trust < 0.5:
                 lines.append(
-                    f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}"
+                    f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}{pool_str}{tags_str}"
                 )
             else:
                 lines.append(
-                    f"✅ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}"
+                    f"✅ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}{pool_str}{tags_str}"
                 )
 
     kb = _back_kb()
