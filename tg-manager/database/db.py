@@ -1605,7 +1605,8 @@ async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
 async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int, status_filter: str | None = None) -> list:
     base = (
         "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active, "
-        "COALESCE(acc_status, 'active') AS acc_status, status_checked_at, status_reason "
+        "COALESCE(acc_status, 'active') AS acc_status, status_checked_at, status_reason, "
+        "trust_score, cooldown_until, pool, tags, warnings "
         "FROM tg_accounts WHERE owner_id=$1"
     )
     if status_filter and status_filter != "all":

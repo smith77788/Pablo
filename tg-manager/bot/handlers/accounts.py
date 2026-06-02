@@ -284,7 +284,10 @@ async def _show_accounts_menu(
             if not acc.get("is_active", True):
                 acc_status = "archived"
             st_emoji = _STATUS_EMOJI.get(acc_status, "✅")
-            lines.append(f"  {st_emoji} {display}")
+            pool_str = f" · 🏊 {escape(acc['pool'])}" if acc.get("pool") else ""
+            trust_score = acc.get("trust_score")
+            trust_str = f" · ⭐{float(trust_score):.2f}" if trust_score is not None else ""
+            lines.append(f"  {st_emoji} {display}{pool_str}{trust_str}")
             kb.button(text=f"{st_emoji} {display}", callback_data=AccCb(action="view", acc_id=acc["id"]))
         text = "\n".join(lines)
     else:
