@@ -749,11 +749,14 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not kws:
         kb = InlineKeyboardBuilder()
+        kb.button(text="➕ Добавить ключевое слово", callback_data=VisCb(action="add_keyword"))
         kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
+        kb.adjust(1)
         await _edit(
             callback,
-            "<b>📋 Отчёт по позициям</b>\n\nНет отслеживаемых ключевых слов.\n\n"
-            "Добавьте слова через <b>📊 Аналитика → 🔍 Ключевые слова</b>.",
+            "<b>📋 Отчёт по позициям</b>\n\n"
+            "Нет отслеживаемых ключевых слов.\n\n"
+            "💡 Добавьте ключевые слова, чтобы начать отслеживать позиции вашего бота в поиске Telegram.",
             kb.as_markup(),
         )
         return

@@ -131,6 +131,10 @@ def net_broadcast_target_menu() -> InlineKeyboardMarkup:
     kb.button(
         text="🌍 По языку (вся сеть)", callback_data=NetBcCb(action="choose_lang")
     )
+    kb.button(
+        text="🤖 Выбрать конкретных ботов",
+        callback_data=NetBcCb(action="choose_bots"),
+    )
     kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
     kb.adjust(1)
     return kb.as_markup()
@@ -849,9 +853,18 @@ def funnel_view(
             action="add_step", bot_id=bot_id, funnel_id=funnel_id, step=step_count
         ),
     )
+    if step_count > 0:
+        kb.button(
+            text="📝 Управление шагами",
+            callback_data=FunnelCb(action="steps_manage", bot_id=bot_id, funnel_id=funnel_id),
+        )
     kb.button(
         text="📢 Написать подписчикам",
         callback_data=FunnelCb(action="broadcast", bot_id=bot_id, funnel_id=funnel_id),
+    )
+    kb.button(
+        text="📋 Копировать воронку",
+        callback_data=FunnelCb(action="copy_single", bot_id=bot_id, funnel_id=funnel_id),
     )
     kb.button(
         text="🗑 Удалить",

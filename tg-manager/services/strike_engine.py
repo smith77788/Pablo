@@ -1599,7 +1599,7 @@ async def execute_mini_strike(
             try:
                 await progress_cb(text)
             except Exception:
-                pass
+                log_exc_swallow(log, "mini_strike: progress_cb failed")
 
     # ── Phase 1: Telethon 12-vector ──────────────────────────────────────────
     await _prog("⚙️ <b>Фаза 1/4:</b> Telethon MTProto — 12 векторов + все причины...")
@@ -1731,7 +1731,7 @@ async def execute_mini_strike(
                         ea["id"],
                     )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, f"mini_strike: failed to update email account success status id={ea.get('id')}")
             else:
                 try:
                     await pool.execute(
@@ -1742,7 +1742,7 @@ async def execute_mini_strike(
                         ea["id"],
                     )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, f"mini_strike: failed to update email account fail_count id={ea.get('id')}")
 
         # Phase 3: NCMEC (только CSAM, отправляем с первого рабочего ящика)
         if cat.get("ncmec"):

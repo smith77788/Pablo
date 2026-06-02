@@ -134,6 +134,7 @@ class AiChat(StatesGroup):
 class NetworkBroadcastV2(StatesGroup):
     choosing_target = State()
     choosing_segment = State()
+    choosing_bots = State()
     waiting_message = State()
     confirming = State()
 
