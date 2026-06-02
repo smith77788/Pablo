@@ -1473,16 +1473,45 @@ async def cb_op_detail(
     dt_created = op["created_at"].strftime("%d.%m.%Y %H:%M")
     dt_finished = op["finished_at"].strftime("%d.%m.%Y %H:%M") if op["finished_at"] else "—"
 
+    # Elapsed time
+    import datetime as _dt_top
+    elapsed_str = ""
+    if op["started_at"]:
+        end = op["finished_at"] or _dt_top.datetime.now(_dt_top.timezone.utc)
+        elapsed_s = int((end - op["started_at"]).total_seconds())
+        if elapsed_s < 60:
+            elapsed_str = f"{elapsed_s}с"
+        elif elapsed_s < 3600:
+            elapsed_str = f"{elapsed_s // 60}м {elapsed_s % 60}с"
+        else:
+            elapsed_str = f"{elapsed_s // 3600}ч {(elapsed_s % 3600) // 60}м"
+
     lines = [
         f"<b>📋 Операция #{op_id}</b>\n",
         f"Тип: <code>{html.escape(op['op_type'])}</code>",
-        f"Статус: {emoji} {op['status']}",
+        f"Статус: {emoji} {op['status']}" + (f" · ⏱ {elapsed_str}" if elapsed_str else ""),
         f"Создана: <code>{dt_created}</code>",
         f"Завершена: <code>{dt_finished}</code>",
     ]
     if op["total_items"]:
-        pct = round(100 * op["done_items"] / op["total_items"]) if op["total_items"] else 0
-        lines.append(f"Прогресс: {op['done_items']}/{op['total_items']} ({pct}%)")
+        total = op["total_items"]
+        done = op["done_items"] or 0
+        pct = round(100 * done / total) if total else 0
+        bar_filled = pct // 10
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        progress_line = f"Прогресс: [{bar}] {done}/{total} ({pct}%)"
+        # ETA for running operations
+        if op["status"] == "running" and op["started_at"] and done > 0:
+            import datetime as _dt
+            elapsed = (_dt.datetime.now(_dt.timezone.utc) - op["started_at"]).total_seconds()
+            remaining = total - done
+            eta_s = int(elapsed / done * remaining)
+            if eta_s < 3600:
+                eta_str = f"{eta_s // 60}м {eta_s % 60}с"
+            else:
+                eta_str = f"{eta_s // 3600}ч {(eta_s % 3600) // 60}м"
+            progress_line += f" · ETA: {eta_str}"
+        lines.append(progress_line)
 
     if op["error_msg"]:
         lines.append(f"\n❌ <b>Ошибка:</b>\n<code>{html.escape(op['error_msg'][:300])}</code>")
