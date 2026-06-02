@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import StrikeCb, ChanCb, BmCb
+from bot.states import MiniStrikeFSM
 from services.logger import log_exc_swallow
 
 router = Router(name="strike")
@@ -94,14 +95,13 @@ async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
 def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     if has_access:
-        kb.button(
-            text="🚨 Одиночная цель", callback_data=ChanCb(action="br_mode_single")
-        )
-        kb.button(text="📋 Список целей", callback_data=ChanCb(action="br_mode_batch"))
-        kb.button(text="⚙️ Настройки атаки", callback_data=StrikeCb(action="settings"))
-        kb.button(text="📜 История атак",    callback_data=StrikeCb(action="history"))
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-        kb.adjust(2, 1, 1, 1)
+        kb.button(text="⚡ Мини-страйк (1 аккаунт)", callback_data=StrikeCb(action="mini"))
+        kb.button(text="🚨 Одиночная цель",           callback_data=ChanCb(action="br_mode_single"))
+        kb.button(text="📋 Список целей",             callback_data=ChanCb(action="br_mode_batch"))
+        kb.button(text="⚙️ Настройки атаки",          callback_data=StrikeCb(action="settings"))
+        kb.button(text="📜 История",                  callback_data=StrikeCb(action="history"))
+        kb.button(text="◀️ Назад",                   callback_data=BmCb(action="main"))
+        kb.adjust(1, 2, 1, 1, 1)
     else:
         kb.button(text="💳 Купить за $250 USDT", callback_data=StrikeCb(action="buy"))
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
@@ -124,19 +124,12 @@ async def cb_strike_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if access:
         text = (
             "⚔️ <b>Strike Module</b> — активен\n\n"
-            "<b>12-векторная атака на нелегальный ресурс:</b>\n"
-            "① Жалоба на ресурс — все доступные причины\n"
-            "② Жалоба на фото профиля канала\n"
-            "③ Вход в канал → жалобы изнутри\n"
-            "④ Жалобы на закреплённые сообщения\n"
-            "⑤ Жалобы на 50 последних сообщений\n"
-            "⑥ Спам-сигнал channels.ReportSpam\n"
-            "⑦ Реакции 👎💩 на все доступные посты\n"
-            "⑧ Жалобы на ВСЕХ администраторов\n"
-            "⑨ Жалоба на связанную группу обсуждений\n"
-            "⑩ Жалобы на связанные боты\n"
-            "⑪ Пересылка доказательств в @stopCA / @notoscam\n"
-            "⑫ Заглушить + заблокировать + выйти\n\n"
+            "<b>⚡ Мини-страйк</b> — 1 аккаунт, максимальный охват:\n"
+            "• 12-векторная MTProto атака (все причины по кругу)\n"
+            "• Email → abuse@telegram.org\n"
+            "• Email → NCMEC CyberTipline (для CSAM)\n"
+            "• Форма telegram.org/support\n\n"
+            "<b>🚨 Одиночная / 📋 Список</b> — мульти-аккаунт страйк\n\n"
             "Выберите режим:" + _DISCLAIMER
         )
     else:
@@ -566,3 +559,251 @@ async def cb_strike_admin_grant(
         callback.from_user.id,
     )
     await callback.answer(f"✅ Strike активирован для {target_id}", show_alert=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MINI-STRIKE WIZARD
+# Поток: /mini → ввод @channel → выбор категории → подтверждение → выполнение
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _category_kb(target: str) -> InlineKeyboardBuilder:
+    from services.strike_engine import MINI_CATEGORIES
+    kb = InlineKeyboardBuilder()
+    for key, cat in MINI_CATEGORIES.items():
+        kb.button(
+            text=cat["label"],
+            callback_data=StrikeCb(action=f"mini_cat_{key}"),
+        )
+    kb.button(text="❌ Отмена", callback_data=StrikeCb(action="menu"))
+    kb.adjust(1)
+    return kb
+
+
+@router.callback_query(StrikeCb.filter(F.action == "mini"))
+async def cb_mini_strike_start(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(MiniStrikeFSM.awaiting_target)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=StrikeCb(action="menu"))
+    await callback.message.edit_text(
+        "⚡ <b>Мини-страйк</b>\n\n"
+        "Введите username или ссылку на канал:\n"
+        "<code>@channelname</code> или <code>https://t.me/channelname</code>\n\n"
+        "Ты находишь — система бьёт по всем официальным каналам одновременно.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(MiniStrikeFSM.awaiting_target)
+async def msg_mini_strike_target(
+    message: Message, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _has_access(pool, message.from_user.id):
+        await state.clear()
+        return
+
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("⚠️ Введите username канала.", parse_mode="HTML")
+        return
+
+    # Нормализация
+    target = (
+        raw.lstrip("@")
+        .replace("https://t.me/", "")
+        .replace("http://t.me/", "")
+        .split("?")[0]
+        .split("/")[0]
+        .strip()
+    )
+    if not target or len(target) < 3:
+        await message.answer("⚠️ Некорректный username. Попробуйте ещё раз.")
+        return
+
+    await state.update_data(target=target)
+    await state.set_state(MiniStrikeFSM.awaiting_category)
+
+    await message.answer(
+        f"🎯 Цель: <code>@{target}</code>\n\n"
+        "Выберите категорию нарушения:",
+        parse_mode="HTML",
+        reply_markup=_category_kb(target).as_markup(),
+    )
+
+
+@router.callback_query(StrikeCb.filter(F.action.startswith("mini_cat_")))
+async def cb_mini_strike_category(
+    callback: CallbackQuery, callback_data: StrikeCb,
+    pool: asyncpg.Pool, state: FSMContext,
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    # Проверяем что FSM активен (пользователь может нажать кнопку повторно)
+    current_state = await state.get_state()
+    sd = await state.get_data()
+    target = sd.get("target", "")
+
+    category = callback_data.action.replace("mini_cat_", "")
+    from services.strike_engine import MINI_CATEGORIES
+    cat = MINI_CATEGORIES.get(category)
+    if not cat:
+        await callback.answer("Неизвестная категория.", show_alert=True)
+        return
+
+    if not target:
+        await callback.answer("Сессия истекла. Начните заново.", show_alert=True)
+        await state.clear()
+        return
+
+    await callback.answer()
+
+    # Найти лучший активный аккаунт
+    try:
+        accs = await pool.fetch(
+            """SELECT id, phone, first_name, session_str, trust_score,
+                      device_model, system_version, app_version, is_active
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND (cooldown_until IS NULL OR cooldown_until < now())
+               ORDER BY trust_score DESC NULLS LAST
+               LIMIT 1""",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_mini_strike_category: DB fetch failed")
+        accs = []
+
+    if not accs:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
+        await state.clear()
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Добавьте аккаунт в разделе <b>📱 Аккаунты</b>, затем вернитесь сюда.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    acc = dict(accs[0])
+    acc_label = acc.get("first_name") or acc.get("phone") or f"id{acc['id']}"
+    trust = acc.get("trust_score") or 0
+
+    await state.update_data(category=category, acc_id=acc["id"])
+
+    from config import SMTP_HOST, SMTP_USER
+    smtp_status = "✅ настроен" if (SMTP_HOST and SMTP_USER) else "⚠️ не настроен (email-репорты недоступны)"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🚀 Запустить страйк", callback_data=StrikeCb(action="mini_run"))
+    kb.button(text="❌ Отмена",           callback_data=StrikeCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"⚡ <b>Мини-страйк — подтверждение</b>\n\n"
+        f"🎯 Цель: <code>@{target}</code>\n"
+        f"📂 Категория: {cat['label']}\n"
+        f"🔴 Уровень: <b>{cat['severity']}</b>\n"
+        f"📱 Аккаунт: <b>{acc_label}</b> (trust: {trust:.2f})\n\n"
+        f"<b>Будет выполнено:</b>\n"
+        f"• Telethon MTProto — 12 векторов, 100+ сообщений, все причины\n"
+        f"• Email abuse@telegram.org: {smtp_status}\n"
+        f"{'• Email NCMEC CyberTipline: ' + smtp_status + chr(10) if cat.get('ncmec') else ''}"
+        f"• Форма telegram.org/support\n\n"
+        f"⏱ Ориентировочно: 2–5 минут",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(StrikeCb.filter(F.action == "mini_run"))
+async def cb_mini_strike_run(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+
+    sd = await state.get_data()
+    target = sd.get("target", "")
+    category = sd.get("category", "fraud")
+    acc_id = sd.get("acc_id")
+    await state.clear()
+
+    if not target or not acc_id:
+        await callback.message.edit_text("⚠️ Сессия истекла. Начните заново.")
+        return
+
+    # Загрузить аккаунт
+    try:
+        acc_row = await pool.fetchrow(
+            """SELECT id, phone, first_name, session_str, trust_score,
+                      device_model, system_version, app_version, is_active
+               FROM tg_accounts WHERE id=$1 AND owner_id=$2""",
+            acc_id, callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_mini_strike_run: acc fetchrow failed")
+        acc_row = None
+
+    if not acc_row or not acc_row["session_str"]:
+        await callback.message.edit_text("⚠️ Аккаунт не найден. Начните заново.")
+        return
+
+    acc = dict(acc_row)
+
+    # Live-обновления в сообщение
+    msg = callback.message
+    last_text = [""]
+
+    async def progress(text: str) -> None:
+        full = f"⚡ <b>Страйк в процессе...</b>\n\n{text}"
+        if full == last_text[0]:
+            return
+        last_text[0] = full
+        try:
+            await msg.edit_text(full, parse_mode="HTML")
+        except Exception:
+            pass
+
+    await progress(
+        f"🎯 Цель: <code>@{target}</code>\n"
+        f"📂 Категория: {category}\n\n"
+        "⚙️ Запуск..."
+    )
+
+    from services.strike_engine import execute_mini_strike, format_mini_result
+    try:
+        result = await execute_mini_strike(
+            pool=pool,
+            session_str=acc["session_str"],
+            acc=acc,
+            target=target,
+            category=category,
+            owner_id=callback.from_user.id,
+            progress_cb=progress,
+        )
+    except Exception as e:
+        log_exc_swallow(log, "cb_mini_strike_run: execute failed")
+        await msg.edit_text(
+            f"❌ <b>Ошибка выполнения страйка</b>\n\n<code>{str(e)[:200]}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    report_text = format_mini_result(result)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔁 Ещё один страйк", callback_data=StrikeCb(action="mini"))
+    kb.button(text="◀️ Меню Strike",     callback_data=StrikeCb(action="menu"))
+    kb.adjust(1)
+
+    await msg.edit_text(report_text, parse_mode="HTML", reply_markup=kb.as_markup())

@@ -28,6 +28,14 @@ TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 # Format: socks5://user:pass@host:port  or  socks5://host:port
 TG_PROXY: str = os.getenv("TG_PROXY", "")
 
+# SMTP for email reporting (abuse@telegram.org, NCMEC, etc.)
+SMTP_HOST: str = os.getenv("SMTP_HOST", "")
+SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER: str = os.getenv("SMTP_USER", "")
+SMTP_PASS: str = os.getenv("SMTP_PASS", "")
+REPORT_FROM_EMAIL: str = os.getenv("REPORT_FROM_EMAIL", "")
+NCMEC_EMAIL: str = os.getenv("NCMEC_EMAIL", "cybertipline@ncmec.org")
+
 
 def _price(plan: str, default: int) -> int:
     try:

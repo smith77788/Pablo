@@ -429,3 +429,8 @@ class WorkspaceFSM(StatesGroup):
 class AiTemplateGenFSM(StatesGroup):
     waiting_prompt = State()   # user describes desired template
     waiting_name   = State()   # user enters name after preview
+
+
+class MiniStrikeFSM(StatesGroup):
+    awaiting_target   = State()  # ввод username/ссылки
+    awaiting_category = State()  # выбор категории (stores target in FSM data)

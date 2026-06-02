@@ -1098,3 +1098,390 @@ async def strike_network_nodes(
 ) -> dict[str, int]:
     """Обратно-совместимый вызов — использует v2 (параллельная атака узлов)."""
     return await strike_network_nodes_v2(accounts, intel, reason, preset)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MINI-STRIKE — одиночный удар с одного аккаунта + email + внешние организации
+# ══════════════════════════════════════════════════════════════════════════════
+
+import smtplib
+import ssl as _ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+# Категории для мини-страйка (один аккаунт, ручное обнаружение)
+MINI_CATEGORIES: dict[str, dict] = {
+    "csam": {
+        "label": "🚨 CSAM (детский контент)",
+        "tg_reason": "childabuse",
+        "severity": "CRITICAL",
+        "ncmec": True,
+        "email_subject": "URGENT: CSAM on Telegram",
+        "report_msg_key": "childabuse",
+    },
+    "drugs": {
+        "label": "💊 Наркотики",
+        "tg_reason": "drugs",
+        "severity": "HIGH",
+        "ncmec": False,
+        "email_subject": "Report: Illegal Drug Sales on Telegram",
+        "report_msg_key": "drugs",
+    },
+    "weapons": {
+        "label": "🔫 Оружие",
+        "tg_reason": "violence",
+        "severity": "HIGH",
+        "ncmec": False,
+        "email_subject": "Report: Illegal Weapons on Telegram",
+        "report_msg_key": "weapons",
+    },
+    "terrorism": {
+        "label": "💣 Терроризм/экстремизм",
+        "tg_reason": "violence",
+        "severity": "CRITICAL",
+        "ncmec": False,
+        "email_subject": "Report: Terrorism/Extremism on Telegram",
+        "report_msg_key": "terrorism",
+    },
+    "prostitution": {
+        "label": "🔞 Проституция/секс-трафик",
+        "tg_reason": "pornography",
+        "severity": "HIGH",
+        "ncmec": False,
+        "email_subject": "Report: Sex Trafficking on Telegram",
+        "report_msg_key": "escort",
+    },
+    "fraud": {
+        "label": "💸 Мошенничество",
+        "tg_reason": "spam",
+        "severity": "MEDIUM",
+        "ncmec": False,
+        "email_subject": "Report: Fraud/Scam on Telegram",
+        "report_msg_key": "fraud",
+    },
+    "darknet": {
+        "label": "🕸 Даркнет-услуги",
+        "tg_reason": "other",
+        "severity": "HIGH",
+        "ncmec": False,
+        "email_subject": "Report: Darknet Services on Telegram",
+        "report_msg_key": "darknet",
+    },
+}
+
+
+def _build_abuse_tg_email(target: str, cat: dict, report_time: str) -> str:
+    chan_url = f"https://t.me/{target}"
+    texts_sample = TEXTS.get(cat["report_msg_key"], TEXTS["other"])
+    description = texts_sample[0] if texts_sample else "Illegal content."
+    return (
+        f"Dear Telegram Trust & Safety Team,\n\n"
+        f"I am reporting the following channel for illegal content requiring immediate action.\n\n"
+        f"Channel: {chan_url}\n"
+        f"Category: {cat['label']}\n"
+        f"Severity: {cat['severity']}\n"
+        f"Date/Time: {report_time} UTC\n\n"
+        f"{description}\n\n"
+        f"This channel is publicly accessible via Telegram search and may be discovered "
+        f"by minors and vulnerable users.\n\n"
+        f"Requested action: immediate review, removal from search, account suspension if confirmed.\n\n"
+        f"This report was filed simultaneously via Telegram MTProto Report API and this email.\n"
+        f"Reference: MINI-{target.upper()}-{report_time[:10].replace('-', '')}\n"
+    )
+
+
+def _build_ncmec_email(target: str, report_time: str) -> str:
+    chan_url = f"https://t.me/{target}"
+    return (
+        f"Dear NCMEC CyberTipline Team,\n\n"
+        f"I am filing an emergency report of suspected Child Sexual Abuse Material (CSAM) "
+        f"on the Telegram platform.\n\n"
+        f"Platform: Telegram Messenger (telegram.org)\n"
+        f"Channel URL: {chan_url}\n"
+        f"Date/Time: {report_time} UTC\n\n"
+        f"The above Telegram public channel appears to distribute child sexual abuse material. "
+        f"The channel is indexed in Telegram's public search and discoverable by any user "
+        f"including minors.\n\n"
+        f"Action taken:\n"
+        f"• Reported to Telegram via MTProto API (all available report reasons)\n"
+        f"• Reported to Telegram via abuse@telegram.org\n\n"
+        f"Please coordinate with Telegram to ensure expedited removal and preservation of "
+        f"evidence for law enforcement.\n\n"
+        f"Reference: NCMEC-{target.upper()}-{report_time[:10].replace('-', '')}\n"
+    )
+
+
+def _smtp_send_sync(
+    smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass: str,
+    from_addr: str, to_addr: str, subject: str, body: str,
+) -> None:
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    ctx = _ssl.create_default_context()
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=20) as srv:
+            srv.login(smtp_user, smtp_pass)
+            srv.sendmail(from_addr, to_addr, msg.as_string())
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as srv:
+            srv.ehlo()
+            srv.starttls(context=ctx)
+            srv.login(smtp_user, smtp_pass)
+            srv.sendmail(from_addr, to_addr, msg.as_string())
+
+
+async def _send_email(
+    smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass: str,
+    from_addr: str, to_addr: str, subject: str, body: str,
+) -> tuple[bool, str]:
+    """Async email via thread executor. Returns (ok, error)."""
+    try:
+        await asyncio.to_thread(
+            _smtp_send_sync,
+            smtp_host, smtp_port, smtp_user, smtp_pass,
+            from_addr, to_addr, subject, body,
+        )
+        log.info("mini_strike: email sent → %s", to_addr)
+        return True, ""
+    except Exception as e:
+        log.warning("mini_strike: email failed → %s: %s", to_addr, e)
+        return False, str(e)[:120]
+
+
+async def execute_mini_strike(
+    pool,
+    session_str: str,
+    acc: dict,
+    target: str,
+    category: str,
+    owner_id: int,
+    progress_cb=None,
+) -> dict:
+    """
+    Одиночный удар с одного аккаунта.
+
+    Phase 1 — Telethon report_peer_deep_v2 (12 векторов, все причины по кругу)
+    Phase 2 — Email abuse@telegram.org
+    Phase 3 — Email NCMEC (только category=csam)
+    Phase 4 — Abuse-форма telegram.org/support
+    Phase 5 — Сохранение в strike_reports
+
+    progress_cb(text) — если передан, вызывается на каждой фазе.
+    """
+    import json
+    from datetime import datetime, timezone
+    from services import account_manager
+    from config import (
+        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+        REPORT_FROM_EMAIL, NCMEC_EMAIL,
+    )
+
+    cat = MINI_CATEGORIES.get(category, MINI_CATEGORIES["fraud"])
+    target_clean = (
+        target.strip()
+        .lstrip("@")
+        .replace("https://t.me/", "")
+        .replace("http://t.me/", "")
+        .split("?")[0]
+        .split("/")[0]
+        .strip()
+    )
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    result: dict = {
+        "target": target_clean,
+        "category": category,
+        "category_label": cat["label"],
+        "severity": cat["severity"],
+        "tg": {},
+        "emails": [],
+        "abuse_form": {},
+        "total_tg_reports": 0,
+        "total_emails": 0,
+        "errors": [],
+    }
+
+    async def _prog(text: str) -> None:
+        if progress_cb:
+            try:
+                await progress_cb(text)
+            except Exception:
+                pass
+
+    # ── Phase 1: Telethon 12-vector ──────────────────────────────────────────
+    await _prog("⚙️ <b>Фаза 1/4:</b> Telethon MTProto — 12 векторов + все причины...")
+    log.info("mini_strike: phase1 telethon target=%s cat=%s", target_clean, category)
+    try:
+        msg_texts = assign_texts(cat["report_msg_key"], 20)
+        tg = await account_manager.report_peer_deep_v2(
+            session_string=session_str,
+            peer_username=target_clean,
+            reason=cat["tg_reason"],
+            message=msg_texts[0],
+            msg_messages=msg_texts,
+            max_msg_reports=100,
+            block_after=True,
+            multi_reason=True,
+            join_first=True,
+            negative_react=True,
+            report_admins=True,
+            report_linked_bots=True,
+            forward_to_bot=True,
+            report_photo=True,
+            report_pinned=True,
+            report_linked_group=True,
+            wave_num=0,
+            _acc=acc,
+        )
+        result["tg"] = tg
+        result["total_tg_reports"] = (
+            (1 if tg.get("peer_reported") else 0)
+            + tg.get("multi_reason_sent", 0)
+            + (1 if tg.get("photo_reported") else 0)
+            + tg.get("pinned_reported", 0)
+            + tg.get("msg_reported", 0)
+            + tg.get("spam_signaled", 0)
+            + tg.get("reactions_sent", 0)
+            + tg.get("admins_reported", 0)
+            + (1 if tg.get("linked_group_reported") else 0)
+            + tg.get("bots_reported", 0)
+            + tg.get("forwarded", 0)
+        )
+        log.info("mini_strike: telethon done tg_total=%d", result["total_tg_reports"])
+    except Exception as e:
+        result["errors"].append(f"Telethon: {str(e)[:100]}")
+        log.exception("mini_strike: telethon failed target=%s", target_clean)
+
+    # ── Phase 2: Email abuse@telegram.org ────────────────────────────────────
+    await _prog(
+        f"📧 <b>Фаза 2/4:</b> Email → abuse@telegram.org...\n"
+        f"   Telethon: <b>{result['total_tg_reports']}</b> репортов отправлено"
+    )
+    smtp_ready = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
+    from_addr = REPORT_FROM_EMAIL or SMTP_USER
+    if smtp_ready:
+        body_tg = _build_abuse_tg_email(target_clean, cat, report_time)
+        ok, err = await _send_email(
+            SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+            from_addr, "abuse@telegram.org",
+            f"{cat['email_subject']} — @{target_clean}",
+            body_tg,
+        )
+        result["emails"].append({"to": "abuse@telegram.org", "ok": ok, "err": err})
+        if ok:
+            result["total_emails"] += 1
+
+        # ── Phase 3: NCMEC (только CSAM) ─────────────────────────────────────
+        if cat.get("ncmec"):
+            await _prog("📧 <b>Фаза 3/4:</b> NCMEC CyberTipline — экстренный CSAM-репорт...")
+            ncmec_addr = NCMEC_EMAIL or "cybertipline@ncmec.org"
+            body_ncmec = _build_ncmec_email(target_clean, report_time)
+            ok_n, err_n = await _send_email(
+                SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+                from_addr, ncmec_addr,
+                f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
+                body_ncmec,
+            )
+            result["emails"].append({"to": ncmec_addr, "ok": ok_n, "err": err_n})
+            if ok_n:
+                result["total_emails"] += 1
+    else:
+        result["emails"].append({
+            "to": "abuse@telegram.org", "ok": False,
+            "err": "SMTP не настроен (нужны SMTP_HOST/SMTP_USER/SMTP_PASS в Railway env)",
+        })
+
+    # ── Phase 4: Abuse form telegram.org/support ──────────────────────────────
+    await _prog("🌐 <b>Фаза 4/4:</b> Форма telegram.org/support...")
+    try:
+        from services.strike_engine import submit_abuse_form as _saf
+        abuse_res = await _saf(
+            target_clean,
+            cat["tg_reason"],
+            title="",
+            members=0,
+        )
+        result["abuse_form"] = abuse_res
+    except Exception as e:
+        result["abuse_form"] = {"ok": False, "error": str(e)[:80]}
+
+    # ── Phase 5: Save to DB ───────────────────────────────────────────────────
+    try:
+        await pool.execute(
+            """INSERT INTO strike_reports
+               (owner_id, target, category, tg_reports_sent, emails_sent,
+                total_reports, details)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+            owner_id, target_clean, category,
+            result["total_tg_reports"],
+            result["total_emails"],
+            result["total_tg_reports"] + result["total_emails"],
+            json.dumps({
+                "tg": result["tg"],
+                "emails": result["emails"],
+                "abuse_form": result["abuse_form"],
+                "errors": result["errors"],
+            }),
+        )
+    except Exception as e:
+        log.debug("mini_strike: DB save skipped: %s", e)
+
+    log.info(
+        "mini_strike: DONE target=%s tg=%d emails=%d form=%s errors=%d",
+        target_clean, result["total_tg_reports"], result["total_emails"],
+        result["abuse_form"].get("ok"), len(result["errors"]),
+    )
+    return result
+
+
+def format_mini_result(r: dict) -> str:
+    """Форматировать финальный отчёт мини-страйка для Telegram HTML."""
+    import html as _html
+    tg = r.get("tg", {})
+    emails = r.get("emails", [])
+    af = r.get("abuse_form", {})
+
+    lines = [
+        f"✅ <b>Мини-страйк завершён — @{_html.escape(r['target'])}</b>",
+        f"Категория: {r['category_label']} · Уровень: <b>{r['severity']}</b>\n",
+        "<b>📡 Telegram MTProto (12 векторов):</b>",
+        f"  ① ReportPeer (все причины): {'✅' if tg.get('peer_reported') else '❌'}"
+        f" +{tg.get('multi_reason_sent', 0)} доп.",
+        f"  ② Фото профиля: {'✅' if tg.get('photo_reported') else '❌'}",
+        f"  ③ Вступил изнутри: {'✅' if tg.get('joined') else '❌'}",
+        f"  ④ Закреплённые: {tg.get('pinned_reported', 0)} репортов",
+        f"  ⑤ Сообщения: {tg.get('msg_reported', 0)} репортов",
+        f"  ⑥ ReportSpam: {tg.get('spam_signaled', 0)} сигналов",
+        f"  ⑦ Реакции 👎💩: {tg.get('reactions_sent', 0)}",
+        f"  ⑧ Администраторы: {tg.get('admins_reported', 0)} репортов",
+        f"  ⑨ Связанная группа: {'✅' if tg.get('linked_group_reported') else 'нет'}",
+        f"  ⑩ Боты в описании: {tg.get('bots_reported', 0)} репортов",
+        f"  ⑪ Форвард в @stopCA: {tg.get('forwarded', 0)} сообщ.",
+        f"  ⑫ Заблок. + выход: {'✅' if tg.get('blocked') else '—'}",
+        "",
+        "<b>📧 Email-репорты:</b>",
+    ]
+    if emails:
+        for e in emails:
+            status = "✅ отправлен" if e.get("ok") else f"❌ {_html.escape((e.get('err') or '')[:50])}"
+            lines.append(f"  → {_html.escape(e['to'])}: {status}")
+    else:
+        lines.append("  SMTP не настроен")
+
+    lines += [
+        "",
+        f"<b>🌐 Форма telegram.org/support:</b> {'✅' if af.get('ok') else '❌'}",
+        "",
+        f"<b>Итого репортов:</b> "
+        f"<b>{r['total_tg_reports']}</b> (Telegram MTProto) + "
+        f"<b>{r['total_emails']}</b> (email)",
+    ]
+
+    if r.get("errors"):
+        errs = "; ".join(r["errors"][:3])
+        lines.append(f"\n⚠️ Ошибки: <code>{_html.escape(errs[:200])}</code>")
+
+    return "\n".join(lines)
