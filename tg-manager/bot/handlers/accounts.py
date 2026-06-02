@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from html import escape
 
 from services.logger import log_exc_swallow
@@ -167,6 +168,50 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
     kb.adjust(2, 2, 2, 2, 2, 2, 1, 2, 1)
+    return kb.as_markup()
+
+
+def _acc_detail_markup(acc_id: int, is_active: bool = True):
+    """Расширенный markup карточки аккаунта с быстрыми действиями."""
+    from bot.callbacks import WarmupCb, HealthCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Каналы/группы",
+              callback_data=AccCb(action="channels", acc_id=acc_id))
+    kb.button(text="🔍 Сканировать активы",
+              callback_data=AccCb(action="scan_assets", acc_id=acc_id))
+    kb.button(text="📤 Написать",
+              callback_data=AccCb(action="post", acc_id=acc_id))
+    kb.button(text="🔍 Проверить",
+              callback_data=AccCb(action="check_health", acc_id=acc_id))
+    kb.button(text="📊 Диалоги",
+              callback_data=AccCb(action="dialogs_stats", acc_id=acc_id))
+    kb.button(text="📂 Список диалогов",
+              callback_data=AccCb(action="dialogs", acc_id=acc_id, chat_id=0))
+    kb.button(text="✉️ Отправить",
+              callback_data=AccCb(action="send_msg", acc_id=acc_id))
+    kb.button(text="🌐 Прокси",
+              callback_data=AccCb(action="set_proxy", acc_id=acc_id))
+    kb.button(text="🏷 Теги/Пул",
+              callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="🗂 CRM",
+              callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="🆘 Активы аккаунта",
+              callback_data=AccCb(action="assets", acc_id=acc_id))
+    toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
+    kb.button(text=toggle_text,
+              callback_data=AccCb(action="toggle", acc_id=acc_id))
+    kb.button(text="🗑 Удалить",
+              callback_data=AccCb(action="remove", acc_id=acc_id))
+    # ── Быстрые действия ──
+    kb.button(text="🌡 Прогрев",
+              callback_data=WarmupCb(action="create_list"))
+    kb.button(text="🔄 Переподключить",
+              callback_data=AccCb(action="relog", acc_id=acc_id))
+    kb.button(text="📊 История операций",
+              callback_data=AccCb(action="op_history", acc_id=acc_id))
+    kb.button(text="◀️ Мои аккаунты",
+              callback_data=AccCb(action="menu"))
+    kb.adjust(2, 2, 2, 2, 2, 1, 2, 3, 1)
     return kb.as_markup()
 
 
@@ -892,6 +937,26 @@ async def _finalize_login(
 
 # ── View account ───────────────────────────────────────────────────────────────
 
+def _fmt_cooldown_human(cooldown_until, now) -> str:
+    """Возвращает 'через 2ч 15м' или '' если кулдаун истёк."""
+    if cooldown_until is None:
+        return ""
+    cd_aware = cooldown_until if cooldown_until.tzinfo else cooldown_until.replace(tzinfo=timezone.utc)
+    if cd_aware <= now:
+        return ""
+    diff = cd_aware - now
+    total_secs = max(0, int(diff.total_seconds()))
+    hours = total_secs // 3600
+    minutes = (total_secs % 3600) // 60
+    if hours >= 24:
+        days = hours // 24
+        rem_h = hours % 24
+        return f"через {days}д {rem_h}ч" if rem_h else f"через {days}д"
+    if hours:
+        return f"через {hours}ч {minutes}м"
+    return f"через {minutes}м"
+
+
 @router.callback_query(AccCb.filter(F.action == "view"))
 async def cb_view_account(
     callback: CallbackQuery,
@@ -904,6 +969,7 @@ async def cb_view_account(
         return
     await callback.answer()
 
+    now = datetime.now(timezone.utc)
     name = escape(acc.get("first_name") or "")
     uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
     phone = escape(acc.get("phone") or "")
@@ -914,27 +980,67 @@ async def cb_view_account(
     proxy_label = acc.get("proxy_label") or ""
     proxy_line = f"🌐 {escape(proxy_label or proxy_url[:40])}" if proxy_url else "🌐 Без прокси"
 
-    # Trust score with visual bar
+    # Trust score с визуальной полосой ████░░░░
     trust_score = acc.get("trust_score")
     if trust_score is not None:
         ts = float(trust_score)
-        filled = round(ts * 6)
-        trust_bar = "█" * filled + "░" * (6 - filled)
+        filled = round(ts * 8)
+        trust_bar = "█" * filled + "░" * (8 - filled)
         trust_line = f"⭐ Trust: [{trust_bar}] {ts:.2f}"
     else:
-        trust_line = ""
+        trust_line = "⭐ Trust: —"
 
-    # Cooldown
+    # Health score из истории
+    health_score_line = "🩺 Health: —"
+    try:
+        h_row = await pool.fetchrow(
+            """SELECT ROUND(health_score::numeric, 1) AS hs
+               FROM account_health_history
+               WHERE account_id=$1
+               ORDER BY recorded_at DESC LIMIT 1""",
+            callback_data.acc_id,
+        )
+        if h_row and h_row["hs"] is not None:
+            hs = float(h_row["hs"])
+            hs_filled = int(hs / 10)
+            hs_bar = "█" * hs_filled + "░" * (10 - hs_filled)
+            health_score_line = f"🩺 Health: [{hs_bar}] {hs:.0f}/100"
+    except Exception:
+        pass
+
+    # Cooldown с человекочитаемым форматом
     cooldown_until = acc.get("cooldown_until")
     cooldown_line = ""
     if cooldown_until:
-        from datetime import timezone as _tz
-        _now = __import__("datetime").datetime.now(_tz.utc)
-        if cooldown_until.tzinfo is None:
-            from datetime import timezone as _tz2
-            cooldown_until = cooldown_until.replace(tzinfo=_tz2.utc)
-        if cooldown_until > _now:
-            cooldown_line = f"⏳ Кулдаун до: {cooldown_until.strftime('%d.%m %H:%M')} UTC"
+        cd_aware = cooldown_until if cooldown_until.tzinfo else cooldown_until.replace(tzinfo=timezone.utc)
+        if cd_aware > now:
+            human_cd = _fmt_cooldown_human(cd_aware, now)
+            cooldown_line = f"⏳ Кулдаун: <b>{cd_aware.strftime('%d.%m %H:%M')} UTC</b> ({human_cd})"
+
+    # Flood events 7d
+    flood_cnt = int(acc.get("flood_count_7d") or 0)
+    flood_line = f"🌊 Блокировок 7д: <b>{flood_cnt}</b>" if flood_cnt else "🌊 Блокировок 7д: <b>—</b>"
+
+    # Last operation (из operation_log если есть)
+    last_op_line = ""
+    try:
+        op_row = await pool.fetchrow(
+            """SELECT ol.step_num, ol.target, ol.status, ol.message,
+                      oq.op_type, oq.created_at
+               FROM operation_log ol
+               JOIN operation_queue oq ON oq.id = ol.op_id
+               WHERE oq.owner_id=$1
+               ORDER BY ol.id DESC LIMIT 1""",
+            callback.from_user.id,
+        )
+        if op_row:
+            op_type = op_row.get("op_type") or "операция"
+            op_dt = op_row["created_at"].strftime("%d.%m %H:%M") if op_row.get("created_at") else "—"
+            op_status = op_row.get("status") or ""
+            op_icon = "✅" if op_status == "done" else ("❌" if op_status == "error" else "⏳")
+            last_op_line = f"📋 Посл. операция: {op_icon} {escape(op_type)} ({op_dt})"
+    except Exception:
+        pass
 
     # Infrastructure fields (v60)
     tags = acc.get("tags") or []
@@ -953,26 +1059,99 @@ async def cb_view_account(
     if tg_id:
         lines.append(f"Telegram ID: <code>{tg_id}</code>")
     lines.append(f"Статус: {'✅ Активен' if is_active else '⏸ Отключён'}")
-    if trust_line:
-        lines.append(trust_line)
+    lines.append("")
+    lines.append(trust_line)
+    lines.append(health_score_line)
+    lines.append(flood_line)
     if cooldown_line:
         lines.append(cooldown_line)
+    if last_op_line:
+        lines.append(last_op_line)
+    lines.append("")
     lines.append(f"Прокси: {proxy_line}")
     if pool_name:
         lines.append(f"🏊 Пул: <b>{escape(pool_name)}</b>")
+    else:
+        lines.append("🏊 Пул: <b>—</b>")
     if tags:
         lines.append(f"🏷 Теги: {', '.join(escape(t) for t in tags)}")
+    else:
+        lines.append("🏷 Теги: <b>—</b>")
     if project:
         lines.append(f"📁 Проект: <b>{escape(project)}</b>")
     if labels:
         lines.append(f"🏷 Метки: {', '.join(escape(lb) for lb in labels)}")
     if warnings:
-        lines.append(f"⚠️ Предупреждения: {len(warnings)} шт.")
+        lines.append(f"⚠️ Предупреждения: <b>{len(warnings)}</b> шт.")
+
+    # Quick actions section
+    lines.append("")
+    lines.append("⚡ <i>Быстрые действия: Прогрев / Переподключить / История ↓</i>")
 
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=_acc_menu_markup(callback_data.acc_id, is_active=is_active),
+        reply_markup=_acc_detail_markup(callback_data.acc_id, is_active=is_active),
+    )
+
+
+# ── Account operation history ─────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "op_history"))
+async def cb_acc_op_history(
+    callback: CallbackQuery,
+    callback_data: AccCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """История операций для аккаунта (через operation_queue)."""
+    await callback.answer()
+    acc_id = callback_data.acc_id
+
+    acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    name = escape(acc.get("first_name") or acc.get("phone") or f"ID {acc_id}")
+
+    lines = [f"📊 <b>История операций: {name}</b>\n"]
+    try:
+        rows = await pool.fetch(
+            """SELECT oq.op_type, oq.status, oq.created_at,
+                      oq.total_items, oq.done_items
+               FROM operation_queue oq
+               WHERE oq.owner_id=$1
+               ORDER BY oq.created_at DESC LIMIT 15""",
+            callback.from_user.id,
+        )
+        if rows:
+            _op_icons = {
+                "running": "⏳", "done": "✅", "error": "❌",
+                "cancelled": "🚫", "pending": "🕐",
+            }
+            for row in rows:
+                st = row.get("status") or "unknown"
+                icon = _op_icons.get(st, "•")
+                op_type = escape(row.get("op_type") or "операция")
+                dt_str = row["created_at"].strftime("%d.%m %H:%M") if row.get("created_at") else "—"
+                done = row.get("done_items") or 0
+                total = row.get("total_items") or 0
+                progress = f" {done}/{total}" if total else ""
+                lines.append(f"{icon} <code>{dt_str}</code> {op_type}{progress}")
+        else:
+            lines.append("Операций не найдено.")
+    except Exception as exc:
+        log_exc_swallow(log, f"op_history query error acc={acc_id}")
+        lines.append("<i>Не удалось загрузить историю операций.</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
