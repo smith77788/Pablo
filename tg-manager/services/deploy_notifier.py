@@ -102,6 +102,48 @@ def _get_current_sha() -> str:
     return ""
 
 
+async def _get_platform_stats(pool: asyncpg.Pool) -> dict:
+    """Collect platform-wide statistics for deploy notification."""
+    stats: dict = {}
+    try:
+        stats["accounts"] = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE is_active=TRUE"
+        ) or 0
+    except Exception:
+        stats["accounts"] = 0
+    try:
+        stats["bots"] = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE is_active=TRUE"
+        ) or 0
+    except Exception:
+        stats["bots"] = 0
+    # Aggregate pressure: average of all distinct owners
+    try:
+        owner_ids = await pool.fetch(
+            "SELECT DISTINCT owner_id FROM tg_accounts WHERE is_active=TRUE LIMIT 20"
+        )
+        if owner_ids:
+            from services import infra_pressure
+            scores = []
+            for row in owner_ids:
+                p = await infra_pressure.compute_pressure(pool, row["owner_id"])
+                scores.append(p.get("score", 0))
+            avg_score = int(sum(scores) / len(scores)) if scores else 0
+            emoji, label = infra_pressure.pressure_level(avg_score)
+            stats["pressure_score"] = avg_score
+            stats["pressure_emoji"] = emoji
+            stats["pressure_label"] = label
+        else:
+            stats["pressure_score"] = 0
+            stats["pressure_emoji"] = "🟢"
+            stats["pressure_label"] = "Норма"
+    except Exception:
+        stats["pressure_score"] = 0
+        stats["pressure_emoji"] = "🟢"
+        stats["pressure_label"] = "Норма"
+    return stats
+
+
 async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
     """Check if a new deployment happened and notify admins.
 
@@ -127,9 +169,15 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
     current_sha = _get_current_sha()
     branch = os.getenv("RAILWAY_GIT_BRANCH", "")
 
+    # Prefer Railway env var for short SHA
+    git_sha = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")[:7] or (current_sha[:7] if current_sha else "local")
+
     # Get git info
     git_log = _get_git_log(previous_sha, max_commits=15) if previous_sha else _get_git_log(None, max_commits=15)
     diff_summary = _get_git_diff_summary(previous_sha) if previous_sha else ""
+
+    # Platform stats
+    platform_stats = await _get_platform_stats(pool)
 
     # Build notification
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -148,8 +196,18 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
 
     if branch:
         lines.append(f"🌿 <b>Ветка:</b> <code>{branch}</code>")
-    if current_sha:
-        lines.append(f"🔖 <b>HEAD:</b> <code>{current_sha[:12]}</code>")
+    if git_sha:
+        lines.append(f"🔖 <b>Commit:</b> <code>{git_sha}</code>")
+
+    # Platform stats block
+    lines.append("")
+    lines.append("<b>📊 Платформа сейчас:</b>")
+    lines.append(f"  🤖 Аккаунтов (активных): <b>{platform_stats['accounts']}</b>")
+    lines.append(f"  🤖 Ботов (активных): <b>{platform_stats['bots']}</b>")
+    p_score = platform_stats["pressure_score"]
+    p_emoji = platform_stats["pressure_emoji"]
+    p_label = platform_stats["pressure_label"]
+    lines.append(f"  {p_emoji} Давление инфраструктуры: <b>{p_score}/100</b> — {p_label}")
 
     if git_log:
         lines.append("")
