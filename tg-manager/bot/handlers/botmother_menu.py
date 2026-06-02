@@ -258,31 +258,51 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
     await callback.answer()
     user_id = callback.from_user.id
 
-    # Append live system status indicator
+    # Append live platform stats for today
     status_line = ""
     try:
         row = await pool.fetchrow(
             """SELECT
-                COUNT(*) FILTER (WHERE oq.status='running') AS running_ops,
-                COUNT(*) FILTER (WHERE ta.cooldown_until > now()) AS in_cooldown,
-                COUNT(*) FILTER (WHERE re.id IS NOT NULL) AS new_alerts
+                COUNT(DISTINCT oq.id) FILTER (
+                    WHERE oq.created_at >= CURRENT_DATE
+                ) AS today_ops,
+                COUNT(DISTINCT ta.id) FILTER (
+                    WHERE ta.is_active = TRUE
+                ) AS active_accs,
+                COUNT(DISTINCT ta.id) FILTER (
+                    WHERE ta.cooldown_until > now()
+                ) AS in_cooldown,
+                COUNT(DISTINCT re.id) FILTER (
+                    WHERE re.created_at > now() - INTERVAL '24 hours'
+                ) AS new_alerts
             FROM (SELECT 1) x
-            LEFT JOIN operation_queue oq ON oq.owner_id=$1 AND oq.status='running'
-            LEFT JOIN tg_accounts ta ON ta.owner_id=$1 AND ta.is_active=true
-            LEFT JOIN restriction_events re ON re.owner_id=$1
-                AND re.created_at > now() - INTERVAL '24 hours'""",
+            LEFT JOIN operation_queue oq ON oq.owner_id=$1
+            LEFT JOIN tg_accounts ta ON ta.owner_id=$1
+            LEFT JOIN restriction_events re ON re.owner_id=$1""",
             user_id,
         )
         if row:
-            parts = []
-            if (row["running_ops"] or 0) > 0:
-                parts.append(f"⚙️ {row['running_ops']} активных оп.")
-            if (row["in_cooldown"] or 0) > 0:
-                parts.append(f"⏳ {row['in_cooldown']} на паузе")
-            if (row["new_alerts"] or 0) > 0:
-                parts.append(f"🔔 {row['new_alerts']} новых алертов")
-            if parts:
-                status_line = "\n\n<i>📊 " + " · ".join(parts) + "</i>"
+            today_ops   = row["today_ops"] or 0
+            active_accs = row["active_accs"] or 0
+            in_cooldown = row["in_cooldown"] or 0
+            new_alerts  = row["new_alerts"] or 0
+
+            # Infrastructure pressure
+            try:
+                from services import infra_pressure
+                pdata = await infra_pressure.compute_pressure(pool, user_id)
+                p_score = pdata.get("score", 0)
+                p_emoji = pdata.get("level_emoji", "🟢")
+                pressure_str = f" · Давление: {p_emoji} {p_score}"
+            except Exception:
+                pressure_str = ""
+
+            alert_str = f" · 🔔 {new_alerts} алертов" if new_alerts else ""
+            cooldown_str = f" · ⏳ {in_cooldown} на паузе" if in_cooldown else ""
+            status_line = (
+                f"\n\n<i>📈 Сегодня: {today_ops} операций · {active_accs} аккаунтов"
+                f"{pressure_str}{cooldown_str}{alert_str}</i>"
+            )
     except Exception:
         log_exc_swallow(log, "Не удалось получить статус-строку главного меню")
 
@@ -379,6 +399,31 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
     await callback.answer()
     import asyncio
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
+
+    # Live operations counter
+    ops_line = ""
+    try:
+        stats = await pool.fetchrow(
+            """SELECT
+                COUNT(*) FILTER (WHERE status='running')  AS running,
+                COUNT(*) FILTER (WHERE status='pending')  AS pending,
+                COUNT(*) FILTER (WHERE status='done' AND finished_at >= CURRENT_DATE) AS done_today
+               FROM operation_queue WHERE owner_id=$1""",
+            callback.from_user.id,
+        )
+        if stats:
+            parts = []
+            if stats["running"]:
+                parts.append(f"🔄 {stats['running']} выполняется")
+            if stats["pending"]:
+                parts.append(f"⏳ {stats['pending']} в очереди")
+            if stats["done_today"]:
+                parts.append(f"✅ {stats['done_today']} завершено сегодня")
+            if parts:
+                ops_line = "\n\n<i>" + " · ".join(parts) + "</i>"
+    except Exception:
+        pass
+
     await _edit(
         callback,
         "⚡ <b>Операции — действия над аккаунтами и каналами</b>\n\n"
@@ -389,7 +434,8 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
         "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"
         "🛠️ <b>Построитель</b> — собрать операцию из блоков\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
-        "⏱️ <b>Планировщик</b> — запустить операцию по расписанию",
+        "⏱️ <b>Планировщик</b> — запустить операцию по расписанию"
+        + ops_line,
         _operations_kb(),
     )
 
@@ -1397,31 +1443,50 @@ async def cb_op_reports(
                 avg_s  = stats["avg_secs"]
                 success_rate = round(done_c / (done_c + fail_c) * 100) if (done_c + fail_c) > 0 else 0
                 avg_str = f"{avg_s // 60}м {avg_s % 60}с" if avg_s else "—"
+                # Visual success bar (10 chars)
+                sr_filled = round(success_rate / 10)
+                sr_bar = "█" * sr_filled + "░" * (10 - sr_filled)
                 summary_line = (
-                    f"\n✅ {done_c} завершено  ❌ {fail_c} с ошибкой"
+                    f"\n✅ {done_c} завершено  ❌ {fail_c} ошибок"
                     + (f"  🔄 {run_c} активно" if run_c else "")
-                    + f"\n📈 Success rate: {success_rate}%  ⏱ Avg: {avg_str}\n"
+                    + f"\n<b>📈 Успех: [{sr_bar}] {success_rate}%</b>  ⏱ Avg: {avg_str}\n"
                 )
         except Exception:
             log_exc_swallow(log, "Не удалось получить статистику операций из operation_queue")
+
+    def _op_progress_bar(done: int, total: int, width: int = 6) -> str:
+        if not total:
+            return ""
+        pct = min(done / total, 1.0)
+        filled = round(pct * width)
+        bar = "█" * filled + "░" * (width - filled)
+        return f"[{bar}] {round(pct * 100)}%"
 
     status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
     kb = InlineKeyboardBuilder()
     lines = []
     for op in ops:
-        emoji = status_emoji.get(op["status"], "❓")
+        status = op["status"]
+        emoji = status_emoji.get(status, "❓")
         dt = op["created_at"].strftime("%d.%m %H:%M")
         otype = html.escape(op["op_type"])
-        if op["total_items"]:
-            progress = f"{op['done_items'] or 0}/{op['total_items']}"
-        else:
-            progress = "—"
+        total_i = op["total_items"] or 0
+        done_i  = op["done_items"] or 0
         duration = ""
         if op["finished_at"] and op["created_at"]:
             secs = int((op["finished_at"] - op["created_at"]).total_seconds())
             if secs >= 60:
                 duration = f" {secs // 60}м"
-        lines.append(f"{emoji} <code>{dt}</code> {otype} [{progress}]{duration}")
+
+        if status == "running" and total_i:
+            progress_str = _op_progress_bar(done_i, total_i)
+            lines.append(f"{emoji} <code>{dt}</code> {otype} {progress_str}{duration}")
+        elif status == "failed":
+            lines.append(f"{emoji} <code>{dt}</code> <b>{otype}</b> — <i>ошибка</i>{duration}")
+        elif total_i:
+            lines.append(f"{emoji} <code>{dt}</code> {otype} [{done_i}/{total_i}]{duration}")
+        else:
+            lines.append(f"{emoji} <code>{dt}</code> {otype}{duration}")
         kb.button(
             text=f"🔍 #{op['id']} {otype}",
             callback_data=BmCb(action="op_detail", op_id=op["id"]),
