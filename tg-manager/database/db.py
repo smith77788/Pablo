@@ -3215,3 +3215,81 @@ async def update_error_report_status(
         report_id, status, notes,
     )
     return result != "UPDATE 0"
+
+
+# ── BotMother Memory (convenience wrappers over services/ai_memory) ───────────
+
+async def add_memory(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    body: str,
+    *,
+    title: str = "",
+    kind: str = "note",
+    tags: list[str] | None = None,
+    source: str = "manual",
+    pinned: bool = False,
+) -> asyncpg.Record:
+    """Сохранить запись в памяти BotMother. Возвращает созданную строку."""
+    row = await pool.fetchrow(
+        """
+        INSERT INTO botmother_memory(owner_id, kind, title, body, tags, source, pinned)
+        VALUES($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, kind, title, body, tags, pinned, created_at, updated_at
+        """,
+        owner_id,
+        (kind or "note").strip()[:32],
+        (title or body[:80]).strip()[:180],
+        body.strip()[:8000],
+        [t.strip().lower().lstrip("#")[:48] for t in (tags or []) if t.strip()][:12],
+        source.strip()[:32],
+        pinned,
+    )
+    return row
+
+
+async def get_memories(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    *,
+    limit: int = 10,
+    offset: int = 0,
+    kind: str | None = None,
+) -> list[asyncpg.Record]:
+    """Получить записи памяти пользователя, отсортированные по pinned DESC, updated_at DESC."""
+    if kind:
+        rows = await pool.fetch(
+            """
+            SELECT id, kind, title, body, tags, source, pinned, created_at, updated_at
+            FROM botmother_memory
+            WHERE owner_id=$1 AND kind=$2
+            ORDER BY pinned DESC, updated_at DESC
+            LIMIT $3 OFFSET $4
+            """,
+            owner_id, kind, limit, offset,
+        )
+    else:
+        rows = await pool.fetch(
+            """
+            SELECT id, kind, title, body, tags, source, pinned, created_at, updated_at
+            FROM botmother_memory
+            WHERE owner_id=$1
+            ORDER BY pinned DESC, updated_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            owner_id, limit, offset,
+        )
+    return list(rows)
+
+
+async def delete_memory(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    memory_id: int,
+) -> bool:
+    """Удалить запись памяти. Возвращает True если запись была найдена и удалена."""
+    result = await pool.execute(
+        "DELETE FROM botmother_memory WHERE owner_id=$1 AND id=$2",
+        owner_id, memory_id,
+    )
+    return result == "DELETE 1"

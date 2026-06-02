@@ -194,6 +194,15 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
     except Exception:
         today_users = 0
 
+    # Счётчик непросмотренных отчётов об ошибках
+    new_error_reports = 0
+    try:
+        new_error_reports = await pool.fetchval(
+            "SELECT COUNT(*) FROM error_reports WHERE status='new'"
+        ) or 0
+    except Exception:
+        log_exc_swallow(log, "Не удалось получить счётчик новых error_reports")
+
     text = (
         "🛡 <b>Admin Panel</b>\n\n"
         f"👥 Всего пользователей: <b>{total_users}</b> (+{today_users} сегодня)\n"
@@ -203,16 +212,16 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         f"💰 Выручка (USD): <b>${float(revenue):.2f}</b>\n\n"
         f"📅 {datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC"
     )
+    kb = _admin_main_kb(new_error_reports=int(new_error_reports))
     if edit and hasattr(msg_or_cb, "message"):
         try:
-            await msg_or_cb.message.edit_text(text, parse_mode="HTML",
-                                               reply_markup=_admin_main_kb())
+            await msg_or_cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
         except Exception as e:
             if "message is not modified" not in str(e):
                 raise
     else:
         target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
-        await target.answer(text, parse_mode="HTML", reply_markup=_admin_main_kb())
+        await target.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 # ── Callback dispatcher ────────────────────────────────────────────────────────
