@@ -644,8 +644,8 @@ async def cb_dm_resume(
     campaign_id = callback_data.campaign_id
     # Update DB status before creating task (same ordering as initial launch)
     await pool.execute(
-        "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1",
-        campaign_id,
+        "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
+        campaign_id, callback.from_user.id,
     )
     _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
     _treg.register(callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t)

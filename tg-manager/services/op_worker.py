@@ -875,7 +875,10 @@ async def _exec_global_presence_channel(
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
 
-    plan = await pool.fetchrow("SELECT asset_type FROM global_presence_plans WHERE id=$1", plan_id)
+    plan = await pool.fetchrow(
+        "SELECT asset_type FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        plan_id, owner_id,
+    )
     if not plan:
         return {"status": "failed", "reason": "План не найден"}
 
@@ -883,8 +886,8 @@ async def _exec_global_presence_channel(
     is_group = asset_type == "group"
 
     await pool.execute(
-        "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1",
-        plan_id,
+        "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1 AND owner_id=$2",
+        plan_id, owner_id,
     )
 
     targets = await pool.fetch(
