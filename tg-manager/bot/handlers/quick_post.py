@@ -547,6 +547,7 @@ async def cb_qp_timing(
         text=f"✅ Опубликовать! ({_plural_channels(len(sel))})",
         callback_data=QuickPostCb(action="publish"),
     )
+    kb.button(text="💾 Сохранить как шаблон", callback_data=QuickPostCb(action="save_template"))
     kb.button(text="◀️ К задержке", callback_data=QuickPostCb(action="back_to_timing"))
     kb.button(text="❌ Отмена", callback_data=QuickPostCb(action="cancel"))
     kb.adjust(1)
@@ -578,6 +579,27 @@ async def cb_qp_back_timing(
         parse_mode="HTML",
         reply_markup=_timing_kb().as_markup(),
     )
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "save_template"), QuickPostFSM.confirming)
+async def cb_qp_save_template(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    sd = await state.get_data()
+    text = sd.get("post_text", "")
+    if not text:
+        await callback.answer("Нет текста для сохранения.", show_alert=True)
+        return
+    name_base = text[:40].strip().replace("\n", " ")
+    name = name_base if name_base else "Быстрый пост"
+    try:
+        tpl_id = await _save_post_template(pool, callback.from_user.id, name, text)
+        await callback.answer(f"✅ Шаблон сохранён (#{tpl_id})", show_alert=True)
+    except Exception:
+        log.exception("Ошибка сохранения шаблона быстрого поста")
+        await callback.answer("❌ Не удалось сохранить шаблон.", show_alert=True)
 
 
 # ── Publish ────────────────────────────────────────────────────────────────
