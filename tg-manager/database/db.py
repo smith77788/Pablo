@@ -607,8 +607,8 @@ async def advance_funnel_step(pool: asyncpg.Pool, sub_id: int, next_step: int,
             "UPDATE funnel_subscriptions SET completed=true WHERE id=$1", sub_id,
         )
     else:
-        from datetime import datetime, timedelta
-        next_at = datetime.utcnow() + timedelta(minutes=delay_minutes)
+        from datetime import datetime, timedelta, timezone
+        next_at = datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
         await pool.execute(
             "UPDATE funnel_subscriptions SET current_step=$2, next_send_at=$3 WHERE id=$1",
             sub_id, next_step, next_at,
@@ -2520,14 +2520,22 @@ async def grant_plan_to_user(
     pool: asyncpg.Pool, user_id: int, admin_id: int, plan: str, months: int
 ) -> None:
     """Выдать план пользователю (админ-действие). Пишет в обе таблицы."""
-    from datetime import datetime, timedelta
-    expires = datetime.utcnow() + timedelta(days=30 * months)
+    from datetime import datetime, timedelta, timezone
 
-    # Обновить platform_users
+    # Обновить platform_users — expires_at продлевается от текущей даты истечения
+    # если подписка ещё активна, иначе — от now()
     await pool.execute(
-        """UPDATE platform_users SET current_plan=$1, plan_expires_at=$2 WHERE user_id=$3""",
-        plan, expires, user_id,
+        """UPDATE platform_users
+           SET current_plan=$1,
+               plan_expires_at = CASE
+                   WHEN plan_expires_at > now()
+                       THEN plan_expires_at + ($2 || ' months')::INTERVAL
+                   ELSE now() + ($2 || ' months')::INTERVAL
+               END
+           WHERE user_id=$3""",
+        plan, str(months), user_id,
     )
+    expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     # Обновить subscriptions (именно здесь get_plan() проверяет доступ)
     if plan == "free":
@@ -2537,10 +2545,23 @@ async def grant_plan_to_user(
     else:
         await pool.execute(
             """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-               VALUES($1,$2,$3,true)
-               ON CONFLICT(user_id) DO UPDATE SET plan=$2, expires_at=$3, is_active=true""",
-            user_id, plan, expires,
+               VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+               ON CONFLICT(user_id) DO UPDATE
+               SET plan      = EXCLUDED.plan,
+                   is_active = true,
+                   expires_at = CASE
+                       WHEN subscriptions.expires_at > now()
+                           THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                       ELSE now() + ($3 || ' months')::INTERVAL
+                   END""",
+            user_id, plan, str(months),
         )
+        # Refresh expires for audit log
+        row = await pool.fetchrow(
+            "SELECT expires_at FROM subscriptions WHERE user_id=$1", user_id
+        )
+        if row:
+            expires = row["expires_at"]
 
     # Логировать действие
     try:

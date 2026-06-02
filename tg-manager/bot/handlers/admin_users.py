@@ -56,8 +56,13 @@ async def _users_list_text(pool: asyncpg.Pool, page: int = 0, items_per_page: in
         emoji = _format_plan_emoji(u["current_plan"])
         expires = ""
         if u["plan_expires_at"]:
+            from datetime import timezone
+            exp = u["plan_expires_at"]
+            # asyncpg returns timezone-aware datetimes from TIMESTAMPTZ columns
             from datetime import datetime
-            days_left = (u["plan_expires_at"] - datetime.utcnow()).days
+            now = datetime.now(timezone.utc)
+            exp_aware = exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)
+            days_left = (exp_aware - now).days
             expires = f" (истекает через {days_left}д)" if days_left > 0 else " (ИСТЁК)"
 
         banned_mark = "🚫 " if u["is_banned"] else ""

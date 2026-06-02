@@ -833,7 +833,7 @@ async def execute_action(
         bot_id = action_data["bot_id"]
         text = action_data["text"]
         when_minutes = int(action_data.get("when_minutes", 60))
-        scheduled_at = datetime.datetime.utcnow() + datetime.timedelta(
+        scheduled_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
             minutes=when_minutes
         )
         row = await pool.fetchrow(
