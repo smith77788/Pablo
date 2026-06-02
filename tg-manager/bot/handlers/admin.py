@@ -465,7 +465,7 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             status = parts[2]
             await _adm_error_reports(callback, pool, page=page, status=status)
         else:
-            await callback.answer("Некорректный формат.", show_alert=True)
+            await callback.message.edit_text("❌ Некорректный формат.", reply_markup=_back_kb())
 
     elif action.startswith("error_report:"):
         parts = action.split(":")
@@ -480,7 +480,7 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             new_status = parts[2]
             await _adm_set_error_report_status(callback, pool, report_id, new_status)
         else:
-            await callback.answer("Некорректный формат.", show_alert=True)
+            await callback.message.edit_text("❌ Некорректный формат.", reply_markup=_back_kb())
 
     elif action == "audit_log":
         try:
@@ -1216,10 +1216,12 @@ async def _adm_env_delete(
     try:
         await railway_api.delete_variable(http, key)
         os.environ.pop(key, None)
-        await callback.answer(f"✅ {key} удалена", show_alert=True)
         await _adm_env_list(callback, http)
     except Exception as e:
-        await callback.answer(f"❌ {e}", show_alert=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка удаления {_html.escape(key)}: {_html.escape(str(e))}",
+            parse_mode="HTML", reply_markup=_back_kb()
+        )
 
 
 # ── Platform operations analytics ────────────────────────────────────────────
@@ -1380,15 +1382,24 @@ async def _adm_show_error_report(
     callback: CallbackQuery, pool: asyncpg.Pool, report_id: int
 ) -> None:
     """Показать детальный вид одного отчёта об ошибке."""
+    _back_kb_err = InlineKeyboardBuilder()
+    _back_kb_err.button(text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new")
+
     try:
         report = await db.get_error_report(pool, report_id)
     except Exception as e:
         log_exc_swallow(log, f"Ошибка загрузки отчёта #{report_id}")
-        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка загрузки отчёта #{report_id}: {_html.escape(str(e))}",
+            parse_mode="HTML", reply_markup=_back_kb_err.as_markup()
+        )
         return
 
     if not report:
-        await callback.answer("Отчёт не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Отчёт не найден.",
+            parse_mode="HTML", reply_markup=_back_kb_err.as_markup()
+        )
         return
 
     dt = report["created_at"].strftime("%d.%m.%Y %H:%M") if report.get("created_at") else "?"
