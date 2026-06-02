@@ -849,6 +849,8 @@ async def cb_seo_ask_username(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=SeoCb(action="chan_ai", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
+    kb.button(text="◀️ Назад", callback_data=SeoCb(action="chan_menu", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
+    kb.adjust(1)
     await callback.message.edit_text(
         "🔤 <b>Желаемый username для канала</b>\n\n"
         "Введите username который хотите установить:\n"
