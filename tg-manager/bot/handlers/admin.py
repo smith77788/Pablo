@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import csv
+import html as _html
 import io
 import logging
 import os
@@ -546,7 +547,8 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         plan = r["sub_plan"] or r["current_plan"] or "free"
         emo = _PLAN_EMO.get(plan, "❓")
         ban = "🚫 " if r["is_banned"] else ""
-        name = f"@{r['username']}" if r["username"] else r["first_name"] or f"#{r['user_id']}"
+        raw_name = f"@{r['username']}" if r["username"] else r["first_name"] or f"#{r['user_id']}"
+        name = _html.escape(raw_name)
         exp = ""
         if r["sub_exp"]:
             exp = f" до {r['sub_exp'].strftime('%d.%m')}"
@@ -1394,7 +1396,9 @@ async def _adm_show_error_report(
     dt = report["created_at"].strftime("%d.%m.%Y %H:%M") if report.get("created_at") else "?"
     user_label = f"@{report['username']}" if report.get("username") else f"id{report['user_id']}"
     status_label = _ERR_STATUS_LABELS.get(report["status"], report["status"])
-    notes_block = f"\n📝 <b>Заметки:</b> {report['notes']}" if report.get("notes") else ""
+    notes_val = _html.escape(report["notes"]) if report.get("notes") else ""
+    notes_block = f"\n📝 <b>Заметки:</b> {notes_val}" if notes_val else ""
+    description_escaped = _html.escape(report["description"] or "")
 
     text = (
         f"🐛 <b>Отчёт #{report['id']}</b>\n\n"
@@ -1402,7 +1406,7 @@ async def _adm_show_error_report(
         f"📅 Дата: {dt}\n"
         f"🔖 Статус: {status_label}\n"
         f"{notes_block}\n\n"
-        f"📋 <b>Описание:</b>\n{report['description']}"
+        f"📋 <b>Описание:</b>\n{description_escaped}"
     )
 
     kb = InlineKeyboardBuilder()

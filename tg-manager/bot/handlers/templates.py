@@ -1,5 +1,6 @@
 """Message templates: save, list, use for broadcasts, delete, AI generation."""
 
+import html as _html
 import logging
 import os
 from aiogram import Router, F
@@ -209,7 +210,7 @@ async def cb_template_view(
     await callback.answer()
     preview = tpl["text"][:900] + ("…" if len(tpl["text"]) > 900 else "")
     await callback.message.edit_text(
-        f"📝 <b>{tpl['name']}</b>\n\n{preview}",
+        f"📝 <b>{_html.escape(tpl['name'])}</b>\n\n{preview}",
         parse_mode="HTML",
         reply_markup=template_actions(callback_data.template_id, callback_data.bot_id),
     )
@@ -272,7 +273,7 @@ async def cb_template_use(
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
         await callback.message.edit_text(
-            f"📢 <b>Рассылка по шаблону «{tpl['name']}»</b>\n\n"
+            f"📢 <b>Рассылка по шаблону «{_html.escape(tpl['name'])}»</b>\n\n"
             f"В шаблоне найдены плейсхолдеры:\n{ph_list}\n\n"
             "Отправьте значения в формате:\n"
             "<code>ключ=значение, ключ=значение</code>\n\n"
@@ -292,7 +293,7 @@ async def cb_template_use(
     await state.update_data(bot_id=bot_id, text=template_text)
 
     await callback.message.edit_text(
-        f"📢 <b>Рассылка по шаблону «{tpl['name']}»</b>\n\n"
+        f"📢 <b>Рассылка по шаблону «{_html.escape(tpl['name'])}»</b>\n\n"
         f"{preview}\n\n"
         f"Получателей: <b>{count}</b> чел.\n\n"
         "Запустить рассылку?",
