@@ -728,7 +728,7 @@ async def cmd_remember(message: Message, pool: asyncpg.Pool) -> None:
         )
     except Exception:
         log.exception("Failed to save AI memory")
-        await message.answer("Не смог сохранить память. Проверь логи, братан.")
+        await message.answer("❌ Не удалось сохранить запись. Проверьте логи.")
         return
 
     await message.answer(
@@ -745,7 +745,7 @@ async def cmd_memory(message: Message, pool: asyncpg.Pool) -> None:
         items = await ai_memory.search(pool, message.from_user.id, query, limit=10)
     except Exception:
         log.exception("Failed to read AI memory")
-        await message.answer("Не смог прочитать память. Смотрим базу и логи.")
+        await message.answer("❌ Не удалось прочитать память. Проверьте логи.")
         return
 
     await message.answer(ai_memory.format_for_user(items), parse_mode="HTML")
@@ -767,7 +767,7 @@ async def cmd_forget(message: Message, pool: asyncpg.Pool) -> None:
         deleted = await ai_memory.delete(pool, message.from_user.id, int(raw_id))
     except Exception:
         log.exception("Failed to delete AI memory")
-        await message.answer("Не смог удалить запись памяти. Надо смотреть базу.")
+        await message.answer("❌ Не удалось удалить запись памяти. Проверьте логи.")
         return
 
     await message.answer(
