@@ -462,6 +462,9 @@ async def cb_set_weight_pick(
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     await state.set_state(SetRoutingWeight.waiting_weight)
     await state.update_data(bot_id=callback_data.bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="routing"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"⚖️ <b>Вес роутинга для {label}</b>\n\n"
         "Введите вес — число от 0.1 до 10.0\n\n"
@@ -471,6 +474,7 @@ async def cb_set_weight_pick(
         "  <code>0.5</code> — в 2 раза меньше трафика\n"
         "  <code>0.0</code> — не получает трафик",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
     await callback.answer()
 
@@ -605,12 +609,16 @@ async def cb_net_broadcast(
 
     await state.set_state(NetworkBroadcast.waiting_message)
     await state.update_data(unique_count=len(users))
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="broadcast_cancel"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка</b>\n\n"
         f"Охват: <b>{len(users):,}</b> уникальных пользователей по всем ботам.\n\n"
         "Каждый пользователь получит сообщение от бота, с которым взаимодействовал последним.\n\n"
         "Напишите текст рассылки (HTML поддерживается):",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
