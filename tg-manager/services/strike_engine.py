@@ -326,6 +326,7 @@ class StrikePlan:
     started_at: float = 0.0
     phase: str = "init"
     mode: str = "normal"   # fast | normal | maximum
+    owner_id: int = 0       # для email-эскалации (загрузка ящиков из DB)
 
 
 @dataclass
@@ -352,6 +353,8 @@ class StrikeResult:
     abuse_form_ok: bool = False
     verified_down: bool | None = None   # None = не проверено
     spambot_escalation: str = "skipped"   # sent | skipped | error
+    emails_sent: int = 0                  # кол-во успешно отправленных email
+    email_escalation: dict = field(default_factory=dict)  # детали email-фазы
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
     phase_results: dict[str, Any] = field(default_factory=dict)
@@ -566,6 +569,163 @@ def _safe_gather_results(raw: list) -> list[dict]:
     return out
 
 
+def _reason_to_email_cat(reason: str, preset: str | None) -> dict:
+    """Возвращает cat-dict для email по reason/preset из основного Strike."""
+    key = (preset or reason or "").lower()
+    _map: dict[str, dict] = {
+        "csam": {"tg_reason": "childabuse", "severity": "CRITICAL", "ncmec": True,
+                 "email_subject": "URGENT: CSAM on Telegram"},
+        "childabuse": {"tg_reason": "childabuse", "severity": "CRITICAL", "ncmec": True,
+                       "email_subject": "URGENT: CSAM on Telegram"},
+        "drugs": {"tg_reason": "drugs", "severity": "HIGH", "ncmec": False,
+                  "email_subject": "Report: Illegal Drug Sales on Telegram"},
+        "terrorism": {"tg_reason": "violence", "severity": "CRITICAL", "ncmec": False,
+                      "email_subject": "Report: Terrorism/Extremism on Telegram"},
+        "violence": {"tg_reason": "violence", "severity": "HIGH", "ncmec": False,
+                     "email_subject": "Report: Violent Content on Telegram"},
+        "weapons": {"tg_reason": "violence", "severity": "HIGH", "ncmec": False,
+                    "email_subject": "Report: Illegal Weapons on Telegram"},
+        "fraud": {"tg_reason": "spam", "severity": "MEDIUM", "ncmec": False,
+                  "email_subject": "Report: Fraud/Scam on Telegram"},
+        "spam": {"tg_reason": "spam", "severity": "MEDIUM", "ncmec": False,
+                 "email_subject": "Report: Spam/Scam on Telegram"},
+        "prostitution": {"tg_reason": "pornography", "severity": "HIGH", "ncmec": False,
+                         "email_subject": "Report: Sex Trafficking on Telegram"},
+        "pornography": {"tg_reason": "pornography", "severity": "HIGH", "ncmec": False,
+                        "email_subject": "Report: Illegal Pornography on Telegram"},
+        "darknet": {"tg_reason": "other", "severity": "HIGH", "ncmec": False,
+                    "email_subject": "Report: Darknet Services on Telegram"},
+    }
+    return _map.get(key, {
+        "tg_reason": reason or "other", "severity": "MEDIUM", "ncmec": False,
+        "email_subject": f"Report: ToS Violation on Telegram ({key})",
+    })
+
+
+async def _run_email_escalation(
+    pool,
+    owner_id: int,
+    target: str,
+    reason: str,
+    preset: str | None,
+    progress_cb=None,
+) -> dict:
+    """
+    Email-эскалация для основного Strike.
+    Отправляет письма с каждого настроенного SMTP-ящика на:
+      abuse@telegram.org, dmca@telegram.org, dpo@telegram.org, security@telegram.org
+    + NCMEC (только для CSAM).
+    Возвращает dict с total_sent, emails list, ncmec bool.
+    """
+    from datetime import datetime, timezone
+
+    if not pool or not owner_id:
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "no pool/owner"}
+
+    cat = _reason_to_email_cat(reason, preset)
+    target_clean = target.lstrip("@")
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    result: dict = {"total_sent": 0, "emails": [], "ncmec": False}
+
+    # Загружаем email-аккаунты из БД
+    db_emails: list[dict] = []
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        db_emails = [dict(r) for r in rows]
+    except Exception as e:
+        log.debug("staggered_strike: email accounts fetch skipped: %s", e)
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": str(e)[:80]}
+
+    if not db_emails:
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "no email accounts configured"}
+
+    # Resolve helpers defined later in this file via module globals (safe at call-time)
+    import sys as _sys
+    _mod = _sys.modules[__name__]
+    _STRIKE_EMAIL_TARGETS = getattr(_mod, "_STRIKE_EMAIL_TARGETS", [])
+    _build_abuse_tg_email = getattr(_mod, "_build_abuse_tg_email", None)
+    _build_dmca_gdpr_email = getattr(_mod, "_build_dmca_gdpr_email", None)
+    _build_ncmec_email = getattr(_mod, "_build_ncmec_email", None)
+    _send_email = getattr(_mod, "_send_email", None)
+
+    if not _STRIKE_EMAIL_TARGETS or not _send_email:
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "email helpers not loaded"}
+
+    for ea in db_emails:
+        any_ok = False
+        for tgt in _STRIKE_EMAIL_TARGETS:
+            if tgt["email_type"] == "abuse":
+                body = _build_abuse_tg_email(target_clean, cat, report_time)
+            else:
+                body = _build_dmca_gdpr_email(target_clean, cat, report_time, tgt["email_type"])
+
+            subject = f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
+            ok, err = await _send_email(
+                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                ea["email"], tgt["addr"],
+                subject, body,
+            )
+            result["emails"].append({
+                "from": ea["email"], "to": tgt["addr"],
+                "label": tgt["label"], "ok": ok, "err": err,
+            })
+            if ok:
+                result["total_sent"] += 1
+                any_ok = True
+                log.info("staggered_strike: email sent %s → %s", ea["email"], tgt["addr"])
+            else:
+                log.warning("staggered_strike: email failed %s → %s: %s", ea["email"], tgt["addr"], err)
+
+        if any_ok:
+            try:
+                await pool.execute(
+                    "UPDATE strike_email_accounts SET last_used_at=now(), fail_count=0 WHERE id=$1",
+                    ea["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, f"staggered_strike: email success update id={ea.get('id')}")
+        else:
+            try:
+                await pool.execute(
+                    """UPDATE strike_email_accounts
+                       SET fail_count = fail_count + 1,
+                           is_active = CASE WHEN fail_count + 1 >= 3 THEN FALSE ELSE is_active END
+                       WHERE id=$1""",
+                    ea["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, f"staggered_strike: email fail_count update id={ea.get('id')}")
+
+    # NCMEC только для CSAM
+    if cat.get("ncmec") and db_emails:
+        ncmec_addr = "cybertipline@ncmec.org"
+        body_ncmec = _build_ncmec_email(target_clean, report_time)
+        for ea in db_emails:
+            ok_n, err_n = await _send_email(
+                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                ea["email"], ncmec_addr,
+                f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
+                body_ncmec,
+            )
+            result["emails"].append({
+                "from": ea["email"], "to": ncmec_addr,
+                "label": "ncmec", "ok": ok_n, "err": err_n,
+            })
+            if ok_n:
+                result["total_sent"] += 1
+                result["ncmec"] = True
+                break
+
+    return result
+
+
 async def staggered_strike(
     plan: StrikePlan,
     progress_cb=None,
@@ -715,12 +875,30 @@ async def staggered_strike(
                  target, result.spambot_escalation,
                  spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {})
 
+        # ═══ Фаза: Email-эскалация ═══
+        if pool and plan.owner_id:
+            if progress_cb:
+                await progress_cb("strike_email", f"📧 {target}: Email-эскалация (abuse/dmca/dpo/security)...")
+            try:
+                email_res = await _run_email_escalation(
+                    pool, plan.owner_id, target, plan.reason, plan.preset
+                )
+                result.emails_sent = email_res.get("total_sent", 0)
+                result.email_escalation = email_res
+                log.info(
+                    "strike_engine: email_escalation target=%s sent=%d ncmec=%s",
+                    target, result.emails_sent, email_res.get("ncmec", False),
+                )
+            except Exception:
+                log_exc_swallow(log, f"staggered_strike: email_escalation failed target={target}")
+
         result.duration_s = time.time() - t_start
         log.info(
             "strike_engine: staggered_strike done target=%s duration=%.1fs "
-            "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s",
+            "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d",
             target, result.duration_s, result.peer_reported, result.msgs_reported,
             result.network_nodes, result.abuse_form_ok, result.spambot_escalation,
+            result.emails_sent,
         )
         all_results.append(result)
 
@@ -1128,6 +1306,10 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"  ├ Abuse форма: <b>{'✅' if r.abuse_form_ok else '❌'}</b> · "
             f"SpamBot: <b>{'✅' if r.spambot_escalation == 'sent' else '❌'}</b> · "
             f"Заблокирован: <b>{r.blocked}</b>\n"
+            f"  ├ 📧 Email: <b>{r.emails_sent}</b> отправлено"
+            + (f" · NCMEC: ✅" if r.email_escalation.get("ncmec") else "")
+            + (f" (<i>{r.email_escalation.get('skip_reason', 'не настроен')}</i>" if r.emails_sent == 0 and r.email_escalation.get("skip_reason") not in (None, "no pool/owner") else "")
+            + "\n"
             f"  └ Длительность: <b>{r.duration_s:.0f}с</b> · "
             f"Аккаунтов: <b>{r.unique_accounts}</b>"
         )

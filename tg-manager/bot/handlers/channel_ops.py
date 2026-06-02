@@ -3517,6 +3517,7 @@ async def _strike_bg_v2(
             label=label, intel=all_intel, waves=waves,
             started_at=time.time(), phase="strike",
             mode=strike_mode,
+            owner_id=user_id,
         )
         results = await strike_engine.staggered_strike(plan, progress_cb=_progress, pool=pool)
 
