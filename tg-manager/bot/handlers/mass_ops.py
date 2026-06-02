@@ -341,7 +341,9 @@ async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
 
 @router.message(MassPublishFSM.waiting_text)
 async def fsm_mp_text_fallback(message: Message, state: FSMContext) -> None:
-    await message.answer("⚠️ Введите текст поста или загрузите .txt файл:")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+    await message.answer("⚠️ Введите текст поста или загрузите .txt файл:", reply_markup=kb.as_markup())
 
 
 # Step 4: choose timing
@@ -551,9 +553,14 @@ async def cb_mp_confirm(
     if op_id:
         await _finish_op_record(pool, op_id, ok_count, err_count)
 
+    err_note = (
+        f"\n\n⚠️ <b>{err_count} ошибок</b> — некоторые каналы пропущены (FloodWait / бан / недоступно)."
+        if err_count > 0 else ""
+    )
     await progress_msg.edit_text(
         f"✅ <b>Рассылка завершена</b>\n\n"
-        f"Всего: {total} · ✅ {ok_count} · ❌ {err_count}",
+        f"Всего: {total} · ✅ {ok_count} · ❌ {err_count}"
+        + err_note,
         parse_mode="HTML",
         reply_markup=_back_menu_kb().as_markup(),
     )
@@ -1169,7 +1176,18 @@ async def _process_bj_links(links: list[str], message: Message, state: FSMContex
     accounts = await _get_active_accounts(pool, message.from_user.id)
     if not accounts:
         await state.clear()
-        await message.answer("⚠️ Нет активных аккаунтов. Добавьте через /accounts.", parse_mode="HTML")
+        from bot.callbacks import AccCb as _AccCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📱 Перейти к аккаунтам", callback_data=_AccCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для массового join нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "💡 Добавьте аккаунт в разделе <b>📱 Аккаунты</b>, затем повторите операцию.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
@@ -1195,18 +1213,25 @@ async def fsm_bulk_join_links(
     raw = message.text or ""
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
-        await message.answer("⚠️ Введите хотя бы одну ссылку или юзернейм:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+        await message.answer("⚠️ Введите хотя бы одну ссылку или юзернейм:", reply_markup=kb.as_markup())
         return
     if len(links) > 50:
-        await message.answer("⚠️ Максимум 50 ссылок за одну операцию.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+        await message.answer("⚠️ Максимум 50 ссылок за одну операцию.", reply_markup=kb.as_markup())
         return
     bad = [ln for ln in links if not _link_re.match(ln)]
     if bad:
         sample = "\n".join(f"  • <code>{ln[:50]}</code>" for ln in bad[:3])
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
         await message.answer(
             f"⚠️ Неверный формат ссылок ({len(bad)} шт.):\n{sample}\n\n"
             "Ожидается: @username, https://t.me/... или ID (−1001234567890)",
             parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
     await _process_bj_links(links, message, state, pool)
@@ -1465,7 +1490,18 @@ async def _process_bl_channels(channels: list[str], message: Message, state: FSM
     accounts = await _get_active_accounts(pool, message.from_user.id)
     if not accounts:
         await state.clear()
-        await message.answer("⚠️ Нет активных аккаунтов. Добавьте через /accounts.")
+        from bot.callbacks import AccCb as _AccCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📱 Перейти к аккаунтам", callback_data=_AccCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для массового leave нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "💡 Добавьте аккаунт в разделе <b>📱 Аккаунты</b>, затем повторите операцию.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
@@ -1489,7 +1525,9 @@ async def fsm_bulk_leave_channels(
     raw = message.text or ""
     channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not channels:
-        await message.answer("⚠️ Введите хотя бы один юзернейм или ID канала:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+        await message.answer("⚠️ Введите хотя бы один юзернейм или ID канала:", reply_markup=kb.as_markup())
         return
     if len(channels) > 200:
         channels = channels[:200]
