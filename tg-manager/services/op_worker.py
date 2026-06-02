@@ -156,7 +156,7 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
                     reply_markup=kb.as_markup(),
                 )
             except Exception:
-                pass
+                log_exc_swallow(log, f"_progress_monitor: уведомление op={op_id} owner={owner_id} не отправлено")
     except asyncio.CancelledError:
         pass
     finally:
@@ -265,7 +265,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         elif op_type in ("global_presence_full_package", "global_presence_package"):
             result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
         else:
-            result = {"status": "skipped", "reason": f"unknown op_type: {op_type}"}
+            log.warning("op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped", op_type, op_id, owner_id)
+            result = {
+                "status": "skipped",
+                "reason": f"unknown op_type: {op_type}",
+                "summary": f"⚠️ Неизвестный тип операции: {op_type}",
+            }
 
         # Не перезаписывать статус если операция была отменена в процессе
         if result.get("status") == "cancelled":
