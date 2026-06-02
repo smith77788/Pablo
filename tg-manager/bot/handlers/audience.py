@@ -387,14 +387,18 @@ async def cb_compare_result(
 async def cb_send_user(
     callback: CallbackQuery, callback_data: AudCb, state: FSMContext
 ) -> None:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
     await callback.answer()
     await state.set_state(SendToUser.waiting_user_id)
     await state.update_data(bot_id=callback_data.bot_id)
+    kb = _Kb()
+    kb.button(text="❌ Отмена", callback_data=AudCb(action="menu", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         "📤 <b>Написать пользователю</b>\n\n"
         "Введите Telegram User ID пользователя\n"
         "(число, например <code>123456789</code>):",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
