@@ -213,9 +213,12 @@ async def cb_dm_target_cohort_bot(
         callback.from_user.id,
     )
     if not bots:
+        _no_bots_kb = InlineKeyboardBuilder()
+        _no_bots_kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
         await callback.message.edit_text(
             "⚠️ У вас нет активных ботов.",
             parse_mode="HTML",
+            reply_markup=_no_bots_kb.as_markup(),
         )
         return
 
@@ -434,11 +437,16 @@ async def cb_dm_launch_or_draft(
                     callback.from_user.id,
                 ) or 0
             if audience_cnt == 0:
+                _empty_kb = InlineKeyboardBuilder()
+                _empty_kb.button(text="💾 Сохранить как черновик", callback_data=DmCb(action="save_draft"))
+                _empty_kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+                _empty_kb.adjust(1)
                 await _edit(
                     callback,
                     "⚠️ <b>Аудитория пуста — кампания не запущена</b>\n\n"
                     "В выбранной аудитории нет получателей.\n"
                     "Сохраните как черновик или выберите другую аудиторию.",
+                    _empty_kb.as_markup(),
                 )
                 return
         except Exception:
@@ -466,19 +474,29 @@ async def cb_dm_launch_or_draft(
         # Запустить асинхронно уже после установки статуса
         _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
         _treg.register(callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t)
+        _launch_kb = InlineKeyboardBuilder()
+        _launch_kb.button(text="📋 Детали кампании", callback_data=DmCb(action="detail", campaign_id=campaign_id))
+        _launch_kb.button(text="◀️ К кампаниям", callback_data=DmCb(action="menu"))
+        _launch_kb.adjust(1)
         await _edit(
             callback,
             f"🚀 Кампания <b>«{html.escape(name)}»</b> запущена!\n\n"
             f"ID кампании: <code>{campaign_id}</code>\n"
             "Отправка идёт в фоне — вы получите уведомление когда закончится.\n"
             "<i>Для отмены: /tasks</i>",
+            _launch_kb.as_markup(),
         )
     else:
+        _draft_kb = InlineKeyboardBuilder()
+        _draft_kb.button(text="📋 Детали кампании", callback_data=DmCb(action="detail", campaign_id=campaign_id))
+        _draft_kb.button(text="◀️ К кампаниям", callback_data=DmCb(action="menu"))
+        _draft_kb.adjust(1)
         await _edit(
             callback,
             f"💾 Кампания <b>«{html.escape(name)}»</b> сохранена как черновик.\n"
             f"ID: <code>{campaign_id}</code>\n\n"
             "Запустите из меню кампаний когда будете готовы.",
+            _draft_kb.as_markup(),
         )
 
 

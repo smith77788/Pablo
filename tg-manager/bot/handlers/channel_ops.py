@@ -595,12 +595,16 @@ async def cb_do_create(
     acc_id = data.get("acc_id")
     if not acc_id:
         await callback.message.edit_text(
-            "⚠️ Сессия истекла. Начните заново: /ops", parse_mode="HTML"
+            "⚠️ Сессия истекла. Начните заново: /ops", parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
         )
         return
     acc = await db.get_account_for_telethon(pool, acc_id, callback.from_user.id)
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.", parse_mode="HTML")
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.", parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
         return
 
     from services import account_manager
@@ -1665,15 +1669,20 @@ async def cb_do_promote(
         owner_acc["session_str"], ch_id, target["tg_user_id"], _acc=owner_acc
     )
     name = (target["first_name"] or target["phone"] or f"id{target['id']}")
+    _promote_back_kb = InlineKeyboardBuilder()
+    _promote_back_kb.button(
+        text="◀️ К администраторам",
+        callback_data=ChanCb(action="manage_admins", acc_id=acc_id, channel_id=ch_id),
+    )
     if ok:
         await callback.message.edit_text(
             f"✅ <b>{html.escape(name)} теперь администратор!</b>",
-            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+            parse_mode="HTML", reply_markup=_promote_back_kb.as_markup(),
         )
     else:
         await callback.message.edit_text(
             f"❌ <b>Не удалось промовать {html.escape(name)}</b>\n\nПроверьте: аккаунт должен быть участником канала.",
-            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+            parse_mode="HTML", reply_markup=_promote_back_kb.as_markup(),
         )
 
 

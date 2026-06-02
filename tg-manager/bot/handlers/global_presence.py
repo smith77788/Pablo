@@ -1402,6 +1402,8 @@ async def cb_gp_plans_list(
     if not plans:
         kb = InlineKeyboardBuilder()
         kb.button(text="➕ Создать план", callback_data=GeoPresenceCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="cancel"))
+        kb.adjust(1)
         await _edit(
             callback,
             "🌍 <b>Global Presence Factory</b>\n\n"
@@ -1426,6 +1428,7 @@ async def cb_gp_plans_list(
         label = f"{emoji} #{plan['id']} — {display_name} ({count} городов)"
         kb.button(text=label, callback_data=GeoPresenceCb(action="progress", plan_id=plan["id"]))
     kb.button(text="➕ Новый план", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
     await _edit(

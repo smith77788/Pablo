@@ -79,6 +79,8 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
     await state.set_state(AddCompetitorFSM.waiting_label)
     kb = InlineKeyboardBuilder()
     kb.button(text="Пропустить", callback_data=CompCb(action="skip_label"))
+    kb.button(text="❌ Отмена", callback_data=CompCb(action="menu"))
+    kb.adjust(1)
     await message.answer(
         f"Метка для @{username} (например: «Конкурент 1»). Или пропустите:",
         reply_markup=kb.as_markup(),
