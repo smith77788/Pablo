@@ -24,6 +24,8 @@ from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
 from config import OPENROUTER_MODEL
+from services import ai_memory
+from services.ai_providers import configured_providers
 from services.logger import log_exc_swallow
 
 router = Router()
@@ -483,7 +485,9 @@ async def _call_openrouter(
                                     ensure_ascii=False,
                                 )
                         except Exception:
-                            log_exc_swallow(log, "Не удалось распарсить JSON-ответ AI-ассистента")
+                            log_exc_swallow(
+                                log, "Не удалось распарсить JSON-ответ AI-ассистента"
+                            )
 
                         current_messages.append(
                             {
@@ -539,7 +543,11 @@ async def _call_openrouter(
                     type(e).__name__,
                 )
                 # Small delay before trying next model to avoid hammering the API
-                retry_delay = 2.0 if "429" in err_str or "rate" in err_str or "limit" in err_str else 0.5
+                retry_delay = (
+                    2.0
+                    if "429" in err_str or "rate" in err_str or "limit" in err_str
+                    else 0.5
+                )
                 await asyncio.sleep(retry_delay)
                 continue
             log.exception("OpenRouter API error with model %s: %s", model, e)
@@ -554,6 +562,199 @@ async def _call_openrouter(
         "• Временная перегрузка серверов — попробуйте через несколько минут\n"
         "• Неверный ключ <code>OPENROUTER_API_KEY</code>\n\n"
         "Сменить модель можно через Admin → ⚙️ Системный режим."
+    )
+
+
+async def _call_ai_providers(
+    messages: list,
+    pool: asyncpg.Pool,
+    user_id: int,
+    http: aiohttp.ClientSession | None = None,
+) -> str | dict:
+    """OpenAI-compatible provider failover with BotMother memory context."""
+    providers = configured_providers()
+    if not providers:
+        return (
+            "⚠️ <b>AI-ассистент не настроен</b>\n\n"
+            "Добавьте хотя бы один ключ: <code>OPENROUTER_API_KEY</code>, "
+            "<code>GROQ_API_KEY</code> или <code>GEMINI_API_KEY</code>."
+        )
+
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        return "⚠️ Библиотека openai не установлена."
+
+    memory_context = ""
+    try:
+        last_user_message = next(
+            (
+                m.get("content", "")
+                for m in reversed(messages)
+                if m.get("role") == "user"
+            ),
+            "",
+        )
+        memory_context = ai_memory.format_for_prompt(
+            await ai_memory.search(pool, user_id, str(last_user_message), limit=8)
+        )
+    except Exception:
+        log_exc_swallow(log, "Не удалось загрузить память AI")
+
+    base_messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    if memory_context:
+        base_messages.append({"role": "system", "content": memory_context})
+    base_messages.extend(list(messages))
+
+    tools = _openai_tools()
+    primary_label = f"{providers[0].name}/{providers[0].models[0]}"
+    attempts = [
+        (provider, model, max_tokens, use_tools)
+        for use_tools in (True, False)
+        for max_tokens in (1500, 600)
+        for provider in providers
+        for model in provider.models
+    ]
+    seen: set[tuple[str, str, int, bool]] = set()
+
+    for provider, model, max_tokens, use_tools in attempts:
+        attempt_key = (provider.name, model, max_tokens, use_tools)
+        if attempt_key in seen:
+            continue
+        seen.add(attempt_key)
+        client = AsyncOpenAI(
+            api_key=provider.api_key,
+            base_url=provider.base_url,
+            timeout=60.0,
+        )
+        current_messages = list(base_messages)
+        try:
+            pending_action_data = None
+            for _ in range(8):
+                completion_kwargs = {
+                    "model": model,
+                    "messages": current_messages,
+                    "max_tokens": max_tokens,
+                }
+                if use_tools:
+                    completion_kwargs["tools"] = tools
+                    completion_kwargs["tool_choice"] = "auto"
+                response = await client.chat.completions.create(**completion_kwargs)
+                choice = response.choices[0]
+                msg = choice.message
+
+                if choice.finish_reason == "tool_calls" and msg.tool_calls:
+                    assistant_msg: dict = {
+                        "role": "assistant",
+                        "content": msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ],
+                    }
+                    current_messages.append(assistant_msg)
+
+                    for tc in msg.tool_calls:
+                        try:
+                            args = json.loads(tc.function.arguments)
+                        except Exception:
+                            args = {}
+                        result_text = await run_tool(
+                            tc.function.name, args, pool, user_id, http
+                        )
+
+                        try:
+                            parsed = json.loads(result_text)
+                            if isinstance(parsed, dict) and "pending_action" in parsed:
+                                pending_action_data = parsed
+                                result_text = json.dumps(
+                                    {
+                                        "status": "pending_confirmation",
+                                        "message": f"Действие «{parsed['pending_action']}» ждёт подтверждения пользователя.",
+                                        "preview": parsed.get("preview", ""),
+                                    },
+                                    ensure_ascii=False,
+                                )
+                        except Exception:
+                            log_exc_swallow(log, "Не удалось распарсить tool JSON")
+
+                        current_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": result_text,
+                            }
+                        )
+                    continue
+
+                ai_reply = msg.content or "Нет ответа."
+                label = f"{provider.name}/{model}"
+                suffix = f"\n\n<i>Модель: {label}</i>" if label != primary_label else ""
+                if not use_tools:
+                    suffix += "\n<i>Режим: без инструментов</i>"
+                full_reply = ai_reply + suffix
+                if pending_action_data:
+                    return {
+                        "__pending__": True,
+                        "action_data": pending_action_data,
+                        "ai_message": full_reply,
+                    }
+                return full_reply
+
+            return "Превышен лимит итераций инструментов."
+
+        except Exception as e:
+            err_str = str(e).lower()
+            should_retry = any(
+                x in err_str
+                for x in (
+                    "rate",
+                    "limit",
+                    "429",
+                    "quota",
+                    "overloaded",
+                    "timeout",
+                    "model_not_found",
+                    "not found",
+                    "404",
+                    "invalid model",
+                    "402",
+                    "credits",
+                    "payment",
+                    "billing",
+                    "insufficient",
+                    "tool",
+                )
+            )
+            if should_retry:
+                log.warning(
+                    "AI provider %s model %s failed (%s), trying next",
+                    provider.name,
+                    model,
+                    type(e).__name__,
+                )
+                await asyncio.sleep(
+                    1.5 if "429" in err_str or "rate" in err_str else 0.4
+                )
+                continue
+            log.exception("AI provider %s model %s error: %s", provider.name, model, e)
+            return (
+                f"⚠️ Ошибка AI-ассистента ({provider.name}/{model}): "
+                f"{type(e).__name__}: {str(e)[:120]}"
+            )
+
+    return (
+        "⚠️ <b>AI-ассистент временно недоступен</b>\n\n"
+        "Все настроенные модели не ответили. Проверьте ключи и доступность "
+        "<code>OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, "
+        "<code>GEMINI_API_KEY</code>."
     )
 
 
@@ -586,7 +787,7 @@ async def _process_ai_turn(
 
     try:
         reply = await asyncio.wait_for(
-            _call_openrouter(messages, pool, message.from_user.id, http),
+            _call_ai_providers(messages, pool, message.from_user.id, http),
             timeout=120.0,
         )
     except asyncio.TimeoutError:
@@ -619,9 +820,13 @@ async def _process_ai_turn(
         preview = action_data.get("preview", "")
 
         icons = {
-            "create_channel": "📡", "create_group": "👥", "create_bot": "🤖",
-            "launch_broadcast": "📢", "post_to_channel": "📤",
-            "update_bot_profile": "✏️", "schedule_broadcast": "⏱️",
+            "create_channel": "📡",
+            "create_group": "👥",
+            "create_bot": "🤖",
+            "launch_broadcast": "📢",
+            "post_to_channel": "📤",
+            "update_bot_profile": "✏️",
+            "schedule_broadcast": "⏱️",
             "bulk_create_channels": "📋",
         }
         icon = icons.get(action_name, "⚡")
@@ -693,6 +898,77 @@ async def cmd_ai(message: Message) -> None:
         "Находится в: <b>Настройки → 🤖 ИИ Помощник</b>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
+    )
+
+
+@router.message(Command("remember"))
+async def cmd_remember(message: Message, pool: asyncpg.Pool) -> None:
+    text = message.text or ""
+    body = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+    if not body:
+        await message.answer(
+            "Напиши так: <code>/remember что важно запомнить #тег</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    tags = [part[1:] for part in body.split() if part.startswith("#") and len(part) > 1]
+    title = body[:80].strip()
+    try:
+        item = await ai_memory.remember(
+            pool,
+            message.from_user.id,
+            body,
+            title=title,
+            tags=tags,
+            source="command",
+        )
+    except Exception:
+        log.exception("Failed to save AI memory")
+        await message.answer("Не смог сохранить память. Проверь логи, братан.")
+        return
+
+    await message.answer(
+        f"✅ Запомнил. ID <code>#{item.id}</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("memory"))
+async def cmd_memory(message: Message, pool: asyncpg.Pool) -> None:
+    text = message.text or ""
+    query = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+    try:
+        items = await ai_memory.search(pool, message.from_user.id, query, limit=10)
+    except Exception:
+        log.exception("Failed to read AI memory")
+        await message.answer("Не смог прочитать память. Смотрим базу и логи.")
+        return
+
+    await message.answer(ai_memory.format_for_user(items), parse_mode="HTML")
+
+
+@router.message(Command("forget"))
+async def cmd_forget(message: Message, pool: asyncpg.Pool) -> None:
+    text = message.text or ""
+    raw_id = (
+        text.split(maxsplit=1)[1].strip().lstrip("#")
+        if len(text.split(maxsplit=1)) > 1
+        else ""
+    )
+    if not raw_id.isdigit():
+        await message.answer("Напиши так: <code>/forget 123</code>", parse_mode="HTML")
+        return
+
+    try:
+        deleted = await ai_memory.delete(pool, message.from_user.id, int(raw_id))
+    except Exception:
+        log.exception("Failed to delete AI memory")
+        await message.answer("Не смог удалить запись памяти. Надо смотреть базу.")
+        return
+
+    await message.answer(
+        "✅ Удалил." if deleted else "Такой записи в твоей памяти нет."
     )
 
 
@@ -820,11 +1096,13 @@ async def cb_ai_retry(
         await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.")
         return
     # Remove last assistant message if present so we don't duplicate it
-    retry_messages = messages[:-1] if messages[-1].get("role") == "assistant" else messages
+    retry_messages = (
+        messages[:-1] if messages[-1].get("role") == "assistant" else messages
+    )
     await callback.message.edit_text("⏳ <b>Повторяю запрос...</b>", parse_mode="HTML")
     try:
         reply = await asyncio.wait_for(
-            _call_openrouter(retry_messages, pool, callback.from_user.id, http),
+            _call_ai_providers(retry_messages, pool, callback.from_user.id, http),
             timeout=120.0,
         )
     except asyncio.TimeoutError:

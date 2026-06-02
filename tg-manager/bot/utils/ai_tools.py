@@ -440,8 +440,11 @@ async def action_create_channel(
 
 
 async def action_create_bot(
-    pool: asyncpg.Pool, user_id: int,
-    name: str, username: str = "", description: str = "",
+    pool: asyncpg.Pool,
+    user_id: int,
+    name: str,
+    username: str = "",
+    description: str = "",
 ) -> dict:
     """Создать нового бота через BotFather используя аккаунт с наивысшим trust_score."""
     acc_row = await pool.fetchrow(
@@ -452,7 +455,11 @@ async def action_create_bot(
     if not acc_row:
         return {"error": "Нет активных аккаунтов. Подключите аккаунт через /accounts"}
     uname_str = f", @{username}" if username else ""
-    desc_str = f"\nОписание: {description[:60]}{'...' if len(description)>60 else ''}" if description else ""
+    desc_str = (
+        f"\nОписание: {description[:60]}{'...' if len(description) > 60 else ''}"
+        if description
+        else ""
+    )
     return {
         "pending_action": "create_bot",
         "acc_id": acc_row["id"],
@@ -464,8 +471,11 @@ async def action_create_bot(
 
 
 async def action_create_group(
-    pool: asyncpg.Pool, user_id: int,
-    title: str, about: str = "", username: str = "",
+    pool: asyncpg.Pool,
+    user_id: int,
+    title: str,
+    about: str = "",
+    username: str = "",
 ) -> dict:
     """Создать группу/супергруппу. Отдельный инструмент для ясности AI."""
     acc_row = await pool.fetchrow(
@@ -487,9 +497,13 @@ async def action_create_group(
 
 
 async def action_bulk_create_channels(
-    pool: asyncpg.Pool, user_id: int,
-    prefix: str, count: int = 5, about: str = "",
-    username_pattern: str = "", acc_id: int = 0,
+    pool: asyncpg.Pool,
+    user_id: int,
+    prefix: str,
+    count: int = 5,
+    about: str = "",
+    username_pattern: str = "",
+    acc_id: int = 0,
 ) -> dict:
     """Подготовить массовое создание каналов. Будет поставлено в operation_queue."""
     if count < 1 or count > 50:
@@ -499,7 +513,8 @@ async def action_bulk_create_channels(
     if acc_id:
         acc_row = await pool.fetchrow(
             "SELECT id, first_name, phone FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
-            user_id, acc_id,
+            user_id,
+            acc_id,
         )
     else:
         acc_row = await pool.fetchrow(
@@ -517,7 +532,7 @@ async def action_bulk_create_channels(
         "about": about,
         "username_pattern": username_pattern,
         "preview": f"Массовое создание {count} каналов «{prefix} #1–#{count}» через @{acc_row['phone']}"
-                  + (f" с шаблоном @{username_pattern}" if username_pattern else ""),
+        + (f" с шаблоном @{username_pattern}" if username_pattern else ""),
     }
 
 
@@ -629,7 +644,7 @@ async def execute_action(
                     short_desc,
                     bot_id,
                 )
-                results.append(f"✅ Краткое описание обновлено")
+                results.append("✅ Краткое описание обновлено")
             else:
                 results.append("❌ Не удалось обновить краткое описание")
         return "\n".join(results) if results else "❌ Нет изменений"
@@ -714,7 +729,8 @@ async def execute_action(
         acc_row = await pool.fetchrow(
             "SELECT session_str, device_model, system_version, app_version, phone "
             "FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
-            user_id, acc_id,
+            user_id,
+            acc_id,
         )
         if not acc_row:
             return "❌ Аккаунт не найден или не активен"
@@ -722,8 +738,12 @@ async def execute_action(
         if bot_username and not bot_username.lower().endswith("bot"):
             bot_username = bot_username + "_bot"
         from services import account_manager
+
         result = await account_manager.create_bot_via_botfather(
-            acc_row["session_str"], bot_name, bot_username or f"ai_bot", _acc=dict(acc_row)
+            acc_row["session_str"],
+            bot_name,
+            bot_username or "ai_bot",
+            _acc=dict(acc_row),
         )
         if result.get("error"):
             return f"❌ Ошибка создания бота: {result['error'][:200]}"
@@ -734,12 +754,16 @@ async def execute_action(
             if token and ":" in token:
                 bot_id_int = int(token.split(":")[0])
                 from database import db as _db
-                await _db.add_bot(pool, token, bot_id_int, actual_username, bot_name, user_id)
+
+                await _db.add_bot(
+                    pool, token, bot_id_int, actual_username, bot_name, user_id
+                )
         except Exception as e:
             log.warning("ai_tools create_bot: managed_bots insert failed: %s", e)
         # Set description if provided
         if description and token and http:
             from services import bot_api
+
             await bot_api.set_description(http, token, description)
             await bot_api.set_short_description(http, token, description[:120])
         return f"✅ Бот @{actual_username} создан!\nТокен сохранён в системе.\nID: {token.split(':')[0] if ':' in token else '?'}"
@@ -752,12 +776,16 @@ async def execute_action(
         acc_row = await pool.fetchrow(
             "SELECT session_str, device_model, system_version, app_version, phone "
             "FROM tg_accounts WHERE owner_id=$1 AND id=$2 AND is_active=TRUE",
-            user_id, acc_id,
+            user_id,
+            acc_id,
         )
         if not acc_row:
             return "❌ Аккаунт не найден или не активен"
         from services import account_manager
-        result = await account_manager.create_group(acc_row["session_str"], title, about=about, _acc=dict(acc_row))
+
+        result = await account_manager.create_group(
+            acc_row["session_str"], title, about=about, _acc=dict(acc_row)
+        )
         if isinstance(result, dict) and result.get("id"):
             ch_id = result["id"]
             # Save to managed_channels
@@ -765,10 +793,16 @@ async def execute_action(
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
                    VALUES($1,$2,$3,$4,$5)
                    ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
-                user_id, acc_id, ch_id, title, username or None,
+                user_id,
+                acc_id,
+                ch_id,
+                title,
+                username or None,
             )
             if username:
-                err = await account_manager.set_channel_username(acc_row["session_str"], ch_id, username, _acc=dict(acc_row))
+                err = await account_manager.set_channel_username(
+                    acc_row["session_str"], ch_id, username, _acc=dict(acc_row)
+                )
                 if err:
                     return f"✅ Группа «{title}» создана (ID: {ch_id})\n⚠️ Username не удалось установить: {err}"
                 return f"✅ Группа «{title}» создана! ID: {ch_id}, @{username}"
@@ -910,6 +944,36 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "search_memory",
+        "description": "Найти сохранённую память BotMother пользователя по ключевым словам. Используй перед ответом, если вопрос связан с прошлым контекстом, настройками, проектами, ошибками или предпочтениями.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Что искать в памяти"},
+                "limit": {"type": "integer", "default": 8},
+            },
+        },
+    },
+    {
+        "name": "remember",
+        "description": "Сохранить важную память BotMother. Используй только когда пользователь явно просит запомнить, сохранить правило, проект, настройку, вывод или устойчивый факт.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "body": {"type": "string", "description": "Что сохранить"},
+                "title": {"type": "string", "description": "Короткий заголовок"},
+                "kind": {"type": "string", "default": "note"},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Короткие теги без #",
+                },
+                "pinned": {"type": "boolean", "default": False},
+            },
+            "required": ["body"],
+        },
+    },
+    {
         "name": "launch_broadcast",
         "description": (
             "ДЕЙСТВИЕ: Запустить рассылку для всех активных пользователей бота. "
@@ -1034,8 +1098,14 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Имя бота (отображаемое)"},
-                "username": {"type": "string", "description": "Username бота без @ (опционально, закончится на _bot)"},
-                "description": {"type": "string", "description": "Описание бота (опционально)"},
+                "username": {
+                    "type": "string",
+                    "description": "Username бота без @ (опционально, закончится на _bot)",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Описание бота (опционально)",
+                },
             },
             "required": ["name"],
         },
@@ -1052,8 +1122,14 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Название группы"},
-                "about": {"type": "string", "description": "Описание группы (опционально)"},
-                "username": {"type": "string", "description": "Username без @ (опционально)"},
+                "about": {
+                    "type": "string",
+                    "description": "Описание группы (опционально)",
+                },
+                "username": {
+                    "type": "string",
+                    "description": "Username без @ (опционально)",
+                },
             },
             "required": ["title"],
         },
@@ -1069,11 +1145,27 @@ TOOL_DEFINITIONS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "prefix": {"type": "string", "description": "Префикс названия (например «Новости Москва» → каналы «Новости Москва #1», ...)"},
-                "count": {"type": "integer", "description": "Количество каналов (1-50, по умолчанию 5)", "default": 5},
-                "about": {"type": "string", "description": "Описание для всех каналов (опционально)"},
-                "username_pattern": {"type": "string", "description": "Шаблон username без @ (опционально, например news_msk → news_msk_1, ...)"},
-                "acc_id": {"type": "integer", "description": "ID аккаунта (опционально, по умолчанию — лучший по trust_score)"},
+                "prefix": {
+                    "type": "string",
+                    "description": "Префикс названия (например «Новости Москва» → каналы «Новости Москва #1», ...)",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Количество каналов (1-50, по умолчанию 5)",
+                    "default": 5,
+                },
+                "about": {
+                    "type": "string",
+                    "description": "Описание для всех каналов (опционально)",
+                },
+                "username_pattern": {
+                    "type": "string",
+                    "description": "Шаблон username без @ (опционально, например news_msk → news_msk_1, ...)",
+                },
+                "acc_id": {
+                    "type": "integer",
+                    "description": "ID аккаунта (опционально, по умолчанию — лучший по trust_score)",
+                },
             },
             "required": ["prefix", "count"],
         },
@@ -1108,6 +1200,47 @@ async def run_tool(
             result = await get_broadcast_history(
                 pool, user_id, inputs["bot_id"], inputs.get("limit", 10)
             )
+        elif name == "search_memory":
+            from services import ai_memory
+
+            try:
+                limit = int(inputs.get("limit", 8) or 8)
+            except (TypeError, ValueError):
+                limit = 8
+            limit = max(1, min(limit, 20))
+            items = await ai_memory.search(
+                pool,
+                user_id,
+                inputs.get("query", ""),
+                limit=limit,
+            )
+            result = {
+                "items": [
+                    {
+                        "id": item.id,
+                        "kind": item.kind,
+                        "title": item.title,
+                        "body": item.body,
+                        "tags": item.tags,
+                        "pinned": item.pinned,
+                    }
+                    for item in items
+                ]
+            }
+        elif name == "remember":
+            from services import ai_memory
+
+            item = await ai_memory.remember(
+                pool,
+                user_id,
+                inputs["body"],
+                title=inputs.get("title", ""),
+                kind=inputs.get("kind", "note"),
+                tags=inputs.get("tags", []),
+                source="ai_tool",
+                pinned=bool(inputs.get("pinned", False)),
+            )
+            result = {"saved": True, "id": item.id, "title": item.title}
         elif name == "launch_broadcast":
             result = await action_launch_broadcast(
                 pool, user_id, inputs["bot_id"], inputs["text"]
@@ -1144,21 +1277,24 @@ async def run_tool(
             )
         elif name == "create_bot":
             result = await action_create_bot(
-                pool, user_id,
+                pool,
+                user_id,
                 name=inputs["name"],
                 username=inputs.get("username", ""),
                 description=inputs.get("description", ""),
             )
         elif name == "create_group":
             result = await action_create_group(
-                pool, user_id,
+                pool,
+                user_id,
                 title=inputs["title"],
                 about=inputs.get("about", ""),
                 username=inputs.get("username", ""),
             )
         elif name == "bulk_create_channels":
             result = await action_bulk_create_channels(
-                pool, user_id,
+                pool,
+                user_id,
                 prefix=inputs["prefix"],
                 count=inputs.get("count", 5),
                 about=inputs.get("about", ""),
