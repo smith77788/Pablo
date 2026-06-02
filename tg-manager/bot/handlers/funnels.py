@@ -263,7 +263,11 @@ async def msg_fn_step_delay(message: Message, state: FSMContext, pool: asyncpg.P
         if delay < 0:
             raise ValueError
     except ValueError:
-        await message.answer("Введите целое неотрицательное число (минуты):")
+        data_temp = await state.get_data()
+        await message.answer(
+            "Введите целое неотрицательное число (минуты):",
+            reply_markup=_fn_cancel_kb(data_temp.get("bot_id", 0)),
+        )
         return
 
     data = await state.get_data()
