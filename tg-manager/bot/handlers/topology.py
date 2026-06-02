@@ -43,12 +43,35 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     # Count distinct accs with channels
     accs_with_chans = len({c["acc_id"] for c in channels if c.get("acc_id")})
+    has_data = bool(accounts or channels or bots)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🗺️ Обзорная карта", callback_data=TopoCb(action="overview"))
-    kb.button(text="📱 По аккаунтам", callback_data=TopoCb(action="acc_list", page=0))
-    kb.button(text="📡 По каналам", callback_data=TopoCb(action="chan_list", page=0))
-    kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+
+    if not has_data:
+        # Empty state: no assets at all
+        kb.button(text="📱 Добавить аккаунт",  callback_data=AccCb(action="menu"))
+        kb.button(text="🤖 Добавить бота",      callback_data=BotCb(action="list"))
+        kb.button(text="🔄 Обновить граф",      callback_data=TopoCb(action="menu"))
+        kb.button(text="◀️ Назад",              callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "🗺️ <b>Topology Map — граф связей</b>\n\n"
+            "📭 <b>Граф пуст — активов пока нет.</b>\n\n"
+            "Чтобы карта отображала связи, добавьте:\n"
+            "• <b>📱 Аккаунты</b> — Telegram-аккаунты в разделе «Аккаунты»\n"
+            "• <b>📡 Каналы/группы</b> — импортируйте через «Каналы → Импорт из Telegram»\n"
+            "• <b>🤖 Боты</b> — добавьте через «Мои боты»\n\n"
+            "После добавления активов здесь появится интерактивная карта связей.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    kb.button(text="🗺️ Обзорная карта",  callback_data=TopoCb(action="overview"))
+    kb.button(text="📱 По аккаунтам",    callback_data=TopoCb(action="acc_list", page=0))
+    kb.button(text="📡 По каналам",      callback_data=TopoCb(action="chan_list", page=0))
+    kb.button(text="🔄 Обновить граф",   callback_data=TopoCb(action="menu"))
+    kb.button(text="◀️ Назад",           callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(

@@ -555,7 +555,13 @@ async def cb_seo_chan_analyze(
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
-    await callback.answer("⏳ Анализирую...")
+    await callback.answer()
+
+    # Show progress message before the long Telethon call
+    progress_msg = await callback.message.edit_text(
+        "⏳ <b>Анализирую SEO...</b>\n\nПолучаю данные канала из Telegram...",
+        parse_mode="HTML",
+    )
 
     # Try to get full about from Telethon
     about = ""
@@ -615,15 +621,90 @@ async def cb_seo_chan_analyze(
         lines.append("\n🔴 <b>Слабый SEO.</b> Приоритет: задать username + расширить описание.")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 AI-оптимизация",  callback_data=SeoCb(action="chan_ai",    chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔄 Обновить анализ", callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",           callback_data=SeoCb(action="chan_menu",  chan_id=chan_id, acc_id=acc_id))
-    kb.adjust(1)
+    kb.button(text="🤖 AI-оптимизация",      callback_data=SeoCb(action="chan_ai",         chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="📋 Экспорт как текст",   callback_data=SeoCb(action="chan_export_txt",  chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="🔄 Обновить анализ",     callback_data=SeoCb(action="chan_analyze",     chan_id=chan_id, acc_id=acc_id))
+    kb.button(text="◀️ Назад",               callback_data=SeoCb(action="chan_menu",        chan_id=chan_id, acc_id=acc_id))
+    kb.adjust(2, 1, 1)
     try:
-        await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+        await progress_msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             raise
+
+
+# ── Export SEO report as plain text ──────────────────────────────
+
+@router.callback_query(SeoCb.filter(F.action == "chan_export_txt"))
+async def cb_seo_chan_export_txt(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
+    """Send SEO analysis as a plain-text message for easy copy-paste."""
+    chan_id = callback_data.chan_id
+    acc_id  = callback_data.acc_id
+    user_id = callback.from_user.id
+
+    chan = await pool.fetchrow(
+        "SELECT id, title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+        chan_id, user_id,
+    )
+    if not chan:
+        await callback.answer("Канал не найден.", show_alert=True)
+        return
+    await callback.answer("📋 Формирую отчёт...")
+
+    title    = chan["title"] or ""
+    username = chan["username"] or ""
+    display  = f"@{username}" if username else title
+
+    about   = ""
+    members = 0
+    acc = await pool.fetchrow(
+        "SELECT session_str, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        acc_id, user_id,
+    ) if acc_id else None
+
+    if acc:
+        try:
+            from services import account_manager
+            info = await account_manager.get_full_channel_info(
+                acc["session_str"], chan["channel_id"], _acc=acc
+            )
+            if info:
+                about   = info.get("about", "") or ""
+                members = info.get("members_count", 0) or 0
+        except Exception as e:
+            log.debug("chan_export_txt get_full_channel_info: %s", e)
+
+    score, tips = _chan_seo_score(title, about, username, members)
+
+    lines = [
+        f"=== SEO-ОТЧЁТ: {display} ===",
+        f"Дата: {__import__('datetime').date.today()}",
+        "",
+        f"SEO-скор: {score}/100",
+        f"Название: {title} ({len(title)}/50 симв.)",
+        f"Username: {'@' + username if username else '(не задан)'}",
+        f"Описание: {len(about)}/255 симв.",
+        f"Подписчиков: {members:,}",
+    ]
+    if tips:
+        lines.append("")
+        lines.append("Рекомендации:")
+        for t in tips:
+            # Strip emoji for plain text readability
+            lines.append(f"  - {t}")
+    if about:
+        lines.append("")
+        lines.append(f"Текущее описание ({len(about)} симв.):")
+        lines.append(about[:512])
+
+    report = "\n".join(lines)
+    await callback.message.answer(
+        f"<pre>{html.escape(report)}</pre>",
+        parse_mode="HTML",
+    )
 
 
 # ── AI SEO generation ─────────────────────────────────────────────

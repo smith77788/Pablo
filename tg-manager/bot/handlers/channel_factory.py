@@ -1424,13 +1424,14 @@ async def _show_seo_chan_picker(
     )
     if not channels and page == 0:
         kb = InlineKeyboardBuilder()
-        kb.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
+        kb.button(text="📥 Импорт из Telegram", callback_data=ChanFactCb(action="import"))
         kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="seo_pick"))
         kb.adjust(1)
         await callback.message.edit_text(
-            "ℹ️ <b>Нет каналов для этого аккаунта</b>\n\n"
-            "💡 Сначала импортируйте каналы в разделе <b>📥 Импорт из Telegram</b>, "
-            "затем SEO-оптимизация будет доступна.",
+            "📭 <b>Нет каналов для SEO-анализа</b>\n\n"
+            "Импортируйте каналы через меню <b>Каналы → Импорт из Telegram</b>, "
+            "после этого SEO-оптимизация станет доступна для каждого канала.\n\n"
+            "💡 Импорт сканирует все каналы и группы, где вы являетесь администратором.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
         return
