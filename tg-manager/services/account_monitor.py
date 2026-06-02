@@ -111,8 +111,9 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
             SELECT id, owner_id, op_type
             FROM operation_queue
             WHERE status = 'running'
-              AND started_at < NOW() - INTERVAL '$1 hours'
-            """.replace("$1 hours", f"{_STALE_RUNNING_HOURS} hours"),
+              AND started_at < NOW() - ($1 * INTERVAL '1 hour')
+            """,
+            _STALE_RUNNING_HOURS,
         )
         for row in stuck:
             await pool.execute(
