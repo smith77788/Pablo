@@ -49,40 +49,52 @@ async def compute_pressure(pool: asyncpg.Pool, owner_id: int) -> dict:
 
 
 async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
-    # 1. Account stats
-    acc_rows = await pool.fetch(
-        """SELECT
-               COUNT(*) FILTER (WHERE is_active) AS total_active,
-               COUNT(*) FILTER (WHERE is_active AND cooldown_until > NOW()) AS cooling,
-               COUNT(*) FILTER (WHERE COALESCE(acc_status,'active') NOT IN ('active','cooldown') AND is_active) AS restricted,
-               COUNT(*) FILTER (WHERE is_active AND COALESCE(trust_score,1.0) < 0.4) AS low_trust,
-               COALESCE(AVG(COALESCE(flood_count_7d,0)) FILTER (WHERE is_active), 0) AS avg_flood_7d
-           FROM tg_accounts
-           WHERE owner_id=$1""",
-        owner_id,
-    )
-    acc = acc_rows[0] if acc_rows else {}
+    # 1. Account stats — individual try/except so one failure doesn't break the score
+    acc: dict = {}
+    try:
+        acc_rows = await pool.fetch(
+            """SELECT
+                   COUNT(*) FILTER (WHERE is_active) AS total_active,
+                   COUNT(*) FILTER (WHERE is_active AND cooldown_until > NOW()) AS cooling,
+                   COUNT(*) FILTER (WHERE COALESCE(acc_status,'active') NOT IN ('active','cooldown') AND is_active) AS restricted,
+                   COUNT(*) FILTER (WHERE is_active AND COALESCE(trust_score,1.0) < 0.4) AS low_trust,
+                   COALESCE(AVG(COALESCE(flood_count_7d,0)) FILTER (WHERE is_active), 0) AS avg_flood_7d
+               FROM tg_accounts
+               WHERE owner_id=$1""",
+            owner_id,
+        )
+        acc = acc_rows[0] if acc_rows else {}
+    except Exception as e:
+        log.warning("infra_pressure: account stats query failed owner=%d: %s", owner_id, e)
     total = max(acc.get("total_active") or 1, 1)
 
-    # 2. Op queue depth
-    queue_rows = await pool.fetch(
-        "SELECT COUNT(*) AS cnt FROM operation_queue WHERE owner_id=$1 AND status IN ('pending','running')",
-        owner_id,
-    )
-    active_ops = (queue_rows[0]["cnt"] if queue_rows else 0) or 0
+    # 2. Op queue depth — isolated
+    active_ops = 0
+    try:
+        queue_rows = await pool.fetch(
+            "SELECT COUNT(*) AS cnt FROM operation_queue WHERE owner_id=$1 AND status IN ('pending','running')",
+            owner_id,
+        )
+        active_ops = (queue_rows[0]["cnt"] if queue_rows else 0) or 0
+    except Exception as e:
+        log.warning("infra_pressure: queue depth query failed owner=%d: %s", owner_id, e)
 
-    # 3. Proxy failures
-    proxy_rows = await pool.fetch(
-        """SELECT
-               COUNT(*) FILTER (WHERE success) AS ok,
-               COUNT(*) FILTER (WHERE NOT success) AS fail
-           FROM proxy_quality_log pql
-           JOIN user_proxies up ON up.id=pql.proxy_id
-           WHERE up.owner_id=$1 AND pql.checked_at > NOW() - INTERVAL '7 days'""",
-        owner_id,
-    )
-    proxy_total = ((proxy_rows[0]["ok"] or 0) + (proxy_rows[0]["fail"] or 0)) if proxy_rows else 0
-    proxy_fail_rate = (proxy_rows[0]["fail"] or 0) / max(proxy_total, 1) if proxy_total > 0 else 0.0
+    # 3. Proxy failures — isolated (table may not exist on older schemas)
+    proxy_fail_rate = 0.0
+    try:
+        proxy_rows = await pool.fetch(
+            """SELECT
+                   COUNT(*) FILTER (WHERE success) AS ok,
+                   COUNT(*) FILTER (WHERE NOT success) AS fail
+               FROM proxy_quality_log pql
+               JOIN user_proxies up ON up.id=pql.proxy_id
+               WHERE up.owner_id=$1 AND pql.checked_at > NOW() - INTERVAL '7 days'""",
+            owner_id,
+        )
+        proxy_total = ((proxy_rows[0]["ok"] or 0) + (proxy_rows[0]["fail"] or 0)) if proxy_rows else 0
+        proxy_fail_rate = (proxy_rows[0]["fail"] or 0) / max(proxy_total, 1) if proxy_total > 0 else 0.0
+    except Exception as e:
+        log.warning("infra_pressure: proxy quality query failed owner=%d: %s", owner_id, e)
 
     # --- Compute component scores (0-100 each) ---
 
@@ -142,8 +154,8 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
     # Cache the result
     try:
         await _db.save_pressure_cache(pool, owner_id, score, breakdown)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("infra_pressure: cache save failed owner=%d: %s", owner_id, e)
 
     return {
         "score": score,
@@ -163,19 +175,43 @@ def format_pressure_report(data: dict) -> str:
     bar_filled = round(score / 10)
     bar = "█" * bar_filled + "░" * (10 - bar_filled)
 
+    # Weights match _compute(): cooldown=25, restriction=15, flood=20, queue=20, proxy=10, trust=10
+    _WEIGHTS = {
+        "cooldown":    25,
+        "restriction": 15,
+        "flood":       20,
+        "queue":       20,
+        "proxy":       10,
+        "trust":       10,
+    }
+
+    def _pts(key: str) -> tuple[int, int]:
+        """Return (actual_points, max_points) for a component."""
+        raw = comp.get(key, 0)  # 0-100 component score
+        weight = _WEIGHTS[key]
+        actual = round(raw * weight / 100)
+        return actual, weight
+
+    c_cool = _pts("cooldown")
+    c_rest = _pts("restriction")
+    c_fld  = _pts("flood")
+    c_q    = _pts("queue")
+    c_prx  = _pts("proxy")
+    c_tr   = _pts("trust")
+
     lines = [
-        f"🌡 <b>Давление инфраструктуры</b>",
-        f"",
+        "🌡 <b>Давление инфраструктуры</b>",
+        "",
         f"{emoji} <b>{score}/100</b> — {label}",
         f"[{bar}]",
-        f"",
-        f"<b>Компоненты:</b>",
-        f"• Кулдаун аккаунтов:   {comp.get('cooldown', 0):3d}/100  ({bd.get('cooldown_accounts', 0)} шт)",
-        f"• Ограничения:          {comp.get('restriction', 0):3d}/100  ({bd.get('restricted_accounts', 0)} шт)",
-        f"• Флуд-плотность:       {comp.get('flood', 0):3d}/100  (avg {bd.get('avg_flood_7d', 0)}/7д)",
-        f"• Очередь операций:     {comp.get('queue', 0):3d}/100  ({bd.get('active_ops', 0)} активных)",
-        f"• Сбои прокси:          {comp.get('proxy', 0):3d}/100  ({bd.get('proxy_fail_rate', 0.0)}%)",
-        f"• Низкое доверие:       {comp.get('trust', 0):3d}/100  ({bd.get('low_trust_accounts', 0)} шт)",
+        "",
+        "📊 <b>Breakdown по компонентам:</b>",
+        f"  🕐 Кулдаун:        {c_cool[0]:2d}/{c_cool[1]} очков  ({bd.get('cooldown_accounts', 0)} акк)",
+        f"  🚫 Ограничения:    {c_rest[0]:2d}/{c_rest[1]} очков  ({bd.get('restricted_accounts', 0)} акк)",
+        f"  🌊 Флуд:           {c_fld[0]:2d}/{c_fld[1]} очков  (avg {bd.get('avg_flood_7d', 0)}/7д)",
+        f"  ⚙️ Очередь:        {c_q[0]:2d}/{c_q[1]} очков  ({bd.get('active_ops', 0)} активных)",
+        f"  🌐 Прокси-сбои:    {c_prx[0]:2d}/{c_prx[1]} очков  ({bd.get('proxy_fail_rate', 0.0)}%)",
+        f"  ⚠️ Низкое доверие: {c_tr[0]:2d}/{c_tr[1]} очков  ({bd.get('low_trust_accounts', 0)} акк)",
     ]
 
     if score >= 81:

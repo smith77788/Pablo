@@ -571,6 +571,9 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
 async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
                       _acc: dict | None = None) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
+    if not session_string:
+        log.warning("get_dialogs: session_str отсутствует — аккаунт не импортирован")
+        return []
     from telethon.tl.types import Channel, Chat
     client = _make_client(session_string, _acc)
     try:
@@ -966,6 +969,8 @@ async def create_channel(
 
     Returns dict: {channel_id, title, username, type, invite_link, error?}
     """
+    if not session_string:
+        return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.functions.channels import CreateChannelRequest
     from telethon.tl.functions.messages import ExportChatInviteRequest
     client = _make_client(session_string, _acc)
@@ -1011,6 +1016,8 @@ async def join_channel(session_string: str, invite_or_username: str,
 
     Returns dict: {title, members, channel_id, error?}
     """
+    if not session_string:
+        return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.functions.messages import ImportChatInviteRequest
     client = _make_client(session_string, _acc)
@@ -1053,6 +1060,9 @@ async def join_channel(session_string: str, invite_or_username: str,
 async def leave_channel(session_string: str, channel_id: int | str,
                         _acc: dict | None = None) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
+    if not session_string:
+        log.warning("leave_channel: session_str отсутствует — аккаунт не импортирован")
+        return False
     from telethon.tl.functions.channels import LeaveChannelRequest
     client = _make_client(session_string, _acc)
     try:
@@ -1569,6 +1579,8 @@ async def post_to_channel(
 
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
     """
+    if not session_string:
+        return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.types import InputPeerChannel
     from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError, UserBannedInChannelError
     client = _make_client(session_string, _acc)

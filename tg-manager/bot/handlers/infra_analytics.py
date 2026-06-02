@@ -21,7 +21,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import InfraCb
+from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb
 from services import infra_pressure
 from database import db as _db
 
@@ -85,6 +85,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📊 Статистика за сегодня",   callback_data=InfraCb(action="daily_stats"))
     kb.button(text="🎯 Возможности аккаунтов",   callback_data=InfraCb(action="capabilities"))
     kb.button(text="🔄 Авто-балансировка пулов", callback_data=InfraCb(action="rebalance_preview"))
+    kb.button(text="🎯 Советник",                callback_data=InfraCb(action="advisor"))
     kb.adjust(1)
 
     await callback.message.edit_text(
