@@ -143,12 +143,16 @@ async def cb_add(
         )
         return
     await state.set_state(AddBot.waiting_token)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    _cancel_kb = InlineKeyboardBuilder()
+    _cancel_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
     await callback.message.edit_text(
         "🔑 <b>Добавление бота</b>\n\n"
         "Отправьте токен бота (получить у @BotFather):\n\n"
         "<code>123456789:AAF...</code>\n\n"
         f"<i>Добавлено {len(current_bots)} из {limit} доступных ботов</i>",
         parse_mode="HTML",
+        reply_markup=_cancel_kb.as_markup(),
     )
 
 
@@ -164,8 +168,12 @@ async def msg_token(
 
     bot_info = await bot_api.get_me(http, token)
     if not bot_info:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        _retry_kb = InlineKeyboardBuilder()
+        _retry_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
         await info_msg.edit_text(
-            "❌ Неверный токен или бот недоступен. Попробуйте ещё раз:"
+            "❌ Неверный токен или бот недоступен. Попробуйте ещё раз:",
+            reply_markup=_retry_kb.as_markup(),
         )
         return
 
