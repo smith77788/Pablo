@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 import aiohttp
 import asyncpg
 from database import db
@@ -9,12 +10,36 @@ from services import broadcaster
 
 log = logging.getLogger(__name__)
 
+# Рассылки опаздывающие больше чем на 1 час → помечаем как 'missed', не запускаем
+_MISSED_THRESHOLD = timedelta(hours=1)
+
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     while True:
         try:
             rows = await db.get_pending_scheduled(pool)
+            now = datetime.now(timezone.utc)
             for row in rows:
+                execute_at = row["execute_at"]
+                # Нормализуем timezone если нужно
+                if execute_at is not None and execute_at.tzinfo is None:
+                    execute_at = execute_at.replace(tzinfo=timezone.utc)
+
+                # Если рассылка опоздала больше чем на 1 час — помечаем как 'missed'
+                if execute_at is not None and (now - execute_at) > _MISSED_THRESHOLD:
+                    try:
+                        await pool.execute(
+                            "UPDATE scheduled_broadcasts SET status='missed' WHERE id=$1",
+                            row["id"],
+                        )
+                        log.warning(
+                            "Scheduler: scheduled #%d missed (execute_at=%s, now=%s) — marking missed",
+                            row["id"], execute_at, now,
+                        )
+                    except Exception:
+                        log.exception("Scheduler: failed to mark scheduled #%d as missed", row["id"])
+                    continue
+
                 bc_id = None
                 created_bc = False
                 try:
@@ -32,8 +57,6 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         row["id"], bc_id, row["bot_id"],
                     )
                 except Exception:
-                    # If broadcast was created but start failed, mark scheduled as done anyway
-                    # to prevent duplicate broadcasts on the next 60s cycle.
                     if created_bc and bc_id:
                         log.warning(
                             "Scheduler: broadcast #%d created but start failed for scheduled #%d — "
