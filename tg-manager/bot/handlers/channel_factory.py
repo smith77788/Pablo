@@ -395,7 +395,9 @@ async def cb_chanf_create_acc_chosen(
 async def fsm_chanf_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title or len(title) > 128:
-        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
+        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:", reply_markup=kb.as_markup())
         return
     await state.update_data(title=title)
     await state.set_state(ChannelFactoryFSM.waiting_about)
@@ -708,7 +710,9 @@ async def cb_chanf_bulk_create_acc(
 async def fsm_bulk_chan_count(message: Message, state: FSMContext) -> None:
     raw = (message.text or "").strip()
     if not raw.isdigit() or not (1 <= int(raw) <= 10):
-        await message.answer("⚠️ Введите число от 1 до 10:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
+        await message.answer("⚠️ Введите число от 1 до 10:", reply_markup=kb.as_markup())
         return
     await state.update_data(channel_count=int(raw))
     await state.set_state(BulkChannelCreateFSM.waiting_prefix)
@@ -727,7 +731,9 @@ async def fsm_bulk_chan_count(message: Message, state: FSMContext) -> None:
 async def fsm_bulk_chan_prefix(message: Message, state: FSMContext) -> None:
     prefix = (message.text or "").strip()
     if not prefix or len(prefix) > 100:
-        await message.answer("⚠️ Название от 1 до 100 символов. Попробуйте ещё раз:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
+        await message.answer("⚠️ Название от 1 до 100 символов. Попробуйте ещё раз:", reply_markup=kb.as_markup())
         return
     await state.update_data(prefix=prefix)
     await state.set_state(BulkChannelCreateFSM.waiting_about)
@@ -980,7 +986,9 @@ async def cb_chanf_be_pick_acc(
 async def fsm_be_value(message: Message, state: FSMContext) -> None:
     value = (message.text or "").strip()
     if not value:
-        await message.answer("⚠️ Введите непустое значение:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
+        await message.answer("⚠️ Введите непустое значение:", reply_markup=kb.as_markup())
         return
     await state.update_data(edit_value=value)
     await state.set_state(EditChannelBulkFSM.previewing)
