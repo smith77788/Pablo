@@ -367,3 +367,8 @@ class QuickPostCb(CallbackData, prefix="qp"):
     page: int = 0
 
 
+class ErrorReportCb(CallbackData, prefix="err"):
+    action: str   # "start", "cancel"
+    report_id: int = 0
+
+

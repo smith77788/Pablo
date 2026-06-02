@@ -439,3 +439,8 @@ class MiniStrikeFSM(StatesGroup):
 class StrikeEmailFSM(StatesGroup):
     awaiting_email    = State()  # ввод email-адреса
     awaiting_password = State()  # ввод пароля (stores email + smtp in FSM data)
+
+
+class ErrorReportFSM(StatesGroup):
+    awaiting_description = State()  # описание ошибки
+    awaiting_screenshot = State()   # скриншот для доказательства
