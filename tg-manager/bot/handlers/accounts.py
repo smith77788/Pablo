@@ -270,10 +270,24 @@ async def _show_accounts_menu(
 
     kb = InlineKeyboardBuilder()
 
+    # Count by status for header badge
+    _cnt = {}
+    for a in (all_accounts or []):
+        s = a.get("acc_status") or "active"
+        if not a.get("is_active", True):
+            s = "archived"
+        _cnt[s] = _cnt.get(s, 0) + 1
+    active_cnt   = _cnt.get("active", 0)
+    expired_cnt  = _cnt.get("session_expired", 0)
+    problem_cnt  = sum(v for k, v in _cnt.items() if k not in ("active", "archived"))
+
     # Account list buttons (1 per row)
     if shown:
         filter_label = {"all": "Все", "active": "Активные", "problem": "Проблемные"}.get(status_filter, "Все")
-        lines = [f"📱 <b>Telegram-аккаунты</b> · {filter_label}: {len(shown)}\n"]
+        badge = f"✅{active_cnt}"
+        if problem_cnt:
+            badge += f" · ⚠️{problem_cnt}"
+        lines = [f"📱 <b>Telegram-аккаунты</b> ({badge}) · {filter_label}: {len(shown)}\n"]
         for acc in shown:
             name = escape(acc["first_name"] or "")
             uname = f"@{escape(acc['username'])}" if acc.get("username") else ""
@@ -340,6 +354,11 @@ async def _show_accounts_menu(
         kb.row(InlineKeyboardButton(text="🔍 Проверить все", callback_data=AccCb(action="check_all").pack()))
         kb.row(InlineKeyboardButton(text="🔎 Найти ресурсы в аккаунтах", callback_data=AccCb(action="scan_all").pack()))
         kb.row(InlineKeyboardButton(text="🏊 По пулам", callback_data=AccCb(action="pools_view").pack()))
+        if expired_cnt > 0:
+            kb.row(InlineKeyboardButton(
+                text=f"🧹 Удалить expired сессии ({expired_cnt})",
+                callback_data=AccCb(action="purge_expired").pack(),
+            ))
 
     kb.row(InlineKeyboardButton(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu").pack()))
     kb.row(InlineKeyboardButton(text="◀️ Главное меню", callback_data=BotCb(action="main").pack()))
@@ -1926,6 +1945,74 @@ async def cb_scan_all_resources(
 
     await callback.message.edit_text(
         "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Purge expired sessions (by DB status, no Telegram check) ─────────────────
+
+@router.callback_query(AccCb.filter(F.action == "purge_expired"))
+async def cb_purge_expired_sessions(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    uid = callback.from_user.id
+    await callback.answer()
+
+    expired = await pool.fetch(
+        """SELECT id, first_name, phone FROM tg_accounts
+           WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE
+           ORDER BY added_at DESC""",
+        uid,
+    )
+    if not expired:
+        await callback.message.edit_text(
+            "✅ <b>Нет аккаунтов с истёкшей сессией</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Назад", callback_data=AccCb(action="menu")
+            ).as_markup(),
+        )
+        return
+
+    lines = [f"🧹 <b>Удалить {len(expired)} аккаунтов с истёкшей сессией?</b>\n"]
+    for a in expired[:10]:
+        label = escape(a.get("first_name") or a.get("phone") or f"id{a['id']}")
+        lines.append(f"• 🔑 {label}")
+    if len(expired) > 10:
+        lines.append(f"<i>... и ещё {len(expired) - 10}</i>")
+    lines.append("\n<i>Эти аккаунты больше не могут подключиться к Telegram.</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"✅ Удалить {len(expired)} аккаунтов", callback_data=AccCb(action="purge_expired_confirm"))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "purge_expired_confirm"))
+async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    uid = callback.from_user.id
+    await callback.answer("🧹 Удаляю...")
+
+    result = await pool.execute(
+        "DELETE FROM tg_accounts WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE",
+        uid,
+    )
+    try:
+        deleted = int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        deleted = 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
+    kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ <b>Удалено {deleted} аккаунтов с истёкшей сессией</b>\n\n"
+        "Добавьте аккаунты заново через QR-код или номер телефона.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

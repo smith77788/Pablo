@@ -159,7 +159,9 @@ async def cb_warmup_select_all_plan(callback: CallbackQuery, pool: asyncpg.Pool)
     await callback.answer()
 
     count = await pool.fetchval(
-        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+        """SELECT COUNT(*) FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=TRUE
+             AND session_str IS NOT NULL AND session_str != ''""",
         callback.from_user.id,
     )
 
@@ -192,10 +194,24 @@ async def cb_warmup_create_all_plans(
     plan_type = callback_data.action.replace("pall_", "")
     user_id = callback.from_user.id
 
+    # Only accounts with a valid session can be warmed
     accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at DESC",
+        """SELECT id FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=TRUE
+             AND session_str IS NOT NULL AND session_str != ''
+           ORDER BY added_at DESC""",
         user_id,
     )
+
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ <b>Нет аккаунтов с активной сессией</b>\n\n"
+            "Для разогрева нужны аккаунты со статусом «active» и рабочей сессией.\n"
+            "Аккаунты с истёкшей сессией пропускаются.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
 
     created = 0
     for acc in accounts:
@@ -395,6 +411,8 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         f"🌡 <b>Разогрев запущен в фоне</b>\n\n"
         f"Планов: <b>{len(plans)}</b>\n"
         "Процесс займёт время (20-90с между действиями).\n\n"
+        "♻️ <b>Авто-возобновление:</b> при перезапуске бота разогрев "
+        "продолжится автоматически в течение 1 часа.\n\n"
         "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),

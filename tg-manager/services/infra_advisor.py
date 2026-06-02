@@ -179,12 +179,13 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
 
 def format_recommendations(recs: list[dict]) -> str:
+    import html as _html
     if not recs:
         return "✅ <b>Рекомендаций нет</b> — инфраструктура в норме."
     lines = ["🎯 <b>Рекомендации инфраструктуры</b>\n"]
     for r in recs:
         icon = r.get("icon", "•")
-        title = r.get("title", "")
-        text = r.get("text", "")
+        title = _html.escape(r.get("title", ""))
+        text = _html.escape(r.get("text", ""))
         lines.append(f"{icon} <b>{title}</b>\n   {text}\n")
     return "\n".join(lines).strip()

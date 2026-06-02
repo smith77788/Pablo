@@ -780,7 +780,7 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             try:
                 await message.bot.send_message(u["added_by"], text)
                 sent += 1
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.3)
             except Exception:
                 log_exc_swallow(log, "Не удалось отправить сообщение рассылки пользователю",
                                 user_id=u["added_by"])

@@ -430,10 +430,12 @@ async def run_daily_warmup(
     }
 
 
-async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 6) -> None:
+async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     """
-    Фоновый цикл: каждые N часов выполняет действия разогрева для всех активных планов.
-    Один запуск в день на план (проверяем last_action_at).
+    Фоновый цикл: каждый час проверяет активные планы разогрева.
+    Один запуск в сутки на план (проверяем last_action_at > 20ч).
+    Цикл стартует немедленно при запуске бота — задачи возобновляются
+    автоматически после перезапуска без потери прогресса.
     """
     import asyncio
 
@@ -448,6 +450,8 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 6) -> None:
                      AND (wp.last_action_at IS NULL
                           OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
             )
+            if rows:
+                log.info("warmup loop: found %d plans to run", len(rows))
             for plan in rows:
                 await run_daily_warmup(pool, dict(plan))
                 await asyncio.sleep(30)  # Пауза между аккаунтами
