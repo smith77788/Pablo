@@ -1225,21 +1225,119 @@ MINI_CATEGORIES: dict[str, dict] = {
 
 def _build_abuse_tg_email(target: str, cat: dict, report_time: str) -> str:
     chan_url = f"https://t.me/{target}"
-    texts_sample = TEXTS.get(cat["report_msg_key"], TEXTS["other"])
-    description = texts_sample[0] if texts_sample else "Illegal content."
+    ref_id = f"MINI-{target.upper()}-{report_time[:10].replace('-', '')}"
+
+    # Правовые ссылки в зависимости от категории
+    legal_refs: dict[str, str] = {
+        "csam": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown obligation\n"
+            "• UNCRC Optional Protocol on the Sale of Children (Article 3)\n"
+            "• Russian Federal Law No. 436-FZ (protection of children from harmful information)\n"
+            "• Russian Federal Law No. 149-FZ Article 15.1 (mandatory blocking of CSAM)\n"
+            "• US PROTECT Our Children Act (18 U.S.C. § 2258A) — mandatory NCMEC report"
+        ),
+        "drugs": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown for illegal content\n"
+            "• Russian Federal Law No. 149-FZ (Information, Information Technologies and "
+            "Information Protection) — Article 15.1: mandatory blocking of drug-related content\n"
+            "• UN Convention against Illicit Traffic in Narcotic Drugs (1988)\n"
+            "• Russian Federal Law No. 3-FZ on Narcotic Drugs and Psychotropic Substances"
+        ),
+        "terrorism": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown for terrorist content\n"
+            "• EU Regulation 2021/784 on Terrorist Content Online (TCO Regulation) — "
+            "1-hour removal deadline upon competent authority order\n"
+            "• Russian Federal Law No. 149-FZ Article 15.3 — immediate blocking of "
+            "calls for mass disorder, extremism, terrorism\n"
+            "• Russian Federal Law No. 35-FZ on Combating Terrorism\n"
+            "• UN Security Council Resolution 1373 (2001) — counter-terrorism obligations"
+        ),
+        "weapons": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown for illegal content\n"
+            "• Russian Federal Law No. 150-FZ on Weapons — Article 6 (prohibition of illegal trade)\n"
+            "• Russian Federal Law No. 149-FZ Article 15.1 — mandatory blocking\n"
+            "• UN Arms Trade Treaty (ATT) — illegal arms trafficking"
+        ),
+        "fraud": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown\n"
+            "• GDPR Article 17 (Right to Erasure) — fraudulent processing of personal data\n"
+            "• Russian Federal Law No. 149-FZ on Information Technologies\n"
+            "• Russian Federal Law No. 152-FZ on Personal Data — Article 21 "
+            "(obligation to cease unlawful processing)\n"
+            "• Directive 2013/40/EU on attacks against information systems"
+        ),
+        "prostitution": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown\n"
+            "• UN Protocol to Prevent, Suppress and Punish Trafficking in Persons (Palermo Protocol)\n"
+            "• Russian Federal Law No. 149-FZ Article 15.1 — mandatory blocking\n"
+            "• Russian Criminal Code Article 240–242 (promotion of prostitution)"
+        ),
+        "darknet": (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown\n"
+            "• GDPR Article 17 — Right to Erasure of stolen personal data\n"
+            "• Russian Federal Law No. 149-FZ on Information Technologies\n"
+            "• Directive 2013/40/EU on cyber attacks and illegal marketplace operations"
+        ),
+    }
+    severity_map: dict[str, str] = {
+        "csam": "CRITICAL — CSAM / Child Exploitation",
+        "drugs": "HIGH — Illegal Narcotics Trafficking",
+        "terrorism": "CRITICAL — Terrorism / Extremist Incitement",
+        "weapons": "HIGH — Illegal Weapons Trade",
+        "fraud": "MEDIUM — Financial Fraud / Scam Operation",
+        "prostitution": "HIGH — Sex Trafficking / Prostitution",
+        "darknet": "HIGH — Darknet Criminal Services",
+    }
+    category_key = cat.get("report_msg_key", "other")
+    legal_block = legal_refs.get(category_key, (
+        "Legal basis:\n"
+        "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown obligation\n"
+        "• GDPR Article 17 — Right to Erasure of unlawfully processed data\n"
+        "• Russian Federal Law No. 149-FZ (Information, Information Technologies "
+        "and Information Protection)\n"
+        "• Telegram Terms of Service — Community Guidelines"
+    ))
+    severity_str = severity_map.get(category_key, f"{cat['severity']} — {cat['label']}")
+
     return (
+        f"FORMAL NOTICE OF ILLEGAL CONTENT — NOTICE AND TAKEDOWN REQUEST\n"
+        f"{'=' * 65}\n\n"
         f"Dear Telegram Trust & Safety Team,\n\n"
-        f"I am reporting the following channel for illegal content requiring immediate action.\n\n"
-        f"Channel: {chan_url}\n"
-        f"Category: {cat['label']}\n"
-        f"Severity: {cat['severity']}\n"
-        f"Date/Time: {report_time} UTC\n\n"
-        f"{description}\n\n"
-        f"This channel is publicly accessible via Telegram search and may be discovered "
-        f"by minors and vulnerable users.\n\n"
-        f"Requested action: immediate review, removal from search, account suspension if confirmed.\n\n"
-        f"This report was filed simultaneously via Telegram MTProto Report API and this email.\n"
-        f"Reference: MINI-{target.upper()}-{report_time[:10].replace('-', '')}\n"
+        f"This communication constitutes a formal notice under applicable law "
+        f"requesting the immediate removal of illegal content hosted on the Telegram platform.\n\n"
+        f"REPORTED CONTENT:\n"
+        f"  Channel URL : {chan_url}\n"
+        f"  Channel ID  : @{target}\n"
+        f"  Category    : {cat['label']}\n"
+        f"  Severity    : {severity_str}\n"
+        f"  Reported at : {report_time} UTC\n"
+        f"  Reference   : {ref_id}\n\n"
+        f"DESCRIPTION OF VIOLATION:\n"
+        f"The above Telegram channel is openly distributing illegal content falling "
+        f"under the category of {cat['label']}. The content is systematic, ongoing, "
+        f"and publicly discoverable via Telegram search — including by minors and "
+        f"vulnerable users. Multiple independent reports have been filed via the "
+        f"Telegram MTProto Report API prior to this email.\n\n"
+        f"{legal_block}\n\n"
+        f"REQUESTED ACTIONS:\n"
+        f"  1. Immediate takedown / suspension of the reported channel\n"
+        f"  2. Removal from Telegram search index\n"
+        f"  3. Preservation of channel data for potential law enforcement referral\n"
+        f"  4. Suspension of associated accounts and infrastructure\n\n"
+        f"This notice has been filed simultaneously via:\n"
+        f"  • Telegram MTProto Report API (all applicable report reasons)\n"
+        f"  • This email to the Trust & Safety team\n"
+        f"  • Official Telegram abuse form at https://telegram.org/support\n\n"
+        f"We expect acknowledgement and action within the timeframes required by "
+        f"applicable law (24 hours for critical categories; 72 hours for others).\n\n"
+        f"Reference: {ref_id}\n"
     )
 
 
