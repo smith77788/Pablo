@@ -1,4 +1,5 @@
 """Auto-reply rules management for managed bots."""
+import html as _html
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -170,17 +171,19 @@ async def cb_ar_view(callback: CallbackQuery, callback_data: AutoReplyCb,
         await callback.answer("Правило не найдено.", show_alert=True)
         return
     await callback.answer()
+    keyword_escaped = _html.escape(r["keyword"] or "") if r.get("keyword") else ""
     trigger = {
         "start": "/start",
-        "keyword": f"🔑 {r['keyword']}",
+        "keyword": f"🔑 {keyword_escaped}",
         "any": "💬 Любое сообщение",
     }.get(r["trigger_type"])
     status = "✅ Активно" if r["is_active"] else "❌ Отключено"
+    response_escaped = _html.escape(r["response_text"] or "")
     await callback.message.edit_text(
         f"<b>Правило #{r['id']}</b>\n\n"
         f"Триггер: {trigger}\n"
         f"Статус: {status}\n\n"
-        f"Ответ:\n{r['response_text']}",
+        f"Ответ:\n{response_escaped}",
         parse_mode="HTML",
         reply_markup=auto_reply_view(callback_data.bot_id, r["id"], r["is_active"]),
     )

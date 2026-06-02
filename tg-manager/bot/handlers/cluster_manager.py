@@ -5,6 +5,7 @@ Entry point: ClustMCb(action="menu")
 
 from __future__ import annotations
 
+import html as _html
 import logging
 
 import asyncpg
@@ -89,7 +90,7 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         for row in rows:
             cluster_name = row["cluster"]
             bot_count = row["bot_count"]
-            lines.append(f"🔗 <b>{cluster_name}</b> — {bot_count} бот(ов)")
+            lines.append(f"🔗 <b>{_html.escape(cluster_name)}</b> — {bot_count} бот(ов)")
             kb.button(
                 text=f"🔗 {cluster_name} ({bot_count})",
                 callback_data=ClustMCb(action="view", cluster_name=cluster_name),
@@ -135,7 +136,7 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     else:
         for row in rows:
             lines.append(
-                f"🔗 <b>{row['cluster']}</b>\n"
+                f"🔗 <b>{_html.escape(row['cluster'])}</b>\n"
                 f"   Ботов: {row['bot_count']} | "
                 f"Пользователей: {row['total_users']:,}"
             )
@@ -243,7 +244,7 @@ async def cb_cluster_view(
         cluster_name,
     )
 
-    lines = [f"🔗 <b>Кластер: {cluster_name}</b>\n"]
+    lines = [f"🔗 <b>Кластер: {_html.escape(cluster_name)}</b>\n"]
     kb = InlineKeyboardBuilder()
 
     if not rows:
@@ -253,7 +254,7 @@ async def cb_cluster_view(
             name = (
                 bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
             )
-            lines.append(f"🤖 @{name}")
+            lines.append(f"🤖 @{_html.escape(name)}")
 
     kb.button(
         text="📢 Рассылка по кластеру",
@@ -278,7 +279,7 @@ async def cb_cluster_broadcast(
     cluster_name = callback_data.cluster_name or ""
     # Redirect to network broadcast with cluster segment
     await callback.message.edit_text(
-        f"📢 Рассылка по кластеру <b>{cluster_name}</b>\n\n"
+        f"📢 Рассылка по кластеру <b>{_html.escape(cluster_name)}</b>\n\n"
         "Используйте раздел <b>Сетевая рассылка</b> и выберите нужный кластер.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardBuilder()
