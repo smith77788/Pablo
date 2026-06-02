@@ -189,16 +189,28 @@ async def run_campaign(
         campaign_id,
     )
 
-    # Получить активные аккаунты владельца
+    # Получить активные аккаунты владельца (без кулдауна)
     accounts = await pool.fetch(
         "SELECT a.id, a.session_str, a.phone, a.first_name, "
-        "       a.device_model, a.system_version, a.app_version "
+        "       a.device_model, a.system_version, a.app_version, a.cooldown_until "
         "FROM tg_accounts a "
         "WHERE a.owner_id=$1 AND a.is_active=true "
+        "  AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
         "ORDER BY a.trust_score DESC NULLS LAST",
         owner_id,
     )
     if not accounts:
+        # Попробовать любые активные без учёта кулдауна (лучше медленно, чем никак)
+        accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.phone, a.first_name, "
+            "       a.device_model, a.system_version, a.app_version, a.cooldown_until "
+            "FROM tg_accounts a "
+            "WHERE a.owner_id=$1 AND a.is_active=true "
+            "ORDER BY a.cooldown_until ASC NULLS FIRST, a.trust_score DESC NULLS LAST LIMIT 1",
+            owner_id,
+        )
+    if not accounts:
+        log.error("dm_engine: no active accounts for campaign %d owner=%d", campaign_id, owner_id)
         await pool.execute(
             "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
         )
@@ -236,6 +248,34 @@ async def run_campaign(
         acc = dict(acc_cycle[acc_idx % len(acc_cycle)])
         acc_idx += 1
 
+        # Пропустить аккаунт если ещё на кулдауне
+        import datetime as _dt
+        cooldown_until = acc.get("cooldown_until")
+        if cooldown_until is not None:
+            if hasattr(cooldown_until, "replace"):
+                # asyncpg возвращает datetime с tzinfo, сравниваем с UTC now
+                try:
+                    import datetime as _dt2
+                    now_utc = _dt2.datetime.now(_dt2.timezone.utc)
+                    if cooldown_until > now_utc:
+                        log.debug("dm_engine: acc %d on cooldown until %s, skipping", acc["id"], cooldown_until)
+                        # Попробовать следующий аккаунт для этой цели
+                        _found_acc = None
+                        for _i in range(len(acc_cycle)):
+                            _candidate = dict(acc_cycle[(acc_idx + _i) % len(acc_cycle)])
+                            _c = _candidate.get("cooldown_until")
+                            if _c is None or _c <= now_utc:
+                                _found_acc = _candidate
+                                acc_idx += _i + 1
+                                break
+                        if _found_acc:
+                            acc = _found_acc
+                        else:
+                            # Все аккаунты на кулдауне — ждём немного и продолжаем
+                            await asyncio.sleep(30)
+                except Exception:
+                    pass
+
         text = expand_spintax(template)
         result = await send_dm(acc["session_str"], user_id, text, _acc=acc)
         status = result["status"]
@@ -255,9 +295,28 @@ async def run_campaign(
             )
         elif status == "flood":
             wait = result.get("wait") or _FLOOD_PAUSE
-            log.info("dm_engine: flood wait %ds (campaign %d)", wait, campaign_id)
-            await asyncio.sleep(min(wait, 300))
-            # Сохранить ошибку но не считать как fail — попробуем потом
+            log.info("dm_engine: flood wait %ds acc=%d (campaign %d)", wait, acc["id"], campaign_id)
+            # Установить cooldown_until для аккаунта
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
+                    "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
+                    "WHERE id=$2",
+                    min(wait, 3600), acc["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, "dm_engine: failed to set cooldown_until for acc=%d", acc["id"])
+            # Убрать аккаунт из цикла временно и подождать
+            if wait <= 60:
+                await asyncio.sleep(min(wait, 60))
+            else:
+                # Для долгих флуд-вейтов — убираем аккаунт из ротации, продолжаем другими
+                acc_cycle_without = [a for a in acc_cycle if a["id"] != acc["id"]]
+                if acc_cycle_without:
+                    acc_cycle = acc_cycle_without
+                    log.info("dm_engine: removed flooded acc %d from rotation, %d remaining", acc["id"], len(acc_cycle))
+                else:
+                    await asyncio.sleep(min(wait, 300))
             continue
         elif status in ("blocked", "auth"):
             # Аккаунт заблокирован/невалиден — считать текущую попытку ошибкой
@@ -276,8 +335,18 @@ async def run_campaign(
             if not acc_cycle:
                 log.error("dm_engine: no more accounts for campaign %d, stopping", campaign_id)
                 break  # Оставшиеся цели будут учтены после цикла
+        elif status == "skip":
+            # Пользователь заблокировал бота или деактивирован — не ошибка, пропускаем тихо
+            log.debug("dm_engine: user %d blocked/deactivated, skipping silently", user_id)
+            await pool.execute(
+                "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
+                "VALUES ($1,$2,$3,'skip',$4) ON CONFLICT DO NOTHING",
+                campaign_id, acc["id"], user_id, result.get("error", "")[:200],
+            )
+            # Не считаем как fail — пользователь просто недоступен
+            continue
         else:
-            # skip или retry — логируем как ошибку
+            # retry — логируем как ошибку
             failed += 1
             await pool.execute(
                 "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "

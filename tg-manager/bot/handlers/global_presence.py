@@ -30,6 +30,7 @@ _ACC_PAGE_SIZE = 8
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _back_cancel_row() -> list:
+    """Deprecated stub — use _back_cancel_kb() instead."""
     return []
 
 
@@ -686,7 +687,6 @@ async def _show_accounts_step(
     # No accounts — show a clear message with instructions
     if not accounts and page == 0:
         no_acc_kb = InlineKeyboardBuilder()
-        no_acc_kb.button(text="📱 Добавить аккаунт", callback_data=GeoPresenceCb(action="cancel"))
         no_acc_kb.button(text="◀️ Назад к гео", callback_data=GeoPresenceCb(action="back_to_geo"))
         no_acc_kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
         no_acc_kb.adjust(1)
@@ -696,7 +696,8 @@ async def _show_accounts_step(
             f"⚠️ <b>У вас нет активных аккаунтов</b>\n\n"
             f"Для запуска Global Presence необходимо добавить хотя бы один аккаунт "
             f"в разделе <b>Infrastructure → Аккаунты</b>.\n\n"
-            f"📍 Гео: {geo_label} ({n_cities} городов) — настроено"
+            f"📍 Гео: {geo_label} ({n_cities} городов) — настроено\n\n"
+            f"Добавьте аккаунт и вернитесь сюда."
         )
         if send_new and original_message:
             await original_message.answer(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")

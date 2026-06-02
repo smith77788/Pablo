@@ -575,6 +575,13 @@ async def _process_ai_turn(
         return
 
     messages.append({"role": "user", "content": user_content})
+
+    # Показываем индикатор набора текста перед вызовом API
+    try:
+        await message.bot.send_chat_action(message.chat.id, "typing")
+    except Exception:
+        pass
+
     thinking = await message.answer(thinking_text, parse_mode="HTML")
 
     try:
@@ -664,7 +671,9 @@ async def _process_ai_turn(
             return
 
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
+        kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+        kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+        kb.adjust(2)
         await _edit_or_answer_long(
             thinking, message, str_reply, reply_markup=kb.as_markup()
         )
@@ -699,7 +708,9 @@ async def cb_ai_start(
     await state.set_state(AiChat.chatting)
     await state.update_data(messages=[], turns=0)
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Завершить", callback_data=AiCb(action="stop"))
+    kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+    kb.adjust(2)
     await callback.message.edit_text(
         "🤖 <b>AI-ассистент запущен</b>\n\n"
         "Задайте вопрос или поставьте задачу. Я могу анализировать данные ваших ботов, "
@@ -716,8 +727,28 @@ async def cb_ai_stop(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Новая сессия", callback_data=AiCb(action="start"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "✅ Сессия AI-ассистента завершена.",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AiCb.filter(F.action == "clear_history"))
+async def cb_ai_clear_history(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer("🗑 История очищена", show_alert=False)
+    # Сбрасываем историю диалога, но остаёмся в режиме чата
+    await state.set_state(AiChat.chatting)
+    await state.update_data(messages=[], turns=0)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+    kb.adjust(2)
+    await callback.message.edit_text(
+        "🗑 <b>История диалога очищена</b>\n\n"
+        "Контекст сброшен — можете начать новый диалог с чистого листа.",
+        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -744,7 +775,9 @@ async def cb_ai_confirm_action(
     await state.update_data(pending_action_data=None)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
+    kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+    kb.adjust(2)
     await callback.message.edit_text(
         f"<b>Результат выполнения:</b>\n\n{result}",
         parse_mode="HTML",
@@ -757,7 +790,9 @@ async def cb_ai_cancel_action(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer("Действие отменено")
     await state.update_data(pending_action_data=None)
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
+    kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+    kb.adjust(2)
     await callback.message.edit_text(
         "❌ Действие отменено. Можете задать новый вопрос или задачу.",
         reply_markup=kb.as_markup(),
@@ -807,7 +842,9 @@ async def cb_ai_retry(
         kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
         kb.adjust(2)
     else:
-        kb.button(text="❌ Завершить сессию", callback_data=AiCb(action="stop"))
+        kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+        kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+        kb.adjust(2)
     await callback.message.edit_text(
         str_reply[:4000], parse_mode="HTML", reply_markup=kb.as_markup()
     )

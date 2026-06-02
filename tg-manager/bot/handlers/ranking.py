@@ -705,15 +705,27 @@ async def cb_rank_dashboard(
     )
     kb.button(
         text="◀️ Назад",
-        callback_data=RankCb(action="menu", bot_id=0),
+        callback_data=BmCb(action="analytics"),
     )
     kb.adjust(1)
 
     if not keywords:
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(
+            text="➕ Добавить ключевое слово",
+            callback_data=VisCb(action="add_keyword"),
+        )
+        empty_kb.button(
+            text="◀️ Назад",
+            callback_data=BmCb(action="analytics"),
+        )
+        empty_kb.adjust(1)
         await safe_edit(
             callback,
-            "📊 <b>Дашборд позиций</b>\n\nУ вас пока нет отслеживаемых ключевых слов.",
-            reply_markup=kb.as_markup(),
+            "📊 <b>Дашборд позиций</b>\n\n"
+            "У вас пока нет отслеживаемых ключевых слов.\n\n"
+            "💡 Добавьте ключевые слова, чтобы отслеживать позиции вашего бота в поиске Telegram.",
+            reply_markup=empty_kb.as_markup(),
         )
         return
 
@@ -1111,10 +1123,17 @@ async def vis_all_positions(
     kb.adjust(2)
 
     if not rows:
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="➕ Добавить слово", callback_data=VisCb(action="add_keyword"))
+        empty_kb.button(text="🔄 Обновить", callback_data=VisCb(action="all_positions"))
+        empty_kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
+        empty_kb.adjust(1)
         await safe_edit(
             callback,
-            "📊 <b>Позиции в поиске</b>\n\nДанных пока нет. Добавьте ключевые слова и запустите проверку.",
-            reply_markup=kb.as_markup(),
+            "📊 <b>Позиции в поиске</b>\n\n"
+            "Данных пока нет.\n\n"
+            "💡 Добавьте ключевые слова и запустите проверку позиций.",
+            reply_markup=empty_kb.as_markup(),
         )
         return
 
@@ -1249,10 +1268,20 @@ async def vis_by_bot(
     kb.adjust(2)
 
     if not rows:
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(
+            text="➕ Добавить слово",
+            callback_data=VisCb(action="add_keyword"),
+        )
+        empty_kb.button(text="📈 Тренды", callback_data=VisCb(action="trends", bot_id=bot_id))
+        empty_kb.button(text="◀️ Назад", callback_data=VisCb(action="select_bot"))
+        empty_kb.adjust(1)
         await safe_edit(
             callback,
-            f"🔍 <b>Позиции — {html.escape(label)}</b>\n\nДанных пока нет.",
-            reply_markup=kb.as_markup(),
+            f"🔍 <b>Позиции — {html.escape(label)}</b>\n\n"
+            "Данных пока нет.\n\n"
+            "💡 Добавьте ключевые слова и запустите проверку через меню позиций.",
+            reply_markup=empty_kb.as_markup(),
         )
         return
 
