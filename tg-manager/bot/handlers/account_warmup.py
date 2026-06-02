@@ -96,7 +96,14 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         )
         return
 
+    total = len(accounts)
+    no_plan_count = sum(1 for acc in accounts if not acc["has_plan"])
+
     kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"🌡 Выбрать все аккаунты ({total})",
+        callback_data=WarmupCb(action="select_all_plan"),
+    )
     for acc in accounts:
         icon = "✅" if acc["has_plan"] else "⚪"
         label = acc.get("first_name") or acc["phone"]
@@ -107,10 +114,13 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
     kb.adjust(1)
 
+    no_plan_str = f"\n⚪ Без плана: <b>{no_plan_count}</b>" if no_plan_count > 0 else ""
     await callback.message.edit_text(
-        "📱 <b>Выберите аккаунт для разогрева:</b>\n\n"
-        "✅ = уже есть активный план\n"
-        "⚪ = план отсутствует",
+        f"📱 <b>Выберите аккаунт для разогрева:</b>\n\n"
+        f"✅ = уже есть активный план\n"
+        f"⚪ = план отсутствует"
+        f"{no_plan_str}\n\n"
+        "Нажмите <b>«Выбрать все»</b> чтобы создать план для всех аккаунтов сразу.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -141,6 +151,68 @@ async def cb_warmup_select_plan(
         f"🌡 <b>Разогрев: {html.escape(label)}</b>\n\nВыберите режим разогрева:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(WarmupCb.filter(F.action == "select_all_plan"))
+async def cb_warmup_select_all_plan(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+
+    count = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+        callback.from_user.id,
+    )
+
+    kb = InlineKeyboardBuilder()
+    for plan_key, plan_label in _PLAN_LABELS.items():
+        kb.button(
+            text=plan_label,
+            callback_data=WarmupCb(action=f"pall_{plan_key}"),
+        )
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="create_list"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🌡 <b>Разогрев всех аккаунтов ({count} шт.)</b>\n\n"
+        "Выберите режим разогрева для <b>всех</b> аккаунтов:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    WarmupCb.filter(F.action.in_({"pall_gentle", "pall_standard", "pall_aggressive"}))
+)
+async def cb_warmup_create_all_plans(
+    callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Создаю планы...")
+    from services.account_warmer import create_warmup_plan
+
+    plan_type = callback_data.action.replace("pall_", "")
+    user_id = callback.from_user.id
+
+    accounts = await pool.fetch(
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at DESC",
+        user_id,
+    )
+
+    created = 0
+    for acc in accounts:
+        try:
+            await create_warmup_plan(pool, user_id, acc["id"], plan_type)
+            created += 1
+        except Exception as exc:
+            log.warning("warmup create_all: acc=%d error=%s", acc["id"], exc)
+
+    await callback.message.edit_text(
+        f"✅ <b>Планы разогрева созданы!</b>\n\n"
+        f"Аккаунтов: <b>{created}/{len(accounts)}</b>\n"
+        f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
+        "Разогрев запускается автоматически каждые 6 часов.\n"
+        "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
     )
 
 
