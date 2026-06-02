@@ -976,11 +976,11 @@ async def cb_email_add(
     kb.button(text="❌ Отмена", callback_data=StrikeCb(action="emails"))
     await callback.message.edit_text(
         "📧 <b>Добавить email аккаунт</b>\n\n"
-        "Введите ваш email-адрес:\n"
-        "<code>user@gmail.com</code>\n\n"
+        "✏️ <b>Напишите ваш email-адрес в поле сообщения ниже ↓</b>\n\n"
+        "Пример: <code>user@gmail.com</code>\n\n"
         "<b>Поддерживаются:</b> Gmail, Outlook, Яндекс, Mail.ru, Yahoo, iCloud, ProtonMail\n\n"
         "⚠️ Для Gmail и Outlook нужен <b>пароль приложения</b> "
-        "(не обычный пароль) — объясним как получить.",
+        "(не обычный пароль) — после ввода email объясним как получить.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1016,11 +1016,12 @@ async def msg_email_input(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=StrikeCb(action="emails"))
 
+    tip_block = f"{tip}\n\n" if tip else ""
     await message.answer(
         f"📧 Email: <code>{raw}</code>\n"
         f"{smtp_note}\n\n"
-        f"{tip}\n\n" if tip else "" +
-        "Теперь введите <b>пароль приложения</b>:\n"
+        f"{tip_block}"
+        "✏️ <b>Напишите пароль приложения в поле сообщения ниже ↓</b>\n\n"
         "<i>⚠️ Сообщение с паролем будет сразу удалено из чата.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

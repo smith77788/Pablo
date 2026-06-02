@@ -2535,9 +2535,9 @@ async def report_peer_deep_v2(  # noqa: C901
         # ── 7. channels.ReportSpam ────────────────────────────────────
         # channels.reportSpam(channel, participant, ids) requires a USER as participant.
         # We collect message senders from the fetched msgs to use as participant.
+        # Fallback: if all posts are anonymous, use a visible admin as participant.
         if _CSR and msgs and is_channel:
             spam_ids = [m.id for m in msgs[:15] if m and m.id]
-            # Find a sender entity: prefer messages with from_id (non-anonymous posts)
             _spam_participant = None
             for _sm in msgs[:10]:
                 _fid = getattr(_sm, "from_id", None)
@@ -2547,6 +2547,19 @@ async def report_peer_deep_v2(  # noqa: C901
                         break
                     except Exception:
                         pass
+            # Fallback: channel posts are anonymous → try getting a visible admin
+            if spam_ids and _spam_participant is None:
+                try:
+                    _adm_resp = await _timed(client(GetParticipantsRequest(
+                        channel=entity, filter=ChannelParticipantsAdmins(),
+                        offset=0, limit=10, hash=0,
+                    )))
+                    for _au in getattr(_adm_resp, "users", []):
+                        if not getattr(_au, "bot", False) and not getattr(_au, "deleted", False):
+                            _spam_participant = _au
+                            break
+                except Exception:
+                    pass
             if spam_ids and _spam_participant:
                 try:
                     await asyncio.sleep(random.uniform(0.3, 1.0))
@@ -2645,6 +2658,12 @@ async def report_peer_deep_v2(  # noqa: C901
             bot_uname = _fwd_bots.get(reason, "notoscam")
             try:
                 fbot = await _timed(client.get_entity(bot_uname), 8.0)
+                # Боты требуют /start перед принятием пересланных сообщений
+                try:
+                    await client.send_message(fbot, "/start")
+                    await asyncio.sleep(1.5)
+                except Exception:
+                    pass
                 for em in [m for m in msgs[:8] if m and not m.service]:
                     try:
                         await client.forward_messages(fbot, em)
