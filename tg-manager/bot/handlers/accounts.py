@@ -913,8 +913,27 @@ async def cb_view_account(
     proxy_label = acc.get("proxy_label") or ""
     proxy_line = f"🌐 {escape(proxy_label or proxy_url[:40])}" if proxy_url else "🌐 Без прокси"
 
+    # Trust score with visual bar
     trust_score = acc.get("trust_score")
-    trust_line = f"⭐ Trust: {trust_score:.2f}" if trust_score is not None else ""
+    if trust_score is not None:
+        ts = float(trust_score)
+        filled = round(ts * 6)
+        trust_bar = "█" * filled + "░" * (6 - filled)
+        trust_line = f"⭐ Trust: [{trust_bar}] {ts:.2f}"
+    else:
+        trust_line = ""
+
+    # Cooldown
+    cooldown_until = acc.get("cooldown_until")
+    cooldown_line = ""
+    if cooldown_until:
+        from datetime import timezone as _tz
+        _now = __import__("datetime").datetime.now(_tz.utc)
+        if cooldown_until.tzinfo is None:
+            from datetime import timezone as _tz2
+            cooldown_until = cooldown_until.replace(tzinfo=_tz2.utc)
+        if cooldown_until > _now:
+            cooldown_line = f"⏳ Кулдаун до: {cooldown_until.strftime('%d.%m %H:%M')} UTC"
 
     # Infrastructure fields (v60)
     tags = acc.get("tags") or []
@@ -935,6 +954,8 @@ async def cb_view_account(
     lines.append(f"Статус: {'✅ Активен' if is_active else '⏸ Отключён'}")
     if trust_line:
         lines.append(trust_line)
+    if cooldown_line:
+        lines.append(cooldown_line)
     lines.append(f"Прокси: {proxy_line}")
     if pool_name:
         lines.append(f"🏊 Пул: <b>{escape(pool_name)}</b>")
@@ -943,9 +964,9 @@ async def cb_view_account(
     if project:
         lines.append(f"📁 Проект: <b>{escape(project)}</b>")
     if labels:
-        lines.append(f"🔵 Метки: {', '.join(escape(l) for l in labels)}")
+        lines.append(f"🏷 Метки: {', '.join(escape(lb) for lb in labels)}")
     if warnings:
-        lines.append(f"⚠️ Предупреждения: {', '.join(escape(w) for w in warnings)}")
+        lines.append(f"⚠️ Предупреждения: {len(warnings)} шт.")
 
     await callback.message.edit_text(
         "\n".join(lines),
