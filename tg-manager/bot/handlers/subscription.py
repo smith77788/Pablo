@@ -637,18 +637,23 @@ async def msg_payment_setting_value(
                 raise ValueError
             value = f"{rate:.4f}"
         except ValueError:
+            kb = InlineKeyboardBuilder()
+            kb.button(text="❌ Отмена", callback_data=SubCb(action="payment_settings"))
             await message.answer(
-                "❌ Введите положительное число. Пример: <code>5.50</code>",
+                "❌ Введите положительное число. Пример: <code>5.50</code>\n\n"
+                "Попробуйте снова или нажмите Отмена.",
                 parse_mode="HTML",
+                reply_markup=kb.as_markup(),
             )
-            await state.clear()
             return
 
     if key in ("TON_WALLET", "TRON_WALLET") and len(value) < 10:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=SubCb(action="payment_settings"))
         await message.answer(
-            "❌ Адрес кошелька слишком короткий. Проверьте и отправьте снова."
+            "❌ Адрес кошелька слишком короткий. Проверьте и отправьте снова.",
+            reply_markup=kb.as_markup(),
         )
-        await state.clear()
         return
 
     await state.clear()

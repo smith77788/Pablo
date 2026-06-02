@@ -100,7 +100,11 @@ async def msg_broadcast_text(
         photo_file_id = None
         text = message.text
     else:
-        await message.answer("❌ Отправьте текст или фото с подписью.")
+        bot_id = data.get("bot_id", 0)
+        await message.answer(
+            "❌ Отправьте текст или фото с подписью.",
+            reply_markup=_bc_cancel_kb(bot_id),
+        )
         return
 
     await state.update_data(text=text, photo_file_id=photo_file_id)

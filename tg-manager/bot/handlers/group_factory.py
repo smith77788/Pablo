@@ -17,7 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import BmCb, GroupFCb
+from bot.callbacks import AccCb, BmCb, GroupFCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
@@ -31,6 +31,15 @@ router = Router()
 def _back_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
+    return kb
+
+
+def _no_accounts_kb() -> InlineKeyboardBuilder:
+    """Клавиатура для экранов 'нет активных аккаунтов'."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Перейти к аккаунтам", callback_data=AccCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=GroupFCb(action="menu"))
+    kb.adjust(1)
     return kb
 
 
@@ -77,9 +86,11 @@ async def cb_group_create_start(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ <b>Нет активных аккаунтов</b>\n\nПодключите аккаунт через /accounts",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для создания группы нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
 
@@ -326,9 +337,10 @@ async def cb_group_list_start(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов.",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты, затем вернитесь сюда.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
 
@@ -395,9 +407,10 @@ async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов.",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты, затем вернитесь сюда.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -523,9 +536,11 @@ async def cb_group_import(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов.\n\nПодключите аккаунт через /accounts",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для импорта групп нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -678,9 +693,10 @@ async def cb_group_announce_start(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов.",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты, затем вернитесь сюда.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
 

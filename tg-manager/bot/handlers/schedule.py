@@ -122,11 +122,15 @@ async def msg_schedule_datetime(
         await message.answer(
             f"❌ Неверный формат даты.\n\n{_DT_HINT}",
             parse_mode="HTML",
+            reply_markup=_sch_cancel_kb(bot_id),
         )
         return
 
     if execute_at <= datetime.utcnow():
-        await message.answer("❌ Время запуска должно быть в будущем. Введите снова:")
+        await message.answer(
+            "❌ Время запуска должно быть в будущем. Введите снова:",
+            reply_markup=_sch_cancel_kb(bot_id),
+        )
         return
 
     text = data["text"]

@@ -183,6 +183,15 @@ async def cb_net_bc_confirm(
     await callback.answer()
 
     bots = await db.get_bots(pool, callback.from_user.id)
+    if not bots:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+        await callback.message.edit_text(
+            "❌ <b>Нет ботов</b>\n\nДобавьте хотя бы одного бота для запуска сетевой рассылки.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     total_started = 0
     total_users = 0
 
@@ -290,14 +299,23 @@ async def cb_net_bc_confirm(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
-    await callback.message.edit_text(
-        f"🚀 <b>Сетевая рассылка запущена!</b>\n\n"
-        f"Ботов задействовано: <b>{total_started}</b>\n"
-        f"Получателей: <b>{total_users:,}</b>\n\n"
-        "Прогресс — в истории рассылок каждого бота.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    if total_started == 0:
+        await callback.message.edit_text(
+            "⚠️ <b>Рассылка не запущена</b>\n\n"
+            "Нет пользователей в выбранном сегменте. "
+            "Попробуйте другой сегмент или подождите пока аудитория накопится.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await callback.message.edit_text(
+            f"🚀 <b>Сетевая рассылка запущена!</b>\n\n"
+            f"Ботов задействовано: <b>{total_started}</b>\n"
+            f"Получателей: <b>{total_users:,}</b>\n\n"
+            "Прогресс — в истории рассылок каждого бота.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
 
 
 @router.callback_query(NetBcCb.filter(F.action == "cancel"))

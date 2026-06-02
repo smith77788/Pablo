@@ -69,15 +69,20 @@ async def cb_commands_menu(
 async def cb_commands_add(
     callback: CallbackQuery, callback_data: CommandsCb, state: FSMContext
 ) -> None:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
     await callback.answer()
     await state.set_state(SetCommands.waiting_add)
     await state.update_data(bot_id=callback_data.bot_id)
+    kb = _Kb()
+    kb.button(text="❌ Отмена", callback_data=CommandsCb(action="menu", bot_id=callback_data.bot_id))
+    kb.adjust(1)
     await callback.message.edit_text(
         "➕ <b>Добавить команду</b>\n\n"
         "Отправьте одну строку в формате:\n\n"
         "<code>команда - Описание команды</code>\n\n"
         "Например: <code>help - Помощь</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -85,19 +90,23 @@ async def cb_commands_add(
 async def msg_commands_add(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
     data = await state.get_data()
     bot_id = data["bot_id"]
-    await state.clear()
 
     new_cmds = _parse_commands(message.text or "")
     if not new_cmds or len(new_cmds) != 1:
+        kb = _Kb()
+        kb.button(text="❌ Отмена", callback_data=CommandsCb(action="menu", bot_id=bot_id))
         await message.answer(
             "❌ Неверный формат. Введите одну строку:\n"
-            "<code>/команда - Описание</code>",
+            "<code>/команда - Описание</code>\n\n"
+            "Попробуйте ещё раз или нажмите Отмена.",
             parse_mode="HTML",
-            reply_markup=back_to_bot(bot_id),
+            reply_markup=kb.as_markup(),
         )
         return
+    await state.clear()
 
     row = await db.get_bot(pool, bot_id, message.from_user.id)
     if not row:
@@ -129,9 +138,13 @@ async def msg_commands_add(
 async def cb_commands_set_all(
     callback: CallbackQuery, callback_data: CommandsCb, state: FSMContext
 ) -> None:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
     await callback.answer()
     await state.set_state(SetCommands.waiting_commands)
     await state.update_data(bot_id=callback_data.bot_id)
+    kb = _Kb()
+    kb.button(text="❌ Отмена", callback_data=CommandsCb(action="menu", bot_id=callback_data.bot_id))
+    kb.adjust(1)
     await callback.message.edit_text(
         "📋 <b>Задать весь список команд</b>\n\n"
         "Отправьте список команд, каждая с новой строки:\n\n"
@@ -139,6 +152,7 @@ async def cb_commands_set_all(
         "help - Помощь\n"
         "about - О боте</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -146,19 +160,23 @@ async def cb_commands_set_all(
 async def msg_commands_set_all(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
     data = await state.get_data()
     bot_id = data["bot_id"]
-    await state.clear()
 
     commands = _parse_commands(message.text or "")
     if not commands:
+        kb = _Kb()
+        kb.button(text="❌ Отмена", callback_data=CommandsCb(action="menu", bot_id=bot_id))
         await message.answer(
             "❌ Неверный формат. Каждая строка должна быть:\n"
-            "<code>/команда - Описание</code>",
+            "<code>/команда - Описание</code>\n\n"
+            "Попробуйте ещё раз или нажмите Отмена.",
             parse_mode="HTML",
-            reply_markup=back_to_bot(bot_id),
+            reply_markup=kb.as_markup(),
         )
         return
+    await state.clear()
 
     row = await db.get_bot(pool, bot_id, message.from_user.id)
     if not row:

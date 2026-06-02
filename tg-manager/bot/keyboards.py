@@ -318,7 +318,7 @@ def webhook_menu(bot_id: int) -> InlineKeyboardMarkup:
         callback_data=WebhookCb(action="info", bot_id=bot_id),
     )
     kb.button(
-        text="🔌 Отключить другие боты",
+        text="🔌 Удалить вебхук",
         callback_data=WebhookCb(action="disable", bot_id=bot_id),
     )
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))

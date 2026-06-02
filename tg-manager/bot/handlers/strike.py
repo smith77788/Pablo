@@ -568,9 +568,17 @@ async def cb_strike_rerun(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
+        _kb_na = InlineKeyboardBuilder()
+        _kb_na.button(text="📱 Перейти к аккаунтам", callback_data="acc:menu")
+        _kb_na.button(text="◀️ История Strike", callback_data=StrikeCb(action="history"))
+        _kb_na.button(text="⚔️ Меню Strike", callback_data=StrikeCb(action="menu"))
+        _kb_na.adjust(1)
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов. Добавьте или активируйте аккаунты.",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для повтора страйка нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт в разделе <b>📱 Аккаунты</b> и вернитесь сюда.",
             parse_mode="HTML",
+            reply_markup=_kb_na.as_markup(),
         )
         return
 
@@ -1094,13 +1102,18 @@ async def msg_password_input(
             message.from_user.id, email, smtp_host, smtp_port, password,
         )
         domain = email.split("@")[-1]
-        tip = _APP_PASSWORD_TIPS.get(domain, "")
+        _kb_ok = InlineKeyboardBuilder()
+        _kb_ok.button(text="➕ Добавить ещё",    callback_data=StrikeCb(action="email_add"))
+        _kb_ok.button(text="◀️ Список email",    callback_data=StrikeCb(action="emails"))
+        _kb_ok.button(text="⚔️ Меню Strike",    callback_data=StrikeCb(action="menu"))
+        _kb_ok.adjust(1)
         await status_msg.edit_text(
             f"✅ <b>Email добавлен: {email}</b>\n\n"
             f"Подключение к {smtp_host}:{smtp_port} — успешно\n\n"
             f"Теперь при каждом мини-страйке жалоба будет отправляться "
-            f"с этого ящика на abuse@telegram.org{' и NCMEC' if '' else ''}.",
+            f"с этого ящика на abuse@telegram.org.",
             parse_mode="HTML",
+            reply_markup=_kb_ok.as_markup(),
         )
         log.info("strike: email added user=%s email=%s", message.from_user.id, email)
     except Exception as e:

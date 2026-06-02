@@ -23,7 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ChanFactCb, SeoCb
+from bot.callbacks import AccCb, ChanFactCb, SeoCb
 from services.logger import log_exc_swallow
 from bot.states import (
     BulkChannelCreateFSM,
@@ -56,6 +56,15 @@ def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
 def _back_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
+    return kb
+
+
+def _no_accounts_kb() -> InlineKeyboardBuilder:
+    """Клавиатура для экранов 'нет активных аккаунтов'."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📱 Перейти к аккаунтам", callback_data=AccCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1)
     return kb
 
 
@@ -133,9 +142,11 @@ async def cb_chanf_import(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов.\n\nПодключите аккаунт через /accounts",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для импорта каналов нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -318,9 +329,11 @@ async def cb_chanf_create_start(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов. Подключите через /accounts",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для создания канала нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -642,9 +655,11 @@ async def cb_chanf_bulk_create_start(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов. Подключите через /accounts",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для массового создания каналов нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -1166,9 +1181,11 @@ async def cb_chanf_stats(
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ Нет активных аккаунтов. Подключите через /accounts",
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для просмотра статистики каналов нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=_no_accounts_kb().as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()

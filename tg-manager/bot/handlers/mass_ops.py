@@ -364,7 +364,7 @@ async def cb_mp_timing(
     mp_text = data.get("mp_text", "")
 
     # Count channels for preview
-    channel_count = await _count_targets(pool, callback.from_user.id, target, filter_type, mp_acc_id, mp_cluster)
+    channel_count = await _count_targets(pool, callback.from_user.id, target, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
 
     target_label = _TARGET_LABELS.get(target, target)
     filter_label = _FILTER_LABELS.get(filter_type, filter_type)
@@ -685,13 +685,14 @@ async def cb_dry_run(
     filter_type = data.get("mp_filter", "all")
     mp_acc_id = data.get("mp_acc_id")
     mp_cluster = data.get("mp_cluster")
+    mp_pool = data.get("mp_pool")
     delay = int(data.get("mp_delay", 30))
     mp_text = data.get("mp_text", "")
 
     target_label = _TARGET_LABELS.get(target, "Каналы")
     filter_label = _FILTER_LABELS.get(filter_type, "Все активные аккаунты")
 
-    channel_count = await _count_targets(pool, callback.from_user.id, target, filter_type, mp_acc_id, mp_cluster)
+    channel_count = await _count_targets(pool, callback.from_user.id, target, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
     estimated_mins = round(channel_count * delay / 60, 1) if delay else 0
     delay_label = f"{delay}с" if delay > 0 else "Немедленно"
 
@@ -1018,9 +1019,10 @@ async def _get_accounts_for_filter(
 async def _count_targets(
     pool: asyncpg.Pool, owner_id: int,
     target: str, filter_type: str, acc_id: int | None, cluster: str | None,
+    pool_name: str | None = None,
 ) -> int:
     """Estimate number of matching dialogs. Real count requires fetching Telethon dialogs (slow)."""
-    accounts = await _get_accounts_for_filter(pool, owner_id, filter_type, acc_id, cluster)
+    accounts = await _get_accounts_for_filter(pool, owner_id, filter_type, acc_id, cluster, pool_name=pool_name)
     if not accounts:
         return 0
     # Use managed_channels count from DB as a better estimate than flat multiplier
@@ -1991,7 +1993,8 @@ async def cb_ob_confirm(
             "target": target,
             "filter": "all",
             "text": ob_param,
-            "delay": 30,
+            "delay_seconds": 30,  # op_worker uses "delay_seconds" key
+            "delay": 30,          # backward-compat alias
             "source": "builder",
         }
         total_items = 1  # воркер посчитает реальное кол-во каналов при запуске

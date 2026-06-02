@@ -112,13 +112,23 @@ async def cb_template_add(
 
 @router.message(AddTemplate.waiting_name, F.text)
 async def msg_template_name(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    _bot_id = data.get("bot_id", 0)
     name = message.text.strip() if message.text else ""
     if not name:
-        await message.answer("❌ Название не может быть пустым. Введите ещё раз:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id))
+        await message.answer(
+            "❌ Название не может быть пустым. Введите ещё раз:",
+            reply_markup=kb.as_markup(),
+        )
         return
     if len(name) > 64:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id))
         await message.answer(
-            "❌ Название слишком длинное (макс. 64 символа). Введите ещё раз:"
+            "❌ Название слишком длинное (макс. 64 символа). Введите ещё раз:",
+            reply_markup=kb.as_markup(),
         )
         return
     await state.update_data(name=name)
@@ -151,11 +161,23 @@ async def msg_template_text(
     validation = validate_message_template(name, text)
     if not validation.valid:
         errors = "\n".join(f"• {e}" for e in validation.errors)
-        await message.answer(f"❌ <b>Ошибки в шаблоне:</b>\n{errors}", parse_mode="HTML")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        await message.answer(
+            f"❌ <b>Ошибки в шаблоне:</b>\n{errors}\n\nИсправьте и отправьте снова.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
     if validation.warnings:
         warns = "\n".join(f"⚠️ {w}" for w in validation.warnings)
-        await message.answer(f"<b>Предупреждения:</b>\n{warns}\n\nВсё равно сохранить? Напишите текст снова для подтверждения.", parse_mode="HTML")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        await message.answer(
+            f"<b>Предупреждения:</b>\n{warns}\n\nВсё равно сохранить? Напишите текст снова для подтверждения.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
 
     await state.clear()
