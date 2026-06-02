@@ -5106,7 +5106,7 @@ async def cb_cinv_run(
         ),
     )
     if not acc_rows:
-        await callback.message.edit_text("⚠️ Аккаунты не найдены или деактивированы.")
+        await callback.message.edit_text("⚠️ Аккаунты не найдены или деактивированы.", reply_markup=_back_kb().as_markup())
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отменить", callback_data=ContactInvCb(action="cancel_invite"))
