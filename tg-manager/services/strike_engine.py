@@ -446,6 +446,7 @@ async def _one_account_strike(
     wave_num: int,
     sem: asyncio.Semaphore,
     mode: str = "normal",
+    pool=None,
 ) -> dict:
     """
     Один аккаунт выполняет полную атаку.
@@ -506,13 +507,30 @@ async def _one_account_strike(
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
-                # Если FloodWait — ждём и ретраим
+                # Если FloodWait — записываем в flood_engine, ждём и ретраим
                 if "FLOOD_WAIT" in err_str.upper() or "flood" in err_str.lower():
                     import re as _re
                     wait_match = _re.search(r'(\d+)', err_str)
                     wait_s = min(_FLOOD_CAP, float(wait_match.group(1)) if wait_match else 30.0)
                     log.warning("strike acc %s wave %d: FloodWait %ss, retry %d/%d",
                                 acc.get("id"), wave_num, wait_s, attempt + 1, _MAX_RETRIES)
+                    if pool is not None:
+                        try:
+                            from services.flood_engine import record_flood
+                            await record_flood(pool, acc["id"], int(wait_s), "strike")
+                        except Exception:
+                            log_exc_swallow(log, f"strike: record_flood failed acc={acc.get('id')}")
+                    else:
+                        try:
+                            from services.flood_engine import get_account_state
+                            state = get_account_state(acc["id"])
+                            import time as _time
+                            state.consecutive_floods += 1
+                            state.last_flood_at = _time.monotonic()
+                            state.cooldown_until = _time.monotonic() + wait_s + 10
+                            state.risk_score = min(1.0, state.risk_score + 0.15)
+                        except Exception:
+                            pass
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
                 log.warning("strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str)
@@ -545,6 +563,7 @@ def _safe_gather_results(raw: list) -> list[dict]:
 async def staggered_strike(
     plan: StrikePlan,
     progress_cb=None,
+    pool=None,
 ) -> list[StrikeResult]:
     """
     Эшелонированная атака: волны аккаунтов с нарастающей интенсивностью.
@@ -578,7 +597,7 @@ async def staggered_strike(
             texts_w1 = assign_texts(plan.preset or plan.reason, len(plan.waves[0]))
             tasks = [
                 _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w1, i, 0, sem, mode=plan.mode)
+                                    texts_w1, i, 0, sem, mode=plan.mode, pool=pool)
                 for i, acc in enumerate(plan.waves[0])
             ]
             wave_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
@@ -597,7 +616,7 @@ async def staggered_strike(
             texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
             tasks = [
                 _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w2, i, 1, sem, mode=plan.mode)
+                                    texts_w2, i, 1, sem, mode=plan.mode, pool=pool)
                 for i, acc in enumerate(plan.waves[1])
             ]
             w2_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
@@ -617,7 +636,7 @@ async def staggered_strike(
             texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
             tasks = [
                 _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w3, i, 2, sem, mode=plan.mode)
+                                    texts_w3, i, 2, sem, mode=plan.mode, pool=pool)
                 for i, acc in enumerate(plan.waves[2])
             ]
             w3_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
@@ -1350,9 +1369,26 @@ async def execute_mini_strike(
             + tg.get("bots_reported", 0)
             + tg.get("forwarded", 0)
         )
+        # Register success so flood_engine can decay risk_score
+        try:
+            from services.flood_engine import record_success
+            await record_success(acc["id"], "strike")
+        except Exception:
+            log_exc_swallow(log, "mini_strike: record_success flood_engine failed")
         log.info("mini_strike: telethon done tg_total=%d", result["total_tg_reports"])
     except Exception as e:
-        result["errors"].append(f"Telethon: {str(e)[:100]}")
+        err_str = str(e)
+        result["errors"].append(f"Telethon: {err_str[:100]}")
+        # Register FloodWait so flood_engine sets proper cooldown on the account
+        if "FLOOD_WAIT" in err_str.upper() or "flood" in err_str.lower():
+            import re as _re
+            _m = _re.search(r'(\d+)', err_str)
+            flood_wait = int(_m.group(1)) if _m else 60
+            try:
+                from services.flood_engine import record_flood
+                await record_flood(pool, acc["id"], flood_wait, "strike")
+            except Exception:
+                log_exc_swallow(log, "mini_strike: record_flood flood_engine failed")
         log.exception("mini_strike: telethon failed target=%s", target_clean)
 
     # ── Phase 2+3: Email из всех настроенных ящиков ──────────────────────────

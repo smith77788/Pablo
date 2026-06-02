@@ -3313,7 +3313,7 @@ async def _strike_bg_v2(
             started_at=time.time(), phase="strike",
             mode=strike_mode,
         )
-        results = await strike_engine.staggered_strike(plan, progress_cb=_progress)
+        results = await strike_engine.staggered_strike(plan, progress_cb=_progress, pool=pool)
 
         # ── Сохранение в историю (до верификации — не теряем при рестарте) ──
         _history_ids: dict[str, int] = {}

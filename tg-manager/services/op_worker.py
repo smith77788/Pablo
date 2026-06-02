@@ -272,16 +272,22 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
 
     if account_ids:
         accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
+            "a.trust_score, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.id = ANY($1) AND a.is_active=true",
+            "WHERE a.id = ANY($1) AND a.is_active=true "
+            "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
+            "ORDER BY a.trust_score DESC NULLS LAST",
             [int(i) for i in account_ids],
         )
     else:
         accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
+            "a.trust_score, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=true",
+            "WHERE a.owner_id=$1 AND a.is_active=true "
+            "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
+            "ORDER BY a.trust_score DESC NULLS LAST",
             owner_id,
         )
 
@@ -301,10 +307,13 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                 if await _is_cancelled(pool, op_id):
                     return {"status": "cancelled", "sent": total_sent, "failed": total_failed,
                             "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}"}
+                flood_extra = 0
                 try:
-                    await account_manager.post_to_channel(
+                    result = await account_manager.post_to_channel(
                         acc["session_str"], ch["id"], text, _acc=acc_dict
                     )
+                    if isinstance(result, dict) and (result.get("error") or result.get("banned")):
+                        raise Exception(result.get("error") or "banned")
                     total_sent += 1
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok','sent')",
@@ -313,16 +322,36 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                     await pool.execute(
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                     )
+                    try:
+                        from services.flood_engine import record_success
+                        await record_success(acc_dict["id"], "publish")
+                    except Exception:
+                        log_exc_swallow(log, f"Сбой записи успешной публикации в flood_engine аккаунта {acc_dict.get('id')}")
                 except Exception as e:
                     total_failed += 1
+                    err_str = str(e)[:200]
+                    if "FloodWait" in err_str or "flood_wait" in err_str.lower() or "A wait of" in err_str:
+                        try:
+                            flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])) or "60")
+                        except (TypeError, ValueError):
+                            flood_wait = 60
+                        try:
+                            from services.flood_engine import record_flood
+                            await record_flood(pool, acc_dict["id"], flood_wait, "publish", op_id)
+                        except Exception:
+                            log_exc_swallow(log, f"Сбой записи flood в flood_engine аккаунта {acc_dict.get('id')}")
+                        flood_extra = flood_wait
+                    else:
+                        log.warning("op_worker mass_publish: post failed ch=%s acc=%s: %s", ch["id"], acc_dict.get("phone"), err_str)
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                        op_id, total_sent + total_failed, str(ch["id"]), str(e)[:200],
+                        op_id, total_sent + total_failed, str(ch["id"]), err_str,
                     )
                     await pool.execute(
                         "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
                     )
-                await asyncio.sleep(delay)
+                actual_delay = max(delay, flood_extra + 5 if flood_extra else 0)
+                await asyncio.sleep(actual_delay)
 
         except Exception as e:
             log.warning("op_worker mass_publish: account %s error: %s", acc["phone"], e)
@@ -403,6 +432,7 @@ async def _exec_bulk_bot_edit(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id
                     fail_count += 1
             except Exception as e:
                 fail_count += 1
+                log.warning("op_worker bulk_bot_edit: bot=%s field=%s error=%s", b.get("id"), field, e)
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
@@ -1046,6 +1076,7 @@ async def _exec_bulk_create_channels(
         acc_row = await pool.fetchrow(
             "SELECT id, session_str, phone, device_model, system_version, app_version "
             "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
+            "AND (cooldown_until IS NULL OR cooldown_until < now()) "
             "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
             owner_id,
         )

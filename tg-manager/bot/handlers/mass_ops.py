@@ -407,6 +407,7 @@ async def cb_mp_confirm(
 
     for idx, (acc, dialog) in enumerate(targets_with_dialogs, 1):
         access_hash = dialog.get("access_hash", 0) or 0
+        flood_extra = 0
         try:
             result = await account_manager.post_to_channel(
                 acc["session_str"],
@@ -418,15 +419,49 @@ async def cb_mp_confirm(
             if "error" in result or result.get("banned"):
                 err_count += 1
                 step_status = "error"
+                err_str = str(result.get("error", ""))
+                if "FloodWait" in err_str or "flood_wait" in err_str.lower():
+                    try:
+                        flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])) or "60")
+                    except (TypeError, ValueError):
+                        flood_wait = 60
+                    from services.flood_engine import record_flood
+                    try:
+                        await record_flood(pool, acc["id"], flood_wait, "publish")
+                    except Exception:
+                        log_exc_swallow(log, "Не удалось записать flood в flood_engine при публикации")
+                    flood_extra = flood_wait
             else:
                 ok_count += 1
                 step_status = "ok"
+                from services.flood_engine import record_success
+                try:
+                    await record_success(acc["id"], "publish")
+                except Exception:
+                    pass
         except Exception as e:
             err_count += 1
             step_status = "error"
+            err_str = str(e)
+            if "FloodWait" in err_str or "flood_wait" in err_str.lower():
+                try:
+                    flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])) or "60")
+                except (TypeError, ValueError):
+                    flood_wait = 60
+                from services.flood_engine import record_flood
+                try:
+                    await record_flood(pool, acc["id"], flood_wait, "publish")
+                except Exception:
+                    log_exc_swallow(log, "Не удалось записать flood в flood_engine при публикации (except)")
+                flood_extra = flood_wait
+            else:
+                log_exc_swallow(log, f"mass_publish cb: post_to_channel failed for dialog {dialog.get('id')}")
 
         if op_id:
             await _log_op_step(pool, op_id, idx, str(dialog["id"]), step_status)
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
 
         bar = _progress_bar(idx, total)
         pct = round(100 * idx / total)
@@ -438,8 +473,9 @@ async def cb_mp_confirm(
         except Exception:
             log_exc_swallow(log, "Не удалось обновить прогресс массовой публикации")
 
-        if delay > 0:
-            await asyncio.sleep(delay)
+        actual_delay = max(delay, flood_extra + 5 if flood_extra else 0)
+        if actual_delay > 0:
+            await asyncio.sleep(actual_delay)
 
     if op_id:
         await _finish_op_record(pool, op_id, ok_count, err_count)
@@ -885,22 +921,40 @@ def _dialog_matches_target(dialog: dict, target: str) -> bool:
 async def _get_accounts_for_filter(
     pool: asyncpg.Pool, owner_id: int,
     filter_type: str, acc_id: int | None, cluster: str | None,
+    pool_name: str | None = None,
 ) -> list[asyncpg.Record]:
+    _cols = (
+        "id, session_str, first_name, phone, device_model, system_version, app_version, "
+        "trust_score, cooldown_until"
+    )
     if filter_type == "account" and acc_id:
         return await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
-            "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            f"SELECT {_cols} FROM tg_accounts "
+            "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE "
+            "AND (cooldown_until IS NULL OR cooldown_until < now())",
             acc_id, owner_id,
         )
     if filter_type == "cluster" and cluster:
         return await pool.fetch(
-            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND cluster=$2",
+            f"SELECT {_cols} FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND cluster=$2 "
+            "AND (cooldown_until IS NULL OR cooldown_until < now()) "
+            "ORDER BY trust_score DESC NULLS LAST",
             owner_id, cluster,
         )
+    if filter_type == "pool" and pool_name:
+        return await pool.fetch(
+            f"SELECT {_cols} FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND pool=$2 "
+            "AND (cooldown_until IS NULL OR cooldown_until < now()) "
+            "ORDER BY trust_score DESC NULLS LAST",
+            owner_id, pool_name,
+        )
     return await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE",
+        f"SELECT {_cols} FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE "
+        "AND (cooldown_until IS NULL OR cooldown_until < now()) "
+        "ORDER BY trust_score DESC NULLS LAST",
         owner_id,
     )
 
