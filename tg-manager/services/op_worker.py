@@ -109,6 +109,59 @@ async def _audit(
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
 
+# Track last progress milestone notified per op (25/50/75%)
+_progress_milestones: dict[int, int] = {}
+
+
+async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str) -> None:
+    """Периодически проверяет прогресс и уведомляет на 25/50/75% (один раз каждый milestone)."""
+    _progress_milestones[op_id] = 0
+    try:
+        while True:
+            await asyncio.sleep(15)
+            try:
+                row = await pool.fetchrow(
+                    "SELECT total_items, done_items, status FROM operation_queue WHERE id=$1", op_id
+                )
+                if not row or row["status"] not in ("running", "pending"):
+                    break
+                total = row["total_items"] or 0
+                done = row["done_items"] or 0
+                if total <= 0:
+                    continue
+                pct = int(done * 100 / total)
+
+                last = _progress_milestones.get(op_id, 0)
+                milestone = None
+                for m in (25, 50, 75):
+                    if pct >= m > last:
+                        milestone = m
+                        break
+                if milestone is None:
+                    continue
+
+                _progress_milestones[op_id] = milestone
+                bar_filled = milestone // 10
+                bar = "█" * bar_filled + "░" * (10 - bar_filled)
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from bot.callbacks import BmCb
+                kb = InlineKeyboardBuilder()
+                kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
+                await bot.send_message(
+                    owner_id,
+                    f"⏳ <b>Операция #{op_id}</b> — {milestone}%\n"
+                    f"[{bar}] {done}/{total}\n"
+                    f"<code>{op_type}</code>",
+                    parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
+                )
+            except Exception:
+                pass
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _progress_milestones.pop(op_id, None)
+
 
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py."""
@@ -171,6 +224,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             _active_op_ids.discard(op_id)
         return
 
+    progress_task: asyncio.Task | None = None
     try:
         # Уведомить пользователя о старте
         try:
@@ -186,6 +240,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             )
         except Exception:
             log_exc_swallow(log, f"Сбой отправки уведомления о запуске операции #{op_id}")
+
+        # Запустить фоновый монитор прогресса для длинных операций
+        progress_task = asyncio.create_task(
+            _progress_monitor(pool, bot, op_id, owner_id, op_type)
+        )
 
         if op_type == "mass_publish":
             result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
@@ -258,6 +317,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             )
 
     finally:
+        if progress_task and not progress_task.done():
+            progress_task.cancel()
         async with _active_lock:
             _active_op_ids.discard(op_id)
 
