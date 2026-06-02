@@ -486,9 +486,9 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action == "audit_log":
         try:
             rows = await pool.fetch(
-                """SELECT occurred_at, user_id, operation, status, details
+                """SELECT occurred_at, owner_id, action, target, result, error_msg
                    FROM operation_audit
-                   ORDER BY occurred_at DESC LIMIT 20"""
+                   ORDER BY occurred_at DESC LIMIT 25"""
             )
         except Exception:
             rows = []
@@ -496,13 +496,16 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             lines = []
             for r in rows:
                 dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
-                uid = r.get("user_id") or "?"
-                op = r.get("operation") or "?"
-                status = r.get("status") or "?"
-                lines.append(f"<code>{dt}</code> uid:{uid} {op} [{status}]")
-            text = "🔐 <b>Аудит логи (последние 20)</b>\n\n" + "\n".join(lines)
+                uid = r.get("owner_id") or "?"
+                act = r.get("action") or "?"
+                res = r.get("result") or "?"
+                tgt = r.get("target") or ""
+                tgt_str = f" → {tgt[:20]}" if tgt else ""
+                res_emoji = "✅" if res == "success" else ("⚠️" if res == "flood_wait" else "❌")
+                lines.append(f"<code>{dt}</code> uid:{uid} {act}{tgt_str} {res_emoji}")
+            text = "🔐 <b>Аудит операций (последние 25)</b>\n\n" + "\n".join(lines)
         else:
-            text = "🔐 <b>Аудит логи</b>\n\nЗаписей нет или таблица пуста."
+            text = "🔐 <b>Аудит операций</b>\n\nЗаписей нет."
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data="adm:users")
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())

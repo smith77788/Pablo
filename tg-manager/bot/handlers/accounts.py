@@ -336,6 +336,7 @@ async def _show_accounts_menu(
     if total > 0:
         kb.row(InlineKeyboardButton(text="🔍 Проверить все", callback_data=AccCb(action="check_all").pack()))
         kb.row(InlineKeyboardButton(text="🔎 Найти ресурсы в аккаунтах", callback_data=AccCb(action="scan_all").pack()))
+        kb.row(InlineKeyboardButton(text="🏊 По пулам", callback_data=AccCb(action="pools_view").pack()))
 
     kb.row(InlineKeyboardButton(text="📡 Операции с аккаунтами", callback_data=ChanCb(action="menu").pack()))
     kb.row(InlineKeyboardButton(text="◀️ Главное меню", callback_data=BotCb(action="main").pack()))
@@ -1769,6 +1770,66 @@ async def cb_check_all_accounts(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
+    )
+
+
+# ── Accounts by pool view ─────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "pools_view"))
+async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+        await callback.message.edit_text(
+            "📱 Нет аккаунтов.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Group by pool
+    pool_groups: dict[str, list] = {}
+    for acc in accounts:
+        p = acc.get("pool") or "—"
+        pool_groups.setdefault(p, []).append(acc)
+
+    _POOL_ORDER = ["primary", "monitoring", "cooldown"]
+    _POOL_ICON = {"primary": "🟢", "monitoring": "🟡", "cooldown": "🔴", "—": "⚪"}
+
+    lines = ["🏊 <b>Аккаунты по пулам</b>\n"]
+    kb = InlineKeyboardBuilder()
+
+    sorted_pools = sorted(
+        pool_groups.keys(),
+        key=lambda x: (_POOL_ORDER.index(x) if x in _POOL_ORDER else 99, x),
+    )
+    for p_name in sorted_pools:
+        accs = pool_groups[p_name]
+        icon = _POOL_ICON.get(p_name, "⚪")
+        active_cnt = sum(1 for a in accs if a.get("is_active", True))
+        lines.append(f"\n{icon} <b>{escape(p_name)}</b> ({len(accs)} акк., {active_cnt} активных):")
+        for acc in accs:
+            name = escape(acc.get("first_name") or "")
+            phone = escape(acc.get("phone") or "")
+            label = name or phone or f"ID {acc['id']}"
+            acc_status = acc.get("acc_status") or "active"
+            if not acc.get("is_active", True):
+                acc_status = "archived"
+            st = _STATUS_EMOJI.get(acc_status, "✅")
+            trust = acc.get("trust_score")
+            trust_str = f" · {float(trust):.2f}" if trust is not None else ""
+            lines.append(f"  {st} {label}{trust_str}")
+            kb.button(
+                text=f"{st} {label[:20]}",
+                callback_data=AccCb(action="view", acc_id=acc["id"]),
+            )
+
+    kb.adjust(1)
+    kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
     )
 
 
