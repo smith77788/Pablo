@@ -160,9 +160,13 @@ async def cb_bulk_name_lang(callback: CallbackQuery, state: FSMContext) -> None:
 async def msg_bulk_name_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await message.answer(
         f"✏️ Введите имя для языка <code>{message.text.strip()}</code>:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -240,7 +244,10 @@ async def cb_bulk_desc_lang(callback: CallbackQuery, state: FSMContext) -> None:
 async def msg_bulk_desc_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_desc)
-    await message.answer("📄 Введите описание:")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
+    await message.answer("📄 Введите описание:", reply_markup=kb.as_markup())
 
 
 @router.message(BulkEdit.waiting_localized_desc, F.text)
@@ -317,7 +324,10 @@ async def cb_bulk_short_lang(callback: CallbackQuery, state: FSMContext) -> None
 async def msg_bulk_short_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_short)
-    await message.answer("📃 Введите краткое описание:")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
+    await message.answer("📃 Введите краткое описание:", reply_markup=kb.as_markup())
 
 
 @router.message(BulkEdit.waiting_localized_short, F.text)
@@ -406,11 +416,15 @@ async def cb_bulk_commands_lang(callback: CallbackQuery, state: FSMContext) -> N
 async def msg_bulk_commands_lang(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=message.text.strip())
     await state.set_state(BulkEdit.waiting_localized_commands)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BulkCb(action="menu"))
+    kb.adjust(1)
     await message.answer(
         "🤖 Отправьте список команд:\n\n"
         "<code>start - Главное меню\n"
         "help - Помощь</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
