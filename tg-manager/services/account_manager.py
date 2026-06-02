@@ -2163,11 +2163,18 @@ async def report_peer_deep_v2(  # noqa: C901
         "weapons":    ["violence", "spam", "other"],
         "darknet":    ["spam", "other", "drugs"],
     }
-    _fwd_bots: dict[str, str] = {
-        "childabuse": "stopCA", "csam": "stopCA", "drugs": "stopCA",
-        "violence": "notoscam", "other": "notoscam", "spam": "notoscam",
-        "pornography": "notoscam", "fraud": "notoscam",
-        "escort": "notoscam",
+    # Несколько ботов-получателей доказательств — по типу нарушения.
+    # Пересылка в несколько независимых инстанций усиливает сигнал.
+    _fwd_bots_multi: dict[str, list[str]] = {
+        "childabuse": ["stopCA", "notoscam"],
+        "csam":       ["stopCA", "notoscam"],
+        "drugs":      ["stopCA", "notoscam"],
+        "violence":   ["notoscam", "stopCA"],
+        "fraud":      ["notoscam"],
+        "escort":     ["stopCA", "notoscam"],
+        "spam":       ["notoscam"],
+        "pornography": ["notoscam", "stopCA"],
+        "other":      ["notoscam"],
     }
 
     tg_reason = _rm.get(reason, InputReportReasonOther())
@@ -2191,16 +2198,22 @@ async def report_peer_deep_v2(  # noqa: C901
         return await asyncio.wait_for(coro, timeout=timeout)
 
     def _select_report_option(options: list) -> bytes | None:
+        """Pick best-matching option by reason. Returns bytes option value or None."""
         hints = {
-            "spam": ("spam", "спам"),
-            "violence": ("violence", "violent", "насил", "жест"),
-            "pornography": ("porn", "sexual", "adult", "порно", "сексу"),
-            "childabuse": ("child", "minor", "children", "дет"),
-            "copyright": ("copyright", "автор"),
-            "drugs": ("drug", "нарко"),
-            "personal": ("personal", "private", "личн"),
-            "fake": ("fake", "scam", "fraud", "фейк", "мошен"),
-            "other": ("other", "другое"),
+            "spam": ("spam", "спам", "unwanted", "advertising", "реклам", "unsolicited"),
+            "violence": ("violence", "violent", "насил", "жест", "жестокост", "harm", "abuse", "hurt"),
+            "pornography": ("porn", "sexual", "adult", "порно", "сексу", "18+", "explicit", "nudity"),
+            "childabuse": ("child", "minor", "children", "дет", "несовершен", "csam", "underage", "abuse"),
+            "copyright": ("copyright", "автор", "dmca", "intellectual", "авторск"),
+            "drugs": ("drug", "нарко", "substance", "наркотик", "нарк", "illegal substance", "narcotic"),
+            "personal": ("personal", "private", "личн", "privacy", "данн"),
+            "fake": ("fake", "scam", "fraud", "фейк", "мошен", "impersonat", "phishing"),
+            "other": ("other", "другое", "else", "иное", "прочее"),
+            "weapons": ("weapon", "оружи", "arms", "firearm", "explosive"),
+            "terrorism": ("terror", "extremi", "террор", "экстрем", "incit"),
+            "fraud": ("fraud", "scam", "мошен", "financial", "финанс"),
+            "escort": ("escort", "prostit", "услуг", "сексуальн"),
+            "geo": ("geo", "irrelevant", "geography", "геогр", "not relevant"),
         }.get(reason, ())
         opt_texts = [f"'{(getattr(o,'text','') or '')}'" for o in options]
         log.debug("rpv2 option_select reason=%s available=%s", reason, opt_texts)
@@ -2210,6 +2223,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 val = getattr(opt, "option", None)
                 if val is not None:
                     return val
+        # Fallback: первый доступный вариант
         if options:
             val = getattr(options[0], "option", None)
             if val is not None:
@@ -2218,37 +2232,53 @@ async def report_peer_deep_v2(  # noqa: C901
         return None
 
     async def _report_message_ids(peer_obj, msg_ids: list[int], comment: str, stage: str) -> bool:
-        """Handle Telegram's multi-level report option flow (up to 4 nested ChooseOption)."""
-        try:
-            current_option = b""
-            for depth in range(4):
-                result = await client(MsgReportRequest(
+        """BFS через все доступные опции жалобы. Пробует ВСЕ пути до ReportResultReported.
+        В отличие от линейного перебора — не сдаётся при первом несовпадении.
+        """
+        async def _traverse(opt_bytes: bytes, depth: int) -> bool:
+            if depth > 5:
+                return False
+            try:
+                result = await _timed(client(MsgReportRequest(
                     peer=peer_obj, id=msg_ids,
-                    option=current_option,
+                    option=opt_bytes,
                     message=comment if depth > 0 else "",
-                ))
-                if isinstance(result, ReportResultReported):
-                    return True
-                if isinstance(result, ReportResultChooseOption):
-                    opt = _select_report_option(result.options)
-                    if opt is None:
-                        _record_error(stage, f"no selectable option at depth {depth}")
-                        return False
-                    current_option = opt
-                    continue
-                if isinstance(result, ReportResultAddComment):
-                    final = await client(MsgReportRequest(
+                )), 20.0)
+            except Exception as e:
+                err = str(e)
+                _record_error(stage, e)
+                if "FLOOD_WAIT" in err.upper():
+                    await asyncio.sleep(_flood(err))
+                return False
+            if isinstance(result, ReportResultReported):
+                return True
+            if isinstance(result, ReportResultAddComment):
+                try:
+                    final = await _timed(client(MsgReportRequest(
                         peer=peer_obj, id=msg_ids,
                         option=result.option, message=comment,
-                    ))
+                    )), 15.0)
                     return isinstance(final, ReportResultReported)
-                _record_error(stage, f"unexpected result {type(result).__name__}")
-                return False
-            _record_error(stage, "max option depth exceeded")
+                except Exception as e:
+                    _record_error(stage, e)
+                    return False
+            if isinstance(result, ReportResultChooseOption):
+                opts = result.options or []
+                # Сначала пробуем лучшее совпадение, затем остальные по порядку
+                best_bytes = _select_report_option(opts)
+                ordered: list[bytes] = []
+                if best_bytes is not None:
+                    ordered.append(best_bytes)
+                for o in opts:
+                    v = getattr(o, "option", None)
+                    if v is not None and v != best_bytes:
+                        ordered.append(v)
+                for opt_val in ordered:
+                    await asyncio.sleep(random.uniform(0.4, 1.0))
+                    if await _traverse(opt_val, depth + 1):
+                        return True
             return False
-        except Exception as e:
-            _record_error(stage, e)
-            raise
+        return await _traverse(b"", 0)
 
     client = _make_client(session_string, _acc)
     try:
@@ -2669,26 +2699,28 @@ async def report_peer_deep_v2(  # noqa: C901
                 except Exception as e:
                     log.warning("rpv2[11/bot %s] acc=%s: %s", bname, acc_id, str(e)[:80])
 
-        # ── 12. Forward evidence ───────────────────────────────────────
+        # ── 12. Forward evidence → несколько ботов-инстанций ─────────
         if forward_to_bot and msgs:
-            bot_uname = _fwd_bots.get(reason, "notoscam")
-            try:
-                fbot = await _timed(client.get_entity(bot_uname), 8.0)
-                # Боты требуют /start перед принятием пересланных сообщений
+            target_bots = _fwd_bots_multi.get(reason, ["notoscam"])
+            fwd_msgs = [m for m in msgs[:6] if m and not m.service]
+            for bot_uname in target_bots:
                 try:
-                    await client.send_message(fbot, "/start")
-                    await asyncio.sleep(1.5)
-                except Exception:
-                    pass
-                for em in [m for m in msgs[:8] if m and not m.service]:
+                    fbot = await _timed(client.get_entity(bot_uname), 8.0)
                     try:
-                        await client.forward_messages(fbot, em)
-                        R["forwarded"] += 1
-                        await asyncio.sleep(random.uniform(0.3, 1.0))
-                    except Exception as e:
-                        log.warning("rpv2[12/fwd] acc=%s: %s", acc_id, str(e)[:60])
-            except Exception as e:
-                log.warning("rpv2[12/fbot] acc=%s: %s", acc_id, str(e)[:80])
+                        await client.send_message(fbot, "/start")
+                        await asyncio.sleep(random.uniform(1.2, 2.5))
+                    except Exception:
+                        pass
+                    for em in fwd_msgs[:4]:
+                        try:
+                            await client.forward_messages(fbot, em)
+                            R["forwarded"] += 1
+                            await asyncio.sleep(random.uniform(0.5, 1.2))
+                        except Exception as e:
+                            log.warning("rpv2[12/fwd %s] acc=%s: %s", bot_uname, acc_id, str(e)[:60])
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                except Exception as e:
+                    log.warning("rpv2[12/fbot %s] acc=%s: %s", bot_uname, acc_id, str(e)[:80])
 
         # ── 13. Mute + Leave + Block ───────────────────────────────────
         try:

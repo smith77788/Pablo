@@ -36,11 +36,14 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 # ── Константы ──────────────────────────────────────────────────────────────────
-_CONCURRENCY = 6          # макс параллельных аккаунтов в одной волне
-_WAVE_COOLDOWN = (8, 25)  # секунд между волнами атаки (рандомный диапазон)
+_CONCURRENCY = 3          # макс параллельных аккаунтов в тяжёлой фазе (GetHistory+MsgReport)
+_WAVE_COOLDOWN = (120, 300)  # секунд между волнами — Telegram должен успеть принять жалобы
 _VERIFY_WAIT = (30, 120)  # секунд ожидания перед верификацией
 _MAX_RETRIES = 2          # макс ретраев при FloodWait на аккаунт
 _FLOOD_CAP = 65.0         # кап exponential backoff
+# Минимальный интервал между аккаунтами внутри волны (в секундах).
+# Telegram rate-limit работает per-peer: >2 GetHistory на один канал за 60с = FLOOD_WAIT.
+_STAGGER_BASE = (25, 45)
 
 
 # ── Уникальные тексты жалоб ───────────────────────────────────────────────────
@@ -456,8 +459,11 @@ async def _one_account_strike(
     """
     from services import account_manager
 
-    # Staggered start внутри волны — каждый следующий аккаунт ждёт чуть дольше
-    stagger_delay = random.uniform(1.5, 5.0) * (acc_index + 1)
+    # Staggered start: каждый аккаунт ждёт acc_index * 25-45с.
+    # acc_0 стартует сразу, acc_1 через ~35с, acc_2 через ~70с и т.д.
+    # Это предотвращает одновременный GetHistory на один канал от нескольких аккаунтов
+    # и защищает от FLOOD_WAIT, который иначе убивает всю волну за раз.
+    stagger_delay = random.uniform(*_STAGGER_BASE) * acc_index if acc_index > 0 else random.uniform(1.5, 4.0)
     await asyncio.sleep(stagger_delay)
 
     text = texts[acc_index % len(texts)]
@@ -698,22 +704,16 @@ async def staggered_strike(
                                             title=intel.get("title", ""),
                                             members=intel.get("members", 0))
         result.abuse_form_ok = abuse_res.get("ok", False)
-        if result.abuse_form_ok:
-            log.info("strike_engine: abuse form submitted OK for target=%s", target)
-        else:
-            log.warning(
-                "strike_engine: abuse form failed for target=%s: %s",
-                target, abuse_res.get("error", "unknown"),
-            )
+        log.info("strike_engine: abuse_forms target=%s submitted=%d/%d ok=%s",
+                 target, abuse_res.get("submitted", 0), abuse_res.get("total", 0), result.abuse_form_ok)
 
-        # ═══ Фаза: SpamBot escalation ═══
+        # ═══ Фаза: SpamBot + anti-scam боты ═══
+        # Используем лучший аккаунт (первый по trust_score после pre-flight сортировки)
         spambot_result = await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
-        if isinstance(spambot_result, dict):
-            result.spambot_escalation = spambot_result.get("status", "unknown")
-        elif spambot_result is True:
-            result.spambot_escalation = "sent"
-        else:
-            result.spambot_escalation = "skipped"
+        result.spambot_escalation = spambot_result.get("status", "unknown") if isinstance(spambot_result, dict) else "skipped"
+        log.info("strike_engine: spambot_escalation target=%s status=%s bots=%s",
+                 target, result.spambot_escalation,
+                 spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {})
 
         result.duration_s = time.time() - t_start
         log.info(
@@ -819,82 +819,152 @@ async def submit_abuse_form(
     title: str = "",
     members: int = 0,
 ) -> dict[str, Any]:
-    """Отправляет официальную форму жалобы через telegram.org/support."""
+    """Отправляет жалобы сразу в несколько официальных каналов Telegram."""
     clean = target_username.lstrip("@")
-    reason_text = {
-        "drugs": "illegal drug sales and drug trafficking",
-        "terrorism": "terrorism, extremism and incitement to violence",
-        "childabuse": "child sexual abuse material (CSAM)",
-        "csam": "child sexual abuse material (CSAM)",
-        "fraud": "financial fraud and scam operation",
-        "weapons": "illegal weapons trafficking and arms dealing",
-        "darknet": "darknet criminal services and illegal marketplace",
-        "violence": "promotion of violence and terrorism",
-        "spam": "mass spam and platform abuse",
-        "pornography": "illegal pornographic content and adult material without age verification",
-        "escort": "prostitution, illegal escort services and sexual exploitation",
-        "other": "Terms of Service violation and harmful illegal content",
-    }.get(reason, "Terms of Service violation and harmful illegal content")
+    reason_map = {
+        "drugs":      ("illegal drug sales and drug trafficking",
+                       "Незаконная торговля наркотиками и психоактивными веществами"),
+        "terrorism":  ("terrorism, extremism and incitement to violence",
+                       "Террористический контент, экстремизм, призывы к насилию"),
+        "childabuse": ("child sexual abuse material (CSAM) — urgent",
+                       "Материалы сексуальной эксплуатации детей (CSAM) — срочно"),
+        "csam":       ("child sexual abuse material (CSAM) — urgent",
+                       "Материалы сексуальной эксплуатации детей — требует немедленных действий"),
+        "fraud":      ("financial fraud, scam and money theft",
+                       "Финансовое мошенничество, скам, кража денег"),
+        "weapons":    ("illegal weapons trafficking",
+                       "Незаконный оборот оружия и взрывчатых веществ"),
+        "darknet":    ("darknet criminal marketplace distributing illegal goods",
+                       "Даркнет-маркетплейс — незаконная торговля запрещёнными товарами"),
+        "violence":   ("graphic violence and promotion of violent acts",
+                       "Пропаганда насилия и жестокости"),
+        "spam":       ("coordinated spam and platform manipulation",
+                       "Координированный спам и манипуляции с платформой"),
+        "pornography": ("illegal pornographic content distributed without age verification",
+                        "Незаконный порнографический контент без проверки возраста"),
+        "escort":     ("prostitution and sexual exploitation services",
+                       "Проституция, эскорт и сексуальная эксплуатация"),
+        "other":      ("systematic Terms of Service violation",
+                       "Систематическое нарушение Условий использования"),
+    }
+    en_text, ru_text = reason_map.get(reason, reason_map["other"])
 
-    body = (
-        f"I am reporting a Telegram channel for {reason_text}.\n\n"
-        f"Channel: @{clean}\n"
-        f"Title: {title}\n"
-        f"Subscribers: {members}\n\n"
-        f"This channel actively violates Telegram's Terms of Service by openly distributing "
-        f"illegal content related to {reason_text}. The content is systematic, ongoing and "
-        f"openly visible. Multiple independent users have reported this channel. "
-        f"Immediate removal is urgently required."
-    )
-    try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=25),
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-        ) as sess:
-            async with sess.post(
-                "https://telegram.org/support",
-                data={"message": body, "technical_info": f"@{clean}", "question_type": "report"},
-                allow_redirects=True,
-            ) as resp:
-                return {"ok": resp.status in (200, 201, 302), "status": resp.status}
-    except Exception as e:
-        log.warning("submit_abuse_form: %s", e)
-        return {"ok": False, "error": str(e)[:100]}
+    bodies = [
+        # Версия 1 — официальный английский запрос
+        (
+            f"ABUSE REPORT — {en_text.upper()}\n\n"
+            f"Channel: https://t.me/{clean}\n"
+            f"Username: @{clean}\n"
+            f"Title: {title}\n"
+            f"Subscribers: {members:,}\n\n"
+            f"This Telegram channel systematically violates Telegram ToS through {en_text}. "
+            f"The violations are active, ongoing and publicly accessible to all users including minors. "
+            f"The channel is not merely borderline — it explicitly and openly engages in {en_text}. "
+            f"Multiple independent users have already reported this channel. "
+            f"We request immediate review and removal of this channel."
+        ),
+        # Версия 2 — русский технический запрос
+        (
+            f"ЖАЛОБА НА НАРУШЕНИЕ — {ru_text}\n\n"
+            f"Канал: https://t.me/{clean}\n"
+            f"Юзернейм: @{clean}\n"
+            f"Название: {title}\n"
+            f"Подписчиков: {members:,}\n\n"
+            f"Данный Telegram-канал систематически нарушает Условия использования: {ru_text}. "
+            f"Нарушение носит публичный, постоянный характер и доступно всем пользователям. "
+            f"Требуем немедленного рассмотрения и удаления."
+        ),
+    ]
+
+    _ua_pool = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    ]
+
+    results = []
+    for idx, body in enumerate(bodies):
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=25),
+                headers={
+                    "User-Agent": _ua_pool[idx % len(_ua_pool)],
+                    "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+                },
+            ) as sess:
+                await asyncio.sleep(random.uniform(2.0, 5.0))  # между отправками
+                async with sess.post(
+                    "https://telegram.org/support",
+                    data={"message": body, "technical_info": f"@{clean}", "question_type": "report"},
+                    allow_redirects=True,
+                ) as resp:
+                    ok = resp.status in (200, 201, 302)
+                    results.append(ok)
+                    log.info("abuse_form[%d] status=%d ok=%s target=%s", idx, resp.status, ok, clean)
+        except Exception as e:
+            log.warning("submit_abuse_form[%d]: %s", idx, e)
+            results.append(False)
+
+    return {"ok": any(results), "submitted": sum(results), "total": len(results)}
 
 
-async def _escalate_to_spambot(acc: dict | None, target_username: str) -> bool:
-    """
-    Отправляет жалобу через @SpamBot — официальный механизм Telegram.
-    SpamBot принимает пересланные сообщения и реагирует на /report.
+async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
+    """Эскалация через официальные Telegram-боты: @SpamBot, @notoscam, @stopCA.
+    Пересылает несколько последних сообщений канала в каждый бот.
+    Возвращает dict со статусом по каждому боту.
     """
     if not acc:
-        return False
+        return {"status": "no_account"}
     from services import account_manager
+    clean = target_username.lstrip("@")
+    # Официальные боты приёма жалоб: SpamBot + anti-scam инстанции
+    escalation_bots = ["SpamBot", "notoscam", "stopCA"]
+    results: dict[str, str] = {}
+    client = account_manager._make_client(acc["session_str"], acc)
     try:
-        # Пересылаем сообщение от цели в @SpamBot если есть доступ
-        clean = target_username.lstrip("@")
-        client = account_manager._make_client(acc["session_str"], acc)
+        await asyncio.wait_for(client.connect(), timeout=15)
+        msgs = []
         try:
-            await asyncio.wait_for(client.connect(), timeout=15)
-            # Пробуем получить и переслать одно сообщение в SpamBot
-            msgs = await client.get_messages(clean, limit=1)
-            forwarded = False
-            if msgs:
-                spam_bot = await client.get_entity("SpamBot")
-                await client.forward_messages(spam_bot, msgs[0])
-                forwarded = True
-            await client.disconnect()
-            return forwarded
+            msgs = await asyncio.wait_for(client.get_messages(clean, limit=5), timeout=15)
+            msgs = [m for m in (msgs or []) if m and not m.service]
         except Exception:
-            log_exc_swallow(log, "Сбой операции в _escalate_to_spambot")
+            pass
+        for bot_name in escalation_bots:
             try:
-                await client.disconnect()
-            except Exception:
-                log_exc_swallow(log, "Сбой disconnect клиента в _escalate_to_spambot")
-            return False
+                bot_entity = await asyncio.wait_for(client.get_entity(bot_name), timeout=8)
+                await client.send_message(bot_entity, "/start")
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+                fwd_count = 0
+                for m in msgs[:3]:
+                    try:
+                        await client.forward_messages(bot_entity, m)
+                        fwd_count += 1
+                        await asyncio.sleep(random.uniform(0.8, 1.8))
+                    except Exception:
+                        pass
+                # SpamBot принимает /report после пересылки
+                if bot_name == "SpamBot" and fwd_count > 0:
+                    try:
+                        await asyncio.sleep(1.5)
+                        await client.send_message(bot_entity, "/report")
+                    except Exception:
+                        pass
+                results[bot_name] = "sent" if fwd_count > 0 else "no_msgs"
+                log.info("escalate_spambot: %s → %s fwd=%d target=%s", bot_name, results[bot_name], fwd_count, clean)
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+            except Exception as e:
+                results[bot_name] = f"err:{str(e)[:40]}"
+                log.warning("escalate_spambot[%s] acc=%s: %s", bot_name, acc.get("id"), str(e)[:80])
     except Exception as e:
-        log.warning("_escalate_to_spambot: %s", e)
-        return False
+        log.warning("_escalate_to_spambot connect: %s", e)
+        results["connect"] = f"err:{str(e)[:40]}"
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    sent = sum(1 for v in results.values() if v == "sent")
+    return {"status": "sent" if sent > 0 else "failed", "bots": results, "sent_count": sent}
 
 
 # ── Verification loop ──────────────────────────────────────────────────────────
