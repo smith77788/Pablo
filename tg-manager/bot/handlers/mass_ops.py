@@ -447,7 +447,28 @@ async def cb_mp_confirm(
 
     total = len(targets_with_dialogs)
     if total == 0:
-        await safe_edit(callback, "⚠️ Нет подходящих каналов/групп для рассылки.", reply_markup=_back_menu_kb().as_markup())
+        # Check if user has any managed channels at all
+        try:
+            has_managed = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", callback.from_user.id
+            ) or 0
+        except Exception:
+            has_managed = 0
+        from bot.callbacks import ChanCb as _ChanCb
+        empty_kb = InlineKeyboardBuilder()
+        if has_managed == 0:
+            empty_kb.button(text="📡 Перейти в раздел Каналы", callback_data=_ChanCb(action="menu"))
+        empty_kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
+        empty_kb.adjust(1)
+        hint = (
+            "⚠️ <b>Нет каналов для рассылки</b>\n\n"
+            "Ни один из ваших аккаунтов не состоит в каналах/группах выбранного типа.\n\n"
+            "💡 Сначала создайте или импортируйте канал в разделе <b>📡 Каналы &amp; операции</b>."
+            if has_managed == 0 else
+            "⚠️ Нет подходящих каналов/групп для рассылки.\n\n"
+            "Попробуйте изменить фильтр или тип целей."
+        )
+        await safe_edit(callback, hint, reply_markup=empty_kb.as_markup())
         return
 
     # Log operation to DB if table exists
@@ -1015,13 +1036,51 @@ async def _count_targets(
     target: str, filter_type: str, acc_id: int | None, cluster: str | None,
     pool_name: str | None = None,
 ) -> int:
-    """Estimate number of matching dialogs. Real count requires fetching Telethon dialogs (slow)."""
+    """Estimate number of matching dialogs. Real count requires fetching Telethon dialogs (slow).
+
+    Uses managed_channels as a DB-backed estimate. Returns 0 if no matching accounts.
+    """
     accounts = await _get_accounts_for_filter(pool, owner_id, filter_type, acc_id, cluster, pool_name=pool_name)
     if not accounts:
         return 0
-    # Use managed_channels count from DB as a better estimate than flat multiplier
+    acc_ids = [a["id"] for a in accounts]
+    # Use managed_channels count filtered by matching accounts where possible
     try:
-        if target in ("channels", "both"):
+        if target == "channels":
+            db_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                owner_id, acc_ids,
+            ) or 0
+            if db_count > 0:
+                return db_count
+            # Fallback: all channels for owner regardless of account filter
+            db_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                owner_id,
+            ) or 0
+            if db_count > 0:
+                return db_count
+        elif target == "groups":
+            # managed_channels stores both channels and groups — use same table
+            db_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                owner_id, acc_ids,
+            ) or 0
+            if db_count > 0:
+                return db_count
+            db_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                owner_id,
+            ) or 0
+            if db_count > 0:
+                return db_count
+        elif target == "both":
+            db_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                owner_id, acc_ids,
+            ) or 0
+            if db_count > 0:
+                return db_count
             db_count = await pool.fetchval(
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
                 owner_id,
@@ -1030,6 +1089,7 @@ async def _count_targets(
                 return db_count
     except Exception:
         pass
+    # Last resort: estimate based on account count
     return max(len(accounts), 1) * 3
 
 
