@@ -16,6 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import HealthCb, BotCb, BmCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb, InfraCb
 from bot.utils.op_helpers import safe_edit
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -252,7 +253,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             top3_line = f"\n📊 Топ по надёжности: {labels}"
     except Exception:
-        pass
+        log_exc_swallow(log, f"health_dashboard: top3 trust fetch failed user_id={user_id}")
 
     # Cooldown and problem accounts summary
     extra_alerts: list[str] = []
@@ -264,7 +265,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         if (cooldown_cnt or 0) > 0:
             extra_alerts.append(f"⚠️ {cooldown_cnt} аккаунт{'а' if cooldown_cnt < 5 else 'ов'} на кулдауне")
     except Exception:
-        pass
+        log_exc_swallow(log, f"health_dashboard: cooldown_cnt fetch failed user_id={user_id}")
     try:
         problem_cnt = await pool.fetchval(
             """SELECT COUNT(*) FROM tg_accounts
@@ -275,7 +276,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         if (problem_cnt or 0) > 0:
             extra_alerts.append(f"🚨 {problem_cnt} проблемных аккаунта")
     except Exception:
-        pass
+        log_exc_swallow(log, f"health_dashboard: problem_cnt fetch failed user_id={user_id}")
 
     # Last restriction events (top-3) with severity icons
     restriction_lines: list[str] = []
@@ -294,7 +295,7 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             dt_str = re_row["created_at"].strftime("%d.%m %H:%M") if re_row.get("created_at") else ""
             restriction_lines.append(f"  {sev_icon} <code>{dt_str}</code> {etype}")
     except Exception:
-        pass
+        log_exc_swallow(log, f"health_dashboard: restriction_events fetch failed user_id={user_id}")
 
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"

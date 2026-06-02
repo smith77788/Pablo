@@ -514,7 +514,7 @@ async def cb_mp_confirm(
                 try:
                     await record_success(acc["id"], "publish")
                 except Exception:
-                    pass
+                    log_exc_swallow(log, f"mass_ops: record_success flood_engine failed acc={acc.get('id')}")
         except Exception as e:
             err_count += 1
             step_status = "error"

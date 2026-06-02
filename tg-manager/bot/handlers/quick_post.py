@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 
 import asyncpg
@@ -22,7 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import QuickPostCb
+from bot.callbacks import AssetTplCb, QuickPostCb
 from bot.states import QuickPostFSM
 from bot.handlers.mass_publish import _mpub_bg
 from services import task_registry as _treg
@@ -31,6 +32,10 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _PAGE_SIZE = 8
+
+# Telegram limits
+_TG_CAPTION_LIMIT = 4096
+_TG_BUTTON_LIMIT = 200
 
 _TIMING_OPTIONS: dict[int, str] = {
     5: "⚡ 5 сек (быстро)",

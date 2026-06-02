@@ -17,7 +17,7 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import asyncpg
 from services.logger import log_exc_swallow

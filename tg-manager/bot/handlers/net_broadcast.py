@@ -60,6 +60,118 @@ async def cb_net_bc_lang(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     )
 
 
+def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
+    """Строит клавиатуру выбора ботов с чекбоксами."""
+    kb = InlineKeyboardBuilder()
+    for b in bots:
+        bid = b["bot_id"]
+        label = f"@{b['username']}" if b.get("username") else b.get("first_name", f"Bot {bid}")
+        aud = b.get("audience_count", 0)
+        check = "✅ " if bid in selected else "☐ "
+        kb.button(
+            text=f"{check}{label} ({aud:,} юз.)",
+            callback_data=NetBcCb(action="toggle_bot", bot_id=bid),
+        )
+    has_selected = bool(selected)
+    if has_selected:
+        kb.button(
+            text=f"▶️ Продолжить ({len(selected)} бот(ов))",
+            callback_data=NetBcCb(action="bots_confirmed"),
+        )
+    kb.button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+@router.callback_query(NetBcCb.filter(F.action == "choose_bots"))
+async def cb_net_bc_choose_bots(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    bots = await db.get_bots(pool, callback.from_user.id)
+    if not bots:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
+        await callback.message.edit_text(
+            "❌ <b>Нет ботов</b>\n\nДобавьте хотя бы одного бота для рассылки.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await state.set_state(NetworkBroadcastV2.choosing_bots)
+    await state.update_data(selected_bot_ids=[], segment="selected_bots")
+    total = sum(b.get("audience_count", 0) for b in bots)
+    await callback.message.edit_text(
+        f"🤖 <b>Выбор ботов для рассылки</b>\n\n"
+        f"Выберите ботов (можно несколько). Суммарная аудитория: <b>{total:,}</b>\n\n"
+        "Нажмите на бота чтобы включить/выключить его в рассылку:",
+        parse_mode="HTML",
+        reply_markup=_build_bot_pick_kb(list(bots), []),
+    )
+
+
+@router.callback_query(NetBcCb.filter(F.action == "toggle_bot"))
+async def cb_net_bc_toggle_bot(
+    callback: CallbackQuery,
+    callback_data: NetBcCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    selected: list[int] = list(data.get("selected_bot_ids", []))
+    bid = callback_data.bot_id
+    if bid in selected:
+        selected.remove(bid)
+    else:
+        selected.append(bid)
+    await state.update_data(selected_bot_ids=selected)
+    bots = await db.get_bots(pool, callback.from_user.id)
+    await callback.message.edit_reply_markup(
+        reply_markup=_build_bot_pick_kb(list(bots), selected)
+    )
+
+
+@router.callback_query(NetBcCb.filter(F.action == "bots_confirmed"))
+async def cb_net_bc_bots_confirmed(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    selected: list[int] = data.get("selected_bot_ids", [])
+    if not selected:
+        await callback.answer("Выберите хотя бы одного бота.", show_alert=True)
+        return
+    bots = await db.get_bots(pool, callback.from_user.id)
+    bots_map = {b["bot_id"]: b for b in bots}
+    chosen = [bots_map[bid] for bid in selected if bid in bots_map]
+    total_aud = sum(b.get("audience_count", 0) for b in chosen)
+    names = ", ".join(
+        f"@{b['username']}" if b.get("username") else b.get("first_name", "?")
+        for b in chosen[:5]
+    )
+    if len(chosen) > 5:
+        names += f" и ещё {len(chosen) - 5}"
+
+    await state.update_data(segment="selected_bots")
+    await state.set_state(NetworkBroadcastV2.waiting_message)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetBcCb(action="choose_target"))
+    await callback.message.edit_text(
+        f"📢 <b>Сетевая рассылка — выбранные боты</b>\n\n"
+        f"Боты: <b>{names}</b>\n"
+        f"Аудитория: <b>{total_aud:,}</b>\n\n"
+        "Напишите текст сообщения (HTML поддерживается):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(NetBcCb.filter(F.action == "choose_segment"))
 async def cb_net_bc_segment(
     callback: CallbackQuery,
@@ -146,8 +258,25 @@ async def msg_net_bc_text(
         target_desc = "потерянные (30+ дн) по всей сети"
     elif segment == "lang":
         target_desc = f"язык: {lang} по всей сети"
+    elif segment == "selected_bots":
+        selected_ids: list[int] = data.get("selected_bot_ids", [])
+        bots_map = {b["bot_id"]: b for b in bots}
+        chosen = [bots_map[bid] for bid in selected_ids if bid in bots_map]
+        total = sum(b.get("audience_count", 0) for b in chosen)
+        names = ", ".join(
+            f"@{b['username']}" if b.get("username") else b.get("first_name", "?")
+            for b in chosen[:3]
+        )
+        if len(chosen) > 3:
+            names += f" +{len(chosen) - 3}"
+        target_desc = f"{len(chosen)} бот(ов): {names} ({total:,} юз.)"
     else:
         target_desc = segment
+
+    # Ограничиваем превью длинных сообщений
+    preview_text = message.text or ""
+    if len(preview_text) > 500:
+        preview_text = preview_text[:500] + "...\n<i>[сообщение обрезано для предпросмотра]</i>"
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить", callback_data=NetBcCb(action="confirm"))
@@ -156,8 +285,10 @@ async def msg_net_bc_text(
 
     await message.answer(
         f"📢 <b>Предпросмотр сетевой рассылки</b>\n\n"
-        f"{message.text}\n\n"
-        f"<b>Цель:</b> {target_desc}\n\nЗапустить?",
+        f"{preview_text}\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"<b>Цель:</b> {target_desc}\n\n"
+        f"Запустить рассылку?",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -182,8 +313,8 @@ async def cb_net_bc_confirm(
         return
     await callback.answer()
 
-    bots = await db.get_bots(pool, callback.from_user.id)
-    if not bots:
+    bots_all = await db.get_bots(pool, callback.from_user.id)
+    if not bots_all:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
         await callback.message.edit_text(
@@ -192,10 +323,27 @@ async def cb_net_bc_confirm(
             reply_markup=kb.as_markup(),
         )
         return
+
+    # Если выбраны конкретные боты — фильтруем
+    if segment == "selected_bots":
+        selected_ids: list[int] = data.get("selected_bot_ids", [])
+        bots = [b for b in bots_all if b["bot_id"] in selected_ids]
+        if not bots:
+            kb = InlineKeyboardBuilder()
+            kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+            await callback.message.edit_text(
+                "❌ <b>Боты не выбраны</b>\n\nПожалуйста, выберите хотя бы одного бота.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+    else:
+        bots = bots_all
+
     total_started = 0
     total_users = 0
 
-    if segment == "all_each":
+    if segment in ("all_each", "selected_bots"):
         for bot in bots:
             user_ids = await pool.fetch(
                 "SELECT user_id FROM bot_users WHERE bot_id=$1", bot["bot_id"]
@@ -298,21 +446,38 @@ async def cb_net_bc_confirm(
                 total_users += len(ids)
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="📊 История рассылок", callback_data=NetworkCb(action="menu"))
     kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     if total_started == 0:
+        kb_empty = InlineKeyboardBuilder()
+        kb_empty.button(text="🔄 Выбрать другой сегмент", callback_data=NetBcCb(action="choose_target"))
+        kb_empty.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+        kb_empty.adjust(1)
         await callback.message.edit_text(
             "⚠️ <b>Рассылка не запущена</b>\n\n"
-            "Нет пользователей в выбранном сегменте. "
-            "Попробуйте другой сегмент или подождите пока аудитория накопится.",
+            "Нет пользователей в выбранном сегменте.\n\n"
+            "💡 <i>Попробуйте другой сегмент или подождите пока аудитория накопится в ботах.</i>",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=kb_empty.as_markup(),
         )
     else:
+        segment_label = {
+            "all_each": "Все боты → своей аудитории",
+            "unique": "Уникальные пользователи сети",
+            "cold_all": "Холодные (7–30 дн)",
+            "lost_all": "Потерянные (30+ дн)",
+            "lang": f"По языку: {lang}",
+            "selected_bots": f"Выбранные боты ({total_started} шт.)",
+        }.get(segment, segment)
+
         await callback.message.edit_text(
             f"🚀 <b>Сетевая рассылка запущена!</b>\n\n"
-            f"Ботов задействовано: <b>{total_started}</b>\n"
-            f"Получателей: <b>{total_users:,}</b>\n\n"
-            "Прогресс — в истории рассылок каждого бота.",
+            f"📢 Сегмент: <b>{segment_label}</b>\n"
+            f"🤖 Ботов задействовано: <b>{total_started}</b>\n"
+            f"👥 Получателей: <b>{total_users:,}</b>\n\n"
+            "⏳ Рассылка выполняется в фоне.\n"
+            "Прогресс отображается в истории рассылок каждого бота.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

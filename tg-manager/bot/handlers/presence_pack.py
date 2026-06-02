@@ -197,17 +197,37 @@ async def _render_channel_step(
         callback.from_user.id,
     )
     kb = InlineKeyboardBuilder()
+    if not channels:
+        kb.button(text="➡️ Пропустить (нет каналов)", callback_data=PackCb(action="channels_done"))
+        kb.button(text="◀️ Назад к боту", callback_data=PackCb(action="back_to_bot"))
+        kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "🗂 <b>Presence Pack</b> — Шаг 4/6\n\n"
+            "⚠️ У вас нет импортированных каналов.\n\n"
+            "💡 Добавьте каналы через <b>Infrastructure → Каналы → Импорт из Telegram</b>, "
+            "затем вернитесь сюда.\n\n"
+            "Или продолжите без каналов:",
+            markup=kb.as_markup(),
+        )
+        return
     for ch in channels:
         tick = "✅ " if ch["id"] in selected else ""
         label = (tick + (ch["title"] or ch.get("username") or f"id{ch['id']}")).strip()[:35]
         kb.button(text=label, callback_data=PackCb(action="toggle_ch", pack_id=ch["id"]))
-    kb.button(text=f"➡️ Далее ({len(selected)} выбрано)", callback_data=PackCb(action="channels_done"))
-    kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(2)
+    nav = InlineKeyboardBuilder()
+    nav.button(text=f"➡️ Далее ({len(selected)} выбрано)", callback_data=PackCb(action="channels_done"))
+    nav.button(text="◀️ Назад к боту", callback_data=PackCb(action="back_to_bot"))
+    nav.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
+    nav.adjust(1)
+    kb.attach(nav)
     await _edit(
         callback,
         f"🗂 <b>Presence Pack</b> — Шаг 4/6\n\n"
-        f"Выберите <b>каналы</b> для пакета (выбрано: {len(selected)}):",
+        f"Выберите <b>каналы</b> для пакета (выбрано: {len(selected)}):\n"
+        f"<i>Нажмите на канал чтобы добавить/убрать из пакета</i>",
         markup=kb.as_markup(),
     )
 
@@ -251,18 +271,37 @@ async def _render_group_step(
         callback.from_user.id,
     )
     kb = InlineKeyboardBuilder()
+    if not groups:
+        kb.button(text="➡️ Продолжить без групп", callback_data=PackCb(action="groups_done"))
+        kb.button(text="◀️ Назад к каналам", callback_data=PackCb(action="back_to_channels"))
+        kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
+        kb.adjust(1)
+        await _edit(
+            callback,
+            "🗂 <b>Presence Pack</b> — Шаг 5/6\n\n"
+            "ℹ️ У вас нет импортированных групп.\n\n"
+            "💡 Добавьте группы через <b>Infrastructure → Группы → Импорт из Telegram</b>, "
+            "или продолжите без групп:",
+            markup=kb.as_markup(),
+        )
+        return
     for g in groups:
         tick = "✅ " if g["id"] in selected else ""
         label = (tick + (g["title"] or g.get("username") or "id" + str(g["id"]))).strip()[:35]
         kb.button(text=label, callback_data=PackCb(action="toggle_gr", pack_id=g["id"]))
-    kb.button(text=f"➡️ Далее ({len(selected)} выбрано)", callback_data=PackCb(action="groups_done"))
-    kb.button(text="⏭ Без групп", callback_data=PackCb(action="groups_done"))
-    kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(2)
+    nav = InlineKeyboardBuilder()
+    nav.button(text=f"➡️ Далее ({len(selected)} выбрано)", callback_data=PackCb(action="groups_done"))
+    nav.button(text="⏭ Без групп", callback_data=PackCb(action="groups_done"))
+    nav.button(text="◀️ Назад к каналам", callback_data=PackCb(action="back_to_channels"))
+    nav.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
+    nav.adjust(2, 2)
+    kb.attach(nav)
     await _edit(
         callback,
         f"🗂 <b>Presence Pack</b> — Шаг 5/6\n\n"
-        f"Выберите <b>группы/чаты</b> для пакета (выбрано: {len(selected)}):",
+        f"Выберите <b>группы/чаты</b> для пакета (выбрано: {len(selected)}):\n"
+        f"<i>Нажмите на группу чтобы добавить/убрать из пакета</i>",
         markup=kb.as_markup(),
     )
 
@@ -738,6 +777,27 @@ async def cb_pack_cancel_fsm(callback: CallbackQuery, state: FSMContext, pool: a
     await callback.answer()
     await state.clear()
     await cb_pack_menu(callback, pool)
+
+
+# ── Back navigation within wizard ─────────────────────────────────────────
+
+@router.callback_query(PackCb.filter(F.action == "back_to_bot"))
+async def cb_pack_back_to_bot(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Вернуться к шагу выбора бота из шага каналов."""
+    await callback.answer()
+    await _go_to_bot_step(callback, state, pool)
+
+
+@router.callback_query(PackCb.filter(F.action == "back_to_channels"))
+async def cb_pack_back_to_channels(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Вернуться к шагу каналов из шага групп."""
+    await callback.answer()
+    await state.set_state(PresencePackFSM.selecting_channels)
+    await _render_channel_step(callback, state, pool)
 
 
 # ── Bot Admin Panel ────────────────────────────────────────────────────────

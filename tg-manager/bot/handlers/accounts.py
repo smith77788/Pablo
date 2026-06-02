@@ -1010,7 +1010,7 @@ async def cb_view_account(
             hs_bar = "█" * hs_filled + "░" * (10 - hs_filled)
             health_score_line = f"🩺 Health: [{hs_bar}] {hs:.0f}/100"
     except Exception:
-        pass
+        log_exc_swallow(log, f"accounts: health_score fetch failed acc_id={callback_data.acc_id}")
 
     # Cooldown с человекочитаемым форматом
     cooldown_until = acc.get("cooldown_until")
@@ -1044,7 +1044,7 @@ async def cb_view_account(
             op_icon = "✅" if op_status == "done" else ("❌" if op_status == "error" else "⏳")
             last_op_line = f"📋 Посл. операция: {op_icon} {escape(op_type)} ({op_dt})"
     except Exception:
-        pass
+        log_exc_swallow(log, f"accounts: last_op fetch failed owner={callback.from_user.id}")
 
     # Infrastructure fields (v60)
     tags = acc.get("tags") or []

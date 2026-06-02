@@ -274,7 +274,7 @@ async def run_campaign(
                             # Все аккаунты на кулдауне — ждём немного и продолжаем
                             await asyncio.sleep(30)
                 except Exception:
-                    pass
+                    log_exc_swallow(log, f"dm_engine: cooldown check failed for campaign={campaign.get('id')} user_id={user_id}")
 
         text = expand_spintax(template)
         result = await send_dm(acc["session_str"], user_id, text, _acc=acc)
@@ -377,7 +377,7 @@ async def run_campaign(
                             parse_mode="HTML",
                         )
                     except Exception:
-                        pass
+                        log_exc_swallow(log, f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}")
 
         # Humanized delay
         delay = random.uniform(_MIN_DELAY, _MAX_DELAY)

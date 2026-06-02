@@ -1270,7 +1270,7 @@ async def cb_gp_progress(
             if synced_status:
                 plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
         except Exception:
-            pass
+            log_exc_swallow(log, f"global_presence: sync_plan_status_from_op failed plan_id={plan_id}")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))

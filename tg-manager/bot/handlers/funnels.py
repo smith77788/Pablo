@@ -433,3 +433,267 @@ async def cb_fn_copy_confirm(callback: CallbackQuery, callback_data: FunnelCb,
         reply_markup=funnels_list(callback_data.bot_id, funnels),
     )
     await callback.answer(f"✅ Скопировано {copied} цепочек из {src_label}!", show_alert=True)
+
+
+# ── Copy single funnel to another bot ─────────────────────────────────────
+
+@router.callback_query(FunnelCb.filter(F.action == "copy_single"))
+async def cb_fn_copy_single(callback: CallbackQuery, callback_data: FunnelCb,
+                             pool: asyncpg.Pool) -> None:
+    """Скопировать одну воронку в другой бот."""
+    funnels = await db.get_funnels(pool, callback_data.bot_id)
+    funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
+    if not funnel:
+        await callback.answer("Цепочка не найдена.", show_alert=True)
+        return
+
+    bots = await db.get_bots(pool, callback.from_user.id)
+    others = [b for b in bots if b["bot_id"] != callback_data.bot_id]
+    if not others:
+        await callback.answer(
+            "Нет других ботов. Добавьте второй бот чтобы копировать воронки.", show_alert=True
+        )
+        return
+    await callback.answer()
+
+    kb = InlineKeyboardBuilder()
+    for b in others[:8]:
+        label = f"@{b['username']}" if b.get("username") else (b.get("first_name") or f"id{b['bot_id']}")
+        kb.button(
+            text=f"🤖 {label}",
+            callback_data=FunnelCb(
+                action="copy_single_confirm",
+                bot_id=callback_data.bot_id,
+                funnel_id=callback_data.funnel_id,
+                target_bot_id=b["bot_id"],
+            ),
+        )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=FunnelCb(action="view", bot_id=callback_data.bot_id, funnel_id=callback_data.funnel_id),
+    )
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📋 <b>Копировать воронку «{funnel['name']}»</b>\n\nВыберите бот назначения:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(FunnelCb.filter(F.action == "copy_single_confirm"))
+async def cb_fn_copy_single_confirm(callback: CallbackQuery, callback_data: FunnelCb,
+                                     pool: asyncpg.Pool) -> None:
+    """Выполнить копирование одной воронки."""
+    src_funnel_id = callback_data.funnel_id
+    dst_bot_id = callback_data.target_bot_id
+    dst_bot = await db.get_bot(pool, dst_bot_id, callback.from_user.id)
+    if not dst_bot:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+
+    funnels = await db.get_funnels(pool, callback_data.bot_id)
+    src_funnel = next((f for f in funnels if f["id"] == src_funnel_id), None)
+    if not src_funnel:
+        await callback.answer("Исходная воронка не найдена.", show_alert=True)
+        return
+
+    # Копируем шаги
+    steps = await db.get_funnel_steps(pool, src_funnel_id)
+    new_fn = await db.create_funnel(
+        pool, dst_bot_id,
+        src_funnel["name"] + " (копия)",
+        src_funnel["trigger_type"],
+        src_funnel.get("keyword"),
+    )
+    for s in steps:
+        await db.add_funnel_step(pool, new_fn["id"], s["step_order"], s["message_text"], s["delay_minutes"])
+
+    dst_label = f"@{dst_bot['username']}" if dst_bot.get("username") else (dst_bot.get("first_name") or str(dst_bot_id))
+    await callback.answer(f"✅ Воронка скопирована в {dst_label}!", show_alert=True)
+    await _show_funnel_view(callback.message, pool, callback_data.bot_id, src_funnel_id)
+
+
+# ── Steps management (reorder + delete + preview) ─────────────────────────
+
+@router.callback_query(FunnelCb.filter(F.action == "steps_manage"))
+async def cb_fn_steps_manage(callback: CallbackQuery, callback_data: FunnelCb,
+                              pool: asyncpg.Pool) -> None:
+    """Показать список шагов с кнопками управления."""
+    await callback.answer()
+    steps = await db.get_funnel_steps(pool, callback_data.funnel_id)
+    funnels = await db.get_funnels(pool, callback_data.bot_id)
+    funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
+    if not funnel:
+        await callback.answer("Цепочка не найдена.", show_alert=True)
+        return
+
+    if not steps:
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="◀️ Назад",
+            callback_data=FunnelCb(action="view", bot_id=callback_data.bot_id, funnel_id=callback_data.funnel_id),
+        )
+        await callback.message.edit_text(
+            "📝 <b>Управление шагами</b>\n\nШагов пока нет. Добавьте шаги через кнопку «➕ Добавить шаг».",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = []
+    kb = InlineKeyboardBuilder()
+    for s in steps:
+        delay_label = f"{s['delay_minutes']} мин" if s["delay_minutes"] > 0 else "сразу"
+        num = s["step_order"] + 1
+        lines.append(f"<b>Шаг {num}</b> [{delay_label}]: {s['message_text'][:50]}")
+        # Кнопки управления шагом
+        row_btns = []
+        if s["step_order"] > 0:
+            kb.button(
+                text=f"⬆️ {num}",
+                callback_data=FunnelCb(
+                    action="step_up", bot_id=callback_data.bot_id,
+                    funnel_id=callback_data.funnel_id, step=s["step_order"],
+                ),
+            )
+        if s["step_order"] < len(steps) - 1:
+            kb.button(
+                text=f"⬇️ {num}",
+                callback_data=FunnelCb(
+                    action="step_down", bot_id=callback_data.bot_id,
+                    funnel_id=callback_data.funnel_id, step=s["step_order"],
+                ),
+            )
+        kb.button(
+            text=f"👁 {num}",
+            callback_data=FunnelCb(
+                action="step_preview", bot_id=callback_data.bot_id,
+                funnel_id=callback_data.funnel_id, step=s["step_order"],
+            ),
+        )
+        kb.button(
+            text=f"🗑 {num}",
+            callback_data=FunnelCb(
+                action="step_delete", bot_id=callback_data.bot_id,
+                funnel_id=callback_data.funnel_id, step=s["step_order"],
+            ),
+        )
+
+    kb.button(
+        text="◀️ Назад к воронке",
+        callback_data=FunnelCb(action="view", bot_id=callback_data.bot_id, funnel_id=callback_data.funnel_id),
+    )
+    kb.adjust(1)
+
+    steps_list = "\n".join(f"  {l}" for l in lines)
+    await callback.message.edit_text(
+        f"📝 <b>Управление шагами — «{funnel['name']}»</b>\n\n"
+        f"{steps_list}\n\n"
+        f"⬆️/⬇️ — переместить шаг | 👁 — предпросмотр | 🗑 — удалить",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(FunnelCb.filter(F.action == "step_preview"))
+async def cb_fn_step_preview(callback: CallbackQuery, callback_data: FunnelCb,
+                              pool: asyncpg.Pool) -> None:
+    """Показать полный текст шага."""
+    steps = await db.get_funnel_steps(pool, callback_data.funnel_id)
+    step = next((s for s in steps if s["step_order"] == callback_data.step), None)
+    if not step:
+        await callback.answer("Шаг не найден.", show_alert=True)
+        return
+    await callback.answer()
+    delay_label = f"{step['delay_minutes']} мин" if step["delay_minutes"] > 0 else "сразу"
+    num = step["step_order"] + 1
+    raw = step["message_text"]
+    safe = raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="◀️ Назад к шагам",
+        callback_data=FunnelCb(action="steps_manage", bot_id=callback_data.bot_id, funnel_id=callback_data.funnel_id),
+    )
+    await callback.message.edit_text(
+        f"👁 <b>Предпросмотр шага {num}</b> [задержка: {delay_label}]\n\n"
+        f"<i>Содержимое сообщения:</i>\n\n"
+        f"{safe}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(FunnelCb.filter(F.action == "step_delete"))
+async def cb_fn_step_delete(callback: CallbackQuery, callback_data: FunnelCb,
+                             pool: asyncpg.Pool) -> None:
+    """Удалить шаг из воронки и перенумеровать."""
+    await callback.answer()
+    funnel_id = callback_data.funnel_id
+    step_to_delete = callback_data.step
+    steps = await db.get_funnel_steps(pool, funnel_id)
+
+    # Удаляем шаг и перенумеровываем
+    await pool.execute(
+        "DELETE FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
+        funnel_id, step_to_delete,
+    )
+    # Сдвинуть все шаги после удалённого на -1
+    for s in steps:
+        if s["step_order"] > step_to_delete:
+            await pool.execute(
+                "UPDATE funnel_steps SET step_order=$1 WHERE funnel_id=$2 AND step_order=$3",
+                s["step_order"] - 1, funnel_id, s["step_order"],
+            )
+
+    await callback.answer(f"🗑 Шаг {step_to_delete + 1} удалён", show_alert=False)
+    # Обновить экран управления шагами
+    await cb_fn_steps_manage(callback, callback_data, pool)
+
+
+async def _swap_step_content(pool: asyncpg.Pool, funnel_id: int, order_a: int, order_b: int) -> None:
+    """Обменять содержимое (message_text, delay_minutes) двух шагов по step_order.
+    Так мы избегаем нарушения UNIQUE(funnel_id, step_order)."""
+    row_a = await pool.fetchrow(
+        "SELECT message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
+        funnel_id, order_a,
+    )
+    row_b = await pool.fetchrow(
+        "SELECT message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
+        funnel_id, order_b,
+    )
+    if not row_a or not row_b:
+        return
+    await pool.execute(
+        "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
+        row_b["message_text"], row_b["delay_minutes"], funnel_id, order_a,
+    )
+    await pool.execute(
+        "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
+        row_a["message_text"], row_a["delay_minutes"], funnel_id, order_b,
+    )
+
+
+@router.callback_query(FunnelCb.filter(F.action == "step_up"))
+async def cb_fn_step_up(callback: CallbackQuery, callback_data: FunnelCb,
+                        pool: asyncpg.Pool) -> None:
+    """Переместить шаг вверх (обменять содержимое с предыдущим)."""
+    if callback_data.step == 0:
+        await callback.answer("Шаг уже первый.", show_alert=True)
+        return
+    await callback.answer()
+    await _swap_step_content(pool, callback_data.funnel_id, callback_data.step, callback_data.step - 1)
+    await cb_fn_steps_manage(callback, callback_data, pool)
+
+
+@router.callback_query(FunnelCb.filter(F.action == "step_down"))
+async def cb_fn_step_down(callback: CallbackQuery, callback_data: FunnelCb,
+                          pool: asyncpg.Pool) -> None:
+    """Переместить шаг вниз (обменять содержимое со следующим)."""
+    steps = await db.get_funnel_steps(pool, callback_data.funnel_id)
+    if callback_data.step >= len(steps) - 1:
+        await callback.answer("Шаг уже последний.", show_alert=True)
+        return
+    await callback.answer()
+    await _swap_step_content(pool, callback_data.funnel_id, callback_data.step, callback_data.step + 1)
+    await cb_fn_steps_manage(callback, callback_data, pool)
