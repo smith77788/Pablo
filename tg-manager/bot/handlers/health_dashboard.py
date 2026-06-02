@@ -119,20 +119,50 @@ async def _fetch_account_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
     )
     result = dict(row) if row else {"total": 0, "active": 0, "in_cooldown": 0, "avg_trust": 0,
                                      "critical": 0, "low_trust": 0}
-    # Попробуем получить средний health_score из истории
+    # Попробуем получить средний health_score из истории (24ч и вчера для тренда)
     try:
         hrow = await pool.fetchrow(
-            """SELECT ROUND(AVG(h.health_score)::numeric, 1) AS avg_health
+            """SELECT
+                   ROUND(AVG(h.health_score) FILTER (
+                       WHERE h.recorded_at > now() - INTERVAL '24 hours'
+                   )::numeric, 1) AS avg_health,
+                   ROUND(AVG(h.health_score) FILTER (
+                       WHERE h.recorded_at > now() - INTERVAL '48 hours'
+                         AND h.recorded_at <= now() - INTERVAL '24 hours'
+                   )::numeric, 1) AS avg_health_yesterday
                FROM account_health_history h
                JOIN tg_accounts a ON a.id = h.account_id
                WHERE a.owner_id=$1
-                 AND h.recorded_at > now() - INTERVAL '24 hours'""",
+                 AND h.recorded_at > now() - INTERVAL '48 hours'""",
             owner_id,
         )
         result["avg_health"] = float(hrow["avg_health"] or 0) if hrow else 0.0
+        result["avg_health_yesterday"] = (
+            float(hrow["avg_health_yesterday"]) if hrow and hrow["avg_health_yesterday"] is not None else None
+        )
     except Exception:
         result["avg_health"] = 0.0
+        result["avg_health_yesterday"] = None
     return result
+
+
+def _human_cooldown(cooldown_until: datetime, now: datetime) -> str:
+    """Вернуть читаемое время до конца кулдауна (например 'через 2ч 15м')."""
+    diff = cooldown_until.replace(tzinfo=timezone.utc) - now
+    total_secs = max(0, int(diff.total_seconds()))
+    if total_secs <= 0:
+        return "скоро"
+    hours = total_secs // 3600
+    minutes = (total_secs % 3600) // 60
+    if hours >= 24:
+        days = hours // 24
+        rem_h = hours % 24
+        if rem_h:
+            return f"через {days}д {rem_h}ч"
+        return f"через {days}д"
+    if hours:
+        return f"через {hours}ч {minutes}м"
+    return f"через {minutes}м"
 
 
 async def _fetch_flood_events_7d(pool: asyncpg.Pool, owner_id: int) -> int:
@@ -156,13 +186,25 @@ async def _fetch_flood_events_7d(pool: asyncpg.Pool, owner_id: int) -> int:
 async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
+    now = datetime.now(timezone.utc)
 
     stats = await _fetch_account_stats(pool, user_id)
     flood_7d = await _fetch_flood_events_7d(pool, user_id)
 
-    # Health score bar
-    avg_health = stats.get("avg_health", 0)
-    health_bar = "█" * int(avg_health / 10) + "░" * (10 - int(avg_health / 10)) if avg_health else "—"
+    # Health score bar + trend vs yesterday
+    avg_health = stats.get("avg_health", 0.0)
+    avg_health_yesterday = stats.get("avg_health_yesterday")
+    health_bar = "█" * int(avg_health / 10) + "░" * (10 - int(avg_health / 10)) if avg_health else "░" * 10
+    if avg_health_yesterday is not None:
+        delta = avg_health - avg_health_yesterday
+        if delta >= 2:
+            health_trend = f" ↑ +{delta:.0f} vs вчера"
+        elif delta <= -2:
+            health_trend = f" ↓ {delta:.0f} vs вчера"
+        else:
+            health_trend = " → без изменений"
+    else:
+        health_trend = ""
 
     # Infrastructure Pressure Score
     from services import infra_pressure
@@ -172,6 +214,10 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     p_label = pressure_data.get("level_label", "Норма")
     p_bar_filled = round(p_score / 10)
     p_bar = "█" * p_bar_filled + "░" * (10 - p_bar_filled)
+    # Рекомендация при высоком давлении
+    pressure_tip = ""
+    if p_score > 70:
+        pressure_tip = "\n💡 <i>Добавьте аккаунты или снизьте нагрузку</i>"
 
     # Pool and tag diversity
     from database import db as _db
@@ -231,10 +277,29 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception:
         pass
 
+    # Last restriction events (top-3) with severity icons
+    restriction_lines: list[str] = []
+    try:
+        re_rows = await pool.fetch(
+            """SELECT severity, event_type, created_at
+               FROM restriction_events WHERE owner_id=$1
+               ORDER BY created_at DESC LIMIT 3""",
+            user_id,
+        )
+        _sev_icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
+        for re_row in re_rows:
+            sev = re_row.get("severity") or "info"
+            sev_icon = _sev_icons.get(sev, "🔔")
+            etype = html.escape(re_row.get("event_type") or "event")
+            dt_str = re_row["created_at"].strftime("%d.%m %H:%M") if re_row.get("created_at") else ""
+            restriction_lines.append(f"  {sev_icon} <code>{dt_str}</code> {etype}")
+    except Exception:
+        pass
+
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"
-        f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
-        f"🌡 Давление: {p_emoji} <b>{p_score}/100</b> — {p_label}  [{p_bar}]\n"
+        f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]{health_trend}\n"
+        f"🌡 Давление: {p_emoji} <b>{p_score}/100</b> — {p_label}  [{p_bar}]{pressure_tip}\n"
         f"🏊 Пулов: <b>{pool_count}</b> | 🏷 Тегов: <b>{tag_count}</b>\n"
         f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
         f"⭐ Средняя надёжность: <b>{stats['avg_trust']}</b>\n"
@@ -252,6 +317,9 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         text += "\n" + "  ".join(extra_alerts)
     text += f"\n📋 Блокировок за 7д: <b>{flood_7d}</b>"
 
+    if restriction_lines:
+        text += "\n\n🔔 <b>Последние события:</b>\n" + "\n".join(restriction_lines)
+
     kb = InlineKeyboardBuilder()
     kb.button(text="📱 Аккаунты",       callback_data=HealthCb(action="accounts"))
     kb.button(text="🤖 Боты",           callback_data=HealthCb(action="bots_health"))
@@ -266,9 +334,13 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🎯 Советник",       callback_data=HealthCb(action="advisor"))
     kb.button(text="🔄 Авто-балансировка", callback_data=InfraCb(action="rebalance_preview"))
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
+    # ── Секция Действия ──
+    kb.button(text="🔄 Переподключить аккаунты", callback_data=HealthCb(action="reconnect_menu"))
+    kb.button(text="📊 Детальный лог",   callback_data=HealthCb(action="flood_log"))
+    kb.button(text="⚠️ Кулдаун вручную", callback_data=HealthCb(action="set_cooldown_menu"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 3, 1, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())
 
@@ -317,8 +389,9 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             tags_str = f" | 🏷 {', '.join(tags_list[:3])}" if tags_list else ""
 
             if flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
-                time_str = flood_until.strftime("%H:%M")
-                lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b>{hs_str}{pool_str}{tags_str}")
+                human_cd = _human_cooldown(flood_until, now)
+                time_str = flood_until.strftime("%d.%m %H:%M")
+                lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b> ({human_cd}){hs_str}{pool_str}{tags_str}")
             elif trust < 0.5:
                 lines.append(
                     f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}{pool_str}{tags_str}"
@@ -1221,4 +1294,126 @@ async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Назад",   callback_data=HealthCb(action="menu"))
     kb.adjust(*([min(len(action_cbs), 3)] if action_cbs else []), 2, 1)
     await safe_edit(callback, text, reply_markup=kb.as_markup())
+
+
+# ── Actions: Reconnect menu ────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "reconnect_menu"))
+async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Список аккаунтов с неактивными сессиями для переподключения."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        """SELECT id, phone, first_name, username,
+                  COALESCE(acc_status, 'active') AS acc_status, is_active
+           FROM tg_accounts WHERE owner_id=$1
+           ORDER BY is_active ASC, acc_status DESC""",
+        user_id,
+    )
+    if not rows:
+        kb = _back_kb()
+        await safe_edit(callback, "📱 Нет подключённых аккаунтов.", reply_markup=kb.as_markup())
+        return
+
+    lines = ["🔄 <b>Переподключение аккаунтов</b>\n",
+             "Выберите аккаунт для переподключения (релог):\n"]
+
+    kb = InlineKeyboardBuilder()
+    from bot.callbacks import AccCb
+    for acc in rows:
+        st = acc["acc_status"]
+        active = acc["is_active"]
+        name = acc.get("username") or acc.get("first_name") or acc.get("phone") or f"id{acc['id']}"
+        status_icon = "✅" if active and st == "active" else ("🔑" if st == "session_expired" else "⚠️")
+        kb.button(
+            text=f"{status_icon} {html.escape(name[:20])} — {st}",
+            callback_data=AccCb(action="relog", acc_id=acc["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+# ── Actions: Set cooldown menu ─────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "set_cooldown_menu"))
+async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Выбор аккаунта для ручной установки кулдауна."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    rows = await pool.fetch(
+        """SELECT id, phone, first_name, username, cooldown_until, is_active
+           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE
+           ORDER BY phone""",
+        user_id,
+    )
+    if not rows:
+        kb = _back_kb()
+        await safe_edit(callback, "📱 Нет активных аккаунтов.", reply_markup=kb.as_markup())
+        return
+
+    now = datetime.now(timezone.utc)
+    lines = ["⚠️ <b>Установить кулдаун</b>\n",
+             "Выберите аккаунт — будет установлен кулдаун 24 часа:\n"]
+
+    kb = InlineKeyboardBuilder()
+    for acc in rows:
+        name = acc.get("username") or acc.get("first_name") or acc.get("phone") or f"id{acc['id']}"
+        cd_until = acc.get("cooldown_until")
+        if cd_until:
+            cd_aware = cd_until if cd_until.tzinfo else cd_until.replace(tzinfo=timezone.utc)
+            if cd_aware > now:
+                cd_label = f" [кулдаун {_human_cooldown(cd_aware, now)}]"
+            else:
+                cd_label = ""
+        else:
+            cd_label = ""
+        kb.button(
+            text=f"⏸ {html.escape(name[:20])}{cd_label}",
+            callback_data=HealthCb(action="set_cooldown_confirm", page=acc["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+@router.callback_query(HealthCb.filter(F.action == "set_cooldown_confirm"))
+async def cb_set_cooldown_confirm(callback: CallbackQuery, callback_data: HealthCb, pool: asyncpg.Pool) -> None:
+    """Устанавливает кулдаун 24ч на выбранный аккаунт."""
+    await callback.answer()
+    user_id = callback.from_user.id
+    acc_id = callback_data.page  # используем page как acc_id
+
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    cd_until = now + timedelta(hours=24)
+
+    await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until=$1 WHERE id=$2 AND owner_id=$3",
+        cd_until, acc_id, user_id,
+    )
+
+    acc = await pool.fetchrow("SELECT phone, first_name, username FROM tg_accounts WHERE id=$1", acc_id)
+    name = "—"
+    if acc:
+        name = acc.get("username") or acc.get("first_name") or acc.get("phone") or f"id{acc_id}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ Ещё кулдаун", callback_data=HealthCb(action="set_cooldown_menu"))
+    kb.button(text="◀️ К дашборду", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+
+    await safe_edit(
+        callback,
+        f"✅ <b>Кулдаун установлен</b>\n\n"
+        f"Аккаунт <b>{html.escape(name)}</b>\n"
+        f"Кулдаун до: <b>{cd_until.strftime('%d.%m.%Y %H:%M')} UTC</b>\n"
+        f"(через 24 часа)\n\n"
+        "<i>Аккаунт не будет использоваться в операциях до снятия кулдауна.</i>",
+        reply_markup=kb.as_markup(),
+    )
 

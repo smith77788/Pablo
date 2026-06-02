@@ -205,6 +205,9 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         days_left = max(target_days - current_day, 0)
         eta_str = f"⏳ Осталось: {days_left} дн." if days_left > 0 else "🏁 Завершается"
 
+        # Статус разогрева: активный / завершён
+        plan_status_emoji = "🟢" if plan.get("status") == "active" else "🏁"
+
         # Next session: last_action_at + 24h (warmup runs every ~24h)
         last_run = plan.get("last_action_at")
         if last_run:
@@ -222,25 +225,41 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
             next_str = "⏰ Следующий сеанс: ещё не запускался"
             last_str = ""
 
+        # Статус trust score (если есть в плане)
+        trust_val = plan.get("trust_score")
+        trust_str = ""
+        if trust_val is not None:
+            ts = float(trust_val)
+            filled = min(8, round(ts * 8))
+            trust_bar = "█" * filled + "░" * (8 - filled)
+            trust_str = f"\n  ⭐ Trust: [{trust_bar}] {ts:.2f}"
+
         lines.append(
-            f"• <b>{html.escape(label)}</b>\n"
+            f"{plan_status_emoji} <b>{html.escape(label)}</b>\n"
             f"  [{bar}] День {current_day}/{target_days} ({pct}%)\n"
-            f"  Режим: {plan['plan_type']} | {plan['daily_actions']} действий/день\n"
+            f"  Режим: <b>{plan['plan_type']}</b> | {plan['daily_actions']} действий/день\n"
             f"  {eta_str}\n"
             f"  {next_str}"
             f"{last_str}"
+            f"{trust_str}"
         )
+        # Кнопки: Лог + Запустить сейчас + Остановить
         kb.button(
-            text=f"📋 Лог {label[:12]}",
+            text=f"📋 Лог {label[:10]}",
             callback_data=WarmupCb(action="plan_log", plan_id=plan["id"], account_id=plan["account_id"]),
         )
         kb.button(
-            text=f"🗑 Удалить {label[:12]}",
+            text=f"▶️ Запуск {label[:10]}",
+            callback_data=WarmupCb(action="run_one", plan_id=plan["id"], account_id=plan["account_id"]),
+        )
+        kb.button(
+            text=f"🗑 Удалить {label[:10]}",
             callback_data=WarmupCb(action="delete_plan", plan_id=plan["id"]),
         )
 
+    kb.button(text="▶️ Запустить все сейчас", callback_data=WarmupCb(action="run_now"))
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
-    kb.adjust(2)
+    kb.adjust(3)
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -298,6 +317,51 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         "🌡 <b>Сеанс разогрева завершён</b>\n\n" + "\n".join(results),
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
+    )
+
+
+# ── Запуск разогрева для конкретного аккаунта ────────────────────────────────
+
+
+@router.callback_query(WarmupCb.filter(F.action == "run_one"))
+async def cb_warmup_run_one(
+    callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
+) -> None:
+    """Запускает один цикл разогрева для выбранного плана."""
+    await callback.answer("⏳ Запускаю...")
+    from services.account_warmer import get_active_plans, run_daily_warmup
+
+    plan_id = callback_data.plan_id
+    acc_id = callback_data.account_id
+
+    # Получаем конкретный план
+    plans = await get_active_plans(pool, callback.from_user.id)
+    plan = next((p for p in plans if p["id"] == plan_id), None)
+
+    if not plan:
+        await callback.message.edit_text(
+            "⚠️ План не найден или уже завершён.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    label = plan.get("first_name") or plan.get("phone") or str(acc_id)
+    res = await run_daily_warmup(pool, plan)
+    status = "✅" if res["actions_ok"] > 0 else "⚠️"
+    completed_str = " 🏁 <b>Разогрев завершён!</b>" if res.get("completed") else ""
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Лог разогрева", callback_data=WarmupCb(action="plan_log", plan_id=plan_id, account_id=acc_id))
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="active_plans"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🌡 <b>Сеанс разогрева: {html.escape(label)}</b>\n\n"
+        f"{status} Выполнено: <b>{res['actions_ok']}/{res['actions_done']}</b> действий успешно"
+        f"{completed_str}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

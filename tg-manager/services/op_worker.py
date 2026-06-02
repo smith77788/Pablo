@@ -438,6 +438,20 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
             owner_id,
         )
 
+    if not accounts:
+        log.warning("op_worker mass_publish #%d: no active accounts for owner=%d", op_id, owner_id)
+        await pool.execute(
+            "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+            "VALUES($1,1,'system','error','no active accounts found')",
+            op_id,
+        )
+        return {
+            "status": "failed",
+            "sent": 0,
+            "failed": 0,
+            "summary": "Нет активных аккаунтов для публикации",
+        }
+
     total_sent = 0
     total_failed = 0
 
@@ -449,6 +463,12 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
         try:
             dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc_dict)
             channels = [d for d in (dialogs or []) if d.get("type") in ("channel", "megagroup", "gigagroup")]
+
+            if not channels:
+                log.info(
+                    "op_worker mass_publish #%d: acc=%s has no channels — skipping",
+                    op_id, acc_dict.get("phone", acc_dict.get("id")),
+                )
 
             for ch in channels:
                 if await _is_cancelled(pool, op_id):
@@ -524,8 +544,19 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
             total_failed += gap
             log.warning("op_worker mass_publish #%d: synced done_items (+%d unaccounted)", op_id, gap)
 
+    if total_sent == 0 and total_failed == 0:
+        # No channels found across all accounts
+        log.warning("op_worker mass_publish #%d: no channels found for any account (owner=%d)", op_id, owner_id)
+        return {
+            "status": "failed",
+            "sent": 0,
+            "failed": 0,
+            "summary": "Нет каналов для публикации. Проверьте подключение аккаунтов и наличие каналов/групп.",
+        }
+
+    final_status = "done" if total_failed == 0 else ("failed" if total_sent == 0 else "done")
     return {
-        "status": "done",
+        "status": final_status,
         "sent": total_sent,
         "failed": total_failed,
         "summary": f"Отправлено: {total_sent}, ошибок: {total_failed}",
