@@ -19,6 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ProxyCb, BotCb, BmCb
 from bot.states import AddProxyFSM
+from database import db
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -161,6 +162,19 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             lines.append(
                 f"{status} <code>{html.escape(label)}</code> [{ptype}]{lat}{geo}"
             )
+            # Show quality stats from proxy_quality_log (7 days)
+            try:
+                qstats = await db.get_proxy_quality_stats(pool, row["id"])
+                if qstats and qstats.get("total", 0) > 0:
+                    s_ok = qstats.get("successes", 0)
+                    s_fail = qstats.get("failures", 0)
+                    avg_lat = qstats.get("avg_latency")
+                    avg_lat_str = f" / ⚡ avg {avg_lat}ms" if avg_lat else ""
+                    lines.append(
+                        f"   📊 За 7 дней: ✅ {s_ok} успехов / ❌ {s_fail} ошибок{avg_lat_str}"
+                    )
+            except Exception:
+                log_exc_swallow(log, "Не удалось получить статистику качества прокси")
             kb.button(
                 text=f"🗑 {html.escape(label[:22])}",
                 callback_data=ProxyCb(action="delete", proxy_id=row["id"]),
@@ -364,6 +378,12 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 )
             except Exception:
                 log_exc_swallow(log, "Не удалось сохранить запись в proxy_health_log")
+            # Log to proxy_quality_log (Proxy Intelligence)
+            try:
+                error_msg = None if alive else "Недоступен"
+                await db.log_proxy_quality(pool, row["id"], latency_ms, alive, error_msg)
+            except Exception:
+                log_exc_swallow(log, "Не удалось сохранить запись в proxy_quality_log")
 
     lines.append(f"\n✅ Рабочих: <b>{ok_count}</b> | ❌ Нерабочих: <b>{fail_count}</b>")
     await progress_msg.edit_text(
