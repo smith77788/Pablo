@@ -22,6 +22,8 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import InfraCb
+from services import infra_pressure
+from database import db as _db
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -63,6 +65,18 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         uid,
     ) or 0
 
+    # Infrastructure Pressure Score
+    pressure = await infra_pressure.compute_pressure(pool, uid)
+    p_emoji = pressure.get("level_emoji", "🟢")
+    p_score = pressure.get("score", 0)
+    p_label = pressure.get("level_label", "Норма")
+
+    # Distinct pools count
+    pool_count = await pool.fetchval(
+        "SELECT COUNT(DISTINCT pool) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL",
+        uid,
+    ) or 0
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🗂️ Реестр ассетов",         callback_data=InfraCb(action="asset_registry"))
     kb.button(text="❤️ Здоровье аккаунтов",    callback_data=InfraCb(action="health"))
@@ -77,7 +91,9 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"🤖 Активных аккаунтов: <b>{acc_total}</b>\n"
         f"⚡ Flood событий (24ч): <b>{floods_24h}</b>\n"
         f"⚙️ Операций сегодня: <b>{ops_today}</b>\n"
-        f"🌡 Разогревается: <b>{warmup_active}</b>\n\n"
+        f"🌡 Разогревается: <b>{warmup_active}</b>\n"
+        f"🏊 Пулов: <b>{pool_count}</b>\n\n"
+        f"{p_emoji} Давление инфраструктуры: <b>{p_score}/100</b> — {p_label}\n\n"
         "Выберите раздел для детального просмотра:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -122,6 +138,22 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     if len(accounts) > 15:
         lines.append(f"\n<i>...и ещё {len(accounts)-15} аккаунтов</i>")
+
+    # Per-pool breakdown
+    pool_rows = await pool.fetch(
+        """SELECT pool, COUNT(*) AS cnt, AVG(trust_score) AS avg_trust
+           FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=TRUE
+           GROUP BY pool
+           ORDER BY pool""",
+        uid,
+    )
+    if pool_rows:
+        lines.append("\n<b>📊 По пулам:</b>")
+        for pr in pool_rows:
+            pool_name = pr["pool"] or "<i>без пула</i>"
+            avg_t = float(pr["avg_trust"] or 0)
+            lines.append(f"  🏊 {pool_name}: {pr['cnt']} акк, avg trust={avg_t:.2f}")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -214,15 +246,36 @@ async def cb_infra_audit(
         "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1", uid
     ) or 0
 
+    # Bad proxies (success_rate < 50%)
+    bad_proxy_count = 0
+    try:
+        bad_proxy_count = await pool.fetchval(
+            """SELECT COUNT(DISTINCT up.id)
+               FROM user_proxies up
+               JOIN (
+                   SELECT proxy_id,
+                          SUM(CASE WHEN success THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) AS success_rate
+                   FROM proxy_quality_log
+                   GROUP BY proxy_id
+               ) q ON q.proxy_id = up.id
+               WHERE up.owner_id=$1 AND q.success_rate < 0.5""",
+            uid,
+        ) or 0
+    except Exception:
+        pass
+
     if not rows:
+        proxy_warn = f"\n⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>" if bad_proxy_count > 0 else ""
         await callback.message.edit_text(
-            "📋 <b>Лог операций пуст</b>",
+            f"📋 <b>Лог операций пуст</b>{proxy_warn}",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
     lines = [f"📋 <b>Лог операций</b> (всего: {total:,})\n"]
+    if bad_proxy_count > 0:
+        lines.append(f"⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>\n")
     for r in rows:
         icon = {"success": "✅", "error": "❌", "flood_wait": "⏳", "banned": "🚫"}.get(r["result"], "❓")
         acc_label = html.escape(r.get("first_name") or r.get("phone") or "?")
