@@ -31,6 +31,15 @@ def _fn_back_cancel_kb(bot_id: int, back_action: str) -> object:
     return kb.as_markup()
 
 
+async def _owns_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) -> bool:
+    return bool(await pool.fetchval(
+        """SELECT 1 FROM funnels f
+           JOIN managed_bots b ON b.bot_id = f.bot_id
+           WHERE f.id=$1 AND b.added_by=$2""",
+        funnel_id, user_id,
+    ))
+
+
 async def _show_funnel_view(message: Message, pool: asyncpg.Pool,
                              bot_id: int, funnel_id: int) -> None:
     """Helper: fetch funnel + steps and edit/send view message."""
@@ -669,8 +678,11 @@ async def cb_fn_step_preview(callback: CallbackQuery, callback_data: FunnelCb,
 async def cb_fn_step_delete(callback: CallbackQuery, callback_data: FunnelCb,
                              pool: asyncpg.Pool) -> None:
     """Удалить шаг из воронки и перенумеровать."""
-    await callback.answer()
     funnel_id = callback_data.funnel_id
+    if not await _owns_funnel(pool, funnel_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
     step_to_delete = callback_data.step
     steps = await db.get_funnel_steps(pool, funnel_id)
 
@@ -719,6 +731,9 @@ async def _swap_step_content(pool: asyncpg.Pool, funnel_id: int, order_a: int, o
 async def cb_fn_step_up(callback: CallbackQuery, callback_data: FunnelCb,
                         pool: asyncpg.Pool) -> None:
     """Переместить шаг вверх (обменять содержимое с предыдущим)."""
+    if not await _owns_funnel(pool, callback_data.funnel_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     if callback_data.step == 0:
         await callback.answer("Шаг уже первый.", show_alert=True)
         return
@@ -731,6 +746,9 @@ async def cb_fn_step_up(callback: CallbackQuery, callback_data: FunnelCb,
 async def cb_fn_step_down(callback: CallbackQuery, callback_data: FunnelCb,
                           pool: asyncpg.Pool) -> None:
     """Переместить шаг вниз (обменять содержимое со следующим)."""
+    if not await _owns_funnel(pool, callback_data.funnel_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     steps = await db.get_funnel_steps(pool, callback_data.funnel_id)
     if callback_data.step >= len(steps) - 1:
         await callback.answer("Шаг уже последний.", show_alert=True)

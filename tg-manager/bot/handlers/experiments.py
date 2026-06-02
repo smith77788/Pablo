@@ -49,6 +49,15 @@ def _z_test_two_proportions(n_a: int, c_a: int, n_b: int, c_b: int) -> tuple[flo
     return z, label
 
 
+async def _owns_experiment(pool: asyncpg.Pool, exp_id: int, user_id: int) -> bool:
+    return bool(await pool.fetchval(
+        """SELECT 1 FROM experiments e
+           JOIN managed_bots b ON b.bot_id = e.bot_id
+           WHERE e.id=$1 AND b.added_by=$2""",
+        exp_id, user_id,
+    ))
+
+
 async def _exp_text(exp, variants: list) -> str:
     status_label = {"draft": "📝 Черновик", "active": "🟢 Активен", "paused": "⏸ Пауза", "completed": "✅ Завершён"}
     type_label = {"start_message": "/start сообщение", "auto_reply": "Авто-ответ", "funnel": "Воронка"}
@@ -259,6 +268,9 @@ async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "start"))
 async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
                         pool: asyncpg.Pool) -> None:
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     await callback.answer()
     # Guard: don't start if already active
     exp = await db.get_experiment(pool, callback_data.exp_id)
@@ -292,6 +304,9 @@ async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "pause"))
 async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
                         pool: asyncpg.Pool) -> None:
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     await callback.answer("⏸ Эксперимент приостановлен.")
     await db.set_experiment_status(pool, callback_data.exp_id, "paused")
     exp = await db.get_experiment(pool, callback_data.exp_id)
@@ -306,6 +321,9 @@ async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "resume"))
 async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     await callback.answer("▶️ Эксперимент возобновлён.")
     await db.set_experiment_status(pool, callback_data.exp_id, "active")
     exp = await db.get_experiment(pool, callback_data.exp_id)
@@ -337,6 +355,9 @@ async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
 @router.callback_query(ExperimentCb.filter(F.action == "set_winner"))
 async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
                          pool: asyncpg.Pool) -> None:
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     await callback.answer("🏆 Победитель выбран! Эксперимент завершён.", show_alert=True)
     await pool.execute(
         "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
