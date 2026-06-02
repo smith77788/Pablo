@@ -260,8 +260,6 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         new_state = not get_free_mode()
         set_free_mode(new_state)
         await db.set_platform_setting(pool, "free_mode", "true" if new_state else "false")
-        status = "включён ✅ — все функции бесплатны" if new_state else "выключен ⛔ — стандартные тарифы"
-        await callback.answer(f"🆓 Free Mode {status}", show_alert=True)
         await _show_admin_main(callback, pool, edit=True)
 
     elif action == "block_ask":
