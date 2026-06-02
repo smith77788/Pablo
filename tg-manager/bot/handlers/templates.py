@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 import aiohttp
-from bot.callbacks import TemplateCb
+from bot.callbacks import TemplateCb, BotCb
 from bot.keyboards import (
     templates_list,
     template_actions,
@@ -98,11 +98,15 @@ async def cb_template_add(
 ) -> None:
     await callback.answer()
     await state.set_state(AddTemplate.waiting_name)
-    await state.update_data(bot_id=callback_data.bot_id)
+    bot_id = callback_data.bot_id
+    await state.update_data(bot_id=bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
     await callback.message.edit_text(
         "📝 <b>Новый шаблон — шаг 1/2</b>\n\n"
         "Введите название шаблона (например: <i>Акция</i>, <i>Приветствие</i>):",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -119,6 +123,10 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(name=name)
     await state.set_state(AddTemplate.waiting_text)
+    data = await state.get_data()
+    _bot_id = data.get("bot_id", 0)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id))
     await message.answer(
         "📝 <b>Новый шаблон — шаг 2/2</b>\n\n"
         "Напишите текст сообщения.\n\n"
@@ -126,6 +134,7 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
         "<code>&lt;i&gt;курсив&lt;/i&gt;</code>, "
         "<code>&lt;a href=...&gt;ссылка&lt;/a&gt;</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -328,8 +337,11 @@ async def cb_template_ai_gen(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
     await callback.answer()
+    bot_id = callback_data.bot_id
     await state.set_state(AiTemplateGenFSM.waiting_prompt)
-    await state.update_data(bot_id=callback_data.bot_id)
+    await state.update_data(bot_id=bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
     await callback.message.edit_text(
         "✨ <b>AI-генерация шаблона</b>\n\n"
         "Опишите, что должно быть в шаблоне.\n\n"
@@ -339,6 +351,7 @@ async def cb_template_ai_gen(
         "• <i>Напоминание о вебинаре завтра в 19:00, тема: продажи</i>\n\n"
         "Просто опишите своими словами — AI напишет готовый текст.",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -396,9 +409,12 @@ async def cb_template_ai_regen(
         await callback.answer()
         await state.set_state(AiTemplateGenFSM.waiting_prompt)
         await state.update_data(bot_id=bot_id)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
         await callback.message.edit_text(
             "✨ <b>AI-генерация шаблона</b>\n\nОпишите шаблон заново:",
             parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
@@ -442,9 +458,12 @@ async def cb_template_ai_save(
     await callback.answer()
     await state.set_state(AiTemplateGenFSM.waiting_name)
     await state.update_data(bot_id=bot_id, generated_text=generated_text)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
     await callback.message.edit_text(
         "💾 <b>Сохранение шаблона</b>\n\nВведите название для этого шаблона:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
