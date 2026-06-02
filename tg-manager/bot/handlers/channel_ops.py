@@ -1536,7 +1536,7 @@ async def fsm_edit_value(message: Message, state: FSMContext, pool: asyncpg.Pool
     await state.clear()
     acc = await db.get_account_for_telethon(pool, data.get("acc_id"), message.from_user.id)
     if not acc:
-        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
+        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     field = data["field"]
@@ -3187,7 +3187,7 @@ async def cb_br_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncp
     chosen = [dict(a) for a in accounts if a["id"] in selected_ids and a["is_active"]]
 
     if not chosen:
-        await callback.message.edit_text("⚠️ Нет выбранных аккаунтов.", parse_mode="HTML")
+        await callback.message.edit_text("⚠️ Нет выбранных аккаунтов.", parse_mode="HTML", reply_markup=_back_kb().as_markup())
         return
 
     from services import strike_engine
@@ -4390,7 +4390,7 @@ async def cb_bulk_chan_exec(
     await state.clear()
 
     if not selected_ids or not value or op not in ("chan_uname", "chan_about"):
-        await callback.message.edit_text("⚠️ Данные операции устарели. Начните заново: /ops")
+        await callback.message.edit_text("⚠️ Данные операции устарели. Начните заново: /ops", reply_markup=_back_kb().as_markup())
         return
 
     base_uname = value.lstrip("@") if op == "chan_uname" else ""
