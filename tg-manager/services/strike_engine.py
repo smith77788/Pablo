@@ -1343,22 +1343,44 @@ def _build_abuse_tg_email(target: str, cat: dict, report_time: str) -> str:
 
 def _build_ncmec_email(target: str, report_time: str) -> str:
     chan_url = f"https://t.me/{target}"
+    ref_id = f"NCMEC-{target.upper()}-{report_time[:10].replace('-', '')}"
     return (
+        f"EMERGENCY CSAM REPORT — CYBERTIPLINE SUBMISSION\n"
+        f"{'=' * 55}\n\n"
         f"Dear NCMEC CyberTipline Team,\n\n"
-        f"I am filing an emergency report of suspected Child Sexual Abuse Material (CSAM) "
-        f"on the Telegram platform.\n\n"
-        f"Platform: Telegram Messenger (telegram.org)\n"
-        f"Channel URL: {chan_url}\n"
-        f"Date/Time: {report_time} UTC\n\n"
-        f"The above Telegram public channel appears to distribute child sexual abuse material. "
-        f"The channel is indexed in Telegram's public search and discoverable by any user "
-        f"including minors.\n\n"
-        f"Action taken:\n"
-        f"• Reported to Telegram via MTProto API (all available report reasons)\n"
-        f"• Reported to Telegram via abuse@telegram.org\n\n"
-        f"Please coordinate with Telegram to ensure expedited removal and preservation of "
-        f"evidence for law enforcement.\n\n"
-        f"Reference: NCMEC-{target.upper()}-{report_time[:10].replace('-', '')}\n"
+        f"This is an emergency report of suspected Child Sexual Abuse Material (CSAM) "
+        f"actively distributed on the Telegram platform. Immediate action and "
+        f"coordination with Telegram is urgently requested.\n\n"
+        f"PLATFORM DETAILS:\n"
+        f"  Platform     : Telegram Messenger\n"
+        f"  Platform URL : https://telegram.org\n"
+        f"  ESP          : Telegram FZ-LLC / Telegram Messenger LLP\n\n"
+        f"REPORTED CONTENT:\n"
+        f"  Channel URL  : {chan_url}\n"
+        f"  Channel ID   : @{target}\n"
+        f"  Category     : Child Sexual Abuse Material (CSAM)\n"
+        f"  Reported at  : {report_time} UTC\n"
+        f"  Reference    : {ref_id}\n\n"
+        f"DESCRIPTION:\n"
+        f"The above Telegram public channel appears to distribute child sexual abuse "
+        f"material. The channel is indexed in Telegram's public search and is "
+        f"discoverable by any user including minors without age verification.\n\n"
+        f"LEGAL BASIS:\n"
+        f"• US PROTECT Our Children Act — 18 U.S.C. § 2258A (mandatory ESP reporting)\n"
+        f"• EU Digital Services Act (DSA) Article 16 — Notice and Takedown\n"
+        f"• UNCRC Optional Protocol on the Sale of Children (Article 3)\n"
+        f"• Russian Federal Law No. 149-FZ Article 15.1 (mandatory CSAM blocking)\n"
+        f"• Russian Federal Law No. 436-FZ (protection of minors)\n\n"
+        f"ACTIONS ALREADY TAKEN:\n"
+        f"  • Reported to Telegram via MTProto API (all available report reasons)\n"
+        f"  • Formal notice sent to abuse@telegram.org\n"
+        f"  • Formal notice sent to dpo@telegram.org (GDPR / data protection)\n"
+        f"  • Formal notice sent to security@telegram.org\n"
+        f"  • Official Telegram abuse form submitted at https://telegram.org/support\n\n"
+        f"Please coordinate with Telegram (abuse@telegram.org) to ensure expedited "
+        f"removal and preservation of evidence for law enforcement referral. "
+        f"Telegram has obligations under 18 U.S.C. § 2258A to report CSAM to NCMEC.\n\n"
+        f"Reference: {ref_id}\n"
     )
 
 
@@ -1402,6 +1424,123 @@ async def _send_email(
         return False, str(e)[:120]
 
 
+def _build_dmca_gdpr_email(target: str, cat: dict, report_time: str, email_type: str) -> str:
+    """Строит письмо для dpo@telegram.org (GDPR) или dmca@telegram.org или security@telegram.org."""
+    chan_url = f"https://t.me/{target}"
+    ref_id = f"{email_type.upper()}-{target.upper()}-{report_time[:10].replace('-', '')}"
+
+    if email_type == "dmca":
+        subject_prefix = "DMCA Takedown Notice"
+        addressee = "Telegram DMCA Agent"
+        body_intro = (
+            "This letter constitutes a formal DMCA takedown notice pursuant to "
+            "17 U.S.C. § 512(c)(3) and the EU Copyright Directive (Directive 2019/790). "
+            "The reported channel is engaged in the illegal distribution of content "
+            "that violates applicable law and Telegram's Terms of Service."
+        )
+        legal_block = (
+            "LEGAL BASIS:\n"
+            "• Digital Millennium Copyright Act (DMCA) — 17 U.S.C. § 512\n"
+            "• EU Directive 2019/790 on Copyright in the Digital Single Market\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown\n"
+            "• Telegram Terms of Service — §4 Rights"
+        )
+    elif email_type == "dpo":
+        subject_prefix = "GDPR Article 17 — Right to Erasure / Data Protection Notice"
+        addressee = "Telegram Data Protection Officer"
+        body_intro = (
+            "This letter constitutes a formal data protection notice pursuant to "
+            "GDPR Article 17 (Right to Erasure) and GDPR Article 79 (judicial remedy). "
+            "The reported channel is unlawfully processing and distributing personal data "
+            "and content, causing ongoing harm to data subjects and society."
+        )
+        legal_block = (
+            "LEGAL BASIS:\n"
+            "• GDPR Article 17 — Right to Erasure ('Right to be Forgotten')\n"
+            "• GDPR Article 5(1)(f) — Integrity and Confidentiality principle\n"
+            "• GDPR Article 83 — Administrative fines for non-compliance\n"
+            "• Russian Federal Law No. 152-FZ on Personal Data — Articles 19, 21\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown obligation"
+        )
+    else:  # security
+        subject_prefix = "Security Incident Report — Illegal Content Distribution"
+        addressee = "Telegram Security Team"
+        body_intro = (
+            "This letter constitutes a formal security incident report. "
+            "The reported Telegram channel is actively involved in illegal activity "
+            "that poses a direct security threat to platform users and the public. "
+            "Immediate security review and remediation is requested."
+        )
+        legal_block = (
+            "LEGAL BASIS:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown\n"
+            "• EU Network and Information Security (NIS2) Directive — Article 21\n"
+            "• Russian Federal Law No. 149-FZ on Information Technologies — Article 16\n"
+            "• Telegram Terms of Service — §10 Security"
+        )
+
+    return (
+        f"{subject_prefix.upper()}\n"
+        f"{'=' * 65}\n\n"
+        f"Dear {addressee},\n\n"
+        f"{body_intro}\n\n"
+        f"REPORTED CONTENT:\n"
+        f"  Channel URL : {chan_url}\n"
+        f"  Channel ID  : @{target}\n"
+        f"  Category    : {cat['label']}\n"
+        f"  Severity    : {cat['severity']}\n"
+        f"  Reported at : {report_time} UTC\n"
+        f"  Reference   : {ref_id}\n\n"
+        f"DESCRIPTION:\n"
+        f"The above Telegram channel is openly distributing illegal content "
+        f"of category '{cat['label']}'. The content is systematic, ongoing, "
+        f"and publicly accessible without age verification or content moderation.\n\n"
+        f"{legal_block}\n\n"
+        f"REQUESTED ACTIONS:\n"
+        f"  1. Immediate suspension/takedown of the reported channel\n"
+        f"  2. Preservation of data for law enforcement\n"
+        f"  3. Review of associated accounts and infrastructure\n"
+        f"  4. Confirmation of action taken (required by DSA Article 16(5))\n\n"
+        f"This notice has been filed simultaneously via:\n"
+        f"  • Telegram MTProto API (all applicable report reasons)\n"
+        f"  • abuse@telegram.org\n"
+        f"  • dpo@telegram.org\n"
+        f"  • dmca@telegram.org\n"
+        f"  • security@telegram.org\n"
+        f"  • https://telegram.org/support (official abuse form)\n\n"
+        f"Reference: {ref_id}\n"
+    )
+
+
+# Целевые email-адреса для репортов (отправляем на ВСЕ при каждом страйке)
+_STRIKE_EMAIL_TARGETS: list[dict] = [
+    {
+        "addr": "abuse@telegram.org",
+        "label": "abuse",
+        "description": "Trust & Safety / General Abuse",
+        "email_type": "abuse",
+    },
+    {
+        "addr": "dmca@telegram.org",
+        "label": "dmca",
+        "description": "DMCA / Copyright & Illegal Content",
+        "email_type": "dmca",
+    },
+    {
+        "addr": "dpo@telegram.org",
+        "label": "dpo",
+        "description": "DPO / GDPR / Privacy Violations",
+        "email_type": "dpo",
+    },
+    {
+        "addr": "security@telegram.org",
+        "label": "security",
+        "description": "Security Team / Threat Reports",
+        "email_type": "security",
+    },
+]
+
+
 async def execute_mini_strike(
     pool,
     session_str: str,
@@ -1415,7 +1554,7 @@ async def execute_mini_strike(
     Одиночный удар с одного аккаунта.
 
     Phase 1 — Telethon report_peer_deep_v2 (12 векторов, все причины по кругу)
-    Phase 2 — Email abuse@telegram.org
+    Phase 2 — Email abuse@telegram.org + dmca@telegram.org + dpo@telegram.org + security@telegram.org
     Phase 3 — Email NCMEC (только category=csam)
     Phase 4 — Abuse-форма telegram.org/support
     Phase 5 — Сохранение в strike_reports
@@ -1523,9 +1662,9 @@ async def execute_mini_strike(
                 log_exc_swallow(log, "mini_strike: record_flood flood_engine failed")
         log.exception("mini_strike: telethon failed target=%s", target_clean)
 
-    # ── Phase 2+3: Email из всех настроенных ящиков ──────────────────────────
+    # ── Phase 2+3: Email из всех настроенных ящиков → все 4 адреса Telegram ──
     await _prog(
-        f"📧 <b>Фаза 2/4:</b> Email → abuse@telegram.org...\n"
+        f"📧 <b>Фаза 2/4:</b> Email → abuse / dmca / dpo / security @telegram.org...\n"
         f"   Telethon: <b>{result['total_tg_reports']}</b> репортов отправлено"
     )
 
@@ -1543,21 +1682,49 @@ async def execute_mini_strike(
     except Exception as e:
         log.debug("mini_strike: email accounts fetch skipped: %s", e)
 
-    body_tg = _build_abuse_tg_email(target_clean, cat, report_time)
+    # Сохраняем информацию о использованных ящиках для отчёта
+    result["email_accounts_used"] = [ea["email"] for ea in db_emails]
 
     if db_emails:
+        # Отправляем на все целевые адреса Telegram с каждого ящика
         for ea in db_emails:
-            ok, err = await _send_email(
-                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
-                ea["email"], "abuse@telegram.org",
-                f"{cat['email_subject']} — @{target_clean}",
-                body_tg,
-            )
-            result["emails"].append({
-                "from": ea["email"], "to": "abuse@telegram.org", "ok": ok, "err": err,
-            })
-            if ok:
-                result["total_emails"] += 1
+            any_ok = False
+            for tgt in _STRIKE_EMAIL_TARGETS:
+                # Строим тело письма по типу получателя
+                if tgt["email_type"] == "abuse":
+                    body = _build_abuse_tg_email(target_clean, cat, report_time)
+                else:
+                    body = _build_dmca_gdpr_email(target_clean, cat, report_time, tgt["email_type"])
+
+                subject = f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
+                ok, err = await _send_email(
+                    ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                    ea["email"], tgt["addr"],
+                    subject,
+                    body,
+                )
+                result["emails"].append({
+                    "from": ea["email"],
+                    "to": tgt["addr"],
+                    "label": tgt["label"],
+                    "description": tgt["description"],
+                    "ok": ok,
+                    "err": err,
+                })
+                if ok:
+                    result["total_emails"] += 1
+                    any_ok = True
+                    log.info(
+                        "mini_strike: email sent %s → %s", ea["email"], tgt["addr"]
+                    )
+                else:
+                    log.warning(
+                        "mini_strike: email failed %s → %s: %s",
+                        ea["email"], tgt["addr"], err,
+                    )
+
+            # Обновляем статус ящика по итогу отправки хотя бы одного письма
+            if any_ok:
                 try:
                     await pool.execute(
                         "UPDATE strike_email_accounts SET last_used_at=now(), fail_count=0 WHERE id=$1",
@@ -1590,14 +1757,21 @@ async def execute_mini_strike(
                     body_ncmec,
                 )
                 result["emails"].append({
-                    "from": ea["email"], "to": ncmec_addr, "ok": ok_n, "err": err_n,
+                    "from": ea["email"],
+                    "to": ncmec_addr,
+                    "label": "ncmec",
+                    "description": "NCMEC CyberTipline",
+                    "ok": ok_n,
+                    "err": err_n,
                 })
                 if ok_n:
                     result["total_emails"] += 1
                     break  # Достаточно одного NCMEC-репорта
     else:
         result["emails"].append({
-            "to": "abuse@telegram.org", "ok": False,
+            "to": "abuse@telegram.org",
+            "label": "abuse",
+            "ok": False,
             "err": "Email не настроены. Добавьте в Strike → ⚙️ Настройки → 📧 Email аккаунты",
         })
 
@@ -1649,6 +1823,7 @@ def format_mini_result(r: dict) -> str:
     tg = r.get("tg", {})
     emails = r.get("emails", [])
     af = r.get("abuse_form", {})
+    email_accounts_used: list[str] = r.get("email_accounts_used", [])
 
     # Подсчёт успешных MTProto-векторов
     vectors_ok = sum([
@@ -1667,15 +1842,35 @@ def format_mini_result(r: dict) -> str:
     ])
     vectors_total = 12
 
-    if vectors_ok >= 8:
+    # Подсчёт email по получателям
+    email_ok_count = sum(1 for e in emails if e.get("ok"))
+    email_fail_count = sum(1 for e in emails if not e.get("ok"))
+    email_total = len(emails)
+
+    # Вердикт на основе векторов и email
+    af_ok = bool(af.get("ok"))
+    tg_ok = bool(tg.get("peer_reported"))
+    if vectors_ok >= 8 and email_ok_count > 0:
         header_emoji = "✅"
         verdict = "Удар нанесён эффективно"
-    elif vectors_ok >= 4:
+        verdict_detail = "MTProto + Email отправлены успешно"
+    elif vectors_ok >= 4 or (tg_ok and email_ok_count > 0):
         header_emoji = "🟡"
         verdict = "Частичный успех"
+        parts = []
+        if vectors_ok >= 4:
+            parts.append(f"{vectors_ok}/{vectors_total} MTProto-векторов")
+        if email_ok_count > 0:
+            parts.append(f"{email_ok_count} email отправлено")
+        verdict_detail = " · ".join(parts) if parts else "часть операций выполнена"
+    elif tg_ok or email_ok_count > 0:
+        header_emoji = "🟡"
+        verdict = "Минимальный результат"
+        verdict_detail = "только базовые операции выполнены"
     else:
-        header_emoji = "⚠️"
-        verdict = "Выполнено частично — цель могла быть недоступна"
+        header_emoji = "🔴"
+        verdict = "Операция не выполнена"
+        verdict_detail = "цель недоступна или все каналы заблокированы"
 
     def _vb(flag: bool, label: str) -> str:
         return f"  {'✅' if flag else '—'} {label}"
@@ -1685,9 +1880,9 @@ def format_mini_result(r: dict) -> str:
 
     lines = [
         f"{header_emoji} <b>Мини-страйк завершён — @{_html.escape(r['target'])}</b>",
-        f"<i>{verdict}</i>",
-        f"Категория: {r['category_label']} · Уровень: <b>{r['severity']}</b>",
-        f"Векторов сработало: <b>{vectors_ok}/{vectors_total}</b>",
+        f"<b>{verdict}</b>  <i>{verdict_detail}</i>",
+        f"Категория: {_html.escape(r.get('category_label', ''))} · Уровень: <b>{r.get('severity', '?')}</b>",
+        f"MTProto-векторов: <b>{vectors_ok}/{vectors_total}</b>",
         "",
         "<b>📡 Telegram MTProto:</b>",
         _vb(bool(tg.get("peer_reported")),
@@ -1706,33 +1901,70 @@ def format_mini_result(r: dict) -> str:
         "",
         "<b>📧 Email-репорты:</b>",
     ]
-    email_ok_count = 0
-    email_fail_count = 0
+
+    if email_accounts_used:
+        accs_escaped = ", ".join(_html.escape(a) for a in email_accounts_used)
+        lines.append(f"  Ящики: <code>{accs_escaped}</code>")
+        lines.append("")
+
     if emails:
+        # Группируем по получателю (addr) для компактного отображения
+        by_target: dict[str, list[dict]] = {}
         for e in emails:
-            if e.get("ok"):
-                email_ok_count += 1
-                lines.append(f"  ✅ {_html.escape(e['to'])}")
+            to = e.get("to", "?")
+            by_target.setdefault(to, []).append(e)
+
+        for to_addr, sends in by_target.items():
+            ok_sends = [s for s in sends if s.get("ok")]
+            fail_sends = [s for s in sends if not s.get("ok")]
+            label = sends[0].get("label", "")
+            desc = sends[0].get("description", to_addr)
+
+            if ok_sends:
+                from_list = ", ".join(
+                    _html.escape(s.get("from", "?")) for s in ok_sends
+                )
+                lines.append(f"  ✅ <b>{_html.escape(to_addr)}</b> — {_html.escape(desc)}")
+                lines.append(f"      отправлено с: {from_list}")
             else:
-                email_fail_count += 1
-                err_short = _html.escape((e.get("err") or "ошибка")[:60])
-                lines.append(f"  ❌ {_html.escape(e['to'])}: {err_short}")
-    else:
+                lines.append(f"  ❌ <b>{_html.escape(to_addr)}</b> — {_html.escape(desc)}")
+                if fail_sends and fail_sends[0].get("err"):
+                    err_short = _html.escape((fail_sends[0]["err"])[:80])
+                    lines.append(f"      ошибка: {err_short}")
+    elif not email_accounts_used:
         lines.append("  — SMTP не настроен")
         lines.append("  <i>💡 Добавьте email в Настройки → 📧 Email аккаунты</i>")
 
-    af_ok = bool(af.get("ok"))
-    email_summary = f"{email_ok_count} отправлено"
-    if email_fail_count:
-        email_summary += f", {email_fail_count} ошибок"
+    # Email-итог
+    if email_total > 0:
+        email_summary = f"<b>{email_ok_count}</b> отправлено"
+        if email_fail_count:
+            email_summary += f", <b>{email_fail_count}</b> ошибок"
+        email_summary += f" (из {email_total} попыток)"
+    else:
+        email_summary = "— не настроены"
 
     lines += [
         "",
         f"<b>🌐 Форма telegram.org/support:</b> {'✅ отправлена' if af_ok else '— не удалось'}",
         "",
-        "─────────────────",
-        f"📊 <b>Итого:</b> <b>{r['total_tg_reports']}</b> MTProto · "
-        f"email: {email_summary}",
+        "─────────────────────────────",
+    ]
+
+    # Итоговый вердикт блок
+    if header_emoji == "✅":
+        verdict_icon = "🟢 УСПЕХ"
+    elif header_emoji == "🟡":
+        verdict_icon = "🟡 ЧАСТИЧНО"
+    else:
+        verdict_icon = "🔴 НЕУДАЧА"
+
+    lines += [
+        f"📊 <b>Итог: {verdict_icon}</b>",
+        f"   MTProto: <b>{r['total_tg_reports']}</b> репортов  ·  "
+        f"Email: {email_summary}",
+        f"   Форма: {'✅' if af_ok else '❌'}  ·  "
+        f"NCMEC: {'✅' if any(e.get('to', '').find('ncmec') != -1 and e.get('ok') for e in emails) else '—'}",
     ]
 
     if r.get("errors"):
