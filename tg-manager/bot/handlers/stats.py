@@ -2,8 +2,9 @@
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
-from bot.callbacks import StatsCb
+from bot.callbacks import StatsCb, BotCb
 from bot.keyboards import back_to_bot
 from database import db
 
@@ -17,7 +18,12 @@ async def cb_stats_menu(
     await callback.answer()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.message.edit_text("❌ Бот не найден.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Мои боты", callback_data=BotCb(action="list"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "❌ Бот не найден.", reply_markup=kb.as_markup()
+        )
         return
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
