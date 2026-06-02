@@ -164,9 +164,19 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     avg_health = stats.get("avg_health", 0)
     health_bar = "█" * int(avg_health / 10) + "░" * (10 - int(avg_health / 10)) if avg_health else "—"
 
+    # Infrastructure Pressure Score
+    from services import infra_pressure
+    pressure_data = await infra_pressure.compute_pressure(pool, user_id)
+    p_score = pressure_data.get("score", 0)
+    p_emoji = pressure_data.get("level_emoji", "🟢")
+    p_label = pressure_data.get("level_label", "Норма")
+    p_bar_filled = round(p_score / 10)
+    p_bar = "█" * p_bar_filled + "░" * (10 - p_bar_filled)
+
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"
         f"🩺 Состояние: <b>{avg_health:.0f}</b>/100  [{health_bar}]\n"
+        f"🌡 Давление: {p_emoji} <b>{p_score}/100</b> — {p_label}  [{p_bar}]\n"
         f"📱 Аккаунтов: <b>{stats['total']}</b> (активных: <b>{stats['active']}</b>)\n"
         f"⭐ Средняя надёжность: <b>{stats['avg_trust']}</b>\n"
         f"⏸ На паузе: <b>{stats['in_cooldown']}</b>"
@@ -190,10 +200,12 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📊 Сравнить все",    callback_data=HealthCb(action="compare"))
     kb.button(text="🌊 История блокировок", callback_data=HealthCb(action="flood_log"))
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
+    kb.button(text="🌡 Давление",       callback_data=HealthCb(action="pressure"))
+    kb.button(text="🎯 Советник",       callback_data=HealthCb(action="advisor"))
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())
 
@@ -1084,3 +1096,36 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         ),
         parse_mode="HTML",
     )
+
+
+# ── Infrastructure Pressure Score ─────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "pressure"))
+async def cb_pressure_score(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    from services import infra_pressure
+    data = await infra_pressure.compute_pressure(pool, callback.from_user.id)
+    report = infra_pressure.format_pressure_report(data)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=HealthCb(action="pressure"))
+    kb.button(text="🎯 Советник", callback_data=HealthCb(action="advisor"))
+    kb.button(text="◀️ Назад",   callback_data=HealthCb(action="menu"))
+    kb.adjust(2, 1)
+    await safe_edit(callback, report, reply_markup=kb.as_markup())
+
+
+# ── Infrastructure Advisor ─────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "advisor"))
+async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    from services import infra_advisor
+    recs = await infra_advisor.get_recommendations(pool, callback.from_user.id)
+    text = infra_advisor.format_recommendations(recs)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=HealthCb(action="advisor"))
+    kb.button(text="🌡 Давление", callback_data=HealthCb(action="pressure"))
+    kb.button(text="◀️ Назад",   callback_data=HealthCb(action="menu"))
+    kb.adjust(2, 1)
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
+

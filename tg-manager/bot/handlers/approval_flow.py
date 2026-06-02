@@ -31,16 +31,24 @@ async def cb_approval_confirm(callback: CallbackQuery, callback_data: ApprovalCb
         callback.from_user.id, op_id
     )
     op = await pool.fetchrow("SELECT op_type, total_items FROM operation_queue WHERE id=$1", op_id)
+    from bot.callbacks import BmCb
+    _kb = InlineKeyboardBuilder()
+    _kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    _kb.adjust(1)
     if op:
         await callback.message.edit_text(
             f"✅ <b>Операция #{op_id} подтверждена</b>\n\n"
             f"Тип: <code>{op['op_type']}</code>\n"
             f"Целей: {op['total_items'] or '?'}\n\n"
             "Поставлена в очередь на выполнение.",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=_kb.as_markup(),
         )
     else:
-        await callback.message.edit_text("✅ Операция подтверждена и поставлена в очередь.")
+        await callback.message.edit_text(
+            "✅ Операция подтверждена и поставлена в очередь.",
+            reply_markup=_kb.as_markup(),
+        )
 
 
 @router.callback_query(ApprovalCb.filter(F.action == "cancel"))
@@ -51,7 +59,12 @@ async def cb_approval_cancel(callback: CallbackQuery, callback_data: ApprovalCb,
         "UPDATE operation_queue SET status='cancelled' WHERE id=$1 AND status='waiting_approval'",
         op_id
     )
+    from bot.callbacks import BmCb
+    _kb = InlineKeyboardBuilder()
+    _kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+    _kb.adjust(1)
     await callback.message.edit_text(
         f"❌ <b>Операция #{op_id} отменена.</b>",
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=_kb.as_markup(),
     )

@@ -151,6 +151,12 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
               callback_data=AccCb(action="send_msg", acc_id=acc_id))
     kb.button(text="🌐 Прокси",
               callback_data=AccCb(action="set_proxy", acc_id=acc_id))
+    kb.button(text="🏷 Теги/Пул",
+              callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="🗂 CRM",
+              callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="🆘 Активы аккаунта",
+              callback_data=AccCb(action="assets", acc_id=acc_id))
     toggle_text = "⏸ Отключить" if is_active else "▶️ Включить"
     kb.button(text=toggle_text,
               callback_data=AccCb(action="toggle", acc_id=acc_id))
@@ -160,7 +166,7 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
               callback_data=AccCb(action="remove", acc_id=acc_id))
     kb.button(text="◀️ Мои аккаунты",
               callback_data=AccCb(action="menu"))
-    kb.adjust(2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1, 2, 1)
     return kb.as_markup()
 
 
@@ -907,6 +913,16 @@ async def cb_view_account(
     proxy_label = acc.get("proxy_label") or ""
     proxy_line = f"🌐 {escape(proxy_label or proxy_url[:40])}" if proxy_url else "🌐 Без прокси"
 
+    trust_score = acc.get("trust_score")
+    trust_line = f"⭐ Trust: {trust_score:.2f}" if trust_score is not None else ""
+
+    # Infrastructure fields (v60)
+    tags = acc.get("tags") or []
+    pool_name = acc.get("pool") or ""
+    labels = acc.get("labels") or []
+    warnings = acc.get("warnings") or []
+    project = acc.get("project") or ""
+
     lines = ["👤 <b>Аккаунт</b>\n"]
     if name:
         lines.append(f"Имя: <b>{name}</b>")
@@ -917,7 +933,19 @@ async def cb_view_account(
     if tg_id:
         lines.append(f"Telegram ID: <code>{tg_id}</code>")
     lines.append(f"Статус: {'✅ Активен' if is_active else '⏸ Отключён'}")
+    if trust_line:
+        lines.append(trust_line)
     lines.append(f"Прокси: {proxy_line}")
+    if pool_name:
+        lines.append(f"🏊 Пул: <b>{escape(pool_name)}</b>")
+    if tags:
+        lines.append(f"🏷 Теги: {', '.join(escape(t) for t in tags)}")
+    if project:
+        lines.append(f"📁 Проект: <b>{escape(project)}</b>")
+    if labels:
+        lines.append(f"🔵 Метки: {', '.join(escape(l) for l in labels)}")
+    if warnings:
+        lines.append(f"⚠️ Предупреждения: {', '.join(escape(w) for w in warnings)}")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -2986,6 +3014,405 @@ async def cb_scan_connect(
         f"✅ <b>Подключено: {len(to_connect)} активов</b>\n\n"
         + "\n".join(f"  • {p}" for p in parts)
         + "\n\nОни доступны в разделах <b>Каналы</b> и <b>Группы</b>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACCOUNT INFRASTRUCTURE (v60): Tags / Pool / CRM / Disaster Recovery
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class AccountTagsPoolFSM(StatesGroup):
+    waiting_tags = State()
+    waiting_pool = State()
+    waiting_label_add = State()
+    waiting_warning_add = State()
+    waiting_project = State()
+
+
+def _tags_pool_back_kb(acc_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+# ── Tags & Pool menu ──────────────────────────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "tags_menu"))
+async def cb_tags_menu(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer()
+
+    tags = acc.get("tags") or []
+    pool_name = acc.get("pool") or ""
+    acc_id = callback_data.acc_id
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Изменить теги", callback_data=AccCb(action="edit_tags", acc_id=acc_id))
+    kb.button(text="🏊 Изменить пул", callback_data=AccCb(action="edit_pool", acc_id=acc_id))
+    if tags:
+        kb.button(text="🗑 Очистить теги", callback_data=AccCb(action="clear_tags", acc_id=acc_id))
+    if pool_name:
+        kb.button(text="🗑 Убрать из пула", callback_data=AccCb(action="clear_pool", acc_id=acc_id))
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(2, 2, 1)
+
+    tags_text = ", ".join(tags) if tags else "не назначены"
+    pool_text = pool_name if pool_name else "не назначен"
+
+    await callback.message.edit_text(
+        f"🏷 <b>Теги и Пул</b>\n\n"
+        f"Теги используются для умного выбора аккаунта в операциях и страйке.\n\n"
+        f"🏷 Теги: <b>{escape(tags_text)}</b>\n"
+        f"🏊 Пул: <b>{escape(pool_text)}</b>\n\n"
+        f"<i>Примеры тегов: strike, warmup, publish, rank\n"
+        f"Примеры пулов: main, backup, staging</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "edit_tags"))
+async def cb_edit_tags(callback: CallbackQuery, callback_data: AccCb, state: FSMContext) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_tags)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🏷 <b>Теги аккаунта</b>\n\n"
+        "Введите теги через запятую:\n"
+        "<code>strike, warmup, publish</code>\n\n"
+        "Теги позволяют разделить аккаунты по ролям и использовать умный выбор в операциях.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_tags)
+async def handle_tags_input(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    raw = (message.text or "").strip()
+    tags = [t.strip().lower() for t in raw.replace(";", ",").split(",") if t.strip()]
+    tags = tags[:20]  # max 20 tags
+    await db.update_account_tags(pool, acc_id, message.from_user.id, tags)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    tags_text = ", ".join(tags) if tags else "очищены"
+    await message.answer(
+        f"✅ Теги обновлены: <b>{escape(tags_text)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_tags"))
+async def cb_clear_tags(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    await db.update_account_tags(pool, callback_data.acc_id, callback.from_user.id, [])
+    await callback.answer("Теги очищены", show_alert=False)
+    await cb_tags_menu(callback, callback_data, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "edit_pool"))
+async def cb_edit_pool(callback: CallbackQuery, callback_data: AccCb, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+
+    # Show existing pools as quick pick
+    existing_pools = await db.get_distinct_pools(pool, callback.from_user.id)
+
+    kb = InlineKeyboardBuilder()
+    for p in existing_pools[:8]:
+        kb.button(text=f"🏊 {p}", callback_data=AccCb(action=f"pool_set_{p[:20]}", acc_id=acc_id))
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.adjust(2)
+
+    await state.set_state(AccountTagsPoolFSM.waiting_pool)
+    await state.update_data(acc_id=acc_id)
+
+    pool_hint = "\n\n" + "Быстрый выбор из существующих пулов ↑" if existing_pools else ""
+    await callback.message.edit_text(
+        f"🏊 <b>Пул аккаунта</b>\n\n"
+        f"Введите название пула (например: <code>strike</code>, <code>warmup</code>, <code>main</code>)\n"
+        f"или нажмите кнопку для выбора существующего.{pool_hint}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_pool)
+async def handle_pool_input(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    pool_name = (message.text or "").strip()[:50] or None
+    await db.update_account_pool(pool, acc_id, message.from_user.id, pool_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Пул обновлён: <b>{escape(pool_name or 'не назначен')}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action.startswith("pool_set_")))
+async def cb_pool_set_quick(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
+    pool_name = callback_data.action.replace("pool_set_", "")
+    acc_id = callback_data.acc_id
+    await db.update_account_pool(pool, acc_id, callback.from_user.id, pool_name)
+    await callback.answer(f"Пул: {pool_name}", show_alert=False)
+    # refresh tags menu
+    from bot.callbacks import AccCb as _AccCb
+    new_cd = _AccCb(action="tags_menu", acc_id=acc_id)
+    await cb_tags_menu(callback, new_cd, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_pool"))
+async def cb_clear_pool(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    await db.update_account_pool(pool, callback_data.acc_id, callback.from_user.id, None)
+    await callback.answer("Пул убран", show_alert=False)
+    await cb_tags_menu(callback, callback_data, pool)
+
+
+# ── CRM menu (labels, warnings, project) ─────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "crm_menu"))
+async def cb_crm_menu(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer()
+
+    labels = acc.get("labels") or []
+    warnings = acc.get("warnings") or []
+    project = acc.get("project") or ""
+    notes = acc.get("account_notes") or ""
+    acc_id = callback_data.acc_id
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔵 + Метка", callback_data=AccCb(action="add_label", acc_id=acc_id))
+    kb.button(text="⚠️ + Предупреждение", callback_data=AccCb(action="add_warning", acc_id=acc_id))
+    kb.button(text="📁 Проект", callback_data=AccCb(action="edit_project", acc_id=acc_id))
+    if labels:
+        kb.button(text="🗑 Очистить метки", callback_data=AccCb(action="clear_labels", acc_id=acc_id))
+    if warnings:
+        kb.button(text="🗑 Очистить предупреждения", callback_data=AccCb(action="clear_warnings", acc_id=acc_id))
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(2, 1, 2, 1)
+
+    labels_text = ", ".join(labels) if labels else "нет"
+    warnings_text = ", ".join(warnings) if warnings else "нет"
+    proj_text = project if project else "не задан"
+    notes_text = notes[:100] + "…" if len(notes) > 100 else (notes or "нет")
+
+    await callback.message.edit_text(
+        f"🗂 <b>CRM аккаунта</b>\n\n"
+        f"Организуйте аккаунты по проектам, добавляйте метки и предупреждения.\n\n"
+        f"🔵 Метки: <b>{escape(labels_text)}</b>\n"
+        f"⚠️ Предупреждения: <b>{escape(warnings_text)}</b>\n"
+        f"📁 Проект: <b>{escape(proj_text)}</b>\n"
+        f"📝 Заметки: {escape(notes_text)}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "add_label"))
+async def cb_add_label(callback: CallbackQuery, callback_data: AccCb, state: FSMContext) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_label_add)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🔵 <b>Добавить метку</b>\n\nВведите метку (одну):\n<i>Примеры: основной, резервный, для рассылок</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_label_add)
+async def handle_label_add(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    new_label = (message.text or "").strip()[:50]
+    if new_label:
+        acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+        labels = list(acc.get("labels") or [])
+        if new_label not in labels:
+            labels.append(new_label)
+        await db.update_account_labels(pool, acc_id, message.from_user.id, labels)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Метка добавлена: <b>{escape(new_label)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_labels"))
+async def cb_clear_labels(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    await db.update_account_labels(pool, callback_data.acc_id, callback.from_user.id, [])
+    await callback.answer("Метки очищены")
+    await cb_crm_menu(callback, callback_data, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "add_warning"))
+async def cb_add_warning(callback: CallbackQuery, callback_data: AccCb, state: FSMContext) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_warning_add)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "⚠️ <b>Добавить предупреждение</b>\n\nВведите предупреждение:\n<i>Примеры: частые флуды, под наблюдением, не использовать для DM</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_warning_add)
+async def handle_warning_add(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    new_warn = (message.text or "").strip()[:100]
+    if new_warn:
+        acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
+        warnings = list(acc.get("warnings") or [])
+        if new_warn not in warnings:
+            warnings.append(new_warn)
+        await db.update_account_warnings(pool, acc_id, message.from_user.id, warnings)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Предупреждение добавлено: <b>{escape(new_warn)}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "clear_warnings"))
+async def cb_clear_warnings(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    await db.update_account_warnings(pool, callback_data.acc_id, callback.from_user.id, [])
+    await callback.answer("Предупреждения очищены")
+    await cb_crm_menu(callback, callback_data, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "edit_project"))
+async def cb_edit_project(callback: CallbackQuery, callback_data: AccCb, state: FSMContext) -> None:
+    await callback.answer()
+    acc_id = callback_data.acc_id
+    await state.set_state(AccountTagsPoolFSM.waiting_project)
+    await state.update_data(acc_id=acc_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "📁 <b>Проект аккаунта</b>\n\nВведите название проекта или 'нет' для сброса:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AccountTagsPoolFSM.waiting_project)
+async def handle_project_input(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    sd = await state.get_data()
+    acc_id = sd.get("acc_id")
+    await state.clear()
+    raw = (message.text or "").strip()
+    project = None if raw.lower() in ("нет", "no", "-", "") else raw[:100]
+    await db.update_account_project(pool, acc_id, message.from_user.id, project)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ CRM", callback_data=AccCb(action="crm_menu", acc_id=acc_id))
+    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Проект: <b>{escape(project or 'не задан')}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Disaster Recovery — Assets of account ─────────────────────────────────────
+
+@router.callback_query(AccCb.filter(F.action == "assets"))
+async def cb_account_assets(callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool) -> None:
+    acc = await db.get_tg_account(pool, callback_data.acc_id, callback.from_user.id)
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+    await callback.answer()
+    acc_id = callback_data.acc_id
+
+    assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)
+    channels = assets.get("channels", [])
+    ops = assets.get("ops", [])
+
+    name = escape(acc.get("first_name") or acc.get("phone") or f"id{acc_id}")
+
+    lines = [f"🆘 <b>Активы аккаунта: {name}</b>\n"]
+    lines.append(f"Все ресурсы, привязанные к этому аккаунту.\n")
+
+    if channels:
+        lines.append(f"📢 <b>Каналы/группы ({len(channels)}):</b>")
+        for ch in channels[:15]:
+            title = escape(ch.get("title") or "")
+            uname = f"@{escape(ch.get('username') or '')}" if ch.get("username") else ""
+            lines.append(f"  • {title} {uname}".strip())
+        if len(channels) > 15:
+            lines.append(f"  … и ещё {len(channels)-15}")
+    else:
+        lines.append("📢 Каналов/групп не найдено")
+
+    lines.append("")
+    if ops:
+        lines.append(f"⚙️ <b>Активные операции ({len(ops)}):</b>")
+        for op in ops[:5]:
+            op_type = escape(op.get("op_type") or "")
+            status = op.get("status") or ""
+            lines.append(f"  • {op_type} [{status}]")
+    else:
+        lines.append("⚙️ Активных операций нет")
+
+    if not channels and not ops:
+        lines.append("\n✅ Аккаунт можно безопасно отключить или удалить — нет зависимых ресурсов.")
+    elif channels:
+        lines.append(f"\n⚠️ <b>Внимание:</b> при удалении аккаунта {len(channels)} канал(ов) потеряют привязку.")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=acc_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

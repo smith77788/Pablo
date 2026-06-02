@@ -196,18 +196,25 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         label = plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
         pct = round(plan["current_day"] / max(plan["target_days"], 1) * 100)
         bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+        last_run = plan.get("last_action_at")
+        last_str = f"\n  Последний сеанс: {last_run.strftime('%d.%m %H:%M')}" if last_run else ""
         lines.append(
             f"• <b>{html.escape(label)}</b>\n"
             f"  [{bar}] День {plan['current_day']}/{plan['target_days']}\n"
             f"  Режим: {plan['plan_type']} | {plan['daily_actions']} действий/день"
+            f"{last_str}"
         )
         kb.button(
-            text=f"🗑 Удалить план {label[:15]}",
+            text=f"📋 Лог {label[:12]}",
+            callback_data=WarmupCb(action="plan_log", plan_id=plan["id"], account_id=plan["account_id"]),
+        )
+        kb.button(
+            text=f"🗑 Удалить {label[:12]}",
             callback_data=WarmupCb(action="delete_plan", plan_id=plan["id"]),
         )
 
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
-    kb.adjust(1)
+    kb.adjust(2)
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -265,4 +272,101 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         "🌡 <b>Сеанс разогрева завершён</b>\n\n" + "\n".join(results),
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
+    )
+
+
+# ── Warmup plan action log ─────────────────────────────────────────────────────
+
+_ACTION_LABELS = {
+    "read_channel":   "📖 Читал канал",
+    "join_channel":   "🔔 Вступил в канал",
+    "send_reaction":  "❤️ Поставил реакцию",
+    "search":         "🔍 Поиск по слову",
+    "view_profile":   "👁 Смотрел профиль",
+    "open_chat":      "💬 Открыл чат",
+    "dm_bot":         "🤖 Написал боту",
+    "read_messages":  "📨 Читал сообщения",
+}
+
+
+@router.callback_query(WarmupCb.filter(F.action == "plan_log"))
+async def cb_warmup_plan_log(
+    callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    acc_id = callback_data.account_id
+    plan_id = callback_data.plan_id
+
+    # Get account name
+    acc_row = await pool.fetchrow(
+        "SELECT first_name, phone FROM tg_accounts WHERE id=$1", acc_id
+    )
+    label = ""
+    if acc_row:
+        label = acc_row.get("first_name") or acc_row.get("phone") or f"id{acc_id}"
+
+    # Get plan info
+    plan_row = await pool.fetchrow(
+        "SELECT current_day, target_days, plan_type, daily_actions FROM account_warmup_plans WHERE id=$1",
+        plan_id,
+    )
+
+    # Get last 50 actions from warmup log
+    rows = await pool.fetch(
+        """SELECT action_type, target, success, error, performed_at
+           FROM account_warmup_log
+           WHERE account_id=$1
+           ORDER BY performed_at DESC
+           LIMIT 30""",
+        acc_id,
+    )
+
+    lines = [f"📋 <b>Лог разогрева: {html.escape(label)}</b>\n"]
+
+    if plan_row:
+        lines.append(
+            f"День {plan_row['current_day']}/{plan_row['target_days']} | "
+            f"{plan_row['plan_type']} | {plan_row['daily_actions']} действий/день\n"
+        )
+
+    if not rows:
+        lines.append("Действий ещё не выполнено.")
+    else:
+        # Group by day
+        from collections import defaultdict
+        by_day: dict[str, list] = defaultdict(list)
+        for r in rows:
+            day_key = r["performed_at"].strftime("%d.%m") if r.get("performed_at") else "?"
+            by_day[day_key].append(r)
+
+        for day_key, actions in list(by_day.items())[:5]:
+            ok_cnt = sum(1 for a in actions if a["success"])
+            fail_cnt = len(actions) - ok_cnt
+            lines.append(f"<b>📅 {day_key}</b>  ✅{ok_cnt} ❌{fail_cnt}")
+            for a in actions[:8]:
+                act_label = _ACTION_LABELS.get(a["action_type"], a["action_type"])
+                target = html.escape(a.get("target") or "")[:40]
+                if a["success"]:
+                    status = "✅"
+                else:
+                    err = html.escape((a.get("error") or "")[:60])
+                    status = f"❌ {err}"
+                target_str = f" → <code>{target}</code>" if target else ""
+                lines.append(f"  {status} {act_label}{target_str}")
+            lines.append("")
+
+    # Summary stats
+    if rows:
+        total = len(rows)
+        ok_total = sum(1 for r in rows if r["success"])
+        lines.append(f"<i>Показаны последние {total} действий · {ok_total} успешно</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="active_plans"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )

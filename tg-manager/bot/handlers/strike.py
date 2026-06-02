@@ -709,23 +709,15 @@ async def cb_mini_strike_category(
 
     await callback.answer()
 
-    # Найти лучший активный аккаунт
+    # Найти лучший активный аккаунт через flood_engine (учитывает кулдаун + risk score)
+    from services import flood_engine
     try:
-        accs = await pool.fetch(
-            """SELECT id, phone, first_name, session_str, trust_score,
-                      device_model, system_version, app_version, is_active
-               FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE
-                 AND (cooldown_until IS NULL OR cooldown_until < now())
-               ORDER BY trust_score DESC NULLS LAST
-               LIMIT 1""",
-            callback.from_user.id,
-        )
+        acc = await flood_engine.get_best_account(pool, callback.from_user.id, action_type="strike")
     except Exception:
-        log_exc_swallow(log, "cb_mini_strike_category: DB fetch failed")
-        accs = []
+        log_exc_swallow(log, "cb_mini_strike_category: get_best_account failed")
+        acc = None
 
-    if not accs:
+    if not acc:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
         await state.clear()
@@ -737,7 +729,6 @@ async def cb_mini_strike_category(
         )
         return
 
-    acc = dict(accs[0])
     acc_label = acc.get("first_name") or acc.get("phone") or f"id{acc['id']}"
     trust = acc.get("trust_score") or 0
 

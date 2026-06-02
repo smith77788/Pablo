@@ -10,17 +10,35 @@ def _acc_label(acc: asyncpg.Record) -> str:
 
 
 async def _get_active_accounts(
-    pool: asyncpg.Pool, owner_id: int
+    pool: asyncpg.Pool,
+    owner_id: int,
+    *,
+    pool_name: str | None = None,
+    tags: list[str] | None = None,
 ) -> list[asyncpg.Record]:
+    """Return active accounts, optionally filtered by pool name or tags (ALL tags must match)."""
+    conditions = ["a.owner_id=$1", "a.is_active=TRUE"]
+    params: list = [owner_id]
+
+    if pool_name is not None:
+        params.append(pool_name)
+        conditions.append(f"a.pool=${len(params)}")
+
+    if tags:
+        params.append(tags)
+        conditions.append(f"a.tags @> ${len(params)}::text[]")
+
+    where = " AND ".join(conditions)
     return await pool.fetch(
-        """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
-                  a.device_model, a.system_version, a.app_version,
-                  p.proxy_url
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
-        owner_id,
+        f"""SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
+                   a.device_model, a.system_version, a.app_version,
+                   a.tags, a.pool, a.labels, a.warnings, a.project,
+                   p.proxy_url
+            FROM tg_accounts a
+            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+            WHERE {where}
+            ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
+        *params,
     )
 
 

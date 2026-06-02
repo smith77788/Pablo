@@ -141,24 +141,45 @@ async def get_best_account(
     owner_id: int,
     action_type: str = "default",
     exclude_ids: list[int] | None = None,
+    pool_name: str | None = None,
+    tags: list[str] | None = None,
 ) -> dict | None:
-    """Select the best available account for an action, considering flood state and risk."""
+    """Select the best available account for an action, considering flood state and risk.
+
+    Optional filters:
+      pool_name — restrict to accounts in this pool
+      tags      — restrict to accounts having ALL of these tags
+    """
     exclude = exclude_ids or []
+
+    conditions = [
+        "a.owner_id = $1",
+        "a.is_active = TRUE",
+        "(a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
+        "a.id != ALL($2::bigint[])",
+    ]
+    params: list = [owner_id, exclude]
+
+    if pool_name is not None:
+        params.append(pool_name)
+        conditions.append(f"a.pool = ${len(params)}")
+
+    if tags:
+        params.append(tags)
+        conditions.append(f"a.tags @> ${len(params)}::text[]")
+
+    where = " AND ".join(conditions)
     rows = await pool.fetch(
-        """SELECT a.id, a.session_str, a.first_name, a.phone,
-                  a.device_model, a.system_version, a.app_version,
-                  a.trust_score, a.cooldown_until,
-                  p.proxy_url
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.owner_id = $1
-             AND a.is_active = TRUE
-             AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
-             AND a.id != ALL($2::bigint[])
-           ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST
-           LIMIT 10""",
-        owner_id,
-        exclude,
+        f"""SELECT a.id, a.session_str, a.first_name, a.phone,
+                   a.device_model, a.system_version, a.app_version,
+                   a.trust_score, a.cooldown_until, a.tags, a.pool,
+                   p.proxy_url
+            FROM tg_accounts a
+            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+            WHERE {where}
+            ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST
+            LIMIT 10""",
+        *params,
     )
     if not rows:
         return None

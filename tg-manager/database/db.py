@@ -2892,3 +2892,197 @@ async def set_platform_setting(pool: asyncpg.Pool, key: str, value: str) -> None
            ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=NOW()""",
         key, value,
     )
+
+
+# ── Account Infrastructure (v60) ─────────────────────────────────────────────
+
+async def update_account_tags(pool: asyncpg.Pool, acc_id: int, owner_id: int, tags: list[str]) -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET tags=$1 WHERE id=$2 AND owner_id=$3",
+        tags, acc_id, owner_id,
+    )
+
+
+async def update_account_pool(pool: asyncpg.Pool, acc_id: int, owner_id: int, pool_name: str | None) -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
+        pool_name, acc_id, owner_id,
+    )
+
+
+async def update_account_labels(pool: asyncpg.Pool, acc_id: int, owner_id: int, labels: list[str]) -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET labels=$1 WHERE id=$2 AND owner_id=$3",
+        labels, acc_id, owner_id,
+    )
+
+
+async def update_account_warnings(pool: asyncpg.Pool, acc_id: int, owner_id: int, warnings: list[str]) -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET warnings=$1 WHERE id=$2 AND owner_id=$3",
+        warnings, acc_id, owner_id,
+    )
+
+
+async def update_account_project(pool: asyncpg.Pool, acc_id: int, owner_id: int, project: str | None) -> None:
+    await pool.execute(
+        "UPDATE tg_accounts SET project=$1 WHERE id=$2 AND owner_id=$3",
+        project, acc_id, owner_id,
+    )
+
+
+async def get_accounts_by_pool(pool: asyncpg.Pool, owner_id: int, pool_name: str) -> list:
+    return await pool.fetch(
+        """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
+                  a.trust_score, a.cooldown_until, a.tags, a.pool, a.labels, a.warnings, a.project,
+                  a.device_model, a.system_version, a.app_version, p.proxy_url
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+           WHERE a.owner_id=$1 AND a.pool=$2 AND a.is_active=TRUE
+           ORDER BY a.trust_score DESC NULLS LAST""",
+        owner_id, pool_name,
+    )
+
+
+async def get_accounts_by_tags(pool: asyncpg.Pool, owner_id: int, tags: list[str]) -> list:
+    """Return accounts that have ALL of the specified tags."""
+    return await pool.fetch(
+        """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
+                  a.trust_score, a.cooldown_until, a.tags, a.pool, a.labels, a.warnings, a.project,
+                  a.device_model, a.system_version, a.app_version, p.proxy_url
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+           WHERE a.owner_id=$1 AND a.tags @> $2::text[] AND a.is_active=TRUE
+           ORDER BY a.trust_score DESC NULLS LAST""",
+        owner_id, tags,
+    )
+
+
+async def get_distinct_pools(pool: asyncpg.Pool, owner_id: int) -> list[str]:
+    rows = await pool.fetch(
+        "SELECT DISTINCT pool FROM tg_accounts WHERE owner_id=$1 AND pool IS NOT NULL AND is_active=TRUE ORDER BY pool",
+        owner_id,
+    )
+    return [r["pool"] for r in rows]
+
+
+async def get_distinct_tags(pool: asyncpg.Pool, owner_id: int) -> list[str]:
+    rows = await pool.fetch(
+        "SELECT DISTINCT unnest(tags) AS tag FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY tag",
+        owner_id,
+    )
+    return [r["tag"] for r in rows]
+
+
+async def get_account_assets(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> dict:
+    """Return all assets associated with an account (for disaster recovery)."""
+    channels = await pool.fetch(
+        "SELECT channel_id, title, username FROM managed_channels WHERE acc_id=$1 AND owner_id=$2 ORDER BY title",
+        acc_id, owner_id,
+    )
+    active_ops = await pool.fetch(
+        """SELECT id, op_type, status, total_items, done_items, created_at
+           FROM operation_queue
+           WHERE owner_id=$1 AND status IN ('pending','running')
+             AND params::text LIKE $2
+           ORDER BY created_at DESC LIMIT 20""",
+        owner_id, f'%"acc_id": {acc_id}%',
+    )
+    return {"channels": list(channels), "ops": list(active_ops)}
+
+
+# ── Proxy Intelligence (v60) ──────────────────────────────────────────────────
+
+async def log_proxy_quality(
+    pool: asyncpg.Pool, proxy_id: int, latency_ms: int | None, success: bool, error_msg: str | None = None
+) -> None:
+    await pool.execute(
+        "INSERT INTO proxy_quality_log (proxy_id, latency_ms, success, error_msg) VALUES ($1,$2,$3,$4)",
+        proxy_id, latency_ms, success, error_msg,
+    )
+
+
+async def get_proxy_quality_stats(pool: asyncpg.Pool, proxy_id: int) -> dict:
+    row = await pool.fetchrow(
+        """SELECT
+               COUNT(*) FILTER (WHERE success) AS successes,
+               COUNT(*) FILTER (WHERE NOT success) AS failures,
+               COUNT(*) AS total,
+               AVG(latency_ms) FILTER (WHERE success AND latency_ms IS NOT NULL) AS avg_latency,
+               MAX(checked_at) AS last_checked
+           FROM proxy_quality_log
+           WHERE proxy_id=$1 AND checked_at > NOW() - INTERVAL '7 days'""",
+        proxy_id,
+    )
+    if not row or row["total"] == 0:
+        return {"success_rate": None, "avg_latency": None, "total": 0, "last_checked": None}
+    total = row["total"] or 1
+    return {
+        "success_rate": round((row["successes"] or 0) / total * 100, 1),
+        "avg_latency": round(row["avg_latency"]) if row["avg_latency"] else None,
+        "total": total,
+        "successes": row["successes"] or 0,
+        "failures": row["failures"] or 0,
+        "last_checked": row["last_checked"],
+    }
+
+
+async def get_all_proxy_quality_stats(pool: asyncpg.Pool, owner_id: int) -> list:
+    """Return quality stats for all proxies owned by user."""
+    rows = await pool.fetch(
+        """SELECT p.id, p.label, p.proxy_url,
+               COUNT(q.id) FILTER (WHERE q.success) AS successes,
+               COUNT(q.id) FILTER (WHERE NOT q.success) AS failures,
+               COUNT(q.id) AS total,
+               AVG(q.latency_ms) FILTER (WHERE q.success AND q.latency_ms IS NOT NULL) AS avg_latency
+           FROM user_proxies p
+           LEFT JOIN proxy_quality_log q
+               ON q.proxy_id=p.id AND q.checked_at > NOW() - INTERVAL '7 days'
+           WHERE p.owner_id=$1
+           GROUP BY p.id, p.label, p.proxy_url
+           ORDER BY p.label""",
+        owner_id,
+    )
+    result = []
+    for r in rows:
+        total = r["total"] or 0
+        result.append({
+            "id": r["id"],
+            "label": r["label"],
+            "proxy_url": r["proxy_url"],
+            "success_rate": round((r["successes"] or 0) / total * 100, 1) if total > 0 else None,
+            "avg_latency": round(r["avg_latency"]) if r["avg_latency"] else None,
+            "total": total,
+        })
+    return result
+
+
+# ── Infrastructure Pressure Score cache ──────────────────────────────────────
+
+async def save_pressure_cache(pool: asyncpg.Pool, owner_id: int, score: int, breakdown: dict) -> None:
+    import json
+    await pool.execute(
+        """INSERT INTO infra_pressure_cache (owner_id, pressure_score, breakdown, computed_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (owner_id) DO UPDATE
+           SET pressure_score=$2, breakdown=$3, computed_at=NOW()""",
+        owner_id, score, json.dumps(breakdown),
+    )
+
+
+async def get_pressure_cache(pool: asyncpg.Pool, owner_id: int) -> dict | None:
+    row = await pool.fetchrow(
+        "SELECT pressure_score, breakdown, computed_at FROM infra_pressure_cache WHERE owner_id=$1",
+        owner_id,
+    )
+    if not row:
+        return None
+    import json
+    breakdown = row["breakdown"]
+    if isinstance(breakdown, str):
+        breakdown = json.loads(breakdown)
+    return {
+        "score": row["pressure_score"],
+        "breakdown": breakdown,
+        "computed_at": row["computed_at"],
+    }
