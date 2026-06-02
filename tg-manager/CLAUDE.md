@@ -596,8 +596,30 @@ if not await require\_plan(pool, callback.from\_user.id, "starter"):\
 - DM campaign task registration + fix cancellation propagation
 - SQL injection fixes, silent fails, service auto-restart
 - AuthKeyUnregistered detection + удаление мёртвых сессий
+### ✅ Account Infrastructure Contract — ГОТОВО (r17)
+- **Tags/Pools** — теги и пулы для аккаунтов (schema\_v60), умная фильтрация в ops
+- **Pressure Score** — Infrastructure Pressure 0-100 (services/infra\_pressure.py)
+- **Account CRM** — labels, warnings, project на аккаунте
+- **Proxy Intelligence** — proxy\_quality\_log, статистика success/failure в UI
+- **Auto-Rebalancing** — smart distribution: primary/monitoring/cooldown (infra\_analytics)
+- **Disaster Recovery** — просмотр активов аккаунта перед удалением
+- **Autonomous Recommendations** — 8-правильный советник (services/infra\_advisor.py)
+- **Pool filter в Mass Ops** — выполнение операций только по пулу аккаунтов
+- **Health Dashboard обновлён** — пулы, теги в списке аккаунтов + Pressure Score
+- **Free Mode** — глобальный бесплатный доступ + toggle в /admin (schema\_v59)
+### ✅ UX и надёжность — ГОТОВО (r17)
+- Кнопки ◀️ Назад добавлены во все оставшиеся dead-end экраны (30+ файлов)
+- ❌ Отмена во всех FSM prompt'ах (bulk, network\_bulk, crm, schedule, templates и др.)
+- op\_detail: прогресс-бар [████░░] + ETA + elapsed time
+- op\_detail: кнопка 🛑 Отменить операцию (running/pending)
+- op\_worker: progress monitor — уведомления 25/50/75% (фоновая корутина)
+- Warmup Log — детальный лог действий по дням с метками (📖 читал, 🔔 вступил...)
+- FSM input validation в crm, workspaces, deeplinks и других handlers
+- Account Cleaner: защита аккаунтов с активными каналами/операциями
+- Deploy Notifier: статистика платформы (аккаунты, боты, pressure) при деплое
+- Infra Analytics: Pressure Score + пулы + качество прокси + авто-балансировка
 -----
-## 13\. GAP-АНАЛИЗ (все критические пробелы закрыты — r15)
+## 13\. GAP-АНАЛИЗ (все критические пробелы закрыты — r17)
 ### ✅ ВСЕ КРИТИЧЕСКИЕ ПРОБЕЛЫ ЗАКРЫТЫ (r12-r15)
 
 |Функция|Статус|Файл|
@@ -763,5 +785,18 @@ asyncio.create\_task(my\_service.run(pool))
 1. **Пустые состояния** → объяснять что добавить и как это сделать
 1. **Возврат назад** → кнопка "◀️ Назад" всегда должна быть на каждом экране
 -----
-*Последнее обновление: 2026-05-30 (r16)* *Следующий build-номер: r17*
+### ✅ ЗАКРЫТО (r17)
+- ✅ **Account Infrastructure Contract** — 7 систем (Tags/Pools, Pressure, CRM, Proxy Intel, Auto-Rebalancing, Disaster Recovery, Autonomous Recommendations)
+- ✅ **Back buttons UX audit** — 30+ файлов, мёртвые экраны устранены полностью
+- ✅ **FSM cancel validation** — все wizard'ы имеют ❌ Отмена на каждом шаге
+- ✅ **op\_worker progress monitor** — уведомления 25/50/75% milestones
+- ✅ **op\_detail UX** — прогресс-бар, ETA, elapsed time, кнопка отмены
+- ✅ **Warmup action log** — детальный лог по дням с типами действий
+- ✅ **Pool filter in Mass Ops** — операции по пулу аккаунтов
+- ✅ **Free Mode** — глобальный toggle в /admin + platform\_settings таблица
+- ✅ **Strike reliability** — FloodWait persistence в БД, cooldown filtering
+- ✅ **FSM state bug fix** — OpBuilderFSM.confirming, дублирующие State()
+- ✅ **account\_warmer crash fix** — None session\_str early return
+
+*Последнее обновление: 2026-06-02 (r17)* *Следующий build-номер: r18*
 
