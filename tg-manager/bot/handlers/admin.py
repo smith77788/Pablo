@@ -48,7 +48,7 @@ def is_admin(uid: int) -> bool:
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
-def _admin_main_kb():
+def _admin_main_kb(new_error_reports: int = 0):
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Пользователи платформы", callback_data="adm:users")
     kb.button(text="💳 Подписки & платежи",     callback_data="adm:subs")
@@ -76,7 +76,12 @@ def _admin_main_kb():
     kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
-    kb.button(text="🐛 Отчёты об ошибках",         callback_data="adm:error_reports")
+    _err_label = (
+        f"🐛 Отчёты об ошибках ({new_error_reports} новых)"
+        if new_error_reports > 0
+        else "🐛 Отчёты об ошибках"
+    )
+    kb.button(text=_err_label,                   callback_data="adm:error_reports")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
     kb.adjust(2)
     return kb.as_markup()

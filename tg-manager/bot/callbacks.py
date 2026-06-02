@@ -152,6 +152,7 @@ class SubCb(CallbackData, prefix="sub"):
 class AiCb(CallbackData, prefix="ai"):
     action: str
     bot_id: int = 0
+    memory_id: int = 0
 
 
 class NetBcCb(CallbackData, prefix="nbc"):

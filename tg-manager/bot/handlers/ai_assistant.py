@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +28,12 @@ from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
 from services import ai_memory
 from services.ai_providers import configured_providers
 from services.logger import log_exc_swallow
+
+# Регулярное выражение для тега [MEMORY: заголовок | тело]
+_MEMORY_TAG_RE = re.compile(
+    r"\[MEMORY:\s*([^\|\]]{1,180})\|([^\]]{1,2000})\]",
+    re.DOTALL,
+)
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -65,6 +72,12 @@ _SYSTEM_PROMPT = (
     "3. Действие НЕ выполнится сразу — пользователь подтвердит его\n"
     "4. После подготовки действия — сообщи что подготовлено и ждёт подтверждения\n"
     "5. НЕ ГОВОРИ что не можешь создать присутствие — ты УМЕЕШЬ создавать каналы, группы и ботов\n\n"
+    "ПАМЯТЬ:\n"
+    "Если в ходе диалога ты обнаруживаешь важную информацию о пользователе, его бизнесе,\n"
+    "предпочтениях или целях — которую стоит запомнить для будущих сессий — добавь в конец ответа тег:\n"
+    "[MEMORY: заголовок | подробное описание для сохранения]\n"
+    "Пример: [MEMORY: Основной продукт | Пользователь продаёт курсы по Python, целевая аудитория — новички]\n"
+    "Используй этот тег только для действительно важной информации. Можно добавить один тег за ответ.\n\n"
     "ВАЖНО:\n"
     "- Отвечай только на русском языке\n"
     "- Давай конкретные советы с числами\n"
@@ -561,6 +574,36 @@ async def _call_ai_providers(
     )
 
 
+async def _parse_and_save_memory(
+    text: str,
+    pool: asyncpg.Pool,
+    user_id: int,
+) -> tuple[str, int]:
+    """Найти теги [MEMORY: ...] в тексте, сохранить их и вернуть очищенный текст + кол-во сохранённых."""
+    saved = 0
+    clean = text
+    for match in _MEMORY_TAG_RE.finditer(text):
+        title = match.group(1).strip()
+        body = match.group(2).strip()
+        if not body:
+            continue
+        try:
+            await ai_memory.remember(
+                pool,
+                user_id,
+                body,
+                title=title or body[:80],
+                kind="insight",
+                source="ai",
+            )
+            saved += 1
+        except Exception:
+            log_exc_swallow(log, "Не удалось сохранить AI-память")
+    # Удалить теги из текста для отображения пользователю
+    clean = _MEMORY_TAG_RE.sub("", text).rstrip()
+    return clean, saved
+
+
 async def _process_ai_turn(
     message: Message,
     state: FSMContext,
@@ -665,25 +708,38 @@ async def _process_ai_turn(
     else:
         # Regular AI response (text)
         str_reply = reply if isinstance(reply, str) else str(reply)
-        messages.append({"role": "assistant", "content": str_reply})
+
+        # Парсим и сохраняем [MEMORY: ...] теги перед отображением
+        display_reply, saved_count = await _parse_and_save_memory(
+            str_reply, pool, message.from_user.id
+        )
+        # Сохраняем в историю оригинал без тегов
+        messages.append({"role": "assistant", "content": display_reply})
         await state.update_data(messages=messages, turns=turns + 1)
 
-        if "AI-ассистент временно недоступен" in str_reply:
+        if saved_count > 0:
+            display_reply = (
+                display_reply
+                + f"\n\n💾 <i>Запомнил {saved_count} запись(-и) в памяти.</i>"
+            )
+
+        if "AI-ассистент временно недоступен" in display_reply:
             kb = InlineKeyboardBuilder()
             kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
             kb.button(text="🏠 Меню", callback_data=BmCb(action="main"))
             kb.adjust(2)
             await _edit_or_answer_long(
-                thinking, message, str_reply, reply_markup=kb.as_markup()
+                thinking, message, display_reply, reply_markup=kb.as_markup()
             )
             return
 
         kb = InlineKeyboardBuilder()
+        kb.button(text="📚 Память", callback_data=AiCb(action="memory"))
         kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
         kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
-        kb.adjust(2)
+        kb.adjust(3)
         await _edit_or_answer_long(
-            thinking, message, str_reply, reply_markup=kb.as_markup()
+            thinking, message, display_reply, reply_markup=kb.as_markup()
         )
 
 
@@ -789,9 +845,10 @@ async def cb_ai_start(
     await state.set_state(AiChat.chatting)
     await state.update_data(messages=[], turns=0)
     kb = InlineKeyboardBuilder()
+    kb.button(text="📚 Память", callback_data=AiCb(action="memory"))
     kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
     kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
-    kb.adjust(2)
+    kb.adjust(3)
     await callback.message.edit_text(
         "🤖 <b>AI-ассистент запущен</b>\n\n"
         "Задайте вопрос или поставьте задачу. Я могу анализировать данные ваших ботов, "
@@ -878,6 +935,99 @@ async def cb_ai_cancel_action(callback: CallbackQuery, state: FSMContext) -> Non
         "❌ Действие отменено. Можете задать новый вопрос или задачу.",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(AiCb.filter(F.action == "memory"))
+async def cb_ai_memory(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+) -> None:
+    """Показать список последних 10 записей памяти пользователя."""
+    await callback.answer()
+    try:
+        items = await ai_memory.search(pool, callback.from_user.id, "", limit=10)
+    except Exception:
+        log.exception("Failed to load AI memory list")
+        await callback.message.edit_text(
+            "❌ Не удалось загрузить память.",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AiCb(action="start"))
+            .as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    if items:
+        lines = ["📚 <b>Память AI-ассистента</b> (последние 10)\n"]
+        for item in items:
+            pin = "📌 " if item.pinned else ""
+            kind_label = {"note": "📝", "insight": "💡", "reminder": "⏰"}.get(item.kind, "📄")
+            title_text = escape(item.title[:50]) if item.title else escape(item.body[:50])
+            dt = item.created_at.strftime("%d.%m") if item.created_at else ""
+            lines.append(f"{kind_label} {pin}<b>{title_text}</b> <i>{dt}</i>")
+            kb.button(
+                text=f"🗑 #{item.id} {(item.title or item.body[:30])[:30]}",
+                callback_data=AiCb(action="memory_delete", memory_id=item.id),
+            )
+        kb.adjust(1)
+        text = "\n".join(lines)
+    else:
+        text = "📚 <b>Память пустая</b>\n\nAI-ассистент будет сохранять важные сведения о вас здесь."
+
+    kb.button(text="◀️ Назад в чат", callback_data=AiCb(action="start"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(AiCb.filter(F.action == "memory_delete"))
+async def cb_ai_memory_delete(
+    callback: CallbackQuery,
+    callback_data: AiCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """Удалить запись из памяти AI."""
+    await callback.answer()
+    memory_id = callback_data.memory_id
+    if not memory_id:
+        await callback.answer("❌ Некорректный ID записи", show_alert=True)
+        return
+    try:
+        deleted = await ai_memory.delete(pool, callback.from_user.id, memory_id)
+    except Exception:
+        log.exception("Failed to delete AI memory item %s", memory_id)
+        await callback.answer("❌ Ошибка при удалении", show_alert=True)
+        return
+
+    if deleted:
+        await callback.answer("🗑 Запись удалена", show_alert=False)
+    else:
+        await callback.answer("Запись не найдена", show_alert=False)
+
+    # Перезагрузить список памяти
+    try:
+        items = await ai_memory.search(pool, callback.from_user.id, "", limit=10)
+    except Exception:
+        items = []
+
+    kb = InlineKeyboardBuilder()
+    if items:
+        lines = ["📚 <b>Память AI-ассистента</b> (последние 10)\n"]
+        for item in items:
+            pin = "📌 " if item.pinned else ""
+            kind_label = {"note": "📝", "insight": "💡", "reminder": "⏰"}.get(item.kind, "📄")
+            title_text = escape(item.title[:50]) if item.title else escape(item.body[:50])
+            dt = item.created_at.strftime("%d.%m") if item.created_at else ""
+            lines.append(f"{kind_label} {pin}<b>{title_text}</b> <i>{dt}</i>")
+            kb.button(
+                text=f"🗑 #{item.id} {(item.title or item.body[:30])[:30]}",
+                callback_data=AiCb(action="memory_delete", memory_id=item.id),
+            )
+        kb.adjust(1)
+        text = "\n".join(lines)
+    else:
+        text = "📚 <b>Память пустая</b>\n\nAI-ассистент будет сохранять важные сведения о вас здесь."
+
+    kb.button(text="◀️ Назад в чат", callback_data=AiCb(action="start"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.callback_query(AiCb.filter(F.action == "retry"))
