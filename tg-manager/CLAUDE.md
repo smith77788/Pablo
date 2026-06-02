@@ -212,6 +212,9 @@ tg-manager/\
 `    `├── search\_observer.py         # наблюдение за поисковыми паттернами\
 `    `├── broadcaster.py             # рассылки\
 `    `├── routing\_engine.py          # маршрутизация между ботами\
+`    `├── resource\_selector.py       # UNIFIED: единый выбор аккаунтов/прокси (r19)\
+`    `├── operation\_bus.py           # UNIFIED: универсальная постановка в очередь (r19)\
+`    `├── infra\_memory.py            # UNIFIED: Infrastructure Memory — паттерны успехов (r19, schema\_v65)\
 `    `├── bot\_api.py                 # Bot API wrapper\
 `    `└── railway\_api.py             # Railway API интеграция
 ### 3\.3 Авто-миграция БД
@@ -781,7 +784,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.05.30-r15
+- **Текущая build:** 2026.06.02-r19
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -809,5 +812,15 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **FSM state bug fix** — OpBuilderFSM.confirming, дублирующие State()
 - ✅ **account\_warmer crash fix** — None session\_str early return
 
-*Последнее обновление: 2026-06-02 (r18)* *Следующий build-номер: r19*
+### ✅ ЗАКРЫТО (r19) — BOTMOTHER ЕДИНЫЙ ОРГАНИЗМ
+- ✅ **resource\_selector.py** — единый выбор аккаунтов: select\_account/select\_accounts/select\_for\_wave, обёртка flood\_engine
+- ✅ **operation\_bus.py** — OP\_REGISTRY (10 op\_type) + submit/cancel/get\_status/list\_active/list\_recent API
+- ✅ **infra\_memory.py** — Infrastructure Memory: паттерны успехов/ошибок, memory\_score, proxy\_score, best\_hour, flush loop
+- ✅ **schema\_v65** — infra\_memory\_accounts + infra\_memory\_proxies таблицы
+- ✅ **Strike в op\_worker** — op\_type="strike" → _exec_strike() → staggered\_strike() + progress callback
+- ✅ **preflight\_accounts** — composite sort: trust + memory\_score − risk\_score, flood\_engine in-memory cooldown
+- ✅ **infra\_memory wiring** — strike\_engine и op\_worker записывают success/fail в память после операций
+- ✅ **Security hardening** — try-except для int() конвертаций params, timestamp > 0 check, done\_items=0 explicit
+
+*Последнее обновление: 2026-06-02 (r19)* *Следующий build-номер: r20*
 
