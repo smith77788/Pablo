@@ -364,43 +364,61 @@ class StrikeResult:
 
 
 def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dict]:
-    """
-    Предполётная проверка аккаунтов:
-      - Отсев аккаунтов в кулдауне (cooldown_until > now)
-      - Отсев неактивных (is_active = False)
-      - Сортировка по trust_score (высокие первыми — лучшие аккаунты в первой волне)
-      - Отсев с trust_score ниже min_trust
+    """Предполётная проверка аккаунтов.
 
-    Возвращает отсортированный список годных аккаунтов.
+    Фильтры:
+      - is_active = False → отсев
+      - cooldown_until (DB) > now → отсев
+      - flood_engine in-memory cooldown → отсев
+      - trust_score < min_trust → отсев
+
+    Сортировка: composite score = trust_score + memory_score − risk_score
+    (лучшие аккаунты по всем трём метрикам — в первую волну).
     """
     now = time.time()
     viable: list[dict] = []
 
+    try:
+        from services import flood_engine as _fe
+        fe_available = True
+    except Exception:
+        fe_available = False
+
+    try:
+        from services.infra_memory import get_account_score as _mem_score
+        mem_available = True
+    except Exception:
+        mem_available = False
+
     for acc in accounts:
         if not acc.get("is_active", False):
             continue
-        # Проверка кулдауна
+        # Проверка кулдауна из БД
         cooldown = acc.get("cooldown_until")
         if cooldown:
             try:
                 cd_ts = cooldown.timestamp() if hasattr(cooldown, "timestamp") else float(cooldown)
                 if cd_ts > now:
-                    continue  # аккаунт в кулдауне — пропускаем
+                    continue
             except (TypeError, ValueError, OSError):
                 log_exc_swallow(log, "Не удалось распарсить cooldown_until аккаунта в preflight")
+        # Проверка in-memory cooldown в flood_engine
+        if fe_available and acc.get("id") and _fe.is_account_cooling(acc["id"]):
+            continue
         # Проверка trust_score
         ts = acc.get("trust_score") or 0
         if ts < min_trust:
             continue
         viable.append(acc)
 
-    # Сортировка: trust_score DESC, flood_count_7d ASC
-    viable.sort(
-        key=lambda a: (
-            -(a.get("trust_score") or 0),
-            a.get("flood_count_7d") or 0,
-        )
-    )
+    # Composite sort: trust + memory_score − risk (все в диапазоне [0,1])
+    def _sort_key(a: dict) -> float:
+        trust = (a.get("trust_score") or 0) / 100.0  # нормализуем 0-100 → 0-1
+        risk = _fe.get_account_state(a["id"]).risk_score if fe_available and a.get("id") else 0.0
+        mem = _mem_score(a["id"], "strike") if mem_available and a.get("id") else 0.5
+        return -(trust + mem - risk)  # minus = DESC order
+
+    viable.sort(key=_sort_key)
     return viable
 
 
