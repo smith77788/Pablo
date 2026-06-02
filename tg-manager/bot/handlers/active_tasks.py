@@ -22,6 +22,10 @@ _KIND_LABELS = {
     "publish": "📢 Публикация",
     "dm_campaign": "✉️ DM-кампания",
     "bulk_edit": "✏️ Массовое редактирование",
+    "invite": "📩 Инвайт в канал",
+    "global_presence": "🌍 Global Presence",
+    "bulk_post": "📤 Массовая публикация",
+    "bulk_leave": "🚪 Массовый выход",
 }
 
 
