@@ -2,7 +2,8 @@
 
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import EditCb
@@ -12,6 +13,12 @@ from database import db
 from services import bot_api
 
 router = Router()
+
+
+def _cancel_edit_kb(bot_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=EditCb(action="menu", bot_id=bot_id))
+    return kb.as_markup()
 
 
 async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | None:
@@ -24,9 +31,10 @@ async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | Non
 
 @router.callback_query(EditCb.filter(F.action == "menu"))
 async def cb_edit_menu(
-    callback: CallbackQuery, callback_data: EditCb, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: EditCb, pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
-
+    await state.clear()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -38,7 +46,6 @@ async def cb_edit_menu(
         parse_mode="HTML",
         reply_markup=edit_menu(callback_data.bot_id),
     )
-    await callback.answer()
 
 
 # ── Name (default language) ───────────────────────────────────────────────
@@ -51,7 +58,12 @@ async def cb_name(
     await callback.answer()
     await state.set_state(EditProfile.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text("📝 Введите новое имя бота (до 64 символов):")
+    await callback.message.edit_text(
+        "📝 <b>Введите новое имя бота</b> (до 64 символов):\n\n"
+        "✏️ Напишите в поле сообщения ниже ↓",
+        parse_mode="HTML",
+        reply_markup=_cancel_edit_kb(callback_data.bot_id),
+    )
 
 
 @router.message(EditProfile.waiting_name, F.text)
@@ -83,7 +95,10 @@ async def cb_desc(
     await state.set_state(EditProfile.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
-        "📄 Введите новое описание бота (до 512 символов):"
+        "📄 <b>Введите новое описание бота</b> (до 512 символов):\n\n"
+        "✏️ Напишите в поле сообщения ниже ↓",
+        parse_mode="HTML",
+        reply_markup=_cancel_edit_kb(callback_data.bot_id),
     )
 
 
@@ -114,7 +129,12 @@ async def cb_short(
     await callback.answer()
     await state.set_state(EditProfile.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id)
-    await callback.message.edit_text("📃 Введите краткое описание (до 120 символов):")
+    await callback.message.edit_text(
+        "📃 <b>Введите краткое описание</b> (до 120 символов):\n\n"
+        "✏️ Напишите в поле сообщения ниже ↓",
+        parse_mode="HTML",
+        reply_markup=_cancel_edit_kb(callback_data.bot_id),
+    )
 
 
 @router.message(EditProfile.waiting_short, F.text)
@@ -145,8 +165,11 @@ async def cb_photo(
     await state.set_state(EditProfile.waiting_photo)
     await state.update_data(bot_id=callback_data.bot_id)
     await callback.message.edit_text(
-        "🖼 Отправьте новое фото для бота.\n\n"
-        "Отправьте как фото (не файл), квадратное изображение минимум 160×160."
+        "🖼 <b>Отправьте новое фото для бота</b>\n\n"
+        "Отправьте как фото (не файл), квадратное изображение минимум 160×160.\n\n"
+        "✏️ Прикрепите фото в поле сообщения ниже ↓",
+        parse_mode="HTML",
+        reply_markup=_cancel_edit_kb(callback_data.bot_id),
     )
 
 
@@ -164,8 +187,7 @@ async def msg_photo(
         await state.clear()
         return
 
-    # Download photo from Telegram
-    photo = message.photo[-1]  # highest resolution
+    photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
     file_data = await bot.download_file(file.file_path)
     photo_bytes = file_data.read()
@@ -179,8 +201,12 @@ async def msg_photo(
 
 
 @router.message(EditProfile.waiting_photo)
-async def msg_photo_wrong(message: Message) -> None:
-    await message.answer("Пожалуйста, отправьте изображение как фото, не как файл.")
+async def msg_photo_wrong(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await message.answer(
+        "Пожалуйста, отправьте изображение как фото, не как файл.",
+        reply_markup=_cancel_edit_kb(data.get("bot_id", 0)),
+    )
 
 
 @router.callback_query(EditCb.filter(F.action == "del_photo"))
@@ -219,8 +245,10 @@ async def cb_update_token(
     await callback.message.edit_text(
         "🔑 <b>Обновление токена</b>\n\n"
         "Отправьте новый токен бота.\n"
-        "<i>Токен должен быть от того же или нового бота BotFather.</i>",
+        "<i>Токен должен быть от того же или нового бота BotFather.</i>\n\n"
+        "✏️ Напишите в поле сообщения ниже ↓",
         parse_mode="HTML",
+        reply_markup=_cancel_edit_kb(callback_data.bot_id),
     )
 
 
@@ -229,17 +257,22 @@ async def msg_update_token(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     token = message.text.strip() if message.text else ""
-    if not token or ":" not in token:
-        await message.answer("❌ Неверный формат токена. Попробуйте ещё раз:")
-        return
-
     data = await state.get_data()
     old_bot_id = data["old_bot_id"]
 
-    # Validate new token via API
+    if not token or ":" not in token:
+        await message.answer(
+            "❌ Неверный формат токена. Попробуйте ещё раз:",
+            reply_markup=_cancel_edit_kb(old_bot_id),
+        )
+        return
+
     info = await bot_api.get_me(http, token)
     if not info:
-        await message.answer("❌ Токен недействителен. Проверьте и попробуйте снова:")
+        await message.answer(
+            "❌ Токен недействителен. Проверьте и попробуйте снова:",
+            reply_markup=_cancel_edit_kb(old_bot_id),
+        )
         return
 
     new_bot_id = info["id"]
