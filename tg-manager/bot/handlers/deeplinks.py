@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import asyncpg
-from bot.callbacks import DeepLinkCb
+from bot.callbacks import DeepLinkCb, BmCb
 from bot.keyboards import (
     deeplinks_menu,
     deeplink_view_menu,
@@ -35,7 +35,7 @@ async def cb_dl_menu(
         await callback.message.edit_text(
             locked_text("Диплинки и рефералы", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -153,6 +153,7 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
         await message.answer(
             "❌ Параметр должен содержать только латиницу, цифры, _ или - (максимум 50 символов).\n\n"
             "Попробуйте снова:",
+            reply_markup=_dl_cancel_kb(data.get("bot_id", 0)),
         )
         return  # keep state active so user can send another value
     try:

@@ -1437,9 +1437,12 @@ async def vis_receive_region(
     owner_id = callback.from_user.id
 
     if not bot_id or not keyword:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ К дашборду", callback_data=VisCb(action="dashboard"))
         await safe_edit(
             callback,
             "⚠️ Ошибка: данные не найдены. Начните заново.",
+            reply_markup=kb.as_markup(),
         )
         return
 

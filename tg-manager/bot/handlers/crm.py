@@ -6,7 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
-from bot.callbacks import CrmCb, AutoCb
+from bot.callbacks import CrmCb, AutoCb, BmCb
 from bot.keyboards import (
     crm_menu,
     tag_detail_menu,
@@ -44,12 +44,14 @@ async def cb_crm_menu(
         await callback.message.edit_text(
             locked_text("CRM & автоматизация", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.message.edit_text("❌ Бот не найден.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text("❌ Бот не найден.", reply_markup=kb.as_markup())
         return
     tags = await db.get_tag_names(pool, callback_data.bot_id)
     label = (
@@ -77,11 +79,14 @@ async def cb_add_tag_global(
     await callback.answer()
     await state.set_state(AddGlobalTag.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=CrmCb(action="menu", bot_id=callback_data.bot_id))
     await callback.message.edit_text(
         "🏷 <b>Создать тег</b>\n\n"
         "Введите название тега (латиница, кириллица, цифры, _ допустимы).\n"
         "Тег будет создан и доступен для назначения пользователям через автоматизацию.",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -90,11 +95,16 @@ async def msg_global_tag_name(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     data = await state.get_data()
-    await state.clear()
-    tag = message.text.strip()
-    if not tag:
-        await message.answer("❌ Название тега не может быть пустым.")
+    tag = (message.text or "").strip()
+    if not tag or len(tag) > 50:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=CrmCb(action="menu", bot_id=data.get("bot_id", 0)))
+        await message.answer(
+            "⚠️ Название тега должно быть от 1 до 50 символов. Введите снова:",
+            reply_markup=kb.as_markup(),
+        )
         return
+    await state.clear()
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await db.add_user_tag(pool, data["bot_id"], message.from_user.id, tag)
     tags = await db.get_tag_names(pool, data["bot_id"])
@@ -152,12 +162,14 @@ async def cb_auto_menu(
         await callback.message.edit_text(
             locked_text("Автоматизация", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.message.edit_text("❌ Бот не найден.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text("❌ Бот не найден.", reply_markup=kb.as_markup())
         return
     rules = await db.get_automation_rules(pool, callback_data.bot_id)
     label = (
@@ -183,7 +195,9 @@ async def cb_auto_view(
     rules = await db.get_automation_rules(pool, callback_data.bot_id)
     rule = next((r for r in rules if r["id"] == callback_data.rule_id), None)
     if not rule:
-        await callback.message.edit_text("❌ Правило не найдено.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=AutoCb(action="menu", bot_id=callback_data.bot_id))
+        await callback.message.edit_text("❌ Правило не найдено.", reply_markup=kb.as_markup())
         return
     kb = InlineKeyboardBuilder()
     toggle_text = "❌ Отключить" if rule["is_active"] else "✅ Включить"
@@ -289,12 +303,17 @@ async def _set_trigger(
 ) -> None:
     await callback.answer()
     await state.update_data(trigger_type=trigger_type, trigger_value=None)
+    data = await state.get_data()
+    bot_id = data.get("bot_id", 0)
     if needs_value:
         await state.set_state(AddAutoRule.waiting_trigger_value)
         hint = "ключевое слово" if trigger_type == "keyword" else "название тега"
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
         await callback.message.edit_text(
             f"⚙️ Триггер: <b>{TRIGGER_LABELS[trigger_type]}</b>\n\nВведите {hint}:",
             parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
     else:
         await state.set_state(AddAutoRule.choosing_action)
@@ -338,10 +357,19 @@ async def cb_trig_tag(
 
 @router.message(AddAutoRule.waiting_trigger_value, F.text)
 async def msg_trigger_value(message: Message, state: FSMContext) -> None:
-    await state.update_data(trigger_value=message.text.strip())
-    await state.set_state(AddAutoRule.choosing_action)
+    value = (message.text or "").strip()
     data = await state.get_data()
-    bot_id = data["bot_id"]
+    bot_id = data.get("bot_id", 0)
+    if not value or len(value) > 100:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+        await message.answer(
+            "⚠️ Значение должно быть от 1 до 100 символов. Введите снова:",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await state.update_data(trigger_value=value)
+    await state.set_state(AddAutoRule.choosing_action)
     await message.answer(
         "⚙️ <b>Шаг 2/3</b> — Выберите действие:",
         parse_mode="HTML",
@@ -364,15 +392,20 @@ async def cb_choose_action(
     action_type = action_map[callback_data.action]
     await state.update_data(action_type=action_type)
     await state.set_state(AddAutoRule.waiting_action_value)
+    data = await state.get_data()
+    bot_id = data.get("bot_id", 0)
     hints = {
         "send_message": "текст сообщения (HTML поддерживается)",
         "add_tag": "название тега для добавления",
         "remove_tag": "название тега для удаления",
     }
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     await callback.message.edit_text(
         f"⚙️ Действие: <b>{ACTION_LABELS[action_type]}</b>\n\n"
         f"<b>Шаг 3/3</b> — Введите {hints[action_type]}:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -423,18 +456,37 @@ async def cb_sel_funnel(
     )
     await state.update_data(action_value=str(funnel_id))
     await state.set_state(AddAutoRule.waiting_name)
+    data = await state.get_data()
+    bot_id = data.get("bot_id", callback_data.bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     await callback.message.edit_text(
         f"✅ Цепочка: <b>{safe_name}</b>\n\nВведите название для этого правила:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 @router.message(AddAutoRule.waiting_action_value, F.text)
 async def msg_action_value(message: Message, state: FSMContext) -> None:
-    await state.update_data(action_value=message.text.strip())
+    value = (message.text or "").strip()
+    data = await state.get_data()
+    bot_id = data.get("bot_id", 0)
+    if not value or len(value) > 500:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+        await message.answer(
+            "⚠️ Текст должен быть от 1 до 500 символов. Введите снова:",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await state.update_data(action_value=value)
     await state.set_state(AddAutoRule.waiting_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     await message.answer(
         "✅ Почти готово!\n\nВведите название для этого правила (для вашего удобства):",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -443,11 +495,20 @@ async def msg_rule_name(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     data = await state.get_data()
+    rule_name = (message.text or "").strip()
+    if not rule_name or len(rule_name) > 100:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=data.get("bot_id", 0)))
+        await message.answer(
+            "⚠️ Название правила должно быть от 1 до 100 символов. Введите снова:",
+            reply_markup=kb.as_markup(),
+        )
+        return
     await state.clear()
     await db.add_automation_rule(
         pool,
         data["bot_id"],
-        message.text.strip(),
+        rule_name,
         data["trigger_type"],
         data.get("trigger_value"),
         data["action_type"],
@@ -457,7 +518,7 @@ async def msg_rule_name(
     action_label = ACTION_LABELS.get(data["action_type"], data["action_type"])
     await message.answer(
         f"✅ <b>Правило создано!</b>\n\n"
-        f"Название: {message.text.strip()}\n"
+        f"Название: {rule_name}\n"
         f"Триггер: {trigger_label}\n"
         f"Действие: {action_label}\n"
         f"Значение: <code>{data['action_value'][:60]}</code>",

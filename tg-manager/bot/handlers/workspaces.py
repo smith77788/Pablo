@@ -78,7 +78,9 @@ async def cb_ws_view(callback: CallbackQuery, callback_data: WorkspaceCb, pool: 
     await callback.answer()
     ws = await db.get_workspace(pool, callback_data.ws_id)
     if not ws:
-        await callback.message.edit_text("❌ Workspace не найден.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="menu"))
+        await callback.message.edit_text("❌ Workspace не найден.", reply_markup=kb.as_markup())
         return
     is_owner = ws["owner_id"] == callback.from_user.id
     members = await db.get_workspace_members(pool, callback_data.ws_id)
@@ -149,6 +151,8 @@ async def msg_ws_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await state.set_state(WorkspaceFSM.entering_description)
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=WorkspaceCb(action="create"))
+    kb.button(text="❌ Отмена", callback_data=WorkspaceCb(action="menu"))
+    kb.adjust(1)
     await message.answer(
         f"✅ Название: <b>{name}</b>\n\nВведите описание (необязательно) или нажмите Пропустить:",
         parse_mode="HTML",
@@ -190,6 +194,11 @@ async def cb_ws_join(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(WorkspaceFSM.entering_invite_code)
 async def msg_ws_invite_code(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     code = (message.text or "").strip()
+    if not code or len(code) > 100:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=WorkspaceCb(action="menu"))
+        await message.answer("⚠️ Введите корректный код приглашения (до 100 символов).", reply_markup=kb.as_markup())
+        return
     await state.clear()
     ws_id = await db.use_workspace_invite(pool, code, message.from_user.id)
     if not ws_id:
@@ -217,10 +226,15 @@ async def cb_ws_leave(callback: CallbackQuery, callback_data: WorkspaceCb, pool:
     await callback.answer()
     ws = await db.get_workspace(pool, callback_data.ws_id)
     if ws and ws["owner_id"] == callback.from_user.id:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Назад", callback_data=WorkspaceCb(action="view", ws_id=callback_data.ws_id))
         await callback.message.edit_text(
             "⚠️ Вы являетесь <b>владельцем</b> этого workspace. Владелец не может покинуть его.",
             parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
     await db.delete_workspace_member(pool, callback_data.ws_id, callback.from_user.id)
-    await callback.message.edit_text("✅ Вы покинули workspace.")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
+    await callback.message.edit_text("✅ Вы покинули workspace.", reply_markup=kb.as_markup())
