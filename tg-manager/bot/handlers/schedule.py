@@ -42,7 +42,7 @@ async def cb_schedule_menu(
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    status_emoji = {"pending": "⏳", "done": "✅", "cancelled": "❌"}
+    status_emoji = {"pending": "⏳", "done": "✅", "cancelled": "❌", "missed": "⚠️"}
     lines = []
     for s in schedules:
         emoji = status_emoji.get(s["status"], "❓")

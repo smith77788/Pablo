@@ -54,7 +54,7 @@ async def _record_funnel_conversion(
             sub_id,
         )
     except Exception as e:
-        log.debug("funnel conversion record error: %s", e)
+        log.warning("funnel conversion record error: %s", e)
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
