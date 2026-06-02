@@ -361,6 +361,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
             "❌ Неверный формат номера.\n"
             "Введите номер в формате: <code>+79001234567</code>",
             parse_mode="HTML",
+            reply_markup=_cancel_markup(),
         )
         return
 
@@ -742,7 +743,7 @@ async def handle_code(message: Message, pool: asyncpg.Pool, state: FSMContext) -
     phone_code_hash: str = data.get("phone_code_hash", "")
 
     if not code.isdigit():
-        await message.answer("❌ Код должен содержать только цифры. Введите ещё раз:")
+        await message.answer("❌ Код должен содержать только цифры. Введите ещё раз:", reply_markup=_cancel_markup())
         return
 
     try:
@@ -1328,7 +1329,7 @@ async def handle_post_text(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("❌ Сообщение не может быть пустым. Введите текст:")
+        await message.answer("❌ Сообщение не может быть пустым. Введите текст:", reply_markup=_cancel_markup())
         return
 
     data = await state.get_data()
@@ -1985,7 +1986,7 @@ async def handle_send_msg_chat_id(
 ) -> None:
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("❌ Введите chat_id или @username:")
+        await message.answer("❌ Введите chat_id или @username:", reply_markup=_cancel_markup())
         return
 
     # Принимаем @username или числовой chat_id
@@ -1995,7 +1996,7 @@ async def handle_send_msg_chat_id(
         chat_id_value = int(raw)
     else:
         await message.answer(
-            "❌ Неверный формат. Введите числовой ID или @username:"
+            "❌ Неверный формат. Введите числовой ID или @username:", reply_markup=_cancel_markup()
         )
         return
 
