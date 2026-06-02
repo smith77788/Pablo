@@ -2655,7 +2655,7 @@ async def cb_add_bot_token(
     progress = await callback.message.answer("⏳ Добавляю бота...")
     bot_info = await _bot_api.get_me(http, token)
     if not bot_info:
-        await progress.edit_text("❌ Не удалось получить информацию о боте. Токен недействителен.")
+        await progress.edit_text("❌ Не удалось получить информацию о боте. Токен недействителен.", reply_markup=_back_kb().as_markup())
         return
     added = await _db.add_bot(
         pool, token=token, bot_id=bot_info["id"],
@@ -2674,6 +2674,7 @@ async def cb_add_bot_token(
         await progress.edit_text(
             f"⚠️ Бот @{safe} уже добавлен в вашу платформу.",
             parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
         )
 
 
@@ -4404,7 +4405,7 @@ async def cb_bulk_chan_exec(
         callback.from_user.id, selected_ids,
     )
     if not accounts:
-        await callback.message.edit_text("⚠️ Аккаунты не найдены. Начните заново: /ops")
+        await callback.message.edit_text("⚠️ Аккаунты не найдены. Начните заново: /ops", reply_markup=_back_kb().as_markup())
         return
 
     # Fetch all channels for selected accounts from DB cache
@@ -4726,7 +4727,7 @@ async def cb_my_chans_leave(
         )
         session = acc["session_str"] if acc else None
     if not session:
-        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
+        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     progress = await callback.message.edit_text("⏳ Покидаю канал...", parse_mode="HTML")
@@ -4953,7 +4954,7 @@ async def cb_cinv_pick_channel(
     )
     accounts = await _get_accounts(pool, callback.from_user.id)
     if not accounts:
-        await callback.message.edit_text("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts")
+        await callback.message.edit_text("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts", reply_markup=_back_kb().as_markup())
         await state.clear()
         return
     await state.set_state(ContactInviteFSM.choosing_accounts)
