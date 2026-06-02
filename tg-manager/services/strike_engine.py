@@ -530,7 +530,7 @@ async def _one_account_strike(
                             state.cooldown_until = _time.monotonic() + wait_s + 10
                             state.risk_score = min(1.0, state.risk_score + 0.15)
                         except Exception:
-                            pass
+                            log.warning("strike: in-memory flood state update failed acc=%s wait=%s", acc.get("id"), wait_s)
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
                 log.warning("strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str)

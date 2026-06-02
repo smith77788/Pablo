@@ -14,7 +14,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import HealthCb, BotCb, BmCb
+from bot.callbacks import HealthCb, BotCb, BmCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb, InfraCb
 from bot.utils.op_helpers import safe_edit
 
 log = logging.getLogger(__name__)
@@ -216,10 +216,11 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="💡 Рекомендации",   callback_data=HealthCb(action="recommendations"))
     kb.button(text="🌡 Давление",       callback_data=HealthCb(action="pressure"))
     kb.button(text="🎯 Советник",       callback_data=HealthCb(action="advisor"))
+    kb.button(text="🔄 Авто-балансировка", callback_data=InfraCb(action="rebalance_preview"))
     kb.button(text="📥 Экспорт CSV",    callback_data=HealthCb(action="export_csv"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())
 
@@ -1136,6 +1137,15 @@ async def cb_pressure_score(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 # ── Infrastructure Advisor ─────────────────────────────────────────────────────
 
+_ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
+    "accounts": ("📱 Аккаунты",  AccCb(action="menu")),
+    "warmup":   ("🌡 Разогрев",  WarmupCb(action="menu")),
+    "cleaner":  ("🧹 Очистка",   CleanerCb(action="menu")),
+    "proxies":  ("🌐 Прокси",    ProxyCb(action="menu")),
+    "tasks":    ("⚡ Задачи",    TaskCb(action="list")),
+}
+
+
 @router.callback_query(HealthCb.filter(F.action == "advisor"))
 async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
@@ -1143,9 +1153,24 @@ async def cb_infra_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     recs = await infra_advisor.get_recommendations(pool, callback.from_user.id)
     text = infra_advisor.format_recommendations(recs)
     kb = InlineKeyboardBuilder()
+    # Collect unique actions from recommendations (up to 3)
+    seen: set[str] = set()
+    action_cbs = []
+    for rec in recs:
+        action = rec.get("action", "")
+        if action and action in _ADVISOR_ACTION_BUTTONS and action not in seen:
+            seen.add(action)
+            label, cb_data = _ADVISOR_ACTION_BUTTONS[action]
+            action_cbs.append((label, cb_data))
+        if len(action_cbs) >= 3:
+            break
+    for label, cb_data in action_cbs:
+        kb.button(text=label, callback_data=cb_data)
+    if action_cbs:
+        kb.adjust(min(len(action_cbs), 3))
     kb.button(text="🔄 Обновить", callback_data=HealthCb(action="advisor"))
     kb.button(text="🌡 Давление", callback_data=HealthCb(action="pressure"))
     kb.button(text="◀️ Назад",   callback_data=HealthCb(action="menu"))
-    kb.adjust(2, 1)
+    kb.adjust(*([min(len(action_cbs), 3)] if action_cbs else []), 2, 1)
     await safe_edit(callback, text, reply_markup=kb.as_markup())
 

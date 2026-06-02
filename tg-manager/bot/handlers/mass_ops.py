@@ -422,6 +422,20 @@ async def cb_mp_confirm(
     # Build list of (account, dialog) to post to
     accounts = await _get_accounts_for_filter(pool, callback.from_user.id, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
 
+    if not accounts:
+        filter_hint = {
+            "account": "выбранного аккаунта",
+            "cluster": f"кластера «{mp_cluster}»",
+            "pool": f"пула «{mp_pool}»",
+        }.get(filter_type, "выбранного фильтра")
+        await safe_edit(
+            callback,
+            f"⚠️ Нет активных аккаунтов для {filter_hint}.\n"
+            "Проверьте аккаунты в разделе 📱 Аккаунты.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
     from services import account_manager
 
     targets_with_dialogs: list[tuple] = []
@@ -1890,6 +1904,26 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
         lines.append(f"Цели: <b>{target_label}</b>")
         preview_text = html.escape(ob_param[:200])
         lines.append(f"Аккаунтов: <b>{acc_count}</b>")
+        # Estimate channel count for ETA
+        target_filter = sd.get("ob_target", "")
+        chan_count = 0
+        try:
+            if target_filter in ("channels", "both"):
+                chan_count += await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+                ) or 0
+            if target_filter in ("groups", "both"):
+                chan_count += await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+                ) or 0
+        except Exception:
+            log_exc_swallow(log, "_ob_show_preview: channel count failed")
+        if chan_count > 0:
+            # ~30s per publish with safe delays
+            eta_secs = chan_count * 30
+            eta_min = eta_secs // 60
+            eta_str = f"~{eta_min}м" if eta_min > 0 else "<1м"
+            lines.append(f"Каналов/групп: <b>{chan_count}</b> | ⏱️ ETA: <b>{eta_str}</b>")
         lines.append(f"\nТекст поста:\n<i>{preview_text}</i>")
     elif op_type in ("bulk_join", "bulk_leave"):
         action_word = "вступления" if op_type == "bulk_join" else "выхода"
@@ -1898,6 +1932,13 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
             link_preview += f"\n… и ещё {len(ob_links) - 5}"
         lines.append(f"Каналов/групп: <b>{len(ob_links)}</b>")
         lines.append(f"Аккаунтов для {action_word}: <b>{acc_count}</b>")
+        # ETA: accounts × targets × ~60s per action
+        if acc_count > 0 and ob_links:
+            eta_secs = acc_count * len(ob_links) * 60
+            eta_min = eta_secs // 60
+            eta_h = eta_min // 60
+            eta_str = f"~{eta_h}ч {eta_min % 60}м" if eta_h else f"~{eta_min}м"
+            lines.append(f"⏱️ Примерное время: <b>{eta_str}</b> (safe режим)")
         lines.append(f"\n<b>Список:</b>\n{link_preview}")
     elif op_type == "bulk_bot_edit":
         _FIELD_LABELS_OB = {
