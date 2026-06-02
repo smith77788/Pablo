@@ -111,6 +111,57 @@ from database import db
 log = logging.getLogger(__name__)
 router = Router()
 
+
+def _friendly_join_error(error_str: str) -> str:
+    """Translate raw Telethon/Telegram join errors into user-friendly Russian messages."""
+    e = error_str.lower()
+    if "userbannedinchannels" in e or "you're banned" in e or "banned in channel" in e:
+        return (
+            "🚫 <b>Аккаунт заблокирован в этом канале/группе</b>\n\n"
+            "Администраторы канала запретили вступление для этого аккаунта. "
+            "Попробуйте другой аккаунт."
+        )
+    if "channelprivate" in e or "channel_private" in e or "private" in e and "channel" in e:
+        return (
+            "🔒 <b>Закрытый канал/группа</b>\n\n"
+            "Этот канал или группа закрыты. Для вступления нужна пригласительная ссылка "
+            "<code>https://t.me/+...</code>, а не просто @username."
+        )
+    if "floodwait" in e or "flood_wait" in e or "flood wait" in e or "a wait of" in e:
+        import re as _re
+        m = _re.search(r"(\d+)", error_str)
+        seconds = int(m.group(1)) if m else 60
+        minutes = seconds // 60
+        time_str = f"{minutes} мин" if minutes > 0 else f"{seconds} сек"
+        return (
+            f"⏳ <b>Telegram требует паузу {time_str}</b>\n\n"
+            "Слишком много запросов. Подождите немного перед следующей попыткой."
+        )
+    if "invitehash" in e or "invite_hash" in e or "invalid" in e and "hash" in e:
+        return (
+            "❌ <b>Недействительная ссылка-приглашение</b>\n\n"
+            "Ссылка устарела или была отозвана. Запросите новую ссылку у администратора канала."
+        )
+    if "usernotmutualcontact" in e or "not mutual" in e:
+        return (
+            "❌ <b>Доступ ограничен</b>\n\n"
+            "Для вступления в эту группу нужно быть в контактах её участника."
+        )
+    if "channelstoomuchchat" in e or "too much" in e:
+        return (
+            "❌ <b>Слишком много чатов</b>\n\n"
+            "Аккаунт уже состоит в максимально допустимом количестве каналов/групп. "
+            "Выйдите из нескольких каналов и попробуйте снова."
+        )
+    if "usernamenotoccupied" in e or "username not occupied" in e:
+        return (
+            "❌ <b>Канал не найден</b>\n\n"
+            "Канал или группа с таким @username не существует. "
+            "Проверьте правильность написания."
+        )
+    # Generic fallback — show technical error but clean
+    return f"❌ <b>Ошибка вступления</b>\n\n<code>{html.escape(error_str[:200])}</code>"
+
 _DISCLAIMER = (
     "\n\n<i>⚠️ <b>Важно:</b> Strike Module является инструментом для подачи "
     "законных жалоб через официальные механизмы Telegram Trust &amp; Safety. "
@@ -1181,6 +1232,19 @@ async def cb_join_pick_account(
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для вступления в каналы нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     if len(active) == 1:
         acc = await pool.fetchrow(
             "SELECT id, session_str FROM tg_accounts WHERE id=$1", active[0]["id"]
@@ -1245,6 +1309,19 @@ async def cb_leave_pick_account(
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для выхода из каналов нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "leave_dialogs")
     await callback.message.edit_text(
         "🚪 <b>Выйти из канала</b>\n\nВыберите аккаунт:",
@@ -3952,7 +4029,22 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
             elif result.get("flood_wait"):
                 err_list.append(f"⏳ {label}: flood_wait, пропущен")
             elif "error" in result:
-                err_list.append(f"❌ {label}: {html.escape(result['error'][:60])}")
+                err_raw = result["error"]
+                err_e = err_raw.lower()
+                if "userbannedinchannels" in err_e or "banned in channel" in err_e:
+                    err_list.append(f"🚫 {label}: заблокирован в канале")
+                elif "channelprivate" in err_e or "channel_private" in err_e:
+                    err_list.append(f"🔒 {label}: закрытый канал (нужна ссылка-приглашение)")
+                elif "floodwait" in err_e or "flood_wait" in err_e:
+                    err_list.append(f"⏳ {label}: FloodWait — пауза Telegram")
+                elif "usernotmutualcontact" in err_e:
+                    err_list.append(f"❌ {label}: доступ только для контактов")
+                elif "channelstoomuchchat" in err_e or "too much" in err_e:
+                    err_list.append(f"❌ {label}: превышен лимит каналов")
+                elif "invitehash" in err_e or "invalid" in err_e and "hash" in err_e:
+                    err_list.append(f"❌ {label}: недействительная ссылка-приглашение")
+                else:
+                    err_list.append(f"❌ {label}: {html.escape(err_raw[:60])}")
             else:
                 ok_list.append(f"✅ {label}: вступил")
             try:
@@ -3982,8 +4074,9 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
     result = await account_manager.join_channel(acc["session_str"], invite, _acc=acc)
     kb = _back_kb()
     if "error" in result:
+        friendly_msg = _friendly_join_error(result["error"])
         await msg.edit_text(
-            f"❌ <b>Ошибка</b>\n\n<code>{html.escape(result['error'])}</code>",
+            friendly_msg,
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
     else:
