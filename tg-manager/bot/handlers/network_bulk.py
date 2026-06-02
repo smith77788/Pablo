@@ -288,8 +288,13 @@ async def cb_bulk_short(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_short)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        "📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст:", parse_mode="HTML"
+        "📃 <b>Краткое описание для всех ботов</b>\n\nВведите текст:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -318,9 +323,13 @@ async def cb_bulk_short_lang(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_short_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🌍 <b>Краткое по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -358,11 +367,15 @@ async def cb_bulk_commands(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_commands)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "🤖 <b>Команды для всех ботов</b>\n\n"
         "Отправьте список команд, каждая с новой строки:\n\n"
         "<code>start - Главное меню\nhelp - Помощь</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -399,9 +412,13 @@ async def cb_bulk_commands_lang(
     if not await _check_enterprise(callback, pool):
         return
     await state.set_state(BulkEdit.waiting_commands_lang)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -449,11 +466,15 @@ async def cb_bulk_import(
     await callback.answer()
     # Import доступен без подписки
     await state.set_state(ImportBots.waiting_tokens)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "📥 <b>Массовый импорт ботов</b>\n\n"
         "Отправьте токены ботов — по одному на строке:\n\n"
         "<code>123456789:AAF...\n987654321:BBG...</code>",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
