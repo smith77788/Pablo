@@ -317,12 +317,7 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
                 log.warning("warmup run_all error acc=%s: %s", label, exc)
 
     task = asyncio.create_task(_run_all())
-    task_registry.register_task(
-        user_id,
-        task,
-        kind="warmup",
-        label=f"Разогрев всех аккаунтов ({len(plans)})",
-    )
+    task_registry.register(user_id, "warmup", f"Разогрев всех аккаунтов ({len(plans)})", task)
 
     await callback.message.edit_text(
         f"🌡 <b>Разогрев запущен в фоне</b>\n\n"
@@ -366,12 +361,7 @@ async def cb_warmup_run_one(
     user_id = callback.from_user.id
 
     task = asyncio.create_task(run_daily_warmup(pool, plan))
-    task_registry.register_task(
-        user_id,
-        task,
-        kind="warmup",
-        label=f"Разогрев: {label}",
-    )
+    task_registry.register(user_id, "warmup", f"Разогрев: {label}", task)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Лог разогрева", callback_data=WarmupCb(action="plan_log", plan_id=plan_id, account_id=acc_id))
