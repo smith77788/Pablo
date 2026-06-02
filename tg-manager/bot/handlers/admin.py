@@ -1437,20 +1437,29 @@ async def _adm_set_error_report_status(
     callback: CallbackQuery, pool: asyncpg.Pool, report_id: int, new_status: str
 ) -> None:
     """Изменить статус отчёта об ошибке."""
+    _back_kb_err = InlineKeyboardBuilder()
+    _back_kb_err.button(text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new")
+
     try:
         ok = await db.update_error_report_status(pool, report_id, new_status)
     except Exception as e:
         log_exc_swallow(log, f"Ошибка обновления статуса отчёта #{report_id}")
-        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка при обновлении статуса: {_html.escape(str(e))}",
+            parse_mode="HTML",
+            reply_markup=_back_kb_err.as_markup(),
+        )
         return
 
     if not ok:
-        await callback.answer("Отчёт не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Отчёт не найден.",
+            parse_mode="HTML",
+            reply_markup=_back_kb_err.as_markup(),
+        )
         return
 
-    label = _ERR_STATUS_LABELS.get(new_status, new_status)
-    await callback.answer(f"✅ Статус изменён: {label}", show_alert=False)
-    # Перезагрузить детальный вид
+    # Перезагрузить детальный вид — новый статус сразу виден
     await _adm_show_error_report(callback, pool, report_id)
 
 

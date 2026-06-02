@@ -357,6 +357,45 @@ def _chan_seo_score(title: str, about: str, username: str, members: int) -> tupl
     return min(score, 100), tips
 
 
+def _generate_seo_fallback(
+    title: str, about: str, username: str,
+    keywords: list[str], preferred_username: str = "",
+) -> dict:
+    """Rule-based SEO suggestion when AI is not available."""
+    kw_list = [k for k in keywords[:6] if k]
+    kw_str = ", ".join(kw_list) if kw_list else ""
+    keep_uname = preferred_username or username
+
+    # Title: suggest adding keyword if too short
+    new_title = title or ""
+    if kw_list and len(new_title) < 12:
+        candidate = f"{new_title} — {kw_list[0]}" if new_title else kw_list[0].capitalize()
+        new_title = candidate[:50]
+
+    # Description template
+    if not about and kw_list:
+        new_about = (
+            f"{new_title} — канал о {kw_str}. "
+            "Подписывайтесь и получайте актуальный контент! "
+            f"Темы: {kw_str}. Присоединяйтесь к сообществу."
+        )[:255]
+    elif about and len(about) < 100 and kw_str:
+        tail = f" Ключевые темы: {kw_str}."
+        new_about = (about + tail)[:255]
+    else:
+        new_about = about
+
+    return {
+        "title": new_title,
+        "about": new_about,
+        "username": keep_uname,
+        "reasoning": (
+            "Базовая оптимизация по вашим ключевым словам. "
+            "Для полной AI-генерации настройте OPENROUTER_API_KEY в Railway."
+        ),
+    }
+
+
 async def _ai_generate_seo(
     http: aiohttp.ClientSession,
     title: str, about: str, username: str,
@@ -650,15 +689,14 @@ async def cb_seo_chan_ai(
     )
 
     if not result:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
-        await callback.message.edit_text(
-            "⚠️ <b>AI-генерация недоступна</b>\n\n"
-            "Для работы AI-оптимизации нужен OPENROUTER_API_KEY в настройках Railway.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+        # Fallback: rule-based suggestion when API key not configured
+        result = _generate_seo_fallback(
+            title=chan["title"] or "",
+            about=about,
+            username=chan["username"] or "",
+            keywords=keywords,
+            preferred_username=preferred_username,
         )
-        return
 
     new_title    = result.get("title", "")
     new_about    = result.get("about", "")
@@ -791,8 +829,13 @@ async def fsm_seo_feedback(
     )
 
     if not result:
-        await thinking.edit_text("⚠️ AI недоступен. Проверьте OPENROUTER_API_KEY.")
-        return
+        result = _generate_seo_fallback(
+            title=chan["title"] or "",
+            about=about,
+            username=chan["username"] or "",
+            keywords=keywords,
+            preferred_username=preferred_username,
+        )
 
     new_title    = result.get("title", "")
     new_about    = result.get("about", "")

@@ -681,14 +681,16 @@ async def _process_ai_turn(
 
 @router.message(Command("ai"))
 async def cmd_ai(message: Message) -> None:
-    from bot.callbacks import BmCb
+    from bot.callbacks import BmCb, AiCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="🤖 Открыть ИИ Помощник", callback_data=AiCb(action="start"))
+    kb.button(text="🏠 Главное меню",         callback_data=BmCb(action="main"))
+    kb.adjust(1)
     await message.answer(
-        "🤖 <b>AI-ассистент</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 🤖 AI Assistant</code>",
+        "🤖 <b>ИИ Помощник</b>\n\n"
+        "Нейросетевой ассистент для создания контента и управления ботами.\n\n"
+        "Находится в: <b>Настройки → 🤖 ИИ Помощник</b>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
