@@ -50,7 +50,7 @@ async def cb_multigeo_menu(
         await callback.message.edit_text(
             locked_text("Мультигео (редактирование по языкам)", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BotCb(action="select", bot_id=callback_data.bot_id)),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
