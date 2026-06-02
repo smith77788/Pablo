@@ -458,8 +458,13 @@ async def cb_chanf_skip_username(callback: CallbackQuery, state: FSMContext, poo
 async def fsm_chanf_username(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     uname = (message.text or "").strip().lstrip("@")
     if uname and (len(uname) < 5 or not all(c.isalnum() or c == "_" for c in uname)):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⏭ Без username", callback_data=ChanFactCb(action="skip_username"))
+        kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
+        kb.adjust(1)
         await message.answer(
-            "⚠️ Username должен быть не менее 5 символов, только a-z, 0-9 и _. Попробуйте ещё раз:"
+            "⚠️ Username должен быть не менее 5 символов, только a-z, 0-9 и _. Попробуйте ещё раз:",
+            reply_markup=kb.as_markup(),
         )
         return
     await state.update_data(channel_username=uname)
@@ -624,14 +629,23 @@ async def cb_chanf_do_create(
         except Exception as e:
             uname_result = f"\n⚠️ Username не установлен: {html.escape(str(e))}"
 
+    # Build t.me/username link if username was set successfully
+    tme_link = ""
+    if uname and "не установлен" not in uname_result:
+        tme_link = f"\nt.me: <a href=\"https://t.me/{html.escape(uname)}\">t.me/{html.escape(uname)}</a>"
+
     kb = InlineKeyboardBuilder()
+    if uname and "не установлен" not in uname_result:
+        kb.button(text=f"🔗 Открыть t.me/{html.escape(uname)}", url=f"https://t.me/{uname}")
     kb.button(text="◀️ Меню", callback_data=ChanFactCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>Канал создан!</b>\n\n"
         f"Название: <b>{title_s}</b>\n"
         f"ID: <code>{channel_id}</code>"
         + (f"\nСсылка: {html.escape(invite)}" if invite else "")
-        + uname_result,
+        + uname_result
+        + tme_link,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1118,10 +1132,16 @@ async def cb_chanf_gen_links_acc(
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
     channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
     if not channels:
+        kb_empty = InlineKeyboardBuilder()
+        kb_empty.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
+        kb_empty.button(text="◀️ Назад", callback_data=ChanFactCb(action="gen_links"))
+        kb_empty.adjust(1)
         await callback.message.edit_text(
-            "ℹ️ У этого аккаунта нет каналов.",
+            "ℹ️ <b>Нет каналов для этого аккаунта</b>\n\n"
+            "💡 Сначала импортируйте каналы из Telegram в разделе <b>📥 Импорт из Telegram</b>, "
+            "затем вы сможете генерировать ссылки.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=kb_empty.as_markup(),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -1231,10 +1251,16 @@ async def cb_chanf_stats_acc(
     channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
 
     if not channels:
+        kb_empty = InlineKeyboardBuilder()
+        kb_empty.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
+        kb_empty.button(text="◀️ Назад", callback_data=ChanFactCb(action="stats"))
+        kb_empty.adjust(1)
         await callback.message.edit_text(
-            "ℹ️ У этого аккаунта нет каналов.",
+            "ℹ️ <b>Нет каналов для этого аккаунта</b>\n\n"
+            "💡 Сначала импортируйте каналы из Telegram в разделе <b>📥 Импорт из Telegram</b>, "
+            "затем статистика будет доступна.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=kb_empty.as_markup(),
         )
         return
 
@@ -1398,9 +1424,13 @@ async def _show_seo_chan_picker(
     )
     if not channels and page == 0:
         kb = InlineKeyboardBuilder()
+        kb.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
         kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="seo_pick"))
+        kb.adjust(1)
         await callback.message.edit_text(
-            "⚠️ Нет каналов для этого аккаунта. Импортируйте каналы сначала.",
+            "ℹ️ <b>Нет каналов для этого аккаунта</b>\n\n"
+            "💡 Сначала импортируйте каналы в разделе <b>📥 Импорт из Telegram</b>, "
+            "затем SEO-оптимизация будет доступна.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
         return
