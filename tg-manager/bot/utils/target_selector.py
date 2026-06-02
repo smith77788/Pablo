@@ -236,10 +236,7 @@ class TargetSelector:
         back_row = InlineKeyboardBuilder()
         back_row.button(text="◀️ Назад", callback_data=back_callback)
 
-        # Assemble
-        for row in builder.export() or []:
-            pass  # builder is already populated
-
+        # Assemble navigation and back buttons onto main builder
         if total_pages > 1:
             for btn in nav_builder.buttons:
                 builder.row(btn)

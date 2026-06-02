@@ -29,6 +29,29 @@ _FATAL_ERRORS = {
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 
 
+def _extract_flood_wait(exc: Exception, err_str: str) -> int:
+    """Извлекает количество секунд из FloodWaitError или строки ошибки.
+
+    Возвращает 0 если ошибка не является flood-ошибкой.
+    Поддерживает как Telethon FloodWaitError (с атрибутом .seconds),
+    так и строковые представления 'A wait of X seconds is required'.
+    """
+    # Telethon FloodWaitError имеет атрибут .seconds
+    if hasattr(exc, "seconds"):
+        return int(exc.seconds)
+    if not _FLOOD_PATTERNS.search(err_str) and "A wait of" not in err_str:
+        return 0
+    # Парсинг числа из строки: ищем первое число после ключевого слова
+    import re as _re
+    m = _re.search(r"(\d+)", err_str)
+    if m:
+        try:
+            return int(m.group(1))
+        except (ValueError, IndexError):
+            pass
+    return 60  # fallback если flood, но число не найдено
+
+
 def _classify_op_error(exc: Exception) -> str:
     """Классифицирует ошибку операции: 'retry' | 'flood' | 'fatal' | 'skip'."""
     name = type(exc).__name__
@@ -633,18 +656,18 @@ async def _exec_bulk_join(
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
-                flood_wait = 0
-                if "FloodWait" in err_str or "flood_wait" in err_str.lower():
-                    try:
-                        flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])))
-                    except Exception:
-                        log_exc_swallow(log, f"Сбой извлечения flood_wait из ошибки: {err_str[:80]}")
-                        flood_wait = 60
+                flood_wait = _extract_flood_wait(e, err_str)
+                if flood_wait:
                     try:
                         from services.flood_engine import record_flood
                         await record_flood(pool, acc["id"], flood_wait, "join", op_id)
                     except Exception:
                         log_exc_swallow(log, f"Сбой записи flood в flood_engine для аккаунта {acc['id']}")
+                else:
+                    log.warning(
+                        "op_worker bulk_join: link=%s acc=%s error: %s",
+                        link, acc_dict.get("phone"), err_str,
+                    )
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
@@ -746,16 +769,18 @@ async def _exec_bulk_leave(
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
-                if "FloodWait" in err_str or "flood_wait" in err_str.lower() or "A wait of" in err_str:
-                    try:
-                        flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])))
-                    except Exception:
-                        flood_wait = 60
+                flood_wait = _extract_flood_wait(e, err_str)
+                if flood_wait:
                     try:
                         from services.flood_engine import record_flood
                         await record_flood(pool, acc["id"], flood_wait, "leave", op_id)
                     except Exception:
                         log_exc_swallow(log, f"Сбой записи flood в flood_engine для аккаунта {acc['id']}")
+                else:
+                    log.warning(
+                        "op_worker bulk_leave: channel=%s acc=%s error: %s",
+                        channel, acc_dict.get("phone"), err_str,
+                    )
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
