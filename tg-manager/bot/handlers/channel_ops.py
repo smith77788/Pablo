@@ -30,7 +30,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb
+from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb
 from services import task_registry as _treg
 from bot.states import (
     BulkChanFSM, BulkCreateFSM, BulkDmFSM, BulkPostChansFSM, BulkReportFSM,
@@ -1019,9 +1019,8 @@ async def cb_bulk_post_chans_start(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -1243,9 +1242,8 @@ async def cb_join_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -1320,9 +1318,8 @@ async def cb_leave_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -1411,9 +1408,8 @@ async def cb_post_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -1500,9 +1496,8 @@ async def cb_manage_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -1911,9 +1906,8 @@ async def cb_members_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -2585,9 +2579,8 @@ async def cb_profile_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -2851,9 +2844,8 @@ async def cb_react_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -2994,9 +2986,8 @@ async def cb_report_pick_account(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -3107,9 +3098,8 @@ async def cb_bulk_report_start(
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
-        from bot.callbacks import BmCb as _BmCb
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
