@@ -172,9 +172,36 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
         _cancel_cache.pop(op_id, None)
 
 
+async def _reset_stale_running(pool: asyncpg.Pool) -> None:
+    """При старте воркера сбрасывает операции в статусе 'running' обратно в 'pending'.
+
+    Нужно после SIGTERM/рестарта: операции могли оказаться в running-состоянии
+    без реально работающей задачи. Сбрасываем их с очисткой started_at, чтобы
+    они были подхвачены воркером заново.
+    """
+    result = await pool.execute(
+        """UPDATE operation_queue
+           SET status = 'pending', started_at = NULL
+           WHERE status = 'running'""",
+    )
+    # asyncpg возвращает строку вида "UPDATE N"
+    try:
+        count = int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        count = 0
+    if count:
+        log.warning(
+            "op_worker startup: reset %d stale 'running' operations → 'pending'",
+            count,
+        )
+    else:
+        log.info("op_worker startup: no stale running operations found")
+
+
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py."""
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
+    await _reset_stale_running(pool)
     while True:
         try:
             await _process_pending(pool, bot)
