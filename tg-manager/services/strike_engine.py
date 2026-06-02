@@ -665,6 +665,25 @@ async def staggered_strike(
                     f"account {wave_result.get('_acc_id', '?')}: Telegram rate limit"
                 )
 
+        # Логирование итогов векторов
+        failed_accounts = agg.get("failed", 0)
+        total_accounts = len(wave_results)
+        if result.peer_reported > 0:
+            log.info(
+                "strike_engine: target=%s peer_reports=%d multi=%d msgs=%d "
+                "spam=%d admins=%d accounts=%d/%d",
+                target, result.peer_reported, result.multi_reason,
+                result.msgs_reported, result.spam_signaled, result.admins_reported,
+                result.peer_reported, total_accounts,
+            )
+        else:
+            log.warning(
+                "strike_engine: target=%s NO peer_reports — %d/%d accounts failed, "
+                "errors=%s",
+                target, failed_accounts, total_accounts,
+                "; ".join(result.errors[:2])[:120] if result.errors else "none",
+            )
+
         # ═══ Фаза: Network nodes (параллельно) ═══
         if progress_cb:
             await progress_cb("strike_network", f"🌐 {target}: Атака сетевых узлов...")
@@ -679,6 +698,13 @@ async def staggered_strike(
                                             title=intel.get("title", ""),
                                             members=intel.get("members", 0))
         result.abuse_form_ok = abuse_res.get("ok", False)
+        if result.abuse_form_ok:
+            log.info("strike_engine: abuse form submitted OK for target=%s", target)
+        else:
+            log.warning(
+                "strike_engine: abuse form failed for target=%s: %s",
+                target, abuse_res.get("error", "unknown"),
+            )
 
         # ═══ Фаза: SpamBot escalation ═══
         spambot_result = await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
@@ -690,6 +716,12 @@ async def staggered_strike(
             result.spambot_escalation = "skipped"
 
         result.duration_s = time.time() - t_start
+        log.info(
+            "strike_engine: staggered_strike done target=%s duration=%.1fs "
+            "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s",
+            target, result.duration_s, result.peer_reported, result.msgs_reported,
+            result.network_nodes, result.abuse_form_ok, result.spambot_escalation,
+        )
         all_results.append(result)
 
     return all_results
@@ -846,11 +878,13 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> bool:
             await asyncio.wait_for(client.connect(), timeout=15)
             # Пробуем получить и переслать одно сообщение в SpamBot
             msgs = await client.get_messages(clean, limit=1)
+            forwarded = False
             if msgs:
                 spam_bot = await client.get_entity("SpamBot")
                 await client.forward_messages(spam_bot, msgs[0])
+                forwarded = True
             await client.disconnect()
-            return True
+            return forwarded
         except Exception:
             log_exc_swallow(log, "Сбой операции в _escalate_to_spambot")
             try:
@@ -1472,8 +1506,7 @@ async def execute_mini_strike(
     # ── Phase 4: Abuse form telegram.org/support ──────────────────────────────
     await _prog("🌐 <b>Фаза 4/4:</b> Форма telegram.org/support...")
     try:
-        from services.strike_engine import submit_abuse_form as _saf
-        abuse_res = await _saf(
+        abuse_res = await submit_abuse_form(
             target_clean,
             cat["tg_reason"],
             title="",
@@ -1519,40 +1552,89 @@ def format_mini_result(r: dict) -> str:
     emails = r.get("emails", [])
     af = r.get("abuse_form", {})
 
+    # Подсчёт успешных MTProto-векторов
+    vectors_ok = sum([
+        bool(tg.get("peer_reported")),
+        bool(tg.get("photo_reported")),
+        bool(tg.get("joined")),
+        tg.get("pinned_reported", 0) > 0,
+        tg.get("msg_reported", 0) > 0,
+        tg.get("spam_signaled", 0) > 0,
+        tg.get("reactions_sent", 0) > 0,
+        tg.get("admins_reported", 0) > 0,
+        bool(tg.get("linked_group_reported")),
+        tg.get("bots_reported", 0) > 0,
+        tg.get("forwarded", 0) > 0,
+        bool(tg.get("blocked")),
+    ])
+    vectors_total = 12
+
+    if vectors_ok >= 8:
+        header_emoji = "✅"
+        verdict = "Удар нанесён эффективно"
+    elif vectors_ok >= 4:
+        header_emoji = "🟡"
+        verdict = "Частичный успех"
+    else:
+        header_emoji = "⚠️"
+        verdict = "Выполнено частично — цель могла быть недоступна"
+
+    def _vb(flag: bool, label: str) -> str:
+        return f"  {'✅' if flag else '—'} {label}"
+
+    def _vn(n: int, label: str, unit: str = " шт.") -> str:
+        return f"  {'✅' if n > 0 else '—'} {label}{': ' + str(n) + unit if n > 0 else ''}"
+
     lines = [
-        f"✅ <b>Мини-страйк завершён — @{_html.escape(r['target'])}</b>",
-        f"Категория: {r['category_label']} · Уровень: <b>{r['severity']}</b>\n",
-        "<b>📡 Telegram MTProto (12 векторов):</b>",
-        f"  ① ReportPeer (все причины): {'✅' if tg.get('peer_reported') else '❌'}"
-        f" +{tg.get('multi_reason_sent', 0)} доп.",
-        f"  ② Фото профиля: {'✅' if tg.get('photo_reported') else '❌'}",
-        f"  ③ Вступил изнутри: {'✅' if tg.get('joined') else '❌'}",
-        f"  ④ Закреплённые: {tg.get('pinned_reported', 0)} репортов",
-        f"  ⑤ Сообщения: {tg.get('msg_reported', 0)} репортов",
-        f"  ⑥ ReportSpam: {tg.get('spam_signaled', 0)} сигналов",
-        f"  ⑦ Реакции 👎💩: {tg.get('reactions_sent', 0)}",
-        f"  ⑧ Администраторы: {tg.get('admins_reported', 0)} репортов",
-        f"  ⑨ Связанная группа: {'✅' if tg.get('linked_group_reported') else 'нет'}",
-        f"  ⑩ Боты в описании: {tg.get('bots_reported', 0)} репортов",
-        f"  ⑪ Форвард в @stopCA: {tg.get('forwarded', 0)} сообщ.",
-        f"  ⑫ Заблок. + выход: {'✅' if tg.get('blocked') else '—'}",
+        f"{header_emoji} <b>Мини-страйк завершён — @{_html.escape(r['target'])}</b>",
+        f"<i>{verdict}</i>",
+        f"Категория: {r['category_label']} · Уровень: <b>{r['severity']}</b>",
+        f"Векторов сработало: <b>{vectors_ok}/{vectors_total}</b>",
+        "",
+        "<b>📡 Telegram MTProto:</b>",
+        _vb(bool(tg.get("peer_reported")),
+            f"ReportPeer + {tg.get('multi_reason_sent', 0)} доп. причин"),
+        _vb(bool(tg.get("photo_reported")), "Жалоба на фото профиля"),
+        _vb(bool(tg.get("joined")), "Вступление в канал изнутри"),
+        _vn(tg.get("pinned_reported", 0), "Закреплённые посты"),
+        _vn(tg.get("msg_reported", 0), "Сообщения"),
+        _vn(tg.get("spam_signaled", 0), "ReportSpam сигналы"),
+        _vn(tg.get("reactions_sent", 0), "Реакции 👎💩"),
+        _vn(tg.get("admins_reported", 0), "Администраторы"),
+        _vb(bool(tg.get("linked_group_reported")), "Связанная группа"),
+        _vn(tg.get("bots_reported", 0), "Боты в описании"),
+        _vn(tg.get("forwarded", 0), "Пересылка в @SpamBot/@stopCA"),
+        _vb(bool(tg.get("blocked")), "Заблокирован + выход"),
         "",
         "<b>📧 Email-репорты:</b>",
     ]
+    email_ok_count = 0
+    email_fail_count = 0
     if emails:
         for e in emails:
-            status = "✅ отправлен" if e.get("ok") else f"❌ {_html.escape((e.get('err') or '')[:50])}"
-            lines.append(f"  → {_html.escape(e['to'])}: {status}")
+            if e.get("ok"):
+                email_ok_count += 1
+                lines.append(f"  ✅ {_html.escape(e['to'])}")
+            else:
+                email_fail_count += 1
+                err_short = _html.escape((e.get("err") or "ошибка")[:60])
+                lines.append(f"  ❌ {_html.escape(e['to'])}: {err_short}")
     else:
-        lines.append("  SMTP не настроен")
+        lines.append("  — SMTP не настроен")
+        lines.append("  <i>💡 Добавьте email в Настройки → 📧 Email аккаунты</i>")
+
+    af_ok = bool(af.get("ok"))
+    email_summary = f"{email_ok_count} отправлено"
+    if email_fail_count:
+        email_summary += f", {email_fail_count} ошибок"
 
     lines += [
         "",
-        f"<b>🌐 Форма telegram.org/support:</b> {'✅' if af.get('ok') else '❌'}",
+        f"<b>🌐 Форма telegram.org/support:</b> {'✅ отправлена' if af_ok else '— не удалось'}",
         "",
-        f"<b>Итого репортов:</b> "
-        f"<b>{r['total_tg_reports']}</b> (Telegram MTProto) + "
-        f"<b>{r['total_emails']}</b> (email)",
+        "─────────────────",
+        f"📊 <b>Итого:</b> <b>{r['total_tg_reports']}</b> MTProto · "
+        f"email: {email_summary}",
     ]
 
     if r.get("errors"):

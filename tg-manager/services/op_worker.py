@@ -127,9 +127,7 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
                 row = await pool.fetchrow(
                     "SELECT total_items, done_items, status FROM operation_queue WHERE id=$1", op_id
                 )
-                if not row or row["status"] not in ("running", "pending"):
-                    break
-                if row["status"] == "cancelled":
+                if not row or row["status"] != "running":
                     break
                 total = row["total_items"] or 0
                 done = row["done_items"] or 0
@@ -272,6 +270,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         return
 
     progress_task: asyncio.Task | None = None
+    _t_start = time.monotonic()
+    log.info("op_worker: starting op_id=%d op_type=%s owner=%d", op_id, op_type, owner_id)
     try:
         # Уведомить пользователя о старте
         try:
@@ -327,6 +327,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         if current and current["status"] == "cancelled":
             return
 
+        elapsed = time.monotonic() - _t_start
+        log.info(
+            "op_worker: op_id=%d op_type=%s done in %.1fs — %s",
+            op_id, op_type, elapsed, result.get("summary", ""),
+        )
         await pool.execute(
             "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
             json.dumps(result), op_id,
@@ -371,6 +376,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     finally:
         if progress_task and not progress_task.done():
             progress_task.cancel()
+        elapsed_total = time.monotonic() - _t_start
+        log.info(
+            "op_worker: op_id=%d op_type=%s finished (total %.1fs)",
+            op_id, op_type, elapsed_total,
+        )
         async with _active_lock:
             _active_op_ids.discard(op_id)
 
@@ -380,7 +390,8 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     from services import account_manager
 
     text = params.get("text", "")
-    delay = params.get("delay_seconds", 30)
+    # Accept both "delay_seconds" (canonical) and legacy "delay" key from OpBuilder
+    delay = params.get("delay_seconds") or params.get("delay") or 30
     account_ids = params.get("account_ids") or []
 
     if account_ids:
@@ -388,10 +399,10 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
             "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
             "a.trust_score, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.id = ANY($1) AND a.is_active=true "
+            "WHERE a.id = ANY($1) AND a.owner_id=$2 AND a.is_active=true "
             "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
             "ORDER BY a.trust_score DESC NULLS LAST",
-            [int(i) for i in account_ids],
+            [int(i) for i in account_ids], owner_id,
         )
     else:
         accounts = await pool.fetch(
