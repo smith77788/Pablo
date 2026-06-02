@@ -46,6 +46,7 @@ _FILTER_LABELS = {
     "all":     "Все активные аккаунты",
     "account": "По аккаунту",
     "cluster": "По кластеру",
+    "pool":    "По пулу",
 }
 
 
@@ -126,6 +127,7 @@ async def cb_mp_target_chosen(
     kb.button(text="🌐 Все активные аккаунты", callback_data=MassOpCb(action="mp_filter", op_type="all"))
     kb.button(text="👤 По аккаунту",           callback_data=MassOpCb(action="mp_filter", op_type="account"))
     kb.button(text="🗂 По кластеру",           callback_data=MassOpCb(action="mp_filter", op_type="cluster"))
+    kb.button(text="🏊 По пулу",               callback_data=MassOpCb(action="mp_filter", op_type="pool"))
     kb.button(text="❌ Отмена",                callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     target_label = _TARGET_LABELS.get(_op_type, _op_type)
@@ -202,8 +204,33 @@ async def cb_mp_filter_chosen(
         )
         return
 
+    if filter_type == "pool":
+        from database import db as _db
+        pools = await _db.get_distinct_pools(pool, callback.from_user.id)
+        if not pools:
+            # No pools defined — fall back to "all"
+            await state.update_data(mp_filter="all", mp_acc_id=None, mp_cluster=None, mp_pool=None)
+            await _ask_mp_text(callback.message, state, target_label, edit=True)
+            return
+        kb = InlineKeyboardBuilder()
+        for pl in pools:
+            kb.button(
+                text=f"🏊 {pl}",
+                callback_data=MassOpCb(action="mp_pool_pick", op_type=pl[:40]),
+            )
+        kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
+        kb.adjust(1)
+        await safe_edit(
+            callback,
+            f"📤 <b>Массовая публикация</b>\n"
+            f"Цели: <b>{target_label}</b>\n\n"
+            "Шаг 2б: Выберите пул аккаунтов:",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     # filter_type == "all"
-    await state.update_data(mp_acc_id=None, mp_cluster=None)
+    await state.update_data(mp_acc_id=None, mp_cluster=None, mp_pool=None)
     await _ask_mp_text(callback.message, state, target_label, edit=True)
 
 
@@ -223,7 +250,18 @@ async def cb_mp_cluster_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(mp_cluster=callback_data.op_type or "", mp_acc_id=None)
+    await state.update_data(mp_cluster=callback_data.op_type or "", mp_acc_id=None, mp_pool=None)
+    data = await state.get_data()
+    target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
+    await _ask_mp_text(callback.message, state, target_label, edit=True)
+
+
+@router.callback_query(MassOpCb.filter(F.action == "mp_pool_pick"))
+async def cb_mp_pool_picked(
+    callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.update_data(mp_pool=callback_data.op_type or "", mp_acc_id=None, mp_cluster=None)
     data = await state.get_data()
     target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
     await _ask_mp_text(callback.message, state, target_label, edit=True)
@@ -322,6 +360,7 @@ async def cb_mp_timing(
     filter_type = data.get("mp_filter", "all")
     mp_acc_id = data.get("mp_acc_id")
     mp_cluster = data.get("mp_cluster")
+    mp_pool = data.get("mp_pool")
     mp_text = data.get("mp_text", "")
 
     # Count channels for preview
@@ -335,6 +374,8 @@ async def cb_mp_timing(
             filter_label = f"Аккаунт: {acc_row['first_name'] or acc_row['phone']}"
     elif filter_type == "cluster" and mp_cluster:
         filter_label = f"Кластер: {mp_cluster}"
+    elif filter_type == "pool" and mp_pool:
+        filter_label = f"Пул: {mp_pool}"
 
     delay_label = f"{delay}с" if delay > 0 else "Немедленно"
     estimated_mins = round(channel_count * delay / 60, 1) if delay else 0
@@ -374,11 +415,12 @@ async def cb_mp_confirm(
     filter_type = data.get("mp_filter", "all")
     mp_acc_id = data.get("mp_acc_id")
     mp_cluster = data.get("mp_cluster")
+    mp_pool = data.get("mp_pool")
     mp_text = data.get("mp_text", "")
     delay = int(data.get("mp_delay", 0))
 
     # Build list of (account, dialog) to post to
-    accounts = await _get_accounts_for_filter(pool, callback.from_user.id, filter_type, mp_acc_id, mp_cluster)
+    accounts = await _get_accounts_for_filter(pool, callback.from_user.id, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
 
     from services import account_manager
 
