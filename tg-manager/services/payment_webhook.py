@@ -21,7 +21,7 @@ import hmac
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import asyncpg
 from aiohttp import web
@@ -84,14 +84,24 @@ async def _activate_subscription(
            SET status='confirmed', tx_hash=EXCLUDED.tx_hash""",
         user_id, amount, currency, safe_ref, plan, months,
     )
-    expires = datetime.utcnow() + timedelta(days=30 * months)
     await pool.execute(
         """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-           VALUES($1,$2,$3,true)
+           VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
            ON CONFLICT(user_id) DO UPDATE
-           SET plan=$2, expires_at=$3, is_active=true""",
-        user_id, plan, expires,
+           SET plan        = EXCLUDED.plan,
+               is_active   = true,
+               expires_at  = CASE
+                   WHEN subscriptions.expires_at > now()
+                       THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                   ELSE now() + ($3 || ' months')::INTERVAL
+               END,
+               started_at  = CASE
+                   WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
+                   ELSE now()
+               END""",
+        user_id, plan, str(months),
     )
+    expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     try:
         await bot.send_message(
