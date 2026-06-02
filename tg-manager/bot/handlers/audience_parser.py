@@ -158,7 +158,9 @@ async def fsm_parser_source(
 ) -> None:
     source = (message.text or "").strip()
     if not source:
-        await message.answer("⚠️ Введите username или ссылку:")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+        await message.answer("⚠️ Введите username или ссылку:", reply_markup=kb.as_markup())
         return
 
     # Нормализуем — убираем https://t.me/
@@ -206,9 +208,29 @@ async def fsm_parser_limit(
         limit = int(text.replace(" ", "").replace(",", ""))
         limit = max(10, min(limit, 10000))
     except ValueError:
-        await message.answer("⚠️ Введите число (от 10 до 10000):")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+        await message.answer("⚠️ Введите число (от 10 до 10000):", reply_markup=kb.as_markup())
         return
     await _start_parse(message, state, pool, message.from_user.id, limit)
+
+
+_PARSE_TIMEOUT = 300  # 5 минут максимум на операцию
+
+
+def _friendly_parse_error(e: Exception) -> str:
+    msg = str(e).lower()
+    if "connector is closed" in msg or "clientconnectionerror" in msg:
+        return "Соединение с Telegram прервалось. Попробуйте ещё раз."
+    if "flood" in msg or "floodwaiterror" in msg:
+        return "Telegram ограничил запросы (FloodWait). Подождите несколько минут."
+    if "usernotparticipant" in msg or "channelprivateerror" in msg:
+        return "Нет доступа к каналу/группе. Аккаунт должен быть подписчиком."
+    if "usernaminvalid" in msg or "not found" in msg or "no user" in msg:
+        return "Канал/группа не найдены. Проверьте username."
+    if "timeout" in msg or "timed out" in msg:
+        return "Время ожидания истекло (>5 мин). Попробуйте с меньшим лимитом."
+    return str(e)[:200]
 
 
 async def _start_parse(
@@ -230,14 +252,14 @@ async def _start_parse(
         f"⏳ <b>Парсинг {type_label}</b>\n\n"
         f"Источник: <code>{html.escape(source)}</code>\n"
         f"Лимит: <b>{limit:,}</b>\n\n"
-        "⏳ Подключаюсь...",
+        "🔌 Подключаюсь к Telegram...",
         parse_mode="HTML",
     )
 
     last_update = {"n": 0}
 
     async def progress_cb(current: int, total: int) -> None:
-        if current - last_update["n"] >= 200:
+        if current - last_update["n"] >= 50:
             last_update["n"] = current
             pct = min(100, round(current / max(total, 1) * 100))
             bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
@@ -254,19 +276,27 @@ async def _start_parse(
 
     try:
         if parse_type == "members":
-            result = await parse_members(
-                pool, owner_id, source, limit=limit, progress_cb=progress_cb
-            )
+            coro = parse_members(pool, owner_id, source, limit=limit, progress_cb=progress_cb)
         else:
-            result = await parse_active_users(
-                pool, owner_id, source, limit=limit, progress_cb=progress_cb
-            )
-    except Exception as e:
+            coro = parse_active_users(pool, owner_id, source, limit=limit, progress_cb=progress_cb)
+        result = await asyncio.wait_for(coro, timeout=_PARSE_TIMEOUT)
+    except asyncio.TimeoutError:
         await progress_msg.edit_text(
-            f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(str(e)[:200])}",
+            "⏱ <b>Время ожидания истекло</b>\n\n"
+            "Парсинг занял больше 5 минут. Попробуйте уменьшить лимит "
+            "или выбрать другой источник.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
+        return
+    except Exception as e:
+        friendly = _friendly_parse_error(e)
+        await progress_msg.edit_text(
+            f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(friendly)}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        log.warning("parse error for user=%s source=%s: %s", owner_id, source, e)
         return
 
     if result.get("status") == "error":
