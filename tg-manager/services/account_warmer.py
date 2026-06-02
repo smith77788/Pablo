@@ -115,6 +115,15 @@ async def _perform_read_channel(client, channel_ref: str) -> bool:
         await asyncio.sleep(random.uniform(3, 8))
         return bool(msgs)
     except Exception as e:
+        etype = type(e).__name__
+        # Re-raise fatal errors so the outer loop can abort the session early
+        if etype in (
+            "UserDeactivatedBanError",
+            "AuthKeyUnregisteredError",
+            "PhoneNumberBannedError",
+            "SessionRevokedError",
+        ):
+            raise
         log_exc_swallow(log, "warmup read_channel %s", channel_ref)
         return False
 
@@ -129,6 +138,21 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
         await asyncio.sleep(random.uniform(2, 5))
         return True
     except Exception as e:
+        etype = type(e).__name__
+        # Re-raise fatal errors so the outer loop can abort the session early
+        if etype in (
+            "UserDeactivatedBanError",
+            "AuthKeyUnregisteredError",
+            "PhoneNumberBannedError",
+            "SessionRevokedError",
+        ):
+            raise
+        # For FloodWait, respect the required wait and re-raise to abort
+        if etype == "FloodWaitError":
+            seconds = getattr(e, "seconds", 60)
+            log.warning("warmup join_channel FloodWait %ds for %s", seconds, channel_ref)
+            await asyncio.sleep(min(seconds, 300))
+            raise
         log_exc_swallow(log, "warmup join_channel %s", channel_ref)
         return False
 
@@ -142,6 +166,15 @@ async def _perform_search(client, query: str) -> bool:
         await asyncio.sleep(random.uniform(2, 6))
         return True
     except Exception as e:
+        etype = type(e).__name__
+        # Re-raise fatal errors so the outer loop can abort the session early
+        if etype in (
+            "UserDeactivatedBanError",
+            "AuthKeyUnregisteredError",
+            "PhoneNumberBannedError",
+            "SessionRevokedError",
+        ):
+            raise
         log_exc_swallow(log, "warmup search %s", query)
         return False
 
@@ -194,6 +227,15 @@ async def run_daily_warmup(
     )
     if not acc_row:
         log.warning("warmup: account %d not found or inactive", account_id)
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+        }
+
+    if not acc_row["session_str"]:
+        log.warning("warmup: account %d has no session_str, skipping", account_id)
         return {
             "actions_done": 0,
             "actions_ok": 0,

@@ -293,6 +293,10 @@ async def _show_name_pattern_step(
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
     bot_note = ("\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>" if asset_type in ("bot", "full_package") else "")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_tpl"))
+    kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
+    kb.adjust(2)
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"
@@ -309,7 +313,7 @@ async def _show_name_pattern_step(
         + "\n\n"
         + (f"💡 Последний ввод: <code>{prefill}</code>\n\n" if prefill else "")
         + "Введите паттерн:",
-        markup=_cancel_kb(),
+        markup=kb.as_markup(),
     )
 
 
@@ -386,9 +390,10 @@ async def _show_username_pattern_step(
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
     kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="retry_name"))
     kb.button(text="⏭️ Без username", callback_data=GeoPresenceCb(action="skip_uname"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
-    kb.adjust(1)
+    kb.adjust(2, 1)
     await _edit(
         callback,
         f"🌍 <b>Global Presence Factory</b>\n\n"

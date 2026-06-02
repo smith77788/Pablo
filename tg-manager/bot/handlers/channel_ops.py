@@ -675,6 +675,7 @@ async def fsm_bulk_title(message: Message, state: FSMContext) -> None:
     await state.set_state(BulkCreateFSM.waiting_about)
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=ChanCb(action="bulk_skip_about"))
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     kb.adjust(1)
     await message.answer(
         "📄 Описание (или пропустите):", parse_mode="HTML", reply_markup=kb.as_markup()
@@ -2787,7 +2788,7 @@ async def cb_do_react(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     await state.clear()
     acc = await db.get_account_for_telethon(pool, data.get("acc_id"), callback.from_user.id)
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.")
+        await callback.message.edit_text("⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     # channel_ref overrides channel_id when post link was pasted
     channel = data.get("channel_ref") or data.get("channel_id")
@@ -2858,7 +2859,7 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
     await state.clear()
     acc = await db.get_account_for_telethon(pool, data.get("acc_id"), callback.from_user.id)
     if not acc:
-        await callback.message.edit_text("⚠️ Аккаунт не найден.")
+        await callback.message.edit_text("⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup())
         return
     from services import account_manager
     msg_pool = _REPORT_MESSAGES.get(reason, _REPORT_MESSAGES["other"])
@@ -4576,7 +4577,7 @@ async def cb_my_chans_page(
     session = data.get("my_chans_session")
     acc_id = data.get("my_chans_acc_id")
     if not session:
-        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
+        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops", reply_markup=_back_kb().as_markup())
         return
     await _show_my_chans_page(
         callback.message, pool, session, acc_id, page=callback_data.page, edit=True,
@@ -4593,7 +4594,7 @@ async def cb_my_chans_refresh(
     session = data.get("my_chans_session")
     acc_id = callback_data.acc_id or data.get("my_chans_acc_id")
     if not session:
-        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops")
+        await callback.message.edit_text("⚠️ Сессия устарела. Начните заново: /ops", reply_markup=_back_kb().as_markup())
         return
     await _show_my_chans_page(
         callback.message, pool, session, acc_id, page=0, edit=True,
