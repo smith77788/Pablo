@@ -1552,6 +1552,9 @@ async def cb_op_detail(
         kb.button(text="🔄 Повторить операцию", callback_data=BmCb(action="op_retry", op_id=op_id))
     if op["status"] == "running":
         kb.button(text="🔄 Обновить прогресс", callback_data=BmCb(action="op_detail", op_id=op_id))
+        kb.button(text="🛑 Отменить операцию", callback_data=BmCb(action="op_cancel", op_id=op_id))
+    if op["status"] == "pending":
+        kb.button(text="🛑 Отменить операцию", callback_data=BmCb(action="op_cancel", op_id=op_id))
     kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
     kb.adjust(1)
     await _edit(callback, "\n".join(lines), kb.as_markup())
@@ -1594,6 +1597,37 @@ async def cb_op_retry(
         "Она будет выполнена в течение 15 секунд.",
         kb.as_markup(),
     )
+
+
+@router.callback_query(BmCb.filter(F.action == "op_cancel"))
+async def cb_op_cancel(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    op_id = callback_data.op_id
+    user_id = callback.from_user.id
+
+    row = await pool.fetchrow(
+        "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    if not row:
+        await callback.answer("Операция не найдена.", show_alert=True)
+        return
+    if row["status"] not in ("pending", "running", "waiting_approval"):
+        await callback.answer(f"Нельзя отменить операцию со статусом: {row['status']}", show_alert=True)
+        return
+
+    await pool.execute(
+        "UPDATE operation_queue SET status='cancelled', finished_at=now() WHERE id=$1 AND owner_id=$2",
+        op_id, user_id,
+    )
+    await callback.answer("🛑 Операция отменена", show_alert=False)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
+    kb.adjust(1)
+    await _edit(callback, f"🛑 <b>Операция #{op_id} отменена.</b>", kb.as_markup())
 
 
 @router.callback_query(BmCb.filter(F.action == "op_csv"))
