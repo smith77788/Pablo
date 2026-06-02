@@ -269,14 +269,18 @@ async def cb_template_use(
             placeholders=placeholders,
         )
         ph_list = "\n".join(f"  • <code>{{{{{p}}}}}</code>" for p in placeholders)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
         await callback.message.edit_text(
             f"📢 <b>Рассылка по шаблону «{tpl['name']}»</b>\n\n"
             f"В шаблоне найдены плейсхолдеры:\n{ph_list}\n\n"
             "Отправьте значения в формате:\n"
             "<code>ключ=значение, ключ=значение</code>\n\n"
             "Пример:\n"
-            "<code>NAME=Иван, CITY=Москва</code>",
+            "<code>NAME=Иван, CITY=Москва</code>\n\n"
+            "✏️ Напишите в поле сообщения ниже ↓",
             parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
