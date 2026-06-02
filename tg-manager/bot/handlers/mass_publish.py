@@ -327,6 +327,11 @@ async def _show_preview(
         "\n⚠️ <i>Каналы не импортированы. При запуске найдём через Telegram.</i>"
         if total_channels == 0 else ""
     )
+    dry_run_banner = (
+        "\n\n⚠️ <b>Сухой прогон — реальная публикация НЕ выполнится.</b>\n"
+        "<i>Это только предпросмотр: каналы посчитаны, пост НЕ отправлен.</i>"
+        if dry_run else ""
+    )
     preview_msg = (
         f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
         f"Каналов в БД: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'}){channels_hint}\n"
@@ -336,12 +341,15 @@ async def _show_preview(
         f"———\n"
         f"{preview_text}\n"
         f"———"
+        f"{dry_run_banner}"
     )
 
     kb = InlineKeyboardBuilder()
     if not dry_run:
         kb.button(text="✅ Запустить", callback_data=MassPubCb(action="confirm_send"))
-    kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+        kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
+    else:
+        kb.button(text="◀️ В меню публикации", callback_data=MassPubCb(action="menu"))
     kb.adjust(1)
 
     await state.set_state(MassPublishFSM2.confirming)

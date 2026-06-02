@@ -119,6 +119,7 @@ async def cb_net_bc_toggle_bot(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
+    _MAX_BOTS_SELECTION = 50
     await callback.answer()
     data = await state.get_data()
     selected: list[int] = list(data.get("selected_bot_ids", []))
@@ -126,6 +127,12 @@ async def cb_net_bc_toggle_bot(
     if bid in selected:
         selected.remove(bid)
     else:
+        if len(selected) >= _MAX_BOTS_SELECTION:
+            await callback.answer(
+                f"⚠️ Максимум {_MAX_BOTS_SELECTION} ботов для одной рассылки.",
+                show_alert=True,
+            )
+            return
         selected.append(bid)
     await state.update_data(selected_bot_ids=selected)
     bots = await db.get_bots(pool, callback.from_user.id)
@@ -302,6 +309,7 @@ async def cb_net_bc_confirm(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    await callback.answer()
     data = await state.get_data()
     await state.clear()
     text = data.get("text", "")
@@ -309,9 +317,14 @@ async def cb_net_bc_confirm(
     lang = data.get("lang", "")
 
     if not text:
-        await callback.answer("Текст не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "⚠️ <b>Ошибка</b>\n\nТекст рассылки не найден. Попробуйте снова.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Назад", callback_data=NetBcCb(action="choose_target")
+            ).as_markup(),
+        )
         return
-    await callback.answer()
 
     bots_all = await db.get_bots(pool, callback.from_user.id)
     if not bots_all:

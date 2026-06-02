@@ -184,7 +184,6 @@ async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             parse_mode="HTML",
             reply_markup=network_clusters_menu(clusters),
         )
-    await callback.answer()
 
 
 @router.callback_query(ClusterCb.filter(F.action == "view"))
@@ -398,7 +397,6 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 # ── Routing Weights (PRO) ─────────────────────────────────────────────────────
@@ -425,7 +423,6 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-        await callback.answer()
         return
 
     total_weight = sum(float(w["weight"]) for w in weights)
@@ -476,7 +473,6 @@ async def cb_set_weight_pick(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
 
 
 @router.message(SetRoutingWeight.waiting_weight, F.text)
@@ -728,7 +724,6 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
-        await callback.answer()
         return
     await callback.message.edit_text(
         "🔄 <b>Клонирование настроек</b>\n\n"
@@ -858,4 +853,3 @@ async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await callback.answer()
