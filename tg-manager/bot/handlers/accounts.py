@@ -171,7 +171,7 @@ def _acc_menu_markup(acc_id: int, is_active: bool = True):
     return kb.as_markup()
 
 
-def _acc_detail_markup(acc_id: int, is_active: bool = True):
+def _acc_detail_markup(acc_id: int, is_active: bool = True, warmup_level: str | None = None):
     """Расширенный markup карточки аккаунта с быстрыми действиями."""
     from bot.callbacks import WarmupCb, HealthCb
     kb = InlineKeyboardBuilder()
@@ -203,7 +203,11 @@ def _acc_detail_markup(acc_id: int, is_active: bool = True):
     kb.button(text="🗑 Удалить",
               callback_data=AccCb(action="remove", acc_id=acc_id))
     # ── Быстрые действия ──
-    kb.button(text="🌡 Прогрев",
+    _warmup_level_labels = {"light": "🌱 light", "medium": "🌿 medium", "deep": "🔥 deep"}
+    warmup_btn_text = "🌡 Прогрев"
+    if warmup_level:
+        warmup_btn_text = f"🌡 Прогрев [{_warmup_level_labels.get(warmup_level, warmup_level)}]"
+    kb.button(text=warmup_btn_text,
               callback_data=WarmupCb(action="create_list"))
     kb.button(text="🔄 Переподключить",
               callback_data=AccCb(action="relog", acc_id=acc_id))

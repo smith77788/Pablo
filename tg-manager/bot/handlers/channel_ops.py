@@ -2502,7 +2502,7 @@ async def _run_invite_bg(
                         parse_mode="HTML",
                     )
                 except Exception:
-                    pass
+                    log_exc_swallow(log, f"channel_ops: invite cancel notification failed user_id={user_id}")
             return
         except Exception as exc:
             log.exception("invite bg FATAL: %s", exc)

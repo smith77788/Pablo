@@ -28,6 +28,8 @@ async def cb_stats_menu(
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
     stats = await db.get_bot_stats(pool, callback_data.bot_id)
+    daily_growth = await db.get_audience_daily_growth(pool, callback_data.bot_id, days=7)
+
     label = (
         f"@{row.get('username')}"
         if row.get("username")
@@ -40,6 +42,23 @@ async def cb_stats_menu(
         else 0
     )
 
+    # Build 5-cell trend bar: ▓ = filled, ░ = empty
+    # Each cell represents one day (last 5 days), fill based on % of weekly max
+    daily_counts = [d["count"] for d in daily_growth]
+    weekly_max = max(daily_counts) if daily_counts else 0
+    # Use last 5 days for the bar
+    last5 = daily_counts[-5:] if len(daily_counts) >= 5 else daily_counts
+    # Pad left with zeros if fewer than 5 days
+    last5 = [0] * (5 - len(last5)) + last5
+    if weekly_max > 0:
+        trend_bar = "".join(
+            "▓" if (v / weekly_max) >= 0.2 else "░" for v in last5
+        )
+    else:
+        trend_bar = "░░░░░"
+
+    today_new = stats["aud_today"]
+
     hint = (
         "\n\n📌 <b>Что это?</b>\n"
         "Статистика показывает рост аудитории, активность рассылок и состояние автоматизации.\n\n"
@@ -51,8 +70,9 @@ async def cb_stats_menu(
     text = (
         f"📊 <b>Статистика — {label}</b>\n\n"
         f"👥 <b>Аудитория:</b> {stats['aud_total']} чел.\n"
-        f"  🆕 За сутки: +{stats['aud_today']}\n"
-        f"  📈 За 7 дней: +{stats['aud_week']}\n\n"
+        f"  🆕 Новых за 24ч: <b>+{today_new}</b>\n"
+        f"  📈 За 7 дней: +{stats['aud_week']}\n"
+        f"  📅 Рост (5 дн): <code>{trend_bar}</code>\n\n"
         f"📢 <b>Рассылки:</b> {stats['broadcasts_total']} всего, "
         f"отправлено {stats['broadcasts_sent']} сообщений\n\n"
         f"💬 <b>Inbox:</b> {stats['relay_sessions']} диалогов\n"

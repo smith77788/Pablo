@@ -375,7 +375,9 @@ def broadcast_history(bot_id: int, broadcasts: list) -> InlineKeyboardMarkup:
 
 
 def broadcast_detail(
-    bot_id: int, running_bc_id: int | None = None
+    bot_id: int,
+    running_bc_id: int | None = None,
+    done_bc_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if running_bc_id:
@@ -383,6 +385,13 @@ def broadcast_detail(
             text="🔄 Обновить статус",
             callback_data=BroadcastCb(
                 action="detail", bot_id=bot_id, broadcast_id=running_bc_id
+            ),
+        )
+    if done_bc_id:
+        kb.button(
+            text="📊 Статистика",
+            callback_data=BroadcastCb(
+                action="bc_stat", bot_id=bot_id, broadcast_id=done_bc_id
             ),
         )
     kb.button(

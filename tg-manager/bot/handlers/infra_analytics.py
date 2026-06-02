@@ -23,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb
 from services import infra_pressure
+from services.logger import log_exc_swallow
 from database import db as _db
 
 _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
@@ -272,7 +273,7 @@ async def cb_infra_audit(
             uid,
         ) or 0
     except Exception:
-        pass
+        log_exc_swallow(log, f"infra_analytics: bad_proxy_count fetch failed uid={uid}")
 
     if not rows:
         proxy_warn = f"\n⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>" if bad_proxy_count > 0 else ""

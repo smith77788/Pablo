@@ -132,6 +132,19 @@ async def _audit(
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
 
+# Per-owner semaphores: не более 3 параллельных операций на одного владельца
+_MAX_PARALLEL_PER_OWNER = 3
+_owner_semaphores: dict[int, asyncio.Semaphore] = {}
+_owner_sem_lock = asyncio.Lock()
+
+
+async def _get_owner_semaphore(owner_id: int) -> asyncio.Semaphore:
+    """Вернуть (или создать) семафор для конкретного owner_id."""
+    async with _owner_sem_lock:
+        if owner_id not in _owner_semaphores:
+            _owner_semaphores[owner_id] = asyncio.Semaphore(_MAX_PARALLEL_PER_OWNER)
+        return _owner_semaphores[owner_id]
+
 # Track last progress milestone notified per op (25/50/75%)
 _progress_milestones: dict[int, int] = {}
 
@@ -292,120 +305,127 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             _active_op_ids.discard(op_id)
         return
 
+    # Получить семафор для ограничения параллельных операций на одного владельца
+    owner_sem = await _get_owner_semaphore(owner_id)
+
     progress_task: asyncio.Task | None = None
     _t_start = time.monotonic()
     log.info("op_worker: starting op_id=%d op_type=%s owner=%d", op_id, op_type, owner_id)
-    try:
-        # Уведомить пользователя о старте
+
+    async with owner_sem:
         try:
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb
-            start_kb = InlineKeyboardBuilder()
-            start_kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
-            await bot.send_message(
-                owner_id,
-                f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>",
-                parse_mode="HTML",
-                reply_markup=start_kb.as_markup(),
+            # Уведомить пользователя о старте
+            try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from bot.callbacks import BmCb
+                start_kb = InlineKeyboardBuilder()
+                start_kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
+                await bot.send_message(
+                    owner_id,
+                    f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>",
+                    parse_mode="HTML",
+                    reply_markup=start_kb.as_markup(),
+                )
+            except Exception:
+                log_exc_swallow(log, f"Сбой отправки уведомления о запуске операции #{op_id}")
+
+            # Запустить фоновый монитор прогресса для длинных операций
+            progress_task = asyncio.create_task(
+                _progress_monitor(pool, bot, op_id, owner_id, op_type)
             )
-        except Exception:
-            log_exc_swallow(log, f"Сбой отправки уведомления о запуске операции #{op_id}")
 
-        # Запустить фоновый монитор прогресса для длинных операций
-        progress_task = asyncio.create_task(
-            _progress_monitor(pool, bot, op_id, owner_id, op_type)
-        )
+            if op_type == "mass_publish":
+                result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_bot_edit":
+                result = await _exec_bulk_bot_edit(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_join":
+                result = await _exec_bulk_join(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_leave":
+                result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
+            elif op_type == "global_presence_channel":
+                result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "global_presence_group":
+                result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "global_presence_bot":
+                result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_create_channels":
+                result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
+            elif op_type in ("global_presence_full_package", "global_presence_package"):
+                result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+            else:
+                log.warning("op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped", op_type, op_id, owner_id)
+                result = {
+                    "status": "skipped",
+                    "reason": f"unknown op_type: {op_type}",
+                    "summary": f"⚠️ Неизвестный тип операции: {op_type}",
+                }
 
-        if op_type == "mass_publish":
-            result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
-        elif op_type == "bulk_bot_edit":
-            result = await _exec_bulk_bot_edit(pool, bot, op_id, owner_id, params)
-        elif op_type == "bulk_join":
-            result = await _exec_bulk_join(pool, bot, op_id, owner_id, params)
-        elif op_type == "bulk_leave":
-            result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
-        elif op_type == "global_presence_channel":
-            result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
-        elif op_type == "global_presence_group":
-            result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
-        elif op_type == "global_presence_bot":
-            result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
-        elif op_type == "bulk_create_channels":
-            result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
-        elif op_type in ("global_presence_full_package", "global_presence_package"):
-            result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
-        else:
-            log.warning("op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped", op_type, op_id, owner_id)
-            result = {
-                "status": "skipped",
-                "reason": f"unknown op_type: {op_type}",
-                "summary": f"⚠️ Неизвестный тип операции: {op_type}",
-            }
+            # Не перезаписывать статус если операция была отменена в процессе
+            if result.get("status") == "cancelled":
+                return
 
-        # Не перезаписывать статус если операция была отменена в процессе
-        if result.get("status") == "cancelled":
-            return
+            current = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
+            if current and current["status"] == "cancelled":
+                return
 
-        current = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
-        if current and current["status"] == "cancelled":
-            return
-
-        elapsed = time.monotonic() - _t_start
-        log.info(
-            "op_worker: op_id=%d op_type=%s done in %.1fs — %s",
-            op_id, op_type, elapsed, result.get("summary", ""),
-        )
-        await pool.execute(
-            "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
-            json.dumps(result), op_id,
-        )
-        summary = result.get("summary", "")
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from bot.callbacks import BmCb
-        kb = InlineKeyboardBuilder()
-        kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
-        await db.notify_if_enabled(
-            pool, bot, owner_id, "op_complete",
-            f"✅ <b>Операция #{op_id}</b> завершена\n{summary}",
-            reply_markup=kb.as_markup(),
-        )
-
-    except Exception as e:
-        log.exception("op_worker: op %d failed: %s", op_id, e)
-        # Попытаться поставить на повтор перед тем как помечать как failed
-        requeued = await _maybe_requeue(pool, op_id, e)
-        if not requeued:
+            elapsed = time.monotonic() - _t_start
+            duration_seconds = round(elapsed, 1)
+            log.info(
+                "op_worker: op_id=%d op_type=%s done in %.1fs (duration_seconds=%.1f) — %s",
+                op_id, op_type, elapsed, duration_seconds, result.get("summary", ""),
+            )
             await pool.execute(
-                "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
-                str(e)[:500], op_id,
+                "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
+                json.dumps(result), op_id,
             )
+            summary = result.get("summary", "")
             from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot.callbacks import BmCb
             kb = InlineKeyboardBuilder()
             kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
-            retry_row = await pool.fetchrow(
-                "SELECT retry_count FROM operation_queue WHERE id=$1", op_id
-            )
-            retry_info = ""
-            if retry_row and (retry_row["retry_count"] or 0) > 0:
-                retry_info = f"\nПопыток: {retry_row['retry_count']}"
             await db.notify_if_enabled(
                 pool, bot, owner_id, "op_complete",
-                f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n"
-                f"<code>{str(e)[:200]}</code>{retry_info}",
+                f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n{summary}",
                 reply_markup=kb.as_markup(),
             )
 
-    finally:
-        if progress_task and not progress_task.done():
-            progress_task.cancel()
-        elapsed_total = time.monotonic() - _t_start
-        log.info(
-            "op_worker: op_id=%d op_type=%s finished (total %.1fs)",
-            op_id, op_type, elapsed_total,
-        )
-        async with _active_lock:
-            _active_op_ids.discard(op_id)
+        except Exception as e:
+            log.exception("op_worker: op %d failed: %s", op_id, e)
+            # Попытаться поставить на повтор перед тем как помечать как failed
+            requeued = await _maybe_requeue(pool, op_id, e)
+            if not requeued:
+                await pool.execute(
+                    "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
+                    str(e)[:500], op_id,
+                )
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from bot.callbacks import BmCb
+                kb = InlineKeyboardBuilder()
+                kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+                retry_row = await pool.fetchrow(
+                    "SELECT retry_count FROM operation_queue WHERE id=$1", op_id
+                )
+                retry_info = ""
+                if retry_row and (retry_row["retry_count"] or 0) > 0:
+                    retry_info = f"\nПопыток: {retry_row['retry_count']}"
+                await db.notify_if_enabled(
+                    pool, bot, owner_id, "op_complete",
+                    f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n"
+                    f"<code>{str(e)[:200]}</code>{retry_info}",
+                    reply_markup=kb.as_markup(),
+                )
+
+        finally:
+            if progress_task and not progress_task.done():
+                progress_task.cancel()
+            elapsed_total = time.monotonic() - _t_start
+            duration_seconds_total = round(elapsed_total, 1)
+            log.info(
+                "op_worker: op_id=%d op_type=%s finished (total %.1fs, duration_seconds=%.1f)",
+                op_id, op_type, elapsed_total, duration_seconds_total,
+            )
+            async with _active_lock:
+                _active_op_ids.discard(op_id)
 
 
 async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:

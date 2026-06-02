@@ -333,10 +333,26 @@ async def cb_status(
         await callback.answer("Бот не найден.", show_alert=True)
         return
     history = await db.get_recent_broadcasts(pool, row["bot_id"], limit=10)
-    if not history:
-        await callback.answer("Рассылок пока не было.", show_alert=True)
-        return
     await callback.answer()
+    if not history:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
+        kb = _Kb()
+        kb.button(
+            text="➕ Новая рассылка",
+            callback_data=BroadcastCb(action="compose", bot_id=callback_data.bot_id),
+        )
+        kb.button(
+            text="◀️ Назад",
+            callback_data=BroadcastCb(action="menu", bot_id=callback_data.bot_id),
+        )
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "📭 <b>Рассылок пока нет.</b>\n\n"
+            "💡 Начните первую рассылку через меню бота.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     await callback.message.edit_text(
@@ -388,7 +404,9 @@ async def cb_detail(
         text,
         parse_mode="HTML",
         reply_markup=broadcast_detail(
-            callback_data.bot_id, bc["id"] if bc["status"] == "running" else None
+            callback_data.bot_id,
+            running_bc_id=bc["id"] if bc["status"] == "running" else None,
+            done_bc_id=bc["id"] if bc["status"] == "done" else None,
         ),
     )
 
@@ -441,6 +459,48 @@ async def cb_bc_summary(
         f"Отправлено: <b>{total_sent}</b> / {total_users} (<b>{overall_pct}%</b>)",
         parse_mode="HTML",
         reply_markup=broadcast_detail(callback_data.bot_id),
+    )
+
+
+@router.callback_query(BroadcastCb.filter(F.action == "bc_stat"))
+async def cb_bc_stat(
+    callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
+) -> None:
+    """Show detailed stats for a completed broadcast."""
+    bc = await db.get_broadcast(pool, callback_data.broadcast_id)
+    if not bc:
+        await callback.answer("Рассылка не найдена.", show_alert=True)
+        return
+    await callback.answer()
+
+    started = (
+        bc["created_at"].strftime("%d.%m.%Y %H:%M") if bc.get("created_at") else "—"
+    )
+    finished = (
+        bc["finished_at"].strftime("%d.%m.%Y %H:%M") if bc.get("finished_at") else "—"
+    )
+    sent = bc["sent_count"] or 0
+    failed = bc["failed_count"] or 0
+    total = bc["total_users"] or 0
+    delivery_pct = round(sent / total * 100) if total else 0
+
+    open_rate_line = ""
+    if bc.get("open_rate") is not None:
+        open_rate_line = f"📖 Открытий: <b>{bc['open_rate']}%</b>\n"
+
+    await callback.message.edit_text(
+        f"📊 <b>Статистика рассылки #{bc['id']}</b>\n\n"
+        f"✅ Отправлено: <b>{sent}</b>\n"
+        f"❌ Ошибок: <b>{failed}</b>\n"
+        f"👥 Всего: <b>{total}</b>\n"
+        f"📬 Доставка: <b>{delivery_pct}%</b>\n"
+        f"{open_rate_line}"
+        f"\n🕐 Начата: {started}\n"
+        f"🏁 Завершена: {finished}",
+        parse_mode="HTML",
+        reply_markup=broadcast_detail(
+            callback_data.bot_id, done_bc_id=bc["id"]
+        ),
     )
 
 

@@ -59,6 +59,25 @@ async def _load_channels(pool: asyncpg.Pool, user_id: int) -> list[asyncpg.Recor
     )
 
 
+async def _load_post_templates(pool: asyncpg.Pool, user_id: int) -> list[asyncpg.Record]:
+    """Возвращает шаблоны постов пользователя."""
+    return await pool.fetch(
+        "SELECT id, name, template FROM asset_templates "
+        "WHERE owner_id=$1 AND asset_type='post' ORDER BY created_at DESC LIMIT 10",
+        user_id,
+    )
+
+
+async def _save_post_template(pool: asyncpg.Pool, user_id: int, name: str, text: str) -> int:
+    """Сохраняет текст поста как шаблон. Возвращает id нового шаблона."""
+    row = await pool.fetchrow(
+        "INSERT INTO asset_templates (owner_id, asset_type, name, template) "
+        "VALUES ($1, 'post', $2, $3) RETURNING id",
+        user_id, name, json.dumps({"text": text}),
+    )
+    return row["id"]
+
+
 # ── Step indicator ─────────────────────────────────────────────────────────
 
 
@@ -89,14 +108,36 @@ _STEP1_TEXT = (
     "✍️ <b>{step}</b>\n\n"
     "Напишите текст публикации и отправьте его сообщением.\n\n"
     "<i>Поддерживается форматирование Telegram: <b>жирный</b>, <i>курсив</i>, "
-    "<code>моноширинный</code>, ссылки.</i>"
+    "<code>моноширинный</code>, ссылки.</i>\n\n"
+    "📏 <i>Лимит Telegram: {limit} символов для текста поста.</i>"
+)
+
+_STEP1_WITH_COUNT = (
+    "✍️ <b>{step}</b>\n\n"
+    "Напишите текст публикации и отправьте его сообщением.\n\n"
+    "<i>Поддерживается форматирование Telegram: <b>жирный</b>, <i>курсив</i>, "
+    "<code>моноширинный</code>, ссылки.</i>\n\n"
+    "📏 <i>Символов: <b>{count}/{limit}</b> {warn}</i>"
 )
 
 
-async def _show_step1(target, edit: bool = True) -> None:
+async def _show_step1(target, edit: bool = True, char_count: int = 0) -> None:
     kb = InlineKeyboardBuilder()
+    kb.button(text="📄 Из шаблона", callback_data=QuickPostCb(action="from_template"))
     kb.button(text="❌ Отмена", callback_data=QuickPostCb(action="cancel"))
-    text = _STEP1_TEXT.format(step=_step(1, "Текст поста"))
+    kb.adjust(1)
+
+    if char_count > 0:
+        warn = "⚠️ Превышен лимит!" if char_count > _TG_CAPTION_LIMIT else ""
+        text = _STEP1_WITH_COUNT.format(
+            step=_step(1, "Текст поста"),
+            count=char_count,
+            limit=_TG_CAPTION_LIMIT,
+            warn=warn,
+        )
+    else:
+        text = _STEP1_TEXT.format(step=_step(1, "Текст поста"), limit=_TG_CAPTION_LIMIT)
+
     if edit:
         try:
             await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
@@ -223,6 +264,20 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         )
         return
 
+    char_count = len(text)
+    if char_count > _TG_CAPTION_LIMIT:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=QuickPostCb(action="cancel"))
+        kb.adjust(1)
+        await message.answer(
+            f"⚠️ <b>Текст слишком длинный.</b>\n\n"
+            f"Длина: <b>{char_count}</b> символов. Лимит Telegram: <b>{_TG_CAPTION_LIMIT}</b>.\n\n"
+            "Сократите текст и отправьте снова:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     channels = await _load_channels(pool, message.from_user.id)
     if not channels:
         await message.answer(
@@ -238,7 +293,10 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await state.update_data(post_text=text)
     await state.set_state(QuickPostFSM.picking_channels)
 
-    sent = await message.answer("📡 Загружаю каналы…")
+    sent = await message.answer(
+        f"📡 Загружаю каналы… (текст: <b>{char_count}</b> символов)",
+        parse_mode="HTML",
+    )
     await _show_step2(sent, channels, selected_ids, page=0)
 
 
@@ -247,6 +305,107 @@ async def cb_qp_back_text(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(QuickPostFSM.writing_text)
     await _show_step1(callback.message)
+
+
+# ── Template picker for Step 1 ─────────────────────────────────────────────
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "from_template"))
+async def cb_qp_from_template(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    templates = await _load_post_templates(pool, callback.from_user.id)
+    if not templates:
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="➕ Создать шаблон",
+            callback_data=AssetTplCb(action="choose_type", asset_type="post"),
+        )
+        kb.button(text="◀️ Назад", callback_data=QuickPostCb(action="back_to_step1_prompt"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "📄 <b>Шаблоны постов</b>\n\n"
+            "Шаблонов нет. Создайте первый шаблон, чтобы быстро переиспользовать тексты.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for tpl in templates:
+        try:
+            data = json.loads(tpl["template"]) if isinstance(tpl["template"], str) else tpl["template"]
+            preview = (data.get("text") or "")[:40].replace("\n", " ")
+        except Exception:
+            preview = ""
+        label = tpl["name"] or f"Шаблон #{tpl['id']}"
+        btn_text = f"📝 {label}" + (f" — {preview}…" if preview else "")
+        kb.button(
+            text=btn_text[:64],
+            callback_data=QuickPostCb(action="use_template", val=tpl["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=QuickPostCb(action="back_to_step1_prompt"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"📄 <b>Выберите шаблон поста</b>\n\nНайдено: {len(templates)} шт.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "back_to_step1_prompt"))
+async def cb_qp_back_step1_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(QuickPostFSM.writing_text)
+    await _show_step1(callback.message)
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "use_template"))
+async def cb_qp_use_template(
+    callback: CallbackQuery,
+    callback_data: QuickPostCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    tpl_id = callback_data.val
+    row = await pool.fetchrow(
+        "SELECT template FROM asset_templates WHERE id=$1 AND owner_id=$2 AND asset_type='post'",
+        tpl_id, callback.from_user.id,
+    )
+    if not row:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+
+    try:
+        data = json.loads(row["template"]) if isinstance(row["template"], str) else row["template"]
+        text = data.get("text", "")
+    except Exception:
+        text = ""
+
+    if not text:
+        await callback.answer("Шаблон пустой.", show_alert=True)
+        return
+
+    await callback.answer("✅ Шаблон применён")
+    channels = await _load_channels(pool, callback.from_user.id)
+    if not channels:
+        await callback.message.edit_text(
+            "⚠️ <b>Каналов не найдено.</b>\n\n"
+            "Сначала подключите аккаунты и импортируйте каналы:\n"
+            "Меню → 📡 Каналы → 📥 Импорт из Telegram",
+            parse_mode="HTML",
+        )
+        return
+
+    sd = await state.get_data()
+    selected_ids: list[int] = sd.get("selected_chan_ids", [])
+    await state.update_data(post_text=text)
+    await state.set_state(QuickPostFSM.picking_channels)
+    await _show_step2(callback.message, channels, selected_ids, page=0)
 
 
 @router.callback_query(QuickPostCb.filter(F.action == "toggle"), QuickPostFSM.picking_channels)

@@ -73,6 +73,15 @@ class WarmupPlan:
     status: str
 
 
+def _compute_warmup_level(actions_done: int) -> str:
+    """Определяет уровень прогрева по количеству выполненных действий за сессию."""
+    if actions_done >= 6:
+        return "deep"
+    if actions_done >= 3:
+        return "medium"
+    return "light"
+
+
 async def create_warmup_plan(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -253,7 +262,7 @@ async def _perform_search(client, query: str) -> bool:
     try:
         from telethon.tl.functions.contacts import SearchRequest
         await client(SearchRequest(q=query, limit=5))
-        await asyncio.sleep(random.uniform(2, 6))
+        await asyncio.sleep(random.uniform(3, 7))
         return True
     except Exception as e:
         etype = type(e).__name__
@@ -288,10 +297,19 @@ async def _log_warmup_action(
 async def run_daily_warmup(
     pool: asyncpg.Pool,
     plan: dict,
+    update_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> dict:
     """
     Выполняет дневные действия для одного плана разогрева.
-    Возвращает {'actions_done', 'actions_ok', 'actions_fail', 'completed'}.
+
+    Аргументы:
+        pool: пул подключений к БД
+        plan: словарь с данными плана
+        update_callback: опциональный коллбэк вида (step, total, description) ->
+            None, вызывается после каждого действия для отслеживания прогресса.
+
+    Возвращает {'actions_done', 'actions_ok', 'actions_fail', 'completed',
+                'warmup_level'}.
     """
     from services import account_manager
 
@@ -316,6 +334,7 @@ async def run_daily_warmup(
             "actions_ok": 0,
             "actions_fail": 0,
             "completed": False,
+            "warmup_level": "light",
         }
 
     if not acc_row["session_str"]:
@@ -325,6 +344,7 @@ async def run_daily_warmup(
             "actions_ok": 0,
             "actions_fail": 0,
             "completed": False,
+            "warmup_level": "light",
         }
 
     device = dict(acc_row) if acc_row["device_model"] else None
@@ -335,6 +355,17 @@ async def run_daily_warmup(
     available_actions = _get_actions_for_day(current_day)
     channels = _WARMUP_PUBLIC_CHANNELS.copy()
     random.shuffle(channels)
+
+    # Описания действий для прогресс-коллбэка
+    _action_descriptions = {
+        "read_channel":  "читаю канал",
+        "join_channel":  "вступаю в канал",
+        "send_reaction": "ставлю реакцию",
+        "search":        "ищу в Telegram",
+        "view_profile":  "смотрю профиль",
+        "open_chat":     "открываю чат",
+        "dm_bot":        "пишу боту",
+    }
 
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
@@ -377,6 +408,15 @@ async def run_daily_warmup(
             else:
                 actions_fail += 1
 
+            # Прогресс-коллбэк после каждого действия
+            if update_callback is not None:
+                step_desc = _action_descriptions.get(action, action)
+                status_icon = "✅" if success else "❌"
+                try:
+                    update_callback(i + 1, daily_actions, f"{status_icon} {step_desc}")
+                except Exception:
+                    pass
+
             # Пауза между действиями (имитация человека — неравномерная)
             if i < daily_actions - 1:
                 base_pause = random.uniform(20, 90)
@@ -392,6 +432,9 @@ async def run_daily_warmup(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "сбой disconnect при разогреве аккаунта")
+
+    # Вычисляем уровень прогрева по числу успешных действий
+    warmup_level = _compute_warmup_level(actions_ok)
 
     # Обновляем план — только если было хотя бы частичное выполнение
     # Если все действия провалились, повторяем тот же день на следующем цикле
@@ -415,6 +458,17 @@ async def run_daily_warmup(
         plan_id,
     )
 
+    if actions_ok > 0:
+        # Сохраняем дату последнего прогрева и уровень в аккаунте
+        await pool.execute(
+            """UPDATE tg_accounts
+               SET last_warmup_at = NOW(),
+                   warmup_level = $2
+               WHERE id = $1""",
+            account_id,
+            warmup_level,
+        )
+
     if completed and actions_ok > 0:
         # После успешного завершения разогрева повышаем trust_score
         await pool.execute(
@@ -427,6 +481,7 @@ async def run_daily_warmup(
         "actions_ok": actions_ok,
         "actions_fail": actions_fail,
         "completed": completed,
+        "warmup_level": warmup_level,
     }
 
 
