@@ -1513,8 +1513,25 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
         owner_id=owner_id,
     )
 
+    # Progress callback: обновляет done_items в БД при переходе между волнами
+    # чтобы _progress_monitor мог отправлять уведомления 25/50/75%
+    _wave_done = 0
+
+    async def _strike_progress(phase: str, detail: str) -> None:
+        nonlocal _wave_done
+        if "wave" in phase.lower():
+            _wave_done += 1
+            pct_items = min(_wave_done * len(viable) // max(1, num_waves), len(viable))
+            try:
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                    pct_items, op_id,
+                )
+            except Exception:
+                pass
+
     try:
-        results = await staggered_strike(plan, pool=pool)
+        results = await staggered_strike(plan, progress_cb=_strike_progress, pool=pool)
     except Exception as e:
         log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
         return {
