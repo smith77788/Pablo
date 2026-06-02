@@ -84,6 +84,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📋 Лог операций",            callback_data=InfraCb(action="audit"))
     kb.button(text="📊 Статистика за сегодня",   callback_data=InfraCb(action="daily_stats"))
     kb.button(text="🎯 Возможности аккаунтов",   callback_data=InfraCb(action="capabilities"))
+    kb.button(text="🔄 Авто-балансировка пулов", callback_data=InfraCb(action="rebalance_preview"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -583,6 +584,124 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
     await callback.message.edit_text(
         "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Авто-балансировка пулов ───────────────────────────────────────────────
+
+def _classify_account(acc: dict) -> str | None:
+    """Определить целевой пул для аккаунта на основе его состояния."""
+    trust = float(acc.get("trust_score") or 0.5)
+    warnings = acc.get("warnings") or []
+    on_cooldown = acc.get("on_cooldown", False)
+
+    if on_cooldown:
+        return "cooldown"
+    if trust >= 0.75 and not warnings:
+        return "primary"
+    if trust < 0.3 or len(warnings) > 0:
+        return "monitoring"
+    return None  # не менять
+
+
+@router.callback_query(InfraCb.filter(F.action == "rebalance_preview"))
+async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+
+    accounts = await pool.fetch(
+        """SELECT id, first_name, phone, trust_score, pool, warnings,
+                  (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
+           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+        uid,
+    )
+
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов для балансировки.",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    changes: list[dict] = []
+    for acc in accounts:
+        target_pool = _classify_account(dict(acc))
+        if target_pool and acc["pool"] != target_pool:
+            changes.append({
+                "id": acc["id"],
+                "label": acc.get("first_name") or acc["phone"] or f"id{acc['id']}",
+                "from_pool": acc["pool"] or "(нет)",
+                "to_pool": target_pool,
+            })
+
+    if not changes:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
+        await callback.message.edit_text(
+            "✅ <b>Авто-балансировка</b>\n\nВсе аккаунты уже в правильных пулах.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = [f"🔄 <b>Авто-балансировка пулов</b>\n\nБудет изменено: <b>{len(changes)}</b> аккаунтов\n"]
+    for c in changes[:15]:
+        lines.append(
+            f"• <b>{html.escape(c['label'])}</b>: "
+            f"<code>{html.escape(c['from_pool'])}</code> → <code>{html.escape(c['to_pool'])}</code>"
+        )
+    if len(changes) > 15:
+        lines.append(f"<i>... и ещё {len(changes) - 15}</i>")
+
+    lines.append("\n<b>Правила распределения:</b>")
+    lines.append("• trust ≥ 0.75, нет предупреждений → <code>primary</code>")
+    lines.append("• trust < 0.3 или есть предупреждения → <code>monitoring</code>")
+    lines.append("• на cooldown → <code>cooldown</code>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Применить балансировку", callback_data=InfraCb(action="rebalance_apply"))
+    kb.button(text="❌ Отмена", callback_data=InfraCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(InfraCb.filter(F.action == "rebalance_apply"))
+async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer("⏳ Применяю...")
+    uid = callback.from_user.id
+
+    accounts = await pool.fetch(
+        """SELECT id, first_name, phone, trust_score, pool, warnings,
+                  (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
+           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+        uid,
+    )
+
+    changed = 0
+    for acc in accounts:
+        target_pool = _classify_account(dict(acc))
+        if target_pool and acc["pool"] != target_pool:
+            await pool.execute(
+                "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
+                target_pool, acc["id"], uid,
+            )
+            changed += 1
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К аналитике", callback_data=InfraCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ <b>Балансировка применена</b>\n\n"
+        f"Обновлено аккаунтов: <b>{changed}</b>\n\n"
+        f"Пулы обновлены согласно метрикам trust_score и предупреждениям.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
