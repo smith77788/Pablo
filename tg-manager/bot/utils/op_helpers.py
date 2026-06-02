@@ -1,6 +1,31 @@
 from __future__ import annotations
 
+import re
 import asyncpg
+
+_FLOOD_RE = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
+
+
+def extract_flood_wait(exc: Exception, err_str: str) -> int:
+    """Извлекает секунды ожидания из FloodWaitError или строки ошибки.
+
+    Возвращает 0 если ошибка не является flood-ошибкой.
+    Поддерживает Telethon FloodWaitError (.seconds) и строковые форматы.
+    """
+    if hasattr(exc, "seconds"):
+        try:
+            return int(exc.seconds)
+        except (TypeError, ValueError):
+            pass
+    if not _FLOOD_RE.search(err_str) and "A wait of" not in err_str:
+        return 0
+    m = re.search(r"(\d+)", err_str)
+    if m:
+        try:
+            return int(m.group(1))
+        except (ValueError, IndexError):
+            pass
+    return 60  # fallback если flood, но число не найдено
 
 
 def _acc_label(acc: asyncpg.Record) -> str:

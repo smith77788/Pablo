@@ -22,7 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
-from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit
+from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit, extract_flood_wait
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -476,11 +476,8 @@ async def cb_mp_confirm(
                 err_count += 1
                 step_status = "error"
                 err_str = str(result.get("error", ""))
-                if "FloodWait" in err_str or "flood_wait" in err_str.lower():
-                    try:
-                        flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])) or "60")
-                    except (TypeError, ValueError):
-                        flood_wait = 60
+                flood_wait = extract_flood_wait(Exception(err_str), err_str)
+                if flood_wait:
                     from services.flood_engine import record_flood
                     try:
                         await record_flood(pool, acc["id"], flood_wait, "publish")
@@ -499,11 +496,8 @@ async def cb_mp_confirm(
             err_count += 1
             step_status = "error"
             err_str = str(e)
-            if "FloodWait" in err_str or "flood_wait" in err_str.lower():
-                try:
-                    flood_wait = int(''.join(filter(str.isdigit, err_str.split("wait")[-1][:10])) or "60")
-                except (TypeError, ValueError):
-                    flood_wait = 60
+            flood_wait = extract_flood_wait(e, err_str)
+            if flood_wait:
                 from services.flood_engine import record_flood
                 try:
                     await record_flood(pool, acc["id"], flood_wait, "publish")
