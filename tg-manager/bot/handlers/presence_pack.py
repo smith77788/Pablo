@@ -206,7 +206,7 @@ async def _render_channel_step(
             callback,
             "🗂 <b>Presence Pack</b> — Шаг 4/6\n\n"
             "⚠️ У вас нет импортированных каналов.\n\n"
-            "💡 Добавьте каналы через <b>Infrastructure → Каналы → Импорт из Telegram</b>, "
+            "💡 Добавьте каналы через <b>/menu → 📱 Активы → 📡 Каналы → Импорт</b>, "
             "затем вернитесь сюда.\n\n"
             "Или продолжите без каналов:",
             markup=kb.as_markup(),
@@ -280,7 +280,7 @@ async def _render_group_step(
             callback,
             "🗂 <b>Presence Pack</b> — Шаг 5/6\n\n"
             "ℹ️ У вас нет импортированных групп.\n\n"
-            "💡 Добавьте группы через <b>Infrastructure → Группы → Импорт из Telegram</b>, "
+            "💡 Добавьте группы через <b>/menu → 📱 Активы → 👥 Группы → Импорт</b>, "
             "или продолжите без групп:",
             markup=kb.as_markup(),
         )

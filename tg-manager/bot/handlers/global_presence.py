@@ -198,7 +198,7 @@ async def _show_template_step(
     if user_tpl_count > 0:
         header_parts.append(f"📋 Ваших шаблонов: {user_tpl_count}{'+'  if has_more else ''}")
     elif page == 0 and not lib_count:
-        header_parts.append("📋 Ваших шаблонов: 0 (создайте в BotMother → Операции → Шаблоны)")
+        header_parts.append("📋 Ваших шаблонов: 0 (создайте в /menu → ⚙️ Настройки → 📄 Шаблоны)")
     header = "\n".join(header_parts) if header_parts else "📚 Доступны готовые шаблоны из библиотеки"
 
     _asset_label_map = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы", "full_package": "канала/группы/бота"}
@@ -695,7 +695,7 @@ async def _show_accounts_step(
             f"<b>Шаг 6/8 — Аккаунты</b>\n\n"
             f"⚠️ <b>У вас нет активных аккаунтов</b>\n\n"
             f"Для запуска Global Presence необходимо добавить хотя бы один аккаунт "
-            f"в разделе <b>Infrastructure → Аккаунты</b>.\n\n"
+            f"в разделе <b>/menu → 📱 Активы → 📱 Аккаунты</b>.\n\n"
             f"📍 Гео: {geo_label} ({n_cities} городов) — настроено\n\n"
             f"Добавьте аккаунт и вернитесь сюда."
         )

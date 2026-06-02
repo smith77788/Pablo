@@ -233,7 +233,7 @@ async def cmd_accounts(message: Message) -> None:
     await message.answer(
         "📱 <b>Аккаунты</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → ⚙️ Мониторинг → 📱 Аккаунты</code>",
+        "<code>/menu → 📱 Активы → 📱 Аккаунты</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )

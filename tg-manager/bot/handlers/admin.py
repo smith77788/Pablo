@@ -958,7 +958,7 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     uid,
                     "ℹ️ <b>Ваша подписка была отозвана администратором.</b>\n\n"
                     "Вы переведены на план FREE.\n"
-                    "Для восстановления доступа оформите подписку в /menu → 💳 Billing.",
+                    "Для восстановления доступа оформите подписку: /menu → ⚙️ Настройки → 💳 Подписка",
                     parse_mode="HTML",
                 )
             except Exception:

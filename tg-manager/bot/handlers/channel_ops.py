@@ -458,7 +458,7 @@ async def cmd_ops(message: Message) -> None:
     await message.answer(
         "⚡ <b>Операции с аккаунтами</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 📱 Активы → 📡 Каналы & операции</code>",
+        "<code>/menu → 📱 Активы → 📡 Каналы</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )

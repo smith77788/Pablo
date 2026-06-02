@@ -82,7 +82,7 @@ async def cmd_referral(message: Message) -> None:
     await message.answer(
         "👥 <b>Реферальная программа</b>\n\n"
         "Откройте BotMother OS и перейдите в:\n"
-        "<code>BotMother → 💳 Billing → 👥 Referral</code>",
+        "<code>/menu → ⚙️ Настройки → 👥 Рефералы</code>",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )

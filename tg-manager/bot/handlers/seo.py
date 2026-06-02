@@ -1454,7 +1454,7 @@ async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
         kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
         await callback.message.edit_text(
             "📈 <b>Нет данных о позициях</b>\n\n"
-            "Добавьте ключевые слова в разделе BotMother → 📊 Аналитика → Ключевые слова. "
+            "Добавьте ключевые слова в разделе /menu → 📊 Аналитика → 🔍 Ключевые слова. "
             "После первых проверок здесь появится динамика.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )

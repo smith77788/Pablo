@@ -1341,7 +1341,7 @@ def _analyze_error(error_msg: str) -> dict:
     if any(w in msg for w in ("auth", "unauthorized", "session", "key", "token")):
         result["cause"] = "Проблема с авторизацией аккаунта или бота"
         result["recommendation"] = (
-            "Проверьте аккаунт в разделе ⚙️ Мониторинг → Аккаунты. "
+            "Проверьте аккаунт в разделе 📱 Активы → 📱 Аккаунты. "
             "Возможно, сессия истекла — используйте кнопку «Переподключить»."
         )
         return result
