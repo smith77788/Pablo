@@ -1342,7 +1342,9 @@ async def cb_leave_show_dialogs(
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
     if not dialogs:
         await callback.message.edit_text(
-            "ℹ️ Нет доступных каналов/групп.",
+            "ℹ️ <b>Каналов не найдено</b>\n\n"
+            "Этот аккаунт не состоит ни в одном канале или группе.\n\n"
+            "Для выхода из канала сначала вступите через 🔗 <b>Вступить</b>.",
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
@@ -1398,6 +1400,19 @@ async def cb_post_pick_account(
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для публикации постов нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "post_dialogs")
     await callback.message.edit_text(
         "📤 <b>Опубликовать пост</b>\n\nВыберите аккаунт:",
@@ -1423,7 +1438,9 @@ async def cb_post_show_dialogs(
     ]
     if not dialogs:
         await callback.message.edit_text(
-            "ℹ️ Нет доступных каналов/групп.",
+            "ℹ️ <b>Нет каналов для публикации</b>\n\n"
+            "Этот аккаунт не управляет ни одним каналом или группой.\n\n"
+            "Создайте канал через 📢 <b>Создать канал</b> или вступите в существующий.",
             parse_mode="HTML", reply_markup=_back_kb().as_markup(),
         )
         return
@@ -1472,6 +1489,19 @@ async def cb_manage_pick_account(
     await callback.answer()
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для управления каналами нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "manage_dialogs")
     await callback.message.edit_text(
         "✏️ <b>Управление каналом</b>\n\nВыберите аккаунт:",
@@ -1530,7 +1560,10 @@ async def cb_manage_show_dialogs_live(
         await db.upsert_managed_channels(pool, callback.from_user.id, callback_data.acc_id, all_items)
     if not all_items:
         await callback.message.edit_text(
-            "ℹ️ Нет каналов/групп с правами администратора.",
+            "ℹ️ <b>Нет каналов с правами администратора</b>\n\n"
+            "Этот аккаунт не является администратором ни одного канала или группы.\n\n"
+            "Создайте канал через 📢 <b>Создать канал</b> или запросите права у владельца.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup()
         )
         return
@@ -1867,6 +1900,19 @@ async def cb_members_pick_account(
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для управления участниками нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "members_dialogs")
     await callback.message.edit_text(
         "👥 <b>Участники</b>\n\nВыберите аккаунт:",
@@ -1885,6 +1931,14 @@ async def cb_members_dialogs(
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    if not dialogs:
+        await callback.message.edit_text(
+            "ℹ️ <b>Нет каналов/групп</b>\n\n"
+            "Этот аккаунт не состоит ни в одном канале или группе.\n\n"
+            "Вступите в канал через 🔗 <b>Вступить</b> или создайте новый.",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
+        return
     kb = InlineKeyboardBuilder()
     for d in dialogs[:20]:
         label = f"{'📢' if d['type'] == 'channel' else '👥'} {d['title'][:30]}"
@@ -1932,9 +1986,13 @@ async def cb_members_view(
         acc["session_str"], callback_data.channel_id, limit=30, _acc=acc
     )
     if not members:
+        kb_back = InlineKeyboardBuilder()
+        kb_back.button(text="◀️ Назад", callback_data=ChanCb(action="members_menu", acc_id=callback_data.acc_id, channel_id=callback_data.channel_id))
         await callback.message.edit_text(
-            "ℹ️ Нет участников или нет доступа к списку.",
-            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+            "ℹ️ <b>Участники недоступны</b>\n\n"
+            "Список пуст или у аккаунта нет прав на просмотр участников.\n\n"
+            "Убедитесь, что аккаунт является администратором канала/группы.",
+            parse_mode="HTML", reply_markup=kb_back.as_markup(),
         )
         return
     lines = [f"👥 <b>Участники ({len(members)}):</b>\n"]
@@ -2516,6 +2574,19 @@ async def cb_profile_pick_account(
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для редактирования профиля нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "profile_menu")
     await callback.message.edit_text(
         "🙋 <b>Профиль аккаунта</b>\n\nВыберите аккаунт:",
@@ -2769,6 +2840,19 @@ async def cb_react_pick_account(
         return
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для отправки реакций нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "react_dialogs")
     await callback.message.edit_text(
         "👍 <b>Реакция на пост</b>\n\nВыберите аккаунт:",
@@ -2788,6 +2872,14 @@ async def cb_react_dialogs(
     from services import account_manager
     dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
     await state.update_data(acc_id=callback_data.acc_id)
+    if not dialogs:
+        await callback.message.edit_text(
+            "ℹ️ <b>Нет каналов для реакции</b>\n\n"
+            "Этот аккаунт не состоит ни в одном канале или группе.\n\n"
+            "Вступите в канал через 🔗 <b>Вступить</b> или вставьте ссылку на пост напрямую.",
+            parse_mode="HTML", reply_markup=_back_kb().as_markup(),
+        )
+        return
     kb = InlineKeyboardBuilder()
     for d in dialogs[:20]:
         label = f"{'📢' if d['type'] == 'channel' else '👥'} {d['title'][:30]}"
@@ -2891,6 +2983,19 @@ async def cb_report_pick_account(
     await callback.answer()
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
+    if not active:
+        from bot.callbacks import BmCb as _BmCb
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="📱 Добавить аккаунт", callback_data=_BmCb(action="accounts"))
+        empty_kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        empty_kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для подачи жалобы нужен хотя бы один активный аккаунт.\n\n"
+            "Добавьте аккаунт через раздел 📱 Аккаунты.",
+            parse_mode="HTML", reply_markup=empty_kb.as_markup(),
+        )
+        return
     kb = _account_picker_kb(active, "report_start")
     await callback.message.edit_text(
         "🚨 <b>Пожаловаться на контент</b>\n\nВыберите аккаунт:",
@@ -2947,7 +3052,12 @@ async def cb_report_reason(callback: CallbackQuery, state: FSMContext, pool: asy
     await callback.message.edit_text(
         f"✅ <b>Жалоба отправлена!</b>\n\nПричина: {label}\nОбъект: <code>{html.escape(data['peer'])}</code>"
         if ok else
-        "❌ <b>Ошибка отправки жалобы</b>\n\nПроверьте username и попробуйте снова.",
+        f"❌ <b>Ошибка отправки жалобы</b>\n\n"
+        f"Объект: <code>{html.escape(data.get('peer', '?'))}</code>\n\n"
+        "Возможные причины:\n"
+        "• Username не существует или написан с ошибкой\n"
+        "• Аккаунт не имеет доступа к этому контенту\n"
+        "• Telegram временно ограничил жалобы — повторите позже",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
