@@ -26,10 +26,25 @@ log = logging.getLogger(__name__)
 
 # Публичные каналы/группы для "прогрева" (вступление, чтение)
 _WARMUP_PUBLIC_CHANNELS = [
-    "@telegram",
-    "@durov",
-    "@tginfo",
+    "@telegram", "@durov", "@tginfo",
+    "@bbcrussian", "@rian_ru", "@rbc_news",
+    "@rt_russian", "@lentach", "@meduzaio",
+    "@varlamov", "@topor", "@breakingmash",
+    "@ru_python", "@linuxoid", "@android_ru",
+    "@gamedev_ru", "@tg_dev_news", "@proglib",
+    "@sport_ru", "@kinomania", "@music_world_ru",
 ]
+
+_WARMUP_SEARCH_QUERIES = [
+    "новости", "технологии", "бизнес", "криптовалюта",
+    "спорт", "кино", "музыка", "путешествия",
+    "инвестиции", "мемы", "еда", "здоровье",
+    "python", "android", "telegram", "gaming",
+    "ai", "программирование", "стартап", "маркетинг",
+]
+
+_WARMUP_REACTIONS = ["👍", "❤️", "🔥", "🎉", "👏", "😍", "💯", "🤩", "😂", "🏆"]
+_WARMUP_BOTS = ["@BotFather", "@Stickers", "@gamee"]
 
 # Действия по дням разогрева
 _WARMUP_SCHEDULE: dict[str, list[str]] = {
@@ -64,7 +79,7 @@ async def create_warmup_plan(
     plan_type: str = "standard",  # standard / gentle / aggressive
 ) -> int:
     """Создаёт план разогрева для аккаунта. Возвращает plan_id."""
-    daily_map = {"gentle": 3, "standard": 5, "aggressive": 10}
+    daily_map = {"gentle": 5, "standard": 10, "aggressive": 20}
     days_map = {"gentle": 21, "standard": 14, "aggressive": 7}
 
     row = await pool.fetchrow(
@@ -107,24 +122,107 @@ def _get_actions_for_day(day: int) -> list[str]:
     return _WARMUP_SCHEDULE["days_15_plus"]
 
 
+_FATAL_ERRORS = frozenset({
+    "UserDeactivatedBanError",
+    "AuthKeyUnregisteredError",
+    "PhoneNumberBannedError",
+    "SessionRevokedError",
+})
+
+
 async def _perform_read_channel(client, channel_ref: str) -> bool:
-    """Имитирует чтение канала: открываем, делаем паузу."""
+    """Читаем канал: получаем последние 10-15 сообщений, имитируем скролл."""
     try:
         entity = await client.get_entity(channel_ref)
-        msgs = await client.get_messages(entity, limit=5)
-        await asyncio.sleep(random.uniform(3, 8))
-        return bool(msgs)
+        limit = random.randint(10, 15)
+        msgs = await client.get_messages(entity, limit=limit)
+        if not msgs:
+            return False
+        # Имитируем поочерёдное "чтение" каждого сообщения
+        for _ in msgs:
+            await asyncio.sleep(random.uniform(0.8, 2.5))
+        await asyncio.sleep(random.uniform(2, 5))
+        return True
     except Exception as e:
         etype = type(e).__name__
-        # Re-raise fatal errors so the outer loop can abort the session early
-        if etype in (
-            "UserDeactivatedBanError",
-            "AuthKeyUnregisteredError",
-            "PhoneNumberBannedError",
-            "SessionRevokedError",
-        ):
+        if etype in _FATAL_ERRORS:
             raise
         log_exc_swallow(log, "warmup read_channel %s", channel_ref)
+        return False
+
+
+async def _perform_view_profile(client, channel_ref: str) -> bool:
+    """Открываем профиль/инфо канала."""
+    try:
+        from telethon.tl.functions.channels import GetFullChannelRequest
+        entity = await client.get_entity(channel_ref)
+        await client(GetFullChannelRequest(entity))
+        await asyncio.sleep(random.uniform(3, 8))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup view_profile %s", channel_ref)
+        return False
+
+
+async def _perform_open_chat(client, channel_ref: str) -> bool:
+    """Открываем чат и просматриваем сообщения (симуляция скролла)."""
+    try:
+        entity = await client.get_entity(channel_ref)
+        count = random.randint(8, 20)
+        async for _msg in client.iter_messages(entity, limit=count):
+            await asyncio.sleep(random.uniform(0.5, 1.8))
+        await asyncio.sleep(random.uniform(1, 4))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup open_chat %s", channel_ref)
+        return False
+
+
+async def _perform_send_reaction(client, channel_ref: str) -> bool:
+    """Ставим реакцию на случайное сообщение в канале."""
+    try:
+        from telethon.tl.functions.messages import SendReactionRequest
+        from telethon.tl.types import ReactionEmoji
+        entity = await client.get_entity(channel_ref)
+        msgs = await client.get_messages(entity, limit=10)
+        if not msgs:
+            return False
+        msg = random.choice(list(msgs))
+        emoticon = random.choice(_WARMUP_REACTIONS)
+        await client(SendReactionRequest(
+            peer=entity,
+            msg_id=msg.id,
+            reaction=[ReactionEmoji(emoticon=emoticon)],
+        ))
+        await asyncio.sleep(random.uniform(1, 4))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup send_reaction %s", channel_ref)
+        return False
+
+
+async def _perform_dm_bot(client) -> bool:
+    """Открываем официального бота и отправляем /start."""
+    try:
+        bot_handle = random.choice(_WARMUP_BOTS)
+        entity = await client.get_entity(bot_handle)
+        await client.send_message(entity, "/start")
+        await asyncio.sleep(random.uniform(5, 15))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup dm_bot")
         return False
 
 
@@ -132,22 +230,14 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
     """Вступаем в публичный канал."""
     try:
         from telethon.tl.functions.channels import JoinChannelRequest
-
         entity = await client.get_entity(channel_ref)
         await client(JoinChannelRequest(entity))
-        await asyncio.sleep(random.uniform(2, 5))
+        await asyncio.sleep(random.uniform(3, 8))
         return True
     except Exception as e:
         etype = type(e).__name__
-        # Re-raise fatal errors so the outer loop can abort the session early
-        if etype in (
-            "UserDeactivatedBanError",
-            "AuthKeyUnregisteredError",
-            "PhoneNumberBannedError",
-            "SessionRevokedError",
-        ):
+        if etype in _FATAL_ERRORS:
             raise
-        # For FloodWait, respect the required wait and re-raise to abort
         if etype == "FloodWaitError":
             seconds = getattr(e, "seconds", 60)
             log.warning("warmup join_channel FloodWait %ds for %s", seconds, channel_ref)
@@ -158,22 +248,15 @@ async def _perform_join_channel(client, channel_ref: str) -> bool:
 
 
 async def _perform_search(client, query: str) -> bool:
-    """Имитирует поиск в Telegram."""
+    """Поиск в Telegram."""
     try:
         from telethon.tl.functions.contacts import SearchRequest
-
         await client(SearchRequest(q=query, limit=5))
         await asyncio.sleep(random.uniform(2, 6))
         return True
     except Exception as e:
         etype = type(e).__name__
-        # Re-raise fatal errors so the outer loop can abort the session early
-        if etype in (
-            "UserDeactivatedBanError",
-            "AuthKeyUnregisteredError",
-            "PhoneNumberBannedError",
-            "SessionRevokedError",
-        ):
+        if etype in _FATAL_ERRORS:
             raise
         log_exc_swallow(log, "warmup search %s", query)
         return False
@@ -267,11 +350,19 @@ async def run_daily_warmup(
                 elif action == "join_channel":
                     success = await _perform_join_channel(client, target)
                 elif action == "search":
-                    queries = ["telegram", "news", "crypto", "tech", "sport"]
-                    success = await _perform_search(client, random.choice(queries))
-                    target = "search"
-                elif action in ("view_profile", "open_chat", "send_reaction", "dm_bot"):
-                    # Упрощённая имитация: просто пауза
+                    query = random.choice(_WARMUP_SEARCH_QUERIES)
+                    success = await _perform_search(client, query)
+                    target = f"search:{query}"
+                elif action == "view_profile":
+                    success = await _perform_view_profile(client, target)
+                elif action == "open_chat":
+                    success = await _perform_open_chat(client, target)
+                elif action == "send_reaction":
+                    success = await _perform_send_reaction(client, target)
+                elif action == "dm_bot":
+                    success = await _perform_dm_bot(client)
+                    target = "dm_bot"
+                else:
                     await asyncio.sleep(random.uniform(2, 7))
                     success = True
             except Exception as e:
@@ -285,8 +376,13 @@ async def run_daily_warmup(
             else:
                 actions_fail += 1
 
-            # Пауза между действиями (имитация человека)
-            await asyncio.sleep(random.uniform(30, 120))
+            # Пауза между действиями (имитация человека — неравномерная)
+            if i < daily_actions - 1:
+                base_pause = random.uniform(20, 90)
+                # Каждые 5 действий — более длинная пауза
+                if (i + 1) % 5 == 0:
+                    base_pause = random.uniform(120, 300)
+                await asyncio.sleep(base_pause)
 
     except Exception as e:
         log.warning("warmup session error acc=%d: %s", account_id, e)

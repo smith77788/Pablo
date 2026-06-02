@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _PLAN_LABELS = {
-    "gentle": "🌱 Gentle (21 день, 3 действия/день)",
-    "standard": "🌿 Standard (14 дней, 5 действий/день)",
-    "aggressive": "🔥 Aggressive (7 дней, 10 действий/день)",
+    "gentle": "🌱 Gentle (21 день, 5 действий/день)",
+    "standard": "🌿 Standard (14 дней, 10 действий/день)",
+    "aggressive": "🔥 Aggressive (7 дней, 20 действий/день)",
 }
 
 
@@ -56,13 +56,15 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.message.edit_text(
         "🌡 <b>Account Warming — Разогрев аккаунтов</b>\n\n"
-        "Безопасный разогрев новых аккаунтов перед работой.\n"
-        "Имитирует натуральную активность: чтение, реакции, поиск.\n\n"
+        "Постепенный разогрев новых аккаунтов перед боевыми операциями.\n"
+        "Система реально выполняет: чтение каналов, реакции на посты, "
+        "поиск, просмотр профилей, вступление в каналы.\n\n"
         f"Активных планов: <b>{active_count}</b>\n\n"
         "<b>Режимы:</b>\n"
-        "🌱 Gentle — осторожный, 21 день\n"
-        "🌿 Standard — сбалансированный, 14 дней\n"
-        "🔥 Aggressive — быстрый, 7 дней",
+        "🌱 Gentle — 21 день, 5 действий/день\n"
+        "🌿 Standard — 14 дней, 10 действий/день\n"
+        "🔥 Aggressive — 7 дней, 20 действий/день\n\n"
+        "⚙️ Прогрев запускается автоматически раз в сутки",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -290,8 +292,10 @@ async def cb_warmup_delete_plan(
 
 @router.callback_query(WarmupCb.filter(F.action == "run_now"))
 async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer("⏳ Запускаю...")
+    await callback.answer("▶️ Запускаю в фоне...")
     from services.account_warmer import get_active_plans, run_daily_warmup
+    from services import task_registry
+    import asyncio
 
     plans = await get_active_plans(pool, callback.from_user.id)
     if not plans:
@@ -302,19 +306,29 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         )
         return
 
-    results = []
-    for plan in plans:
-        label = plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
-        res = await run_daily_warmup(pool, plan)
-        status = "✅" if res["actions_ok"] > 0 else "⚠️"
-        results.append(
-            f"{status} <b>{html.escape(label)}</b>: "
-            f"{res['actions_ok']}/{res['actions_done']} успешно"
-            + (" 🏁 завершён!" if res["completed"] else "")
-        )
+    user_id = callback.from_user.id
+
+    async def _run_all():
+        for plan in plans:
+            label = plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
+            try:
+                await run_daily_warmup(pool, plan)
+            except Exception as exc:
+                log.warning("warmup run_all error acc=%s: %s", label, exc)
+
+    task = asyncio.create_task(_run_all())
+    task_registry.register_task(
+        user_id,
+        task,
+        kind="warmup",
+        label=f"Разогрев всех аккаунтов ({len(plans)})",
+    )
 
     await callback.message.edit_text(
-        "🌡 <b>Сеанс разогрева завершён</b>\n\n" + "\n".join(results),
+        f"🌡 <b>Разогрев запущен в фоне</b>\n\n"
+        f"Планов: <b>{len(plans)}</b>\n"
+        "Процесс займёт время (20-90с между действиями).\n\n"
+        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
@@ -327,14 +341,15 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 async def cb_warmup_run_one(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    """Запускает один цикл разогрева для выбранного плана."""
-    await callback.answer("⏳ Запускаю...")
+    """Запускает один цикл разогрева для выбранного плана в фоне."""
+    await callback.answer("▶️ Запускаю в фоне...")
     from services.account_warmer import get_active_plans, run_daily_warmup
+    from services import task_registry
+    import asyncio
 
     plan_id = callback_data.plan_id
     acc_id = callback_data.account_id
 
-    # Получаем конкретный план
     plans = await get_active_plans(pool, callback.from_user.id)
     plan = next((p for p in plans if p["id"] == plan_id), None)
 
@@ -347,9 +362,16 @@ async def cb_warmup_run_one(
         return
 
     label = plan.get("first_name") or plan.get("phone") or str(acc_id)
-    res = await run_daily_warmup(pool, plan)
-    status = "✅" if res["actions_ok"] > 0 else "⚠️"
-    completed_str = " 🏁 <b>Разогрев завершён!</b>" if res.get("completed") else ""
+    daily = plan.get("daily_actions", 5)
+    user_id = callback.from_user.id
+
+    task = asyncio.create_task(run_daily_warmup(pool, plan))
+    task_registry.register_task(
+        user_id,
+        task,
+        kind="warmup",
+        label=f"Разогрев: {label}",
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Лог разогрева", callback_data=WarmupCb(action="plan_log", plan_id=plan_id, account_id=acc_id))
@@ -357,9 +379,10 @@ async def cb_warmup_run_one(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"🌡 <b>Сеанс разогрева: {html.escape(label)}</b>\n\n"
-        f"{status} Выполнено: <b>{res['actions_ok']}/{res['actions_done']}</b> действий успешно"
-        f"{completed_str}",
+        f"🌡 <b>Разогрев запущен: {html.escape(label)}</b>\n\n"
+        f"Действий: <b>{daily}</b>\n"
+        "Работает в фоне. Лог обновится после завершения.\n\n"
+        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
