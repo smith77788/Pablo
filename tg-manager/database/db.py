@@ -2876,3 +2876,19 @@ async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) 
     await pool.execute(
         "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, user_id
     )
+
+
+async def get_platform_setting(pool: asyncpg.Pool, key: str, default: str = "") -> str:
+    row = await pool.fetchrow(
+        "SELECT value FROM platform_settings WHERE key=$1", key
+    )
+    return row["value"] if row else default
+
+
+async def set_platform_setting(pool: asyncpg.Pool, key: str, value: str) -> None:
+    await pool.execute(
+        """INSERT INTO platform_settings (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=NOW()""",
+        key, value,
+    )

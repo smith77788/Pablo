@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from aiogram.filters import Command
 from bot.keyboards import main_menu
+from bot.utils.subscription import get_free_mode, set_free_mode
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -58,6 +59,8 @@ def _admin_main_kb():
     kb.button(text="📨 Рассылка всем юзерам",    callback_data="adm:broadcast")
     _notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
     kb.button(text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle")
+    _free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
+    kb.button(text=f"🆓 Free Mode: {_free_icon}", callback_data="adm:free_mode_toggle")
     kb.button(text="🚫 Заблокировать юзера",     callback_data="adm:block_ask")
     kb.button(text="✅ Разблокировать юзера",    callback_data="adm:unblock_ask")
     kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")
@@ -73,7 +76,7 @@ def _admin_main_kb():
     kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
     kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
     kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)
+    kb.adjust(2)
     return kb.as_markup()
 
 
@@ -249,6 +252,14 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action == "notify_toggle":
         global _NOTIFY_NEW_USERS
         _NOTIFY_NEW_USERS = not _NOTIFY_NEW_USERS
+        await _show_admin_main(callback, pool, edit=True)
+
+    elif action == "free_mode_toggle":
+        new_state = not get_free_mode()
+        set_free_mode(new_state)
+        await db.set_platform_setting(pool, "free_mode", "true" if new_state else "false")
+        status = "включён ✅ — все функции бесплатны" if new_state else "выключен ⛔ — стандартные тарифы"
+        await callback.answer(f"🆓 Free Mode {status}", show_alert=True)
         await _show_admin_main(callback, pool, edit=True)
 
     elif action == "block_ask":

@@ -209,6 +209,13 @@ async def main() -> None:
 
     pool = await create_pool()
 
+    # Load persistent platform settings
+    from database import db as _db
+    from bot.utils.subscription import set_free_mode
+    _fm = await _db.get_platform_setting(pool, "free_mode", "false")
+    set_free_mode(_fm == "true")
+    log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
+
     # Send deployment notification to admins on startup (detects new deploys)
     asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 

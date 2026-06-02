@@ -7,6 +7,17 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
+_FREE_MODE: bool = False
+
+
+def get_free_mode() -> bool:
+    return _FREE_MODE
+
+
+def set_free_mode(enabled: bool) -> None:
+    global _FREE_MODE
+    _FREE_MODE = enabled
+
 PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
 BOT_LIMITS: dict[str, int] = {"free": 3, "starter": 10, "pro": 30, "enterprise": 9999}
 PLAN_PRICES = {"starter": "$9", "pro": "$25", "enterprise": "$69"}
@@ -51,6 +62,8 @@ async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
 
 
 async def require_plan(pool: asyncpg.Pool, user_id: int, min_plan: str) -> bool:
+    if _FREE_MODE:
+        return True
     if is_platform_admin(user_id):
         return True
     plan = await get_plan(pool, user_id)
