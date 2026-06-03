@@ -31,12 +31,13 @@ router = Router(name="intent_engine")
 # ─── Preset intents ───────────────────────────────────────────────────────────
 
 _PRESET_LABELS: dict[str, tuple[str, str]] = {
-    "presence": ("🌍", "Создать присутствие"),
-    "growth":   ("📈", "Масштабировать сеть"),
-    "sync":     ("🔄", "Синхронизировать всё"),
-    "audit":    ("🔍", "Аудит инфраструктуры"),
-    "network":  ("🕸", "Новая сеть"),
-    "strike":   ("⚔️", "STRIKE"),
+    "presence":   ("🌍", "Создать присутствие"),
+    "growth":     ("📈", "Масштабировать сеть"),
+    "sync":       ("🔄", "Синхронизировать всё"),
+    "audit":      ("🔍", "Аудит инфраструктуры"),
+    "network":    ("🕸", "Новая сеть"),
+    "strike":     ("⚔️", "STRIKE"),
+    "visibility": ("👁️", "Усилить видимость"),
 }
 
 _NAVIGATE_LABELS: dict[str, str] = {
@@ -47,6 +48,7 @@ _NAVIGATE_LABELS: dict[str, str] = {
     "ecosystems":      "🌐 Открыть Экосистемы",
     "strike":          "⚔️ Открыть STRIKE",
     "main":            "🏠 Главное меню",
+    "ranking":         "🔍 Открыть Rankings",
 }
 
 
@@ -59,7 +61,7 @@ def _intent_main_kb() -> object:
     kb.button(text="✍️ Описать свою цель", callback_data=IntentCb(action="new"))
     kb.button(text="📋 История",           callback_data=IntentCb(action="history"))
     kb.button(text="◀️ Главное меню",      callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1, 2)
+    kb.adjust(2, 2, 2, 1, 2, 1)
     return kb.as_markup()
 
 
@@ -98,7 +100,8 @@ def _history_kb(intents: list, page: int = 0) -> object:
         icon = status_icons.get(row["status"], "📋")
         itype_icons = {
             "presence": "🌍", "network": "🕸", "audit": "🔍",
-            "sync": "🔄", "growth": "📈", "strike": "⚔️", "custom": "🎯",
+            "sync": "🔄", "growth": "📈", "strike": "⚔️",
+            "visibility": "👁️", "custom": "🎯",
         }
         type_icon = itype_icons.get(row["intent_type"], "🎯")
         label = f"{icon} {type_icon} {row['description'][:30]}"
@@ -260,13 +263,14 @@ async def _show_plan_card(
     edit: bool = False,
 ) -> None:
     intent_type_labels = {
-        "presence": "🌍 Создать присутствие",
-        "network":  "🕸 Создать сеть",
-        "audit":    "🔍 Аудит инфраструктуры",
-        "sync":     "🔄 Синхронизация",
-        "growth":   "📈 Масштабирование",
-        "strike":   "⚔️ STRIKE",
-        "custom":   "🎯 Пользовательское",
+        "presence":   "🌍 Создать присутствие",
+        "network":    "🕸 Создать сеть",
+        "audit":      "🔍 Аудит инфраструктуры",
+        "sync":       "🔄 Синхронизация",
+        "growth":     "📈 Масштабирование",
+        "strike":     "⚔️ STRIKE",
+        "visibility": "👁️ Усилить видимость",
+        "custom":     "🎯 Пользовательское",
     }
     type_label = intent_type_labels.get(plan.get("intent_type", "custom"), "🎯")
 
@@ -340,6 +344,12 @@ async def cb_intent_confirm(
         await _execute_gp_intent(callback, pool, intent_id, plan, strategy, owner_id)
     elif action == "run_audit":
         await _execute_audit_intent(callback, pool, intent_id, owner_id)
+    elif action == "execute_growth":
+        await _execute_growth_intent(callback, pool, intent_id, plan, strategy, owner_id)
+    elif action == "execute_sync":
+        await _execute_sync_intent(callback, pool, intent_id, plan, owner_id)
+    elif action == "run_visibility":
+        await _execute_visibility_intent(callback, pool, intent_id, owner_id)
     else:
         await _navigate_to_tool(callback, plan)
 
@@ -475,6 +485,146 @@ async def _execute_audit_intent(
         await callback.message.edit_text(
             f"⚠️ Ошибка аудита: {type(e).__name__}"
         )
+
+
+async def _execute_growth_intent(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    intent_id: int,
+    plan: dict,
+    strategy: str,
+    owner_id: int,
+) -> None:
+    """Submit bulk_join to add accounts to managed channels — grows network activity."""
+    from services import operation_bus
+
+    channels_cnt = plan.get("n_channels", 0)
+    n_accs = plan.get("n_accounts_available", 0)
+
+    if not channels_cnt or not n_accs:
+        await _navigate_to_tool(callback, plan)
+        return
+
+    try:
+        channel_rows = await pool.fetch(
+            "SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1 LIMIT 20",
+            owner_id,
+        )
+        channel_ids = [str(r["channel_id"]) for r in channel_rows]
+        if not channel_ids:
+            await _navigate_to_tool(callback, plan)
+            return
+
+        op_id = await operation_bus.submit(
+            pool,
+            owner_id,
+            "bulk_join",
+            {"targets": channel_ids, "strategy": strategy, "via_intent": intent_id},
+            total_items=len(channel_ids),
+        )
+        await db.link_intent_operation(pool, intent_id, op_id)
+        await db.update_intent_status(pool, intent_id, owner_id, "executing")
+
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
+        kb.button(text="◀️ Навигатор целей",  callback_data=IntentCb(action="menu"))
+        kb.adjust(1)
+
+        await callback.message.edit_text(
+            f"✅ <b>Growth план запущен!</b>\n\n"
+            f"📡 Каналов для охвата: {len(channel_ids)}\n"
+            f"👤 Аккаунтов: {n_accs}\n"
+            f"🔢 Операция #{op_id}\n\n"
+            "Следите за прогрессом в очереди операций.",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception as e:
+        log_exc_swallow(log, f"_execute_growth_intent: {e}")
+        await callback.message.edit_text(f"⚠️ Ошибка запуска: {type(e).__name__}: {e}")
+
+
+async def _execute_sync_intent(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    intent_id: int,
+    plan: dict,
+    owner_id: int,
+) -> None:
+    """Sync requires content selection — navigate to Mass Ops with context."""
+    await db.update_intent_status(pool, intent_id, owner_id, "ready")
+
+    channels_cnt = plan.get("n_channels", 0)
+    bots_cnt = plan.get("n_bots", 0)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚡ Открыть Mass Ops",   callback_data=MassOpCb(action="menu"))
+    kb.button(text="◀️ Навигатор целей",    callback_data=IntentCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🔄 <b>План синхронизации готов</b>\n\n"
+        f"📡 Каналов: {channels_cnt}\n"
+        f"🤖 Ботов: {bots_cnt}\n\n"
+        "Для синхронизации выберите шаблон публикации в Mass Ops.\n"
+        "Система применит единый контент ко всем активам.",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _execute_visibility_intent(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    intent_id: int,
+    owner_id: int,
+) -> None:
+    """Run visibility analysis — rankings, keywords, competitor data."""
+    try:
+        keywords_cnt = await pool.fetchval(
+            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
+            owner_id,
+        ) or 0
+
+        recent_rankings = await pool.fetch(
+            """SELECT tk.keyword, sr.position
+               FROM tracked_keywords tk
+               LEFT JOIN LATERAL (
+                   SELECT position FROM search_rankings
+                   WHERE keyword_id = tk.id ORDER BY checked_at DESC LIMIT 1
+               ) sr ON true
+               WHERE tk.owner_id = $1 AND tk.is_active = TRUE
+               ORDER BY sr.position ASC NULLS LAST LIMIT 5""",
+            owner_id,
+        )
+
+        lines = ["👁️ <b>Отчёт о видимости</b>\n"]
+        if keywords_cnt == 0:
+            lines.append("⚠️ Нет отслеживаемых ключевых слов.")
+            lines.append("Добавьте ключевые слова в разделе Видимость → Ключевые слова.")
+        else:
+            lines.append(f"🔍 Ключевых слов отслеживается: {keywords_cnt}")
+            if recent_rankings:
+                lines.append("\n<b>Топ-позиции:</b>")
+                for row in recent_rankings:
+                    pos = row["position"] if row["position"] else "—"
+                    lines.append(f"  • {row['keyword']}: позиция {pos}")
+            else:
+                lines.append("ℹ️ Данных о позициях пока нет — запустите проверку рейтинга.")
+
+        await db.update_intent_status(pool, intent_id, owner_id, "completed")
+        await db.save_intent_feedback(pool, intent_id, owner_id, {
+            "keywords_cnt": keywords_cnt,
+            "rankings_checked": len(recent_rankings),
+        })
+
+        kb = InlineKeyboardBuilder()
+        kb.button(text="📊 Открыть Rankings",  callback_data=BmCb(action="visibility"))
+        kb.button(text="◀️ Навигатор целей",   callback_data=IntentCb(action="menu"))
+        kb.adjust(1)
+
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb.as_markup())
+    except Exception as e:
+        log_exc_swallow(log, f"_execute_visibility_intent: {e}")
+        await callback.message.edit_text(f"⚠️ Ошибка анализа: {type(e).__name__}")
 
 
 async def _navigate_to_tool(callback: CallbackQuery, plan: dict) -> None:

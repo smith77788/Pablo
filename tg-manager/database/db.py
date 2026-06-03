@@ -4253,3 +4253,20 @@ async def save_intent_feedback(
         intent_id,
         owner_id,
     )
+
+
+async def link_intent_operation(pool: asyncpg.Pool, intent_id: int, op_id: int) -> None:
+    await pool.execute(
+        "INSERT INTO intent_operation_links (intent_id, op_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        intent_id,
+        op_id,
+    )
+
+
+async def get_intent_by_op(pool: asyncpg.Pool, op_id: int):
+    return await pool.fetchrow(
+        "SELECT i.* FROM intents i "
+        "JOIN intent_operation_links l ON l.intent_id = i.id "
+        "WHERE l.op_id = $1",
+        op_id,
+    )

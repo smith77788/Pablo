@@ -541,6 +541,26 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             except Exception:
                 pass
 
+            # Memory Feedback Loop: mark linked intent as completed
+            try:
+                from database import db as _db
+                intent_row = await _db.get_intent_by_op(pool, op_id)
+                if intent_row:
+                    await _db.update_intent_status(
+                        pool, intent_row["id"], intent_row["owner_id"], "completed"
+                    )
+                    await _db.save_intent_feedback(
+                        pool, intent_row["id"], intent_row["owner_id"],
+                        {
+                            "op_id": op_id,
+                            "actual_done": result.get("ok", 0),
+                            "actual_duration_s": duration_seconds,
+                            "op_type": op_type,
+                        },
+                    )
+            except Exception as _ie:
+                log.debug("intent feedback link: %s", _ie)
+
         except Exception as e:
             log.exception("op_worker: op %d failed: %s", op_id, e)
             # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION_REVOKED

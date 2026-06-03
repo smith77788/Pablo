@@ -48,6 +48,10 @@ _INTENT_PATTERNS: list[tuple[str, list[str]]] = [
         "growth",
         ["масштаб", "growth", "расширить", "усилить", "увелич", "развить", "scale"],
     ),
+    (
+        "visibility",
+        ["видимость", "visibility", "поиск", "seo", "позиции", "ранжировани", "рейтинг", "ranking", "усилить присутствие"],
+    ),
 ]
 
 
@@ -142,6 +146,7 @@ async def build_plan(
         "sync": _build_sync_plan,
         "growth": _build_growth_plan,
         "strike": _build_strike_plan,
+        "visibility": _build_visibility_plan,
     }
     builder = builders.get(intent_type, _build_custom_plan)
     return await builder(pool, owner_id, description, resources)
@@ -295,19 +300,15 @@ async def _build_audit_plan(pool, owner_id, description, resources):
 
 
 async def _build_sync_plan(pool, owner_id, description, resources):
-    channels_cnt = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-        )
-        or 0
-    )
-    bots_cnt = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
-        )
-        or 0
-    )
+    channels_cnt = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+    ) or 0
+    bots_cnt = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
+    ) or 0
     total = channels_cnt + bots_cnt
+
+    can_execute = channels_cnt > 0
 
     return {
         "intent_type": "sync",
@@ -315,19 +316,21 @@ async def _build_sync_plan(pool, owner_id, description, resources):
         "n_channels": channels_cnt,
         "n_bots": bots_cnt,
         "n_total": total,
+        "n_accounts_available": resources["accounts_available"],
         "steps": [
             f"1. Каналов для синхронизации: {channels_cnt}",
             f"2. Ботов для синхронизации: {bots_cnt}",
-            "3. Применение единого шаблона",
-            "4. Массовое обновление через Mass Ops",
+            "3. Подбор единого шаблона публикации",
+            "4. Массовое обновление контента через Mass Ops",
+            "5. Применение единых настроек по всем активам",
         ],
         "risks": (
-            ["⚠️ Изменения затронут все активы — рекомендуется резервная копия"]
+            ["⚠️ Изменения затронут все активы — убедитесь в корректном шаблоне"]
             if total > 10
             else ["✅ Объём небольшой — риски минимальны"]
         ),
-        "executable": False,
-        "action": "navigate",
+        "executable": can_execute,
+        "action": "execute_sync" if can_execute else "navigate",
         "navigate_to": "mass_ops",
     }
 
@@ -336,27 +339,42 @@ async def _build_growth_plan(pool, owner_id, description, resources):
     geo_preset = detect_geo_preset(description)
     preset_info = GEO_PRESETS.get(geo_preset) or GEO_PRESETS["eu_capitals"]
 
+    channels_cnt = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+    ) or 0
+
+    n_accs = resources["accounts_available"]
+    can_execute = n_accs > 0 and channels_cnt > 0
+
+    steps = [
+        f"1. Анализ {channels_cnt} каналов текущего присутствия",
+        f"2. Оценка ресурсов: {n_accs} аккаунтов, {resources['proxies_available']} прокси",
+        "3. Подбор оптимальных аккаунтов для операции",
+    ]
+    if can_execute:
+        target_count = min(channels_cnt, 20)
+        steps.append(f"4. Массовое вступление аккаунтов в {target_count} каналов")
+        steps.append("5. Обновление trust score и поведенческих метрик")
+    else:
+        steps.append("4. Переход к Ecosystem Factory для создания новых активов")
+
     return {
         "intent_type": "growth",
         "goal": "Масштабирование и усиление экосистемы",
         "geo_preset": geo_preset,
         "geo_label": preset_info["label"],
-        "n_targets": preset_info["count"],
-        "n_accounts_available": resources["accounts_available"],
-        "steps": [
-            f"1. Анализ текущего присутствия ({preset_info['label']})",
-            "2. Выявление незакрытых регионов",
-            "3. Планирование расширения",
-            "4. Оптимизация существующих активов",
-            "5. Запуск Global Presence для новых регионов",
-        ],
+        "n_targets": max(channels_cnt, 1),
+        "n_channels": channels_cnt,
+        "n_accounts_available": n_accs,
+        "n_proxies_available": resources["proxies_available"],
+        "steps": steps,
         "risks": (
             ["⚠️ Масштабирование требует достаточного числа аккаунтов и прокси"]
-            if resources["accounts_available"] < 3
+            if n_accs < 3
             else ["✅ Ресурсов достаточно для масштабирования"]
         ),
-        "executable": False,
-        "action": "navigate",
+        "executable": can_execute,
+        "action": "execute_growth" if can_execute else "navigate",
         "navigate_to": "ecosystems",
     }
 
@@ -379,6 +397,53 @@ async def _build_strike_plan(pool, owner_id, description, resources):
         "executable": False,
         "action": "navigate",
         "navigate_to": "strike",
+    }
+
+
+async def _build_visibility_plan(pool, owner_id, description, resources):
+    keywords_cnt = await pool.fetchval(
+        "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE", owner_id
+    ) or 0
+    channels_cnt = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+    ) or 0
+
+    # Get avg position if rankings exist
+    avg_pos = await pool.fetchval(
+        """SELECT ROUND(AVG(sr.position))
+           FROM tracked_keywords tk
+           JOIN search_rankings sr ON sr.keyword_id = tk.id
+           WHERE tk.owner_id = $1 AND tk.is_active = TRUE
+             AND sr.checked_at > NOW() - INTERVAL '7 days'""",
+        owner_id,
+    )
+
+    steps = [
+        f"1. Анализ {keywords_cnt} ключевых слов в поиске",
+        f"2. Аудит позиций {channels_cnt} каналов",
+        "3. Выявление ключевых слов с низким рангом",
+        "4. Анализ конкурентов по топ-позициям",
+        "5. Рекомендации по SEO-оптимизации",
+    ]
+
+    risks = []
+    if keywords_cnt == 0:
+        risks.append("⚠️ Нет отслеживаемых ключевых слов — добавьте их для анализа")
+    else:
+        risks.append(f"ℹ️ Средняя позиция: {avg_pos or '—'} (по {keywords_cnt} ключевым словам)")
+
+    return {
+        "intent_type": "visibility",
+        "goal": "Усиление видимости в поиске Telegram",
+        "n_keywords": keywords_cnt,
+        "n_channels": channels_cnt,
+        "avg_position": int(avg_pos) if avg_pos else None,
+        "n_accounts_available": resources["accounts_available"],
+        "steps": steps,
+        "risks": risks if risks else ["✅ Ключевые слова настроены"],
+        "executable": True,
+        "action": "run_visibility",
+        "navigate_to": "ranking",
     }
 
 
@@ -464,6 +529,7 @@ def format_plan_card(plan: dict, forecast: dict, strategy: str) -> str:
         "sync": "🔄",
         "growth": "📈",
         "strike": "⚔️",
+        "visibility": "👁️",
         "custom": "🎯",
     }
     icon = intent_icons.get(plan.get("intent_type", "custom"), "🎯")
