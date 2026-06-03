@@ -281,3 +281,45 @@ async def _safe_queue_counts(pool: asyncpg.Pool, owner_id: int) -> dict:
     except Exception as e:
         log.debug("infra_orchestrator: queue counts failed owner=%d: %s", owner_id, e)
         return {}
+
+
+async def get_full_intelligence(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    op_type: str,
+    item_count: int,
+    account_ids: Optional[list[int]] = None,
+) -> dict:
+    """Единая точка входа для полного pre-launch intelligence (через intelligence_engine).
+
+    Возвращает dict с ключами:
+      go (bool), reason (str), warning (str),
+      risk_level (str), risk_score (int),
+      pressure (int), accounts_available (int),
+      prediction_minutes (int), success_probability (float),
+      formatted_block (str)  — готовый HTML для Telegram
+    """
+    try:
+        from services.intelligence_engine import get_pre_launch_intelligence, format_pre_launch_block
+        intel = await get_pre_launch_intelligence(pool, owner_id, op_type, item_count, account_ids)
+        return {
+            "go": intel.go_decision,
+            "reason": intel.go_reason,
+            "warning": intel.warning_text,
+            "risk_level": intel.risk.level,
+            "risk_score": intel.risk.score,
+            "pressure": intel.pressure_score,
+            "accounts_available": len(intel.recommended_accounts),
+            "prediction_minutes": intel.prediction.estimated_minutes,
+            "success_probability": intel.prediction.success_probability,
+            "formatted_block": format_pre_launch_block(intel),
+        }
+    except Exception as e:
+        log.warning("infra_orchestrator.get_full_intelligence failed owner=%d op=%s: %s", owner_id, op_type, e)
+        return {
+            "go": True, "reason": "", "warning": "",
+            "risk_level": "unknown", "risk_score": 0,
+            "pressure": 0, "accounts_available": 0,
+            "prediction_minutes": 0, "success_probability": 0.8,
+            "formatted_block": "",
+        }

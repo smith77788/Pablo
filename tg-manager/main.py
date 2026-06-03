@@ -86,6 +86,7 @@ from services import task_registry
 from services import drift_detector
 from services import deploy_notifier
 from services import infra_memory
+from services import infra_copilot
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -287,6 +288,7 @@ async def main() -> None:
         asyncio.create_task(_resilient("task_registry",  task_registry.run_cleanup_loop))
         asyncio.create_task(_resilient("drift_detector",  drift_detector.run, pool, bot))
         asyncio.create_task(_resilient("infra_memory",    infra_memory.run_flush_loop, pool))
+        asyncio.create_task(_resilient("infra_copilot",   infra_copilot.run_copilot_loop, pool, bot))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:

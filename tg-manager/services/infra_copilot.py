@@ -946,3 +946,54 @@ def format_pre_launch_intelligence(
         lines.append(f"📌 {reason}")
 
     return "\n".join(lines)
+
+
+async def run_copilot_loop(pool: asyncpg.Pool, bot) -> None:
+    """Фоновый цикл: каждые 30 минут анализирует инфраструктуру всех пользователей.
+
+    При обнаружении critical-проблем — уведомляет владельцев через notify_if_enabled.
+    """
+    import asyncio
+    from database import db as _db
+
+    log.info("infra_copilot: background loop started (interval=30min)")
+    await asyncio.sleep(300)  # начальная задержка 5 минут после старта бота
+
+    while True:
+        try:
+            # Получить список активных владельцев с аккаунтами
+            owner_ids = await pool.fetch(
+                """SELECT DISTINCT owner_id FROM tg_accounts
+                   WHERE is_active=TRUE
+                   GROUP BY owner_id HAVING COUNT(*) > 0""",
+            )
+            for row in owner_ids:
+                owner_id = row["owner_id"]
+                try:
+                    insights = await run_full_analysis(pool, owner_id, include_predictions=False)
+                    critical = [i for i in insights if i.severity == "critical"]
+                    if critical:
+                        report = _format_critical_alert(critical[:3])
+                        await _db.notify_if_enabled(
+                            pool, bot, owner_id, "restriction",
+                            report,
+                        )
+                    await asyncio.sleep(1)  # небольшая пауза между пользователями
+                except Exception as e:
+                    log.debug("infra_copilot loop owner=%d: %s", owner_id, e)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.warning("infra_copilot loop error: %s", e)
+
+        await asyncio.sleep(1800)  # 30 минут
+
+
+def _format_critical_alert(insights: list[CopilotInsight]) -> str:
+    lines = ["🚨 <b>Infrastructure Copilot: критические проблемы</b>\n"]
+    for i in insights:
+        lines.append(f"• <b>{i.title}</b>")
+        lines.append(f"  {i.explanation}")
+        if i.recommendation:
+            lines.append(f"  💡 {i.recommendation}")
+    return "\n".join(lines)
