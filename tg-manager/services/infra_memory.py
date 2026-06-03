@@ -379,17 +379,20 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
             if key in _account_memory:
                 # Не перетирать свежие in-memory данные устаревшими из БД
                 continue
-            total = (row["successes"] or 0) + (row["failures"] or 0)
+            successes = row["successes"] or 0
+            failures = row["failures"] or 0
+            avg_dur = float(row["avg_duration_s"] or 0)
             rec = _AccountActionRecord(
                 account_id=row["account_id"],
                 action_type=row["action_type"],
-                successes=row["successes"] or 0,
-                failures=row["failures"] or 0,
+                successes=successes,
+                failures=failures,
                 last_success_at=float(row["last_success_ts"] or 0),
                 last_failure_at=float(row["last_failure_ts"] or 0),
                 last_errors=list(row["last_errors"] or []),
-                avg_duration_s=float(row["avg_duration_s"] or 0),
-                duration_samples=total,
+                avg_duration_s=avg_dur,
+                # duration только для успешных; если avg есть — инициализируем как successes
+                duration_samples=successes if avg_dur > 0 else 0,
             )
             _account_memory[key] = rec
             loaded += 1
@@ -422,17 +425,18 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
             key = (row["account_id"], row["action_type"])
             if key in _account_memory:
                 continue  # не перетирать свежие in-memory данные
-            total = (row["successes"] or 0) + (row["failures"] or 0)
+            successes = row["successes"] or 0
+            avg_dur = float(row["avg_duration_s"] or 0)
             rec = _AccountActionRecord(
                 account_id=row["account_id"],
                 action_type=row["action_type"],
-                successes=row["successes"] or 0,
+                successes=successes,
                 failures=row["failures"] or 0,
                 last_success_at=float(row["last_success_ts"] or 0),
                 last_failure_at=float(row["last_failure_ts"] or 0),
                 last_errors=list(row["last_errors"] or []),
-                avg_duration_s=float(row["avg_duration_s"] or 0),
-                duration_samples=total,
+                avg_duration_s=avg_dur,
+                duration_samples=successes if avg_dur > 0 else 0,
             )
             _account_memory[key] = rec
             loaded += 1
