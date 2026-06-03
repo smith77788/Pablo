@@ -16,7 +16,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import WarmupCb, BmCb
+from bot.callbacks import WarmupCb, BmCb, AccCb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -89,10 +89,15 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     )
 
     if not accounts:
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="menu"))
+        empty_kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
+        empty_kb.adjust(1)
         await callback.message.edit_text(
-            "⚠️ Нет доступных аккаунтов.",
+            "⚠️ <b>Нет доступных аккаунтов</b>\n\n"
+            "Добавьте Telegram-аккаунт через 📱 Аккаунты, затем вернитесь сюда.",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=empty_kb.as_markup(),
         )
         return
 
@@ -274,10 +279,14 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
     plans = await get_active_plans(pool, callback.from_user.id)
 
     if not plans:
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="➕ Создать план разогрева", callback_data=WarmupCb(action="create_list"))
+        empty_kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
+        empty_kb.adjust(1)
         await callback.message.edit_text(
-            "📋 <b>Активных планов нет</b>\n\nСоздайте план через «➕ Создать план разогрева».",
+            "📋 <b>Активных планов нет</b>\n\nСоздайте план разогрева для ваших аккаунтов.",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=empty_kb.as_markup(),
         )
         return
 

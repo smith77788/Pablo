@@ -378,25 +378,29 @@ async def run_daily_warmup(
 
             try:
                 if action == "read_channel":
-                    success = await _perform_read_channel(client, target)
+                    success = await asyncio.wait_for(_perform_read_channel(client, target), timeout=60)
                 elif action == "join_channel":
-                    success = await _perform_join_channel(client, target)
+                    success = await asyncio.wait_for(_perform_join_channel(client, target), timeout=60)
                 elif action == "search":
                     query = random.choice(_WARMUP_SEARCH_QUERIES)
-                    success = await _perform_search(client, query)
+                    success = await asyncio.wait_for(_perform_search(client, query), timeout=60)
                     target = f"search:{query}"
                 elif action == "view_profile":
-                    success = await _perform_view_profile(client, target)
+                    success = await asyncio.wait_for(_perform_view_profile(client, target), timeout=60)
                 elif action == "open_chat":
-                    success = await _perform_open_chat(client, target)
+                    success = await asyncio.wait_for(_perform_open_chat(client, target), timeout=60)
                 elif action == "send_reaction":
-                    success = await _perform_send_reaction(client, target)
+                    success = await asyncio.wait_for(_perform_send_reaction(client, target), timeout=60)
                 elif action == "dm_bot":
-                    success = await _perform_dm_bot(client)
+                    success = await asyncio.wait_for(_perform_dm_bot(client), timeout=60)
                     target = "dm_bot"
                 else:
                     await asyncio.sleep(random.uniform(2, 7))
                     success = True
+            except asyncio.TimeoutError:
+                error = "timeout"
+                success = False
+                log.warning("warmup: action %s timed out for acc=%d target=%s", action, account_id, target)
             except Exception as e:
                 error = str(e)[:100]
                 success = False
@@ -414,8 +418,8 @@ async def run_daily_warmup(
                 status_icon = "✅" if success else "❌"
                 try:
                     update_callback(i + 1, daily_actions, f"{status_icon} {step_desc}")
-                except Exception:
-                    pass
+                except Exception as cb_exc:
+                    log.debug("warmup update_callback error: %s", cb_exc)
 
             # Пауза между действиями (имитация человека — неравномерная)
             if i < daily_actions - 1:
@@ -426,7 +430,18 @@ async def run_daily_warmup(
                 await asyncio.sleep(base_pause)
 
     except Exception as e:
-        log.warning("warmup session error acc=%d: %s", account_id, e)
+        etype = type(e).__name__
+        if etype in ("AuthKeyUnregisteredError", "SessionRevokedError"):
+            log.warning("warmup: fatal auth error acc=%d (%s) — deactivating", account_id, etype)
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
+                    account_id,
+                )
+            except Exception as db_exc:
+                log.error("warmup: failed to deactivate acc=%d: %s", account_id, db_exc)
+        else:
+            log.warning("warmup session error acc=%d: %s", account_id, e)
     finally:
         try:
             await client.disconnect()

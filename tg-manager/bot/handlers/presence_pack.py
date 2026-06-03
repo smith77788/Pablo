@@ -13,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import PackCb, BotAdminCb, BmCb
+from bot.callbacks import PackCb, BotAdminCb, BmCb, AutoReplyCb
 from bot.states import PresencePackFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -579,7 +579,7 @@ async def cb_pack_seed(
             target_label=pack.get("target_label"),
             pack_description=pack.get("description"),
         )
-        chan_name = ch.get("title") or f"@{ch.get('username')}" if ch.get("username") else f"id{ch['channel_id']}"
+        chan_name = ch.get("title") or (f"@{ch['username']}" if ch.get("username") else f"id{ch['channel_id']}")
         posted = False
         if bot_token:
             # Bot API requires @username or -100{channel_id} format
@@ -855,9 +855,45 @@ async def cb_bot_regen_token(
 ) -> None:
     new_token = presence_setup.generate_admin_token()
     await db.upsert_bot_admin_session(pool, callback_data.bot_id, callback.from_user.id, new_token)
+    # Show alert with new token, then refresh the panel.
+    # cb_bot_admin_panel will call callback.answer() — skip it here to avoid double answer.
     await callback.answer(f"✅ Новый токен: /admin {new_token}", show_alert=True)
-    # Refresh the panel
-    await cb_bot_admin_panel(callback, callback_data, pool)
+    # Refresh the panel directly without triggering another answer()
+    bot_id = callback_data.bot_id
+    owner_id = callback.from_user.id
+    bot_row = await pool.fetchrow(
+        "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        bot_id, owner_id,
+    )
+    if not bot_row:
+        return
+    user_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id
+    ) or 0
+    reply_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
+    ) or 0
+    funnel_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+    ) or 0
+    token = await db.get_bot_admin_token(pool, bot_id)
+    bot_name = f"@{bot_row['username']}" if bot_row.get("username") else bot_row.get("first_name") or f"id{bot_id}"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💬 Список авто-ответов", callback_data=BotAdminCb(action="list_replies", bot_id=bot_id))
+    kb.button(text="🔑 Обновить токен доступа", callback_data=BotAdminCb(action="regen_token", bot_id=bot_id))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        f"🔧 <b>Admin панель: {escape(bot_name)}</b>\n\n"
+        f"👥 Пользователей: {user_count}\n"
+        f"💬 Авто-ответов: {reply_count}\n"
+        f"🔄 Активных воронок: {funnel_count}\n\n"
+        f"🔑 <b>Команда для входа в бота:</b>\n"
+        f"<code>/admin {token or 'нет токена — нажмите «Обновить токен»'}</code>\n\n"
+        f"<i>Введите эту команду в своём боте чтобы получить панель управления.</i>",
+        markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(BotAdminCb.filter(F.action == "list_replies"))
@@ -873,7 +909,16 @@ async def cb_bot_list_replies(
     kb.adjust(1)
 
     if not rules:
-        await _edit(callback, "💬 <b>Авто-ответы</b>\n\nАвто-ответов пока нет.", markup=kb.as_markup())
+        empty_kb = InlineKeyboardBuilder()
+        empty_kb.button(text="➕ Добавить авто-ответ", callback_data=AutoReplyCb(action="add", bot_id=bot_id))
+        empty_kb.button(text="◀️ Назад", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
+        empty_kb.adjust(1)
+        await _edit(
+            callback,
+            "💬 <b>Авто-ответы</b>\n\nАвто-ответов пока нет.\n\n"
+            "💡 Добавьте первый авто-ответ — бот будет автоматически реагировать на ключевые слова.",
+            markup=empty_kb.as_markup(),
+        )
         return
 
     lines = []
