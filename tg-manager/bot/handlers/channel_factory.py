@@ -35,6 +35,7 @@ from bot.utils.op_helpers import (
     _get_active_accounts,
     _progress_bar,
     _progress_text,
+    backoff,
 )
 from services import session_simulator
 
@@ -46,11 +47,6 @@ _PRO = "pro"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
-
-def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
-    raw = min(base ** attempt, cap)
-    return raw * random.uniform(0.8, 1.2)
-
 
 
 def _back_menu_kb() -> InlineKeyboardBuilder:
@@ -1073,7 +1069,7 @@ async def cb_chanf_be_confirm(
                 ok_total += 1
             else:
                 err_total += 1
-            await asyncio.sleep(_backoff(1, base=2.0, cap=10.0))
+            await asyncio.sleep(backoff(1, base=2.0, cap=10.0))
 
     await progress_msg.edit_text(
         f"✅ <b>Изменение применено</b>\n\n"

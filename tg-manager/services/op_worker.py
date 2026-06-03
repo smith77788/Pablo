@@ -9,6 +9,9 @@ import asyncpg
 from aiogram import Bot
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import extract_flood_wait
+from services import resource_selector
+from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10   # секунд между проверками очереди
@@ -27,29 +30,6 @@ _FATAL_ERRORS = {
     "UserDeactivatedBan", "BotKicked", "PhoneNumberBanned",
 }
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
-
-
-def _extract_flood_wait(exc: Exception, err_str: str) -> int:
-    """Извлекает количество секунд из FloodWaitError или строки ошибки.
-
-    Возвращает 0 если ошибка не является flood-ошибкой.
-    Поддерживает как Telethon FloodWaitError (с атрибутом .seconds),
-    так и строковые представления 'A wait of X seconds is required'.
-    """
-    # Telethon FloodWaitError имеет атрибут .seconds
-    if hasattr(exc, "seconds"):
-        return int(exc.seconds)
-    if not _FLOOD_PATTERNS.search(err_str) and "A wait of" not in err_str:
-        return 0
-    # Парсинг числа из строки: ищем первое число после ключевого слова
-    import re as _re
-    m = _re.search(r"(\d+)", err_str)
-    if m:
-        try:
-            return int(m.group(1))
-        except (ValueError, IndexError):
-            pass
-    return 60  # fallback если flood, но число не найдено
 
 
 def _classify_op_error(exc: Exception) -> str:
@@ -451,28 +431,12 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     text = params.get("text", "")
     # Accept both "delay_seconds" (canonical) and legacy "delay" key from OpBuilder
     delay = params.get("delay_seconds") or params.get("delay") or 30
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    if account_ids:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-            "a.trust_score, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.id = ANY($1) AND a.owner_id=$2 AND a.is_active=true "
-            "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-            "ORDER BY a.trust_score DESC NULLS LAST",
-            [int(i) for i in account_ids], owner_id,
-        )
-    else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-            "a.trust_score, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=true "
-            "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-            "ORDER BY a.trust_score DESC NULLS LAST",
-            owner_id,
-        )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id,
+        include_ids=account_ids or None,
+    )
 
     if not accounts:
         log.warning("op_worker mass_publish #%d: no active accounts for owner=%d", op_id, owner_id)
@@ -530,10 +494,12 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                         await record_success(acc_dict["id"], "publish")
                     except Exception:
                         log_exc_swallow(log, f"Сбой записи успешной публикации в flood_engine аккаунта {acc_dict.get('id')}")
+                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=True)
                 except Exception as e:
                     total_failed += 1
                     err_str = str(e)[:200]
-                    flood_wait = _extract_flood_wait(e, err_str)
+                    flood_wait = extract_flood_wait(e, err_str)
+                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=False, error=err_str[:100])
                     if flood_wait:
                         try:
                             from services.flood_engine import record_flood
@@ -665,23 +631,12 @@ async def _exec_bulk_join(
     import random
 
     links = params.get("links", [])
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    _acc_q = (
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-        "a.trust_score, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=true "
-        "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-        "ORDER BY a.trust_score DESC NULLS LAST"
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id,
+        include_ids=account_ids or None,
     )
-    if account_ids:
-        accounts = await pool.fetch(
-            _acc_q.replace("WHERE a.owner_id=$1", "WHERE a.id = ANY($2) AND a.owner_id=$1"),
-            owner_id, [int(i) for i in account_ids],
-        )
-    else:
-        accounts = await pool.fetch(_acc_q, owner_id)
 
     ok_count = 0
     fail_count = 0
@@ -717,10 +672,12 @@ async def _exec_bulk_join(
                     await record_success(acc["id"], "join")
                 except Exception:
                     log_exc_swallow(log, f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}")
+                _infra_mem.record_account_op(acc["id"], "join", success=True)
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
-                flood_wait = _extract_flood_wait(e, err_str)
+                flood_wait = extract_flood_wait(e, err_str)
+                _infra_mem.record_account_op(acc["id"], "join", success=False, error=err_str[:100])
                 if flood_wait:
                     try:
                         from services.flood_engine import record_flood
@@ -777,23 +734,12 @@ async def _exec_bulk_leave(
     import random
 
     channels = params.get("channels", [])
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    _acc_q = (
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-        "a.trust_score, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=true "
-        "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-        "ORDER BY a.trust_score DESC NULLS LAST"
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id,
+        include_ids=account_ids or None,
     )
-    if account_ids:
-        accounts = await pool.fetch(
-            _acc_q.replace("WHERE a.owner_id=$1", "WHERE a.id = ANY($2) AND a.owner_id=$1"),
-            owner_id, [int(i) for i in account_ids],
-        )
-    else:
-        accounts = await pool.fetch(_acc_q, owner_id)
 
     ok_count = 0
     fail_count = 0
@@ -830,10 +776,12 @@ async def _exec_bulk_leave(
                     await record_success(acc["id"], "leave")
                 except Exception:
                     log_exc_swallow(log, f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}")
+                _infra_mem.record_account_op(acc["id"], "leave", success=True)
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
-                flood_wait = _extract_flood_wait(e, err_str)
+                flood_wait = extract_flood_wait(e, err_str)
+                _infra_mem.record_account_op(acc["id"], "leave", success=False, error=err_str[:100])
                 if flood_wait:
                     try:
                         from services.flood_engine import record_flood

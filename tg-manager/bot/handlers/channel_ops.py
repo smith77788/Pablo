@@ -39,7 +39,7 @@ from bot.states import (
     PostToChannelFSM, ReportFSM, SendReactionFSM, UpdateProfileFSM,
 )
 from bot.utils.subscription import require_plan
-from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text
+from bot.utils.op_helpers import _acc_label, _progress_bar, _progress_text, backoff
 from services import session_simulator
 from services.logger import log_exc_swallow
 
@@ -294,13 +294,6 @@ def _parse_tme_post_link(text: str) -> tuple[int | str | None, int | None]:
     if m:
         return m.group(1), int(m.group(2))
     return None, None
-
-
-def _backoff(attempt: int, base: float = 2.0, cap: float = 60.0) -> float:
-    """Exponential backoff with ±20% jitter so operations don't look robotic."""
-    import math, random
-    raw = min(base ** attempt, cap)
-    return raw * random.uniform(0.8, 1.2)
 
 
 def _human_delay(min_s: float, max_s: float) -> float:
@@ -990,7 +983,7 @@ async def cb_do_bulk_create(
 
             chaos = session_simulator.chaos_factor()
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos))
+            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos))
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
@@ -1212,7 +1205,7 @@ async def fsm_bpchans_text(message: Message, state: FSMContext, pool: asyncpg.Po
         else:
             attempt += 1
         flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood))
+        await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
 
     lines = [f"📤 <b>Результаты публикации</b>\n", f"Каналов: {total} · ✅ {ok} · ❌ {err}\n"]
     await progress_msg.edit_text(
@@ -2787,7 +2780,7 @@ async def fsm_botfather_username(message: Message, state: FSMContext, pool: asyn
         else:
             attempt += 1
         flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=60.0), flood))
+        await asyncio.sleep(max(backoff(attempt, base=2.0, cap=60.0), flood))
 
     lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
     lines += results_ok + results_err
@@ -3985,7 +3978,7 @@ async def fsm_bulk_channel_id(message: Message, state: FSMContext, pool: asyncpg
             else:
                 attempt += 1
             flood = (result.get("flood_wait", 0) if isinstance(result, dict) else 0)
-            await asyncio.sleep(max(_backoff(attempt, base=2.0, cap=30.0), flood))
+            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
         lines = [f"🚪 <b>Выход из {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
 
@@ -4071,7 +4064,7 @@ async def fsm_bulk_post_text(message: Message, state: FSMContext, pool: asyncpg.
             else:
                 attempt += 1
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(_backoff(attempt), flood))
+            await asyncio.sleep(max(backoff(attempt), flood))
         lines = [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
@@ -4178,7 +4171,7 @@ async def fsm_join_invite_combined(message: Message, state: FSMContext, pool: as
             else:
                 attempt += 1
             flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(_backoff(attempt), flood))
+            await asyncio.sleep(max(backoff(attempt), flood))
         lines = [f"🔗 <b>Вступление в {html.escape(invite)}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
         return
@@ -4281,7 +4274,7 @@ async def fsm_update_profile(message: Message, state: FSMContext, pool: asyncpg.
                 attempt = 0
             else:
                 attempt += 1
-            await asyncio.sleep(_backoff(attempt, base=2.0, cap=30.0))
+            await asyncio.sleep(backoff(attempt, base=2.0, cap=30.0))
         lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
         await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
     else:
@@ -4697,7 +4690,7 @@ async def cb_bulk_chan_exec(
             except Exception:
                 log_exc_swallow(log, "Сбой обновления прогресса bulk-операции (leave)")
 
-        await asyncio.sleep(_backoff(idx % 5, base=2.0, cap=20.0))
+        await asyncio.sleep(backoff(idx % 5, base=2.0, cap=20.0))
 
     header = (
         f"📊 <b>{op_label} каналам — завершено</b>\n\n"

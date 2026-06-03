@@ -51,11 +51,6 @@ _OP_TIMEOUT = 45
 # Кап для FloodWait backoff
 _FLOOD_CAP = 65.0
 
-def _backoff(attempt: int, base: float = 2.0, cap: float = 120.0) -> float:
-    """Return exponential backoff seconds: base^attempt, capped at cap."""
-    import math
-    return min(base ** attempt, cap)
-
 # Pool of realistic Android device fingerprints
 _ANDROID_DEVICES: list[tuple[str, str]] = [
     ("Samsung SM-S928B", "Android 14"),
@@ -2814,14 +2809,6 @@ async def report_peer_deep_v2(  # noqa: C901
     return R
 
 
-
-def _extract_flood_wait(err_str: str, default: float = 30.0) -> float:
-    """Извлекает секунды ожидания из ошибки FloodWait."""
-    import re as _re
-    match = _re.search(r'(\d+)', err_str)
-    if match:
-        return min(_FLOOD_CAP, float(match.group(1)))
-    return default
 
 async def strike_map_target(
     session_string: str,

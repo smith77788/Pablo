@@ -120,6 +120,7 @@ async def select_all_active(
     pool: asyncpg.Pool,
     owner_id: int,
     *,
+    include_ids: list[int] | None = None,
     pool_name: str | None = None,
     tags: list[str] | None = None,
     respect_cooldown: bool = True,
@@ -128,12 +129,18 @@ async def select_all_active(
 
     Используется когда нужны все аккаунты, а не один лучший.
     Для bulk-операций без flood-ранжирования.
+
+    include_ids: если указан — вернуть только эти аккаунты (пользователь выбрал конкретные).
     """
     conditions = ["a.owner_id=$1", "a.is_active=TRUE"]
     params: list = [owner_id]
 
     if respect_cooldown:
         conditions.append("(a.cooldown_until IS NULL OR a.cooldown_until < NOW())")
+
+    if include_ids:
+        params.append(include_ids)
+        conditions.append(f"a.id = ANY(${len(params)})")
 
     if pool_name is not None:
         params.append(pool_name)
