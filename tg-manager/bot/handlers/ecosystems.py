@@ -701,7 +701,10 @@ async def cb_eco_sync(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад к экосистеме", callback_data=EcoCb(action="view", eco_id=eco_id))
-    await _edit(callback, text, markup=kb.as_markup())
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Clone ─────────────────────────────────────────────────────────────────────
@@ -916,9 +919,27 @@ async def cb_eco_dna_delete(
     dna_id = callback_data.page
     await _eb.delete_dna(pool, dna_id, callback.from_user.id)
     await callback.answer("🗑 DNA удалена", show_alert=True)
-    # redirect to DNA menu
-    callback_data_new = EcoCb(action="dna_menu", eco_id=eco_id)
-    from aiogram.types import CallbackQuery as CQ
-    callback.data = callback_data_new.pack()
-    await cb_eco_dna_menu(callback, callback_data_new, pool)
+    # Show updated DNA menu directly
+    dna_list = await _eb.list_dna(pool, callback.from_user.id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📸 Снять DNA с этой экосистемы",
+              callback_data=EcoCb(action="dna_capture", eco_id=eco_id))
+    for d in dna_list[:8]:
+        is_mine = d["owner_id"] == callback.from_user.id
+        label = ("💾 " if is_mine else "📚 ") + html.escape(d["name"][:28])
+        kb.button(text=label, callback_data=EcoCb(action="dna_view", eco_id=eco_id, page=d["id"]))
+    kb.button(text="◀️ Назад", callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(1)
+    lines = ["🧬 <b>DNA-шаблоны экосистемы</b>\n"]
+    if dna_list:
+        for d in dna_list[:8]:
+            flag = "💾" if d["owner_id"] == callback.from_user.id else "📚"
+            lines.append(f"{flag} <b>{html.escape(d['name'])}</b> · {d['dna_type']}")
+    else:
+        lines.append("Нет сохранённых DNA-шаблонов.")
+    try:
+        await callback.message.edit_text("\n".join(lines), parse_mode="HTML",
+                                         reply_markup=kb.as_markup())
+    except Exception:
+        pass
 

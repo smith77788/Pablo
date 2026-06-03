@@ -444,6 +444,7 @@ class StrikeEmailFSM(StatesGroup):
 
 class ErrorReportFSM(StatesGroup):
     awaiting_description = State()  # описание ошибки
+    awaiting_screenshot  = State()  # скриншот для доказательства
 
 
 class EcosystemCreateFSM(StatesGroup):
