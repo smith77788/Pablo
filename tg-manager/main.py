@@ -15,6 +15,7 @@ from config import BOT_TOKEN
 from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
 from bot.middlewares.user_activity import UserActivityLogMiddleware
+from bot.utils.button_styles import install_button_style_patch
 from bot.handlers import start, bots, edit, audience, webhooks, broadcast, bulk
 from bot.handlers import commands as cmd_handler
 from bot.handlers import templates as tpl_handler
@@ -141,6 +142,8 @@ async def _global_error_handler(event: ErrorEvent) -> None:
 
 
 async def main() -> None:
+    install_button_style_patch()
+
     bot_session = AiohttpSession()
     bot_session._connector_init["ssl"] = False
 
