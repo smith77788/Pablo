@@ -86,6 +86,114 @@ _SYSTEM_PROMPT = (
 )
 
 _MAX_TURNS = 100
+
+# ── Fast action patterns (no LLM needed) ──────────────────────────────────────
+
+_FAST_ACTION_PATTERNS: list[tuple] = [
+    # "создай 5 каналов <prefix>" — bulk first (more specific)
+    (
+        re.compile(r'созда(?:й|йте|ть|вай)\s+(\d+)\s+канал\w*\s+(.+)', re.I | re.DOTALL),
+        "bulk_channels",
+    ),
+    # "создай канал <title>"
+    (
+        re.compile(r'созда(?:й|йте|ть|вай)\s+канал(?!\w)\s+(.+)', re.I | re.DOTALL),
+        "channel",
+    ),
+    # "создай группу <title>"
+    (
+        re.compile(r'созда(?:й|йте|ть|вай)\s+(?:чат|групп\w+)\s+(.+)', re.I | re.DOTALL),
+        "group",
+    ),
+    # "создай бота <name>"
+    (
+        re.compile(r'созда(?:й|йте|ть|вай)\s+бот\w*\s+(.+)', re.I | re.DOTALL),
+        "bot",
+    ),
+]
+
+
+async def _fast_parse_action(
+    text: str, pool: asyncpg.Pool, user_id: int
+) -> dict | None:
+    """
+    Detect simple create/action intents without LLM.
+    Returns {"__pending__": True, "action_data": ..., "ai_message": ...} or None.
+    """
+    from bot.utils.ai_tools import (
+        action_create_channel,
+        action_create_group,
+        action_create_bot,
+        action_bulk_create_channels,
+    )
+
+    stripped = text.strip()
+
+    for pattern, kind in _FAST_ACTION_PATTERNS:
+        m = pattern.search(stripped)
+        if not m:
+            continue
+
+        if kind == "bulk_channels":
+            try:
+                count = min(50, max(1, int(m.group(1))))
+            except ValueError:
+                continue
+            prefix = m.group(2).strip().strip('«»"\' \t\n')[:80]
+            if len(prefix) < 2:
+                continue
+            result = await action_bulk_create_channels(pool, user_id, prefix=prefix, count=count)
+            if "error" in result:
+                return None
+            return {
+                "__pending__": True,
+                "action_data": result,
+                "ai_message": (
+                    f"⚡ Подготовил операцию: создать <b>{count}</b> каналов "
+                    f"с префиксом «{prefix}»."
+                ),
+            }
+
+        elif kind == "channel":
+            title = m.group(1).strip().strip('«»"\' \t\n')[:80]
+            if len(title) < 2:
+                continue
+            result = await action_create_channel(pool, user_id, title=title)
+            if "error" in result:
+                return None
+            return {
+                "__pending__": True,
+                "action_data": result,
+                "ai_message": f"⚡ Подготовил создание канала «{title}».",
+            }
+
+        elif kind == "group":
+            title = m.group(1).strip().strip('«»"\' \t\n')[:80]
+            if len(title) < 2:
+                continue
+            result = await action_create_group(pool, user_id, title=title)
+            if "error" in result:
+                return None
+            return {
+                "__pending__": True,
+                "action_data": result,
+                "ai_message": f"⚡ Подготовил создание группы «{title}».",
+            }
+
+        elif kind == "bot":
+            name = m.group(1).strip().strip('«»"\' \t\n')[:80]
+            if len(name) < 2:
+                continue
+            result = await action_create_bot(pool, user_id, name=name)
+            if "error" in result:
+                return None
+            return {
+                "__pending__": True,
+                "action_data": result,
+                "ai_message": f"⚡ Подготовил создание бота «{name}».",
+            }
+
+    return None
 _DEFAULT_MAX_FILE_BYTES = 1_048_576
 _DEFAULT_MAX_FILE_CHARS = 60_000
 _TELEGRAM_TEXT_LIMIT = 3900
@@ -621,38 +729,44 @@ async def _process_ai_turn(
 
     messages.append({"role": "user", "content": user_content})
 
-    # Показываем индикатор набора текста перед вызовом API
-    try:
-        await message.bot.send_chat_action(message.chat.id, "typing")
-    except Exception:
-        pass
-
-    thinking = await message.answer(thinking_text, parse_mode="HTML")
-
-    try:
-        reply = await asyncio.wait_for(
-            _call_ai_providers(messages, pool, message.from_user.id, http),
-            timeout=75.0,
-        )
-    except asyncio.TimeoutError:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
-        kb.button(text="❌ Выйти", callback_data=AiCb(action="stop"))
-        kb.adjust(2)
+    # ── Fast path: detect action intent without LLM ──────────────────────────
+    fast_reply = await _fast_parse_action(user_content, pool, message.from_user.id)
+    if fast_reply:
+        thinking = await message.answer("⚡ <i>Готово!</i>", parse_mode="HTML")
+        reply = fast_reply
+    else:
+        # Показываем индикатор набора текста перед вызовом API
         try:
-            await thinking.edit_text(
-                "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
-                "Все модели заняты или перегружены. Попробуйте ещё раз.",
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
-            )
+            await message.bot.send_chat_action(message.chat.id, "typing")
         except Exception:
-            await message.answer(
-                "⏰ <b>AI-ассистент не ответил вовремя.</b> Попробуйте ещё раз.",
-                parse_mode="HTML",
-                reply_markup=kb.as_markup(),
+            pass
+
+        thinking = await message.answer(thinking_text, parse_mode="HTML")
+
+        try:
+            reply = await asyncio.wait_for(
+                _call_ai_providers(messages, pool, message.from_user.id, http),
+                timeout=75.0,
             )
-        return
+        except asyncio.TimeoutError:
+            kb = InlineKeyboardBuilder()
+            kb.button(text="🔄 Повторить", callback_data=AiCb(action="retry"))
+            kb.button(text="❌ Выйти", callback_data=AiCb(action="stop"))
+            kb.adjust(2)
+            try:
+                await thinking.edit_text(
+                    "⏰ <b>AI-ассистент не ответил вовремя</b>\n\n"
+                    "Все модели заняты или перегружены. Попробуйте ещё раз.",
+                    parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
+                )
+            except Exception:
+                await message.answer(
+                    "⏰ <b>AI-ассистент не ответил вовремя.</b> Попробуйте ещё раз.",
+                    parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
+                )
+            return
 
     if isinstance(reply, dict) and reply.get("__pending__"):
         # AI wants to perform an action — show confirmation

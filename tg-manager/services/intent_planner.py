@@ -71,7 +71,7 @@ _GEO_KEYWORDS: dict[str, list[str]] = {
     "cis": ["снг", "cis", "постсоветск", "снг-страны"],
     "dach": ["германи", "german", "austria", "австри", "швейцар", "dach"],
     "latam": ["латин", "latin", "brazil", "бразил", "аргентин", "latam"],
-    "ru_cities": ["россия", "russia", "рф", "russian", "рос"],
+    "russia": ["россия", "russia", "рф", "russian", "росс", "городах", "городов", "рф"],
     "tier1": ["tier1", "tier-1", "крупных", "major cities", "мегаполис"],
 }
 
