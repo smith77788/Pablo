@@ -237,6 +237,7 @@ async def _start_parse(
     msg_target, state: FSMContext, pool: asyncpg.Pool, owner_id: int, limit: int
 ) -> None:
     from services.parser import parse_members, parse_active_users
+    from services import infra_orchestrator
 
     data = await state.get_data()
     source = data.get("parse_source", "")
@@ -245,6 +246,11 @@ async def _start_parse(
 
     if not source:
         await msg_target.answer("⚠️ Источник не указан. Начните заново.")
+        return
+
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, owner_id)
+    if not ready:
+        await msg_target.answer(f"⚠️ {reason}", parse_mode="HTML")
         return
 
     type_label = "участников" if parse_type == "members" else "активных"
