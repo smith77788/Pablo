@@ -501,6 +501,8 @@ async def cb_mp_confirm(
                 step_status = "error"
                 err_str = str(result.get("error", ""))
                 flood_wait = extract_flood_wait(Exception(err_str), err_str)
+                from services.infra_memory import record_account_op as _rim_rec
+                _rim_rec(acc["id"], "publish", success=False, error=err_str[:100])
                 if flood_wait:
                     from services.flood_engine import record_flood
                     try:
@@ -511,6 +513,8 @@ async def cb_mp_confirm(
             else:
                 ok_count += 1
                 step_status = "ok"
+                from services.infra_memory import record_account_op as _rim_rec
+                _rim_rec(acc["id"], "publish", success=True)
                 from services.flood_engine import record_success
                 try:
                     await record_success(acc["id"], "publish")
