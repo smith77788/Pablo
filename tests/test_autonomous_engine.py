@@ -15,6 +15,7 @@ from services.autonomous_engine import (
     build_risk_plan,
     choose_strategy,
     enrich_forecast,
+    execution_gate,
     format_autonomous_block,
 )
 
@@ -99,6 +100,33 @@ def test_enrich_forecast_marks_blocked_contract_as_no_go() -> None:
     assert enriched["go"] is False
     assert enriched["success_probability"] == 0.25
     assert enriched["queue_parallelism"] == 2
+
+
+def test_execution_gate_blocks_contract_with_risk_blockers() -> None:
+    plan = {
+        "autonomous": {
+            "risk_plan": {
+                "go": False,
+                "blockers": ["Infrastructure pressure is too high"],
+            }
+        }
+    }
+
+    gate = execution_gate(plan, {"go": True})
+
+    assert gate["go"] is False
+    assert gate["manual_review_required"] is True
+    assert gate["blockers"] == ["Infrastructure pressure is too high"]
+
+
+def test_execution_gate_allows_clean_contract() -> None:
+    plan = {"autonomous": {"risk_plan": {"go": True, "warnings": ["Watch load"]}}}
+
+    gate = execution_gate(plan, {"go": True})
+
+    assert gate["go"] is True
+    assert gate["manual_review_required"] is False
+    assert gate["warnings"] == ["Watch load"]
 
 
 def test_format_autonomous_block_exposes_operational_contract() -> None:

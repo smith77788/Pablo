@@ -414,6 +414,25 @@ async def cb_intent_confirm(
     )
     strategy = row["strategy"]
     action = plan.get("action", "navigate")
+    forecast = (
+        json.loads(row["forecast"])
+        if isinstance(row["forecast"], str)
+        else dict(row["forecast"])
+    )
+    gate = autonomous_engine.execution_gate(plan, forecast)
+
+    if not gate["go"]:
+        blockers = gate["blockers"] or ["Autonomous risk gate blocked execution"]
+        await callback.answer(
+            "Autonomous gate: manual review required", show_alert=True
+        )
+        await callback.message.edit_text(
+            "⚠️ <b>Autonomous Gate</b>\n\n"
+            "Plan is not safe to execute yet:\n"
+            + "\n".join(f"• {reason}" for reason in blockers[:5]),
+            reply_markup=_plan_kb(intent_id, plan, strategy),
+        )
+        return
 
     await callback.answer("Запускаю…")
 

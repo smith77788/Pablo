@@ -270,6 +270,24 @@ def enrich_forecast(
     return enriched
 
 
+def execution_gate(
+    plan: dict[str, Any], forecast: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    autonomous = plan.get("autonomous") or {}
+    risk_plan = autonomous.get("risk_plan") or {}
+    blockers = list(risk_plan.get("blockers") or [])
+    warnings = list(risk_plan.get("warnings") or [])
+    forecast_go = True if forecast is None else bool(forecast.get("go", True))
+    go = bool(risk_plan.get("go", True)) and forecast_go and not blockers
+
+    return {
+        "go": go,
+        "blockers": blockers,
+        "warnings": warnings,
+        "manual_review_required": not go,
+    }
+
+
 def format_autonomous_block(
     plan: dict[str, Any],
     strategy: str | None = None,
