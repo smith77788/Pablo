@@ -1601,6 +1601,34 @@ RUSSIA_CITIES: list[dict] = [
     {"city": "Sochi", "city_slug": "sochi", "country": "Russia", "country_code": "ru", "region": "Krasnodar Krai", "language": "ru", "timezone": "Europe/Moscow"},
 ]
 
+UKRAINE_CITIES: list[dict] = [
+    {"city": "Kyiv", "city_slug": "kyiv", "country": "Ukraine", "country_code": "ua", "region": "Kyiv", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Kharkiv", "city_slug": "kharkiv", "country": "Ukraine", "country_code": "ua", "region": "Kharkiv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Odessa", "city_slug": "odessa", "country": "Ukraine", "country_code": "ua", "region": "Odessa Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Dnipro", "city_slug": "dnipro", "country": "Ukraine", "country_code": "ua", "region": "Dnipropetrovsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Donetsk", "city_slug": "donetsk", "country": "Ukraine", "country_code": "ua", "region": "Donetsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Zaporizhzhia", "city_slug": "zaporizhzhia", "country": "Ukraine", "country_code": "ua", "region": "Zaporizhzhia Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Lviv", "city_slug": "lviv", "country": "Ukraine", "country_code": "ua", "region": "Lviv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Mykolaiv", "city_slug": "mykolaiv", "country": "Ukraine", "country_code": "ua", "region": "Mykolaiv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Mariupol", "city_slug": "mariupol", "country": "Ukraine", "country_code": "ua", "region": "Donetsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Vinnytsia", "city_slug": "vinnytsia", "country": "Ukraine", "country_code": "ua", "region": "Vinnytsia Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Simferopol", "city_slug": "simferopol", "country": "Ukraine", "country_code": "ua", "region": "Crimea", "language": "uk", "timezone": "Europe/Simferopol"},
+    {"city": "Chernivtsi", "city_slug": "chernivtsi", "country": "Ukraine", "country_code": "ua", "region": "Chernivtsi Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Khmelnytskyi", "city_slug": "khmelnytskyi", "country": "Ukraine", "country_code": "ua", "region": "Khmelnytskyi Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Cherkasy", "city_slug": "cherkasy", "country": "Ukraine", "country_code": "ua", "region": "Cherkasy Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Zhytomyr", "city_slug": "zhytomyr", "country": "Ukraine", "country_code": "ua", "region": "Zhytomyr Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Sumy", "city_slug": "sumy", "country": "Ukraine", "country_code": "ua", "region": "Sumy Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Rivne", "city_slug": "rivne", "country": "Ukraine", "country_code": "ua", "region": "Rivne Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Ivano-Frankivsk", "city_slug": "ivano_frankivsk", "country": "Ukraine", "country_code": "ua", "region": "Ivano-Frankivsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Ternopil", "city_slug": "ternopil", "country": "Ukraine", "country_code": "ua", "region": "Ternopil Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Poltava", "city_slug": "poltava", "country": "Ukraine", "country_code": "ua", "region": "Poltava Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Kryvyi Rih", "city_slug": "kryvyi_rih", "country": "Ukraine", "country_code": "ua", "region": "Dnipropetrovsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Luhansk", "city_slug": "luhansk", "country": "Ukraine", "country_code": "ua", "region": "Luhansk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Uzhhorod", "city_slug": "uzhhorod", "country": "Ukraine", "country_code": "ua", "region": "Zakarpattia Oblast", "language": "uk", "timezone": "Europe/Uzhgorod"},
+    {"city": "Lutsk", "city_slug": "lutsk", "country": "Ukraine", "country_code": "ua", "region": "Volyn Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Chernihiv", "city_slug": "chernihiv", "country": "Ukraine", "country_code": "ua", "region": "Chernihiv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+]
+
 BELARUS_CITIES: list[dict] = [
     {"city": "Minsk", "city_slug": "minsk", "country": "Belarus", "country_code": "by", "region": "Minsk", "language": "be", "timezone": "Europe/Minsk"},
     {"city": "Gomel", "city_slug": "gomel", "country": "Belarus", "country_code": "by", "region": "Gomel Oblast", "language": "be", "timezone": "Europe/Minsk"},
@@ -1614,13 +1642,7 @@ BELARUS_CITIES: list[dict] = [
     {"city": "Orsha", "city_slug": "orsha", "country": "Belarus", "country_code": "by", "region": "Vitebsk Oblast", "language": "be", "timezone": "Europe/Minsk"},
 ]
 
-CIS_CITIES: list[dict] = RUSSIA_CITIES + BELARUS_CITIES + [
-    # Ukraine
-    {"city": "Kyiv", "city_slug": "kyiv", "country": "Ukraine", "country_code": "ua", "region": "Kyiv", "language": "uk", "timezone": "Europe/Kiev"},
-    {"city": "Kharkiv", "city_slug": "kharkiv", "country": "Ukraine", "country_code": "ua", "region": "Kharkiv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
-    {"city": "Odessa", "city_slug": "odessa", "country": "Ukraine", "country_code": "ua", "region": "Odessa Oblast", "language": "uk", "timezone": "Europe/Kiev"},
-    {"city": "Dnipro", "city_slug": "dnipro", "country": "Ukraine", "country_code": "ua", "region": "Dnipropetrovsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
-    {"city": "Lviv", "city_slug": "lviv", "country": "Ukraine", "country_code": "ua", "region": "Lviv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+CIS_CITIES: list[dict] = RUSSIA_CITIES + BELARUS_CITIES + UKRAINE_CITIES + [
     # Kazakhstan
     {"city": "Almaty", "city_slug": "almaty", "country": "Kazakhstan", "country_code": "kz", "region": "Almaty", "language": "kk", "timezone": "Asia/Almaty"},
     {"city": "Astana", "city_slug": "astana", "country": "Kazakhstan", "country_code": "kz", "region": "Astana", "language": "kk", "timezone": "Asia/Almaty"},
@@ -1668,13 +1690,18 @@ GEO_PRESETS: dict[str, dict] = {
         "cities": RUSSIA_CITIES,
         "count": len(RUSSIA_CITIES),
     },
+    "ukraine": {
+        "label": "🇺🇦 Україна",
+        "cities": UKRAINE_CITIES,
+        "count": len(UKRAINE_CITIES),
+    },
     "belarus": {
         "label": "🇧🇾 Беларусь",
         "cities": BELARUS_CITIES,
         "count": len(BELARUS_CITIES),
     },
     "cis": {
-        "label": "🌐 СНГ (RU+BY+UA+KZ)",
+        "label": "🌐 СНГ (RU+UA+BY+KZ)",
         "cities": CIS_CITIES,
         "count": len(CIS_CITIES),
     },
