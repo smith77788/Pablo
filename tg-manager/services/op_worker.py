@@ -508,12 +508,14 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                     return {"status": "cancelled", "sent": total_sent, "failed": total_failed,
                             "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}"}
                 flood_extra = 0
+                t0_pub = time.monotonic()
                 try:
                     result = await account_manager.post_to_channel(
                         acc["session_str"], ch["id"], text, _acc=acc_dict
                     )
                     if isinstance(result, dict) and (result.get("error") or result.get("banned")):
                         raise Exception(result.get("error") or "banned")
+                    pub_dur_s = time.monotonic() - t0_pub
                     total_sent += 1
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok','sent')",
@@ -527,7 +529,7 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                         await record_success(acc_dict["id"], "publish")
                     except Exception:
                         log_exc_swallow(log, f"Сбой записи успешной публикации в flood_engine аккаунта {acc_dict.get('id')}")
-                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=True)
+                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=True, duration_s=pub_dur_s)
                 except Exception as e:
                     total_failed += 1
                     err_str = str(e)[:200]
@@ -705,7 +707,7 @@ async def _exec_bulk_join(
                     await record_success(acc["id"], "join")
                 except Exception:
                     log_exc_swallow(log, f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}")
-                _infra_mem.record_account_op(acc["id"], "join", success=True)
+                _infra_mem.record_account_op(acc["id"], "join", success=True, duration_s=dur_ms / 1000)
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
@@ -809,7 +811,7 @@ async def _exec_bulk_leave(
                     await record_success(acc["id"], "leave")
                 except Exception:
                     log_exc_swallow(log, f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}")
-                _infra_mem.record_account_op(acc["id"], "leave", success=True)
+                _infra_mem.record_account_op(acc["id"], "leave", success=True, duration_s=dur_ms / 1000)
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
