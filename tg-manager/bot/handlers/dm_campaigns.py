@@ -504,6 +504,12 @@ async def cb_dm_launch_or_draft(
     await state.clear()
 
     if status == "running":
+        from services import infra_orchestrator
+        ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+        if not ready:
+            await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
+            await _edit(callback, f"⚠️ {reason}\n\nКампания не запущена.", InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=DmCb(action="menu")).as_markup())
+            return
         await pool.execute(
             "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
             campaign_id,
