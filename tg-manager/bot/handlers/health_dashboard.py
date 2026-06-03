@@ -339,9 +339,10 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🔄 Переподключить аккаунты", callback_data=HealthCb(action="reconnect_menu"))
     kb.button(text="📊 Детальный лог",   callback_data=HealthCb(action="flood_log"))
     kb.button(text="⚠️ Кулдаун вручную", callback_data=HealthCb(action="set_cooldown_menu"))
+    kb.button(text="🔓 Сбросить кулдауны", callback_data=HealthCb(action="reset_cooldown_menu"))
     kb.button(text="🔄 Обновить",       callback_data=HealthCb(action="menu"))
     kb.button(text="◀️ Назад",          callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 3, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 3, 2, 1, 1)
 
     await safe_edit(callback, text, reply_markup=kb.as_markup())
 
@@ -1506,6 +1507,112 @@ async def cb_set_cooldown_confirm(callback: CallbackQuery, callback_data: Health
         f"Кулдаун до: <b>{cd_until.strftime('%d.%m.%Y %H:%M')} UTC</b>\n"
         f"(через 24 часа)\n\n"
         "<i>Аккаунт не будет использоваться в операциях до снятия кулдауна.</i>",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Reset Cooldown ─────────────────────────────────────────────────────────────
+
+@router.callback_query(HealthCb.filter(F.action == "reset_cooldown_menu"))
+async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Показывает аккаунты с активными кулдаунами и кнопки для сброса."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    now = datetime.now(timezone.utc)
+    rows = await pool.fetch(
+        """SELECT id, phone, first_name, username, cooldown_until
+           FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > NOW()
+           ORDER BY cooldown_until""",
+        user_id,
+    )
+
+    kb = InlineKeyboardBuilder()
+
+    if not rows:
+        text = (
+            "🔓 <b>Сбросить кулдауны</b>\n\n"
+            "✅ Нет активных кулдаунов — все аккаунты доступны."
+        )
+        kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
+        await safe_edit(callback, text, reply_markup=kb.as_markup())
+        return
+
+    lines = [f"🔓 <b>Сбросить кулдауны</b>\n", f"На паузе: <b>{len(rows)}</b> аккаунт(ов)\n"]
+    for acc in rows:
+        name = acc.get("username") or acc.get("first_name") or acc.get("phone") or f"id{acc['id']}"
+        cd_until = acc["cooldown_until"]
+        cd_aware = cd_until if cd_until.tzinfo else cd_until.replace(tzinfo=timezone.utc)
+        human_cd = _human_cooldown(cd_aware, now)
+        lines.append(f"⏸ <b>{html.escape(name)}</b> — ещё {human_cd}")
+        kb.button(
+            text=f"🔓 {name[:22]}",
+            callback_data=HealthCb(action="reset_cooldown_one", page=acc["id"]),
+        )
+
+    kb.button(text="🔓 Сбросить ВСЕ кулдауны", callback_data=HealthCb(action="reset_cooldown_all"))
+    kb.button(text="◀️ Назад", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
+@router.callback_query(HealthCb.filter(F.action == "reset_cooldown_one"))
+async def cb_reset_cooldown_one(callback: CallbackQuery, callback_data: HealthCb, pool: asyncpg.Pool) -> None:
+    """Сбрасывает кулдаун для одного аккаунта."""
+    await callback.answer()
+    user_id = callback.from_user.id
+    acc_id = callback_data.page
+
+    await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
+        acc_id, user_id,
+    )
+
+    acc = await pool.fetchrow("SELECT phone, first_name, username FROM tg_accounts WHERE id=$1", acc_id)
+    name = f"id{acc_id}"
+    if acc:
+        name = acc.get("username") or acc.get("first_name") or acc.get("phone") or name
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔓 Сбросить ещё", callback_data=HealthCb(action="reset_cooldown_menu"))
+    kb.button(text="◀️ К дашборду",  callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+
+    await safe_edit(
+        callback,
+        f"✅ <b>Кулдаун снят</b>\n\n"
+        f"Аккаунт <b>{html.escape(name)}</b> снова доступен для операций.",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(HealthCb.filter(F.action == "reset_cooldown_all"))
+async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Сбрасывает кулдаун для всех аккаунтов пользователя."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    result = await pool.execute(
+        "UPDATE tg_accounts SET cooldown_until=NULL WHERE owner_id=$1 AND cooldown_until > NOW()",
+        user_id,
+    )
+    # result is like "UPDATE N"
+    try:
+        count = int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        count = 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К дашборду", callback_data=HealthCb(action="menu"))
+    kb.adjust(1)
+
+    await safe_edit(
+        callback,
+        f"✅ <b>Все кулдауны сброшены</b>\n\n"
+        f"Освобождено аккаунтов: <b>{count}</b>\n\n"
+        "<i>Все активные аккаунты снова доступны для операций.</i>",
         reply_markup=kb.as_markup(),
     )
 

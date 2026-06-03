@@ -21,6 +21,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+import html as _html
+
 import asyncpg
 
 from services.logger import log_exc_swallow
@@ -300,15 +302,15 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
     # Причины риска
     if intel.risk.reasons:
         for r in intel.risk.reasons[:2]:
-            lines.append(f"   • {r}")
+            lines.append(f"   • {_html.escape(r)}")
 
     # Предупреждение (если есть)
     if intel.warning_text:
-        lines.append(f"\n⚠️ {intel.warning_text}")
+        lines.append(f"\n⚠️ {_html.escape(intel.warning_text)}")
 
     # Блокировка
     if not intel.go_decision:
-        lines.append(f"\n🚫 <b>Операция заблокирована:</b> {intel.go_reason}")
+        lines.append(f"\n🚫 <b>Операция заблокирована:</b> {_html.escape(intel.go_reason)}")
 
     return "\n".join(lines)
 
