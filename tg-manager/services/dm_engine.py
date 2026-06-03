@@ -21,6 +21,7 @@ import asyncpg
 from aiogram import Bot
 
 from services.logger import log_exc_swallow
+from services import infra_memory
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +248,7 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET sent_count=sent_count+1 WHERE id=$1",
                 campaign_id,
             )
+            infra_memory.record_account_op(acc["id"], "dm_campaign", True)
         elif status == "flood":
             wait = result.get("wait") or _FLOOD_PAUSE
             log.info("dm_engine: flood wait %ds acc=%d (campaign %d)", wait, acc["id"], campaign_id)
@@ -271,6 +273,7 @@ async def run_campaign(
                     log.info("dm_engine: removed flooded acc %d from rotation, %d remaining", acc["id"], len(acc_cycle))
                 else:
                     await asyncio.sleep(min(wait, 300))
+            infra_memory.record_account_op(acc["id"], "dm_campaign", False, "flood_wait")
             continue
         elif status in ("blocked", "auth"):
             # Аккаунт заблокирован/невалиден — считать текущую попытку ошибкой
@@ -285,6 +288,7 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
                 campaign_id,
             )
+            infra_memory.record_account_op(acc["id"], "dm_campaign", False, result.get("error", ""))
             acc_cycle = [a for a in acc_cycle if a["id"] != acc["id"]]
             if not acc_cycle:
                 log.error("dm_engine: no more accounts for campaign %d, stopping", campaign_id)
@@ -315,6 +319,7 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
                 campaign_id,
             )
+            infra_memory.record_account_op(acc["id"], "dm_campaign", False, result.get("error", ""))
 
         # Milestone progress notifications (25%, 50%, 75%)
         if total > 0:

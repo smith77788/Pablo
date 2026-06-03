@@ -18,6 +18,7 @@ import logging
 from typing import Any, Callable, Optional
 
 from services.logger import log_exc_swallow
+from services import infra_memory
 
 import asyncpg
 
@@ -153,6 +154,7 @@ async def parse_members(
             await _update_run(
                 pool, run_id, "failed", error=f"Не удалось получить сущность: {e}"
             )
+            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100])
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         offset = 0
@@ -234,6 +236,10 @@ async def parse_members(
 
     status = "done" if total_found > 0 else "empty"
     await _update_run(pool, run_id, status, total_found, total_saved)
+    if total_found > 0:
+        infra_memory.record_account_op(acc["id"], "parse", True)
+    else:
+        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found")
     return {
         "run_id": run_id,
         "status": status,
@@ -277,6 +283,7 @@ async def parse_active_users(
             source_title = getattr(entity, "title", source_ref)
         except Exception as e:
             await _update_run(pool, run_id, "failed", error=str(e))
+            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100])
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         seen_ids: set[int] = set()
@@ -340,6 +347,10 @@ async def parse_active_users(
 
     status = "done" if total_found > 0 else "empty"
     await _update_run(pool, run_id, status, total_found, total_saved)
+    if total_found > 0:
+        infra_memory.record_account_op(acc["id"], "parse", True)
+    else:
+        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found")
     return {
         "run_id": run_id,
         "status": status,

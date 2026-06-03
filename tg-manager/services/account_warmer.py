@@ -21,6 +21,7 @@ from typing import Callable, Optional
 
 import asyncpg
 from services.logger import log_exc_swallow
+from services import infra_memory
 
 log = logging.getLogger(__name__)
 
@@ -406,6 +407,10 @@ async def run_daily_warmup(
                 success = False
 
             await _log_warmup_action(pool, account_id, action, target, success, error)
+            if success:
+                infra_memory.record_account_op(account_id, "warmup", True)
+            else:
+                infra_memory.record_account_op(account_id, "warmup", False, str(error)[:100] if error else "")
 
             if success:
                 actions_ok += 1
