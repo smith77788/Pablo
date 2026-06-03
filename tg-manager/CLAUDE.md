@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r24
+- **Текущая build:** 2026.06.03-r25
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -900,4 +900,24 @@ asyncio.create\_task(my\_service.run(pool))
   вместо `len(ranked_slice)`, занижало среднее при малом числе аккаунтов
 
 *Последнее обновление: 2026-06-03 (r24)* *Следующий build-номер: r25*
+
+### ✅ ЗАКРЫТО (r25) — EPOCH III: ECOSYSTEM INTEGRATION
+
+**Global Presence → Ecosystem auto-creation:**
+- ✅ **global_presence.py** — при запуске плана автоматически создаётся экосистема с типом `global_presence`
+- ✅ **schema_v68.sql** — `ecosystem_id` добавлен в `global_presence_plans`
+- ✅ **op_worker _exec_global_presence_channel** — созданные каналы и аккаунты добавляются в экосистему
+- ✅ **op_worker _exec_global_presence_bot** — созданные боты и аккаунты добавляются в экосистему
+
+**Strike + Mass Ops — Ecosystem контекст:**
+- ✅ **strike.py confirm screen** — показывает состояние активных экосистем (health %) перед запуском
+- ✅ **mass_ops.py _intel_block** — добавлен блок с состоянием экосистем к intelligence-блоку
+
+**Enhanced Drift Detection (ecosystem_brain.py):**
+- ✅ Правило 4: заблокированные аккаунты (is_banned) в экосистеме
+- ✅ Правило 5: нет активности 7+ дней (застой)
+- ✅ Правило 6: высокий cooldown ratio (>= 60%)
+- ✅ Правило 7: нет каналов/групп/ботов в экосистеме с аккаунтами
+
+*Последнее обновление: 2026-06-03 (r25)* *Следующий build-номер: r26*
 

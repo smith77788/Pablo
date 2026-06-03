@@ -1089,6 +1089,31 @@ async def cb_gp_launch(
         len(selected_acc_ids),
     )
 
+    # Auto-create ecosystem for this GP plan
+    _eco_id: int | None = None
+    try:
+        from services import ecosystem_brain as _eb
+        _asset_labels = {"channel": "Каналы", "group": "Группы", "bot": "Боты",
+                         "package": "Пакет", "full_package": "Полный пакет"}
+        _asset_label = _asset_labels.get(asset_type, "Активы")
+        _geo_label = geo_preset.replace("_", " ").title() if geo_preset else f"{len(geo_list)} регионов"
+        _eco_name = f"GP: {_asset_label} — {_geo_label}"
+        _eco_id = await _eb.create_ecosystem(
+            pool, callback.from_user.id, _eco_name,
+            ecosystem_type="global_presence",
+            region=geo_preset or None,
+        )
+        await pool.execute(
+            "UPDATE global_presence_plans SET ecosystem_id=$1 WHERE id=$2",
+            _eco_id, plan_id,
+        )
+        await _eb.record_event(pool, _eco_id, callback.from_user.id,
+                               "plan_started", f"GP план #{plan_id} запущен",
+                               severity="info", details={"plan_id": plan_id, "asset_type": asset_type})
+        log.info("global_presence: created ecosystem eco_id=%d for plan_id=%d", _eco_id, plan_id)
+    except Exception as _eco_err:
+        log.debug("global_presence: ecosystem auto-create failed: %s", _eco_err)
+
     # For package/full_package: also queue group (and bot for full) creation
     op_id2, op_id3 = None, None
     if asset_type in ("package", "full_package"):

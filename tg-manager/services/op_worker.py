@@ -911,6 +911,7 @@ async def _exec_global_presence_channel(
     created_count = 0
     failed_count = 0
     total = len(targets)
+    _gp_eco_id: int | None = None  # lazily loaded from plan
 
     for i, target in enumerate(targets):
         if await _is_cancelled(pool, op_id):
@@ -1064,6 +1065,20 @@ async def _exec_global_presence_channel(
 
         created_count += 1
 
+        # Add created channel to ecosystem
+        try:
+            if _gp_eco_id is None:
+                _eco_row = await pool.fetchrow(
+                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1", plan_id
+                )
+                _gp_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
+            if _gp_eco_id:
+                from services import ecosystem_brain as _eb
+                await _eb.add_member(pool, _gp_eco_id, owner_id, "channel", channel_id)
+                await _eb.add_member(pool, _gp_eco_id, owner_id, "account", acc["id"])
+        except Exception:
+            pass
+
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
             op_id, created_count + failed_count,
@@ -1163,6 +1178,7 @@ async def _exec_global_presence_bot(
     failed_count = 0
     acc_idx = 0
     total = len(targets)
+    _gp_bot_eco_id: int | None = None  # lazily loaded from plan
 
     for i, target in enumerate(targets):
         cancelled = await pool.fetchval(
@@ -1235,17 +1251,18 @@ async def _exec_global_presence_bot(
         )
         _infra_mem.record_account_op(acc["id"], "global_presence_bot", success=True, duration_s=time.monotonic() - t0_gp_bot)
 
-        # Link bot to ecosystem if one exists for this owner
+        # Add created bot to ecosystem
         try:
-            ecos = await pool.fetch(
-                "SELECT id FROM ecosystems WHERE owner_id=$1 AND ecosystem_type='global_presence' AND status='active' ORDER BY created_at DESC LIMIT 1",
-                owner_id,
-            )
-            if ecos and token and ":" in token:
+            if _gp_bot_eco_id is None:
+                _eco_row = await pool.fetchrow(
+                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1", plan_id
+                )
+                _gp_bot_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
+            if _gp_bot_eco_id and token and ":" in token:
                 from services import ecosystem_brain as _eb
-                eco_id = ecos[0]["id"]
-                bot_obj_id = int(token.split(":")[0])
-                await _eb.add_member(pool, eco_id, owner_id, "bot", bot_obj_id)
+                _bot_id_for_eco = int(token.split(":")[0])
+                await _eb.add_member(pool, _gp_bot_eco_id, owner_id, "bot", _bot_id_for_eco)
+                await _eb.add_member(pool, _gp_bot_eco_id, owner_id, "account", acc["id"])
         except Exception:
             pass
 

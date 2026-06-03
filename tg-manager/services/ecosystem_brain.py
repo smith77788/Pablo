@@ -625,7 +625,81 @@ async def detect_drift(
                 auto_fixable=False,
             ))
 
-        # 4. Сохраняем в ecosystem_drift_log
+        # 4. Заблокированные аккаунты в экосистеме
+        banned_accs = await pool.fetch(
+            """SELECT a.id, COALESCE(a.first_name, a.phone, 'id'||a.id::text) AS label
+               FROM ecosystem_members m
+               JOIN tg_accounts a ON a.id=m.object_id
+               WHERE m.ecosystem_id=$1 AND m.object_type='account'
+                 AND a.is_banned = TRUE""",
+            ecosystem_id,
+        )
+        for ba in banned_accs[:3]:
+            drifts.append(EcosystemDrift(
+                drift_type="account_banned",
+                object_type="account",
+                object_id=ba["id"],
+                description=f"Аккаунт {ba['label']} заблокирован (banned)",
+                suggested_fix="Удалить аккаунт из экосистемы или заменить его",
+                auto_fixable=False,
+            ))
+
+        # 5. Экосистема без операций 7+ дней (застой)
+        last_event = await pool.fetchval(
+            """SELECT MAX(occurred_at) FROM ecosystem_events
+               WHERE ecosystem_id=$1""",
+            ecosystem_id,
+        )
+        from datetime import datetime as _dt_now, timezone as _tz
+        if last_event is None or (
+            _dt_now.now(tz=_tz.utc) - last_event.astimezone(_tz.utc)
+        ).days >= 7:
+            drifts.append(EcosystemDrift(
+                drift_type="inactivity",
+                object_type=None,
+                object_id=None,
+                description="Нет активности в экосистеме более 7 дней",
+                suggested_fix="Запустите операцию или обновите статус экосистемы",
+                auto_fixable=False,
+            ))
+
+        # 6. Высокий cooldown ratio (>= 60% аккаунтов на cooldown)
+        if acc_count > 0:
+            cooling_count = await pool.fetchval(
+                """SELECT COUNT(*) FROM ecosystem_members m
+                   JOIN tg_accounts a ON a.id=m.object_id
+                   WHERE m.ecosystem_id=$1 AND m.object_type='account'
+                     AND a.is_active AND a.cooldown_until > NOW()""",
+                ecosystem_id,
+            ) or 0
+            cooldown_ratio = cooling_count / acc_count
+            if cooldown_ratio >= 0.6:
+                drifts.append(EcosystemDrift(
+                    drift_type="resource_pressure",
+                    object_type="account",
+                    object_id=None,
+                    description=f"{cooling_count}/{acc_count} аккаунтов на cooldown ({cooldown_ratio:.0%})",
+                    suggested_fix="Снизьте интенсивность операций или добавьте новые аккаунты",
+                    auto_fixable=False,
+                ))
+
+        # 7. Экосистема без каналов/групп и без ботов (пустая структура)
+        channel_count = await pool.fetchval(
+            """SELECT COUNT(*) FROM ecosystem_members
+               WHERE ecosystem_id=$1 AND object_type IN ('channel', 'group', 'bot')""",
+            ecosystem_id,
+        ) or 0
+        if acc_count > 0 and channel_count == 0:
+            drifts.append(EcosystemDrift(
+                drift_type="resource_gap",
+                object_type=None,
+                object_id=None,
+                description="В экосистеме нет каналов, групп или ботов",
+                suggested_fix="Добавьте каналы/группы/боты или запустите Global Presence",
+                auto_fixable=False,
+            ))
+
+        # Save all detected drifts to ecosystem_drift_log
         for d in drifts:
             try:
                 await pool.execute(

@@ -812,24 +812,19 @@ async def cb_mini_strike_category(
         except Exception:
             pass
 
-    # Ecosystem Brain: ecosystem context for the selected account
+    # Ecosystem context block
+    eco_block = ""
     try:
-        from database import db as _db
-        import html as _html_eco
-        ecos = await _db.find_object_ecosystems(pool, callback.from_user.id, "account", acc["id"])
-        eco_lines = []
-        seen_ecos: set = set()
-        for e in ecos:
-            if e["id"] not in seen_ecos:
-                seen_ecos.add(e["id"])
-                pressure = e.get("pressure_score") or 0
-                health = int((e.get("health_score") or 1.0) * 100)
-                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}.get(e.get("risk_level", "low"), "🟢")
-                eco_lines.append(f"  🌐 <b>{_html_eco.escape(e['name'])}</b>  {risk_icon} {health}%  ⚡{pressure}")
-                if pressure >= 85:
-                    eco_lines.append(f"  ⚠️ Давление экосистемы критическое ({_html_eco.escape(e['name'])}: {pressure})")
-        if eco_lines:
-            intel_block += "\n\n🌐 <b>Экосистемы аккаунта:</b>\n" + "\n".join(eco_lines[:4])
+        from services import ecosystem_brain as _eb
+        _ecosystems = await _eb.list_ecosystems(pool, callback.from_user.id)
+        if _ecosystems:
+            _eco_lines = ["🌐 <b>Экосистемы:</b>"]
+            for _eco in _ecosystems[:3]:
+                _eco_health = await _eb.compute_health(pool, _eco["id"], callback.from_user.id)
+                _health_pct = int(_eco_health.overall * 100)
+                _health_icon = "🟢" if _eco_health.overall >= 0.7 else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
+                _eco_lines.append(f"  {_health_icon} {_eco['name']}: {_health_pct}%")
+            eco_block = "\n".join(_eco_lines)
     except Exception:
         pass
 
@@ -850,7 +845,8 @@ async def cb_mini_strike_category(
         f"{'• Email NCMEC CyberTipline: ' + smtp_status + chr(10) if cat.get('ncmec') else ''}"
         f"• Форма telegram.org/support\n\n"
         f"⏱ Ориентировочно: 2–5 минут"
-        + (f"\n\n{intel_block}" if intel_block else ""),
+        + (f"\n\n{intel_block}" if intel_block else "")
+        + (f"\n\n{eco_block}" if eco_block else ""),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

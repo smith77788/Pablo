@@ -88,7 +88,7 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
     Использует intelligence_engine.get_pre_launch_intelligence() с fallback
     на базовый infra_orchestrator.get_state() + estimate_capacity().
     """
-    result = ""
+    base_block = ""
 
     # Primary: full intelligence engine
     if _ie is not None:
@@ -96,12 +96,12 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
             intel = await _ie.get_pre_launch_intelligence(
                 pool, owner_id, op_type, total_items, acc_ids or None
             )
-            result = _ie.format_pre_launch_block(intel)
+            base_block = _ie.format_pre_launch_block(intel)
         except Exception:
             pass
 
-    # Fallback: simple state block via infra_orchestrator
-    if not result:
+    if not base_block:
+        # Fallback: simple state block via infra_orchestrator
         try:
             state_res, cap_res = await asyncio.gather(
                 infra_orchestrator.get_state(pool, owner_id),
@@ -132,30 +132,27 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
                     lines.append(f"⚠️ {rec.get('text', rec.get('message', ''))[:80]}")
                     shown += 1
 
-            result = "\n".join(lines)
+            base_block = "\n".join(lines)
         except Exception:
             pass
 
-    # Ecosystem Brain: append ecosystem context for selected accounts
+    # Append ecosystem health summary if ecosystems exist
+    eco_lines: list[str] = []
     try:
-        from database import db as _db
-        if acc_ids:
-            eco_names: set = set()
-            pressure_warns = []
-            for acc_id in (acc_ids or [])[:5]:
-                ecos = await _db.find_object_ecosystems(pool, owner_id, "account", acc_id)
-                for e in ecos:
-                    eco_names.add(e["name"])
-                    if (e.get("pressure_score") or 0) >= 70:
-                        pressure_warns.append(f"{e['name']}: {e['pressure_score']}")
-            if eco_names:
-                result += f"\n\n🌐 Экосистемы: {', '.join(list(eco_names)[:3])}"
-            if pressure_warns:
-                result += f"\n⚡ Давление: {', '.join(pressure_warns[:2])}"
+        from services import ecosystem_brain as _eb
+        _ecosystems = await _eb.list_ecosystems(pool, owner_id)
+        if _ecosystems:
+            eco_lines.append("🌐 <b>Экосистемы:</b>")
+            for _eco in _ecosystems[:3]:
+                _eco_health = await _eb.compute_health(pool, _eco["id"], owner_id)
+                _health_pct = int(_eco_health.overall * 100)
+                _health_icon = "🟢" if _eco_health.overall >= 0.7 else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
+                eco_lines.append(f"  {_health_icon} {_eco['name']}: {_health_pct}%")
     except Exception:
         pass
 
-    return result
+    parts = [p for p in (base_block, "\n".join(eco_lines)) if p]
+    return "\n\n".join(parts)
 
 
 # ── Main menu ────────────────────────────────────────────────────────────────
