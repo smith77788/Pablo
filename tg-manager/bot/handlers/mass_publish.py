@@ -332,6 +332,20 @@ async def _show_preview(
         "<i>Это только предпросмотр: каналы посчитаны, пост НЕ отправлен.</i>"
         if dry_run else ""
     )
+
+    # Intelligence block
+    intel_text = ""
+    if not dry_run:
+        try:
+            from services import intelligence_engine
+            intel = await intelligence_engine.get_pre_launch_intelligence(
+                pool, callback.from_user.id, "mass_publish", total_channels or 1,
+                account_ids=acc_ids if acc_ids else None,
+            )
+            intel_text = "\n\n" + intelligence_engine.format_pre_launch_block(intel)
+        except Exception:
+            intel_text = ""
+
     preview_msg = (
         f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
         f"Каналов в БД: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'}){channels_hint}\n"
@@ -342,6 +356,7 @@ async def _show_preview(
         f"{preview_text}\n"
         f"———"
         f"{dry_run_banner}"
+        f"{intel_text}"
     )
 
     kb = InlineKeyboardBuilder()
