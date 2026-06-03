@@ -3,14 +3,18 @@ from __future__ import annotations
 import sys
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 
-os.environ.setdefault("MANAGER_BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "postgres://test:test@localhost/test")
+os.environ.setdefault("MANAGER_BOT_TOKEN", "test-token")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
 
-from services.account_manager import normalize_telegram_join_ref
+from services.account_manager import (
+    _select_report_option_for_reason,
+    normalize_telegram_join_ref,
+)
 
 
 def test_normalize_private_invite_links() -> None:
@@ -43,3 +47,12 @@ def test_normalize_public_channel_refs() -> None:
         "public",
         "telegram",
     )
+
+
+def test_select_report_option_for_reason_prefers_matching_text() -> None:
+    options = [
+        SimpleNamespace(text="Other", option=b"other"),
+        SimpleNamespace(text="Spam or advertising", option=b"spam"),
+    ]
+
+    assert _select_report_option_for_reason(options, "spam") == b"spam"

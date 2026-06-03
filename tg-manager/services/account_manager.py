@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 import asyncio
+from datetime import datetime, timezone
 import logging
 import random
 import re
+from typing import Any
 from config import TG_API_ID, TG_API_HASH, TG_PROXY
 
 from services.logger import log_exc_swallow
@@ -55,6 +57,7 @@ _pending_qr: dict[int, tuple] = {}
 _CONNECT_TIMEOUT = 30
 # Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
 _OP_TIMEOUT = 45
+_TELEGRAM_MAX_MUTE_UNTIL = datetime.fromtimestamp(2_147_483_647, tz=timezone.utc)
 
 _TG_INVITE_RE = re.compile(
     r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:joinchat/|\+)([\w-]+)",
@@ -88,6 +91,107 @@ def normalize_telegram_join_ref(value: str) -> tuple[str, str]:
     if raw_no_fragment.startswith("@"):
         return ("public", raw_no_fragment[1:].split("?", 1)[0])
     return ("public", raw_no_fragment.split("?", 1)[0])
+
+
+def _select_report_option_for_reason(options: list, reason: str) -> bytes | None:
+    """Pick the best report option Telegram offered for the requested reason."""
+    hints = {
+        "spam": ("spam", "unwanted", "advertising", "unsolicited", "спам", "реклам"),
+        "violence": ("violence", "violent", "harm", "abuse", "насил", "жест"),
+        "pornography": ("porn", "sexual", "adult", "explicit", "nudity", "порно"),
+        "childabuse": ("child", "minor", "children", "underage", "csam", "дет"),
+        "copyright": ("copyright", "dmca", "intellectual", "автор"),
+        "drugs": ("drug", "substance", "narcotic", "нарко"),
+        "personal": ("personal", "private", "privacy", "личн", "данн"),
+        "fake": ("fake", "scam", "fraud", "impersonat", "мошен", "фейк"),
+        "other": ("other", "else", "другое", "иное"),
+        "weapons": ("weapon", "arms", "firearm", "explosive", "оружи"),
+        "terrorism": ("terror", "extremi", "incit", "террор", "экстрем"),
+        "fraud": ("fraud", "scam", "financial", "мошен", "финанс"),
+        "escort": ("escort", "prostit", "sexual", "услуг", "сексуальн"),
+        "geo": ("geo", "irrelevant", "geography", "геогр"),
+    }.get(reason, ())
+    for opt in options:
+        text = (getattr(opt, "text", "") or "").lower()
+        if any(hint in text for hint in hints):
+            value = getattr(opt, "option", None)
+            if value is not None:
+                return value
+    if options:
+        return getattr(options[0], "option", None)
+    return None
+
+
+async def _submit_message_report(
+    client: Any,
+    request_cls: Any,
+    peer_obj: Any,
+    msg_ids: list[int],
+    comment: str,
+    reason: str,
+    stage: str,
+) -> bool:
+    """Submit a message report using Telegram's option-based flow."""
+    from telethon.tl.types import (
+        ReportResultAddComment,
+        ReportResultChooseOption,
+        ReportResultReported,
+    )
+
+    async def _traverse(option: bytes, depth: int) -> bool:
+        if depth > 5:
+            return False
+        try:
+            result = await asyncio.wait_for(
+                client(
+                    request_cls(
+                        peer=peer_obj,
+                        id=msg_ids,
+                        option=option,
+                        message=comment if depth > 0 else "",
+                    )
+                ),
+                timeout=_OP_TIMEOUT,
+            )
+        except Exception as exc:
+            log.warning("%s: %s", stage, exc)
+            return False
+        if isinstance(result, ReportResultReported):
+            return True
+        if isinstance(result, ReportResultAddComment):
+            try:
+                final = await asyncio.wait_for(
+                    client(
+                        request_cls(
+                            peer=peer_obj,
+                            id=msg_ids,
+                            option=result.option,
+                            message=comment,
+                        )
+                    ),
+                    timeout=_OP_TIMEOUT,
+                )
+                return isinstance(final, ReportResultReported)
+            except Exception as exc:
+                log.warning("%s: %s", stage, exc)
+                return False
+        if isinstance(result, ReportResultChooseOption):
+            options = result.options or []
+            preferred = _select_report_option_for_reason(options, reason)
+            ordered: list[bytes] = []
+            if preferred is not None:
+                ordered.append(preferred)
+            for opt in options:
+                value = getattr(opt, "option", None)
+                if value is not None and value != preferred:
+                    ordered.append(value)
+            for value in ordered:
+                await asyncio.sleep(random.uniform(0.25, 0.75))
+                if await _traverse(value, depth + 1):
+                    return True
+        return False
+
+    return await _traverse(b"", 0)
 
 
 # Pool of realistic Android device fingerprints
@@ -635,7 +739,7 @@ async def start_qr_login(user_id: int) -> bytes:
     Call wait_qr_login() in a background task to detect scan.
     """
     import io
-    import qrcode  # type: ignore
+    import qrcode
 
     await cleanup_qr_pending(user_id)
 
@@ -1467,13 +1571,13 @@ async def edit_channel_about(
     about: str,
     _acc: dict | None = None,
 ) -> bool:
-    from telethon.tl.functions.channels import EditAboutRequest
+    from telethon.tl.functions.messages import EditChatAboutRequest
 
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
-        await client(EditAboutRequest(peer=entity, about=about))
+        await client(EditChatAboutRequest(peer=entity, about=about))
         return True
     except Exception as e:
         log.exception("edit_channel_about error: %s", e)
@@ -2006,6 +2110,7 @@ async def promote_to_admin(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
         channel = await _resolve_channel_peer(client, channel_id, access_hash)
+        input_user = await client.get_input_entity(PeerUser(user_id=user_id))
 
         rights = ChatAdminRights(
             post_messages=post_messages,
@@ -2024,7 +2129,7 @@ async def promote_to_admin(
         await client(
             EditAdminRequest(
                 channel=channel,
-                user_id=PeerUser(user_id=user_id),
+                user_id=input_user,
                 admin_rights=rights,
                 rank="",
             )
@@ -2426,17 +2531,18 @@ async def report_peer_deep(
                 )
                 pinned_ids = [m.id for m in pinned_msgs if m and m.id]
                 for idx_p, pid in enumerate(pinned_ids):
-                    r_obj = all_reasons_cycle[idx_p % len(all_reasons_cycle)]
                     try:
-                        await client(
-                            MsgReportRequest(
-                                peer=entity,
-                                id=[pid],
-                                reason=r_obj,
-                                message=msg_pool[idx_p % len(msg_pool)],
-                            )
+                        ok = await _submit_message_report(
+                            client,
+                            MsgReportRequest,
+                            entity,
+                            [pid],
+                            msg_pool[idx_p % len(msg_pool)],
+                            reason,
+                            f"report_peer_deep[4/pinned {pid}]",
                         )
-                        result["pinned_reported"] += 1
+                        if ok:
+                            result["pinned_reported"] += 1
                         await asyncio.sleep(0.4)
                     except Exception as e:
                         log.warning("report_peer_deep[4/pinned %d]: %s", pid, e)
@@ -2451,18 +2557,19 @@ async def report_peer_deep(
                 msg_ids = [m.id for m in msgs if m and m.id]
                 chunks = [msg_ids[i : i + 5] for i in range(0, len(msg_ids), 5)]
                 for chunk_idx, chunk in enumerate(chunks):
-                    r_obj = all_reasons_cycle[chunk_idx % len(all_reasons_cycle)]
                     chunk_msg = msg_pool[chunk_idx % len(msg_pool)]
                     try:
-                        await client(
-                            MsgReportRequest(
-                                peer=entity,
-                                id=chunk,
-                                reason=r_obj,
-                                message=chunk_msg,
-                            )
+                        ok = await _submit_message_report(
+                            client,
+                            MsgReportRequest,
+                            entity,
+                            chunk,
+                            chunk_msg,
+                            reason,
+                            f"report_peer_deep[5/msg_chunk {chunk_idx}]",
                         )
-                        result["msg_reported"] += len(chunk)
+                        if ok:
+                            result["msg_reported"] += len(chunk)
                     except Exception as e:
                         log.warning(
                             "report_peer_deep[5/msg_chunk %d]: %s", chunk_idx, e
@@ -2611,7 +2718,9 @@ async def report_peer_deep(
             await client(
                 UpdateNotifySettingsRequest(
                     peer=InputNotifyPeer(peer=entity),
-                    settings=InputPeerNotifySettings(mute_until=2_147_483_647),
+                    settings=InputPeerNotifySettings(
+                        mute_until=_TELEGRAM_MAX_MUTE_UNTIL
+                    ),
                 )
             )
         except Exception:
@@ -2996,7 +3105,7 @@ async def report_peer_deep_v2(  # noqa: C901
                         _GHR_PRE(
                             peer=entity,
                             offset_id=0,
-                            offset_date=0,
+                            offset_date=None,
                             add_offset=0,
                             limit=max_msg_reports,
                             max_id=0,
@@ -3155,7 +3264,7 @@ async def report_peer_deep_v2(  # noqa: C901
                         _GHR(
                             peer=_ipeer6,
                             offset_id=0,
-                            offset_date=0,
+                            offset_date=None,
                             add_offset=0,
                             limit=max_msg_reports,
                             max_id=0,
@@ -3280,8 +3389,10 @@ async def report_peer_deep_v2(  # noqa: C901
                         R["reactions_sent"] += 1
                         _react_count += 1
                         await asyncio.sleep(random.uniform(1.0, 3.0))
-                    except Exception as _re:
-                        log.debug("rpv2[6/react] acc=%s: %s", acc_id, str(_re)[:60])
+                    except Exception as _react_err:
+                        log.debug(
+                            "rpv2[6/react] acc=%s: %s", acc_id, str(_react_err)[:60]
+                        )
 
             # Сохранить 1-2 поста в "Избранное" (поведение пользователя, собирающего доказательства)
             _save_cands = [
@@ -3641,7 +3752,9 @@ async def report_peer_deep_v2(  # noqa: C901
             await client(
                 UpdateNotifySettingsRequest(
                     peer=InputNotifyPeer(peer=entity),
-                    settings=InputPeerNotifySettings(mute_until=2_147_483_647),
+                    settings=InputPeerNotifySettings(
+                        mute_until=_TELEGRAM_MAX_MUTE_UNTIL
+                    ),
                 )
             )
         except Exception:
