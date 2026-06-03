@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -376,6 +377,7 @@ async def run_daily_warmup(
             target = channels[i % len(channels)]
             success = False
             error = None
+            t0_action = time.monotonic()
 
             try:
                 if action == "read_channel":
@@ -407,10 +409,11 @@ async def run_daily_warmup(
                 success = False
 
             await _log_warmup_action(pool, account_id, action, target, success, error)
+            _action_dur = time.monotonic() - t0_action
             if success:
-                infra_memory.record_account_op(account_id, "warmup", True)
+                infra_memory.record_account_op(account_id, "warmup", True, duration_s=_action_dur)
             else:
-                infra_memory.record_account_op(account_id, "warmup", False, str(error)[:100] if error else "")
+                infra_memory.record_account_op(account_id, "warmup", False, str(error)[:100] if error else "", duration_s=_action_dur)
 
             if success:
                 actions_ok += 1

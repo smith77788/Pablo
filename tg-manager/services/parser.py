@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable, Optional
 
 from services.logger import log_exc_swallow
@@ -137,6 +138,7 @@ async def parse_members(
     )
 
     client = account_manager._make_client(acc["session_str"], acc)
+    t0_parse = time.monotonic()
     total_found = 0
     total_saved = 0
     source_id = 0
@@ -154,7 +156,7 @@ async def parse_members(
             await _update_run(
                 pool, run_id, "failed", error=f"Не удалось получить сущность: {e}"
             )
-            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100])
+            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100], duration_s=time.monotonic() - t0_parse)
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         offset = 0
@@ -236,10 +238,11 @@ async def parse_members(
 
     status = "done" if total_found > 0 else "empty"
     await _update_run(pool, run_id, status, total_found, total_saved)
+    _parse_dur = time.monotonic() - t0_parse
     if total_found > 0:
-        infra_memory.record_account_op(acc["id"], "parse", True)
+        infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
     else:
-        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found")
+        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found", duration_s=_parse_dur)
     return {
         "run_id": run_id,
         "status": status,
@@ -270,6 +273,7 @@ async def parse_active_users(
     run_id = await _create_run(pool, owner_id, "group", source_ref, "active", acc["id"])
 
     client = account_manager._make_client(acc["session_str"], acc)
+    t0_parse = time.monotonic()
     total_found = 0
     total_saved = 0
     source_id = 0
@@ -283,7 +287,7 @@ async def parse_active_users(
             source_title = getattr(entity, "title", source_ref)
         except Exception as e:
             await _update_run(pool, run_id, "failed", error=str(e))
-            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100])
+            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100], duration_s=time.monotonic() - t0_parse)
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         seen_ids: set[int] = set()
@@ -347,10 +351,11 @@ async def parse_active_users(
 
     status = "done" if total_found > 0 else "empty"
     await _update_run(pool, run_id, status, total_found, total_saved)
+    _parse_dur = time.monotonic() - t0_parse
     if total_found > 0:
-        infra_memory.record_account_op(acc["id"], "parse", True)
+        infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
     else:
-        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found")
+        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found", duration_s=_parse_dur)
     return {
         "run_id": run_id,
         "status": status,

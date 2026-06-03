@@ -517,6 +517,7 @@ async def _one_account_strike(
         )
 
     async with sem:
+        t0_strike = time.monotonic()
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 result = await account_manager.report_peer_deep_v2(
@@ -534,7 +535,7 @@ async def _one_account_strike(
                 # Фиксируем успех в Infrastructure Memory
                 try:
                     from services.infra_memory import record_account_op
-                    record_account_op(acc["id"], "strike", success=True)
+                    record_account_op(acc["id"], "strike", success=True, duration_s=time.monotonic() - t0_strike)
                 except Exception:
                     pass
                 return result

@@ -15,6 +15,7 @@ import json
 import logging
 import random
 import re
+import time
 from typing import AsyncIterator
 
 import asyncpg
@@ -232,6 +233,7 @@ async def run_campaign(
         acc_idx += 1
 
         text = expand_spintax(template)
+        t0_dm = time.monotonic()
         result = await send_dm(acc["session_str"], user_id, text, _acc=acc)
         status = result["status"]
 
@@ -248,7 +250,7 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET sent_count=sent_count+1 WHERE id=$1",
                 campaign_id,
             )
-            infra_memory.record_account_op(acc["id"], "dm_campaign", True)
+            infra_memory.record_account_op(acc["id"], "dm_campaign", True, duration_s=time.monotonic() - t0_dm)
         elif status == "flood":
             wait = result.get("wait") or _FLOOD_PAUSE
             log.info("dm_engine: flood wait %ds acc=%d (campaign %d)", wait, acc["id"], campaign_id)
