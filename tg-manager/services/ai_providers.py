@@ -114,7 +114,24 @@ def configured_providers() -> list[AiProvider]:
         if provider:
             providers["gemini"] = provider
 
-    order = _csv_env("AI_PROVIDER_ORDER", "openrouter,groq,gemini")
+    # Ollama — local/self-hosted LLM, no API key required.
+    # Set OLLAMA_BASE_URL to your server, e.g. http://1.2.3.4:11434/v1
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "")
+    if ollama_url:
+        provider = _provider(
+            name="ollama",
+            api_key="ollama",  # Ollama ignores the key; non-empty to pass validation
+            base_url=ollama_url.rstrip("/"),
+            models=_csv_env(
+                "OLLAMA_MODELS",
+                os.getenv("OLLAMA_MODEL", "qwen2.5:7b"),
+            ),
+        )
+        if provider:
+            providers["ollama"] = provider
+
+    default_order = "ollama,openrouter,groq,gemini" if "ollama" in providers else "openrouter,groq,gemini"
+    order = _csv_env("AI_PROVIDER_ORDER", default_order)
     ordered = [providers[name] for name in order if name in providers]
     ordered.extend(
         provider for name, provider in providers.items() if provider not in ordered
