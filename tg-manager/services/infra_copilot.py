@@ -456,7 +456,7 @@ async def _analyze_operation_patterns(
                FROM operation_queue
                WHERE owner_id = $1
                  AND created_at > NOW() - INTERVAL '7 days'
-                 AND status IN ('completed', 'failed')
+                 AND status IN ('done', 'failed')
                GROUP BY op_type
                HAVING COUNT(*) >= 3
                   AND COUNT(*) FILTER (WHERE status = 'failed') * 100.0
@@ -866,18 +866,18 @@ async def predict_operation_outcome(
     try:
         hist = await pool.fetchrow(
             """SELECT
-                   COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                   COUNT(*) FILTER (WHERE status = 'done') AS completed,
                    COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-                   AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 60.0)
-                     FILTER (WHERE status = 'completed' AND total_items > 0)
+                   AVG(EXTRACT(EPOCH FROM (finished_at - created_at)) / 60.0)
+                     FILTER (WHERE status = 'done' AND total_items > 0)
                        AS avg_duration_min,
                    AVG(total_items)
-                     FILTER (WHERE status = 'completed') AS avg_items
+                     FILTER (WHERE status = 'done') AS avg_items
                FROM operation_queue
                WHERE owner_id = $1
                  AND op_type = $2
                  AND created_at > NOW() - INTERVAL '7 days'
-                 AND status IN ('completed', 'failed')""",
+                 AND status IN ('done', 'failed')""",
             owner_id, op_type,
         )
         if hist:

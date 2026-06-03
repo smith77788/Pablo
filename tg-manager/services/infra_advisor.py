@@ -280,11 +280,11 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     try:
         idle_high_trust = await pool.fetch(
             """SELECT id, COALESCE(first_name, phone, 'id'||id::text) AS label,
-                      trust_score, last_used_at
+                      trust_score, last_used
                FROM tg_accounts
                WHERE owner_id=$1 AND is_active=TRUE
                  AND COALESCE(trust_score, 0) > 0.70
-                 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '7 days')
+                 AND (last_used IS NULL OR last_used < NOW() - INTERVAL '7 days')
                  AND (cooldown_until IS NULL OR cooldown_until < NOW())
                ORDER BY trust_score DESC LIMIT 5""",
             owner_id,

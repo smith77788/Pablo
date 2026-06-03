@@ -22,6 +22,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
 from services import operation_bus, infra_orchestrator
+try:
+    from services import intelligence_engine as _ie
+except ImportError:
+    _ie = None  # type: ignore[assignment]
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit, extract_flood_wait
 
@@ -85,14 +89,14 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
     на базовый infra_orchestrator.get_state() + estimate_capacity().
     """
     # Primary: full intelligence engine
-    try:
-        from services import intelligence_engine as _ie
-        intel = await _ie.get_pre_launch_intelligence(
-            pool, owner_id, op_type, total_items, acc_ids or None
-        )
-        return _ie.format_pre_launch_block(intel)
-    except Exception:
-        pass
+    if _ie is not None:
+        try:
+            intel = await _ie.get_pre_launch_intelligence(
+                pool, owner_id, op_type, total_items, acc_ids or None
+            )
+            return _ie.format_pre_launch_block(intel)
+        except Exception:
+            pass
 
     # Fallback: simple state block via infra_orchestrator
     try:
