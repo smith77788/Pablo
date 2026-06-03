@@ -305,10 +305,11 @@ async def _show_name_pattern_step(
         f"<b>Шаг 3/8 — Паттерн названия</b>\n"
         f"Введите шаблон для названия {asset_noun}.\n\n"
         f"Доступные плейсхолдеры:\n"
-        f"  <code>{{{{CITY}}}}</code> — город\n"
+        f"  <code>{{{{CITY}}}}</code> — город (English)\n"
+        f"  <code>{{{{CITY_NAME}}}}</code> — название на языке страны (Москва, Київ, Wien…)\n"
         f"  <code>{{{{COUNTRY}}}}</code> — страна\n"
         f"  <code>{{{{COUNTRY_CODE}}}}</code> — код страны (DE, FR…)\n"
-        f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг города\n"
+        f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг города (для username)\n"
         f"  <code>{{{{INDEX}}}}</code> — порядковый номер\n\n"
         f"Примеры:\n{ex_text}"
         + bot_note

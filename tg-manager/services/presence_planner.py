@@ -9,15 +9,18 @@ def render_pattern(pattern: str, geo: dict) -> str:
     """Replace {{PLACEHOLDER}} tokens in pattern with geo values. Never crashes."""
     city_slug = geo.get("city_slug") or slugify(geo.get("city", ""))
     country_slug = geo.get("country_slug") or slugify(geo.get("country", ""))
+    # {{CITY_NAME}} = нативное название (Москва, Київ, Wien), fallback → английское
+    city_native = geo.get("city_native") or geo.get("city") or ""
     replacements = {
-        "{{CITY}}": geo.get("city") or "",
-        "{{COUNTRY}}": geo.get("country") or "",
-        "{{REGION}}": geo.get("region") or "",
-        "{{LANGUAGE}}": geo.get("language") or "",
+        "{{CITY}}":         geo.get("city") or "",
+        "{{CITY_NAME}}":    city_native,
+        "{{COUNTRY}}":      geo.get("country") or "",
+        "{{REGION}}":       geo.get("region") or "",
+        "{{LANGUAGE}}":     geo.get("language") or "",
         "{{COUNTRY_CODE}}": (geo.get("country_code") or "").upper(),
-        "{{CITY_SLUG}}": city_slug,
+        "{{CITY_SLUG}}":    city_slug,
         "{{COUNTRY_SLUG}}": country_slug,
-        "{{INDEX}}": str(geo.get("index", 1)),
+        "{{INDEX}}":        str(geo.get("index", 1)),
     }
     for key, val in replacements.items():
         pattern = pattern.replace(key, val)
