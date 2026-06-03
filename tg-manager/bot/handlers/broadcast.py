@@ -1,5 +1,6 @@
 """Broadcast composer and launcher."""
 
+import html
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -94,12 +95,34 @@ async def msg_broadcast_text(
     else:
         count = await db.get_audience_count(pool, data["bot_id"])
 
+    # Telegram limits: 4096 chars for text messages, 1024 for photo captions
+    _TEXT_LIMIT = 4096
+    _CAPTION_LIMIT = 1024
+
     if message.photo:
         photo_file_id = message.photo[-1].file_id
         text = message.caption or ""
+        if len(text) > _CAPTION_LIMIT:
+            await message.answer(
+                f"❌ Подпись к фото слишком длинная: <b>{len(text)}</b> символов.\n"
+                f"Лимит Telegram для подписей к фото/видео: <b>{_CAPTION_LIMIT}</b> символов.\n\n"
+                "Сократите подпись и отправьте снова.",
+                parse_mode="HTML",
+                reply_markup=_bc_cancel_kb(data.get("bot_id", 0)),
+            )
+            return
     elif message.text:
         photo_file_id = None
         text = message.text
+        if len(text) > _TEXT_LIMIT:
+            await message.answer(
+                f"❌ Текст рассылки слишком длинный: <b>{len(text)}</b> символов.\n"
+                f"Лимит Telegram для сообщений: <b>{_TEXT_LIMIT}</b> символов.\n\n"
+                "Сократите текст и отправьте снова.",
+                parse_mode="HTML",
+                reply_markup=_bc_cancel_kb(data.get("bot_id", 0)),
+            )
+            return
     else:
         bot_id = data.get("bot_id", 0)
         await message.answer(
@@ -120,8 +143,12 @@ async def msg_broadcast_text(
     if data.get("segment_lang"):
         segment_label = f"🎯 Сегмент: <b>{data['segment_lang'].upper()}</b>\n"
 
+    # Escape user text in preview — the text itself may contain HTML special chars
+    # that would break parse_mode="HTML". The broadcast sends the raw text, only the
+    # preview wrapper uses HTML tags.
+    preview_text = html.escape(text)
     await message.answer(
-        f"{preview_header}{text}\n\n"
+        f"{preview_header}{preview_text}\n\n"
         f"{segment_label}"
         f"Получателей: <b>{count}</b> чел.\nЗапустить?",
         parse_mode="HTML",
@@ -305,8 +332,10 @@ async def msg_button_url(
         if photo_file_id
         else "📢 <b>Предпросмотр:</b>\n\n"
     )
+    # Escape user text so HTML special chars don't break parse_mode="HTML"
+    preview_text = html.escape(text)
     await message.answer(
-        f"{preview_header}{text}\n\n"
+        f"{preview_header}{preview_text}\n\n"
         f"🔘 <b>Кнопки:</b>\n{btn_list}\n\n"
         f"{segment_label}"
         f"Получателей: <b>{count}</b> чел.\nЗапустить?",

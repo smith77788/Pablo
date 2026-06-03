@@ -879,6 +879,7 @@ async def _exec_bulk_join(
                 }
             step += 1
             t0 = time.monotonic()
+            flood_wait = 0
             try:
                 res = await account_manager.join_channel(
                     acc["session_str"], link, _acc=acc_dict
@@ -983,6 +984,8 @@ async def _exec_bulk_join(
                 else:
                     pause = random.uniform(45, 120) * chaos
                 pause *= tod
+            if flood_wait:
+                pause = max(pause, float(flood_wait) + random.uniform(10, 30))
             await asyncio.sleep(pause)
 
     return {
@@ -1280,17 +1283,27 @@ async def _exec_global_presence_channel(
         )
 
         if result.get("error") and result.get("flood_wait"):
-            wait_time = min(int(result["flood_wait"]) + 15, 300)
-            log.info(
-                "op_worker gp_%s: flood wait %ds for target %d",
-                "group" if is_group else "channel",
-                wait_time,
-                target["id"],
-            )
-            await asyncio.sleep(wait_time)
-            result = await account_manager.create_channel(
-                acc["session_str"], title, about="", megagroup=is_group, _acc=acc
-            )
+            raw_flood = int(result["flood_wait"])
+            if raw_flood > 600:
+                # Flood wait too long to block the batch — skip this target and continue
+                log.warning(
+                    "op_worker gp_%s: flood wait %ds too long for target %d — skipping",
+                    "group" if is_group else "channel",
+                    raw_flood,
+                    target["id"],
+                )
+            else:
+                wait_time = raw_flood + 15
+                log.info(
+                    "op_worker gp_%s: flood wait %ds for target %d",
+                    "group" if is_group else "channel",
+                    wait_time,
+                    target["id"],
+                )
+                await asyncio.sleep(wait_time)
+                result = await account_manager.create_channel(
+                    acc["session_str"], title, about="", megagroup=is_group, _acc=acc
+                )
 
         if result.get("error"):
             await pool.execute(
@@ -1766,12 +1779,19 @@ async def _exec_bulk_create_channels(
 
         # Handle flood wait
         if result.get("error") and result.get("flood_wait"):
-            wait_time = min(int(result["flood_wait"]) + 15, 300)
-            log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
-            await asyncio.sleep(wait_time)
-            result = await account_manager.create_channel(
-                acc["session_str"], title, about=about, _acc=acc
-            )
+            raw_flood = int(result["flood_wait"])
+            if raw_flood > 600:
+                # Flood wait too long to block the batch — skip this channel
+                log.warning(
+                    "op_worker bulk_channels: flood wait %ds too long — skipping", raw_flood
+                )
+            else:
+                wait_time = raw_flood + 15
+                log.info("op_worker bulk_channels: flood %ds, sleeping...", wait_time)
+                await asyncio.sleep(wait_time)
+                result = await account_manager.create_channel(
+                    acc["session_str"], title, about=about, _acc=acc
+                )
 
         if (
             isinstance(result, dict)

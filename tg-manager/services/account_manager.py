@@ -114,16 +114,20 @@ _ANDROID_DEVICES: list[tuple[str, str]] = [
     ("Motorola Moto G84", "Android 13"),
 ]
 _APP_VERSIONS: list[str] = [
+    "11.6.0",
+    "11.5.3",
+    "11.5.2",
+    "11.4.1",
+    "11.4.0",
+    "11.3.2",
+    "11.3.1",
+    "11.2.0",
+    "11.1.3",
+    "11.1.2",
+    "11.0.1",
+    "10.14.5",
     "10.14.4",
     "10.14.3",
-    "10.13.2",
-    "10.12.2",
-    "10.11.0",
-    "10.10.1",
-    "10.9.1",
-    "10.8.2",
-    "10.7.0",
-    "10.6.2",
 ]
 
 
@@ -153,7 +157,7 @@ def _make_client(session_string: str = "", device: dict | None = None):
         TG_API_HASH,
         device_model=d.get("device_model") or "Samsung SM-S911B",
         system_version=d.get("system_version") or "Android 14",
-        app_version=d.get("app_version") or "10.9.1",
+        app_version=d.get("app_version") or "11.5.3",
         lang_code="ru",
         system_lang_code="ru-RU",
         connection_retries=3,
@@ -256,8 +260,12 @@ async def confirm_code(phone: str, code: str, phone_code_hash: str):
         return client
     except SessionPasswordNeededError:
         return "need_2fa"
-    except (PhoneCodeInvalidError, PhoneCodeExpiredError):
-        raise ValueError("Неверный или истёкший код.")
+    except PhoneCodeExpiredError:
+        raise ValueError(
+            "Код истёк — запросите новый код через кнопку «Отправить повторно»."
+        )
+    except PhoneCodeInvalidError:
+        raise ValueError("Неверный код — проверьте и введите снова.")
 
 
 async def confirm_2fa(phone: str, password: str):
@@ -289,7 +297,10 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
     if not session_string or len(session_string) < 20:
         raise ValueError("Строка сессии слишком короткая.")
 
-    client = _make_client(session_string)
+    # Use a realistic Android fingerprint during import validation.
+    # Telethon's bare default ("PC 64bit" / version string) is a known
+    # Telegram anti-abuse signal — it must never reach Telegram servers.
+    client = _make_client(session_string, generate_device_fingerprint())
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         if not await client.is_user_authorized():
@@ -548,7 +559,8 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     # Берём первую сессию и проверяем через Telegram
     session_str = sessions[0]["session_str"]
 
-    client = _make_client(session_str)
+    # Use a realistic Android fingerprint — same reason as import_from_session_string.
+    client = _make_client(session_str, generate_device_fingerprint())
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
