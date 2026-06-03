@@ -373,3 +373,9 @@ class ErrorReportCb(CallbackData, prefix="err"):
     report_id: int = 0
 
 
+class EcoCb(CallbackData, prefix="eco"):
+    action: str
+    eco_id: int = 0
+    page: int = 0
+
+

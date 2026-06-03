@@ -50,6 +50,7 @@ from bot.callbacks import (
     VisCb,
     WarmupCb,
     WorkspaceCb,
+    EcoCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -90,8 +91,9 @@ def _main_menu_kb():
     kb.button(text="📢 Рассылки & Связь", callback_data=BmCb(action="comms"))
     kb.button(text="📊 Аналитика",        callback_data=BmCb(action="analytics"))
     kb.button(text="🛡️ Мониторинг",       callback_data=BmCb(action="monitoring"))
+    kb.button(text="🌐 Экосистемы",       callback_data=EcoCb(action="menu"))
     kb.button(text="⚙️ Настройки",        callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 

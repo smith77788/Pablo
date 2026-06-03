@@ -3315,3 +3315,28 @@ async def delete_memory(
         owner_id, memory_id,
     )
     return result == "DELETE 1"
+
+
+# ── Ecosystem helpers ──────────────────────────────────────────────────────────
+
+async def get_user_ecosystem_count(pool: asyncpg.Pool, owner_id: int) -> int:
+    """Количество активных экосистем пользователя."""
+    return await pool.fetchval(
+        "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1 AND status='active'",
+        owner_id,
+    ) or 0
+
+
+async def find_object_ecosystems(
+    pool: asyncpg.Pool, owner_id: int, object_type: str, object_id: int
+) -> list[dict]:
+    """Найти все экосистемы, в которых состоит данный объект."""
+    return await pool.fetch(
+        """SELECT e.id, e.name, e.ecosystem_type, e.health_score, e.risk_level
+           FROM ecosystem_members m
+           JOIN ecosystems e ON e.id=m.ecosystem_id
+           WHERE m.owner_id=$1 AND m.object_type=$2 AND m.object_id=$3
+             AND e.status='active'
+           ORDER BY e.name""",
+        owner_id, object_type, object_id,
+    )

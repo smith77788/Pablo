@@ -67,6 +67,7 @@ from bot.handlers import presence_pack as presence_pack_handler
 from bot.handlers import approval_flow as approval_flow_handler
 from bot.handlers import workspaces as workspaces_handler
 from bot.handlers import error_report as error_report_handler
+from bot.handlers import ecosystems as ecosystems_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -87,6 +88,7 @@ from services import drift_detector
 from services import deploy_notifier
 from services import infra_memory
 from services import infra_copilot
+from services import ecosystem_copilot
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -157,6 +159,7 @@ async def main() -> None:
     dp.include_router(asset_tpl_handler.router)
     dp.include_router(chan_factory_handler.router)
     dp.include_router(global_presence_handler.router)
+    dp.include_router(ecosystems_handler.router)
     dp.include_router(quick_post_handler.router)
     dp.include_router(mass_pub_handler.router)
     dp.include_router(competitors_handler.router)
@@ -288,7 +291,8 @@ async def main() -> None:
         asyncio.create_task(_resilient("task_registry",  task_registry.run_cleanup_loop))
         asyncio.create_task(_resilient("drift_detector",  drift_detector.run, pool, bot))
         asyncio.create_task(_resilient("infra_memory",    infra_memory.run_flush_loop, pool))
-        asyncio.create_task(_resilient("infra_copilot",   infra_copilot.run_copilot_loop, pool, bot))
+        asyncio.create_task(_resilient("infra_copilot",       infra_copilot.run_copilot_loop, pool, bot))
+        asyncio.create_task(_resilient("ecosystem_copilot",   ecosystem_copilot.run_ecosystem_copilot_loop, pool, bot))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:
