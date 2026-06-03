@@ -438,17 +438,13 @@ async def cb_rank_check_now(
         )
         return
 
-    # Pick least-recently-used active account (fair distribution across accounts)
-    account: asyncpg.Record | None = None
+    # Pick best available account via resource_selector (trust_score + flood_engine scoring)
+    account: dict | None = None
     try:
-        account = await pool.fetchrow(
-            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE "
-            "ORDER BY last_used ASC NULLS FIRST LIMIT 1",
-            owner_id,
-        )
+        from services import resource_selector
+        account = await resource_selector.select_account(pool, owner_id, action_type="search")
     except Exception as exc:
-        log.warning("Ошибка при запросе tg_accounts: %s", exc)
+        log.warning("Ошибка при выборе аккаунта для ranking: %s", exc)
 
     if not account:
         await safe_edit(
