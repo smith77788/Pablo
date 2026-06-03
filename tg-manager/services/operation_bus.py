@@ -74,6 +74,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "🌍",
     },
+    "global_presence_package": {
+        "description": "Global Presence — пакет",
+        "min_plan": "pro",
+        "max_retries": 2,
+        "icon": "🌍",
+    },
     "global_presence_full_package": {
         "description": "Global Presence — полный пакет",
         "min_plan": "enterprise",

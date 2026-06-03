@@ -56,6 +56,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
 from services.logger import log_exc_swallow
+from services import operation_bus
 
 log = logging.getLogger(__name__)
 
@@ -1205,14 +1206,9 @@ async def cb_plan_confirm(
         params["channels"] = links  # used by bulk_leave executor
 
     try:
-        op_id = await pool.fetchval(
-            """INSERT INTO operation_queue(owner_id, op_type, status, params, scheduled_for)
-               VALUES($1, $2, 'pending', $3::jsonb, $4)
-               RETURNING id""",
-            callback.from_user.id,
-            op_type,
-            json.dumps(params),
-            scheduled_for,
+        op_id = await operation_bus.submit(
+            pool, callback.from_user.id, op_type, params,
+            scheduled_for=scheduled_for.isoformat(),
         )
     except Exception as e:
         log.error("plan_confirm insert error: %s", e)
