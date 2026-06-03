@@ -725,12 +725,12 @@ async def cb_mini_strike_category(
 
     await callback.answer()
 
-    # Найти лучший активный аккаунт через flood_engine (учитывает кулдаун + risk score)
-    from services import flood_engine
+    # Найти лучший активный аккаунт (учитывает кулдаун + risk score + infra_memory)
+    from services import resource_selector
     try:
-        acc = await flood_engine.get_best_account(pool, callback.from_user.id, action_type="strike")
+        acc = await resource_selector.select_account(pool, callback.from_user.id, action_type="strike")
     except Exception:
-        log_exc_swallow(log, "cb_mini_strike_category: get_best_account failed")
+        log_exc_swallow(log, "cb_mini_strike_category: select_account failed")
         acc = None
 
     if not acc:
