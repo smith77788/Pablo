@@ -1568,6 +1568,74 @@ LATAM_CITIES: list[dict] = [
     },
 ]
 
+RUSSIA_CITIES: list[dict] = [
+    {"city": "Moscow", "city_slug": "moscow", "country": "Russia", "country_code": "ru", "region": "Moscow", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Saint Petersburg", "city_slug": "saint_petersburg", "country": "Russia", "country_code": "ru", "region": "Saint Petersburg", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Novosibirsk", "city_slug": "novosibirsk", "country": "Russia", "country_code": "ru", "region": "Novosibirsk Oblast", "language": "ru", "timezone": "Asia/Novosibirsk"},
+    {"city": "Yekaterinburg", "city_slug": "yekaterinburg", "country": "Russia", "country_code": "ru", "region": "Sverdlovsk Oblast", "language": "ru", "timezone": "Asia/Yekaterinburg"},
+    {"city": "Kazan", "city_slug": "kazan", "country": "Russia", "country_code": "ru", "region": "Tatarstan", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Nizhny Novgorod", "city_slug": "nizhny_novgorod", "country": "Russia", "country_code": "ru", "region": "Nizhny Novgorod Oblast", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Chelyabinsk", "city_slug": "chelyabinsk", "country": "Russia", "country_code": "ru", "region": "Chelyabinsk Oblast", "language": "ru", "timezone": "Asia/Yekaterinburg"},
+    {"city": "Samara", "city_slug": "samara", "country": "Russia", "country_code": "ru", "region": "Samara Oblast", "language": "ru", "timezone": "Europe/Samara"},
+    {"city": "Omsk", "city_slug": "omsk", "country": "Russia", "country_code": "ru", "region": "Omsk Oblast", "language": "ru", "timezone": "Asia/Omsk"},
+    {"city": "Rostov-on-Don", "city_slug": "rostov_on_don", "country": "Russia", "country_code": "ru", "region": "Rostov Oblast", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Ufa", "city_slug": "ufa", "country": "Russia", "country_code": "ru", "region": "Bashkortostan", "language": "ru", "timezone": "Asia/Yekaterinburg"},
+    {"city": "Krasnoyarsk", "city_slug": "krasnoyarsk", "country": "Russia", "country_code": "ru", "region": "Krasnoyarsk Krai", "language": "ru", "timezone": "Asia/Krasnoyarsk"},
+    {"city": "Voronezh", "city_slug": "voronezh", "country": "Russia", "country_code": "ru", "region": "Voronezh Oblast", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Perm", "city_slug": "perm", "country": "Russia", "country_code": "ru", "region": "Perm Krai", "language": "ru", "timezone": "Asia/Yekaterinburg"},
+    {"city": "Volgograd", "city_slug": "volgograd", "country": "Russia", "country_code": "ru", "region": "Volgograd Oblast", "language": "ru", "timezone": "Europe/Volgograd"},
+    {"city": "Krasnodar", "city_slug": "krasnodar", "country": "Russia", "country_code": "ru", "region": "Krasnodar Krai", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Saratov", "city_slug": "saratov", "country": "Russia", "country_code": "ru", "region": "Saratov Oblast", "language": "ru", "timezone": "Europe/Saratov"},
+    {"city": "Tyumen", "city_slug": "tyumen", "country": "Russia", "country_code": "ru", "region": "Tyumen Oblast", "language": "ru", "timezone": "Asia/Yekaterinburg"},
+    {"city": "Tolyatti", "city_slug": "tolyatti", "country": "Russia", "country_code": "ru", "region": "Samara Oblast", "language": "ru", "timezone": "Europe/Samara"},
+    {"city": "Izhevsk", "city_slug": "izhevsk", "country": "Russia", "country_code": "ru", "region": "Udmurtia", "language": "ru", "timezone": "Europe/Samara"},
+    {"city": "Barnaul", "city_slug": "barnaul", "country": "Russia", "country_code": "ru", "region": "Altai Krai", "language": "ru", "timezone": "Asia/Barnaul"},
+    {"city": "Irkutsk", "city_slug": "irkutsk", "country": "Russia", "country_code": "ru", "region": "Irkutsk Oblast", "language": "ru", "timezone": "Asia/Irkutsk"},
+    {"city": "Khabarovsk", "city_slug": "khabarovsk", "country": "Russia", "country_code": "ru", "region": "Khabarovsk Krai", "language": "ru", "timezone": "Asia/Vladivostok"},
+    {"city": "Vladivostok", "city_slug": "vladivostok", "country": "Russia", "country_code": "ru", "region": "Primorsky Krai", "language": "ru", "timezone": "Asia/Vladivostok"},
+    {"city": "Yaroslavl", "city_slug": "yaroslavl", "country": "Russia", "country_code": "ru", "region": "Yaroslavl Oblast", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Makhachkala", "city_slug": "makhachkala", "country": "Russia", "country_code": "ru", "region": "Dagestan", "language": "ru", "timezone": "Europe/Moscow"},
+    {"city": "Tomsk", "city_slug": "tomsk", "country": "Russia", "country_code": "ru", "region": "Tomsk Oblast", "language": "ru", "timezone": "Asia/Tomsk"},
+    {"city": "Orenburg", "city_slug": "orenburg", "country": "Russia", "country_code": "ru", "region": "Orenburg Oblast", "language": "ru", "timezone": "Asia/Yekaterinburg"},
+    {"city": "Kemerovo", "city_slug": "kemerovo", "country": "Russia", "country_code": "ru", "region": "Kemerovo Oblast", "language": "ru", "timezone": "Asia/Novosibirsk"},
+    {"city": "Sochi", "city_slug": "sochi", "country": "Russia", "country_code": "ru", "region": "Krasnodar Krai", "language": "ru", "timezone": "Europe/Moscow"},
+]
+
+BELARUS_CITIES: list[dict] = [
+    {"city": "Minsk", "city_slug": "minsk", "country": "Belarus", "country_code": "by", "region": "Minsk", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Gomel", "city_slug": "gomel", "country": "Belarus", "country_code": "by", "region": "Gomel Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Mogilev", "city_slug": "mogilev", "country": "Belarus", "country_code": "by", "region": "Mogilev Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Vitebsk", "city_slug": "vitebsk", "country": "Belarus", "country_code": "by", "region": "Vitebsk Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Grodno", "city_slug": "grodno", "country": "Belarus", "country_code": "by", "region": "Grodno Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Brest", "city_slug": "brest", "country": "Belarus", "country_code": "by", "region": "Brest Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Bobruisk", "city_slug": "bobruisk", "country": "Belarus", "country_code": "by", "region": "Mogilev Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Baranovichi", "city_slug": "baranovichi", "country": "Belarus", "country_code": "by", "region": "Brest Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Pinsk", "city_slug": "pinsk", "country": "Belarus", "country_code": "by", "region": "Brest Oblast", "language": "be", "timezone": "Europe/Minsk"},
+    {"city": "Orsha", "city_slug": "orsha", "country": "Belarus", "country_code": "by", "region": "Vitebsk Oblast", "language": "be", "timezone": "Europe/Minsk"},
+]
+
+CIS_CITIES: list[dict] = RUSSIA_CITIES + BELARUS_CITIES + [
+    # Ukraine
+    {"city": "Kyiv", "city_slug": "kyiv", "country": "Ukraine", "country_code": "ua", "region": "Kyiv", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Kharkiv", "city_slug": "kharkiv", "country": "Ukraine", "country_code": "ua", "region": "Kharkiv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Odessa", "city_slug": "odessa", "country": "Ukraine", "country_code": "ua", "region": "Odessa Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Dnipro", "city_slug": "dnipro", "country": "Ukraine", "country_code": "ua", "region": "Dnipropetrovsk Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    {"city": "Lviv", "city_slug": "lviv", "country": "Ukraine", "country_code": "ua", "region": "Lviv Oblast", "language": "uk", "timezone": "Europe/Kiev"},
+    # Kazakhstan
+    {"city": "Almaty", "city_slug": "almaty", "country": "Kazakhstan", "country_code": "kz", "region": "Almaty", "language": "kk", "timezone": "Asia/Almaty"},
+    {"city": "Astana", "city_slug": "astana", "country": "Kazakhstan", "country_code": "kz", "region": "Astana", "language": "kk", "timezone": "Asia/Almaty"},
+    # Azerbaijan
+    {"city": "Baku", "city_slug": "baku", "country": "Azerbaijan", "country_code": "az", "region": "Baku", "language": "az", "timezone": "Asia/Baku"},
+    # Georgia
+    {"city": "Tbilisi", "city_slug": "tbilisi", "country": "Georgia", "country_code": "ge", "region": "Tbilisi", "language": "ka", "timezone": "Asia/Tbilisi"},
+    # Armenia
+    {"city": "Yerevan", "city_slug": "yerevan", "country": "Armenia", "country_code": "am", "region": "Yerevan", "language": "hy", "timezone": "Asia/Yerevan"},
+    # Uzbekistan
+    {"city": "Tashkent", "city_slug": "tashkent", "country": "Uzbekistan", "country_code": "uz", "region": "Tashkent", "language": "uz", "timezone": "Asia/Tashkent"},
+    # Moldova
+    {"city": "Chisinau", "city_slug": "chisinau", "country": "Moldova", "country_code": "md", "region": "Chisinau", "language": "ro", "timezone": "Europe/Chisinau"},
+]
+
 # Registry of all presets
 GEO_PRESETS: dict[str, dict] = {
     "eu_capitals": {
@@ -1594,6 +1662,21 @@ GEO_PRESETS: dict[str, dict] = {
         "label": "🌐 LATAM",
         "cities": LATAM_CITIES,
         "count": len(LATAM_CITIES),
+    },
+    "russia": {
+        "label": "🇷🇺 Россия",
+        "cities": RUSSIA_CITIES,
+        "count": len(RUSSIA_CITIES),
+    },
+    "belarus": {
+        "label": "🇧🇾 Беларусь",
+        "cities": BELARUS_CITIES,
+        "count": len(BELARUS_CITIES),
+    },
+    "cis": {
+        "label": "🌐 СНГ (RU+BY+UA+KZ)",
+        "cities": CIS_CITIES,
+        "count": len(CIS_CITIES),
     },
 }
 
