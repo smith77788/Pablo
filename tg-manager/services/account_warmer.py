@@ -38,6 +38,17 @@ _WARMUP_PUBLIC_CHANNELS = [
     "@spacex", "@nasa", "@nature",
 ]
 
+# Нишевые каналы для специализированного прогрева (по категориям)
+_NICHE_CHANNELS: dict[str, list[str]] = {
+    "tech":          ["@proglib", "@techcrunch", "@hackernoon", "@wired", "@linuxoid", "@telegram"],
+    "news":          ["@bbcrussian", "@rian_ru", "@rbc_news", "@lentach", "@meduzaio", "@breakingmash"],
+    "crypto":        ["@durov", "@tginfo", "@techcrunch", "@wired"],
+    "sports":        ["@telegram", "@bbcrussian", "@rian_ru"],
+    "entertainment": ["@varlamov", "@lentach", "@telegram"],
+    "science":       ["@spacex", "@nasa", "@nature", "@wired", "@guardian"],
+    "general":       _WARMUP_PUBLIC_CHANNELS,
+}
+
 _WARMUP_SEARCH_QUERIES = [
     "новости", "технологии", "бизнес", "криптовалюта",
     "спорт", "кино", "музыка", "путешествия",
@@ -100,6 +111,24 @@ def _compute_warmup_level(actions_done: int) -> str:
     if actions_done >= 3:
         return "medium"
     return "light"
+
+
+async def get_account_niche_channels(pool: asyncpg.Pool, account_id: int) -> list[str]:
+    """Возвращает список каналов для прогрева с учётом нишевого профиля аккаунта."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT niche, custom_channels FROM account_niche_profiles WHERE account_id=$1",
+            account_id,
+        )
+        if row:
+            custom: list = row["custom_channels"] or []
+            if custom:
+                return custom
+            niche = row["niche"] or "general"
+            return _NICHE_CHANNELS.get(niche, _WARMUP_PUBLIC_CHANNELS)
+    except Exception as e:
+        log.debug("warmup get_niche_channels acc=%d: %s", account_id, e)
+    return _WARMUP_PUBLIC_CHANNELS
 
 
 async def create_warmup_plan(

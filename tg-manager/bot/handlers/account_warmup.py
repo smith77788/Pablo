@@ -19,8 +19,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import WarmupCb, BmCb, AccCb
-from bot.states import WarmupSessionFSM
+from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
+from bot.states import WarmupSessionFSM, ResourceActivityFSM
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -58,6 +58,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="🎯 Новая сессия прогрева", callback_data=WarmupCb(action="new_session"))
     kb.button(text="📋 Активные сессии", callback_data=WarmupCb(action="session_list"))
+    kb.button(text="📡 Активность ресурсов", callback_data=ResourceActCb(action="menu"))
     kb.button(text="🔧 Одиночный план (1 аккаунт)", callback_data=WarmupCb(action="create_list"))
     kb.button(text="📊 Активные планы", callback_data=WarmupCb(action="active_plans"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
@@ -1225,4 +1226,488 @@ async def cb_wu_sess_delete(
         "🗑 <b>Сессия удалена</b>",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESOURCE ACTIVITY ENGINE — активность в собственных ресурсах
+# Профили: reader | commenter | reactor | mixed
+# Адаптивный пейсинг при FloodWait
+# ══════════════════════════════════════════════════════════════════════════════
+
+_RACT_PROFILE_LABELS = {
+    "reader":    "📖 Reader — чтение и просмотр (низкий риск)",
+    "commenter": "💬 Commenter — акцент на комментарии",
+    "reactor":   "❤️ Reactor — акцент на реакции",
+    "mixed":     "🔀 Mixed — все типы действий",
+}
+
+_RACT_CONFIG = {
+    "short":    {"days": 7,  "daily": 6,  "label": "⚡ Короткий (7 дней, 6 действий/день)"},
+    "standard": {"days": 14, "daily": 8,  "label": "🌿 Стандарт (14 дней, 8 действий/день)"},
+    "long":     {"days": 30, "daily": 5,  "label": "🌱 Долгий (30 дней, 5 действий/день)"},
+}
+
+
+def _ract_back_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="menu"))
+    return kb
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "menu"))
+async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+    try:
+        active_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM resource_activity_sessions WHERE owner_id=$1 AND status='active'",
+            uid,
+        ) or 0
+    except Exception:
+        active_count = 0
+
+    try:
+        resources = await pool.fetchval(
+            """SELECT COUNT(*) FROM (
+               SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1
+               UNION ALL
+               SELECT DISTINCT bot_id FROM managed_bots WHERE added_by=$1 AND is_active=TRUE
+               ) x""",
+            uid,
+        ) or 0
+    except Exception:
+        resources = 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Новая сессия активности", callback_data=ResourceActCb(action="new"))
+    kb.button(text="📋 Мои сессии", callback_data=ResourceActCb(action="list"))
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "📡 <b>Активность ресурсов</b>\n\n"
+        "Создаёт органическую активность в ваших каналах, ботах и группах. "
+        "Несколько аккаунтов читают, реагируют и комментируют посты в ваших ресурсах — "
+        "имитируя реального пользователя.\n\n"
+        "<b>Профили:</b>\n"
+        "📖 Reader — читает посты, отмечает прочитанным\n"
+        "❤️ Reactor — ставит реакции на посты\n"
+        "💬 Commenter — оставляет комментарии (нужна discussion group)\n"
+        "🔀 Mixed — все типы действий\n\n"
+        f"Ресурсов в инфраструктуре: <b>{resources}</b>\n"
+        f"Активных сессий: <b>{active_count}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _show_ract_account_picker(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    data = await state.get_data()
+    selected: set[int] = set(data.get("ract_acc_ids", []))
+
+    accounts = await pool.fetch(
+        """SELECT a.id, a.phone, a.first_name,
+                  COALESCE(a.acc_status, 'active') AS acc_status
+           FROM tg_accounts a
+           WHERE a.owner_id=$1 AND a.is_active=TRUE
+             AND a.session_str IS NOT NULL AND a.session_str != ''
+           ORDER BY a.added_at DESC""",
+        callback.from_user.id,
+    )
+
+    kb = InlineKeyboardBuilder()
+    for acc in accounts:
+        icon = "✅" if acc["id"] in selected else "⬜"
+        label = acc.get("first_name") or acc["phone"]
+        kb.button(
+            text=f"{icon} {html.escape(label)}",
+            callback_data=ResourceActCb(action="tog_acc", account_id=acc["id"]),
+        )
+    if selected:
+        kb.button(
+            text=f"➡️ Готово ({len(selected)} акк.)",
+            callback_data=ResourceActCb(action="accs_done"),
+        )
+    kb.button(text="❌ Отмена", callback_data=ResourceActCb(action="menu"))
+    kb.adjust(1)
+
+    n_sel = len(selected)
+    hint = f"Выбрано: <b>{n_sel}</b>" if n_sel else "Нажмите для выбора"
+    await callback.message.edit_text(
+        "📡 <b>Активность ресурсов — Шаг 1: Аккаунты</b>\n\n"
+        "Выберите аккаунты, которые будут создавать активность в ваших ресурсах.\n\n"
+        f"{hint}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "new"))
+async def cb_ract_new(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await state.set_state(ResourceActivityFSM.choosing_accounts)
+    await state.update_data(ract_acc_ids=[])
+    await _show_ract_account_picker(callback, state, pool)
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "tog_acc"), ResourceActivityFSM.choosing_accounts)
+async def cb_ract_toggle_acc(
+    callback: CallbackQuery, callback_data: ResourceActCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    selected: list[int] = data.get("ract_acc_ids", [])
+    acc_id = callback_data.account_id
+    if acc_id in selected:
+        selected = [x for x in selected if x != acc_id]
+    else:
+        selected = selected + [acc_id]
+    await state.update_data(ract_acc_ids=selected)
+    await _show_ract_account_picker(callback, state, pool)
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "accs_done"), ResourceActivityFSM.choosing_accounts)
+async def cb_ract_accs_done(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    if not data.get("ract_acc_ids"):
+        await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
+        return
+    await state.set_state(ResourceActivityFSM.choosing_profile)
+
+    kb = InlineKeyboardBuilder()
+    for profile_key, profile_label in _RACT_PROFILE_LABELS.items():
+        kb.button(text=profile_label, callback_data=ResourceActCb(action=f"profile_{profile_key}"))
+    kb.button(text="❌ Отмена", callback_data=ResourceActCb(action="menu"))
+    kb.adjust(1)
+
+    n = len(data["ract_acc_ids"])
+    await callback.message.edit_text(
+        f"📡 <b>Активность ресурсов — Шаг 2: Профиль</b>\n\n"
+        f"Аккаунтов: <b>{n}</b>\n\n"
+        "Выберите профиль активности:\n\n"
+        "📖 <b>Reader</b> — безопасно, только чтение/просмотр\n"
+        "❤️ <b>Reactor</b> — реакции на посты\n"
+        "💬 <b>Commenter</b> — комментарии (нужна linked discussion group)\n"
+        "🔀 <b>Mixed</b> — все виды активности",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    ResourceActCb.filter(F.action.in_({"profile_reader", "profile_commenter", "profile_reactor", "profile_mixed"})),
+    ResourceActivityFSM.choosing_profile,
+)
+async def cb_ract_profile(
+    callback: CallbackQuery, callback_data: ResourceActCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    profile = callback_data.action.replace("profile_", "")
+    await state.update_data(ract_profile=profile)
+    await state.set_state(ResourceActivityFSM.confirming)
+
+    data = await state.get_data()
+    acc_ids: list[int] = data.get("ract_acc_ids", [])
+
+    # Preview own resources
+    resources = await pool.fetch(
+        """SELECT COALESCE('@'||username, title) AS label
+           FROM managed_channels WHERE owner_id=$1 LIMIT 5""",
+        callback.from_user.id,
+    )
+    res_preview = "\n".join(f"  • <code>{html.escape(str(r['label']))}</code>" for r in resources)
+    if not res_preview:
+        res_preview = "  <i>Ресурсы из инфраструктуры (авто)</i>"
+
+    acc_rows = await pool.fetch(
+        "SELECT id, COALESCE(first_name, phone) AS label FROM tg_accounts WHERE id=ANY($1)",
+        acc_ids,
+    )
+    acc_preview = ", ".join(html.escape(str(r["label"])) for r in acc_rows[:4])
+    if len(acc_rows) > 4:
+        acc_preview += f" и ещё {len(acc_rows)-4}"
+
+    profile_label = _RACT_PROFILE_LABELS.get(profile, profile)
+    cfg = _RACT_CONFIG["standard"]
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="▶️ Запустить", callback_data=ResourceActCb(action="start"))
+    kb.button(text="◀️ Изменить профиль", callback_data=ResourceActCb(action="accs_done"))
+    kb.button(text="❌ Отмена", callback_data=ResourceActCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"📡 <b>Активность ресурсов — Подтверждение</b>\n\n"
+        f"<b>Аккаунты ({len(acc_ids)}):</b> {acc_preview}\n\n"
+        f"<b>Ресурсы (авто из инфраструктуры):</b>\n{res_preview}\n\n"
+        f"<b>Профиль:</b> {profile_label}\n"
+        f"<b>Длительность:</b> {cfg['days']} дней · {cfg['daily']} действий/день\n\n"
+        "Ресурсы определяются автоматически из ваших каналов и ботов. "
+        "Нажмите ▶️ для запуска.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "start"), ResourceActivityFSM.confirming)
+async def cb_ract_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Создаю сессию...")
+    data = await state.get_data()
+    acc_ids: list[int] = data.get("ract_acc_ids", [])
+    profile: str = data.get("ract_profile", "mixed")
+    cfg = _RACT_CONFIG["standard"]
+
+    sess_id = await pool.fetchval(
+        """INSERT INTO resource_activity_sessions
+           (owner_id, account_ids, resource_refs, profile_type, target_days, daily_actions)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id""",
+        callback.from_user.id,
+        acc_ids,
+        [],
+        profile,
+        cfg["days"],
+        cfg["daily"],
+    )
+
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Мои сессии", callback_data=ResourceActCb(action="list"))
+    kb.button(text="▶️ Запустить сейчас", callback_data=ResourceActCb(action="run", session_id=sess_id))
+    kb.button(text="◀️ В меню", callback_data=ResourceActCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✅ <b>Сессия активности создана!</b>\n\n"
+        f"ID: <code>{sess_id}</code>\n"
+        f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
+        f"Профиль: <b>{_RACT_PROFILE_LABELS.get(profile, profile)}</b>\n"
+        f"Длительность: <b>{cfg['days']}</b> дней · <b>{cfg['daily']}</b> действий/день\n\n"
+        "Активность запускается автоматически каждые 24ч. "
+        "Или нажмите ▶️ для немедленного запуска.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "list"))
+async def cb_ract_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    uid = callback.from_user.id
+
+    sessions = await pool.fetch(
+        """SELECT id, account_ids, profile_type, status, current_day, target_days,
+                  daily_actions, last_run_at, created_at
+           FROM resource_activity_sessions
+           WHERE owner_id=$1 AND status IN ('active', 'paused')
+           ORDER BY created_at DESC LIMIT 15""",
+        uid,
+    )
+
+    if not sessions:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="➕ Новая сессия", callback_data=ResourceActCb(action="new"))
+        kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "📋 <b>Активных сессий нет</b>\n\nСоздайте сессию активности для ваших ресурсов.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = ["📋 <b>Сессии активности ресурсов</b>\n"]
+    kb = InlineKeyboardBuilder()
+    now_utc = datetime.now(timezone.utc)
+
+    for s in sessions:
+        n_acc = len(s["account_ids"] or [])
+        day   = s["current_day"] or 0
+        days  = max(s["target_days"] or 1, 1)
+        pct   = round(day / days * 100)
+        bar   = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+        icon  = "🟢" if s["status"] == "active" else "⏸"
+        profile_label = _RACT_PROFILE_LABELS.get(s["profile_type"], s["profile_type"]).split(" — ")[0]
+
+        last = s["last_run_at"]
+        if last:
+            last_aware = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
+            next_run = last_aware + timedelta(hours=24)
+            diff = next_run - now_utc
+            if diff.total_seconds() > 0:
+                h = int(diff.total_seconds() // 3600)
+                m = int((diff.total_seconds() % 3600) // 60)
+                timing = f"⏰ через {h}ч {m}м"
+            else:
+                timing = "⏰ готова к запуску"
+        else:
+            timing = "⏰ не запускалась"
+
+        lines.append(
+            f"{icon} <b>Сессия #{s['id']}</b> · {profile_label}\n"
+            f"  [{bar}] День {day}/{days} ({pct}%) · {n_acc} акк.\n"
+            f"  {timing}"
+        )
+        kb.button(
+            text=f"📊 #{s['id']} {s['profile_type']}",
+            callback_data=ResourceActCb(action="detail", session_id=s["id"]),
+        )
+
+    kb.button(text="➕ Новая сессия", callback_data=ResourceActCb(action="new"))
+    kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "detail"))
+async def cb_ract_detail(
+    callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    sess_id = callback_data.session_id
+    uid = callback.from_user.id
+
+    s = await pool.fetchrow(
+        "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
+        sess_id, uid,
+    )
+    if not s:
+        await callback.answer("Сессия не найдена", show_alert=True)
+        return
+
+    logs = await pool.fetch(
+        """SELECT account_id, action_type, resource_ref, success, performed_at
+           FROM resource_activity_log
+           WHERE session_id=$1
+           ORDER BY performed_at DESC LIMIT 20""",
+        sess_id,
+    )
+
+    day  = s["current_day"] or 0
+    days = s["target_days"] or 1
+    ok   = sum(1 for l in logs if l["success"])
+    fail = len(logs) - ok
+    profile_label = _RACT_PROFILE_LABELS.get(s["profile_type"], s["profile_type"])
+
+    lines = [
+        f"📡 <b>Сессия активности #{sess_id}</b>\n",
+        f"Профиль: <b>{profile_label}</b>",
+        f"Статус: <b>{s['status']}</b> · День: <b>{day}/{days}</b>",
+        f"Аккаунтов: <b>{len(s['account_ids'] or [])}</b> · Действий/день: <b>{s['daily_actions']}</b>\n",
+    ]
+
+    if logs:
+        from services.activity_engine import _ACTION_LABELS as _AELABELS
+        lines.append(f"<b>Последние действия</b> (✅{ok} ❌{fail}):")
+        for l in logs[:10]:
+            act_label = _AELABELS.get(l["action_type"], l["action_type"])
+            ref = html.escape((l["resource_ref"] or "")[:35])
+            status = "✅" if l["success"] else "❌"
+            ref_str = f" → <code>{ref}</code>" if ref else ""
+            lines.append(f"  {status} {act_label}{ref_str}")
+    else:
+        lines.append("<i>Действий ещё не выполнено.</i>")
+
+    kb = InlineKeyboardBuilder()
+    if s["status"] == "active":
+        kb.button(text="▶️ Запустить сейчас", callback_data=ResourceActCb(action="run", session_id=sess_id))
+        kb.button(text="⏸ Пауза", callback_data=ResourceActCb(action="pause", session_id=sess_id))
+    else:
+        kb.button(text="▶️ Возобновить", callback_data=ResourceActCb(action="resume", session_id=sess_id))
+    kb.button(text="🗑 Удалить", callback_data=ResourceActCb(action="delete", session_id=sess_id))
+    kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="list"))
+    kb.adjust(2)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "run"))
+async def cb_ract_run(
+    callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("▶️ Запускаю в фоне...")
+    from services.activity_engine import run_resource_activity_session
+    from services import task_registry
+    import asyncio
+
+    sess_id = callback_data.session_id
+    uid = callback.from_user.id
+    s = await pool.fetchrow(
+        "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
+        sess_id, uid,
+    )
+    if not s:
+        await callback.answer("Сессия не найдена или не активна", show_alert=True)
+        return
+
+    task = asyncio.create_task(run_resource_activity_session(pool, dict(s)))
+    task_registry.register(
+        uid, "resource_activity",
+        f"Активность ресурсов #{sess_id} ({s['profile_type']})", task,
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Детали", callback_data=ResourceActCb(action="detail", session_id=sess_id))
+    kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="list"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"▶️ <b>Сессия #{sess_id} запущена в фоне</b>\n\n"
+        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "pause"))
+async def cb_ract_pause(
+    callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
+) -> None:
+    await pool.execute(
+        "UPDATE resource_activity_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
+        callback_data.session_id, callback.from_user.id,
+    )
+    await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "resume"))
+async def cb_ract_resume(
+    callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
+) -> None:
+    await pool.execute(
+        "UPDATE resource_activity_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
+        callback_data.session_id, callback.from_user.id,
+    )
+    await callback.answer("▶️ Сессия возобновлена", show_alert=True)
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "delete"))
+async def cb_ract_delete(
+    callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await pool.execute(
+        "DELETE FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
+        callback_data.session_id, callback.from_user.id,
+    )
+    await callback.message.edit_text(
+        "🗑 <b>Сессия удалена</b>",
+        parse_mode="HTML",
+        reply_markup=_ract_back_kb().as_markup(),
     )

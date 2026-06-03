@@ -475,3 +475,9 @@ class WarmupSessionFSM(StatesGroup):
     entering_targets     = State()  # ввод username/ссылок вручную
     choosing_mode        = State()  # gentle | standard | aggressive
     confirming           = State()  # финальное подтверждение
+
+
+class ResourceActivityFSM(StatesGroup):
+    choosing_accounts = State()  # multi-select аккаунтов для активности
+    choosing_profile  = State()  # reader | commenter | reactor | mixed
+    confirming        = State()  # подтверждение перед запуском

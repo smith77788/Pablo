@@ -389,3 +389,11 @@ class EcoPickCb(CallbackData, prefix="ecopick"):
     eco_id: int = 0
 
 
+class ResourceActCb(CallbackData, prefix="ract"):
+    """Resource Activity Engine — активность в собственных ресурсах."""
+    action: str
+    session_id: int = 0
+    account_id: int = 0
+    page: int = 0
+
+
