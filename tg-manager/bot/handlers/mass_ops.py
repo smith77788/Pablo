@@ -94,7 +94,7 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
     except Exception:
         pass
 
-    # Fallback: simple state block
+    # Fallback: simple state block via infra_orchestrator
     try:
         state_res, cap_res = await asyncio.gather(
             infra_orchestrator.get_state(pool, owner_id),

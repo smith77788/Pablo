@@ -851,6 +851,8 @@ asyncio.create\_task(my\_service.run(pool))
 ### ✅ ЗАКРЫТО (r22) — BOTMOTHER EPOCH II: INFRASTRUCTURE INTELLIGENCE CONTRACT
 
 - ✅ **intelligence_engine.py HTML fix** — html.escape() в format_pre_launch_block() (risk.reasons, warning_text, go_reason)
+- ✅ **intelligence_engine bug fix** — исправлен мёртвый if/else в flood_risk_component (обе ветки были идентичны)
+- ✅ **available_accs SQL fix** — excluded spamblock/banned/deactivated/session_expired из подсчёта доступных аккаунтов в assess_risk
 - ✅ **Cooldown Reset UI** — кнопка "🔓 Сбросить кулдауны" в Health Dashboard; reset_one + reset_all handlers
 - ✅ **Pool Pressure Score** — compute_pool_pressure() → per-pool давление с cooldown+restriction+flood; format_pool_pressure()
 - ✅ **Pressure Panel → Pool Breakdown** — панель давления показывает breakdown по пулам (≥2 пулов)
@@ -858,10 +860,10 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **Copilot Memory Analyzer** — _analyze_memory_performance(): chronic underperformers + trust-memory divergence
 - ✅ **Copilot Timing Analyzer** — _analyze_timing_patterns(): best operation hour из 14d history в operation_queue
 - ✅ **Intelligence Dashboard** — InfraCb(action="intelligence"): top-3 accounts, risk for join/publish/strike, proxy quality
-- ✅ **Strike Intelligence upgrade** — format_pre_launch_block() + excluded accounts с причинами на confirm screen
-- ✅ **Mass Ops Intelligence upgrade** — _intel_block() → intelligence_engine.get_pre_launch_intelligence() primary + fallback
+- ✅ **format_pre_launch_block** — добавлены исключённые аккаунты с причинами (макс. 3): "↳ acc_name: причина исключения"
+- ✅ **Strike Intelligence upgrade** — get_pre_launch_intelligence() + format_pre_launch_block() с fallback на infra_orchestrator
+- ✅ **Mass Ops Intelligence upgrade** — _intel_block() → intelligence_engine primary + infra_orchestrator fallback
 - ✅ **Memory Feedback Loop completeness** — global_presence_channel + global_presence_bot теперь пишут в infra_memory per-item
-- ✅ **Free Mode** — глобальный toggle в /admin + platform_settings (из прошлой сессии, задокументировано)
 
 *Последнее обновление: 2026-06-03 (r22)* *Следующий build-номер: r23*
 

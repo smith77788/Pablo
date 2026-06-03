@@ -800,16 +800,6 @@ async def cb_mini_strike_category(
             pool, callback.from_user.id, "strike", 1
         )
         intel_block = _ie.format_pre_launch_block(intel)
-        # Append excluded accounts section if any
-        excluded = [a for a in intel.all_accounts if not a.recommended and a.skip_reason]
-        if excluded:
-            ex_lines = ["\n⛔ <b>Исключены из операции:</b>"]
-            for a in excluded[:4]:
-                import html as _html
-                ex_lines.append(
-                    f"  • {_html.escape(a.label())} — {_html.escape(a.skip_reason or '?')}"
-                )
-            intel_block += "\n".join(ex_lines)
     except Exception:
         # Fallback to simple state-based block
         try:

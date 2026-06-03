@@ -283,13 +283,26 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
         f"{intel.pressure_emoji} <b>Инфраструктура:</b> {intel.pressure_label} ({intel.pressure_score}/100)"
     )
 
-    # Аккаунты
-    available = [a for a in intel.all_accounts if not a.is_cooling and a.recommended]
+    # Аккаунты — доступные и исключённые
+    available = [a for a in intel.all_accounts if a.recommended]
+    excluded = [a for a in intel.all_accounts if not a.recommended]
     cooling = [a for a in intel.all_accounts if a.is_cooling]
-    lines.append(
-        f"📱 <b>Аккаунты:</b> {len(available)} доступно"
-        + (f" · {len(cooling)} на кулдауне" if cooling else "")
-    )
+    accs_line = f"📱 <b>Аккаунты:</b> ✅ {len(available)} доступно"
+    if cooling:
+        accs_line += f" · ⏳ {len(cooling)} кулдаун"
+    if excluded:
+        accs_line += f" · 🚫 {len(excluded)} исключено"
+    lines.append(accs_line)
+
+    # Исключённые аккаунты с причинами (макс. 3)
+    if excluded:
+        shown_excluded = excluded[:3]
+        for acc in shown_excluded:
+            lbl = html.escape(acc.label())
+            reason = html.escape(acc.skip_reason)
+            lines.append(f"   ↳ {lbl}: {reason}")
+        if len(excluded) > 3:
+            lines.append(f"   … и ещё {len(excluded) - 3}")
 
     # Прогноз
     if intel.prediction.item_count > 0:
@@ -298,7 +311,7 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
     # Риск
     lines.append(f"🎯 <b>Риск:</b> {html.escape(intel.risk.summary)}")
 
-    # Причины риска
+    # Причины риска (макс. 2)
     if intel.risk.reasons:
         for r in intel.risk.reasons[:2]:
             lines.append(f"   • {html.escape(r)}")
@@ -416,10 +429,7 @@ async def _analyze_accounts_impl(
 
         # Флуд-активность
         flood_risk_component = min(1.0, flood_7d / 15.0)
-        if flood_7d > 10:
-            risk_factors.append(flood_risk_component * 0.35)
-        else:
-            risk_factors.append(flood_risk_component * 0.35)
+        risk_factors.append(flood_risk_component * 0.35)
 
         # In-memory риск
         risk_factors.append(flood_risk * 0.25)
@@ -573,7 +583,10 @@ async def _assess_risk_impl(
     acc_row = await pool.fetchrow(
         """SELECT
                COUNT(*) FILTER (WHERE is_active) AS total,
-               COUNT(*) FILTER (WHERE is_active AND (cooldown_until IS NULL OR cooldown_until < NOW())) AS available,
+               COUNT(*) FILTER (WHERE is_active
+                   AND (cooldown_until IS NULL OR cooldown_until < NOW())
+                   AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')
+               ) AS available,
                COUNT(*) FILTER (WHERE is_active AND COALESCE(trust_score,1.0) < 0.4) AS low_trust,
                AVG(COALESCE(trust_score,1.0)) FILTER (WHERE is_active) AS avg_trust,
                COUNT(*) FILTER (WHERE is_active AND COALESCE(flood_count_7d,0) > 10) AS high_flood
