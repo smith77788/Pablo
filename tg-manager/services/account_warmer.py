@@ -792,18 +792,163 @@ async def run_daily_warmup(
     }
 
 
+async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
+    """
+    Выполняет один день прогрева для сессии (N аккаунтов → M целей).
+
+    Возвращает {'actions_done', 'actions_ok', 'actions_fail', 'completed'}.
+    """
+    from services import account_manager
+
+    session_id = session["id"]
+    owner_id = session["owner_id"]
+    account_ids: list = session.get("account_ids") or []
+    target_refs: list = session.get("target_refs") or []
+    plan_type: str = session.get("plan_type", "standard")
+    current_day: int = session.get("current_day", 0)
+    daily_actions: int = session.get("daily_actions", 10)
+    target_days: int = session.get("target_days", 14)
+
+    if not account_ids:
+        log.warning("warmup_session %d: no account_ids", session_id)
+        return {"actions_done": 0, "actions_ok": 0, "actions_fail": 0, "completed": False}
+
+    # Если нет явных целей — загружаем из собственной инфраструктуры
+    targets: list[str] = list(target_refs) if target_refs else []
+    if not targets:
+        resources = await _get_warmup_resources(pool, owner_id)
+        targets = [f"@{c['username']}" for c in resources["channels"] if c.get("username")]
+        targets += [f"@{b['username']}" for b in resources["bots"] if b.get("username")]
+    if not targets:
+        targets = _WARMUP_PUBLIC_CHANNELS[:8]
+
+    actions_per_acc = max(1, daily_actions // len(account_ids))
+    total_ok = 0
+    total_fail = 0
+
+    for acc_id in account_ids:
+        acc_row = await pool.fetchrow(
+            """SELECT a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
+               FROM tg_accounts a
+               LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
+               WHERE a.id=$1 AND a.is_active=TRUE""",
+            acc_id,
+        )
+        if not acc_row or not acc_row["session_str"]:
+            continue
+
+        device = dict(acc_row) if acc_row["device_model"] else None
+        client = account_manager._make_client(acc_row["session_str"], device)
+        available_actions = _get_actions_for_day(current_day)
+
+        try:
+            await asyncio.wait_for(client.connect(), timeout=15)
+
+            for i in range(actions_per_acc):
+                action = random.choice(available_actions)
+                target = targets[i % len(targets)] if targets else ""
+                success = False
+                error_str: Optional[str] = None
+                t0 = time.monotonic()
+
+                try:
+                    if action in ("update_presence", "browse_dialogs"):
+                        target = "self"
+                        success = await (_perform_update_presence(client) if action == "update_presence"
+                                         else _perform_browse_dialogs(client))
+                    elif action == "read_channel" and target:
+                        success = await _perform_read_channel(client, target)
+                    elif action == "send_reaction" and target:
+                        success = await _perform_send_reaction(client, target)
+                    elif action == "mark_read" and target:
+                        success = await _perform_mark_read(client, target)
+                    elif action == "send_comment" and target:
+                        success = await _perform_send_comment(client, target)
+                    elif action == "forward_to_saved" and target:
+                        success = await _perform_forward_to_saved(client, target)
+                    elif action == "vote_poll" and target:
+                        success = await _perform_vote_poll(client, target)
+                    elif action == "own_channel_read" and target:
+                        success = await _perform_own_channel_read(client, target)
+                    elif action in ("smart_bot_start", "own_bot_start") and target:
+                        success = await _perform_smart_bot_cmd(client, target, "/start")
+                    elif action == "smart_bot_help" and target:
+                        success = await _perform_smart_bot_cmd(client, target, "/help")
+                    else:
+                        success = True
+
+                    dur_s = time.monotonic() - t0
+                    try:
+                        from services import infra_memory
+                        await infra_memory.record_account_op(
+                            acc_id, "warmup_session", success, duration_s=dur_s
+                        )
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    error_str = str(exc)[:200]
+                    success = False
+
+                if success:
+                    total_ok += 1
+                else:
+                    total_fail += 1
+
+                try:
+                    await pool.execute(
+                        """INSERT INTO warmup_session_log
+                           (session_id, account_id, action_type, target, success, error)
+                           VALUES ($1,$2,$3,$4,$5,$6)""",
+                        session_id, acc_id, action, target or "", success, error_str,
+                    )
+                except Exception:
+                    pass
+
+                await asyncio.sleep(random.uniform(8, 25))
+
+        except Exception as exc:
+            log.warning("warmup_session acc=%d: %s", acc_id, exc)
+        finally:
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=5)
+            except Exception:
+                pass
+
+        await asyncio.sleep(random.uniform(15, 45))
+
+    new_day = current_day + 1
+    completed = new_day >= target_days
+    new_status = "completed" if completed else "active"
+
+    await pool.execute(
+        """UPDATE warmup_sessions
+           SET current_day=$1, last_run_at=NOW(), status=$2
+           WHERE id=$3""",
+        new_day, new_status, session_id,
+    )
+
+    log.info(
+        "warmup_session %d day=%d/%d ok=%d fail=%d completed=%s",
+        session_id, new_day, target_days, total_ok, total_fail, completed,
+    )
+    return {
+        "actions_done": total_ok + total_fail,
+        "actions_ok": total_ok,
+        "actions_fail": total_fail,
+        "completed": completed,
+    }
+
+
 async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     """
-    Фоновый цикл: каждый час проверяет активные планы разогрева.
-    Один запуск в сутки на план (проверяем last_action_at > 20ч).
-    Цикл стартует немедленно при запуске бота — задачи возобновляются
-    автоматически после перезапуска без потери прогресса.
+    Фоновый цикл: каждый час проверяет активные планы И сессии разогрева.
+    Один запуск в сутки на план/сессию (проверяем last_action_at > 20ч).
     """
     import asyncio
 
     while True:
         try:
-            # Найти планы, которые не запускались сегодня
+            # Одиночные планы разогрева
             rows = await pool.fetch(
                 """SELECT wp.*, a.owner_id
                    FROM account_warmup_plans wp
@@ -813,10 +958,24 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                           OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
             )
             if rows:
-                log.info("warmup loop: found %d plans to run", len(rows))
+                log.info("warmup loop: found %d single-plans to run", len(rows))
             for plan in rows:
                 await run_daily_warmup(pool, dict(plan))
-                await asyncio.sleep(30)  # Пауза между аккаунтами
+                await asyncio.sleep(30)
+
+            # Мультиаккаунтные сессии прогрева
+            session_rows = await pool.fetch(
+                """SELECT * FROM warmup_sessions
+                   WHERE status = 'active'
+                     AND (last_run_at IS NULL
+                          OR last_run_at < NOW() - INTERVAL '20 hours')""",
+            )
+            if session_rows:
+                log.info("warmup loop: found %d sessions to run", len(session_rows))
+            for session in session_rows:
+                await run_warmup_session(pool, dict(session))
+                await asyncio.sleep(30)
+
         except Exception as e:
             log.warning("warmup loop error: %s", e)
         await asyncio.sleep(interval_hours * 3600)

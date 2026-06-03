@@ -466,3 +466,12 @@ class EcosystemDnaFSM(StatesGroup):
 class EcosystemCloneFSM(StatesGroup):
     naming  = State()  # ввод имени клона
     region  = State()  # ввод нового региона (опционально)
+
+
+class WarmupSessionFSM(StatesGroup):
+    choosing_accounts    = State()  # multi-select рабочих аккаунтов
+    choosing_target_type = State()  # infra | manual
+    picking_infra        = State()  # multi-select каналов/ботов из инфраструктуры
+    entering_targets     = State()  # ввод username/ссылок вручную
+    choosing_mode        = State()  # gentle | standard | aggressive
+    confirming           = State()  # финальное подтверждение

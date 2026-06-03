@@ -302,6 +302,8 @@ class WarmupCb(CallbackData, prefix="wu"):
     action: str
     account_id: int = 0
     plan_id: int = 0
+    session_id: int = 0
+    page: int = 0
 
 
 class InfraCb(CallbackData, prefix="infra"):
