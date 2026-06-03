@@ -180,6 +180,10 @@ class PreLaunchIntelligence:
     pressure_label: str = "Норма"
     pressure_emoji: str = "🟢"
 
+    # Прокси
+    recommended_proxies: list["ProxyIntelligence"] = field(default_factory=list)
+    all_proxies: list["ProxyIntelligence"] = field(default_factory=list)
+
     # Итоговое решение системы
     go_decision: bool = True         # True = запускать, False = блокировать
     go_reason: str = ""              # почему заблокировано
@@ -304,6 +308,14 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
         if len(excluded) > 3:
             lines.append(f"   … и ещё {len(excluded) - 3}")
 
+    # Прокси (только если есть)
+    if intel.all_proxies:
+        bad_proxies = [p for p in intel.all_proxies if not p.recommended]
+        proxy_line = f"🌐 <b>Прокси:</b> ✅ {len(intel.recommended_proxies)} пригодны"
+        if bad_proxies:
+            proxy_line += f" · ⚠️ {len(bad_proxies)} плохих"
+        lines.append(proxy_line)
+
     # Прогноз
     if intel.prediction.item_count > 0:
         lines.append(f"⏱ <b>Прогноз:</b> {intel.prediction.format()}")
@@ -376,11 +388,12 @@ async def _analyze_accounts_impl(
     from services import infra_memory
     from services.flood_engine import get_account_state
 
-    # Запрос аккаунтов из БД
+    # Запрос аккаунтов из БД (включая health_score для полного анализа)
     if account_ids:
         rows = await pool.fetch(
             """SELECT id, phone, first_name, trust_score, flood_count_7d,
-                      cooldown_until, pool, tags, acc_status
+                      cooldown_until, pool, tags, acc_status,
+                      COALESCE(health_score, 0.5) AS health_score
                FROM tg_accounts
                WHERE owner_id=$1 AND is_active=TRUE AND id=ANY($2)
                ORDER BY COALESCE(trust_score, 1.0) DESC""",
@@ -389,7 +402,8 @@ async def _analyze_accounts_impl(
     else:
         rows = await pool.fetch(
             """SELECT id, phone, first_name, trust_score, flood_count_7d,
-                      cooldown_until, pool, tags, acc_status
+                      cooldown_until, pool, tags, acc_status,
+                      COALESCE(health_score, 0.5) AS health_score
                FROM tg_accounts
                WHERE owner_id=$1 AND is_active=TRUE
                ORDER BY COALESCE(trust_score, 1.0) DESC""",
@@ -407,6 +421,7 @@ async def _analyze_accounts_impl(
         acc_status = row["acc_status"] or "active"
         tags = list(row["tags"] or [])
         pool_name = row["pool"]
+        health = float(row["health_score"])
 
         is_cooling = cooldown is not None and cooldown.timestamp() > now
         cooldown_minutes = max(0, int((cooldown.timestamp() - now) / 60)) if is_cooling else 0
@@ -453,11 +468,12 @@ async def _analyze_accounts_impl(
         reliability_score = mem_score  # уже 0.0–1.0
 
         # ── Suitability Score — итоговая пригодность для операции ──
-        # Комбинация: высокое доверие + низкий риск + высокая надёжность
+        # Комбинация: trust + health + низкий риск + историческая надёжность
         suitability = (
-            trust * 0.35
-            + (1.0 - risk_score) * 0.35
-            + reliability_score * 0.30
+            trust * 0.30
+            + health * 0.15
+            + (1.0 - risk_score) * 0.30
+            + reliability_score * 0.25
         )
         suitability = max(0.0, min(1.0, suitability))
 
@@ -748,9 +764,27 @@ async def _predict_impl(
     memory_adjustment = (avg_memory_score - 0.5) * 0.20  # ±10%
     success_probability = max(0.30, min(0.98, base_rate + memory_adjustment))
 
-    # Время выполнения
-    items_per_account = item_count / account_count
+    # Время выполнения — используем реальные данные из infra_memory если есть
+    historical_duration: Optional[float] = None
+    if acc_ids:
+        durations = [
+            infra_memory.get_account_avg_duration(acc_id, op_type)
+            for acc_id in acc_ids[:account_count]
+        ]
+        valid = [d for d in durations if d is not None and d > 0]
+        if len(valid) >= 2:
+            historical_duration = sum(valid) / len(valid)
+
+    if historical_duration and historical_duration > 0:
+        # Используем реальное среднее + ±20% диапазон
+        t_hist_min = historical_duration * 0.8
+        t_hist_max = historical_duration * 1.2
+        # Смешиваем с базовыми константами (70% история, 30% baseline)
+        t_min = t_hist_min * 0.7 + t_min * 0.3
+        t_max = t_hist_max * 0.7 + t_max * 0.3
+
     # Параллельное выполнение с аккаунтами
+    items_per_account = item_count / account_count
     effective_items = max(1, item_count / account_count)
     t_min_total = int(effective_items * t_min / 60)
     t_max_total = int(effective_items * t_max / 60)
@@ -815,12 +849,15 @@ async def _pre_launch_impl(
 ) -> PreLaunchIntelligence:
     from services import infra_pressure
 
-    # Параллельный сбор данных
-    accs_task = asyncio.create_task(analyze_accounts(pool, owner_id, op_type, account_ids))
-    risk_task = asyncio.create_task(assess_risk(pool, owner_id, op_type, item_count))
+    # Параллельный сбор данных (включая анализ прокси)
+    accs_task     = asyncio.create_task(analyze_accounts(pool, owner_id, op_type, account_ids))
+    risk_task     = asyncio.create_task(assess_risk(pool, owner_id, op_type, item_count))
     pressure_task = asyncio.create_task(infra_pressure.compute_pressure(pool, owner_id))
+    proxies_task  = asyncio.create_task(analyze_proxies(pool, owner_id))
 
-    accs_list, risk, pressure_data = await asyncio.gather(accs_task, risk_task, pressure_task)
+    accs_list, risk, pressure_data, proxies_list = await asyncio.gather(
+        accs_task, risk_task, pressure_task, proxies_task
+    )
 
     recommended_accs = [a for a in accs_list if a.recommended]
     acc_count = len(recommended_accs) if recommended_accs else max(1, len(accs_list))
@@ -830,6 +867,8 @@ async def _pre_launch_impl(
     pressure_emoji = pressure_data.get("level_emoji", "🟢")
     pressure_label = pressure_data.get("level_label", "Норма")
 
+    recommended_proxies = [p for p in proxies_list if p.recommended]
+
     intel = PreLaunchIntelligence(
         op_type=op_type,
         item_count=item_count,
@@ -838,6 +877,8 @@ async def _pre_launch_impl(
         prediction=prediction,
         recommended_accounts=recommended_accs,
         all_accounts=accs_list,
+        recommended_proxies=recommended_proxies,
+        all_proxies=proxies_list,
         pressure_score=pressure_score,
         pressure_label=pressure_label,
         pressure_emoji=pressure_emoji,

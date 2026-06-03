@@ -865,5 +865,16 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **Mass Ops Intelligence upgrade** — _intel_block() → intelligence_engine primary + infra_orchestrator fallback
 - ✅ **Memory Feedback Loop completeness** — global_presence_channel + global_presence_bot теперь пишут в infra_memory per-item
 
-*Последнее обновление: 2026-06-03 (r22)* *Следующий build-номер: r23*
+### ✅ ЗАКРЫТО (r23) — EPOCH II: LEARNING ENGINE + DEEP INTELLIGENCE
+
+- ✅ **schema_v66** — ALTER TABLE infra_memory_accounts ADD COLUMN avg_duration_s FLOAT DEFAULT 0
+- ✅ **infra_memory duration tracking** — `record_account_op(duration_s=...)`: скользящее среднее времени выполнения per-аккаунт/op_type
+- ✅ **get_account_avg_duration()** — новая функция, возвращает реальное среднее время если ≥3 samples
+- ✅ **Prediction Engine learning** — `_predict_impl` использует `get_account_avg_duration()` (70% история + 30% baseline) вместо только статичных констант
+- ✅ **health_score в Account Intelligence** — `_analyze_accounts_impl` запрашивает `health_score` из БД, включает в Suitability Score (trust 30% + health 15% + risk 30% + reliability 25%)
+- ✅ **Proxy recommendations в PreLaunchIntelligence** — `_pre_launch_impl` запрашивает `analyze_proxies()` параллельно, добавляет `recommended_proxies` + `all_proxies` в intel
+- ✅ **format_pre_launch_block proxy line** — показывает "🌐 Прокси: ✅ N пригодны · ⚠️ M плохих" если есть прокси
+- ✅ **flush/load avg_duration_s** — персистируется в БД через infra_memory flush loop, загружается при рестарте
+
+*Последнее обновление: 2026-06-03 (r23)* *Следующий build-номер: r24*
 

@@ -37,6 +37,8 @@ class _AccountActionRecord:
     last_failure_at: float = 0.0
     last_errors: list[str] = field(default_factory=list)  # последние 5 ошибок
     hour_successes: dict[int, int] = field(default_factory=dict)  # час → число успехов
+    avg_duration_s: float = 0.0    # скользящее среднее времени выполнения (сек на элемент)
+    duration_samples: int = 0      # количество измерений duration
 
     @property
     def total(self) -> int:
@@ -98,9 +100,11 @@ def record_account_op(
     action_type: str,
     success: bool,
     error: Optional[str] = None,
+    duration_s: Optional[float] = None,
 ) -> None:
     """Записать результат операции для аккаунта (in-memory, non-blocking).
 
+    duration_s — время выполнения одного элемента в секундах (для обучения Prediction Engine).
     Вызывается из account_manager, strike_engine, op_worker после каждой операции.
     """
     key = (account_id, action_type)
@@ -117,6 +121,11 @@ def record_account_op(
         # Трекинг по часу суток
         hour = int(time.strftime("%H", time.localtime(now)))
         rec.hour_successes[hour] = rec.hour_successes.get(hour, 0) + 1
+        # Скользящее среднее времени выполнения (только успешные)
+        if duration_s is not None and duration_s > 0:
+            n = rec.duration_samples + 1
+            rec.avg_duration_s = rec.avg_duration_s * (n - 1) / n + duration_s / n
+            rec.duration_samples = n
     else:
         rec.failures += 1
         rec.last_failure_at = now
@@ -181,6 +190,20 @@ def get_proxy_score(proxy_url: str, action_type: str) -> float:
     if key not in _proxy_memory:
         return 0.5
     return _proxy_memory[key].success_rate
+
+
+def get_account_avg_duration(account_id: int, action_type: str) -> Optional[float]:
+    """Вернуть среднее время выполнения одного элемента (сек), или None если нет данных.
+
+    Используется Prediction Engine для обучения на реальных временах вместо статичных констант.
+    """
+    key = (account_id, action_type)
+    if key not in _account_memory:
+        return None
+    rec = _account_memory[key]
+    if rec.duration_samples < 3:
+        return None  # недостаточно данных
+    return rec.avg_duration_s
 
 
 def get_best_hour(account_id: int, action_type: str) -> Optional[int]:
@@ -263,10 +286,11 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
             await pool.execute(
                 """INSERT INTO infra_memory_accounts
                        (account_id, action_type, successes, failures,
-                        last_success_at, last_failure_at, last_errors, updated_at)
+                        last_success_at, last_failure_at, last_errors,
+                        avg_duration_s, updated_at)
                    VALUES ($1, $2, $3, $4,
                        to_timestamp($5), to_timestamp($6),
-                       $7, NOW())
+                       $7, $8, NOW())
                    ON CONFLICT (account_id, action_type)
                    DO UPDATE SET
                        successes = infra_memory_accounts.successes + EXCLUDED.successes,
@@ -274,12 +298,17 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        last_success_at = GREATEST(infra_memory_accounts.last_success_at, EXCLUDED.last_success_at),
                        last_failure_at = GREATEST(infra_memory_accounts.last_failure_at, EXCLUDED.last_failure_at),
                        last_errors = EXCLUDED.last_errors,
+                       avg_duration_s = CASE
+                           WHEN EXCLUDED.avg_duration_s > 0 THEN EXCLUDED.avg_duration_s
+                           ELSE infra_memory_accounts.avg_duration_s
+                       END,
                        updated_at = NOW()""",
                 rec.account_id, rec.action_type,
                 rec.successes, rec.failures,
                 rec.last_success_at if rec.last_success_at > 0 else None,
                 rec.last_failure_at if rec.last_failure_at > 0 else None,
                 rec.last_errors,
+                rec.avg_duration_s if rec.avg_duration_s > 0 else 0.0,
             )
         except Exception as e:
             log.warning("infra_memory flush account %s/%s: %s", key[0], key[1], e)
@@ -337,7 +366,8 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
                       ima.successes, ima.failures,
                       EXTRACT(EPOCH FROM ima.last_success_at) as last_success_ts,
                       EXTRACT(EPOCH FROM ima.last_failure_at) as last_failure_ts,
-                      ima.last_errors
+                      ima.last_errors,
+                      COALESCE(ima.avg_duration_s, 0) AS avg_duration_s
                FROM infra_memory_accounts ima
                JOIN tg_accounts a ON a.id = ima.account_id
                WHERE a.owner_id = $1 AND a.is_active = TRUE""",
@@ -349,6 +379,7 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
             if key in _account_memory:
                 # Не перетирать свежие in-memory данные устаревшими из БД
                 continue
+            total = (row["successes"] or 0) + (row["failures"] or 0)
             rec = _AccountActionRecord(
                 account_id=row["account_id"],
                 action_type=row["action_type"],
@@ -357,6 +388,8 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
                 last_success_at=float(row["last_success_ts"] or 0),
                 last_failure_at=float(row["last_failure_ts"] or 0),
                 last_errors=list(row["last_errors"] or []),
+                avg_duration_s=float(row["avg_duration_s"] or 0),
+                duration_samples=total,
             )
             _account_memory[key] = rec
             loaded += 1
@@ -379,7 +412,8 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
                       successes, failures,
                       EXTRACT(EPOCH FROM last_success_at) as last_success_ts,
                       EXTRACT(EPOCH FROM last_failure_at) as last_failure_ts,
-                      last_errors
+                      last_errors,
+                      COALESCE(avg_duration_s, 0) AS avg_duration_s
                FROM infra_memory_accounts
                WHERE successes + failures > 0"""
         )
@@ -388,6 +422,7 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
             key = (row["account_id"], row["action_type"])
             if key in _account_memory:
                 continue  # не перетирать свежие in-memory данные
+            total = (row["successes"] or 0) + (row["failures"] or 0)
             rec = _AccountActionRecord(
                 account_id=row["account_id"],
                 action_type=row["action_type"],
@@ -396,6 +431,8 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
                 last_success_at=float(row["last_success_ts"] or 0),
                 last_failure_at=float(row["last_failure_ts"] or 0),
                 last_errors=list(row["last_errors"] or []),
+                avg_duration_s=float(row["avg_duration_s"] or 0),
+                duration_samples=total,
             )
             _account_memory[key] = rec
             loaded += 1
