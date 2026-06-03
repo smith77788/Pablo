@@ -464,4 +464,5 @@ class EcosystemDnaFSM(StatesGroup):
 
 
 class EcosystemCloneFSM(StatesGroup):
-    naming = State()  # ввод имени клона
+    naming  = State()  # ввод имени клона
+    region  = State()  # ввод нового региона (опционально)

@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r28
+- **Текущая build:** 2026.06.03-r29
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -989,4 +989,20 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ Иконка summary_icon: 🟢/🟡/🔴 по среднему здоровью
 
 *Последнее обновление: 2026-06-03 (r28)* *Следующий build-номер: r29*
+
+### ✅ ЗАКРЫТО (r29) — EPOCH III: Regional Factory link + Clone Auto-Adaptation
+
+**Regional Factory quick-launch из экосистемы:**
+- ✅ Кнопка "🌍 Global Presence" в `cb_eco_view` keyboard
+- ✅ Импорт `GeoPresenceCb` в ecosystems.py
+- ✅ GP автоматически создаёт экосистему при запуске (r25, уже работало)
+
+**Clone Auto-Adaptation (регион):**
+- ✅ `EcosystemCloneFSM.region` — новый FSM state для ввода региона
+- ✅ `fsm_eco_clone_name`: после имени спрашивает новый регион
+- ✅ `cb_eco_clone_skip_region`: пропустить регион (быстрый клон)
+- ✅ `fsm_eco_clone_region`: применяет новый регион к клонированной экосистеме
+- ✅ При наличии нового региона: `UPDATE ecosystems SET region=$1`
+
+*Последнее обновление: 2026-06-03 (r29)* *Следующий build-номер: r30*
 

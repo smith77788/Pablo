@@ -16,7 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import asyncpg
 
-from bot.callbacks import EcoCb, BmCb, EcoPickCb
+from bot.callbacks import EcoCb, BmCb, EcoPickCb, GeoPresenceCb
 from bot.states import EcosystemCreateFSM, EcosystemAddMemberFSM, EcosystemDnaFSM, EcosystemCloneFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -265,9 +265,10 @@ async def cb_eco_view(
     kb.button(text="🔃 Синхр.",       callback_data=EcoCb(action="sync",     eco_id=eco_id))
     kb.button(text="🧬 DNA",          callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
     kb.button(text="♻️ Клон",         callback_data=EcoCb(action="clone_start", eco_id=eco_id))
+    kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="🔄 Обновить",     callback_data=EcoCb(action="view",     eco_id=eco_id))
     kb.button(text="◀️ Назад",        callback_data=EcoCb(action="menu"))
-    kb.adjust(3, 2, 2, 2, 3)
+    kb.adjust(3, 2, 2, 2, 2, 2)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -1087,24 +1088,78 @@ async def cb_eco_clone_start(
 
 @router.message(EcosystemCloneFSM.naming)
 async def fsm_eco_clone_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
-    from services import ecosystem_brain as _eb
-    sd = await state.get_data()
-    source_id = sd.get("clone_source_id", 0)
     new_name = (message.text or "").strip()[:80]
     if not new_name:
         await message.answer("Название не может быть пустым. Введите название клона:")
         return
+    await state.update_data(clone_new_name=new_name)
+    await state.set_state(EcosystemCloneFSM.region)
 
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=EcoCb(action="clone_skip_region"))
+    kb.button(text="❌ Отмена",    callback_data=EcoCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"🌍 <b>Адаптация региона</b>\n\n"
+        f"Клон: <b>{html.escape(new_name)}</b>\n\n"
+        f"Введите новый регион для адаптации (например: <i>Санкт-Петербург</i>)\n"
+        f"или нажмите Пропустить:",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(EcoCb.filter(F.action == "clone_skip_region"))
+async def cb_eco_clone_skip_region(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    from services import ecosystem_brain as _eb
+    sd = await state.get_data()
+    source_id = sd.get("clone_source_id", 0)
+    new_name  = sd.get("clone_new_name", "Клон")
     await state.clear()
+    await callback.answer()
     try:
-        new_id = await _eb.clone_ecosystem(pool, source_id, message.from_user.id, new_name)
+        new_id = await _eb.clone_ecosystem(pool, source_id, callback.from_user.id, new_name)
         kb = InlineKeyboardBuilder()
         kb.button(text="🌐 Открыть клон", callback_data=EcoCb(action="view", eco_id=new_id))
         kb.button(text="📋 Все экосистемы", callback_data=EcoCb(action="menu"))
         kb.adjust(1)
+        await callback.message.edit_text(
+            f"✅ <b>Экосистема клонирована</b>\n\n"
+            f"<b>{html.escape(new_name)}</b> (#{new_id})\n"
+            f"Все участники скопированы.",
+            parse_mode="HTML", reply_markup=kb.as_markup(),
+        )
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML"
+        )
+
+
+@router.message(EcosystemCloneFSM.region)
+async def fsm_eco_clone_region(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    from services import ecosystem_brain as _eb
+    sd = await state.get_data()
+    source_id  = sd.get("clone_source_id", 0)
+    new_name   = sd.get("clone_new_name", "Клон")
+    new_region = (message.text or "").strip()[:64]
+    await state.clear()
+    try:
+        new_id = await _eb.clone_ecosystem(pool, source_id, message.from_user.id, new_name)
+        if new_region:
+            await pool.execute(
+                "UPDATE ecosystems SET region=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+                new_region, new_id, message.from_user.id,
+            )
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🌐 Открыть клон", callback_data=EcoCb(action="view", eco_id=new_id))
+        kb.button(text="📋 Все экосистемы", callback_data=EcoCb(action="menu"))
+        kb.adjust(1)
+        region_note = f"Регион: <b>{html.escape(new_region)}</b>\n" if new_region else ""
         await message.answer(
             f"✅ <b>Экосистема клонирована</b>\n\n"
-            f"Новая экосистема: <b>{html.escape(new_name)}</b> (#{new_id})\n"
+            f"<b>{html.escape(new_name)}</b> (#{new_id})\n"
+            f"{region_note}"
             f"Все участники скопированы.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
