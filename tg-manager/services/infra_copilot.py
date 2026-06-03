@@ -61,6 +61,28 @@ def get_snooze_remaining(owner_id: int) -> str:
     return f"{mins}м"
 
 
+async def reload_snoozes_from_db(pool: asyncpg.Pool) -> None:
+    """Загружает снуз-состояния из БД в оперативный словарь (вызывать при старте цикла)."""
+    import time
+    try:
+        rows = await pool.fetch(
+            "SELECT key, value FROM platform_settings WHERE key LIKE 'copilot_snooze_%'"
+        )
+        now = time.time()
+        for row in rows:
+            try:
+                owner_id = int(row["key"].replace("copilot_snooze_", ""))
+                exp = float(row["value"])
+                if exp > now:
+                    _snooze_until[owner_id] = exp
+                else:
+                    _snooze_until.pop(owner_id, None)
+            except (ValueError, KeyError):
+                pass
+    except Exception as e:
+        log.debug("reload_snoozes_from_db: %s", e)
+
+
 # ── Severity порядок для сортировки ──────────────────────────────────────────
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2, "opportunity": 3}
 
@@ -1241,6 +1263,7 @@ async def run_copilot_loop(pool: asyncpg.Pool, bot) -> None:
 
     while True:
         try:
+            await reload_snoozes_from_db(pool)
             # Получить список активных владельцев с аккаунтами
             owner_ids = await pool.fetch(
                 """SELECT DISTINCT owner_id FROM tg_accounts
