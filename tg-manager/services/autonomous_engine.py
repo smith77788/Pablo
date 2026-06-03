@@ -100,12 +100,16 @@ def choose_strategy(
     accounts = int(
         plan.get("n_accounts_selected", resources.get("accounts_available", 0)) or 0
     )
-    targets = int(plan.get("n_targets", 0) or 0)
+    targets = _target_count(plan)
     intent_type = str(plan.get("intent_type", "custom"))
 
-    if pressure >= 70 or active_ops >= 5 or accounts <= 1:
+    if (
+        pressure >= 70
+        or active_ops >= 5
+        or (_intent_requires_accounts(intent_type) and accounts <= 1)
+    ):
         return "safest"
-    if intent_type in {"audit", "sync"}:
+    if intent_type in {"audit", "sync", "visibility"}:
         return "balanced"
     if targets >= max(100, accounts * 35):
         return "scalable"
@@ -120,15 +124,18 @@ async def build_resource_plan(
     resources: dict[str, Any],
     strategy: Strategy,
 ) -> dict[str, Any]:
-    requested_accounts = int(
-        plan.get("n_accounts_selected")
-        or min(
-            resources.get("accounts_available", 0),
-            max(1, plan.get("n_targets", 1) // 15),
-        )
-        or 0
-    )
     op_type = _intent_to_op_type(intent_type, plan)
+    read_only = not _intent_requires_accounts(intent_type)
+    requested_accounts = 0
+    if not read_only:
+        requested_accounts = int(
+            plan.get("n_accounts_selected")
+            or min(
+                resources.get("accounts_available", 0),
+                max(1, _target_count(plan) // 15),
+            )
+            or 0
+        )
     accounts = await _safe_recommend_accounts(
         pool, owner_id, op_type, requested_accounts
     )
@@ -139,6 +146,7 @@ async def build_resource_plan(
 
     return {
         "op_type": op_type,
+        "operation_class": "read_only" if read_only else "active",
         "requested_accounts": requested_accounts,
         "primary_account_ids": [i for i in primary if i is not None],
         "secondary_account_ids": [i for i in secondary if i is not None],
@@ -154,7 +162,7 @@ def build_queue_plan(
     infra_state: dict[str, Any],
     strategy: Strategy,
 ) -> dict[str, Any]:
-    targets = int(plan.get("n_targets", 1) or 1)
+    targets = _target_count(plan)
     pressure = int(infra_state.get("pressure", {}).get("score", 0) or 0)
     active_ops = int(resources.get("active_operations", 0) or 0)
     parallelism = {"safest": 1, "balanced": 2, "fastest": 3, "scalable": 4}[strategy]
@@ -184,7 +192,10 @@ def build_risk_plan(
     blockers: list[str] = []
     warnings: list[str] = []
 
-    if accounts <= 0:
+    if (
+        _intent_requires_accounts(str(plan.get("intent_type", "custom")))
+        and accounts <= 0
+    ):
         blockers.append("No available accounts")
     if pressure >= 85:
         blockers.append("Infrastructure pressure is too high")
@@ -338,9 +349,25 @@ def _intent_to_op_type(intent_type: str, plan: dict[str, Any]) -> str:
         }.get(asset_type, "global_presence_channel")
     if intent_type == "strike":
         return "strike"
+    if intent_type == "audit":
+        return "infra_audit"
     if intent_type == "sync":
         return "bulk_bot_edit"
+    if intent_type == "visibility":
+        return "visibility_audit"
     return "mass_publish"
+
+
+def _intent_requires_accounts(intent_type: str) -> bool:
+    return intent_type not in {"audit", "visibility"}
+
+
+def _target_count(plan: dict[str, Any]) -> int:
+    for key in ("n_targets", "n_total", "n_keywords", "n_channels", "n_bots"):
+        value = plan.get(key)
+        if isinstance(value, int | float) and value > 0:
+            return int(value)
+    return 1
 
 
 def _proxy_policy(resources: dict[str, Any], strategy: Strategy) -> dict[str, Any]:
