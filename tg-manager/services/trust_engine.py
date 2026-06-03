@@ -40,6 +40,7 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
                cooldown_until
         FROM tg_accounts
         WHERE is_active = true
+          AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')
     """)
     history_batch = []
     for row in rows:
@@ -54,6 +55,25 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
             score, row["id"],
         )
         history_batch.append((row["id"], row["owner_id"], score))
+
+    # Корректируем trust для ограниченных аккаунтов, которые могли быть пересчитаны ранее
+    try:
+        await pool.execute(
+            """UPDATE tg_accounts
+               SET trust_score = LEAST(COALESCE(trust_score, 1.0), 0.3)
+               WHERE is_active = TRUE
+                 AND acc_status = 'spamblock'
+                 AND COALESCE(trust_score, 1.0) > 0.3"""
+        )
+        await pool.execute(
+            """UPDATE tg_accounts
+               SET trust_score = 0.0
+               WHERE is_active = TRUE
+                 AND acc_status IN ('banned', 'deactivated')
+                 AND COALESCE(trust_score, 1.0) > 0.1"""
+        )
+    except Exception as exc:
+        log.debug("trust_engine: restricted account correction skipped: %s", exc)
 
     # Write one history snapshot per recalculation cycle (every 30 min)
     if history_batch:

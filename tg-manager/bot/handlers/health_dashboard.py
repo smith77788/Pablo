@@ -392,45 +392,100 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         lines.append("Нет подключённых аккаунтов.")
     else:
         now = datetime.now(timezone.utc)
+
+        # Группируем по статусу
+        grp_restricted: list = []
+        grp_cooldown: list = []
+        grp_low_trust: list = []
+        grp_ok: list = []
+
         for acc in rows:
-            trust = float(acc["trust_score"] or 1.0)
-            health = float(acc["health_score"] or 0) if acc["health_score"] is not None else None
-            phone = acc["phone"] or ""
-            name = acc["username"] or acc["first_name"] or phone or f"id{acc['id']}"
-            flood_until = acc["cooldown_until"]
-            flood_cnt = int(acc["flood_count_7d"] or 0)
             acc_status = acc["acc_status"] or "active"
-            last_check = acc["last_real_check_at"]
-
-            hs_str = f" | health: {health:.0f}" if health is not None else ""
-
-            # Pool and tags info
-            pool_str = f" | 🏊 {acc['pool']}" if acc.get("pool") else ""
-            tags_list = acc.get("tags") or []
-            tags_str = f" | 🏷 {', '.join(tags_list[:3])}" if tags_list else ""
-
-            # Статус ограничений — главный приоритет
+            flood_until = acc["cooldown_until"]
+            trust = float(acc["trust_score"] or 1.0)
             if acc_status in ("spamblock", "banned", "deactivated", "session_expired"):
+                grp_restricted.append(acc)
+            elif flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
+                grp_cooldown.append(acc)
+            elif trust < 0.5:
+                grp_low_trust.append(acc)
+            else:
+                grp_ok.append(acc)
+
+        # Сводная строка
+        summary_parts = []
+        if grp_ok:
+            summary_parts.append(f"✅ {len(grp_ok)} в норме")
+        if grp_restricted:
+            summary_parts.append(f"🚫 {len(grp_restricted)} ограничен{'ы' if len(grp_restricted) > 1 else ''}")
+        if grp_cooldown:
+            summary_parts.append(f"⏸ {len(grp_cooldown)} на паузе")
+        if grp_low_trust:
+            summary_parts.append(f"⚠️ {len(grp_low_trust)} низкий trust")
+        lines.append("  ".join(summary_parts) if summary_parts else "Нет данных")
+        lines.append("")
+
+        # Ограниченные аккаунты — полный список
+        if grp_restricted:
+            lines.append("<b>🚨 Ограничения:</b>")
+            for acc in grp_restricted:
+                acc_status = acc["acc_status"] or "active"
                 status_emoji = _STATUS_EMOJI.get(acc_status, "⛔")
                 status_label = _STATUS_LABEL.get(acc_status, acc_status.upper())
+                trust = float(acc["trust_score"] or 0)
+                name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
+                phone = acc["phone"] or ""
+                last_check = acc["last_real_check_at"]
+                check_str = f" | с {last_check.strftime('%d.%m')}" if last_check else " | давно"
                 lines.append(
-                    f"{status_emoji} @{name} ({phone}) | <b>{status_label}</b> | trust: {trust:.2f}{hs_str}{pool_str}{tags_str}"
+                    f"  {status_emoji} <b>{name}</b>{check_str} | trust: {trust:.2f}"
                 )
-            elif flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
+            lines.append("")
+
+        # Аккаунты на паузе
+        if grp_cooldown:
+            lines.append("<b>⏸ На паузе:</b>")
+            for acc in grp_cooldown:
+                name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
+                flood_until = acc["cooldown_until"]
                 human_cd = _human_cooldown(flood_until, now)
-                time_str = flood_until.strftime("%d.%m %H:%M")
-                lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b> ({human_cd}){hs_str}{pool_str}{tags_str}")
-            elif trust < 0.5:
+                trust = float(acc["trust_score"] or 1.0)
+                flood_cnt = int(acc["flood_count_7d"] or 0)
                 lines.append(
-                    f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}{pool_str}{tags_str}"
+                    f"  ⏸ <b>{name}</b> | {human_cd} | trust: {trust:.2f} | флудов: {flood_cnt}"
                 )
-            else:
-                check_hint = ""
-                if last_check is None:
-                    check_hint = " | <i>не проверен</i>"
+            lines.append("")
+
+        # Аккаунты с низким trust
+        if grp_low_trust:
+            lines.append("<b>⚠️ Низкая надёжность:</b>")
+            for acc in grp_low_trust:
+                name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
+                trust = float(acc["trust_score"] or 0)
+                flood_cnt = int(acc["flood_count_7d"] or 0)
+                health = acc["health_score"]
+                hs_str = f" | 🩺{float(health):.0f}" if health is not None else ""
                 lines.append(
-                    f"✅ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}{pool_str}{tags_str}{check_hint}"
+                    f"  ⚠️ <b>{name}</b> | trust: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}"
                 )
+            lines.append("")
+
+        # Нормальные аккаунты — первые 5, остальные свёрнуты
+        if grp_ok:
+            lines.append("<b>✅ В норме:</b>")
+            show_ok = grp_ok[:6]
+            for acc in show_ok:
+                name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
+                trust = float(acc["trust_score"] or 1.0)
+                health = acc["health_score"]
+                hs_str = f" | 🩺{float(health):.0f}" if health is not None else ""
+                last_check = acc["last_real_check_at"]
+                check_hint = " | <i>не проверен</i>" if last_check is None else ""
+                lines.append(
+                    f"  ✅ <b>{name}</b> | trust: {trust:.2f}{hs_str}{check_hint}"
+                )
+            if len(grp_ok) > 6:
+                lines.append(f"  <i>...и ещё {len(grp_ok) - 6} аккаунтов в норме</i>")
 
     kb = _back_kb()
     kb.adjust(1)

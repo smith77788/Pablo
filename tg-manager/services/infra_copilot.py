@@ -151,7 +151,7 @@ async def _analyze_account_patterns(
                 title=f"Двойной риск: {len(high_risk)} акк. (флуд + низкий trust)",
                 explanation=(
                     f"Аккаунты {names} одновременно имеют высокую флуд-активность "
-                    f"(>{5} за 7д) и низкий trust_score (<0.5). "
+                    f"(более 5 за 7д) и низкий trust_score (ниже 0.5). "
                     f"Худший: {worst['label']} — {worst['flood_count_7d']} флудов, "
                     f"trust={round(worst['trust_score'] or 0, 2)}."
                 ),
@@ -340,7 +340,7 @@ async def _analyze_proxy_patterns(
                 ),
                 recommendation=(
                     "Смените провайдера прокси или регион. "
-                    "Идеальная латентность для Telegram API: <500ms."
+                    "Идеальная латентность для Telegram API: до 500ms."
                 ),
                 data={
                     "proxies": [dict(r) for r in slow_proxies],
@@ -992,8 +992,8 @@ async def run_copilot_loop(pool: asyncpg.Pool, bot) -> None:
 def _format_critical_alert(insights: list[CopilotInsight]) -> str:
     lines = ["🚨 <b>Infrastructure Copilot: критические проблемы</b>\n"]
     for i in insights:
-        lines.append(f"• <b>{i.title}</b>")
-        lines.append(f"  {i.explanation}")
+        lines.append(f"• <b>{html.escape(i.title)}</b>")
+        lines.append(f"  {html.escape(i.explanation)}")
         if i.recommendation:
-            lines.append(f"  💡 {i.recommendation}")
+            lines.append(f"  💡 {html.escape(i.recommendation)}")
     return "\n".join(lines)
