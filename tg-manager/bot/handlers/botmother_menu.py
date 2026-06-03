@@ -422,6 +422,12 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
             parts.append(f"Давление: {p_emoji} {p_score}")
         if parts:
             infra_line = "\n\n<i>" + " · ".join(parts) + "</i>"
+        # Первый совет инфраструктурного советника (если есть)
+        if state.recommendations:
+            import html as _html
+            rec_text = _html.escape(state.recommendations[0].get("text", ""))
+            if rec_text:
+                infra_line += f"\n💡 <i>{rec_text}</i>"
     except Exception:
         log_exc_swallow(log, "botmother_menu: infra_orchestrator state fetch failed")
 
