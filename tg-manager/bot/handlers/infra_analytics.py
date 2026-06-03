@@ -95,6 +95,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🎯 Возможности аккаунтов",   callback_data=InfraCb(action="capabilities"))
     kb.button(text="🔄 Авто-балансировка пулов", callback_data=InfraCb(action="rebalance_preview"))
     kb.button(text="🎯 Советник",                callback_data=InfraCb(action="advisor"))
+    kb.button(text="🧠 Copilot",                 callback_data=InfraCb(action="copilot"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -707,6 +708,27 @@ async def cb_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Назад",   callback_data=InfraCb(action="menu"))
     kb.adjust(*([min(len(action_cbs), 3)] if action_cbs else []), 2)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(InfraCb.filter(F.action == "copilot"))
+async def cb_infra_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+    try:
+        from services import infra_copilot
+        insights = await infra_copilot.run_full_analysis(pool, owner_id)
+        if not insights:
+            text = "✅ <b>Copilot: всё в норме</b>\n\nКритических проблем не обнаружено."
+        else:
+            text = infra_copilot.format_copilot_report(insights)
+    except Exception as e:
+        text = f"⚠️ Copilot временно недоступен: {html.escape(str(e))}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data=InfraCb(action="copilot"))
+    kb.button(text="◀️ Назад",   callback_data=InfraCb(action="menu"))
+    kb.adjust(2)
+    await callback.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_apply"))
