@@ -50,7 +50,7 @@ def is_admin(uid: int) -> bool:
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
 
-def _admin_main_kb(new_error_reports: int = 0):
+def _legacy_admin_main_kb(new_error_reports: int = 0):
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Пользователи платформы", callback_data="adm:users")
     kb.button(text="💳 Подписки & платежи", callback_data="adm:subs")
@@ -93,7 +93,96 @@ def _admin_main_kb(new_error_reports: int = 0):
 
 # ── Список отображаемых переменных (с метками) ────────────────────────────────
 
+# Structured admin dashboard. The legacy keyboard above is intentionally kept as a
+# fallback reference while the live panel uses compact role-based sections.
+
+
+def _admin_main_kb(new_error_reports: int = 0):
+    kb = InlineKeyboardBuilder()
+    err_label = (
+        f"🐛 Ошибки ({new_error_reports})" if new_error_reports > 0 else "🐛 Ошибки"
+    )
+    kb.button(text="📊 Обзор", callback_data="adm:main")
+    kb.button(text="👥 Пользователи", callback_data="adm:section_users")
+    kb.button(text="💳 Деньги", callback_data="adm:section_billing")
+    kb.button(text="🤖 Боты / токены", callback_data="adm:section_assets")
+    kb.button(text="⚙️ Операции", callback_data="adm:section_ops")
+    kb.button(text="🧠 AI / провайдеры", callback_data="adm:section_ai")
+    kb.button(text="🛠 Система", callback_data="adm:section_system")
+    kb.button(text=err_label, callback_data="adm:error_reports")
+    kb.button(text="🚪 Выйти", callback_data="adm:exit")
+    kb.adjust(2, 2, 2, 2, 1)
+    return kb.as_markup()
+
+
+def _admin_section_kb(section: str, new_error_reports: int = 0):
+    kb = InlineKeyboardBuilder()
+    if section == "users":
+        kb.button(text="👥 Последние пользователи", callback_data="adm:users")
+        kb.button(text="🔍 Найти юзера", callback_data="adm:find_user")
+        kb.button(text="🚫 Заблокировать", callback_data="adm:block_ask")
+        kb.button(text="✅ Разблокировать", callback_data="adm:unblock_ask")
+        kb.button(text="🗑 Удалить данные", callback_data="adm:delete_ask")
+        kb.button(text="📋 Экспорт CSV", callback_data="adm:users_csv")
+        kb.button(text="🔔 Уведомления", callback_data="adm:notify_toggle")
+        kb.adjust(2, 2, 2, 1)
+    elif section == "billing":
+        kb.button(text="💳 Активные подписки", callback_data="adm:subs")
+        kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
+        kb.button(text="❌ Забрать подписку", callback_data="adm:revoke_ask")
+        kb.button(text="💰 Bulk-выдача", callback_data="adm:bulk_grant_ask")
+        kb.button(text="💵 Цены", callback_data="adm:prices")
+        kb.button(text="⚙️ Методы оплаты", callback_data="adm:pay_cfg")
+        kb.adjust(2, 2, 2)
+    elif section == "assets":
+        kb.button(text="🤖 Все боты", callback_data="adm:bots")
+        kb.button(text="📁 Экспорт токенов", callback_data="adm:tokens_file")
+        kb.button(text="⚔️ Выдать Strike", callback_data="adm:strike_grant_ask")
+        kb.button(text="⚔️ Забрать Strike", callback_data="adm:strike_revoke_ask")
+        kb.button(text="📨 Рассылка всем", callback_data="adm:broadcast")
+        kb.adjust(2, 2, 1)
+    elif section == "ops":
+        kb.button(text="📈 Очередь операций", callback_data="adm:platform_ops")
+        kb.button(text="🔐 Аудит операций", callback_data="adm:audit_log")
+        kb.button(text="📊 Системная статистика", callback_data="adm:stats")
+        kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
+        kb.adjust(2, 2)
+    elif section == "ai":
+        kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
+        kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
+        kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        kb.adjust(1)
+    elif section == "system":
+        free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
+        notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
+        kb.button(
+            text=f"🆓 Free Mode: {free_icon}", callback_data="adm:free_mode_toggle"
+        )
+        kb.button(
+            text=f"🔔 Новые пользователи: {notify_icon}",
+            callback_data="adm:notify_toggle",
+        )
+        kb.button(text="🔑 Railway env", callback_data="adm:env_list")
+        kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        err_label = (
+            f"🐛 Отчёты ({new_error_reports})"
+            if new_error_reports > 0
+            else "🐛 Отчёты об ошибках"
+        )
+        kb.button(text=err_label, callback_data="adm:error_reports")
+        kb.adjust(1)
+    kb.button(text="🏠 Админка", callback_data="adm:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 _ENV_VARS: list[tuple[str, str]] = [
+    ("AI_PROVIDER_ORDER", "🧠 AI Provider Order"),
+    ("OPENROUTER_MODELS", "🧠 OpenRouter Models"),
+    ("GROQ_API_KEY", "🧠 Groq Key"),
+    ("GROQ_MODEL", "🧠 Groq Model"),
+    ("GEMINI_API_KEY", "🧠 Gemini Key"),
+    ("GEMINI_MODEL", "🧠 Gemini Model"),
     ("MANAGER_BOT_TOKEN", "🤖 Bot Token"),
     ("ADMIN_IDS", "👑 Admin IDs"),
     ("ADMIN_SECRET", "🔐 Admin Secret"),
@@ -266,6 +355,24 @@ async def cb_admin(
     if action == "main":
         await _show_admin_main(callback, pool, edit=True)
 
+    elif action == "section_users":
+        await _adm_section_users(callback, pool)
+
+    elif action == "section_billing":
+        await _adm_section_billing(callback, pool)
+
+    elif action == "section_assets":
+        await _adm_section_assets(callback, pool)
+
+    elif action == "section_ops":
+        await _adm_section_ops(callback, pool)
+
+    elif action == "section_ai":
+        await _adm_section_ai(callback, pool)
+
+    elif action == "section_system":
+        await _adm_section_system(callback, pool)
+
     elif action == "users":
         await _adm_users(callback, pool)
 
@@ -415,6 +522,9 @@ async def cb_admin(
 
     elif action == "swarm_mode":
         await _adm_swarm_mode(callback, pool)
+
+    elif action == "ai_status":
+        await _adm_ai_status(callback, pool)
 
     elif action == "env_list":
         await _adm_env_list(callback, http)
@@ -591,6 +701,196 @@ async def cb_admin(
 
 
 # ── Sub-screens ───────────────────────────────────────────────────────────────
+
+
+async def _fetchval_or_zero(pool: asyncpg.Pool, query: str) -> int:
+    try:
+        return int(await pool.fetchval(query) or 0)
+    except Exception:
+        log_exc_swallow(log, "Admin dashboard metric query failed")
+        return 0
+
+
+async def _new_error_report_count(pool: asyncpg.Pool) -> int:
+    return await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM error_reports WHERE status='new'"
+    )
+
+
+def _provider_status_line(name: str, key_name: str, model_name: str) -> str:
+    key_ok = bool(os.getenv(key_name))
+    model = os.getenv(model_name, "auto")
+    status = "✅" if key_ok else "❌"
+    return f"{status} <b>{name}</b> · model: <code>{_html.escape(model)}</code>"
+
+
+async def _adm_section_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    total = await _fetchval_or_zero(pool, "SELECT COUNT(*) FROM platform_users")
+    today = await _fetchval_or_zero(
+        pool,
+        "SELECT COUNT(*) FROM platform_users "
+        "WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE",
+    )
+    banned = await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM platform_users WHERE COALESCE(is_banned,false)=true"
+    )
+    subscribers = await _fetchval_or_zero(
+        pool,
+        "SELECT COUNT(*) FROM subscriptions "
+        "WHERE is_active=true AND expires_at > now()",
+    )
+    text = (
+        "👥 <b>Пользователи</b>\n\n"
+        f"Всего: <b>{total}</b>\n"
+        f"Новых сегодня: <b>{today}</b>\n"
+        f"Активных подписок: <b>{subscribers}</b>\n"
+        f"Заблокировано: <b>{banned}</b>\n\n"
+        "Действия сгруппированы: просмотр, поиск, доступ, экспорт."
+    )
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_admin_section_kb("users")
+    )
+
+
+async def _adm_section_billing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    active = await _fetchval_or_zero(
+        pool,
+        "SELECT COUNT(*) FROM subscriptions "
+        "WHERE is_active=true AND expires_at > now()",
+    )
+    confirmed = await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM payments WHERE status='confirmed'"
+    )
+    pending = await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM payments WHERE status='pending'"
+    )
+    try:
+        revenue = float(
+            await pool.fetchval(
+                "SELECT COALESCE(SUM(amount_usd),0) "
+                "FROM payments WHERE status='confirmed'"
+            )
+            or 0
+        )
+    except Exception:
+        log_exc_swallow(log, "Admin billing revenue query failed")
+        revenue = 0.0
+    text = (
+        "💳 <b>Деньги и подписки</b>\n\n"
+        f"Активные подписки: <b>{active}</b>\n"
+        f"Подтверждённых оплат: <b>{confirmed}</b>\n"
+        f"Ожидают оплаты: <b>{pending}</b>\n"
+        f"Выручка: <b>${revenue:.2f}</b>\n\n"
+        "Здесь выдача, отзыв, bulk-выдача, цены и платёжные методы."
+    )
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_admin_section_kb("billing")
+    )
+
+
+async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    bots = await _fetchval_or_zero(pool, "SELECT COUNT(*) FROM managed_bots")
+    channels = await _fetchval_or_zero(pool, "SELECT COUNT(*) FROM managed_channels")
+    accounts = await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM tg_accounts WHERE COALESCE(is_active,true)=true"
+    )
+    strike_users = await _fetchval_or_zero(
+        pool,
+        "SELECT COUNT(*) FROM platform_users WHERE COALESCE(strike_access,false)=true",
+    )
+    text = (
+        "🤖 <b>Боты, токены и Strike</b>\n\n"
+        f"Ботов в системе: <b>{bots}</b>\n"
+        f"Каналов/чатов: <b>{channels}</b>\n"
+        f"Активных TG-аккаунтов: <b>{accounts}</b>\n"
+        f"Strike-доступов: <b>{strike_users}</b>\n\n"
+        "Здесь токены, рассылка и выдача доступа к Strike."
+    )
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_admin_section_kb("assets")
+    )
+
+
+async def _adm_section_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    running = await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM operation_queue WHERE status='running'"
+    )
+    pending = await _fetchval_or_zero(
+        pool, "SELECT COUNT(*) FROM operation_queue WHERE status='pending'"
+    )
+    failed = await _fetchval_or_zero(
+        pool,
+        "SELECT COUNT(*) FROM operation_queue WHERE status='failed' "
+        "AND finished_at > now() - INTERVAL '24 hours'",
+    )
+    floods = await _fetchval_or_zero(
+        pool,
+        "SELECT COUNT(*) FROM account_flood_log "
+        "WHERE created_at > now() - INTERVAL '24 hours'",
+    )
+    text = (
+        "⚙️ <b>Операции и здоровье процессов</b>\n\n"
+        f"В работе: <b>{running}</b>\n"
+        f"В очереди: <b>{pending}</b>\n"
+        f"Ошибок за 24ч: <b>{failed}</b>\n"
+        f"Flood-событий за 24ч: <b>{floods}</b>\n\n"
+        "Смотри очередь, аудит, статистику и чистку данных."
+    )
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_admin_section_kb("ops")
+    )
+
+
+async def _adm_section_ai(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    mode = await db.get_system_mode(pool)
+    order = os.getenv("AI_PROVIDER_ORDER", "openrouter,gemini,groq")
+    lines = [
+        "🧠 <b>AI / провайдеры</b>",
+        "",
+        _provider_status_line("OpenRouter", "OPENROUTER_API_KEY", "OPENROUTER_MODEL"),
+        _provider_status_line("Gemini", "GEMINI_API_KEY", "GEMINI_MODEL"),
+        _provider_status_line("Groq", "GROQ_API_KEY", "GROQ_MODEL"),
+        f"🔁 Порядок: <code>{_html.escape(order)}</code>",
+        f"⚙️ Swarm: <b>{_html.escape(mode.upper())}</b>",
+        "",
+        "Отсюда правим ключи, модели и режим работы системы.",
+    ]
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_admin_section_kb("ai"),
+    )
+
+
+async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await _adm_section_ai(callback, pool)
+
+
+async def _adm_section_system(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    mode = await db.get_system_mode(pool)
+    new_errors = await _new_error_report_count(pool)
+    env_flags = {
+        "Railway": bool(os.getenv("RAILWAY_TOKEN")),
+        "TG API": bool(os.getenv("TG_API_ID") and os.getenv("TG_API_HASH")),
+        "Manager token": bool(os.getenv("MANAGER_BOT_TOKEN")),
+        "Admins": bool(os.getenv("ADMIN_IDS")),
+    }
+    env_lines = "\n".join(
+        f"{'✅' if ok else '❌'} {name}" for name, ok in env_flags.items()
+    )
+    text = (
+        "🛠 <b>Система</b>\n\n"
+        f"Free Mode: <b>{'ВКЛ' if get_free_mode() else 'ВЫКЛ'}</b>\n"
+        f"Уведомления о новых: <b>{'ВКЛ' if _NOTIFY_NEW_USERS else 'ВЫКЛ'}</b>\n"
+        f"Swarm режим: <b>{_html.escape(mode.upper())}</b>\n"
+        f"Новых отчётов об ошибках: <b>{new_errors}</b>\n\n"
+        f"{env_lines}"
+    )
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=_admin_section_kb("system", new_error_reports=new_errors),
+    )
 
 
 async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
