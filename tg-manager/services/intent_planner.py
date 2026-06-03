@@ -99,7 +99,7 @@ def detect_asset_type(description: str) -> str:
 async def assess_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
     acc_row = await pool.fetchrow(
         "SELECT COUNT(*) AS cnt, COALESCE(AVG(trust_score), 0.5) AS avg_trust "
-        "FROM user_accounts WHERE owner_id=$1 AND trust_score > 0.3",
+        "FROM tg_accounts WHERE owner_id=$1 AND trust_score > 0.3",
         owner_id,
     )
     proxy_row = await pool.fetchrow(
@@ -169,7 +169,7 @@ async def _build_presence_plan(pool, owner_id, description, resources):
         1, min(resources["accounts_available"], max(1, n_targets // 15))
     )
     acc_rows = await pool.fetch(
-        "SELECT id FROM user_accounts WHERE owner_id=$1 AND trust_score > 0.3 "
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND trust_score > 0.3 "
         "ORDER BY trust_score DESC LIMIT $2",
         owner_id,
         n_accounts_needed,
