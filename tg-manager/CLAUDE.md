@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r27
+- **Текущая build:** 2026.06.03-r28
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -967,4 +967,26 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ `cb_eco_recs` в ecosystems.py: показывает список рекомендаций с иконками
 
 *Последнее обновление: 2026-06-03 (r27)* *Следующий build-номер: r28*
+
+### ✅ ЗАКРЫТО (r28) — EPOCH III: Sync Wizard + DNA Types + Ecosystem Summary
+
+**Sync Preview Wizard (Preview → Confirm → Execute → Report):**
+- ✅ `cb_eco_sync` (action="sync"): Preview — показывает состав, количество объектов по типам, время последней синхр., что будет сделано
+- ✅ `cb_eco_sync_exec` (action="sync_exec"): Execute — запускает реальную синхронизацию, показывает diff + обновлённые метрики
+- ✅ Кнопка "💡 Рекомендации" в отчёте синхронизации
+
+**DNA Types с type-specific capture (ecosystem_brain):**
+- ✅ `capture_dna_from_ecosystem(... dna_type=...)` принимает тип
+- ✅ "regional": дополнительно сохраняет geo_presets из GP-планов экосистемы
+- ✅ "publishing": дополнительно сохраняет связанные каналы + шаблоны постов
+- ✅ "visibility": дополнительно сохраняет health_snapshot (health/stability/accounts)
+- ✅ `cb_eco_dna_capture`: показывает type picker (4 типа: Regional/Publishing/Visibility/Custom)
+- ✅ `cb_eco_dna_type_X`: сохраняет тип в FSM, переходит к вводу названия
+- ✅ `fsm_eco_dna_name`: передаёт dna_type в capture_dna_from_ecosystem
+
+**Ecosystem Summary Widget на главном экране:**
+- ✅ `cb_eco_menu`: сводная статистика вверху — среднее здоровье, кол-во экосистем, объектов, критичных
+- ✅ Иконка summary_icon: 🟢/🟡/🔴 по среднему здоровью
+
+*Последнее обновление: 2026-06-03 (r28)* *Следующий build-номер: r29*
 

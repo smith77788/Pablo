@@ -985,14 +985,17 @@ async def delete_dna(pool: asyncpg.Pool, dna_id: int, owner_id: int) -> None:
 
 
 async def capture_dna_from_ecosystem(
-    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int, name: str
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int, name: str,
+    dna_type: str = "custom",
 ) -> int:
-    """Снимает DNA-слепок с текущего состояния экосистемы. Возвращает dna_id."""
+    """Снимает DNA-слепок с текущего состояния экосистемы. Возвращает dna_id.
+
+    dna_type: "custom" | "regional" | "publishing" | "visibility"
+    """
     eco = await get_ecosystem(pool, ecosystem_id, owner_id)
     if not eco:
         raise ValueError(f"Ecosystem {ecosystem_id} not found")
 
-    # Member counts by type
     counts_rows = await pool.fetch(
         """SELECT object_type, COUNT(*) AS cnt
            FROM ecosystem_members WHERE ecosystem_id=$1 GROUP BY object_type""",
@@ -1008,7 +1011,7 @@ async def capture_dna_from_ecosystem(
         except Exception:
             meta = {}
 
-    template_data = {
+    template_data: dict = {
         "ecosystem_type": eco["ecosystem_type"],
         "description": eco.get("description", ""),
         "region": eco.get("region"),
@@ -1016,8 +1019,54 @@ async def capture_dna_from_ecosystem(
         "meta": meta,
         "source_ecosystem_id": ecosystem_id,
     }
+
+    # Type-specific enrichment
+    if dna_type == "regional":
+        template_data["region_detail"] = eco.get("region") or ""
+        try:
+            geo_rows = await pool.fetch(
+                "SELECT DISTINCT geo_preset FROM global_presence_plans "
+                "WHERE ecosystem_id=$1 AND geo_preset IS NOT NULL LIMIT 5",
+                ecosystem_id,
+            )
+            if geo_rows:
+                template_data["geo_presets"] = [r["geo_preset"] for r in geo_rows]
+        except Exception:
+            pass
+
+    elif dna_type == "publishing":
+        try:
+            chan_rows = await pool.fetch(
+                "SELECT em.object_id FROM ecosystem_members em "
+                "WHERE em.ecosystem_id=$1 AND em.object_type='channel' LIMIT 10",
+                ecosystem_id,
+            )
+            tpl_rows = await pool.fetch(
+                "SELECT id, title FROM post_templates WHERE owner_id=$1 LIMIT 5",
+                owner_id,
+            )
+            template_data["publishing_channels"] = [r["object_id"] for r in chan_rows]
+            template_data["templates"] = [
+                {"id": r["id"], "title": r["title"]} for r in tpl_rows
+            ]
+        except Exception:
+            pass
+
+    elif dna_type == "visibility":
+        try:
+            health = await compute_health(pool, ecosystem_id, owner_id)
+            template_data["health_snapshot"] = {
+                "health_score": round(health.health_score, 3),
+                "stability_score": round(health.stability_score, 3),
+                "account_count": health.account_count,
+                "healthy_accounts": health.healthy_accounts,
+            }
+        except Exception:
+            pass
+
+    actual_type = dna_type if dna_type in ("regional", "publishing", "visibility", "custom") else "custom"
     return await create_dna(
-        pool, owner_id, name, eco["ecosystem_type"],
+        pool, owner_id, name, actual_type,
         description=f"Снято с экосистемы: {eco['name']}",
         template_data=template_data,
     )

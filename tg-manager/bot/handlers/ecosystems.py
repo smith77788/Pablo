@@ -40,6 +40,13 @@ _MEMBER_TYPES = {
     "proxy":   ("🌐", "Прокси"),
 }
 
+_DNA_TYPES = {
+    "regional":   ("🌍", "Региональная", "Регион, геопресеты, локальные настройки"),
+    "publishing": ("📝", "Публикации",   "Шаблоны постов, связанные каналы"),
+    "visibility": ("👁", "Видимость",    "Снимок Health/Stability/аккаунтов"),
+    "custom":     ("🛠️", "Универсальная", "Полный слепок экосистемы"),
+}
+
 
 async def _edit(cb: CallbackQuery, text: str, markup=None, **kw) -> None:
     await cb.answer()
@@ -71,7 +78,21 @@ async def cb_eco_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "Создайте первую — и BotMother начнёт мыслить экосистемами."
         )
     else:
-        lines = ["🌐 <b>Ecosystem Brain</b>\n"]
+        total_health = sum((e.get("health_score") or 1.0) for e in ecosystems)
+        avg_h = int(total_health / len(ecosystems) * 100)
+        total_objs = sum(e.get("member_count", 0) for e in ecosystems)
+        critical = sum(1 for e in ecosystems if e.get("risk_level") in ("high", "critical"))
+        summary_icon = "🟢" if avg_h >= 70 else ("🟡" if avg_h >= 40 else "🔴")
+
+        lines = [
+            "🌐 <b>Ecosystem Brain</b>\n",
+            f"{summary_icon} Здоровье: <b>{avg_h}%</b>  •  "
+            f"Экосистем: <b>{len(ecosystems)}</b>  •  "
+            f"Объектов: <b>{total_objs}</b>",
+        ]
+        if critical:
+            lines.append(f"🚨 Требуют внимания: <b>{critical}</b>")
+        lines.append("")
         for e in ecosystems[:10]:
             icon = _ECO_TYPES.get(e["ecosystem_type"], ("🌐", ""))[0]
             risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}.get(
@@ -923,19 +944,83 @@ async def cb_eco_snooze_clear(callback: CallbackQuery) -> None:
         pass
 
 
-# ── Sync scores ───────────────────────────────────────────────────────────────
+# ── Sync: Preview ────────────────────────────────────────────────────────────
 
 @router.callback_query(EcoCb.filter(F.action == "sync"))
 async def cb_eco_sync(
     callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
 ) -> None:
+    """Шаг 1: Preview — что будет синхронизировано."""
+    from services import ecosystem_brain as _eb
+    eco_id = callback_data.eco_id
+    await callback.answer("⏳ Анализирую состав…")
+
+    eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
+    if not eco:
+        await callback.answer("Экосистема не найдена", show_alert=True)
+        return
+
+    counts_rows = await pool.fetch(
+        "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members "
+        "WHERE ecosystem_id=$1 GROUP BY object_type",
+        eco_id,
+    )
+    counts = {r["object_type"]: r["cnt"] for r in counts_rows}
+    total = sum(counts.values())
+
+    last_sync = await pool.fetchrow(
+        "SELECT occurred_at FROM ecosystem_events "
+        "WHERE ecosystem_id=$1 AND event_type='sync' "
+        "ORDER BY occurred_at DESC LIMIT 1",
+        eco_id,
+    )
+    last_sync_str = "никогда"
+    if last_sync:
+        ts = last_sync["occurred_at"]
+        last_sync_str = ts.strftime("%d.%m %H:%M") if hasattr(ts, "strftime") else str(ts)[:16]
+
+    lines = [
+        f"🔃 <b>Синхронизация: {html.escape(eco['name'])}</b>\n",
+        f"Будет проверено: <b>{total} объектов</b>",
+    ]
+    for otype, (icon, label) in _MEMBER_TYPES.items():
+        if otype in counts:
+            lines.append(f"  {icon} {label}: {counts[otype]}")
+    lines.extend([
+        f"\nПоследняя синхр.: <i>{last_sync_str}</i>",
+        "\n<b>Что будет сделано:</b>",
+        "• Проверка активности аккаунтов и прокси",
+        "• Удаление удалённых / заблокированных объектов",
+        "• Пересчёт Health · Pressure · Risk",
+    ])
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Запустить синхронизацию",
+              callback_data=EcoCb(action="sync_exec", eco_id=eco_id))
+    kb.button(text="◀️ Назад", callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+        )
+
+
+# ── Sync: Execute ─────────────────────────────────────────────────────────────
+
+@router.callback_query(EcoCb.filter(F.action == "sync_exec"))
+async def cb_eco_sync_exec(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
+    """Шаг 2: выполняет синхронизацию и показывает отчёт."""
     from services import ecosystem_brain as _eb
     eco_id = callback_data.eco_id
     await callback.answer("⏳ Синхронизирую участников и метрики…")
     try:
-        # 1. Sync member statuses
         diff   = await _eb.sync_ecosystem_members(pool, eco_id, callback.from_user.id)
-        # 2. Sync scores
         scores = await _eb.sync_ecosystem_scores(pool, eco_id, callback.from_user.id)
 
         h_pct     = int(scores["health"] * 100)
@@ -943,7 +1028,7 @@ async def cb_eco_sync(
         risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}.get(risk, "🟢")
 
         lines = [
-            "🔃 <b>Синхронизация выполнена</b>\n",
+            "✅ <b>Синхронизация выполнена</b>\n",
             f"🏥 Здоровье: <b>{h_pct}%</b>  "
             f"⚡ Давление: <b>{scores['pressure']}/100</b>  "
             f"{risk_icon} Риск: <b>{risk}</b>",
@@ -955,13 +1040,18 @@ async def cb_eco_sync(
         if diff["stale"]:
             lines.append(f"⚠️ Проблемных: <b>{len(diff['stale'])}</b>")
             for s in diff["stale"][:4]:
-                lines.append(f"  • {html.escape(str(s['label'])[:30])}: {html.escape(s['issue'])}")
+                lines.append(
+                    f"  • {html.escape(str(s.get('label','?'))[:30])}: "
+                    f"{html.escape(str(s.get('issue','?')))}"
+                )
         text = "\n".join(lines)
     except Exception as e:
         text = f"❌ Ошибка синхронизации: {html.escape(str(e)[:100])}"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад к экосистеме", callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.button(text="💡 Рекомендации",      callback_data=EcoCb(action="recs",  eco_id=eco_id))
+    kb.button(text="◀️ К экосистеме",      callback_data=EcoCb(action="view",  eco_id=eco_id))
+    kb.adjust(1)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
@@ -1068,14 +1158,45 @@ async def cb_eco_dna_capture(
         return
     await callback.answer()
     await state.update_data(dna_source_eco_id=eco_id)
-    await state.set_state(EcosystemDnaFSM.naming)
 
     kb = InlineKeyboardBuilder()
+    for dtype, (icon, label, hint) in _DNA_TYPES.items():
+        kb.button(
+            text=f"{icon} {label}",
+            callback_data=EcoCb(action=f"dna_type_{dtype}", eco_id=eco_id),
+        )
     kb.button(text="❌ Отмена", callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
-    await _edit(callback,
-        f"📸 <b>Снятие DNA-шаблона</b>\n\n"
-        f"Экосистема: <b>{html.escape(eco['name'])}</b>\n\n"
-        f"Введите название для DNA-шаблона:",
+    kb.adjust(2, 2, 1)
+
+    lines = [
+        f"🧬 <b>Тип DNA-шаблона</b>\n",
+        f"Экосистема: <b>{html.escape(eco['name'])}</b>\n",
+    ]
+    for dtype, (icon, label, hint) in _DNA_TYPES.items():
+        lines.append(f"{icon} <b>{label}</b> — {hint}")
+    await _edit(callback, "\n".join(lines), markup=kb.as_markup())
+
+
+@router.callback_query(EcoCb.filter(F.action.startswith("dna_type_")))
+async def cb_eco_dna_type(
+    callback: CallbackQuery, callback_data: EcoCb,
+    state: FSMContext,
+) -> None:
+    dtype = callback_data.action[len("dna_type_"):]
+    if dtype not in _DNA_TYPES:
+        await callback.answer("Неверный тип", show_alert=True)
+        return
+    eco_id = callback_data.eco_id
+    await state.update_data(dna_type=dtype)
+    await state.set_state(EcosystemDnaFSM.naming)
+
+    icon, label, _ = _DNA_TYPES[dtype]
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
+    await _edit(
+        callback,
+        f"📸 <b>{icon} DNA: {label}</b>\n\n"
+        f"Введите название для шаблона:",
         markup=kb.as_markup(),
     )
 
@@ -1084,23 +1205,27 @@ async def cb_eco_dna_capture(
 async def fsm_eco_dna_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     from services import ecosystem_brain as _eb
     sd = await state.get_data()
-    eco_id = sd.get("dna_source_eco_id", 0)
+    eco_id   = sd.get("dna_source_eco_id", 0)
+    dna_type = sd.get("dna_type", "custom")
     name = (message.text or "").strip()[:80]
     if not name:
         await message.answer("Название не может быть пустым. Введите название шаблона:")
         return
 
     await state.clear()
+    icon = _DNA_TYPES.get(dna_type, ("🛠️", "", ""))[0]
     try:
-        dna_id = await _eb.capture_dna_from_ecosystem(pool, eco_id, message.from_user.id, name)
+        dna_id = await _eb.capture_dna_from_ecosystem(
+            pool, eco_id, message.from_user.id, name, dna_type=dna_type
+        )
         kb = InlineKeyboardBuilder()
         kb.button(text="🧬 DNA-шаблоны", callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
         kb.button(text="◀️ Экосистема",  callback_data=EcoCb(action="view",     eco_id=eco_id))
         kb.adjust(1)
         await message.answer(
             f"✅ <b>DNA снята</b>\n\n"
-            f"Шаблон <b>{html.escape(name)}</b> (#{dna_id}) сохранён.\n"
-            f"Его можно применить к любой другой экосистеме.",
+            f"{icon} Шаблон <b>{html.escape(name)}</b> (#{dna_id}) сохранён.\n"
+            f"Тип: {dna_type} · применим к любой экосистеме.",
             parse_mode="HTML", reply_markup=kb.as_markup(),
         )
     except Exception as e:
