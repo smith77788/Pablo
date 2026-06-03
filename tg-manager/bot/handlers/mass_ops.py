@@ -57,6 +57,27 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
     return kb
 
 
+_RISK_LABEL = {"low": ("🟢", "низкий"), "medium": ("🟡", "средний"), "high": ("🔴", "высокий")}
+
+
+async def _capacity_line(pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list) -> str:
+    """Однострочный прогноз нагрузки для экрана подтверждения. Молча возвращает '' при ошибке."""
+    try:
+        est = await infra_orchestrator.estimate_capacity(
+            pool, owner_id, op_type, total_items, account_ids=acc_ids or None
+        )
+        minutes = est.get("estimated_minutes", 0)
+        risk = "low"
+        if minutes > 120:
+            risk = "high"
+        elif minutes > 45:
+            risk = "medium"
+        emoji, label = _RISK_LABEL.get(risk, ("⚪", "неизвестно"))
+        return f"⏱ Прогноз: ~{minutes:.0f} мин · {emoji} {label} риск"
+    except Exception:
+        return ""
+
+
 # ── Main menu ────────────────────────────────────────────────────────────────
 
 @router.callback_query(MassOpCb.filter(F.action == "menu"))
@@ -1505,6 +1526,7 @@ async def cb_bulk_join_delay(
     callback: CallbackQuery,
     callback_data: MassOpCb,
     state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
@@ -1521,6 +1543,7 @@ async def cb_bulk_join_delay(
 
     icon, delay_str, time_est = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
     n = len(links) * len(acc_ids)
+    cap_line = await _capacity_line(pool, callback.from_user.id, "join", n, acc_ids)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
@@ -1533,8 +1556,9 @@ async def cb_bulk_join_delay(
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(links)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n"
-        f"Операций: <b>{n}</b> (~{time_est})\n\n"
-        f"<b>Список:</b>\n{link_preview}",
+        f"Операций: <b>{n}</b> (~{time_est})\n"
+        + (f"{cap_line}\n" if cap_line else "")
+        + f"\n<b>Список:</b>\n{link_preview}",
         reply_markup=kb.as_markup(),
     )
 
@@ -1807,6 +1831,7 @@ async def cb_bulk_leave_delay(
     callback: CallbackQuery,
     callback_data: MassOpCb,
     state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
@@ -1823,6 +1848,7 @@ async def cb_bulk_leave_delay(
 
     icon, delay_str, time_est = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
     n = len(channels) * len(acc_ids)
+    cap_line = await _capacity_line(pool, callback.from_user.id, "leave", n, acc_ids)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
@@ -1835,8 +1861,9 @@ async def cb_bulk_leave_delay(
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n"
-        f"Операций: <b>{n}</b> (~{time_est})\n\n"
-        f"<b>Список:</b>\n{ch_preview}",
+        f"Операций: <b>{n}</b> (~{time_est})\n"
+        + (f"{cap_line}\n" if cap_line else "")
+        + f"\n<b>Список:</b>\n{ch_preview}",
         reply_markup=kb.as_markup(),
     )
 
