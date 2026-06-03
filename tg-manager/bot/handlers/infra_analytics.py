@@ -858,3 +858,49 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ── Copilot snooze ────────────────────────────────────────────────────────────
+
+@router.callback_query(InfraCb.filter(F.action == "snooze"))
+async def cb_copilot_snooze(
+    callback: CallbackQuery, callback_data: InfraCb
+) -> None:
+    """Отложить уведомления Infrastructure Copilot на N часов."""
+    from services import infra_copilot as _cop
+
+    hours = callback_data.page or 1
+    _cop.snooze_alerts(callback.from_user.id, float(hours))
+    remaining = _cop.get_snooze_remaining(callback.from_user.id)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Снять снуз", callback_data=InfraCb(action="snooze_clear"))
+    kb.button(text="🔍 Copilot",    callback_data=InfraCb(action="copilot"))
+    kb.adjust(2)
+
+    await callback.answer(f"😴 Уведомления отложены на {hours}ч", show_alert=False)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
+    except Exception:
+        pass
+
+
+@router.callback_query(InfraCb.filter(F.action == "snooze_clear"))
+async def cb_copilot_snooze_clear(callback: CallbackQuery) -> None:
+    """Снять снуз — вернуть уведомления Copilot."""
+    from services import infra_copilot as _cop
+
+    _cop._snooze_until.pop(callback.from_user.id, None)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="😴 1ч",  callback_data=InfraCb(action="snooze", page=1))
+    kb.button(text="😴 6ч",  callback_data=InfraCb(action="snooze", page=6))
+    kb.button(text="😴 24ч", callback_data=InfraCb(action="snooze", page=24))
+    kb.button(text="🔍 Copilot", callback_data=InfraCb(action="copilot"))
+    kb.adjust(3, 1)
+
+    await callback.answer("✅ Уведомления возобновлены", show_alert=False)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
+    except Exception:
+        pass

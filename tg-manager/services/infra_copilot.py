@@ -25,6 +25,40 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
+# ── Snooze registry: owner_id → unix timestamp until which alerts are silenced ─
+_snooze_until: dict[int, float] = {}
+
+
+def snooze_alerts(owner_id: int, hours: float) -> None:
+    """Заглушить уведомления Copilot для owner_id на указанное число часов."""
+    import time
+    _snooze_until[owner_id] = time.time() + hours * 3600
+
+
+def is_snoozed(owner_id: int) -> bool:
+    """True если алерты для owner_id сейчас заглушены."""
+    import time
+    exp = _snooze_until.get(owner_id, 0.0)
+    if exp and time.time() < exp:
+        return True
+    _snooze_until.pop(owner_id, None)
+    return False
+
+
+def get_snooze_remaining(owner_id: int) -> str:
+    """Возвращает читаемое время до конца снуза или пустую строку."""
+    import time
+    exp = _snooze_until.get(owner_id, 0.0)
+    remaining = exp - time.time()
+    if remaining <= 0:
+        return ""
+    hours, rem = divmod(int(remaining), 3600)
+    mins = rem // 60
+    if hours:
+        return f"{hours}ч {mins}м"
+    return f"{mins}м"
+
+
 # ── Severity порядок для сортировки ──────────────────────────────────────────
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2, "opportunity": 3}
 
@@ -1127,13 +1161,19 @@ async def run_copilot_loop(pool: asyncpg.Pool, bot) -> None:
             for row in owner_ids:
                 owner_id = row["owner_id"]
                 try:
+                    if is_snoozed(owner_id):
+                        log.debug("infra_copilot: owner=%d alerts snoozed", owner_id)
+                        await asyncio.sleep(1)
+                        continue
                     insights = await run_full_analysis(pool, owner_id, include_predictions=False)
                     critical = [i for i in insights if i.severity == "critical"]
                     if critical:
                         report = _format_critical_alert(critical[:3])
+                        markup = _snooze_markup()
                         await _db.notify_if_enabled(
                             pool, bot, owner_id, "restriction",
                             report,
+                            reply_markup=markup,
                         )
                     await asyncio.sleep(1)  # небольшая пауза между пользователями
                 except Exception as e:
@@ -1153,4 +1193,18 @@ def _format_critical_alert(insights: list[CopilotInsight]) -> str:
         lines.append(f"  {html.escape(i.explanation)}")
         if i.recommendation:
             lines.append(f"  💡 {html.escape(i.recommendation)}")
+    lines.append("\n<i>Отложить уведомления:</i>")
     return "\n".join(lines)
+
+
+def _snooze_markup():
+    """Inline-клавиатура для снуза уведомлений Copilot."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import InfraCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="😴 1ч",  callback_data=InfraCb(action="snooze", page=1))
+    kb.button(text="😴 6ч",  callback_data=InfraCb(action="snooze", page=6))
+    kb.button(text="😴 24ч", callback_data=InfraCb(action="snooze", page=24))
+    kb.button(text="🔍 Copilot", callback_data=InfraCb(action="copilot"))
+    kb.adjust(3, 1)
+    return kb.as_markup()
