@@ -17,7 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, BmCb, GroupFCb
+from bot.callbacks import AccCb, BmCb, GroupFCb, EcoPickCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
@@ -317,13 +317,18 @@ async def cb_group_do_create(
     invite = result.get("invite_link", "")
     group_type = "Супергруппа" if is_super else "Группа"
 
+    kb_grp = InlineKeyboardBuilder()
+    kb_grp.button(text="🌐 Добавить в экосистему",
+                  callback_data=EcoPickCb(action="list", object_type="group", object_id=group_id))
+    kb_grp.button(text="◀️ Меню", callback_data=GroupFCb(action="menu"))
+    kb_grp.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>{group_type} создана!</b>\n\n"
         f"Название: <b>{title_s}</b>\n"
         f"ID: <code>{group_id}</code>\n"
         + (f"Ссылка: {html.escape(invite)}" if invite else ""),
         parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
+        reply_markup=kb_grp.as_markup(),
     )
 
 

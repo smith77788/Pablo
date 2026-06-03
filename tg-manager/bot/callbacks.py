@@ -379,3 +379,11 @@ class EcoCb(CallbackData, prefix="eco"):
     page: int = 0
 
 
+class EcoPickCb(CallbackData, prefix="ecopick"):
+    """Выбор экосистемы для добавления объекта (из фабрик)."""
+    action: str        # "list" | "add"
+    object_type: str   # "channel" | "group" | "bot" | "account"
+    object_id: int = 0
+    eco_id: int = 0
+
+

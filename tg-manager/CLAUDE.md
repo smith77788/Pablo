@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r26
+- **Текущая build:** 2026.06.03-r27
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -944,4 +944,27 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ Если health < 35%, pressure >= 80 или risk=critical → добавляет предупреждение в pre-launch блок
 
 *Последнее обновление: 2026-06-03 (r26)* *Следующий build-номер: r27*
+
+### ✅ ЗАКРЫТО (r27) — EPOCH III: Factories + EcoPickCb + Sync Members + Recommendations
+
+**Cross-Factory Ecosystem Assignment (EcoPickCb):**
+- ✅ `bot/callbacks.py`: новый `EcoPickCb(action, object_type, object_id, eco_id)`
+- ✅ `channel_factory.py`: кнопка 🌐 Добавить в экосистему после создания канала
+- ✅ `group_factory.py`: кнопка 🌐 Добавить в экосистему после создания группы
+- ✅ `bot_factory.py`: кнопка 🌐 Добавить в экосистему после импорта бота
+- ✅ `ecosystems.py`: `cb_ecopick_list` — picker выбора экосистемы
+- ✅ `ecosystems.py`: `cb_ecopick_add` — добавление объекта в выбранную экосистему
+
+**Sync Engine полный (ecosystem_brain):**
+- ✅ `sync_ecosystem_members`: проверяет реальный статус всех участников (аккаунты/прокси/каналы/боты)
+- ✅ Удаляет осиротевших членов из БД (бан, неактивность, fail_count >= 5)
+- ✅ Возвращает {ok, stale, removed} для diff-отчёта
+- ✅ `cb_eco_sync` в ecosystems.py: запускает полный sync (members + scores), показывает diff
+
+**Recommendations Engine (ecosystem_brain):**
+- ✅ `generate_recommendations(pool, ecosystem_id, owner_id)` → list[dict]
+- ✅ Приоритеты: high / medium / low на основе health/pressure/risk/структуры
+- ✅ `cb_eco_recs` в ecosystems.py: показывает список рекомендаций с иконками
+
+*Последнее обновление: 2026-06-03 (r27)* *Следующий build-номер: r28*
 

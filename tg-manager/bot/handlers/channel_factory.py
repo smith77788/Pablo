@@ -23,7 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, ChanFactCb, SeoCb
+from bot.callbacks import AccCb, ChanFactCb, SeoCb, EcoPickCb
 from services.logger import log_exc_swallow
 from bot.states import (
     BulkChannelCreateFSM,
@@ -633,6 +633,8 @@ async def cb_chanf_do_create(
     kb = InlineKeyboardBuilder()
     if uname and "не установлен" not in uname_result:
         kb.button(text=f"🔗 Открыть t.me/{html.escape(uname)}", url=f"https://t.me/{uname}")
+    kb.button(text="🌐 Добавить в экосистему",
+              callback_data=EcoPickCb(action="list", object_type="channel", object_id=channel_id))
     kb.button(text="◀️ Меню", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

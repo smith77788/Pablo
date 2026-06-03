@@ -12,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import BotCb, BotFactCb
+from bot.callbacks import BotCb, BotFactCb, EcoPickCb
 from bot.states import BotCloneSettingsFSM, BotTokenImportFSM, BotValidateFSM
 from database import db
 from services import bot_api
@@ -206,7 +206,20 @@ async def cb_import_save(callback: CallbackQuery, state: FSMContext,
 
     await state.clear()
     kb = InlineKeyboardBuilder()
+    # If at least one bot was saved, offer to add to ecosystem
+    first_saved_id = 0
+    if saved > 0:
+        for b in valid_bots:
+            if b.get("id"):
+                first_saved_id = b["id"]
+                break
+    if first_saved_id:
+        kb.button(
+            text="🌐 Добавить в экосистему",
+            callback_data=EcoPickCb(action="list", object_type="bot", object_id=first_saved_id),
+        )
     kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>Импорт завершён</b>\n\n"
         f"Сохранено: <b>{saved}</b>\n"

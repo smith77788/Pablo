@@ -1168,3 +1168,246 @@ async def sync_ecosystem_scores(
         "stability": round(health.stability_score, 3),
         "reliability": round(health.reliability_score, 3),
     }
+
+
+# ── Member Sync Engine ────────────────────────────────────────────────────────
+
+async def sync_ecosystem_members(
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int,
+) -> dict:
+    """Проверяет актуальность участников экосистемы по данным БД.
+
+    Для каждого типа объектов сверяет текущее состояние:
+    - account: is_active, is_banned, trust_score
+    - proxy: is_active, fail_count
+    - channel/group/bot: существование в соответствующей таблице
+
+    Возвращает diff: {"stale": [...], "ok": [...], "removed": int}
+    """
+    members = await get_members(pool, ecosystem_id, owner_id)
+    stale: list[dict] = []
+    ok_count = 0
+    removed_count = 0
+
+    for m in members:
+        otype = m["object_type"]
+        oid   = m["object_id"]
+
+        try:
+            if otype == "account":
+                row = await pool.fetchrow(
+                    "SELECT id, is_active, is_banned, trust_score, "
+                    "COALESCE(first_name, phone, 'id'||id::text) AS label "
+                    "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                    oid, owner_id,
+                )
+                if not row:
+                    removed_count += 1
+                    await pool.execute(
+                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
+                        ecosystem_id, otype, oid,
+                    )
+                elif row["is_banned"]:
+                    stale.append({"type": otype, "id": oid,
+                                  "label": row["label"], "issue": "заблокирован"})
+                elif not row["is_active"]:
+                    stale.append({"type": otype, "id": oid,
+                                  "label": row["label"], "issue": "неактивен"})
+                elif (row["trust_score"] or 0.5) < 0.25:
+                    stale.append({"type": otype, "id": oid,
+                                  "label": row["label"],
+                                  "issue": f"trust={row['trust_score']:.2f} критически низкий"})
+                else:
+                    ok_count += 1
+
+            elif otype == "proxy":
+                row = await pool.fetchrow(
+                    "SELECT id, is_active, fail_count, host FROM proxies WHERE id=$1 AND owner_id=$2",
+                    oid, owner_id,
+                )
+                if not row:
+                    removed_count += 1
+                    await pool.execute(
+                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
+                        ecosystem_id, otype, oid,
+                    )
+                elif not row["is_active"]:
+                    stale.append({"type": otype, "id": oid,
+                                  "label": row["host"], "issue": "прокси неактивен"})
+                elif (row["fail_count"] or 0) >= 5:
+                    stale.append({"type": otype, "id": oid,
+                                  "label": row["host"],
+                                  "issue": f"fail_count={row['fail_count']}"})
+                else:
+                    ok_count += 1
+
+            elif otype in ("channel", "group"):
+                row = await pool.fetchrow(
+                    "SELECT id FROM tg_channels WHERE id=$1 AND owner_id=$2",
+                    oid, owner_id,
+                )
+                if not row:
+                    removed_count += 1
+                    await pool.execute(
+                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
+                        ecosystem_id, otype, oid,
+                    )
+                else:
+                    ok_count += 1
+
+            elif otype == "bot":
+                row = await pool.fetchrow(
+                    "SELECT id FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                    oid, owner_id,
+                )
+                if not row:
+                    removed_count += 1
+                    await pool.execute(
+                        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND object_type=$2 AND object_id=$3",
+                        ecosystem_id, otype, oid,
+                    )
+                else:
+                    ok_count += 1
+            else:
+                ok_count += 1
+
+        except Exception as e:
+            log.debug("sync_members eco=%d obj=%s/%d: %s", ecosystem_id, otype, oid, e)
+
+    await record_event(
+        pool, ecosystem_id, owner_id, "sync",
+        f"Синхронизация: OK={ok_count}, устаревших={len(stale)}, удалено={removed_count}",
+        severity="info" if not stale else "warning",
+        details={"ok": ok_count, "stale": len(stale), "removed": removed_count},
+    )
+    return {"ok": ok_count, "stale": stale, "removed": removed_count}
+
+
+# ── Ecosystem Recommendations ─────────────────────────────────────────────────
+
+async def generate_recommendations(
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int,
+) -> list[dict]:
+    """Генерирует список конкретных рекомендаций для экосистемы.
+
+    Каждая рекомендация: {"priority": "high"|"medium"|"low", "icon": str,
+                           "title": str, "action": str}
+    """
+    recs: list[dict] = []
+    try:
+        health, pressure, risk = await asyncio.gather(
+            compute_health(pool, ecosystem_id, owner_id),
+            compute_pressure(pool, ecosystem_id, owner_id),
+            compute_risk(pool, ecosystem_id, owner_id),
+            return_exceptions=True,
+        )
+        if isinstance(health, Exception):   health   = EcosystemHealth()
+        if isinstance(pressure, Exception): pressure = EcosystemPressure()
+        if isinstance(risk, Exception):     risk     = EcosystemRisk()
+
+        counts_rows = await pool.fetch(
+            "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members WHERE ecosystem_id=$1 GROUP BY object_type",
+            ecosystem_id,
+        )
+        counts = {r["object_type"]: r["cnt"] for r in counts_rows}
+        acc_count     = counts.get("account", 0)
+        channel_count = counts.get("channel", 0) + counts.get("group", 0)
+        proxy_count   = counts.get("proxy", 0)
+
+        # Health recommendations
+        if health.overall < 0.35:
+            recs.append({
+                "priority": "high",
+                "icon": "🔴",
+                "title": f"Критическое здоровье ({int(health.overall*100)}%)",
+                "action": "Замените или восстановите проблемные аккаунты",
+            })
+        elif health.overall < 0.6:
+            recs.append({
+                "priority": "medium",
+                "icon": "🟡",
+                "title": f"Здоровье ниже нормы ({int(health.overall*100)}%)",
+                "action": "Запустите прогрев аккаунтов или добавьте новые",
+            })
+
+        # Pressure recommendations
+        if pressure.score >= 80:
+            recs.append({
+                "priority": "high",
+                "icon": "⚡",
+                "title": f"Критическое давление ({pressure.score}/100)",
+                "action": "Снизьте интенсивность операций или добавьте аккаунты",
+            })
+        elif pressure.score >= 60:
+            recs.append({
+                "priority": "medium",
+                "icon": "⚡",
+                "title": f"Повышенное давление ({pressure.score}/100)",
+                "action": "Распределите операции на большее число аккаунтов",
+            })
+
+        # Risk recommendations
+        if risk.level == "critical":
+            reason = risk.reasons[0] if risk.reasons else "Множественные факторы"
+            recs.append({
+                "priority": "high",
+                "icon": "🚨",
+                "title": f"Критический риск: {reason}",
+                "action": "Приостановите операции до устранения причин риска",
+            })
+
+        # Structure recommendations
+        if acc_count == 0:
+            recs.append({
+                "priority": "high",
+                "icon": "📱",
+                "title": "Нет аккаунтов в экосистеме",
+                "action": "Добавьте активные аккаунты через 👥 Участники",
+            })
+        elif acc_count < 3:
+            recs.append({
+                "priority": "medium",
+                "icon": "📱",
+                "title": f"Мало аккаунтов ({acc_count})",
+                "action": "Добавьте аккаунты для устойчивости операций",
+            })
+
+        if proxy_count == 0 and acc_count > 0:
+            recs.append({
+                "priority": "medium",
+                "icon": "🌐",
+                "title": "Аккаунты без прокси",
+                "action": "Назначьте прокси для снижения риска блокировок",
+            })
+
+        if channel_count == 0 and acc_count > 0:
+            recs.append({
+                "priority": "low",
+                "icon": "📡",
+                "title": "Нет каналов или групп в экосистеме",
+                "action": "Создайте каналы через Channel Factory или запустите Global Presence",
+            })
+
+        if health.growth_score < 0.1 and acc_count > 0:
+            recs.append({
+                "priority": "low",
+                "icon": "📈",
+                "title": "Нулевой рост экосистемы",
+                "action": "Запустите операции — публикации, вступления, DM-кампанию",
+            })
+
+        if not recs:
+            recs.append({
+                "priority": "low",
+                "icon": "✅",
+                "title": "Экосистема в хорошем состоянии",
+                "action": "Продолжайте текущую стратегию",
+            })
+
+    except Exception as e:
+        log.debug("generate_recommendations eco=%d: %s", ecosystem_id, e)
+
+    # Sort: high → medium → low
+    _order = {"high": 0, "medium": 1, "low": 2}
+    recs.sort(key=lambda r: _order.get(r["priority"], 3))
+    return recs
