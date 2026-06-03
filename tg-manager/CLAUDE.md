@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r20
+- **Текущая build:** 2026.06.03-r21
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -841,5 +841,12 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **proxy_selector.py** — Phase 6: get_proxy_score, record_proxy_result, rank_accounts_by_proxy_quality
 - ✅ **_normalize_result()** — унифицированный формат результата операций: ok/failed/total/summary/duration_s/op_type
 
-*Последнее обновление: 2026-06-03 (r20)* *Следующий build-номер: r21*
+### ✅ ЗАКРЫТО (r21) — EPOCH I: PRESSURE GATE
+
+- ✅ **get_pressure_warning()** — мягкое предупреждение (≥70) в infra_orchestrator.py
+- ✅ **pressure gate в bulk_join/bulk_leave confirm** — 🚫 хардблок при ≥85, ⚠️ тост при 70–84
+- ✅ **pressure gate в mass_publish confirm** — та же логика, infra_orchestrator влияет на UX
+- ✅ **pressure gate в ob_confirm (Operation Builder)** — первая точка где "мозг" реально управляет действиями
+
+*Последнее обновление: 2026-06-03 (r21)* *Следующий build-номер: r22*
 

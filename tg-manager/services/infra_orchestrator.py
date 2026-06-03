@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 
 # Порог давления выше которого новые операции блокируются по умолчанию
 _PRESSURE_HARD_LIMIT = 85
+# Порог для мягкого предупреждения (операция разрешена, но показывается тост)
+_PRESSURE_SOFT_WARN = 70
 
 
 @dataclass
@@ -208,6 +210,26 @@ async def is_ready_for_op(
         log.debug("infra_orchestrator.is_ready_for_op account check failed: %s", e)
 
     return True, ""
+
+
+async def get_pressure_warning(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    warn_threshold: int = _PRESSURE_SOFT_WARN,
+) -> str | None:
+    """Мягкое предупреждение: warn_threshold ≤ давление < HARD_LIMIT.
+
+    Возвращает текст предупреждения или None.  Хардблок — через is_ready_for_op().
+    """
+    try:
+        pressure = await _safe_pressure(pool, owner_id)
+        score = pressure.get("score", 0)
+        if warn_threshold <= score < _PRESSURE_HARD_LIMIT:
+            label = pressure.get("level_label", "Повышенное")
+            return f"⚠️ Давление инфраструктуры {label} ({score}/100) — операция продолжается"
+    except Exception:
+        pass
+    return None
 
 
 # ── Private helpers ─────────────────────────────────────────────────────────

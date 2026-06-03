@@ -21,7 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
-from services import operation_bus
+from services import operation_bus, infra_orchestrator
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit, extract_flood_wait
 
@@ -410,7 +410,14 @@ async def cb_mp_timing(
 async def cb_mp_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Запускаю рассылку...")
+    # Проверка давления инфраструктуры
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+    warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
+    await callback.answer(warn or "⏳ Запускаю рассылку...", show_alert=bool(warn))
+
     data = await state.get_data()
     await state.clear()
 
@@ -1546,6 +1553,17 @@ async def cb_bulk_join_confirm(
         await state.clear()
         return
 
+    # Проверка давления инфраструктуры
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+    warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
+    if warn:
+        await callback.answer(warn, show_alert=False)
+    else:
+        await callback.answer()
+
     params = {"links": links, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
         op_id = await operation_bus.submit(
@@ -1556,7 +1574,6 @@ async def cb_bulk_join_confirm(
         log.error("bulk_join confirm error: %s", e)
         await callback.answer("Ошибка создания операции", show_alert=True)
         return
-    await callback.answer()
 
     icon, delay_str, _ = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", ""))
     await state.clear()
@@ -1838,6 +1855,17 @@ async def cb_bulk_leave_confirm(
         await state.clear()
         return
 
+    # Проверка давления инфраструктуры
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+    warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
+    if warn:
+        await callback.answer(warn, show_alert=False)
+    else:
+        await callback.answer()
+
     params = {"channels": channels, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
         op_id = await operation_bus.submit(
@@ -1848,7 +1876,6 @@ async def cb_bulk_leave_confirm(
         log.error("bulk_leave confirm error: %s", e)
         await callback.answer("Ошибка создания операции", show_alert=True)
         return
-    await callback.answer()
 
     icon, delay_str, _ = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", ""))
     await state.clear()
@@ -2186,7 +2213,14 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
 async def cb_ob_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Создаю операцию...")
+    # Проверка давления инфраструктуры
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+    warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
+    await callback.answer(warn or "⏳ Создаю операцию...", show_alert=bool(warn))
+
     sd = await state.get_data()
     await state.clear()
 
