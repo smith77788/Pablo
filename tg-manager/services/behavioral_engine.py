@@ -24,6 +24,10 @@ _RESCORE_INTERVAL = 900  # 15 minutes
 # ── Background runner ─────────────────────────────────────────────────────
 
 
+_PRUNE_INTERVAL_CYCLES = 96  # prune once every 96 × 15min ≈ 24 hours
+_PRUNE_RETAIN_DAYS = 60       # keep 60 days of events (2 months of history)
+
+
 async def run(pool: asyncpg.Pool, bot=None) -> None:
     """Main loop: periodically recompute behavioral scores and detect anomalies.
 
@@ -42,11 +46,60 @@ async def run(pool: asyncpg.Pool, bot=None) -> None:
             # Auto-pause winning A/B experiments every 4 cycles (~1 hour)
             if cycle % 4 == 0:
                 await _auto_conclude_experiments(pool, bot)
+            # Prune old behavioral_events once per day to prevent unbounded growth.
+            # _recompute_scores only looks back 30 days; we keep 60 days for anomaly
+            # detection headroom. Beyond that, rows are dead weight.
+            if cycle % _PRUNE_INTERVAL_CYCLES == 0 and cycle > 0:
+                await _prune_old_events(pool)
             cycle += 1
         except Exception:
             log.exception("behavioral_engine error")
         elapsed = asyncio.get_event_loop().time() - started_at
         await asyncio.sleep(max(0.0, _RESCORE_INTERVAL - elapsed))
+
+
+# ── Event pruning ────────────────────────────────────────────────────────
+
+
+async def _prune_old_events(pool: asyncpg.Pool) -> None:
+    """Delete behavioral_events older than _PRUNE_RETAIN_DAYS.
+
+    Without pruning, a platform with 50 active users each generating
+    10–30 events/day accumulates 100k–500k rows/month, reaching tens of
+    millions within 6 months. _recompute_scores already queries only the
+    last 30 days, so anything older than 60 days is never read again.
+
+    Deletes in batches to avoid a long-held lock on the table.
+    """
+    total_deleted = 0
+    batch_size = 5000
+    while True:
+        try:
+            result = await pool.execute(
+                """DELETE FROM behavioral_events
+                   WHERE id IN (
+                       SELECT id FROM behavioral_events
+                       WHERE occurred_at < now() - ($1 * INTERVAL '1 day')
+                       LIMIT $2
+                   )""",
+                _PRUNE_RETAIN_DAYS,
+                batch_size,
+            )
+            deleted = int(str(result).split()[-1])
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+            # Yield between batches so other queries are not blocked
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            log.warning("behavioral_engine: prune error: %s", e)
+            break
+    if total_deleted:
+        log.info(
+            "behavioral_engine: pruned %d behavioral_events older than %d days",
+            total_deleted,
+            _PRUNE_RETAIN_DAYS,
+        )
 
 
 # ── Score recomputation ───────────────────────────────────────────────────

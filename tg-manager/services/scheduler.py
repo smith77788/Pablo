@@ -3,16 +3,21 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 import aiohttp
 import asyncpg
 from database import db
 from services import broadcaster
+from services import bot_api
 
 log = logging.getLogger(__name__)
 
-# Рассылки опаздывающие больше чем на 1 час → помечаем как 'missed', не запускаем
-_MISSED_THRESHOLD = timedelta(hours=1)
+# Рассылки опаздывающие больше чем на 1 час → помечаем как 'missed', не запускаем.
+# Переопределяется через переменную окружения SCHEDULER_MISSED_THRESHOLD_HOURS.
+_MISSED_THRESHOLD = timedelta(
+    hours=float(os.environ.get("SCHEDULER_MISSED_THRESHOLD_HOURS", "1"))
+)
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
@@ -49,6 +54,27 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 bc_id = None
                 created_bc = False
                 try:
+                    # Pre-flight: verify bot token before creating broadcast records
+                    me = await bot_api.get_me(http, row["token"])
+                    if not me:
+                        log.error(
+                            "Scheduler: bot token for scheduled #%d (bot_id=%d) is invalid "
+                            "or revoked — marking scheduled done to prevent refire",
+                            row["id"],
+                            row["bot_id"],
+                        )
+                        try:
+                            await pool.execute(
+                                "UPDATE scheduled_broadcasts SET status='failed' WHERE id=$1",
+                                row["id"],
+                            )
+                        except Exception:
+                            log.exception(
+                                "Scheduler: failed to mark scheduled #%d as failed",
+                                row["id"],
+                            )
+                        continue
+
                     total = await db.get_audience_count(pool, row["bot_id"])
                     bc_id = await db.create_broadcast(
                         pool,

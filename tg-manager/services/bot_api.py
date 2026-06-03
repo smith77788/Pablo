@@ -55,8 +55,12 @@ async def _call(
                         attempt + 1,
                         _MAX_RETRIES,
                     )
-                    await asyncio.sleep(retry_after)
-                    continue
+                    if attempt < _MAX_RETRIES - 1:
+                        await asyncio.sleep(retry_after)
+                        continue
+                    # All retries exhausted on 429 — return the real response so
+                    # callers (send_message / send_photo) can propagate retry_after
+                    return data
                 if status in (500, 502, 503, 504) and attempt < _MAX_RETRIES - 1:
                     backoff = _BASE_BACKOFF * (2**attempt)
                     log.debug(

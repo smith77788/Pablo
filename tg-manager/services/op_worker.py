@@ -98,6 +98,44 @@ def _classify_op_error(exc: Exception) -> str:
     return "retry"
 
 
+async def _deactivate_dead_session(pool: asyncpg.Pool, exc: Exception, params: dict) -> None:
+    """При AUTH_KEY/SESSION_REVOKED ошибке немедленно деактивировать аккаунт в БД.
+
+    Без этого аккаунт продолжает попадать в выборки resource_selector до следующего
+    цикла account_monitor (1 час), и все операции на нём будут падать.
+    Используем acc_status='session_expired' + is_active=FALSE — обе колонки
+    уже существуют в tg_accounts (schema_v15 + schema_v40).
+    """
+    msg = str(exc)
+    name = type(exc).__name__
+    if not (name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg):
+        return
+    account_ids = params.get("account_ids") or []
+    if not account_ids:
+        return
+    for acc_id in account_ids:
+        try:
+            result = await pool.execute(
+                """UPDATE tg_accounts
+                   SET is_active    = FALSE,
+                       acc_status   = 'session_expired',
+                       status_reason = $2
+                   WHERE id = $1 AND is_active = TRUE""",
+                int(acc_id),
+                f"AUTH_KEY/SESSION dead (op_worker): {msg[:200]}",
+            )
+            if result != "UPDATE 0":
+                log.warning(
+                    "op_worker: deactivated dead session account_id=%s (%s)",
+                    acc_id,
+                    name,
+                )
+        except Exception as db_err:
+            log.warning(
+                "op_worker: failed to deactivate account_id=%s: %s", acc_id, db_err
+            )
+
+
 async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool:
     """
     Если ошибка ретраевая и retry_count < max_retries — сбросить операцию в pending.
@@ -505,6 +543,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
         except Exception as e:
             log.exception("op_worker: op %d failed: %s", op_id, e)
+            # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION_REVOKED
+            await _deactivate_dead_session(pool, e, params)
             # Фиксируем ошибку в Infrastructure Memory
             try:
                 from services.infra_memory import record_account_op
@@ -884,6 +924,43 @@ async def _exec_bulk_join(
                 res = await account_manager.join_channel(
                     acc["session_str"], link, _acc=acc_dict
                 )
+                # peer_flood=True means account-level join rate-limit (PEER_FLOOD).
+                # This is NOT a channel ban — apply a cooldown and skip remaining
+                # links for this account to avoid escalation to a real spamblock.
+                if res.get("peer_flood"):
+                    fail_count += 1
+                    _peer_flood_wait = 900  # 15-minute minimum per Telegram guidance
+                    err_str = res.get("error", "PeerFlood")[:200]
+                    log.warning(
+                        "op_worker bulk_join: PEER_FLOOD on acc=%s — cooldown %ds, skipping remaining links",
+                        acc_dict.get("phone"),
+                        _peer_flood_wait,
+                    )
+                    try:
+                        from services.flood_engine import record_flood
+                        await record_flood(pool, acc["id"], _peer_flood_wait, "join", op_id)
+                    except Exception:
+                        log_exc_swallow(
+                            log,
+                            f"Сбой записи PeerFlood в flood_engine для аккаунта {acc['id']}",
+                        )
+                    _infra_mem.record_account_op(
+                        acc["id"], "join", success=False, error="PeerFlood"
+                    )
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                        "VALUES($1,$2,$3,'error',$4)",
+                        op_id, step, link, err_str,
+                    )
+                    await _audit(
+                        pool, owner_id, "join", "peer_flood",
+                        operation_id=op_id, account_id=acc["id"],
+                        target=link, error_msg=err_str, flood_wait_s=_peer_flood_wait,
+                    )
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    )
+                    break  # stop all remaining links for this account
                 if res.get("error"):
                     raise Exception(res["error"])
                 ok_count += 1
@@ -1379,11 +1456,27 @@ async def _exec_global_presence_channel(
                     )
                 username_error = err
 
-        await pool.execute(
-            "UPDATE global_presence_targets SET status='done', result_asset_id=$1 WHERE id=$2",
-            channel_id,
-            target["id"],
-        )
+        # ── Атомарная запись: обновить targets + вставить в managed_channels одной транзакцией.
+        # Если Telethon создал канал, но DB-запись падает, канал станет «призраком» без записи.
+        # Транзакция гарантирует: либо оба write успешны, либо оба откатываются.
+        async with pool.acquire() as _conn:
+            async with _conn.transaction():
+                await _conn.execute(
+                    "UPDATE global_presence_targets SET status='done', result_asset_id=$1 WHERE id=$2",
+                    channel_id,
+                    target["id"],
+                )
+                await _conn.execute(
+                    """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
+                       VALUES($1,$2,$3,$4,$5)
+                       ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                    owner_id,
+                    acc["id"],
+                    channel_id,
+                    title,
+                    target.get("planned_username") or None,
+                )
+
         _infra_mem.record_account_op(
             acc["id"],
             "global_presence_channel",

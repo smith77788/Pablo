@@ -160,7 +160,8 @@ def _make_client(session_string: str = "", device: dict | None = None):
         app_version=d.get("app_version") or "11.5.3",
         lang_code="ru",
         system_lang_code="ru-RU",
-        connection_retries=3,
+        connection_retries=1,
+        request_retries=1,
         timeout=_CONNECT_TIMEOUT,
         flood_sleep_threshold=0,
         proxy=proxy,
@@ -897,9 +898,10 @@ async def send_dm(
     except FloodWaitError as e:
         return {"error": f"FloodWait: подождите {e.seconds}с", "flood_wait": e.seconds}
     except PeerFloodError as e:
+        # PeerFlood is a temporary account-level DM rate limit, NOT a permanent ban.
         return {
             "error": f"PeerFlood: аккаунт временно ограничен по рассылке: {e}",
-            "banned": True,
+            "peer_flood": True,
         }
     except UserPrivacyRestrictedError:
         return {"error": "приватность: пользователь запретил входящие"}
@@ -1322,9 +1324,11 @@ async def create_channel(
                 "flood_wait": e.seconds,
             }
         if isinstance(e, PeerFloodError):
+            # PeerFloodError has NO .seconds attribute — never use e.seconds here.
+            # Return peer_flood=True so callers distinguish it from a FloodWaitError.
             return {
                 "error": f"PeerFlood: аккаунт ограничен — {e}",
-                "flood_wait": e.seconds if hasattr(e, "seconds") else 0,
+                "peer_flood": True,
             }
         log.exception("create_channel error: %s", e)
         return {"error": str(e)[:200]}
@@ -1388,9 +1392,11 @@ async def join_channel(
                 "banned": True,
             }
         if isinstance(e, PeerFloodError):
+            # PeerFlood = temporary account-level join rate limit, NOT a channel ban.
+            # peer_flood=True lets callers apply a cooldown instead of skipping the account.
             return {
                 "error": f"PeerFlood: аккаунт временно ограничен: {e}",
-                "banned": True,
+                "peer_flood": True,
             }
         log.exception("join_channel error: %s", e)
         return {"error": str(e)[:200]}

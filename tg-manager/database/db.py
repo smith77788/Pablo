@@ -274,6 +274,29 @@ async def get_broadcast(pool: asyncpg.Pool, broadcast_id: int) -> asyncpg.Record
     return await pool.fetchrow("SELECT * FROM broadcasts WHERE id=$1", broadcast_id)
 
 
+async def log_broadcast_delivery(
+    pool: asyncpg.Pool, broadcast_id: int, user_id: int
+) -> None:
+    """Record that a specific user received a broadcast (idempotent via ON CONFLICT DO NOTHING)."""
+    await pool.execute(
+        "INSERT INTO broadcast_delivery_log (broadcast_id, user_id) VALUES ($1, $2)"
+        " ON CONFLICT DO NOTHING",
+        broadcast_id,
+        user_id,
+    )
+
+
+async def get_broadcast_delivered_ids(
+    pool: asyncpg.Pool, broadcast_id: int
+) -> set[int]:
+    """Return the set of user_ids already delivered for a broadcast (for resume)."""
+    rows = await pool.fetch(
+        "SELECT user_id FROM broadcast_delivery_log WHERE broadcast_id=$1",
+        broadcast_id,
+    )
+    return {r["user_id"] for r in rows}
+
+
 async def get_recent_broadcasts(
     pool: asyncpg.Pool, bot_id: int, limit: int = 10
 ) -> list[asyncpg.Record]:

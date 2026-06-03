@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 # broadcast_id → asyncio.Task, for optional cancellation
 _running: dict[int, asyncio.Task] = {}
 
+# Telegram group/channel rate limit: 20 messages/minute = 3 seconds between sends.
+# Private users follow the global 30 msg/s limit (BROADCAST_DELAY covers that).
+# Any chat_id < 0 is a group/channel.
+_GROUP_DELAY = 3.0
+
 
 def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
     """Render {{PLACEHOLDER}} tokens for a specific user."""
@@ -55,9 +60,35 @@ async def run(
 ) -> None:
     if user_ids is None:
         user_ids = await db.get_audience_user_ids(pool, bot_id)
-    sent = failed = 0
+
+    # Pre-flight: verify token is valid before burning through 10k send attempts
+    me = await bot_api.get_me(session, token)
+    if not me:
+        logger.error(
+            "Broadcast %d: pre-flight getMe failed — token invalid or revoked; aborting",
+            broadcast_id,
+        )
+        try:
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
+        except Exception as _e:
+            logger.warning("Broadcast %d: failed to mark failed: %s", broadcast_id, _e)
+        return
+
+    # Skip users already delivered (supports crash-resume without duplicate sends)
     try:
-        await db.update_broadcast(pool, broadcast_id, 0, 0, "running")
+        already_sent: set[int] = await db.get_broadcast_delivered_ids(pool, broadcast_id)
+    except Exception as _e:
+        logger.warning(
+            "Broadcast %d: could not load delivery log, starting fresh: %s",
+            broadcast_id,
+            _e,
+        )
+        already_sent = set()
+
+    sent = len(already_sent)
+    failed = 0
+    try:
+        await db.update_broadcast(pool, broadcast_id, sent, 0, "running")
     except Exception as _e:
         logger.warning("Broadcast %d: failed to mark running: %s", broadcast_id, _e)
 
@@ -82,6 +113,10 @@ async def run(
     user_count = len(user_ids)
 
     for uid in user_ids:
+        # Resume support: skip users already reached in a previous run
+        if uid in already_sent:
+            continue
+
         # Render per-user placeholders
         user_text = text
         if has_placeholders:
@@ -98,6 +133,16 @@ async def run(
             )
         if success:
             sent += 1
+            # Log delivery immediately so a crash can resume from here
+            try:
+                await db.log_broadcast_delivery(pool, broadcast_id, uid)
+            except Exception as _e:
+                logger.warning(
+                    "Broadcast %d: failed to log delivery for user %d: %s",
+                    broadcast_id,
+                    uid,
+                    _e,
+                )
         else:
             failed += 1
             if retry_after:
@@ -118,12 +163,25 @@ async def run(
                 if ok:
                     sent += 1
                     failed -= 1
+                    try:
+                        await db.log_broadcast_delivery(pool, broadcast_id, uid)
+                    except Exception as _e:
+                        logger.warning(
+                            "Broadcast %d: failed to log delivery for user %d: %s",
+                            broadcast_id,
+                            uid,
+                            _e,
+                        )
                 else:
                     await db.mark_user_inactive(pool, bot_id, uid)
             else:
                 await db.mark_user_inactive(pool, bot_id, uid)
 
-        await asyncio.sleep(BROADCAST_DELAY)
+        # Respect per-chat type rate limits.
+        # Groups/channels: 20 msg/min max → 3s between sends to same chat.
+        # Private users: global 30 msg/s limit → BROADCAST_DELAY (default 0.05s).
+        delay = _GROUP_DELAY if uid < 0 else BROADCAST_DELAY
+        await asyncio.sleep(delay)
 
     total = user_count
     if total == 0 or sent == total:
