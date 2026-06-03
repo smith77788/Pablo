@@ -49,17 +49,35 @@ _WARMUP_SEARCH_QUERIES = [
 _WARMUP_REACTIONS = ["👍", "❤️", "🔥", "🎉", "👏", "😍", "💯", "🤩", "😂", "🏆"]
 _WARMUP_BOTS = ["@BotFather", "@Stickers", "@gamee"]
 
+_COMMENT_TEXTS = [
+    "👍", "Спасибо!", "Интересно", "Согласен",
+    "Хорошая тема", "Полезная информация", "Да, именно",
+    "Отличный материал!", "Актуально", "👏",
+    "Интересная точка зрения", "Благодарю за пост",
+    "Продолжайте", "Поддерживаю", "Спасибо за контент",
+    "Очень полезно", "🔥", "Хороший контент", "Важная тема",
+]
+
+_BOT_COMMANDS = ["/start", "/help", "/menu", "/info"]
+
 # Действия по дням разогрева
 _WARMUP_SCHEDULE: dict[str, list[str]] = {
-    "days_1_3": ["read_channel", "view_profile", "open_chat"],
-    "days_4_7": ["read_channel", "view_profile", "join_channel", "send_reaction"],
-    "days_8_14": ["read_channel", "join_channel", "send_reaction", "search"],
+    "days_1_3": [
+        "read_channel", "view_profile", "open_chat",
+        "mark_read", "update_presence", "browse_dialogs",
+    ],
+    "days_4_7": [
+        "read_channel", "view_profile", "join_channel", "send_reaction",
+        "mark_read", "browse_dialogs", "forward_to_saved",
+    ],
+    "days_8_14": [
+        "read_channel", "join_channel", "send_reaction", "search",
+        "forward_to_saved", "vote_poll", "own_channel_read", "mark_read",
+    ],
     "days_15_plus": [
-        "read_channel",
-        "join_channel",
-        "send_reaction",
-        "search",
-        "dm_bot",
+        "read_channel", "join_channel", "send_reaction", "search",
+        "dm_bot", "send_comment", "smart_bot_start", "smart_bot_help",
+        "forward_to_saved", "vote_poll", "own_channel_read", "own_bot_start",
     ],
 }
 
@@ -274,6 +292,187 @@ async def _perform_search(client, query: str) -> bool:
         return False
 
 
+async def _perform_mark_read(client, channel_ref: str) -> bool:
+    """ReadHistoryRequest — реально отмечает сообщения прочитанными."""
+    try:
+        from telethon.tl.functions.messages import ReadHistoryRequest
+        entity = await client.get_entity(channel_ref)
+        msgs = await client.get_messages(entity, limit=5)
+        if msgs:
+            await client(ReadHistoryRequest(peer=entity, max_id=msgs[0].id))
+        await asyncio.sleep(random.uniform(2, 5))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup mark_read %s", channel_ref)
+        return False
+
+
+async def _perform_update_presence(client) -> bool:
+    """UpdateStatusRequest — симулируем онлайн-присутствие."""
+    try:
+        from telethon.tl.functions.account import UpdateStatusRequest
+        await client(UpdateStatusRequest(offline=False))
+        await asyncio.sleep(random.uniform(15, 45))
+        await client(UpdateStatusRequest(offline=True))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup update_presence")
+        return False
+
+
+async def _perform_browse_dialogs(client) -> bool:
+    """GetDialogs — симуляция открытия списка диалогов."""
+    try:
+        dialogs = await client.get_dialogs(limit=random.randint(10, 20))
+        for _ in dialogs[:random.randint(3, 7)]:
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+        await asyncio.sleep(random.uniform(3, 8))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup browse_dialogs")
+        return False
+
+
+async def _perform_forward_to_saved(client, channel_ref: str) -> bool:
+    """Пересылаем интересный пост в Saved Messages."""
+    try:
+        entity = await client.get_entity(channel_ref)
+        msgs = await client.get_messages(entity, limit=20)
+        if not msgs:
+            return False
+        candidates = [m for m in msgs if m.media or (m.text and len(m.text or "") > 50)]
+        msg = random.choice(candidates if candidates else list(msgs))
+        await client.forward_messages("me", msg)
+        await asyncio.sleep(random.uniform(2, 6))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup forward_to_saved %s", channel_ref)
+        return False
+
+
+async def _perform_vote_poll(client, channel_ref: str) -> bool:
+    """Голосуем в опросе если есть в канале."""
+    try:
+        from telethon.tl.functions.messages import SendVoteRequest
+        from telethon.tl.types import MessageMediaPoll
+        entity = await client.get_entity(channel_ref)
+        msgs = await client.get_messages(entity, limit=30)
+        poll_msgs = [
+            m for m in msgs
+            if isinstance(m.media, MessageMediaPoll)
+            and not m.media.poll.closed
+            and not (m.media.results and m.media.results.min)
+        ]
+        if not poll_msgs:
+            return False
+        msg = random.choice(poll_msgs)
+        options = msg.media.poll.answers
+        if not options:
+            return False
+        chosen = random.choice(options)
+        await client(SendVoteRequest(peer=entity, msg_id=msg.id, options=[chosen.option]))
+        await asyncio.sleep(random.uniform(2, 5))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup vote_poll %s", channel_ref)
+        return False
+
+
+async def _perform_send_comment(client, channel_ref: str) -> bool:
+    """Отправляем комментарий к посту через группу обсуждений."""
+    try:
+        from telethon.tl.functions.channels import GetFullChannelRequest
+        entity = await client.get_entity(channel_ref)
+        if not hasattr(entity, 'broadcast') or not entity.broadcast:
+            return False  # only channels have discussions
+        full = await client(GetFullChannelRequest(entity))
+        linked_id = getattr(full.full_chat, 'linked_chat_id', None)
+        if not linked_id:
+            return False
+        msgs = await client.get_messages(entity, limit=20)
+        msg_with_replies = [m for m in msgs if m.replies and m.replies.replies > 0]
+        if not msg_with_replies:
+            return False
+        post = random.choice(msg_with_replies[:5])
+        comment = random.choice(_COMMENT_TEXTS)
+        discussion = await client.get_entity(linked_id)
+        await client.send_message(discussion, comment, comment_to=post.id)
+        await asyncio.sleep(random.uniform(5, 15))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup send_comment %s", channel_ref)
+        return False
+
+
+async def _perform_smart_bot_cmd(client, bot_ref: str, command: str = "/start") -> bool:
+    """Отправляем команду боту, читаем ответ — умная имитация пользователя."""
+    try:
+        entity = await client.get_entity(bot_ref)
+        await client.send_message(entity, command)
+        await asyncio.sleep(random.uniform(3, 10))
+        # Читаем ответ бота
+        await client.get_messages(entity, limit=3)
+        await asyncio.sleep(random.uniform(2, 5))
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup smart_bot_cmd %s %s", bot_ref, command)
+        return False
+
+
+async def _perform_own_channel_read(client, channel_ref: str) -> bool:
+    """Читаем и реагируем на пост в своём канале (имитация органического просмотра)."""
+    try:
+        from telethon.tl.functions.messages import ReadHistoryRequest, SendReactionRequest
+        from telethon.tl.types import ReactionEmoji
+        entity = await client.get_entity(channel_ref)
+        msgs = await client.get_messages(entity, limit=10)
+        if not msgs:
+            return False
+        # Mark as read
+        await client(ReadHistoryRequest(peer=entity, max_id=msgs[0].id))
+        await asyncio.sleep(random.uniform(3, 8))
+        # With 40% chance add reaction
+        if random.random() < 0.4:
+            msg = random.choice(list(msgs))
+            emoticon = random.choice(_WARMUP_REACTIONS)
+            try:
+                await client(SendReactionRequest(
+                    peer=entity, msg_id=msg.id,
+                    reaction=[ReactionEmoji(emoticon=emoticon)],
+                ))
+                await asyncio.sleep(random.uniform(1, 3))
+            except Exception:
+                pass
+        return True
+    except Exception as e:
+        etype = type(e).__name__
+        if etype in _FATAL_ERRORS:
+            raise
+        log_exc_swallow(log, "warmup own_channel_read %s", channel_ref)
+        return False
+
+
 async def _log_warmup_action(
     pool: asyncpg.Pool,
     account_id: int,
@@ -294,6 +493,30 @@ async def _log_warmup_action(
         )
     except Exception as e:
         log.debug("warmup log write: %s", e)
+
+
+async def _get_warmup_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Получает каналы и боты пользователя для прогрева собственных ресурсов."""
+    try:
+        bots = await pool.fetch(
+            """SELECT DISTINCT username FROM managed_bots
+               WHERE added_by=$1 AND is_active=TRUE AND username IS NOT NULL AND username != ''
+               LIMIT 5""",
+            owner_id,
+        )
+        channels = await pool.fetch(
+            """SELECT DISTINCT channel_id, username, title FROM managed_channels
+               WHERE owner_id=$1 AND username IS NOT NULL AND username != ''
+               LIMIT 10""",
+            owner_id,
+        )
+        return {
+            "bots": [dict(r) for r in bots],
+            "channels": [dict(r) for r in channels],
+        }
+    except Exception as e:
+        log.debug("warmup get_resources owner=%d: %s", owner_id, e)
+        return {"bots": [], "channels": []}
 
 
 async def run_daily_warmup(
@@ -355,18 +578,31 @@ async def run_daily_warmup(
     actions_ok = 0
     actions_fail = 0
     available_actions = _get_actions_for_day(current_day)
+    resources = await _get_warmup_resources(pool, owner_id)
+    own_bots = resources["bots"]
+    own_channels = resources["channels"]
     channels = _WARMUP_PUBLIC_CHANNELS.copy()
     random.shuffle(channels)
 
     # Описания действий для прогресс-коллбэка
     _action_descriptions = {
-        "read_channel":  "читаю канал",
-        "join_channel":  "вступаю в канал",
-        "send_reaction": "ставлю реакцию",
-        "search":        "ищу в Telegram",
-        "view_profile":  "смотрю профиль",
-        "open_chat":     "открываю чат",
-        "dm_bot":        "пишу боту",
+        "read_channel":    "📖 читаю канал",
+        "join_channel":    "🔔 вступаю в канал",
+        "send_reaction":   "❤️ реакция на пост",
+        "search":          "🔍 поиск",
+        "view_profile":    "👁 смотрю профиль",
+        "open_chat":       "💬 открываю чат",
+        "dm_bot":          "🤖 пишу боту",
+        "mark_read":       "✅ отмечаю прочитанным",
+        "update_presence": "🟢 онлайн-присутствие",
+        "browse_dialogs":  "📱 проверяю диалоги",
+        "forward_to_saved":"📌 сохраняю пост",
+        "vote_poll":       "📊 голосую в опросе",
+        "send_comment":    "💬 оставляю комментарий",
+        "own_channel_read":"📡 читаю свой канал",
+        "smart_bot_start": "🤖 /start своему боту",
+        "smart_bot_help":  "🤖 /help своему боту",
+        "own_bot_start":   "🤖 запуск своего бота",
     }
 
     try:
@@ -380,7 +616,55 @@ async def run_daily_warmup(
             t0_action = time.monotonic()
 
             try:
-                if action == "read_channel":
+                if action in ("update_presence", "browse_dialogs"):
+                    target = "self"
+                    success = False
+                    if action == "update_presence":
+                        success = await asyncio.wait_for(_perform_update_presence(client), timeout=60)
+                    else:
+                        success = await asyncio.wait_for(_perform_browse_dialogs(client), timeout=60)
+
+                elif action == "mark_read":
+                    target = channels[i % len(channels)]
+                    success = await asyncio.wait_for(_perform_mark_read(client, target), timeout=60)
+
+                elif action == "forward_to_saved":
+                    target = channels[i % len(channels)]
+                    success = await asyncio.wait_for(_perform_forward_to_saved(client, target), timeout=60)
+
+                elif action == "vote_poll":
+                    target = channels[i % len(channels)]
+                    success = await asyncio.wait_for(_perform_vote_poll(client, target), timeout=60)
+
+                elif action == "send_comment":
+                    target = channels[i % len(channels)]
+                    success = await asyncio.wait_for(_perform_send_comment(client, target), timeout=90)
+
+                elif action == "own_channel_read":
+                    if own_channels:
+                        ch = random.choice(own_channels)
+                        target = f"@{ch['username']}" if ch.get("username") else str(ch["channel_id"])
+                    else:
+                        target = channels[i % len(channels)]
+                    success = await asyncio.wait_for(_perform_own_channel_read(client, target), timeout=60)
+
+                elif action in ("smart_bot_start", "own_bot_start"):
+                    if own_bots:
+                        bot = random.choice(own_bots)
+                        target = f"@{bot['username']}"
+                    else:
+                        target = random.choice(_WARMUP_BOTS)
+                    success = await asyncio.wait_for(_perform_smart_bot_cmd(client, target, "/start"), timeout=60)
+
+                elif action == "smart_bot_help":
+                    if own_bots:
+                        bot = random.choice(own_bots)
+                        target = f"@{bot['username']}"
+                    else:
+                        target = random.choice(_WARMUP_BOTS)
+                    success = await asyncio.wait_for(_perform_smart_bot_cmd(client, target, "/help"), timeout=60)
+
+                elif action == "read_channel":
                     success = await asyncio.wait_for(_perform_read_channel(client, target), timeout=60)
                 elif action == "join_channel":
                     success = await asyncio.wait_for(_perform_join_channel(client, target), timeout=60)
