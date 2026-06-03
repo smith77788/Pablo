@@ -812,6 +812,27 @@ async def cb_mini_strike_category(
         except Exception:
             pass
 
+    # Ecosystem Brain: ecosystem context for the selected account
+    try:
+        from database import db as _db
+        import html as _html_eco
+        ecos = await _db.find_object_ecosystems(pool, callback.from_user.id, "account", acc["id"])
+        eco_lines = []
+        seen_ecos: set = set()
+        for e in ecos:
+            if e["id"] not in seen_ecos:
+                seen_ecos.add(e["id"])
+                pressure = e.get("pressure_score") or 0
+                health = int((e.get("health_score") or 1.0) * 100)
+                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}.get(e.get("risk_level", "low"), "🟢")
+                eco_lines.append(f"  🌐 <b>{_html_eco.escape(e['name'])}</b>  {risk_icon} {health}%  ⚡{pressure}")
+                if pressure >= 85:
+                    eco_lines.append(f"  ⚠️ Давление экосистемы критическое ({_html_eco.escape(e['name'])}: {pressure})")
+        if eco_lines:
+            intel_block += "\n\n🌐 <b>Экосистемы аккаунта:</b>\n" + "\n".join(eco_lines[:4])
+    except Exception:
+        pass
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить страйк", callback_data=StrikeCb(action="mini_run"))
     kb.button(text="❌ Отмена",           callback_data=StrikeCb(action="menu"))

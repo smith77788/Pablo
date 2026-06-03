@@ -1047,6 +1047,21 @@ async def _exec_global_presence_channel(
             channel_id, target["id"],
         )
         _infra_mem.record_account_op(acc["id"], "global_presence_channel", success=True, duration_s=time.monotonic() - t0_gp)
+
+        # Link to ecosystem if one exists for this owner
+        try:
+            ecos = await pool.fetch(
+                "SELECT id FROM ecosystems WHERE owner_id=$1 AND ecosystem_type='global_presence' AND status='active' ORDER BY created_at DESC LIMIT 1",
+                owner_id,
+            )
+            if ecos and channel_id:
+                from services import ecosystem_brain as _eb
+                eco_id = ecos[0]["id"]
+                obj_type = "group" if is_group else "channel"
+                await _eb.add_member(pool, eco_id, owner_id, obj_type, channel_id)
+        except Exception:
+            pass
+
         created_count += 1
 
         await pool.execute(
@@ -1219,6 +1234,21 @@ async def _exec_global_presence_bot(
             "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
         )
         _infra_mem.record_account_op(acc["id"], "global_presence_bot", success=True, duration_s=time.monotonic() - t0_gp_bot)
+
+        # Link bot to ecosystem if one exists for this owner
+        try:
+            ecos = await pool.fetch(
+                "SELECT id FROM ecosystems WHERE owner_id=$1 AND ecosystem_type='global_presence' AND status='active' ORDER BY created_at DESC LIMIT 1",
+                owner_id,
+            )
+            if ecos and token and ":" in token:
+                from services import ecosystem_brain as _eb
+                eco_id = ecos[0]["id"]
+                bot_obj_id = int(token.split(":")[0])
+                await _eb.add_member(pool, eco_id, owner_id, "bot", bot_obj_id)
+        except Exception:
+            pass
+
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
             op_id, created_count + failed_count + 1,

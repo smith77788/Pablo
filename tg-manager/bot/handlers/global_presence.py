@@ -1148,6 +1148,28 @@ async def cb_gp_launch(
 
     await state.clear()
 
+    # Auto-create ecosystem for this Global Presence package
+    try:
+        from services import ecosystem_brain as _eb
+        geo_label_eco = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset or "Custom")
+        eco_name = f"Global Presence — {geo_label_eco}"
+        eco_id = await _eb.create_ecosystem(
+            pool,
+            owner_id=callback.from_user.id,
+            name=eco_name,
+            description="Автоматически создана при запуске Global Presence",
+            ecosystem_type="global_presence",
+            region=geo_preset if geo_preset else None,
+        )
+        await _eb.record_event(
+            pool, eco_id, callback.from_user.id, "operation",
+            f"Global Presence запущен: {geo_label_eco}",
+            severity="info",
+        )
+        log.debug("ecosystem created for global_presence: %d", eco_id)
+    except Exception as e:
+        log.debug("ecosystem auto-create failed: %s", e)
+
     # Build result message
     _type_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦", "full_package": "📦"}
     _type_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов", "full_package": "пакетов"}
