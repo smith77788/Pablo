@@ -8,8 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
-import aiohttp
-from bot.callbacks import TemplateCb, BotCb
+from bot.callbacks import TemplateCb
 from bot.keyboards import (
     templates_list,
     template_actions,
@@ -17,7 +16,11 @@ from bot.keyboards import (
     back_to_bot,
 )
 from bot.states import AddTemplate, Broadcast, AiTemplateGenFSM
-from bot.utils.template_validator import validate_message_template, list_placeholders, replace_placeholders
+from bot.utils.template_validator import (
+    validate_message_template,
+    list_placeholders,
+    replace_placeholders,
+)
 from database import db
 
 router = Router()
@@ -34,8 +37,14 @@ _AI_SYSTEM = (
 
 def _ai_preview_kb(bot_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="💾 Сохранить шаблон", callback_data=TemplateCb(action="ai_save", bot_id=bot_id))
-    kb.button(text="🔄 Перегенерировать", callback_data=TemplateCb(action="ai_regen", bot_id=bot_id))
+    kb.button(
+        text="💾 Сохранить шаблон",
+        callback_data=TemplateCb(action="ai_save", bot_id=bot_id),
+    )
+    kb.button(
+        text="🔄 Перегенерировать",
+        callback_data=TemplateCb(action="ai_regen", bot_id=bot_id),
+    )
     kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
@@ -48,6 +57,7 @@ async def _call_ai(prompt: str) -> str | None:
         return None
     try:
         from openai import AsyncOpenAI
+
         client = AsyncOpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
         resp = await client.chat.completions.create(
             model=model,
@@ -118,7 +128,9 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip() if message.text else ""
     if not name:
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id))
+        kb.button(
+            text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id)
+        )
         await message.answer(
             "❌ Название не может быть пустым. Введите ещё раз:",
             reply_markup=kb.as_markup(),
@@ -126,7 +138,9 @@ async def msg_template_name(message: Message, state: FSMContext) -> None:
         return
     if len(name) > 64:
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id))
+        kb.button(
+            text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=_bot_id)
+        )
         await message.answer(
             "❌ Название слишком длинное (макс. 64 символа). Введите ещё раз:",
             reply_markup=kb.as_markup(),
@@ -163,7 +177,9 @@ async def msg_template_text(
     if not validation.valid:
         errors = "\n".join(f"• {e}" for e in validation.errors)
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        kb.button(
+            text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id)
+        )
         await message.answer(
             f"❌ <b>Ошибки в шаблоне:</b>\n{errors}\n\nИсправьте и отправьте снова.",
             parse_mode="HTML",
@@ -173,7 +189,9 @@ async def msg_template_text(
     if validation.warnings:
         warns = "\n".join(f"⚠️ {w}" for w in validation.warnings)
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        kb.button(
+            text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id)
+        )
         await message.answer(
             f"<b>Предупреждения:</b>\n{warns}\n\nВсё равно сохранить? Напишите текст снова для подтверждения.",
             parse_mode="HTML",
@@ -206,7 +224,10 @@ async def cb_template_view(
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id))
+        kb.button(
+            text="◀️ Назад",
+            callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id),
+        )
         await callback.message.edit_text(
             "❌ Шаблон не найден.",
             parse_mode="HTML",
@@ -231,7 +252,10 @@ async def cb_template_delete(
     )
     if not deleted:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id))
+        kb.button(
+            text="◀️ Назад",
+            callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id),
+        )
         await callback.message.edit_text(
             "❌ Не удалось удалить шаблон.",
             parse_mode="HTML",
@@ -264,7 +288,10 @@ async def cb_template_use(
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id))
+        kb.button(
+            text="◀️ Назад",
+            callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id),
+        )
         await callback.message.edit_text(
             "❌ Шаблон не найден.",
             parse_mode="HTML",
@@ -286,7 +313,9 @@ async def cb_template_use(
         )
         ph_list = "\n".join(f"  • <code>{{{{{p}}}}}</code>" for p in placeholders)
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        kb.button(
+            text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id)
+        )
         await callback.message.edit_text(
             f"📢 <b>Рассылка по шаблону «{_html.escape(tpl['name'])}»</b>\n\n"
             f"В шаблоне найдены плейсхолдеры:\n{ph_list}\n\n"
@@ -318,8 +347,9 @@ async def cb_template_use(
 
 
 @router.message(Broadcast.waiting_placeholders, F.text)
-async def msg_placeholders(message: Message, state: FSMContext,
-                            pool: asyncpg.Pool) -> None:
+async def msg_placeholders(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     """Parse placeholder values, render template, proceed to broadcast confirm."""
     data = await state.get_data()
     placeholders: list = data.get("placeholders", [])
@@ -355,8 +385,9 @@ async def msg_placeholders(message: Message, state: FSMContext,
     unfilled = list_placeholders(rendered)
     extra = ""
     if unfilled:
-        extra = ("\n\n⚠️ Остались незаполненные: "
-                + ", ".join(f"<code>{{{{{p}}}}}</code>" for p in unfilled))
+        extra = "\n\n⚠️ Остались незаполненные: " + ", ".join(
+            f"<code>{{{{{p}}}}}</code>" for p in unfilled
+        )
 
     await state.set_state(Broadcast.confirming)
     await state.update_data(text=rendered, bot_id=bot_id)
@@ -398,9 +429,7 @@ async def cb_template_ai_gen(
 
 
 @router.message(AiTemplateGenFSM.waiting_prompt, F.text)
-async def msg_ai_template_prompt(
-    message: Message, state: FSMContext
-) -> None:
+async def msg_ai_template_prompt(message: Message, state: FSMContext) -> None:
     prompt = (message.text or "").strip()
     if not prompt:
         await message.answer("❌ Описание не может быть пустым. Попробуйте снова:")
@@ -452,7 +481,9 @@ async def cb_template_ai_regen(
         await state.set_state(AiTemplateGenFSM.waiting_prompt)
         await state.update_data(bot_id=bot_id)
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        kb.button(
+            text="❌ Отмена", callback_data=TemplateCb(action="list", bot_id=bot_id)
+        )
         await callback.message.edit_text(
             "✨ <b>AI-генерация шаблона</b>\n\nОпишите шаблон заново:",
             parse_mode="HTML",
@@ -494,7 +525,9 @@ async def cb_template_ai_save(
     if not generated_text:
         await state.clear()
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        kb.button(
+            text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=bot_id)
+        )
         await callback.message.edit_text(
             "❌ Нет сгенерированного текста. Попробуйте сгенерировать заново.",
             parse_mode="HTML",

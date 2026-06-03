@@ -5,6 +5,7 @@ Validates message templates (HTML syntax, length) and asset templates
 
 Used by templates.py and asset_templates.py handlers.
 """
+
 from __future__ import annotations
 
 import re
@@ -13,7 +14,7 @@ from dataclasses import dataclass, field
 
 # ── Constants ────────────────────────────────────────────────────────────────────
 
-MAX_TEXT_LENGTH = 4096   # Telegram message limit
+MAX_TEXT_LENGTH = 4096  # Telegram message limit
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 512
 MAX_SHORT_DESC_LENGTH = 120
@@ -26,6 +27,7 @@ HTML_TAG_RE = re.compile(r"</?([a-zA-Z][a-zA-Z0-9]*)\s*[^>]*>")
 
 
 # ── Result type ──────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class ValidationResult:
@@ -42,6 +44,7 @@ class ValidationResult:
 
 # ── Message template validation ──────────────────────────────────────────────────
 
+
 def validate_message_template(name: str, text: str) -> ValidationResult:
     """Validate a message template before saving."""
     result = ValidationResult()
@@ -52,7 +55,9 @@ def validate_message_template(name: str, text: str) -> ValidationResult:
         result.errors.append("Название не может быть пустым")
     elif len(name) > MAX_NAME_LENGTH:
         result.valid = False
-        result.errors.append(f"Название слишком длинное (макс. {MAX_NAME_LENGTH} символов)")
+        result.errors.append(
+            f"Название слишком длинное (макс. {MAX_NAME_LENGTH} символов)"
+        )
 
     # Text checks
     if not text or not text.strip():
@@ -74,6 +79,7 @@ def validate_message_template(name: str, text: str) -> ValidationResult:
 
 # ── Asset template validation ────────────────────────────────────────────────────
 
+
 def validate_asset_template(
     asset_type: str,
     name: str,
@@ -88,7 +94,9 @@ def validate_asset_template(
         result.errors.append("Название шаблона не может быть пустым")
     elif len(name) > MAX_NAME_LENGTH:
         result.valid = False
-        result.errors.append(f"Название слишком длинное (макс. {MAX_NAME_LENGTH} символов)")
+        result.errors.append(
+            f"Название слишком длинное (макс. {MAX_NAME_LENGTH} символов)"
+        )
 
     # Template data checks (must be non-empty dict)
     if not template or not isinstance(template, dict):
@@ -115,6 +123,7 @@ def validate_asset_template(
 
 
 # ── Per-type validators ──────────────────────────────────────────────────────────
+
 
 def _validate_bot_template(t: dict) -> ValidationResult:
     result = ValidationResult()
@@ -224,7 +233,9 @@ def _validate_operation_template(t: dict) -> ValidationResult:
             result.errors.append("Текст публикации не может быть пустым")
         elif len(text) > MAX_TEXT_LENGTH:
             result.valid = False
-            result.errors.append(f"Текст публикации слишком длинный ({len(text)} симв.)")
+            result.errors.append(
+                f"Текст публикации слишком длинный ({len(text)} симв.)"
+            )
 
     elif op_type == "bulk_join":
         links = t.get("links") or []
@@ -250,7 +261,9 @@ def _validate_operation_template(t: dict) -> ValidationResult:
         VALID_FIELDS = {"name", "desc", "short_desc"}
         if not field:
             result.valid = False
-            result.errors.append("Поле для редактирования обязательно (второе поле до ;;;)")
+            result.errors.append(
+                "Поле для редактирования обязательно (второе поле до ;;;)"
+            )
         elif field not in VALID_FIELDS:
             result.valid = False
             result.errors.append(
@@ -258,12 +271,15 @@ def _validate_operation_template(t: dict) -> ValidationResult:
             )
         if not value:
             result.valid = False
-            result.errors.append("Значение для редактирования обязательно (третье поле до ;;;)")
+            result.errors.append(
+                "Значение для редактирования обязательно (третье поле до ;;;)"
+            )
 
     return result
 
 
 # ── HTML helpers ─────────────────────────────────────────────────────────────────
+
 
 def _check_html_balance(text: str) -> ValidationResult:
     """Check that HTML tags are balanced. Returns warnings, not errors."""

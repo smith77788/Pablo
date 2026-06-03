@@ -61,6 +61,7 @@ def _build_text_and_kb(user_id: int):
             kb.button(text="🛑 Отменить всё", callback_data=TaskCb(action="cancel_all"))
 
     from bot.callbacks import BmCb
+
     kb.button(text="🔄 Обновить", callback_data=TaskCb(action="list"))
     kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)

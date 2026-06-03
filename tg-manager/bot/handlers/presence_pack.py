@@ -1,4 +1,5 @@
 """Presence Pack — link bot + channels + groups into a conversion funnel."""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,12 +43,16 @@ async def _edit(cb: CallbackQuery, text: str, markup=None):
 
 # ── Pack List ──────────────────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "menu"))
 async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await _edit(callback, locked_text("Presence Packs", "starter"),
-                    subscription_locked_markup("starter"))
+        await _edit(
+            callback,
+            locked_text("Presence Packs", "starter"),
+            subscription_locked_markup("starter"),
+        )
         return
 
     packs = await db.get_presence_packs(pool, callback.from_user.id)
@@ -80,13 +85,13 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     await _edit(
         callback,
-        f"🗂 <b>Presence Packs</b>\n\n"
-        f"{count_text}",
+        f"🗂 <b>Presence Packs</b>\n\n{count_text}",
         markup=kb.as_markup(),
     )
 
 
 # ── Create Pack — Step 1: Name ─────────────────────────────────────────────
+
 
 @router.callback_query(PackCb.filter(F.action == "create"))
 async def cb_pack_create(callback: CallbackQuery, state: FSMContext) -> None:
@@ -103,12 +108,17 @@ async def cb_pack_create(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(PresencePackFSM.entering_name)
-async def fsm_pack_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def fsm_pack_name(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     name = (message.text or "").strip()[:80]
     if not name:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
-        await message.answer("❌ Название не может быть пустым. Введите название пакета:", reply_markup=kb.as_markup())
+        await message.answer(
+            "❌ Название не может быть пустым. Введите название пакета:",
+            reply_markup=kb.as_markup(),
+        )
         return
     await state.update_data(pack_name=name)
     await state.set_state(PresencePackFSM.entering_description)
@@ -121,11 +131,14 @@ async def fsm_pack_name(message: Message, state: FSMContext, pool: asyncpg.Pool)
         "Введите <b>описание пакета</b> (будет добавлено в посевные посты):\n"
         "Например: «Всё о криптовалютах и DeFi — новости, обзоры, сигналы»\n\n"
         "Или нажмите «⏭ Пропустить»",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
-@router.callback_query(PackCb.filter(F.action == "skip_description"), PresencePackFSM.entering_description)
+@router.callback_query(
+    PackCb.filter(F.action == "skip_description"), PresencePackFSM.entering_description
+)
 async def cb_pack_skip_description(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -134,13 +147,17 @@ async def cb_pack_skip_description(
 
 
 @router.message(PresencePackFSM.entering_description)
-async def fsm_pack_description(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def fsm_pack_description(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     desc = (message.text or "").strip()[:300]
     await state.update_data(pack_description=desc)
     await _go_to_bot_step(message, state, pool)
 
 
-async def _go_to_bot_step(target: Message | CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def _go_to_bot_step(
+    target: Message | CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await state.set_state(PresencePackFSM.selecting_bot)
     is_msg = isinstance(target, Message)
     uid = target.from_user.id
@@ -151,8 +168,15 @@ async def _go_to_bot_step(target: Message | CallbackQuery, state: FSMContext, po
     )
     kb = InlineKeyboardBuilder()
     for b in bots:
-        label = f"@{b['username']}" if b.get("username") else (b.get("first_name") or f"id{b['bot_id']}")
-        kb.button(text=f"🤖 {label}", callback_data=PackCb(action="pick_bot", pack_id=b["bot_id"]))
+        label = (
+            f"@{b['username']}"
+            if b.get("username")
+            else (b.get("first_name") or f"id{b['bot_id']}")
+        )
+        kb.button(
+            text=f"🤖 {label}",
+            callback_data=PackCb(action="pick_bot", pack_id=b["bot_id"]),
+        )
     kb.button(text="⏭ Без бота", callback_data=PackCb(action="pick_bot", pack_id=0))
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(1)
@@ -163,14 +187,22 @@ async def _go_to_bot_step(target: Message | CallbackQuery, state: FSMContext, po
     if is_msg:
         await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
     else:
-        await target.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await target.message.edit_text(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
 
 
 # ── Step 3: Bot ────────────────────────────────────────────────────────────
 
-@router.callback_query(PackCb.filter(F.action == "pick_bot"), PresencePackFSM.selecting_bot)
+
+@router.callback_query(
+    PackCb.filter(F.action == "pick_bot"), PresencePackFSM.selecting_bot
+)
 async def cb_pack_pick_bot(
-    callback: CallbackQuery, callback_data: PackCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     bot_id = callback_data.pack_id
@@ -198,7 +230,10 @@ async def _render_channel_step(
     )
     kb = InlineKeyboardBuilder()
     if not channels:
-        kb.button(text="➡️ Пропустить (нет каналов)", callback_data=PackCb(action="channels_done"))
+        kb.button(
+            text="➡️ Пропустить (нет каналов)",
+            callback_data=PackCb(action="channels_done"),
+        )
         kb.button(text="◀️ Назад к боту", callback_data=PackCb(action="back_to_bot"))
         kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
         kb.adjust(1)
@@ -214,11 +249,18 @@ async def _render_channel_step(
         return
     for ch in channels:
         tick = "✅ " if ch["id"] in selected else ""
-        label = (tick + (ch["title"] or ch.get("username") or f"id{ch['id']}")).strip()[:35]
-        kb.button(text=label, callback_data=PackCb(action="toggle_ch", pack_id=ch["id"]))
+        label = (tick + (ch["title"] or ch.get("username") or f"id{ch['id']}")).strip()[
+            :35
+        ]
+        kb.button(
+            text=label, callback_data=PackCb(action="toggle_ch", pack_id=ch["id"])
+        )
     kb.adjust(2)
     nav = InlineKeyboardBuilder()
-    nav.button(text=f"➡️ Далее ({len(selected)} выбрано)", callback_data=PackCb(action="channels_done"))
+    nav.button(
+        text=f"➡️ Далее ({len(selected)} выбрано)",
+        callback_data=PackCb(action="channels_done"),
+    )
     nav.button(text="◀️ Назад к боту", callback_data=PackCb(action="back_to_bot"))
     nav.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     nav.adjust(1)
@@ -234,9 +276,15 @@ async def _render_channel_step(
 
 # ── Step 3: Channels ───────────────────────────────────────────────────────
 
-@router.callback_query(PackCb.filter(F.action == "toggle_ch"), PresencePackFSM.selecting_channels)
+
+@router.callback_query(
+    PackCb.filter(F.action == "toggle_ch"), PresencePackFSM.selecting_channels
+)
 async def cb_pack_toggle_ch(
-    callback: CallbackQuery, callback_data: PackCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
@@ -250,7 +298,9 @@ async def cb_pack_toggle_ch(
     await _render_channel_step(callback, state, pool)
 
 
-@router.callback_query(PackCb.filter(F.action == "channels_done"), PresencePackFSM.selecting_channels)
+@router.callback_query(
+    PackCb.filter(F.action == "channels_done"), PresencePackFSM.selecting_channels
+)
 async def cb_pack_channels_done(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -272,8 +322,12 @@ async def _render_group_step(
     )
     kb = InlineKeyboardBuilder()
     if not groups:
-        kb.button(text="➡️ Продолжить без групп", callback_data=PackCb(action="groups_done"))
-        kb.button(text="◀️ Назад к каналам", callback_data=PackCb(action="back_to_channels"))
+        kb.button(
+            text="➡️ Продолжить без групп", callback_data=PackCb(action="groups_done")
+        )
+        kb.button(
+            text="◀️ Назад к каналам", callback_data=PackCb(action="back_to_channels")
+        )
         kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
         kb.adjust(1)
         await _edit(
@@ -287,13 +341,20 @@ async def _render_group_step(
         return
     for g in groups:
         tick = "✅ " if g["id"] in selected else ""
-        label = (tick + (g["title"] or g.get("username") or "id" + str(g["id"]))).strip()[:35]
+        label = (
+            tick + (g["title"] or g.get("username") or "id" + str(g["id"]))
+        ).strip()[:35]
         kb.button(text=label, callback_data=PackCb(action="toggle_gr", pack_id=g["id"]))
     kb.adjust(2)
     nav = InlineKeyboardBuilder()
-    nav.button(text=f"➡️ Далее ({len(selected)} выбрано)", callback_data=PackCb(action="groups_done"))
+    nav.button(
+        text=f"➡️ Далее ({len(selected)} выбрано)",
+        callback_data=PackCb(action="groups_done"),
+    )
     nav.button(text="⏭ Без групп", callback_data=PackCb(action="groups_done"))
-    nav.button(text="◀️ Назад к каналам", callback_data=PackCb(action="back_to_channels"))
+    nav.button(
+        text="◀️ Назад к каналам", callback_data=PackCb(action="back_to_channels")
+    )
     nav.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     nav.adjust(2, 2)
     kb.attach(nav)
@@ -308,9 +369,15 @@ async def _render_group_step(
 
 # ── Step 4: Groups ─────────────────────────────────────────────────────────
 
-@router.callback_query(PackCb.filter(F.action == "toggle_gr"), PresencePackFSM.selecting_groups)
+
+@router.callback_query(
+    PackCb.filter(F.action == "toggle_gr"), PresencePackFSM.selecting_groups
+)
 async def cb_pack_toggle_gr(
-    callback: CallbackQuery, callback_data: PackCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
@@ -324,7 +391,9 @@ async def cb_pack_toggle_gr(
     await _render_group_step(callback, state, pool)
 
 
-@router.callback_query(PackCb.filter(F.action == "groups_done"), PresencePackFSM.selecting_groups)
+@router.callback_query(
+    PackCb.filter(F.action == "groups_done"), PresencePackFSM.selecting_groups
+)
 async def cb_pack_groups_done(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(PresencePackFSM.entering_target)
@@ -345,6 +414,7 @@ async def cb_pack_groups_done(callback: CallbackQuery, state: FSMContext) -> Non
 
 # ── Step 5: Target ─────────────────────────────────────────────────────────
 
+
 @router.message(PresencePackFSM.entering_target)
 async def fsm_pack_target(message: Message, state: FSMContext) -> None:
     lines = (message.text or "").strip().splitlines()
@@ -355,7 +425,9 @@ async def fsm_pack_target(message: Message, state: FSMContext) -> None:
     await _render_preview_msg(message, state)
 
 
-@router.callback_query(PackCb.filter(F.action == "skip_target"), PresencePackFSM.entering_target)
+@router.callback_query(
+    PackCb.filter(F.action == "skip_target"), PresencePackFSM.entering_target
+)
 async def cb_pack_skip_target(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.update_data(pack_target_url=None, pack_target_label=None)
@@ -372,7 +444,7 @@ async def _build_preview_text(sd: dict) -> str:
     target_url = sd.get("pack_target_url") or "—"
     target_label = sd.get("pack_target_label") or ""
     lines = [
-        f"🗂 <b>Presence Pack — Предпросмотр</b>\n",
+        "🗂 <b>Presence Pack — Предпросмотр</b>\n",
         f"<b>Название:</b> {escape(name)}",
     ]
     if description:
@@ -382,10 +454,10 @@ async def _build_preview_text(sd: dict) -> str:
         f"<b>Каналов:</b> {len(ch_ids)}",
         f"<b>Групп:</b> {len(gr_ids)}",
         f"<b>Целевой ресурс:</b> {escape(target_label or target_url)}\n",
-        f"После создания вы сможете:",
-        f"• 🌱 Посеять начальные посты с взаимными ссылками",
-        f"• 👑 Назначить бота администратором каналов",
-        f"• 🔄 Синхронизировать настройки между зеркалами",
+        "После создания вы сможете:",
+        "• 🌱 Посеять начальные посты с взаимными ссылками",
+        "• 👑 Назначить бота администратором каналов",
+        "• 🔄 Синхронизировать настройки между зеркалами",
     ]
     return "\n".join(lines)
 
@@ -401,17 +473,22 @@ def _preview_kb() -> InlineKeyboardBuilder:
 async def _render_preview_msg(message: Message, state: FSMContext) -> None:
     sd = await state.get_data()
     await message.answer(
-        await _build_preview_text(sd), parse_mode="HTML",
+        await _build_preview_text(sd),
+        parse_mode="HTML",
         reply_markup=_preview_kb().as_markup(),
     )
 
 
 async def _render_preview_cb(callback: CallbackQuery, state: FSMContext) -> None:
     sd = await state.get_data()
-    await _edit(callback, await _build_preview_text(sd), markup=_preview_kb().as_markup())
+    await _edit(
+        callback, await _build_preview_text(sd), markup=_preview_kb().as_markup()
+    )
 
 
-@router.callback_query(PackCb.filter(F.action == "confirm_create"), PresencePackFSM.previewing)
+@router.callback_query(
+    PackCb.filter(F.action == "confirm_create"), PresencePackFSM.previewing
+)
 async def cb_pack_confirm_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -421,7 +498,8 @@ async def cb_pack_confirm_create(
 
     owner_id = callback.from_user.id
     pack_id = await db.create_presence_pack(
-        pool, owner_id,
+        pool,
+        owner_id,
         name=sd.get("pack_name") or "Pack",
         description=sd.get("pack_description"),
         target_url=sd.get("pack_target_url"),
@@ -439,9 +517,17 @@ async def cb_pack_confirm_create(
     name = sd.get("pack_name") or "Pack"
     bot_username = sd.get("pack_bot_username") or "—"
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌱 Посеять начальные посты", callback_data=PackCb(action="seed", pack_id=pack_id))
-    kb.button(text="👑 Назначить бота admin", callback_data=PackCb(action="promote", pack_id=pack_id))
-    kb.button(text="🔄 Синх. зеркала", callback_data=PackCb(action="mirror", pack_id=pack_id))
+    kb.button(
+        text="🌱 Посеять начальные посты",
+        callback_data=PackCb(action="seed", pack_id=pack_id),
+    )
+    kb.button(
+        text="👑 Назначить бота admin",
+        callback_data=PackCb(action="promote", pack_id=pack_id),
+    )
+    kb.button(
+        text="🔄 Синх. зеркала", callback_data=PackCb(action="mirror", pack_id=pack_id)
+    )
     kb.button(text="📋 Детали", callback_data=PackCb(action="view", pack_id=pack_id))
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
@@ -457,11 +543,14 @@ async def cb_pack_confirm_create(
 
 # ── Pack View ──────────────────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "view"))
 async def cb_pack_view(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool
 ) -> None:
-    pack = await db.get_presence_pack(pool, callback_data.pack_id, callback.from_user.id)
+    pack = await db.get_presence_pack(
+        pool, callback_data.pack_id, callback.from_user.id
+    )
     if not pack:
         await callback.answer("Пакет не найден", show_alert=True)
         return
@@ -470,12 +559,22 @@ async def cb_pack_view(
     ch_ids = _jlist(pack["channel_ids"])
     gr_ids = _jlist(pack["group_ids"])
 
-    ch_rows = await pool.fetch(
-        "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])", ch_ids
-    ) if ch_ids else []
-    gr_rows = await pool.fetch(
-        "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])", gr_ids
-    ) if gr_ids else []
+    ch_rows = (
+        await pool.fetch(
+            "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])",
+            ch_ids,
+        )
+        if ch_ids
+        else []
+    )
+    gr_rows = (
+        await pool.fetch(
+            "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])",
+            gr_ids,
+        )
+        if gr_ids
+        else []
+    )
 
     def _row_label(r) -> str:
         return r["title"] or r.get("username") or "—"
@@ -495,15 +594,29 @@ async def cb_pack_view(
         next_steps.append("1️⃣ Назначьте бота администратором каналов (👑)")
     if not pack["seed_posted"]:
         next_steps.append("2️⃣ Опубликуйте начальные посты (🌱)")
-    guidance = ("\n\n💡 <b>Следующие шаги:</b>\n" + "\n".join(next_steps)) if next_steps else "\n\n✅ <b>Пакет полностью настроен!</b>"
+    guidance = (
+        ("\n\n💡 <b>Следующие шаги:</b>\n" + "\n".join(next_steps))
+        if next_steps
+        else "\n\n✅ <b>Пакет полностью настроен!</b>"
+    )
 
     pack_id = callback_data.pack_id
     kb = InlineKeyboardBuilder()
     if not pack["bot_promoted"] and pack.get("bot_id"):
-        kb.button(text="👑 Назначить бота admin", callback_data=PackCb(action="promote", pack_id=pack_id))
-    kb.button(text="🌱 Посеять начальные посты", callback_data=PackCb(action="seed", pack_id=pack_id))
-    kb.button(text="🔄 Синх. зеркала", callback_data=PackCb(action="mirror", pack_id=pack_id))
-    kb.button(text="🗑 Удалить", callback_data=PackCb(action="confirm_delete", pack_id=pack_id))
+        kb.button(
+            text="👑 Назначить бота admin",
+            callback_data=PackCb(action="promote", pack_id=pack_id),
+        )
+    kb.button(
+        text="🌱 Посеять начальные посты",
+        callback_data=PackCb(action="seed", pack_id=pack_id),
+    )
+    kb.button(
+        text="🔄 Синх. зеркала", callback_data=PackCb(action="mirror", pack_id=pack_id)
+    )
+    kb.button(
+        text="🗑 Удалить", callback_data=PackCb(action="confirm_delete", pack_id=pack_id)
+    )
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
 
@@ -524,9 +637,12 @@ async def cb_pack_view(
 
 # ── Seed Posts ─────────────────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "seed"))
 async def cb_pack_seed(
-    callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
     owner_id = callback.from_user.id
@@ -546,7 +662,8 @@ async def cb_pack_seed(
     if pack.get("bot_id"):
         bot_row = await pool.fetchrow(
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            pack["bot_id"], owner_id,
+            pack["bot_id"],
+            owner_id,
         )
         if bot_row:
             bot_token = bot_row["token"]
@@ -579,7 +696,9 @@ async def cb_pack_seed(
             target_label=pack.get("target_label"),
             pack_description=pack.get("description"),
         )
-        chan_name = ch.get("title") or (f"@{ch['username']}" if ch.get("username") else f"id{ch['channel_id']}")
+        chan_name = ch.get("title") or (
+            f"@{ch['username']}" if ch.get("username") else f"id{ch['channel_id']}"
+        )
         posted = False
         if bot_token:
             # Bot API requires @username or -100{channel_id} format
@@ -587,7 +706,9 @@ async def cb_pack_seed(
                 chan_target = f"@{ch['username']}"
             else:
                 chan_target = int(f"-100{ch['channel_id']}")
-            posted = await presence_setup.seed_channel_post(http, bot_token, chan_target, post_text)
+            posted = await presence_setup.seed_channel_post(
+                http, bot_token, chan_target, post_text
+            )
         if not posted:
             posted = await presence_setup.seed_channel_via_account(
                 pool, owner_id, ch["channel_id"], ch.get("access_hash") or 0, post_text
@@ -605,15 +726,20 @@ async def cb_pack_seed(
     pack_id = callback_data.pack_id
     kb = InlineKeyboardBuilder()
     if fail > 0:
-        kb.button(text="🔁 Повторить посев", callback_data=PackCb(action="seed", pack_id=pack_id))
-    kb.button(text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id))
+        kb.button(
+            text="🔁 Повторить посев",
+            callback_data=PackCb(action="seed", pack_id=pack_id),
+        )
+    kb.button(
+        text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id)
+    )
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
 
     fail_hint = ""
     if fail > 0 and fail_details:
         names = ", ".join(fail_details[:3])
-        extra = f" (+{len(fail_details)-3})" if len(fail_details) > 3 else ""
+        extra = f" (+{len(fail_details) - 3})" if len(fail_details) > 3 else ""
         fail_hint = (
             f"\n\n⚠️ Не удалось опубликовать в: <b>{escape(names)}{extra}</b>\n"
             f"💡 Причины: бот не является администратором канала, или аккаунт не участник. "
@@ -644,14 +770,19 @@ async def cb_pack_seed(
 
 # ── Promote Bot as Admin ───────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "promote"))
 async def cb_pack_promote(
-    callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    pool: asyncpg.Pool,
 ) -> None:
     owner_id = callback.from_user.id
     pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
     if not pack or not pack.get("bot_id"):
-        await callback.answer("Нет бота в пакете. Привяжите бот при создании.", show_alert=True)
+        await callback.answer(
+            "Нет бота в пакете. Привяжите бот при создании.", show_alert=True
+        )
         return
 
     ch_ids = _jlist(pack["channel_ids"])
@@ -685,7 +816,9 @@ async def cb_pack_promote(
 
     pack_id = callback_data.pack_id
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌱 Посеять посты", callback_data=PackCb(action="seed", pack_id=pack_id))
+    kb.button(
+        text="🌱 Посеять посты", callback_data=PackCb(action="seed", pack_id=pack_id)
+    )
     kb.button(text="📋 Детали", callback_data=PackCb(action="view", pack_id=pack_id))
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
@@ -701,9 +834,12 @@ async def cb_pack_promote(
 
 # ── Mirror Sync ────────────────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "mirror"))
 async def cb_pack_mirror(
-    callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    pool: asyncpg.Pool,
 ) -> None:
     owner_id = callback.from_user.id
     pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
@@ -713,7 +849,9 @@ async def cb_pack_mirror(
 
     await callback.answer("⏳ Синхронизирую зеркала...")
 
-    synced, total = await presence_setup.mirror_sync_auto_replies(pool, pack["bot_id"], owner_id)
+    synced, total = await presence_setup.mirror_sync_auto_replies(
+        pool, pack["bot_id"], owner_id
+    )
 
     pack_id = callback_data.pack_id
     kb = InlineKeyboardBuilder()
@@ -739,19 +877,30 @@ async def cb_pack_mirror(
 
 # ── Delete Pack ────────────────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "confirm_delete"))
 async def cb_pack_confirm_delete(
-    callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    pool: asyncpg.Pool,
 ) -> None:
-    pack = await db.get_presence_pack(pool, callback_data.pack_id, callback.from_user.id)
+    pack = await db.get_presence_pack(
+        pool, callback_data.pack_id, callback.from_user.id
+    )
     if not pack:
         await callback.answer("Не найден", show_alert=True)
         return
     await callback.answer()
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🗑 Да, удалить", callback_data=PackCb(action="delete", pack_id=callback_data.pack_id))
-    kb.button(text="◀️ Отмена", callback_data=PackCb(action="view", pack_id=callback_data.pack_id))
+    kb.button(
+        text="🗑 Да, удалить",
+        callback_data=PackCb(action="delete", pack_id=callback_data.pack_id),
+    )
+    kb.button(
+        text="◀️ Отмена",
+        callback_data=PackCb(action="view", pack_id=callback_data.pack_id),
+    )
     kb.adjust(1)
     await _edit(
         callback,
@@ -763,7 +912,9 @@ async def cb_pack_confirm_delete(
 
 @router.callback_query(PackCb.filter(F.action == "delete"))
 async def cb_pack_delete(
-    callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: PackCb,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await db.delete_presence_pack(pool, callback_data.pack_id, callback.from_user.id)
@@ -772,14 +923,18 @@ async def cb_pack_delete(
 
 # ── Cancel FSM ─────────────────────────────────────────────────────────────
 
+
 @router.callback_query(PackCb.filter(F.action == "cancel_fsm"))
-async def cb_pack_cancel_fsm(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_pack_cancel_fsm(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     await state.clear()
     await cb_pack_menu(callback, pool)
 
 
 # ── Back navigation within wizard ─────────────────────────────────────────
+
 
 @router.callback_query(PackCb.filter(F.action == "back_to_bot"))
 async def cb_pack_back_to_bot(
@@ -802,38 +957,60 @@ async def cb_pack_back_to_channels(
 
 # ── Bot Admin Panel ────────────────────────────────────────────────────────
 
+
 @router.callback_query(BotAdminCb.filter(F.action == "panel"))
 async def cb_bot_admin_panel(
-    callback: CallbackQuery, callback_data: BotAdminCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: BotAdminCb,
+    pool: asyncpg.Pool,
 ) -> None:
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id
 
     bot_row = await pool.fetchrow(
         "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id, owner_id,
+        bot_id,
+        owner_id,
     )
     if not bot_row:
         await callback.answer("Бот не найден", show_alert=True)
         return
     await callback.answer()
 
-    user_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id
-    ) or 0
-    reply_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
-    ) or 0
-    funnel_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
-    ) or 0
+    user_count = (
+        await pool.fetchval("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
+        or 0
+    )
+    reply_count = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
+            bot_id,
+        )
+        or 0
+    )
+    funnel_count = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+        )
+        or 0
+    )
 
     token = await db.get_bot_admin_token(pool, bot_id)
-    bot_name = f"@{bot_row['username']}" if bot_row.get("username") else bot_row.get("first_name") or f"id{bot_id}"
+    bot_name = (
+        f"@{bot_row['username']}"
+        if bot_row.get("username")
+        else bot_row.get("first_name") or f"id{bot_id}"
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="💬 Список авто-ответов", callback_data=BotAdminCb(action="list_replies", bot_id=bot_id))
-    kb.button(text="🔑 Обновить токен доступа", callback_data=BotAdminCb(action="regen_token", bot_id=bot_id))
+    kb.button(
+        text="💬 Список авто-ответов",
+        callback_data=BotAdminCb(action="list_replies", bot_id=bot_id),
+    )
+    kb.button(
+        text="🔑 Обновить токен доступа",
+        callback_data=BotAdminCb(action="regen_token", bot_id=bot_id),
+    )
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await _edit(
@@ -851,10 +1028,14 @@ async def cb_bot_admin_panel(
 
 @router.callback_query(BotAdminCb.filter(F.action == "regen_token"))
 async def cb_bot_regen_token(
-    callback: CallbackQuery, callback_data: BotAdminCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: BotAdminCb,
+    pool: asyncpg.Pool,
 ) -> None:
     new_token = presence_setup.generate_admin_token()
-    await db.upsert_bot_admin_session(pool, callback_data.bot_id, callback.from_user.id, new_token)
+    await db.upsert_bot_admin_session(
+        pool, callback_data.bot_id, callback.from_user.id, new_token
+    )
     # Show alert with new token, then refresh the panel.
     # cb_bot_admin_panel will call callback.answer() — skip it here to avoid double answer.
     await callback.answer(f"✅ Новый токен: /admin {new_token}", show_alert=True)
@@ -863,24 +1044,43 @@ async def cb_bot_regen_token(
     owner_id = callback.from_user.id
     bot_row = await pool.fetchrow(
         "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id, owner_id,
+        bot_id,
+        owner_id,
     )
     if not bot_row:
         return
-    user_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id
-    ) or 0
-    reply_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
-    ) or 0
-    funnel_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
-    ) or 0
+    user_count = (
+        await pool.fetchval("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
+        or 0
+    )
+    reply_count = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
+            bot_id,
+        )
+        or 0
+    )
+    funnel_count = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+        )
+        or 0
+    )
     token = await db.get_bot_admin_token(pool, bot_id)
-    bot_name = f"@{bot_row['username']}" if bot_row.get("username") else bot_row.get("first_name") or f"id{bot_id}"
+    bot_name = (
+        f"@{bot_row['username']}"
+        if bot_row.get("username")
+        else bot_row.get("first_name") or f"id{bot_id}"
+    )
     kb = InlineKeyboardBuilder()
-    kb.button(text="💬 Список авто-ответов", callback_data=BotAdminCb(action="list_replies", bot_id=bot_id))
-    kb.button(text="🔑 Обновить токен доступа", callback_data=BotAdminCb(action="regen_token", bot_id=bot_id))
+    kb.button(
+        text="💬 Список авто-ответов",
+        callback_data=BotAdminCb(action="list_replies", bot_id=bot_id),
+    )
+    kb.button(
+        text="🔑 Обновить токен доступа",
+        callback_data=BotAdminCb(action="regen_token", bot_id=bot_id),
+    )
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await _edit(
@@ -898,7 +1098,9 @@ async def cb_bot_regen_token(
 
 @router.callback_query(BotAdminCb.filter(F.action == "list_replies"))
 async def cb_bot_list_replies(
-    callback: CallbackQuery, callback_data: BotAdminCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: BotAdminCb,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     bot_id = callback_data.bot_id
@@ -910,8 +1112,13 @@ async def cb_bot_list_replies(
 
     if not rules:
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="➕ Добавить авто-ответ", callback_data=AutoReplyCb(action="add", bot_id=bot_id))
-        empty_kb.button(text="◀️ Назад", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
+        empty_kb.button(
+            text="➕ Добавить авто-ответ",
+            callback_data=AutoReplyCb(action="add", bot_id=bot_id),
+        )
+        empty_kb.button(
+            text="◀️ Назад", callback_data=BotAdminCb(action="panel", bot_id=bot_id)
+        )
         empty_kb.adjust(1)
         await _edit(
             callback,
@@ -929,7 +1136,8 @@ async def cb_bot_list_replies(
 
     await _edit(
         callback,
-        f"💬 <b>Авто-ответы бота</b> ({len(rules)}):\n\n" + "\n".join(lines) +
-        "\n\n<i>Управление: ⚙️ Настройки → Авто-ответы</i>",
+        f"💬 <b>Авто-ответы бота</b> ({len(rules)}):\n\n"
+        + "\n".join(lines)
+        + "\n\n<i>Управление: ⚙️ Настройки → Авто-ответы</i>",
         markup=kb.as_markup(),
     )

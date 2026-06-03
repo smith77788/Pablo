@@ -247,7 +247,9 @@ async def get_active_accounts(
     # Exclude in-memory cooling accounts, then re-sort by combined score
     result = [dict(r) for r in rows if not is_account_cooling(r["id"])]
     result.sort(
-        key=lambda r: get_account_state(r["id"]).risk_score - (r.get("trust_score") or 0) / 100.0
+        key=lambda r: (
+            get_account_state(r["id"]).risk_score - (r.get("trust_score") or 0) / 100.0
+        )
     )
     return result
 

@@ -130,6 +130,7 @@ def _mask(val: str) -> str:
 async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
     """Возвращает (plan, expires_at) или (plan, None) для бесплатного плана."""
     from bot.utils.subscription import is_platform_admin
+
     if is_platform_admin(user_id):
         return "enterprise", None
     row = await pool.fetchrow(
@@ -144,6 +145,7 @@ async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
 
 async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     from datetime import datetime, timezone
+
     plan, expires_at = await _get_plan_expiry(pool, user_id)
     lim = BOT_LIMITS.get(plan, 3)
     lim_label = "∞" if lim >= 9999 else str(lim)
@@ -157,26 +159,32 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
         plan_info = f"Текущий план: <b>{emoji} FREE</b> · до {lim_label} ботов"
     else:
         from bot.utils.subscription import is_platform_admin
+
         if is_platform_admin(user_id):
             plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · ∞ ботов\n🔑 <i>Администратор платформы</i>"
         elif expires_at:
             now_utc = datetime.now(timezone.utc)
             if expires_at.tzinfo is None:
                 from datetime import timezone as tz
+
                 expires_utc = expires_at.replace(tzinfo=tz.utc)
             else:
                 expires_utc = expires_at
             days_left = (expires_utc - now_utc).days
             expire_str = expires_utc.strftime("%d.%m.%Y")
             if days_left <= 3:
-                days_badge = f"⚠️ <b>Осталось {days_left} дн.</b> — продлите до {expire_str}"
+                days_badge = (
+                    f"⚠️ <b>Осталось {days_left} дн.</b> — продлите до {expire_str}"
+                )
             elif days_left <= 14:
                 days_badge = f"⏳ Осталось <b>{days_left} дн.</b> (до {expire_str})"
             else:
                 days_badge = f"✅ Активен до <b>{expire_str}</b> ({days_left} дн.)"
             plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · до {lim_label} ботов\n{days_badge}"
         else:
-            plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · до {lim_label} ботов"
+            plan_info = (
+                f"Текущий план: <b>{emoji} {plan.upper()}</b> · до {lim_label} ботов"
+            )
 
     text = (
         f"💳 <b>Подписка</b>\n\n"
@@ -267,7 +275,9 @@ _PLAN_ANNUAL_SAVINGS: dict[str, str] = {
 
 
 @router.callback_query(SubCb.filter(F.action == "plan_features"))
-async def cb_plan_features(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
+async def cb_plan_features(
+    callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
+) -> None:
     plan = callback_data.plan or ""
     if plan not in PLAN_DETAILED_FEATURES:
         await callback.answer("Неизвестный план.", show_alert=True)
@@ -549,7 +559,9 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
         try:
             await callback.bot.send_message(admin_id, notify, parse_mode="HTML")
         except Exception:
-            log_exc_swallow(log, "Ошибка отправки уведомления администратору о запросе подписки")
+            log_exc_swallow(
+                log, "Ошибка отправки уведомления администратору о запросе подписки"
+            )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К планам", callback_data=SubCb(action="menu"))
@@ -588,12 +600,18 @@ async def cb_admin_grant(
                        THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
                    ELSE now() + ($3 || ' months')::INTERVAL
                END""",
-        callback.from_user.id, plan, str(months),
+        callback.from_user.id,
+        plan,
+        str(months),
     )
     row = await pool.fetchrow(
         "SELECT expires_at FROM subscriptions WHERE user_id=$1", callback.from_user.id
     )
-    expires = row["expires_at"] if row else (datetime.now(timezone.utc) + timedelta(days=30 * months))
+    expires = (
+        row["expires_at"]
+        if row
+        else (datetime.now(timezone.utc) + timedelta(days=30 * months))
+    )
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Готово", callback_data=SubCb(action="menu"))
     await callback.message.edit_text(

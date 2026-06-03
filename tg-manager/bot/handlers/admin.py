@@ -1,4 +1,5 @@
 """Super-admin panel — platform management, monitoring, token vault, user control."""
+
 from __future__ import annotations
 import asyncio
 import csv
@@ -6,7 +7,7 @@ import html as _html
 import io
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import asyncpg
 import aiohttp
@@ -48,41 +49,44 @@ def is_admin(uid: int) -> bool:
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
+
 def _admin_main_kb(new_error_reports: int = 0):
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Пользователи платформы", callback_data="adm:users")
-    kb.button(text="💳 Подписки & платежи",     callback_data="adm:subs")
-    kb.button(text="🤖 Все боты & токены",       callback_data="adm:bots")
-    kb.button(text="📊 Системная статистика",    callback_data="adm:stats")
-    kb.button(text="📈 Операции платформы",      callback_data="adm:platform_ops")
-    kb.button(text="💰 Цены на подписки",        callback_data="adm:prices")
-    kb.button(text="⚙️ Методы оплаты",          callback_data="adm:pay_cfg")
-    kb.button(text="📨 Рассылка всем юзерам",    callback_data="adm:broadcast")
+    kb.button(text="💳 Подписки & платежи", callback_data="adm:subs")
+    kb.button(text="🤖 Все боты & токены", callback_data="adm:bots")
+    kb.button(text="📊 Системная статистика", callback_data="adm:stats")
+    kb.button(text="📈 Операции платформы", callback_data="adm:platform_ops")
+    kb.button(text="💰 Цены на подписки", callback_data="adm:prices")
+    kb.button(text="⚙️ Методы оплаты", callback_data="adm:pay_cfg")
+    kb.button(text="📨 Рассылка всем юзерам", callback_data="adm:broadcast")
     _notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
-    kb.button(text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle")
+    kb.button(
+        text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle"
+    )
     _free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
     kb.button(text=f"🆓 Free Mode: {_free_icon}", callback_data="adm:free_mode_toggle")
-    kb.button(text="🚫 Заблокировать юзера",     callback_data="adm:block_ask")
-    kb.button(text="✅ Разблокировать юзера",    callback_data="adm:unblock_ask")
-    kb.button(text="🗑 Удалить данные юзера",    callback_data="adm:delete_ask")
-    kb.button(text="💰 Выдать подписку",         callback_data="adm:grant_ask")
-    kb.button(text="❌ Забрать подписку",        callback_data="adm:revoke_ask")
-    kb.button(text="💰 Bulk-выдача подписок",    callback_data="adm:bulk_grant_ask")
-    kb.button(text="⚔️ Выдать Strike доступ",   callback_data="adm:strike_grant_ask")
-    kb.button(text="⚔️ Забрать Strike доступ",  callback_data="adm:strike_revoke_ask")
+    kb.button(text="🚫 Заблокировать юзера", callback_data="adm:block_ask")
+    kb.button(text="✅ Разблокировать юзера", callback_data="adm:unblock_ask")
+    kb.button(text="🗑 Удалить данные юзера", callback_data="adm:delete_ask")
+    kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
+    kb.button(text="❌ Забрать подписку", callback_data="adm:revoke_ask")
+    kb.button(text="💰 Bulk-выдача подписок", callback_data="adm:bulk_grant_ask")
+    kb.button(text="⚔️ Выдать Strike доступ", callback_data="adm:strike_grant_ask")
+    kb.button(text="⚔️ Забрать Strike доступ", callback_data="adm:strike_revoke_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
-    kb.button(text="📋 Экспорт юзеров (CSV)",   callback_data="adm:users_csv")
-    kb.button(text="🔍 Поиск юзера",            callback_data="adm:find_user")
-    kb.button(text="⚙️ Системный режим Swarm",   callback_data="adm:swarm_mode")
-    kb.button(text="🧹 Очистка данных",          callback_data="adm:cleanup_ask")
-    kb.button(text="🔑 Переменные Railway",      callback_data="adm:env_list")
+    kb.button(text="📋 Экспорт юзеров (CSV)", callback_data="adm:users_csv")
+    kb.button(text="🔍 Поиск юзера", callback_data="adm:find_user")
+    kb.button(text="⚙️ Системный режим Swarm", callback_data="adm:swarm_mode")
+    kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
+    kb.button(text="🔑 Переменные Railway", callback_data="adm:env_list")
     _err_label = (
         f"🐛 Отчёты об ошибках ({new_error_reports} новых)"
         if new_error_reports > 0
         else "🐛 Отчёты об ошибках"
     )
-    kb.button(text=_err_label,                   callback_data="adm:error_reports")
-    kb.button(text="◀️ Выйти из админки",        callback_data="adm:exit")
+    kb.button(text=_err_label, callback_data="adm:error_reports")
+    kb.button(text="◀️ Выйти из админки", callback_data="adm:exit")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -90,21 +94,21 @@ def _admin_main_kb(new_error_reports: int = 0):
 # ── Список отображаемых переменных (с метками) ────────────────────────────────
 
 _ENV_VARS: list[tuple[str, str]] = [
-    ("MANAGER_BOT_TOKEN",      "🤖 Bot Token"),
-    ("ADMIN_IDS",              "👑 Admin IDs"),
-    ("ADMIN_SECRET",           "🔐 Admin Secret"),
-    ("TON_WALLET",             "💎 TON Wallet"),
-    ("TON_API_KEY",            "🔑 TON API Key"),
-    ("TRON_WALLET",            "💵 TRON Wallet"),
-    ("TRON_API_KEY",           "🔑 TRON API Key"),
-    ("OPENROUTER_API_KEY",     "🤖 OpenRouter Key"),
-    ("OPENROUTER_MODEL",       "🧠 OpenRouter Model"),
-    ("ANTHROPIC_API_KEY",      "🧠 Anthropic Key"),
-    ("TG_API_ID",              "📱 TG API ID"),
-    ("TG_API_HASH",            "📱 TG API Hash"),
-    ("BROADCAST_DELAY",        "⏱ Broadcast Delay"),
-    ("RAILWAY_TOKEN",          "🚂 Railway Token"),
-    ("RAILWAY_PROJECT_ID",     "🚂 Railway Project ID"),
+    ("MANAGER_BOT_TOKEN", "🤖 Bot Token"),
+    ("ADMIN_IDS", "👑 Admin IDs"),
+    ("ADMIN_SECRET", "🔐 Admin Secret"),
+    ("TON_WALLET", "💎 TON Wallet"),
+    ("TON_API_KEY", "🔑 TON API Key"),
+    ("TRON_WALLET", "💵 TRON Wallet"),
+    ("TRON_API_KEY", "🔑 TRON API Key"),
+    ("OPENROUTER_API_KEY", "🤖 OpenRouter Key"),
+    ("OPENROUTER_MODEL", "🧠 OpenRouter Model"),
+    ("ANTHROPIC_API_KEY", "🧠 Anthropic Key"),
+    ("TG_API_ID", "📱 TG API ID"),
+    ("TG_API_HASH", "📱 TG API Hash"),
+    ("BROADCAST_DELAY", "⏱ Broadcast Delay"),
+    ("RAILWAY_TOKEN", "🚂 Railway Token"),
+    ("RAILWAY_PROJECT_ID", "🚂 Railway Project ID"),
 ]
 _ENV_KEYS = {k for k, _ in _ENV_VARS}
 
@@ -115,9 +119,9 @@ def _env_list_kb(vars_online: dict[str, str] | None = None):
         val = (vars_online or {}).get(key, "")
         status = "✅" if val else "❌"
         kb.button(text=f"{status} {label}", callback_data=f"adm:env_edit:{key}")
-    kb.button(text="➕ Добавить переменную",   callback_data="adm:env_add")
-    kb.button(text="🔄 Обновить список",        callback_data="adm:env_list")
-    kb.button(text="◀️ Главное меню админки",  callback_data="adm:main")
+    kb.button(text="➕ Добавить переменную", callback_data="adm:env_add")
+    kb.button(text="🔄 Обновить список", callback_data="adm:env_list")
+    kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -129,6 +133,7 @@ def _back_kb():
 
 
 # ── /admin команда ─────────────────────────────────────────────────────────────
+
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
@@ -148,6 +153,7 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
 
 # ── Секретная фраза для входа в админку ────────────────────────────────────────
 
+
 @router.message(F.text.func(lambda t: bool(ADMIN_SECRET) and t == ADMIN_SECRET))
 async def cmd_admin_secret(message: Message) -> None:
     # Секретная фраза совпала — даём сессионный доступ без проверки ADMIN_IDS
@@ -155,7 +161,11 @@ async def cmd_admin_secret(message: Message) -> None:
     try:
         await message.delete()
     except Exception:
-        log_exc_swallow(log, "Не удалось удалить сообщение с секретной фразой", user_id=message.from_user.id)
+        log_exc_swallow(
+            log,
+            "Не удалось удалить сообщение с секретной фразой",
+            user_id=message.from_user.id,
+        )
     kb = InlineKeyboardBuilder()
     kb.button(text="🔑 Открыть Админ Меню", callback_data="adm:main")
     await message.answer(
@@ -168,38 +178,54 @@ async def cmd_admin_secret(message: Message) -> None:
 
 
 async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> None:
-    total_users = await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots") or 0
-    total_bots  = await pool.fetchval("SELECT COUNT(*) FROM managed_bots") or 0
-    total_subs  = await pool.fetchval(
-        "SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now()"
-    ) or 0
-    total_payments = await pool.fetchval(
-        "SELECT COUNT(*) FROM payments WHERE status='confirmed'"
-    ) or 0
-    revenue = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='confirmed'"
-    ) or 0
+    total_users = (
+        await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots") or 0
+    )
+    total_bots = await pool.fetchval("SELECT COUNT(*) FROM managed_bots") or 0
+    total_subs = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now()"
+        )
+        or 0
+    )
+    total_payments = (
+        await pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='confirmed'")
+        or 0
+    )
+    revenue = (
+        await pool.fetchval(
+            "SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='confirmed'"
+        )
+        or 0
+    )
 
     try:
         total_users = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
     except Exception:
-        log_exc_swallow(log, "Не удалось получить количество пользователей из platform_users",
-                        user_id=msg_or_cb.from_user.id)
+        log_exc_swallow(
+            log,
+            "Не удалось получить количество пользователей из platform_users",
+            user_id=msg_or_cb.from_user.id,
+        )
         # total_users already set above as fallback
     try:
-        today_users = await pool.fetchval(
-            "SELECT COUNT(*) FROM platform_users "
-            "WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE"
-        ) or 0
+        today_users = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM platform_users "
+                "WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE"
+            )
+            or 0
+        )
     except Exception:
         today_users = 0
 
     # Счётчик непросмотренных отчётов об ошибках
     new_error_reports = 0
     try:
-        new_error_reports = await pool.fetchval(
-            "SELECT COUNT(*) FROM error_reports WHERE status='new'"
-        ) or 0
+        new_error_reports = (
+            await pool.fetchval("SELECT COUNT(*) FROM error_reports WHERE status='new'")
+            or 0
+        )
     except Exception:
         log_exc_swallow(log, "Не удалось получить счётчик новых error_reports")
 
@@ -226,9 +252,11 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
 
 # ── Callback dispatcher ────────────────────────────────────────────────────────
 
+
 @router.callback_query(F.data.startswith("adm:"))
-async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
-                    http: aiohttp.ClientSession) -> None:
+async def cb_admin(
+    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет доступа.", show_alert=True)
         return
@@ -255,7 +283,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "📨 <b>Рассылка по всем пользователям платформы</b>\n\n"
             "Отправьте текст сообщения следующим сообщением.\n"
             "Сообщение получат все зарегистрированные пользователи.",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         # set FSM flag via message text — simple approach: store in temp table
         await pool.execute(
@@ -273,13 +302,16 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action == "free_mode_toggle":
         new_state = not get_free_mode()
         set_free_mode(new_state)
-        await db.set_platform_setting(pool, "free_mode", "true" if new_state else "false")
+        await db.set_platform_setting(
+            pool, "free_mode", "true" if new_state else "false"
+        )
         await _show_admin_main(callback, pool, edit=True)
 
     elif action == "block_ask":
         await callback.message.edit_text(
             "🚫 <b>Заблокировать пользователя</b>\n\nОтправьте Telegram ID (число):",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'block','') "
@@ -290,7 +322,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action == "unblock_ask":
         await callback.message.edit_text(
             "✅ <b>Разблокировать пользователя</b>\n\nОтправьте Telegram ID:",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'unblock','') "
@@ -302,7 +335,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         await callback.message.edit_text(
             "🗑 <b>Удалить все данные пользователя</b>\n\n"
             "⚠️ Это действие необратимо! Отправьте Telegram ID:",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'delete_user','') "
@@ -317,7 +351,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "<code>USER_ID план месяцев</code>\n\n"
             "Пример: <code>123456789 pro 3</code>\n"
             "Планы: starter, pro, enterprise",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'grant','') "
@@ -332,7 +367,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
             "Подписка будет деактивирована, пользователь вернётся на FREE.",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'revoke','') "
@@ -349,7 +385,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
     elif action == "find_user":
         await callback.message.edit_text(
             "🔍 <b>Поиск пользователя</b>\n\nОтправьте Telegram ID:",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'find','') "
@@ -365,9 +402,15 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         await _adm_price_edit_ask(callback, pool, plan)
 
     elif action == "pay_cfg":
-        from bot.handlers.subscription import _payment_settings_text, _payment_settings_kb
+        from bot.handlers.subscription import (
+            _payment_settings_text,
+            _payment_settings_kb,
+        )
+
         await callback.message.edit_text(
-            _payment_settings_text(), parse_mode="HTML", reply_markup=_payment_settings_kb(),
+            _payment_settings_text(),
+            parse_mode="HTML",
+            reply_markup=_payment_settings_kb(),
         )
 
     elif action == "swarm_mode":
@@ -385,7 +428,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "➕ <b>Добавить переменную</b>\n\n"
             "Отправьте в формате:\n<code>КЛЮЧ значение</code>\n\n"
             "Пример: <code>MY_VAR hello123</code>",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'env_add','') "
@@ -409,7 +453,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
             "Доступ будет активирован немедленно.",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_grant','') "
@@ -424,7 +469,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
             "Strike доступ будет немедленно отозван.",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_revoke','') "
@@ -440,7 +486,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "Пример:\n"
             "<code>123456 pro 3\n789012 starter 1\n345678 enterprise 6</code>\n\n"
             "Планы: <code>starter</code>, <code>pro</code>, <code>enterprise</code>",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'bulk_grant','') "
@@ -460,7 +507,8 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             "• Аудит операций старше 30 дней\n\n"
             "⚠️ <b>Действие необратимо!</b>\n\n"
             "Введите <code>CLEAN</code> для подтверждения:",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         await pool.execute(
             "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'cleanup','') "
@@ -479,7 +527,9 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             status = parts[2]
             await _adm_error_reports(callback, pool, page=page, status=status)
         else:
-            await callback.message.edit_text("❌ Некорректный формат.", reply_markup=_back_kb())
+            await callback.message.edit_text(
+                "❌ Некорректный формат.", reply_markup=_back_kb()
+            )
 
     elif action.startswith("error_report:"):
         parts = action.split(":")
@@ -494,7 +544,9 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
             new_status = parts[2]
             await _adm_set_error_report_status(callback, pool, report_id, new_status)
         else:
-            await callback.message.edit_text("❌ Некорректный формат.", reply_markup=_back_kb())
+            await callback.message.edit_text(
+                "❌ Некорректный формат.", reply_markup=_back_kb()
+            )
 
     elif action == "audit_log":
         try:
@@ -508,20 +560,28 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
         if rows:
             lines = []
             for r in rows:
-                dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
+                dt = (
+                    r["occurred_at"].strftime("%d.%m %H:%M")
+                    if r.get("occurred_at")
+                    else "?"
+                )
                 uid = r.get("owner_id") or "?"
                 act = r.get("action") or "?"
                 res = r.get("result") or "?"
                 tgt = r.get("target") or ""
                 tgt_str = f" → {tgt[:20]}" if tgt else ""
-                res_emoji = "✅" if res == "success" else ("⚠️" if res == "flood_wait" else "❌")
+                res_emoji = (
+                    "✅" if res == "success" else ("⚠️" if res == "flood_wait" else "❌")
+                )
                 lines.append(f"<code>{dt}</code> uid:{uid} {act}{tgt_str} {res_emoji}")
             text = "🔐 <b>Аудит операций (последние 25)</b>\n\n" + "\n".join(lines)
         else:
             text = "🔐 <b>Аудит операций</b>\n\nЗаписей нет."
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data="adm:users")
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
 
     elif action == "exit":
         await callback.message.edit_text(
@@ -532,8 +592,10 @@ async def cb_admin(callback: CallbackQuery, pool: asyncpg.Pool,
 
 # ── Sub-screens ───────────────────────────────────────────────────────────────
 
+
 async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     from bot.handlers.admin_users import AdminUserCb
+
     _PLAN_EMO = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
     try:
         rows = await pool.fetch(
@@ -559,7 +621,11 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         plan = r["sub_plan"] or r["current_plan"] or "free"
         emo = _PLAN_EMO.get(plan, "❓")
         ban = "🚫 " if r["is_banned"] else ""
-        raw_name = f"@{r['username']}" if r["username"] else r["first_name"] or f"#{r['user_id']}"
+        raw_name = (
+            f"@{r['username']}"
+            if r["username"]
+            else r["first_name"] or f"#{r['user_id']}"
+        )
         name = _html.escape(raw_name)
         exp = ""
         if r["sub_exp"]:
@@ -567,7 +633,7 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         lines.append(f"{ban}{emo} {name} — {plan.upper()}{exp}")
         kb.button(
             text=f"{ban}{emo} {name[:22]}",
-            callback_data=AdminUserCb(action="user_actions", user_id=r["user_id"])
+            callback_data=AdminUserCb(action="user_actions", user_id=r["user_id"]),
         )
     body = "\n".join(lines) if lines else "Нет зарегистрированных пользователей."
     kb.button(text="📋 Полный список", callback_data=AdminUserCb(action="list"))
@@ -576,7 +642,8 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
     await callback.message.edit_text(
         f"👥 <b>Пользователи платформы</b> (всего: <b>{total}</b>)\n\n{body}",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -585,9 +652,12 @@ async def _adm_subscriptions(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         "SELECT user_id, plan, expires_at FROM subscriptions "
         "WHERE is_active=true AND expires_at > now() ORDER BY expires_at DESC LIMIT 20"
     )
-    expired = await pool.fetchval(
-        "SELECT COUNT(*) FROM subscriptions WHERE is_active=false OR expires_at <= now()"
-    ) or 0
+    expired = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM subscriptions WHERE is_active=false OR expires_at <= now()"
+        )
+        or 0
+    )
     lines = []
     for s in active:
         lines.append(
@@ -596,9 +666,9 @@ async def _adm_subscriptions(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         )
     body = "\n".join(lines) if lines else "Активных подписок нет."
     await callback.message.edit_text(
-        f"💳 <b>Активные подписки</b>\n\n{body}\n\n"
-        f"<i>Истёкших: {expired}</i>",
-        parse_mode="HTML", reply_markup=_back_kb(),
+        f"💳 <b>Активные подписки</b>\n\n{body}\n\n<i>Истёкших: {expired}</i>",
+        parse_mode="HTML",
+        reply_markup=_back_kb(),
     )
 
 
@@ -611,25 +681,30 @@ async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         lines.append(
-            f"<code>{b['bot_id']}</code> {label} "
-            f"(owner: <code>{b['added_by']}</code>)"
+            f"<code>{b['bot_id']}</code> {label} (owner: <code>{b['added_by']}</code>)"
         )
     body = "\n".join(lines) if lines else "Ботов нет."
     await callback.message.edit_text(
         f"🤖 <b>Последние 20 ботов в системе</b>\n\n{body}\n\n"
         "Для полного списка с токенами нажмите «Экспорт токенов».",
-        parse_mode="HTML", reply_markup=_back_kb(),
+        parse_mode="HTML",
+        reply_markup=_back_kb(),
     )
 
 
 async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    total_msgs = await pool.fetchval("SELECT COALESCE(SUM(sent_count),0) FROM broadcasts") or 0
-    total_bc   = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
+    total_msgs = (
+        await pool.fetchval("SELECT COALESCE(SUM(sent_count),0) FROM broadcasts") or 0
+    )
+    total_bc = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
     total_relay = await pool.fetchval("SELECT COUNT(*) FROM relay_sessions") or 0
     total_funnels = await pool.fetchval("SELECT COUNT(*) FROM funnels") or 0
-    total_schedules = await pool.fetchval(
-        "SELECT COUNT(*) FROM scheduled_broadcasts WHERE status='pending'"
-    ) or 0
+    total_schedules = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM scheduled_broadcasts WHERE status='pending'"
+        )
+        or 0
+    )
     db_users = await pool.fetchval("SELECT COUNT(*) FROM bot_users") or 0
     mode = await db.get_system_mode(pool)
 
@@ -642,7 +717,8 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         f"⏰ Запланировано: <b>{int(total_schedules):,}</b>\n"
         f"👥 Записей в bot_users: <b>{int(db_users):,}</b>\n\n"
         f"🌐 Swarm mode: <b>{mode.upper()}</b>",
-        parse_mode="HTML", reply_markup=_back_kb(),
+        parse_mode="HTML",
+        reply_markup=_back_kb(),
     )
 
 
@@ -664,7 +740,7 @@ async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     await callback.message.answer_document(
         file,
         caption=f"🔑 Токены всех ботов ({len(bots)} шт.) — {ts} UTC\n"
-                "<b>⚠️ Держите файл в тайне!</b>",
+        "<b>⚠️ Держите файл в тайне!</b>",
         parse_mode="HTML",
     )
 
@@ -682,11 +758,14 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     writer = csv.writer(buf)
     writer.writerow(["user_id", "bots_count", "plan", "expires_at"])
     for r in rows:
-        writer.writerow([
-            r["added_by"], r["bots"],
-            r["plan"] or "free",
-            r["expires_at"].strftime("%Y-%m-%d") if r["expires_at"] else "",
-        ])
+        writer.writerow(
+            [
+                r["added_by"],
+                r["bots"],
+                r["plan"] or "free",
+                r["expires_at"].strftime("%Y-%m-%d") if r["expires_at"] else "",
+            ]
+        )
     content = buf.getvalue().encode("utf-8")
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     file = BufferedInputFile(content, filename=f"users_{ts}.csv")
@@ -698,10 +777,14 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
 async def _adm_prices(callback: CallbackQuery) -> None:
     import config
+
     kb = InlineKeyboardBuilder()
     for plan, price in config.PLAN_PRICES_USD.items():
         emo = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(plan, "")
-        kb.button(text=f"✏️ {emo} {plan.upper()} — ${price}/мес", callback_data=f"adm:price_edit:{plan}")
+        kb.button(
+            text=f"✏️ {emo} {plan.upper()} — ${price}/мес",
+            callback_data=f"adm:price_edit:{plan}",
+        )
     kb.button(text="◀️ Назад", callback_data="adm:main")
     kb.adjust(1)
     s = config.PLAN_PRICES_USD
@@ -712,7 +795,8 @@ async def _adm_prices(callback: CallbackQuery) -> None:
         f"👑 ENTERPRISE — <b>${s['enterprise']}/мес</b>\n\n"
         "Нажмите на план чтобы изменить цену.\n"
         "Новая цена применится сразу и сохранится в Railway.",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -720,6 +804,7 @@ async def _adm_price_edit_ask(
     callback: CallbackQuery, pool: asyncpg.Pool, plan: str
 ) -> None:
     import config
+
     emo = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(plan, "")
     cur = config.PLAN_PRICES_USD.get(plan, 0)
     kb = InlineKeyboardBuilder()
@@ -728,24 +813,26 @@ async def _adm_price_edit_ask(
         f"✏️ <b>Цена {emo} {plan.upper()}</b>\n\n"
         f"Текущая цена: <b>${cur}/мес</b>\n\n"
         "Отправьте новую цену в USD (только число, например <code>15</code>):",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
     await pool.execute(
         "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
         "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
-        callback.from_user.id, f"price_edit:{plan}",
+        callback.from_user.id,
+        f"price_edit:{plan}",
     )
 
 
 async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     current = await db.get_system_mode(pool)
     modes = {
-        "manual":     "🟢 Manual — ручной контроль",
-        "assisted":   "🟡 Assisted — система предлагает",
-        "autopilot":  "🔵 Autopilot — авто-оптимизация",
-        "growth":     "🔴 Growth — агрессивный рост",
+        "manual": "🟢 Manual — ручной контроль",
+        "assisted": "🟡 Assisted — система предлагает",
+        "autopilot": "🔵 Autopilot — авто-оптимизация",
+        "growth": "🔴 Growth — агрессивный рост",
         "experiment": "🟣 Experiment — макс. тестирование",
-        "stability":  "⚫ Stability — фиксированный роутинг",
+        "stability": "⚫ Stability — фиксированный роутинг",
     }
     kb = InlineKeyboardBuilder()
     for mode, label in modes.items():
@@ -756,15 +843,18 @@ async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(
         f"⚙️ <b>Swarm системный режим</b>\n\nТекущий: <b>{current.upper()}</b>\n\n"
         "Режим определяет поведение всего swarm-роутинга:",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── Message handler for admin FSM states ─────────────────────────────────────
 
+
 @router.message(F.text)
-async def handle_admin_message(message: Message, pool: asyncpg.Pool,
-                                http: aiohttp.ClientSession) -> None:
+async def handle_admin_message(
+    message: Message, pool: asyncpg.Pool, http: aiohttp.ClientSession
+) -> None:
     if not _is_admin(message.from_user.id):
         return
 
@@ -783,12 +873,12 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
     state = state_row["state"]
     text = message.text.strip()
 
-    await pool.execute("DELETE FROM admin_state WHERE admin_id=$1", message.from_user.id)
+    await pool.execute(
+        "DELETE FROM admin_state WHERE admin_id=$1", message.from_user.id
+    )
 
     if state == "broadcast":
-        users = await pool.fetch(
-            "SELECT DISTINCT added_by FROM managed_bots"
-        )
+        users = await pool.fetch("SELECT DISTINCT added_by FROM managed_bots")
         sent = 0
         for u in users:
             try:
@@ -796,22 +886,28 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                 sent += 1
                 await asyncio.sleep(0.3)
             except Exception:
-                log_exc_swallow(log, "Не удалось отправить сообщение рассылки пользователю",
-                                user_id=u["added_by"])
+                log_exc_swallow(
+                    log,
+                    "Не удалось отправить сообщение рассылки пользователю",
+                    user_id=u["added_by"],
+                )
         await message.answer(
             f"✅ Рассылка завершена\n\nОтправлено: <b>{sent}</b> / {len(users)}",
-            parse_mode="HTML", reply_markup=_admin_main_kb(),
+            parse_mode="HTML",
+            reply_markup=_admin_main_kb(),
         )
 
     elif state == "block":
         try:
             uid = int(text)
             await pool.execute(
-                "INSERT INTO blocked_users(user_id) VALUES($1) ON CONFLICT DO NOTHING", uid
+                "INSERT INTO blocked_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+                uid,
             )
             await message.answer(
                 f"🚫 Пользователь <code>{uid}</code> заблокирован.",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
@@ -822,7 +918,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             await pool.execute("DELETE FROM blocked_users WHERE user_id=$1", uid)
             await message.answer(
                 f"✅ Пользователь <code>{uid}</code> разблокирован.",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
@@ -830,15 +927,20 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
     elif state == "delete_user":
         try:
             uid = int(text)
-            bot_ids = await pool.fetch("SELECT bot_id FROM managed_bots WHERE added_by=$1", uid)
+            bot_ids = await pool.fetch(
+                "SELECT bot_id FROM managed_bots WHERE added_by=$1", uid
+            )
             for b in bot_ids:
-                await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", b["bot_id"])
+                await pool.execute(
+                    "DELETE FROM managed_bots WHERE bot_id=$1", b["bot_id"]
+                )
             await pool.execute("DELETE FROM subscriptions WHERE user_id=$1", uid)
             await pool.execute("DELETE FROM payments WHERE user_id=$1", uid)
             await message.answer(
                 f"🗑 Данные пользователя <code>{uid}</code> удалены "
                 f"({len(bot_ids)} ботов).",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
@@ -863,7 +965,9 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                                THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
                            ELSE now() + ($3 || ' months')::INTERVAL
                        END""",
-                uid, plan, str(months),
+                uid,
+                plan,
+                str(months),
             )
             row = await pool.fetchrow(
                 "SELECT expires_at FROM subscriptions WHERE user_id=$1", uid
@@ -872,7 +976,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             await message.answer(
                 f"✅ Подписка <b>{plan.upper()}</b> выдана пользователю "
                 f"<code>{uid}</code> на {months} мес.",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
             try:
                 await message.bot.send_message(
@@ -883,28 +988,35 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                log_exc_swallow(log, "Не удалось уведомить пользователя о выдаче подписки",
-                                user_id=uid)
+                log_exc_swallow(
+                    log,
+                    "Не удалось уведомить пользователя о выдаче подписки",
+                    user_id=uid,
+                )
         except (ValueError, IndexError):
             await message.answer(
                 "❌ Формат: <code>USER_ID план месяцев</code>\n"
                 "Пример: <code>123456 pro 3</code>",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
 
     elif state == "find":
         try:
             uid = int(text)
             bots = await pool.fetch(
-                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1", uid
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1",
+                uid,
             )
             sub = await pool.fetchrow(
                 "SELECT plan, expires_at FROM subscriptions "
-                "WHERE user_id=$1 AND is_active=true AND expires_at > now()", uid
+                "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
+                uid,
             )
             plan_info = (
                 f"{sub['plan'].upper()} до {sub['expires_at'].strftime('%d.%m.%Y')}"
-                if sub else "FREE"
+                if sub
+                else "FREE"
             )
             bot_lines = []
             for b in bots[:10]:
@@ -916,7 +1028,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                 f"Подписка: <b>{plan_info}</b>\n"
                 f"Ботов: <b>{len(bots)}</b>\n\n"
                 f"{body}",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
@@ -947,7 +1060,9 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                                    THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
                                ELSE now() + ($3 || ' months')::INTERVAL
                            END""",
-                    uid, plan, str(months),
+                    uid,
+                    plan,
+                    str(months),
                 )
                 ok_list.append(f"✅ {uid} → {plan.upper()} {months}м.")
                 try:
@@ -958,8 +1073,11 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                         parse_mode="HTML",
                     )
                 except Exception:
-                    log_exc_swallow(log, "Не удалось уведомить пользователя о массовой выдаче подписки",
-                                    user_id=uid)
+                    log_exc_swallow(
+                        log,
+                        "Не удалось уведомить пользователя о массовой выдаче подписки",
+                        user_id=uid,
+                    )
             except (ValueError, IndexError) as e:
                 fail_list.append(f"❌ {line[:30]}: {e}")
         result_lines = ok_list[:20] + fail_list[:10]
@@ -967,7 +1085,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             f"💰 <b>Массовая выдача завершена</b>\n\n"
             f"Успешно: <b>{len(ok_list)}</b>, ошибок: <b>{len(fail_list)}</b>\n\n"
             + "\n".join(result_lines),
-            parse_mode="HTML", reply_markup=_admin_main_kb(),
+            parse_mode="HTML",
+            reply_markup=_admin_main_kb(),
         )
 
     elif state == "revoke":
@@ -977,7 +1096,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             await message.answer(
                 f"❌ Подписка отозвана у пользователя <code>{uid}</code>.\n"
                 f"Пользователь переведён на план <b>FREE</b>.",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
             try:
                 await message.bot.send_message(
@@ -988,8 +1108,11 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                log_exc_swallow(log, "Не удалось уведомить пользователя об отзыве подписки",
-                                user_id=uid)
+                log_exc_swallow(
+                    log,
+                    "Не удалось уведомить пользователя об отзыве подписки",
+                    user_id=uid,
+                )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
@@ -997,16 +1120,19 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
         try:
             target_uid = int(text.strip())
             from bot.handlers.strike import _ensure_table
+
             await _ensure_table(pool)
             await pool.execute(
                 "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
                 "ON CONFLICT (user_id) DO NOTHING",
-                target_uid, message.from_user.id,
+                target_uid,
+                message.from_user.id,
             )
             await message.answer(
                 f"⚔️ <b>Strike доступ активирован</b>\n\n"
                 f"Пользователь <code>{target_uid}</code> теперь имеет доступ к Strike Module.",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
             try:
                 await message.bot.send_message(
@@ -1017,8 +1143,11 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                log_exc_swallow(log, "Не удалось уведомить пользователя о выдаче Strike доступа",
-                                user_id=target_uid)
+                log_exc_swallow(
+                    log,
+                    "Не удалось уведомить пользователя о выдаче Strike доступа",
+                    user_id=target_uid,
+                )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
@@ -1029,7 +1158,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             await message.answer(
                 f"⚔️ <b>Strike доступ отозван</b>\n\n"
                 f"У пользователя <code>{target_uid}</code> больше нет доступа к Strike Module.",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
             try:
                 await message.bot.send_message(
@@ -1039,38 +1169,56 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     parse_mode="HTML",
                 )
             except Exception:
-                log_exc_swallow(log, "Не удалось уведомить пользователя об отзыве Strike доступа",
-                                user_id=target_uid)
+                log_exc_swallow(
+                    log,
+                    "Не удалось уведомить пользователя об отзыве Strike доступа",
+                    user_id=target_uid,
+                )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
     elif state == "cleanup":
         if text.strip().upper() != "CLEAN":
-            await message.answer("❌ Отменено (введите CLEAN для подтверждения).", reply_markup=_admin_main_kb())
+            await message.answer(
+                "❌ Отменено (введите CLEAN для подтверждения).",
+                reply_markup=_admin_main_kb(),
+            )
             return
         try:
-            flood_del = await pool.fetchval(
-                "WITH d AS (DELETE FROM account_flood_log WHERE created_at < now() - INTERVAL '30 days' RETURNING 1) SELECT COUNT(*) FROM d"
-            ) or 0
+            flood_del = (
+                await pool.fetchval(
+                    "WITH d AS (DELETE FROM account_flood_log WHERE created_at < now() - INTERVAL '30 days' RETURNING 1) SELECT COUNT(*) FROM d"
+                )
+                or 0
+            )
         except Exception:
             flood_del = 0
         try:
-            ops_del = await pool.fetchval(
-                "WITH d AS (DELETE FROM operation_queue WHERE status IN ('done','failed') "
-                "AND finished_at < now() - INTERVAL '7 days' RETURNING 1) SELECT COUNT(*) FROM d"
-            ) or 0
+            ops_del = (
+                await pool.fetchval(
+                    "WITH d AS (DELETE FROM operation_queue WHERE status IN ('done','failed') "
+                    "AND finished_at < now() - INTERVAL '7 days' RETURNING 1) SELECT COUNT(*) FROM d"
+                )
+                or 0
+            )
         except Exception:
             ops_del = 0
         try:
-            audit_del = await pool.fetchval(
-                "WITH d AS (DELETE FROM operation_audit WHERE occurred_at < now() - INTERVAL '30 days' RETURNING 1) SELECT COUNT(*) FROM d"
-            ) or 0
+            audit_del = (
+                await pool.fetchval(
+                    "WITH d AS (DELETE FROM operation_audit WHERE occurred_at < now() - INTERVAL '30 days' RETURNING 1) SELECT COUNT(*) FROM d"
+                )
+                or 0
+            )
         except Exception:
             audit_del = 0
         try:
-            dm_del = await pool.fetchval(
-                "WITH d AS (DELETE FROM dm_campaign_log WHERE sent_at < now() - INTERVAL '90 days' RETURNING 1) SELECT COUNT(*) FROM d"
-            ) or 0
+            dm_del = (
+                await pool.fetchval(
+                    "WITH d AS (DELETE FROM dm_campaign_log WHERE sent_at < now() - INTERVAL '90 days' RETURNING 1) SELECT COUNT(*) FROM d"
+                )
+                or 0
+            )
         except Exception:
             dm_del = 0
         await message.answer(
@@ -1079,7 +1227,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             f"• Операций удалено: <b>{ops_del}</b>\n"
             f"• Аудит-записей удалено: <b>{audit_del}</b>\n"
             f"• DM-логов удалено: <b>{dm_del}</b>",
-            parse_mode="HTML", reply_markup=_admin_main_kb(),
+            parse_mode="HTML",
+            reply_markup=_admin_main_kb(),
         )
 
     elif state.startswith("price_edit:"):
@@ -1089,20 +1238,26 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             if price < 1 or price > 9999:
                 raise ValueError
             import config
+
             config.PLAN_PRICES_USD[plan] = price
             os.environ[f"PRICE_{plan.upper()}"] = str(price)
             try:
                 async with aiohttp.ClientSession() as tmp:
-                    await railway_api.set_variable(tmp, f"PRICE_{plan.upper()}", str(price))
+                    await railway_api.set_variable(
+                        tmp, f"PRICE_{plan.upper()}", str(price)
+                    )
                 note = "Сохранено в Railway."
             except Exception:
                 note = "⚠️ Railway не настроен — цена активна до перезапуска."
             await message.answer(
                 f"✅ Цена <b>{plan.upper()}</b> обновлена: <b>${price}/мес</b>\n\n{note}",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
         except ValueError:
-            await message.answer("❌ Введите целое число от 1 до 9999", reply_markup=_admin_main_kb())
+            await message.answer(
+                "❌ Введите целое число от 1 до 9999", reply_markup=_admin_main_kb()
+            )
 
     elif state.startswith("env_edit:"):
         key = state.split(":", 1)[1]
@@ -1114,12 +1269,14 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     f"✅ <b>Переменная обновлена</b>\n\n"
                     f"<code>{key}</code> = <code>{text[:80]}{'...' if len(text) > 80 else ''}</code>\n\n"
                     "Railway начнёт переразворачивание автоматически.",
-                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
                 )
             except Exception as e:
                 await message.answer(
                     f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
-                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
                 )
 
     elif state == "env_add":
@@ -1127,7 +1284,8 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
         if len(parts) != 2:
             await message.answer(
                 "❌ Неверный формат. Нужно: <code>КЛЮЧ значение</code>",
-                parse_mode="HTML", reply_markup=_admin_main_kb(),
+                parse_mode="HTML",
+                reply_markup=_admin_main_kb(),
             )
             return
         key, val = parts[0].upper(), parts[1]
@@ -1139,16 +1297,19 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                     f"✅ <b>Переменная добавлена</b>\n\n"
                     f"<code>{key}</code> = <code>{val[:80]}{'...' if len(val) > 80 else ''}</code>\n\n"
                     "Railway начнёт переразворачивание автоматически.",
-                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
                 )
             except Exception as e:
                 await message.answer(
                     f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
-                    parse_mode="HTML", reply_markup=_admin_main_kb(),
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
                 )
 
 
 # ── Railway env var management helpers ────────────────────────────────────────
+
 
 async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) -> None:
     if not railway_api.is_configured():
@@ -1163,7 +1324,8 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
             "   <code>railway.com/project/<b>ВОТ-ЭТОТ-UUID</b></code>\n\n"
             "Service ID и Environment ID определятся <b>автоматически</b>.\n\n"
             "После добавления этих 2 переменных — управление всеми остальными будет здесь.",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         return
 
@@ -1172,7 +1334,8 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
     except Exception as e:
         await callback.message.edit_text(
             f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         return
 
@@ -1203,7 +1366,7 @@ async def _adm_env_edit_ask(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🗑 Удалить переменную", callback_data=f"adm:env_del:{key}")
-    kb.button(text="◀️ Назад",              callback_data="adm:env_list")
+    kb.button(text="◀️ Назад", callback_data="adm:env_list")
     kb.adjust(1)
 
     # Special hint for ADMIN_IDS — show user's own ID
@@ -1217,7 +1380,9 @@ async def _adm_env_edit_ask(
             "После сохранения кнопка ⚙️ Админка появится в главном меню."
         )
     elif key == "RAILWAY_TOKEN":
-        extra_hint = "\n💡 Получить: railway.com → Account Settings → Tokens → Create Token"
+        extra_hint = (
+            "\n💡 Получить: railway.com → Account Settings → Tokens → Create Token"
+        )
     elif key == "RAILWAY_PROJECT_ID":
         extra_hint = "\n💡 UUID из URL проекта: railway.com/project/<b>ВОТ-ЭТО</b>"
     elif key in ("TON_WALLET", "TRON_WALLET"):
@@ -1229,12 +1394,14 @@ async def _adm_env_edit_ask(
         f"Текущее значение: <code>{masked if masked else 'не задано'}</code>\n"
         f"{extra_hint}\n\n"
         "Отправьте новое значение следующим сообщением:",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
     await pool.execute(
         "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
         "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
-        callback.from_user.id, f"env_edit:{key}",
+        callback.from_user.id,
+        f"env_edit:{key}",
     )
 
 
@@ -1248,49 +1415,74 @@ async def _adm_env_delete(
     except Exception as e:
         await callback.message.edit_text(
             f"❌ Ошибка удаления {_html.escape(key)}: {_html.escape(str(e))}",
-            parse_mode="HTML", reply_markup=_back_kb()
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
 
 
 # ── Platform operations analytics ────────────────────────────────────────────
 
+
 async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Платформенная аналитика по операциям всех пользователей."""
     try:
         total_ops = await pool.fetchval("SELECT COUNT(*) FROM operation_queue") or 0
-        running = await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE status='running'"
-        ) or 0
-        pending = await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE status='pending'"
-        ) or 0
-        done_today = await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE status='done' "
-            "AND finished_at > now() - INTERVAL '24 hours'"
-        ) or 0
-        failed_today = await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE status='failed' "
-            "AND finished_at > now() - INTERVAL '24 hours'"
-        ) or 0
+        running = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE status='running'"
+            )
+            or 0
+        )
+        pending = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE status='pending'"
+            )
+            or 0
+        )
+        done_today = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE status='done' "
+                "AND finished_at > now() - INTERVAL '24 hours'"
+            )
+            or 0
+        )
+        failed_today = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE status='failed' "
+                "AND finished_at > now() - INTERVAL '24 hours'"
+            )
+            or 0
+        )
         top_ops = await pool.fetch(
             """SELECT op_type, COUNT(*) AS cnt
                FROM operation_queue
                WHERE created_at > now() - INTERVAL '7 days'
                GROUP BY op_type ORDER BY cnt DESC LIMIT 5"""
         )
-        total_floods = await pool.fetchval(
-            "SELECT COUNT(*) FROM account_flood_log WHERE created_at > now() - INTERVAL '24 hours'"
-        ) or 0
-        active_accounts = await pool.fetchval(
-            "SELECT COUNT(DISTINCT owner_id) FROM tg_accounts WHERE is_active=true"
-        ) or 0
-        dm_sent = await pool.fetchval(
-            "SELECT COUNT(*) FROM dm_campaign_log WHERE status='sent' "
-            "AND sent_at > now() - INTERVAL '24 hours'"
-        ) or 0
+        total_floods = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM account_flood_log WHERE created_at > now() - INTERVAL '24 hours'"
+            )
+            or 0
+        )
+        active_accounts = (
+            await pool.fetchval(
+                "SELECT COUNT(DISTINCT owner_id) FROM tg_accounts WHERE is_active=true"
+            )
+            or 0
+        )
+        dm_sent = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM dm_campaign_log WHERE status='sent' "
+                "AND sent_at > now() - INTERVAL '24 hours'"
+            )
+            or 0
+        )
     except Exception as e:
         await callback.message.edit_text(
-            f"❌ Ошибка получения данных: {e}", parse_mode="HTML", reply_markup=_back_kb()
+            f"❌ Ошибка получения данных: {e}",
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         return
 
@@ -1319,10 +1511,10 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 # ── Error Reports Admin UI ────────────────────────────────────────────────────
 
 _ERR_STATUS_LABELS: dict[str, str] = {
-    "new":       "🆕 Новые",
-    "viewing":   "👁 Просматриваются",
-    "fixing":    "🔧 В работе",
-    "fixed":     "✅ Исправлены",
+    "new": "🆕 Новые",
+    "viewing": "👁 Просматриваются",
+    "fixing": "🔧 В работе",
+    "fixed": "✅ Исправлены",
     "duplicate": "🔄 Дубликаты",
 }
 _PAGE_SIZE = 8
@@ -1339,12 +1531,14 @@ def _error_reports_kb(
     # Фильтр по статусу
     for st, label in _ERR_STATUS_LABELS.items():
         marker = "▶ " if st == status else ""
-        kb.button(text=f"{marker}{label}", callback_data=f"adm:error_reports:{page}:{st}")
+        kb.button(
+            text=f"{marker}{label}", callback_data=f"adm:error_reports:{page}:{st}"
+        )
     kb.adjust(3)
 
     # Список отчётов
     for r in reports:
-        dt = r["created_at"].strftime("%d.%m %H:%M") if r.get("created_at") else "?"
+        r["created_at"].strftime("%d.%m %H:%M") if r.get("created_at") else "?"
         user_label = f"@{r['username']}" if r.get("username") else f"id{r['user_id']}"
         desc_short = (r["description"] or "")[:28].replace("\n", " ")
         kb.button(
@@ -1356,9 +1550,19 @@ def _error_reports_kb(
     # Пагинация
     nav_btns: list[dict] = []
     if page > 0:
-        nav_btns.append({"text": "◀ Пред.", "callback_data": f"adm:error_reports:{page - 1}:{status}"})
+        nav_btns.append(
+            {
+                "text": "◀ Пред.",
+                "callback_data": f"adm:error_reports:{page - 1}:{status}",
+            }
+        )
     if (page + 1) * _PAGE_SIZE < total:
-        nav_btns.append({"text": "След. ▶", "callback_data": f"adm:error_reports:{page + 1}:{status}"})
+        nav_btns.append(
+            {
+                "text": "След. ▶",
+                "callback_data": f"adm:error_reports:{page + 1}:{status}",
+            }
+        )
     for btn in nav_btns:
         kb.button(text=btn["text"], callback_data=btn["callback_data"])
     if nav_btns:
@@ -1374,19 +1578,25 @@ async def _adm_error_reports(
     """Показать список отчётов об ошибках."""
     offset = page * _PAGE_SIZE
     try:
-        reports = await db.get_error_reports(pool, status=status, limit=_PAGE_SIZE, offset=offset)
+        reports = await db.get_error_reports(
+            pool, status=status, limit=_PAGE_SIZE, offset=offset
+        )
         # Общий счётчик для пагинации
         if status == "all":
             total = await pool.fetchval("SELECT COUNT(*) FROM error_reports") or 0
         else:
-            total = await pool.fetchval(
-                "SELECT COUNT(*) FROM error_reports WHERE status=$1", status
-            ) or 0
+            total = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM error_reports WHERE status=$1", status
+                )
+                or 0
+            )
     except Exception as e:
         log_exc_swallow(log, "Ошибка загрузки error_reports")
         await callback.message.edit_text(
             f"❌ Не удалось загрузить отчёты: <code>{e}</code>",
-            parse_mode="HTML", reply_markup=_back_kb(),
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
         )
         return
 
@@ -1411,7 +1621,9 @@ async def _adm_show_error_report(
 ) -> None:
     """Показать детальный вид одного отчёта об ошибке."""
     _back_kb_err = InlineKeyboardBuilder()
-    _back_kb_err.button(text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new")
+    _back_kb_err.button(
+        text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new"
+    )
 
     try:
         report = await db.get_error_report(pool, report_id)
@@ -1419,19 +1631,27 @@ async def _adm_show_error_report(
         log_exc_swallow(log, f"Ошибка загрузки отчёта #{report_id}")
         await callback.message.edit_text(
             f"❌ Ошибка загрузки отчёта #{report_id}: {_html.escape(str(e))}",
-            parse_mode="HTML", reply_markup=_back_kb_err.as_markup()
+            parse_mode="HTML",
+            reply_markup=_back_kb_err.as_markup(),
         )
         return
 
     if not report:
         await callback.message.edit_text(
             "❌ Отчёт не найден.",
-            parse_mode="HTML", reply_markup=_back_kb_err.as_markup()
+            parse_mode="HTML",
+            reply_markup=_back_kb_err.as_markup(),
         )
         return
 
-    dt = report["created_at"].strftime("%d.%m.%Y %H:%M") if report.get("created_at") else "?"
-    user_label = f"@{report['username']}" if report.get("username") else f"id{report['user_id']}"
+    dt = (
+        report["created_at"].strftime("%d.%m.%Y %H:%M")
+        if report.get("created_at")
+        else "?"
+    )
+    user_label = (
+        f"@{report['username']}" if report.get("username") else f"id{report['user_id']}"
+    )
     status_label = _ERR_STATUS_LABELS.get(report["status"], report["status"])
     notes_val = _html.escape(report["notes"]) if report.get("notes") else ""
     notes_block = f"\n📝 <b>Заметки:</b> {notes_val}" if notes_val else ""
@@ -1450,10 +1670,12 @@ async def _adm_show_error_report(
     # Кнопки смены статуса
     for st, label in _ERR_STATUS_LABELS.items():
         if st != report["status"]:
-            kb.button(text=f"→ {label}", callback_data=f"adm:err_status:{report_id}:{st}")
+            kb.button(
+                text=f"→ {label}", callback_data=f"adm:err_status:{report_id}:{st}"
+            )
     kb.adjust(2)
     kb.button(text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new")
-    kb.button(text="◀️ Главное меню",     callback_data="adm:main")
+    kb.button(text="◀️ Главное меню", callback_data="adm:main")
     kb.adjust(1)
 
     # Если есть скриншот — отправляем фото отдельно, затем редактируем сообщение
@@ -1464,10 +1686,14 @@ async def _adm_show_error_report(
                 caption=f"📸 Скриншот к отчёту #{report['id']}",
             )
         except Exception:
-            log_exc_swallow(log, f"Не удалось отправить скриншот для отчёта #{report_id}")
+            log_exc_swallow(
+                log, f"Не удалось отправить скриншот для отчёта #{report_id}"
+            )
         text += "\n\n📸 Скриншот отправлен выше."
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 async def _adm_set_error_report_status(
@@ -1475,7 +1701,9 @@ async def _adm_set_error_report_status(
 ) -> None:
     """Изменить статус отчёта об ошибке."""
     _back_kb_err = InlineKeyboardBuilder()
-    _back_kb_err.button(text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new")
+    _back_kb_err.button(
+        text="◀️ К списку отчётов", callback_data="adm:error_reports:0:new"
+    )
 
     try:
         ok = await db.update_error_report_status(pool, report_id, new_status)
@@ -1502,8 +1730,10 @@ async def _adm_set_error_report_status(
 
 # ── New user tracker (called from start.py or inline) ─────────────────────────
 
-async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
-                                    username: str | None, first_name: str) -> None:
+
+async def notify_new_platform_user(
+    bot, pool: asyncpg.Pool, user_id: int, username: str | None, first_name: str
+) -> None:
     """Call this when a new user starts the management bot for the first time."""
     raw = os.getenv("ADMIN_IDS", "")
     admin_ids = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
@@ -1512,7 +1742,10 @@ async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
     try:
         total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
     except Exception:
-        total = await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots") or 0
+        total = (
+            await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots")
+            or 0
+        )
     label = f"@{username}" if username else first_name
     for admin_id in admin_ids:
         try:
@@ -1525,5 +1758,8 @@ async def notify_new_platform_user(bot, pool: asyncpg.Pool, user_id: int,
                 parse_mode="HTML",
             )
         except Exception:
-            log_exc_swallow(log, "Не удалось отправить уведомление о новом пользователе админу",
-                            user_id=admin_id)
+            log_exc_swallow(
+                log,
+                "Не удалось отправить уведомление о новом пользователе админу",
+                user_id=admin_id,
+            )

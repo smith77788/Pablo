@@ -138,7 +138,6 @@ _MAX_FILE_BYTES = _get_positive_int_env("AI_FILE_MAX_BYTES", _DEFAULT_MAX_FILE_B
 _MAX_FILE_CHARS = _get_positive_int_env("AI_FILE_MAX_CHARS", _DEFAULT_MAX_FILE_CHARS)
 
 
-
 def _openai_tools() -> list:
     result = []
     for t in TOOL_DEFINITIONS:
@@ -378,7 +377,6 @@ async def _edit_or_answer_long(
         await source_message.answer(chunk, parse_mode=None)
 
     await source_message.answer(chunks[-1], parse_mode=None, reply_markup=reply_markup)
-
 
 
 async def _call_ai_providers(
@@ -761,7 +759,7 @@ async def cmd_ai(message: Message) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Открыть ИИ Помощник", callback_data=AiCb(action="start"))
-    kb.button(text="🏠 Главное меню",         callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await message.answer(
         "🤖 <b>ИИ Помощник</b>\n\n"
@@ -973,8 +971,12 @@ async def cb_ai_memory(
         lines = ["📚 <b>Память AI-ассистента</b> (последние 10)\n"]
         for item in items:
             pin = "📌 " if item.pinned else ""
-            kind_label = {"note": "📝", "insight": "💡", "reminder": "⏰"}.get(item.kind, "📄")
-            title_text = escape(item.title[:50]) if item.title else escape(item.body[:50])
+            kind_label = {"note": "📝", "insight": "💡", "reminder": "⏰"}.get(
+                item.kind, "📄"
+            )
+            title_text = (
+                escape(item.title[:50]) if item.title else escape(item.body[:50])
+            )
             dt = item.created_at.strftime("%d.%m") if item.created_at else ""
             lines.append(f"{kind_label} {pin}<b>{title_text}</b> <i>{dt}</i>")
             kb.button(
@@ -987,7 +989,9 @@ async def cb_ai_memory(
         text = "📚 <b>Память пустая</b>\n\nAI-ассистент будет сохранять важные сведения о вас здесь."
 
     kb.button(text="◀️ Назад в чат", callback_data=AiCb(action="start"))
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(AiCb.filter(F.action == "memory_delete"))
@@ -1025,8 +1029,12 @@ async def cb_ai_memory_delete(
         lines = ["📚 <b>Память AI-ассистента</b> (последние 10)\n"]
         for item in items:
             pin = "📌 " if item.pinned else ""
-            kind_label = {"note": "📝", "insight": "💡", "reminder": "⏰"}.get(item.kind, "📄")
-            title_text = escape(item.title[:50]) if item.title else escape(item.body[:50])
+            kind_label = {"note": "📝", "insight": "💡", "reminder": "⏰"}.get(
+                item.kind, "📄"
+            )
+            title_text = (
+                escape(item.title[:50]) if item.title else escape(item.body[:50])
+            )
             dt = item.created_at.strftime("%d.%m") if item.created_at else ""
             lines.append(f"{kind_label} {pin}<b>{title_text}</b> <i>{dt}</i>")
             kb.button(
@@ -1039,7 +1047,9 @@ async def cb_ai_memory_delete(
         text = "📚 <b>Память пустая</b>\n\nAI-ассистент будет сохранять важные сведения о вас здесь."
 
     kb.button(text="◀️ Назад в чат", callback_data=AiCb(action="start"))
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(AiCb.filter(F.action == "retry"))

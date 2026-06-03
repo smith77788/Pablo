@@ -1,4 +1,5 @@
 """Система сбора ошибок от пользователей с скриншотами."""
+
 from __future__ import annotations
 
 import logging
@@ -45,7 +46,9 @@ async def msg_error_description(message: Message, state: FSMContext) -> None:
 
     description = message.text.strip()
     if len(description) < 10:
-        await message.answer("❌ Описание слишком короткое. Опишите подробнее что произошло.")
+        await message.answer(
+            "❌ Описание слишком короткое. Опишите подробнее что произошло."
+        )
         return
 
     await state.update_data(description=description)
@@ -61,7 +64,9 @@ async def msg_error_description(message: Message, state: FSMContext) -> None:
 
 
 @router.message(ErrorReportFSM.awaiting_screenshot, F.photo)
-async def msg_error_screenshot(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def msg_error_screenshot(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     """Получение скриншота ошибки."""
     photo: PhotoSize = message.photo[-1]
     file_id = photo.file_id
@@ -80,7 +85,11 @@ async def msg_error_screenshot(message: Message, state: FSMContext, pool: asyncp
             file_id,
             "new",
         )
-        log.info("error_report: saved report_id=%d user_id=%d", report_id, message.from_user.id)
+        log.info(
+            "error_report: saved report_id=%d user_id=%d",
+            report_id,
+            message.from_user.id,
+        )
 
         await state.clear()
 

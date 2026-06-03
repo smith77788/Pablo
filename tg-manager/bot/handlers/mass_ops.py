@@ -5,13 +5,13 @@ Provides:
   - Dry-run preview: show what would be done without executing
   - Operation queue: view status of queued operations from DB
 """
+
 from __future__ import annotations
 
 import asyncio
 import html
 import json
 import logging
-from datetime import datetime, timezone
 
 import asyncpg
 from aiogram import F, Router
@@ -22,12 +22,25 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
 from services import operation_bus, infra_orchestrator
+
 try:
     from services import intelligence_engine as _ie
 except ImportError:
     _ie = None  # type: ignore[assignment]
-from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
-from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit, extract_flood_wait
+from bot.states import (
+    MassPublishFSM,
+    BulkBotEditFSM,
+    BulkJoinFSM,
+    BulkLeaveFSM,
+    OpBuilderFSM,
+)
+from bot.utils.op_helpers import (
+    _acc_label,
+    _get_active_accounts,
+    _progress_bar,
+    safe_edit,
+    extract_flood_wait,
+)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -36,22 +49,22 @@ router = Router()
 # ── Timing options ──────────────────────────────────────────────────────────
 
 _TIMING_OPTIONS = [
-    ("⚡ Немедленно",      "0"),
-    ("⏱ Задержка 5с",    "5"),
-    ("⏳ Задержка 30с",   "30"),
+    ("⚡ Немедленно", "0"),
+    ("⏱ Задержка 5с", "5"),
+    ("⏳ Задержка 30с", "30"),
 ]
 
 _TARGET_LABELS = {
     "channels": "Каналы",
-    "groups":   "Группы",
-    "both":     "Каналы и группы",
+    "groups": "Группы",
+    "both": "Каналы и группы",
 }
 
 _FILTER_LABELS = {
-    "all":     "Все активные аккаунты",
+    "all": "Все активные аккаунты",
     "account": "По аккаунту",
     "cluster": "По кластеру",
-    "pool":    "По пулу",
+    "pool": "По пулу",
 }
 
 
@@ -61,10 +74,16 @@ def _back_menu_kb() -> InlineKeyboardBuilder:
     return kb
 
 
-_RISK_LABEL = {"low": ("🟢", "низкий"), "medium": ("🟡", "средний"), "high": ("🔴", "высокий")}
+_RISK_LABEL = {
+    "low": ("🟢", "низкий"),
+    "medium": ("🟡", "средний"),
+    "high": ("🔴", "высокий"),
+}
 
 
-async def _capacity_line(pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list) -> str:
+async def _capacity_line(
+    pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list
+) -> str:
     """Однострочный прогноз нагрузки для экрана подтверждения. Молча возвращает '' при ошибке."""
     try:
         est = await infra_orchestrator.estimate_capacity(
@@ -82,7 +101,9 @@ async def _capacity_line(pool: asyncpg.Pool, owner_id: int, op_type: str, total_
         return ""
 
 
-async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list) -> str:
+async def _intel_block(
+    pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list
+) -> str:
     """Intelligence-блок для экрана подтверждения массовых операций.
 
     Использует intelligence_engine.get_pre_launch_intelligence() с fallback
@@ -105,15 +126,17 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
         try:
             state_res, cap_res = await asyncio.gather(
                 infra_orchestrator.get_state(pool, owner_id),
-                infra_orchestrator.estimate_capacity(pool, owner_id, op_type, total_items, account_ids=acc_ids or None),
+                infra_orchestrator.estimate_capacity(
+                    pool, owner_id, op_type, total_items, account_ids=acc_ids or None
+                ),
             )
-            pressure  = state_res.pressure_emoji
-            p_label   = state_res.pressure_label
-            p_score   = state_res.pressure_score
+            pressure = state_res.pressure_emoji
+            p_label = state_res.pressure_label
+            p_score = state_res.pressure_score
             available = state_res.account_available
-            cooling   = state_res.account_cooling
+            cooling = state_res.account_cooling
             total_acc = state_res.account_total
-            est_min   = cap_res.get("estimated_minutes", 0)
+            est_min = cap_res.get("estimated_minutes", 0)
 
             lines = [
                 "📊 <b>Анализ операции</b>",
@@ -140,13 +163,18 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
     eco_lines: list[str] = []
     try:
         from services import ecosystem_brain as _eb
+
         _ecosystems = await _eb.list_ecosystems(pool, owner_id)
         if _ecosystems:
             eco_lines.append("🌐 <b>Экосистемы:</b>")
             for _eco in _ecosystems[:3]:
                 _eco_health = await _eb.compute_health(pool, _eco["id"], owner_id)
                 _health_pct = int(_eco_health.overall * 100)
-                _health_icon = "🟢" if _eco_health.overall >= 0.7 else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
+                _health_icon = (
+                    "🟢"
+                    if _eco_health.overall >= 0.7
+                    else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
+                )
                 eco_lines.append(f"  {_health_icon} {_eco['name']}: {_health_pct}%")
     except Exception:
         pass
@@ -157,19 +185,31 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
 
 # ── Main menu ────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(MassOpCb.filter(F.action == "menu"))
 async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="🛠️ Построитель операций",         callback_data=MassOpCb(action="build"))
-    kb.button(text="📤 Массовая публикация",           callback_data=MassOpCb(action="mass_publish"))
-    kb.button(text="🔗 Массовый join каналов",         callback_data=MassOpCb(action="bulk_join"))
-    kb.button(text="🚪 Массовый выход из каналов",     callback_data=MassOpCb(action="bulk_leave"))
-    kb.button(text="✏️ Массовое редактирование ботов", callback_data=MassOpCb(action="bulk_bot_edit"))
-    kb.button(text="🔍 Предпросмотр (Dry Run)",        callback_data=MassOpCb(action="dry_run"))
-    kb.button(text="📋 Очередь операций",              callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад",                         callback_data=BmCb(action="operations"))
+    kb.button(text="🛠️ Построитель операций", callback_data=MassOpCb(action="build"))
+    kb.button(
+        text="📤 Массовая публикация", callback_data=MassOpCb(action="mass_publish")
+    )
+    kb.button(
+        text="🔗 Массовый join каналов", callback_data=MassOpCb(action="bulk_join")
+    )
+    kb.button(
+        text="🚪 Массовый выход из каналов", callback_data=MassOpCb(action="bulk_leave")
+    )
+    kb.button(
+        text="✏️ Массовое редактирование ботов",
+        callback_data=MassOpCb(action="bulk_bot_edit"),
+    )
+    kb.button(
+        text="🔍 Предпросмотр (Dry Run)", callback_data=MassOpCb(action="dry_run")
+    )
+    kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     kb.adjust(2, 2, 2, 1, 1)
     await safe_edit(
         callback,
@@ -190,28 +230,46 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
 # Step 1: choose target type
 
+
 @router.callback_query(MassOpCb.filter(F.action == "mass_publish"))
 async def cb_mass_publish_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await safe_edit(callback, "🔒 <b>Массовая публикация — PRO+</b>\n\nОформите подписку: /subscription", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "🔒 <b>Массовая публикация — PRO+</b>\n\nОформите подписку: /subscription",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
     await state.set_state(MassPublishFSM.choosing_targets)
     await state.update_data(mp_step="targets")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📢 Каналы",              callback_data=MassOpCb(action="mp_target", op_type="channels"))
-    kb.button(text="👥 Группы",              callback_data=MassOpCb(action="mp_target", op_type="groups"))
-    kb.button(text="📢+👥 Каналы и группы", callback_data=MassOpCb(action="mp_target", op_type="both"))
-    kb.button(text="❌ Отмена",              callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="📢 Каналы", callback_data=MassOpCb(action="mp_target", op_type="channels")
+    )
+    kb.button(
+        text="👥 Группы", callback_data=MassOpCb(action="mp_target", op_type="groups")
+    )
+    kb.button(
+        text="📢+👥 Каналы и группы",
+        callback_data=MassOpCb(action="mp_target", op_type="both"),
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 1, 1)
-    await safe_edit(callback, "📤 <b>Массовая публикация</b>\n\nШаг 1 из 5: Выберите тип целей:", reply_markup=kb.as_markup())
+    await safe_edit(
+        callback,
+        "📤 <b>Массовая публикация</b>\n\nШаг 1 из 5: Выберите тип целей:",
+        reply_markup=kb.as_markup(),
+    )
 
 
 # Step 2: choose filter (all / by account / by cluster)
+
 
 @router.callback_query(MassOpCb.filter(F.action == "mp_target"))
 async def cb_mp_target_chosen(
@@ -223,11 +281,22 @@ async def cb_mp_target_chosen(
     await state.set_state(MassPublishFSM.choosing_selector)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌐 Все активные аккаунты", callback_data=MassOpCb(action="mp_filter", op_type="all"))
-    kb.button(text="👤 По аккаунту",           callback_data=MassOpCb(action="mp_filter", op_type="account"))
-    kb.button(text="🗂 По кластеру",           callback_data=MassOpCb(action="mp_filter", op_type="cluster"))
-    kb.button(text="🏊 По пулу",               callback_data=MassOpCb(action="mp_filter", op_type="pool"))
-    kb.button(text="❌ Отмена",                callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="🌐 Все активные аккаунты",
+        callback_data=MassOpCb(action="mp_filter", op_type="all"),
+    )
+    kb.button(
+        text="👤 По аккаунту",
+        callback_data=MassOpCb(action="mp_filter", op_type="account"),
+    )
+    kb.button(
+        text="🗂 По кластеру",
+        callback_data=MassOpCb(action="mp_filter", op_type="cluster"),
+    )
+    kb.button(
+        text="🏊 По пулу", callback_data=MassOpCb(action="mp_filter", op_type="pool")
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     target_label = _TARGET_LABELS.get(_op_type, _op_type)
     await safe_edit(
@@ -241,9 +310,13 @@ async def cb_mp_target_chosen(
 
 # Step 2b: filter by account — show account list
 
+
 @router.callback_query(MassOpCb.filter(F.action == "mp_filter"))
 async def cb_mp_filter_chosen(
-    callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     await callback.answer()
     filter_type = callback_data.op_type or ""
@@ -254,7 +327,11 @@ async def cb_mp_filter_chosen(
     if filter_type == "account":
         accounts = await _get_active_accounts(pool, callback.from_user.id)
         if not accounts:
-            await safe_edit(callback, "⚠️ Нет активных аккаунтов.", reply_markup=_back_menu_kb().as_markup())
+            await safe_edit(
+                callback,
+                "⚠️ Нет активных аккаунтов.",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
             return
         kb = InlineKeyboardBuilder()
         for acc in accounts:
@@ -305,10 +382,13 @@ async def cb_mp_filter_chosen(
 
     if filter_type == "pool":
         from database import db as _db
+
         pools = await _db.get_distinct_pools(pool, callback.from_user.id)
         if not pools:
             # No pools defined — fall back to "all"
-            await state.update_data(mp_filter="all", mp_acc_id=None, mp_cluster=None, mp_pool=None)
+            await state.update_data(
+                mp_filter="all", mp_acc_id=None, mp_cluster=None, mp_pool=None
+            )
             await _ask_mp_text(callback.message, state, target_label, edit=True)
             return
         kb = InlineKeyboardBuilder()
@@ -349,7 +429,9 @@ async def cb_mp_cluster_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(mp_cluster=callback_data.op_type or "", mp_acc_id=None, mp_pool=None)
+    await state.update_data(
+        mp_cluster=callback_data.op_type or "", mp_acc_id=None, mp_pool=None
+    )
     data = await state.get_data()
     target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
     await _ask_mp_text(callback.message, state, target_label, edit=True)
@@ -360,7 +442,9 @@ async def cb_mp_pool_picked(
     callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(mp_pool=callback_data.op_type or "", mp_acc_id=None, mp_cluster=None)
+    await state.update_data(
+        mp_pool=callback_data.op_type or "", mp_acc_id=None, mp_cluster=None
+    )
     data = await state.get_data()
     target_label = _TARGET_LABELS.get(data.get("mp_target", ""), "")
     await _ask_mp_text(callback.message, state, target_label, edit=True)
@@ -368,7 +452,10 @@ async def cb_mp_pool_picked(
 
 # Step 3: enter text
 
-async def _ask_mp_text(msg, state: FSMContext, target_label: str, edit: bool = False) -> None:
+
+async def _ask_mp_text(
+    msg, state: FSMContext, target_label: str, edit: bool = False
+) -> None:
     await state.set_state(MassPublishFSM.waiting_text)
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
@@ -383,7 +470,10 @@ async def _ask_mp_text(msg, state: FSMContext, target_label: str, edit: bool = F
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать сообщение ввода текста массовой публикации, отправляем новое")
+            log_exc_swallow(
+                log,
+                "Не удалось отредактировать сообщение ввода текста массовой публикации, отправляем новое",
+            )
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -442,14 +532,20 @@ async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
 async def fsm_mp_text_fallback(message: Message, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-    await message.answer("⚠️ Введите текст поста или загрузите .txt файл:", reply_markup=kb.as_markup())
+    await message.answer(
+        "⚠️ Введите текст поста или загрузите .txt файл:", reply_markup=kb.as_markup()
+    )
 
 
 # Step 4: choose timing
 
+
 @router.callback_query(MassOpCb.filter(F.action == "mp_timing"))
 async def cb_mp_timing(
-    callback: CallbackQuery, callback_data: MassOpCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     delay = int(callback_data.op_type or "0")
@@ -465,12 +561,22 @@ async def cb_mp_timing(
     mp_text = data.get("mp_text", "")
 
     # Count channels for preview
-    channel_count = await _count_targets(pool, callback.from_user.id, target, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
+    channel_count = await _count_targets(
+        pool,
+        callback.from_user.id,
+        target,
+        filter_type,
+        mp_acc_id,
+        mp_cluster,
+        pool_name=mp_pool,
+    )
 
     target_label = _TARGET_LABELS.get(target, target)
     filter_label = _FILTER_LABELS.get(filter_type, filter_type)
     if filter_type == "account" and mp_acc_id:
-        acc_row = await pool.fetchrow("SELECT first_name, phone FROM tg_accounts WHERE id=$1", mp_acc_id)
+        acc_row = await pool.fetchrow(
+            "SELECT first_name, phone FROM tg_accounts WHERE id=$1", mp_acc_id
+        )
         if acc_row:
             filter_label = f"Аккаунт: {acc_row['first_name'] or acc_row['phone']}"
     elif filter_type == "cluster" and mp_cluster:
@@ -484,9 +590,9 @@ async def cb_mp_timing(
 
     await state.set_state(MassPublishFSM.confirming)
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Запустить",  callback_data=MassOpCb(action="mp_confirm"))
-    kb.button(text="🔍 Dry Run",   callback_data=MassOpCb(action="dry_run"))
-    kb.button(text="❌ Отмена",    callback_data=MassOpCb(action="menu"))
+    kb.button(text="✅ Запустить", callback_data=MassOpCb(action="mp_confirm"))
+    kb.button(text="🔍 Dry Run", callback_data=MassOpCb(action="dry_run"))
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 1)
     await safe_edit(
         callback,
@@ -504,12 +610,15 @@ async def cb_mp_timing(
 
 # Step 5: confirm and run
 
+
 @router.callback_query(MassOpCb.filter(F.action == "mp_confirm"))
 async def cb_mp_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     # Проверка давления инфраструктуры
-    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    ready, reason = await infra_orchestrator.is_ready_for_op(
+        pool, callback.from_user.id
+    )
     if not ready:
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
@@ -528,7 +637,14 @@ async def cb_mp_confirm(
     delay = int(data.get("mp_delay", 0))
 
     # Build list of (account, dialog) to post to
-    accounts = await _get_accounts_for_filter(pool, callback.from_user.id, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
+    accounts = await _get_accounts_for_filter(
+        pool,
+        callback.from_user.id,
+        filter_type,
+        mp_acc_id,
+        mp_cluster,
+        pool_name=mp_pool,
+    )
 
     if not accounts:
         filter_hint = {
@@ -549,7 +665,7 @@ async def cb_mp_confirm(
     targets_with_dialogs: list[tuple] = []
     for acc in accounts:
         dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
-        for d in (dialogs or []):
+        for d in dialogs or []:
             if _dialog_matches_target(d, target):
                 targets_with_dialogs.append((acc, d))
 
@@ -557,32 +673,47 @@ async def cb_mp_confirm(
     if total == 0:
         # Check if user has any managed channels at all
         try:
-            has_managed = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", callback.from_user.id
-            ) or 0
+            has_managed = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    callback.from_user.id,
+                )
+                or 0
+            )
         except Exception:
             has_managed = 0
         from bot.callbacks import ChanCb as _ChanCb
+
         empty_kb = InlineKeyboardBuilder()
         if has_managed == 0:
-            empty_kb.button(text="📡 Перейти в раздел Каналы", callback_data=_ChanCb(action="menu"))
+            empty_kb.button(
+                text="📡 Перейти в раздел Каналы", callback_data=_ChanCb(action="menu")
+            )
         empty_kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
         empty_kb.adjust(1)
         hint = (
             "⚠️ <b>Нет каналов для рассылки</b>\n\n"
             "Ни один из ваших аккаунтов не состоит в каналах/группах выбранного типа.\n\n"
             "💡 Сначала создайте или импортируйте канал в разделе <b>📡 Каналы &amp; операции</b>."
-            if has_managed == 0 else
-            "⚠️ Нет подходящих каналов/групп для рассылки.\n\n"
+            if has_managed == 0
+            else "⚠️ Нет подходящих каналов/групп для рассылки.\n\n"
             "Попробуйте изменить фильтр или тип целей."
         )
         await safe_edit(callback, hint, reply_markup=empty_kb.as_markup())
         return
 
     # Log operation to DB if table exists
-    op_id = await _create_op_record(pool, callback.from_user.id, "mass_publish", total, {
-        "target": target, "filter": filter_type, "delay": delay,
-    })
+    op_id = await _create_op_record(
+        pool,
+        callback.from_user.id,
+        "mass_publish",
+        total,
+        {
+            "target": target,
+            "filter": filter_type,
+            "delay": delay,
+        },
+    )
 
     ok_count, err_count = 0, 0
     progress_msg = await callback.message.edit_text(
@@ -607,24 +738,34 @@ async def cb_mp_confirm(
                 err_str = str(result.get("error", ""))
                 flood_wait = extract_flood_wait(Exception(err_str), err_str)
                 from services.infra_memory import record_account_op as _rim_rec
+
                 _rim_rec(acc["id"], "publish", success=False, error=err_str[:100])
                 if flood_wait:
                     from services.flood_engine import record_flood
+
                     try:
                         await record_flood(pool, acc["id"], flood_wait, "publish")
                     except Exception:
-                        log_exc_swallow(log, "Не удалось записать flood в flood_engine при публикации")
+                        log_exc_swallow(
+                            log,
+                            "Не удалось записать flood в flood_engine при публикации",
+                        )
                     flood_extra = flood_wait
             else:
                 ok_count += 1
                 step_status = "ok"
                 from services.infra_memory import record_account_op as _rim_rec
+
                 _rim_rec(acc["id"], "publish", success=True)
                 from services.flood_engine import record_success
+
                 try:
                     await record_success(acc["id"], "publish")
                 except Exception:
-                    log_exc_swallow(log, f"mass_ops: record_success flood_engine failed acc={acc.get('id')}")
+                    log_exc_swallow(
+                        log,
+                        f"mass_ops: record_success flood_engine failed acc={acc.get('id')}",
+                    )
         except Exception as e:
             err_count += 1
             step_status = "error"
@@ -632,13 +773,20 @@ async def cb_mp_confirm(
             flood_wait = extract_flood_wait(e, err_str)
             if flood_wait:
                 from services.flood_engine import record_flood
+
                 try:
                     await record_flood(pool, acc["id"], flood_wait, "publish")
                 except Exception:
-                    log_exc_swallow(log, "Не удалось записать flood в flood_engine при публикации (except)")
+                    log_exc_swallow(
+                        log,
+                        "Не удалось записать flood в flood_engine при публикации (except)",
+                    )
                 flood_extra = flood_wait
             else:
-                log_exc_swallow(log, f"mass_publish cb: post_to_channel failed for dialog {dialog.get('id')}")
+                log_exc_swallow(
+                    log,
+                    f"mass_publish cb: post_to_channel failed for dialog {dialog.get('id')}",
+                )
 
         if op_id:
             await _log_op_step(pool, op_id, idx, str(dialog["id"]), step_status)
@@ -665,12 +813,12 @@ async def cb_mp_confirm(
 
     err_note = (
         f"\n\n⚠️ <b>{err_count} ошибок</b> — некоторые каналы пропущены (FloodWait / бан / недоступно)."
-        if err_count > 0 else ""
+        if err_count > 0
+        else ""
     )
     await progress_msg.edit_text(
         f"✅ <b>Рассылка завершена</b>\n\n"
-        f"Всего: {total} · ✅ {ok_count} · ❌ {err_count}"
-        + err_note,
+        f"Всего: {total} · ✅ {ok_count} · ❌ {err_count}" + err_note,
         parse_mode="HTML",
         reply_markup=_back_menu_kb().as_markup(),
     )
@@ -684,7 +832,8 @@ async def cb_cancel_op(
     result = await pool.execute(
         "UPDATE operation_queue SET status='cancelled', finished_at=now() "
         "WHERE id=$1 AND owner_id=$2 AND status IN ('pending','running')",
-        callback_data.op_id, callback.from_user.id,
+        callback_data.op_id,
+        callback.from_user.id,
     )
     if result == "UPDATE 0":
         await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
@@ -700,16 +849,20 @@ async def cb_cancel_op(
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
     if not rows:
-        await safe_edit(callback, "📋 <b>Очередь операций</b>\n\nОчередь пуста.", reply_markup=kb.as_markup())
+        await safe_edit(
+            callback,
+            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
+            reply_markup=kb.as_markup(),
+        )
         return
     _STATUS_ICONS = {
-        "pending":   "⏳",
-        "running":   "🔄",
-        "done":      "✅",
-        "failed":    "❌",
+        "pending": "⏳",
+        "running": "🔄",
+        "done": "✅",
+        "failed": "❌",
         "cancelled": "🚫",
     }
     lines = ["📋 <b>Очередь операций</b>\n"]
@@ -728,7 +881,10 @@ async def cb_cancel_op(
             progress = f"{total} элементов"
         lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
         if status in ("pending", "running"):
-            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+            kb.button(
+                text=f"❌ Отменить #{r['id']}",
+                callback_data=MassOpCb(action="cancel_op", op_id=r["id"]),
+            )
     await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
@@ -740,7 +896,8 @@ async def cb_retry_op(
         result = await pool.execute(
             "UPDATE operation_queue SET status='pending', last_error=NULL, retry_count=0, "
             "finished_at=NULL WHERE id=$1 AND owner_id=$2 AND status='failed'",
-            callback_data.op_id, callback.from_user.id,
+            callback_data.op_id,
+            callback.from_user.id,
         )
     except Exception as e:
         await callback.answer(f"Ошибка БД: {e}", show_alert=True)
@@ -764,16 +921,20 @@ async def cb_retry_op(
         rows = []
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
     if not rows:
-        await safe_edit(callback, "📋 <b>Очередь операций</b>\n\nОчередь пуста.", reply_markup=kb.as_markup())
+        await safe_edit(
+            callback,
+            "📋 <b>Очередь операций</b>\n\nОчередь пуста.",
+            reply_markup=kb.as_markup(),
+        )
         return
     _STATUS_ICONS = {
-        "pending":   "⏳",
-        "running":   "🔄",
-        "done":      "✅",
-        "failed":    "❌",
+        "pending": "⏳",
+        "running": "🔄",
+        "done": "✅",
+        "failed": "❌",
         "cancelled": "🚫",
     }
     lines = ["📋 <b>Очередь операций</b>\n"]
@@ -800,15 +961,22 @@ async def cb_retry_op(
             err_preview = html.escape(last_error[:60])
             lines.append(f"   ⚠️ <i>{err_preview}</i>")
         if status in ("pending", "running"):
-            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+            kb.button(
+                text=f"❌ Отменить #{r['id']}",
+                callback_data=MassOpCb(action="cancel_op", op_id=r["id"]),
+            )
         elif status == "failed":
-            kb.button(text=f"🔁 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
+            kb.button(
+                text=f"🔁 Повторить #{r['id']}",
+                callback_data=MassOpCb(action="retry_op", op_id=r["id"]),
+            )
     await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # DRY RUN PREVIEW
 # ══════════════════════════════════════════════════════════════════════════
+
 
 @router.callback_query(MassOpCb.filter(F.action == "dry_run"))
 async def cb_dry_run(
@@ -828,7 +996,15 @@ async def cb_dry_run(
     target_label = _TARGET_LABELS.get(target, "Каналы")
     filter_label = _FILTER_LABELS.get(filter_type, "Все активные аккаунты")
 
-    channel_count = await _count_targets(pool, callback.from_user.id, target, filter_type, mp_acc_id, mp_cluster, pool_name=mp_pool)
+    channel_count = await _count_targets(
+        pool,
+        callback.from_user.id,
+        target,
+        filter_type,
+        mp_acc_id,
+        mp_cluster,
+        pool_name=mp_pool,
+    )
     estimated_mins = round(channel_count * delay / 60, 1) if delay else 0
     delay_label = f"{delay}с" if delay > 0 else "Немедленно"
 
@@ -836,7 +1012,10 @@ async def cb_dry_run(
     if mp_text:
         kb.button(text="✅ Запустить", callback_data=MassOpCb(action="mp_confirm"))
     else:
-        kb.button(text="📤 Настроить публикацию", callback_data=MassOpCb(action="mass_publish"))
+        kb.button(
+            text="📤 Настроить публикацию",
+            callback_data=MassOpCb(action="mass_publish"),
+        )
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
 
@@ -857,10 +1036,9 @@ async def cb_dry_run(
 # OPERATION QUEUE
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassOpCb.filter(F.action == "queue"))
-async def cb_queue(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
 
     try:
@@ -880,7 +1058,7 @@ async def cb_queue(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
 
     if not rows:
@@ -893,10 +1071,10 @@ async def cb_queue(
         return
 
     _STATUS_ICONS = {
-        "pending":   "⏳",
-        "running":   "🔄",
-        "done":      "✅",
-        "failed":    "❌",
+        "pending": "⏳",
+        "running": "🔄",
+        "done": "✅",
+        "failed": "❌",
         "cancelled": "🚫",
     }
     lines = ["📋 <b>Очередь операций</b>\n"]
@@ -928,9 +1106,15 @@ async def cb_queue(
             lines.append(f"   ⚠️ <i>{err_preview}</i>")
 
         if status in ("pending", "running"):
-            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+            kb.button(
+                text=f"❌ Отменить #{r['id']}",
+                callback_data=MassOpCb(action="cancel_op", op_id=r["id"]),
+            )
         elif status == "failed":
-            kb.button(text=f"🔄 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
+            kb.button(
+                text=f"🔄 Повторить #{r['id']}",
+                callback_data=MassOpCb(action="retry_op", op_id=r["id"]),
+            )
 
         if status in ("done", "failed"):
             has_completed = True
@@ -945,9 +1129,7 @@ async def cb_queue(
 
 
 @router.callback_query(MassOpCb.filter(F.action == "clear_completed"))
-async def cb_clear_completed(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Удалить записи со статусом done/failed старше 24 часов."""
     await callback.answer()
     try:
@@ -989,7 +1171,7 @@ async def cb_clear_completed(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад",   callback_data=MassOpCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
 
     if not rows:
@@ -1002,10 +1184,10 @@ async def cb_clear_completed(
         return
 
     _STATUS_ICONS = {
-        "pending":   "⏳",
-        "running":   "🔄",
-        "done":      "✅",
-        "failed":    "❌",
+        "pending": "⏳",
+        "running": "🔄",
+        "done": "✅",
+        "failed": "❌",
         "cancelled": "🚫",
     }
     lines = ["📋 <b>Очередь операций</b>\n"]
@@ -1033,9 +1215,15 @@ async def cb_clear_completed(
             err_preview = html.escape(last_error[:60])
             lines.append(f"   ⚠️ <i>{err_preview}</i>")
         if status in ("pending", "running"):
-            kb.button(text=f"❌ Отменить #{r['id']}", callback_data=MassOpCb(action="cancel_op", op_id=r["id"]))
+            kb.button(
+                text=f"❌ Отменить #{r['id']}",
+                callback_data=MassOpCb(action="cancel_op", op_id=r["id"]),
+            )
         elif status == "failed":
-            kb.button(text=f"🔄 Повторить #{r['id']}", callback_data=MassOpCb(action="retry_op", op_id=r["id"]))
+            kb.button(
+                text=f"🔄 Повторить #{r['id']}",
+                callback_data=MassOpCb(action="retry_op", op_id=r["id"]),
+            )
         if status in ("done", "failed"):
             has_completed = True
     if has_completed:
@@ -1050,27 +1238,48 @@ async def cb_clear_completed(
 # BULK BOT EDIT
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassOpCb.filter(F.action == "bulk_bot_edit"))
 async def cb_bulk_bot_edit_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     from bot.utils.subscription import require_plan
     from bot.keyboards import subscription_locked_markup
+
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
-        await safe_edit(callback, "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription", reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="operations")))
+        await safe_edit(
+            callback,
+            "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription",
+            reply_markup=subscription_locked_markup(
+                "pro", back_callback=BmCb(action="operations")
+            ),
+        )
         return
     await callback.answer()
     await state.set_state(BulkBotEditFSM.choosing_field)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Имя бота",        callback_data=MassOpCb(action="bbe_field", op_type="name"))
-    kb.button(text="📄 Описание",        callback_data=MassOpCb(action="bbe_field", op_type="desc"))
-    kb.button(text="📝 Краткое описание", callback_data=MassOpCb(action="bbe_field", op_type="short_desc"))
-    kb.button(text="⌨️ Команды",         callback_data=MassOpCb(action="bbe_field", op_type="commands"))
-    kb.button(text="❌ Отмена",          callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="✏️ Имя бота", callback_data=MassOpCb(action="bbe_field", op_type="name")
+    )
+    kb.button(
+        text="📄 Описание", callback_data=MassOpCb(action="bbe_field", op_type="desc")
+    )
+    kb.button(
+        text="📝 Краткое описание",
+        callback_data=MassOpCb(action="bbe_field", op_type="short_desc"),
+    )
+    kb.button(
+        text="⌨️ Команды", callback_data=MassOpCb(action="bbe_field", op_type="commands")
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
-    await safe_edit(callback, "✏️ <b>Массовое редактирование ботов</b>\n\nВыберите поле для изменения:", reply_markup=kb.as_markup())
+    await safe_edit(
+        callback,
+        "✏️ <b>Массовое редактирование ботов</b>\n\nВыберите поле для изменения:",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(MassOpCb.filter(F.action == "bbe_field"))
@@ -1083,16 +1292,20 @@ async def cb_bbe_field_chosen(
     await state.set_state(BulkBotEditFSM.waiting_value)
 
     _FIELD_LABELS = {
-        "name":       "имя бота",
-        "desc":       "описание",
+        "name": "имя бота",
+        "desc": "описание",
         "short_desc": "краткое описание",
-        "commands":   "команды (формат: /cmd - описание)",
+        "commands": "команды (формат: /cmd - описание)",
     }
     field_label = _FIELD_LABELS.get(field, field)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="bulk_bot_edit"))
-    await safe_edit(callback, f"✏️ <b>Массовое редактирование</b>\n\nВведите новое <b>{field_label}</b> для всех ботов:", reply_markup=kb.as_markup())
+    await safe_edit(
+        callback,
+        f"✏️ <b>Массовое редактирование</b>\n\nВведите новое <b>{field_label}</b> для всех ботов:",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.message(BulkBotEditFSM.waiting_value)
@@ -1109,8 +1322,10 @@ async def fsm_bbe_value(message: Message, state: FSMContext) -> None:
     preview = html.escape(value[:300])
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Применить ко всем ботам", callback_data=MassOpCb(action="bbe_confirm"))
-    kb.button(text="❌ Отмена",                  callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="✅ Применить ко всем ботам", callback_data=MassOpCb(action="bbe_confirm")
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await message.answer(
         f"✏️ <b>Предпросмотр изменения</b>\n\n"
@@ -1139,7 +1354,11 @@ async def cb_bbe_confirm(
         callback.from_user.id,
     )
     if not bots:
-        await safe_edit(callback, "⚠️ У вас нет добавленных ботов.", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "⚠️ У вас нет добавленных ботов.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     total = len(bots)
@@ -1151,6 +1370,7 @@ async def cb_bbe_confirm(
     )
 
     import aiohttp
+
     for idx, bot in enumerate(bots, 1):
         token = bot["token"]
         _call_ok = False
@@ -1174,7 +1394,12 @@ async def cb_bbe_confirm(
                             cmd_part, desc_part = line.split(" - ", 1)
                             cmd = cmd_part.strip().lstrip("/")
                             if cmd:
-                                commands.append({"command": cmd, "description": desc_part.strip()[:256]})
+                                commands.append(
+                                    {
+                                        "command": cmd,
+                                        "description": desc_part.strip()[:256],
+                                    }
+                                )
                     url = f"https://api.telegram.org/bot{token}/setMyCommands"
                     payload = {"commands": json.dumps(commands)}
                 else:
@@ -1201,9 +1426,15 @@ async def cb_bbe_confirm(
                 parse_mode="HTML",
             )
         except Exception:
-            log_exc_swallow(log, "Не удалось обновить прогресс массового редактирования ботов")
+            log_exc_swallow(
+                log, "Не удалось обновить прогресс массового редактирования ботов"
+            )
         # exponential backoff: 1s normal, 2/4/8...s after consecutive errors (cap 30s)
-        _delay = min(1.0 * (2 ** _consecutive_errors), 30.0) if _consecutive_errors > 0 else 1.0
+        _delay = (
+            min(1.0 * (2**_consecutive_errors), 30.0)
+            if _consecutive_errors > 0
+            else 1.0
+        )
         await asyncio.sleep(_delay)
 
     await progress_msg.edit_text(
@@ -1218,6 +1449,7 @@ async def cb_bbe_confirm(
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
+
 def _dialog_matches_target(dialog: dict, target: str) -> bool:
     dtype = dialog.get("type", "")
     if target == "channels":
@@ -1229,8 +1461,11 @@ def _dialog_matches_target(dialog: dict, target: str) -> bool:
 
 
 async def _get_accounts_for_filter(
-    pool: asyncpg.Pool, owner_id: int,
-    filter_type: str, acc_id: int | None, cluster: str | None,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    filter_type: str,
+    acc_id: int | None,
+    cluster: str | None,
     pool_name: str | None = None,
 ) -> list[asyncpg.Record]:
     _cols = (
@@ -1242,7 +1477,8 @@ async def _get_accounts_for_filter(
             f"SELECT {_cols} FROM tg_accounts "
             "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE "
             "AND (cooldown_until IS NULL OR cooldown_until < now())",
-            acc_id, owner_id,
+            acc_id,
+            owner_id,
         )
     if filter_type == "cluster" and cluster:
         return await pool.fetch(
@@ -1250,7 +1486,8 @@ async def _get_accounts_for_filter(
             "WHERE owner_id=$1 AND is_active=TRUE AND cluster=$2 "
             "AND (cooldown_until IS NULL OR cooldown_until < now()) "
             "ORDER BY trust_score DESC NULLS LAST",
-            owner_id, cluster,
+            owner_id,
+            cluster,
         )
     if filter_type == "pool" and pool_name:
         return await pool.fetch(
@@ -1258,7 +1495,8 @@ async def _get_accounts_for_filter(
             "WHERE owner_id=$1 AND is_active=TRUE AND pool=$2 "
             "AND (cooldown_until IS NULL OR cooldown_until < now()) "
             "ORDER BY trust_score DESC NULLS LAST",
-            owner_id, pool_name,
+            owner_id,
+            pool_name,
         )
     return await pool.fetch(
         f"SELECT {_cols} FROM tg_accounts "
@@ -1270,59 +1508,86 @@ async def _get_accounts_for_filter(
 
 
 async def _count_targets(
-    pool: asyncpg.Pool, owner_id: int,
-    target: str, filter_type: str, acc_id: int | None, cluster: str | None,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    target: str,
+    filter_type: str,
+    acc_id: int | None,
+    cluster: str | None,
     pool_name: str | None = None,
 ) -> int:
     """Estimate number of matching dialogs. Real count requires fetching Telethon dialogs (slow).
 
     Uses managed_channels as a DB-backed estimate. Returns 0 if no matching accounts.
     """
-    accounts = await _get_accounts_for_filter(pool, owner_id, filter_type, acc_id, cluster, pool_name=pool_name)
+    accounts = await _get_accounts_for_filter(
+        pool, owner_id, filter_type, acc_id, cluster, pool_name=pool_name
+    )
     if not accounts:
         return 0
     acc_ids = [a["id"] for a in accounts]
     # Use managed_channels count filtered by matching accounts where possible
     try:
         if target == "channels":
-            db_count = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
-                owner_id, acc_ids,
-            ) or 0
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                    owner_id,
+                    acc_ids,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
             # Fallback: all channels for owner regardless of account filter
-            db_count = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
-                owner_id,
-            ) or 0
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    owner_id,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
         elif target == "groups":
             # managed_channels stores both channels and groups — use same table
-            db_count = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
-                owner_id, acc_ids,
-            ) or 0
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                    owner_id,
+                    acc_ids,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
-            db_count = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
-                owner_id,
-            ) or 0
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    owner_id,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
         elif target == "both":
-            db_count = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
-                owner_id, acc_ids,
-            ) or 0
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                    owner_id,
+                    acc_ids,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
-            db_count = await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
-                owner_id,
-            ) or 0
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    owner_id,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
     except Exception:
@@ -1338,7 +1603,10 @@ async def _create_op_record(
         row = await pool.fetchrow(
             "INSERT INTO operation_queue (owner_id, op_type, status, total_items, params) "
             "VALUES ($1, $2, 'running', $3, $4) RETURNING id",
-            owner_id, op_type, total_items, json.dumps(params),
+            owner_id,
+            op_type,
+            total_items,
+            json.dumps(params),
         )
         return row["id"] if row else None
     except Exception as e:
@@ -1352,7 +1620,10 @@ async def _log_op_step(
     try:
         await pool.execute(
             "INSERT INTO operation_log (op_id, step_num, target, status) VALUES ($1, $2, $3, $4)",
-            op_id, step_num, target, status,
+            op_id,
+            step_num,
+            target,
+            status,
         )
     except Exception:
         log_exc_swallow(log, "Не удалось записать шаг операции в operation_log")
@@ -1365,7 +1636,9 @@ async def _finish_op_record(
         status = "done" if err_count == 0 else ("failed" if ok_count == 0 else "done")
         await pool.execute(
             "UPDATE operation_queue SET status=$1, done_items=$2, finished_at=now() WHERE id=$3",
-            status, ok_count, op_id,
+            status,
+            ok_count,
+            op_id,
         )
     except Exception:
         log_exc_swallow(log, "Не удалось завершить запись операции в operation_queue")
@@ -1375,14 +1648,20 @@ async def _finish_op_record(
 # BULK JOIN WIZARD
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassOpCb.filter(F.action == "bulk_join"))
 async def cb_bulk_join_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await safe_edit(callback, "🔒 <b>Массовый join — PRO+</b>\n\nОформите подписку: /subscription", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "🔒 <b>Массовый join — PRO+</b>\n\nОформите подписку: /subscription",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     await state.set_state(BulkJoinFSM.waiting_links)
@@ -1400,7 +1679,9 @@ async def cb_bulk_join_start(
     )
 
 
-async def _process_bj_links(links: list[str], message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def _process_bj_links(
+    links: list[str], message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     """Common logic after collecting bulk_join links (text or file)."""
     await state.update_data(bj_links=links)
     await state.set_state(BulkJoinFSM.choosing_accounts)
@@ -1408,6 +1689,7 @@ async def _process_bj_links(links: list[str], message: Message, state: FSMContex
     if not accounts:
         await state.clear()
         from bot.callbacks import AccCb as _AccCb
+
         kb = InlineKeyboardBuilder()
         kb.button(text="📱 Перейти к аккаунтам", callback_data=_AccCb(action="menu"))
         kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
@@ -1421,9 +1703,15 @@ async def _process_bj_links(links: list[str], message: Message, state: FSMContex
         )
         return
     kb = InlineKeyboardBuilder()
-    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
+    kb.button(
+        text="👥 Все активные аккаунты",
+        callback_data=MassOpCb(action="bj_accs", op_type="all"),
+    )
     for acc in accounts[:10]:
-        kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]))
+        kb.button(
+            text=f"👤 {_acc_label(acc)}",
+            callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]),
+        )
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await message.answer(
@@ -1440,18 +1728,23 @@ async def fsm_bulk_join_links(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     import re as _re
-    _link_re = _re.compile(r'^(@[\w]{4,}\s*$|https?://t\.me/[\w\-+/]+|[-\d]{8,})')
+
+    _link_re = _re.compile(r"^(@[\w]{4,}\s*$|https?://t\.me/[\w\-+/]+|[-\d]{8,})")
     raw = message.text or ""
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-        await message.answer("⚠️ Введите хотя бы одну ссылку или юзернейм:", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Введите хотя бы одну ссылку или юзернейм:", reply_markup=kb.as_markup()
+        )
         return
     if len(links) > 50:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-        await message.answer("⚠️ Максимум 50 ссылок за одну операцию.", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Максимум 50 ссылок за одну операцию.", reply_markup=kb.as_markup()
+        )
         return
     bad = [ln for ln in links if not _link_re.match(ln)]
     if bad:
@@ -1492,7 +1785,7 @@ async def fsm_bulk_join_links_file(
         return
     if len(links) > 200:
         links = links[:200]
-        await message.answer(f"⚠️ Взяты первые 200 строк из файла.")
+        await message.answer("⚠️ Взяты первые 200 строк из файла.")
     await _process_bj_links(links, message, state, pool)
 
 
@@ -1524,7 +1817,8 @@ async def cb_bulk_join_accs(
         acc_ids = [callback_data.op_id]
         acc = await pool.fetchrow(
             "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.op_id, uid,
+            callback_data.op_id,
+            uid,
         )
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
         acc_list_preview = f"  👤 {html.escape(acc_label)}"
@@ -1542,11 +1836,23 @@ async def cb_bulk_join_accs(
     await state.update_data(bj_acc_ids=acc_ids, bj_acc_label=acc_label)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bj_delay", op_type="fast"))
-    kb.button(text="🛡 Нормально (30-60с)", callback_data=MassOpCb(action="bj_delay", op_type="normal"))
-    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bj_delay", op_type="slow"))
-    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bj_delay", op_type="smart"))
-    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="⚡ Быстро (5-15с)",
+        callback_data=MassOpCb(action="bj_delay", op_type="fast"),
+    )
+    kb.button(
+        text="🛡 Нормально (30-60с)",
+        callback_data=MassOpCb(action="bj_delay", op_type="normal"),
+    )
+    kb.button(
+        text="🐌 Медленно (60-120с)",
+        callback_data=MassOpCb(action="bj_delay", op_type="slow"),
+    )
+    kb.button(
+        text="🧠 Умный (авто)",
+        callback_data=MassOpCb(action="bj_delay", op_type="smart"),
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
     acc_section = f"\n<b>Аккаунты:</b>\n{acc_list_preview}" if acc_list_preview else ""
     await safe_edit(
@@ -1561,10 +1867,10 @@ async def cb_bulk_join_accs(
 
 
 _DELAY_LABELS = {
-    "fast":   ("⚡ Быстро",    "5–15с",   "1–3 мин"),
-    "normal": ("🛡 Нормально", "30–60с",  "5–15 мин"),
-    "slow":   ("🐌 Медленно",  "60–120с", "10–30 мин"),
-    "smart":  ("🧠 Умный",     "авто",    "переменно"),
+    "fast": ("⚡ Быстро", "5–15с", "1–3 мин"),
+    "normal": ("🛡 Нормально", "30–60с", "5–15 мин"),
+    "slow": ("🐌 Медленно", "60–120с", "10–30 мин"),
+    "smart": ("🧠 Умный", "авто", "переменно"),
 }
 
 
@@ -1581,11 +1887,23 @@ async def cb_bulk_join_redelay(callback: CallbackQuery, state: FSMContext) -> No
         link_preview += f"\n… и ещё {len(links) - 5}"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bj_delay", op_type="fast"))
-    kb.button(text="🛡 Нормально (30-60с)", callback_data=MassOpCb(action="bj_delay", op_type="normal"))
-    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bj_delay", op_type="slow"))
-    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bj_delay", op_type="smart"))
-    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="⚡ Быстро (5-15с)",
+        callback_data=MassOpCb(action="bj_delay", op_type="fast"),
+    )
+    kb.button(
+        text="🛡 Нормально (30-60с)",
+        callback_data=MassOpCb(action="bj_delay", op_type="normal"),
+    )
+    kb.button(
+        text="🐌 Медленно (60-120с)",
+        callback_data=MassOpCb(action="bj_delay", op_type="slow"),
+    )
+    kb.button(
+        text="🧠 Умный (авто)",
+        callback_data=MassOpCb(action="bj_delay", op_type="smart"),
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
     await safe_edit(
         callback,
@@ -1618,7 +1936,9 @@ async def cb_bulk_join_delay(
     if len(links) > 5:
         link_preview += f"\n… и ещё {len(links) - 5}"
 
-    icon, delay_str, time_est = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
+    icon, delay_str, time_est = _DELAY_LABELS.get(
+        delay_mode, ("🧠 Умный", "авто", "переменно")
+    )
     n = len(links) * len(acc_ids)
     cap_line, intel = await asyncio.gather(
         _capacity_line(pool, callback.from_user.id, "join", n, acc_ids),
@@ -1659,7 +1979,9 @@ async def cb_bulk_join_confirm(
         return
 
     # Проверка давления инфраструктуры
-    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    ready, reason = await infra_orchestrator.is_ready_for_op(
+        pool, callback.from_user.id
+    )
     if not ready:
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
@@ -1672,7 +1994,10 @@ async def cb_bulk_join_confirm(
     params = {"links": links, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
         op_id = await operation_bus.submit(
-            pool, callback.from_user.id, "bulk_join", params,
+            pool,
+            callback.from_user.id,
+            "bulk_join",
+            params,
             total_items=len(links) * len(acc_ids),
         )
     except Exception as e:
@@ -1702,14 +2027,20 @@ async def cb_bulk_join_confirm(
 # BULK LEAVE WIZARD
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(MassOpCb.filter(F.action == "bulk_leave"))
 async def cb_bulk_leave_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await safe_edit(callback, "🔒 <b>Массовый leave — PRO+</b>\n\nОформите подписку: /subscription", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "🔒 <b>Массовый leave — PRO+</b>\n\nОформите подписку: /subscription",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     await state.set_state(BulkLeaveFSM.waiting_channels)
@@ -1727,7 +2058,9 @@ async def cb_bulk_leave_start(
     )
 
 
-async def _process_bl_channels(channels: list[str], message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def _process_bl_channels(
+    channels: list[str], message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     """Common logic after collecting bulk_leave channels (text or file)."""
     await state.update_data(bl_channels=channels)
     await state.set_state(BulkLeaveFSM.choosing_accounts)
@@ -1735,6 +2068,7 @@ async def _process_bl_channels(channels: list[str], message: Message, state: FSM
     if not accounts:
         await state.clear()
         from bot.callbacks import AccCb as _AccCb
+
         kb = InlineKeyboardBuilder()
         kb.button(text="📱 Перейти к аккаунтам", callback_data=_AccCb(action="menu"))
         kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
@@ -1748,9 +2082,15 @@ async def _process_bl_channels(channels: list[str], message: Message, state: FSM
         )
         return
     kb = InlineKeyboardBuilder()
-    kb.button(text="👥 Все активные аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
+    kb.button(
+        text="👥 Все активные аккаунты",
+        callback_data=MassOpCb(action="bl_accs", op_type="all"),
+    )
     for acc in accounts[:10]:
-        kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]))
+        kb.button(
+            text=f"👤 {_acc_label(acc)}",
+            callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]),
+        )
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await message.answer(
@@ -1771,7 +2111,10 @@ async def fsm_bulk_leave_channels(
     if not channels:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
-        await message.answer("⚠️ Введите хотя бы один юзернейм или ID канала:", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Введите хотя бы один юзернейм или ID канала:",
+            reply_markup=kb.as_markup(),
+        )
         return
     if len(channels) > 200:
         channels = channels[:200]
@@ -1834,7 +2177,8 @@ async def cb_bulk_leave_accs(
         acc_ids = [callback_data.op_id]
         acc = await pool.fetchrow(
             "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.op_id, uid,
+            callback_data.op_id,
+            uid,
         )
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
         bl_acc_list_preview = f"  👤 {html.escape(acc_label)}"
@@ -1851,13 +2195,27 @@ async def cb_bulk_leave_accs(
     await state.update_data(bl_acc_ids=acc_ids, bl_acc_label=acc_label)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bl_delay", op_type="fast"))
-    kb.button(text="🛡 Нормально (15-45с)", callback_data=MassOpCb(action="bl_delay", op_type="normal"))
-    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bl_delay", op_type="slow"))
-    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bl_delay", op_type="smart"))
-    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="⚡ Быстро (5-15с)",
+        callback_data=MassOpCb(action="bl_delay", op_type="fast"),
+    )
+    kb.button(
+        text="🛡 Нормально (15-45с)",
+        callback_data=MassOpCb(action="bl_delay", op_type="normal"),
+    )
+    kb.button(
+        text="🐌 Медленно (60-120с)",
+        callback_data=MassOpCb(action="bl_delay", op_type="slow"),
+    )
+    kb.button(
+        text="🧠 Умный (авто)",
+        callback_data=MassOpCb(action="bl_delay", op_type="smart"),
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
-    bl_acc_section = f"\n<b>Аккаунты:</b>\n{bl_acc_list_preview}" if bl_acc_list_preview else ""
+    bl_acc_section = (
+        f"\n<b>Аккаунты:</b>\n{bl_acc_list_preview}" if bl_acc_list_preview else ""
+    )
     await safe_edit(
         callback,
         f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
@@ -1870,10 +2228,10 @@ async def cb_bulk_leave_accs(
 
 
 _DELAY_LABELS_LEAVE = {
-    "fast":   ("⚡ Быстро",    "5–15с",   "1–2 мин"),
-    "normal": ("🛡 Нормально", "15–45с",  "3–10 мин"),
-    "slow":   ("🐌 Медленно",  "60–120с", "10–30 мин"),
-    "smart":  ("🧠 Умный",     "авто",    "переменно"),
+    "fast": ("⚡ Быстро", "5–15с", "1–2 мин"),
+    "normal": ("🛡 Нормально", "15–45с", "3–10 мин"),
+    "slow": ("🐌 Медленно", "60–120с", "10–30 мин"),
+    "smart": ("🧠 Умный", "авто", "переменно"),
 }
 
 
@@ -1890,11 +2248,23 @@ async def cb_bulk_leave_redelay(callback: CallbackQuery, state: FSMContext) -> N
         ch_preview += f"\n… и ещё {len(channels) - 5}"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚡ Быстро (5-15с)",    callback_data=MassOpCb(action="bl_delay", op_type="fast"))
-    kb.button(text="🛡 Нормально (15-45с)", callback_data=MassOpCb(action="bl_delay", op_type="normal"))
-    kb.button(text="🐌 Медленно (60-120с)", callback_data=MassOpCb(action="bl_delay", op_type="slow"))
-    kb.button(text="🧠 Умный (авто)",       callback_data=MassOpCb(action="bl_delay", op_type="smart"))
-    kb.button(text="❌ Отмена",             callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="⚡ Быстро (5-15с)",
+        callback_data=MassOpCb(action="bl_delay", op_type="fast"),
+    )
+    kb.button(
+        text="🛡 Нормально (15-45с)",
+        callback_data=MassOpCb(action="bl_delay", op_type="normal"),
+    )
+    kb.button(
+        text="🐌 Медленно (60-120с)",
+        callback_data=MassOpCb(action="bl_delay", op_type="slow"),
+    )
+    kb.button(
+        text="🧠 Умный (авто)",
+        callback_data=MassOpCb(action="bl_delay", op_type="smart"),
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(2, 2, 1)
     await safe_edit(
         callback,
@@ -1927,7 +2297,9 @@ async def cb_bulk_leave_delay(
     if len(channels) > 5:
         ch_preview += f"\n… и ещё {len(channels) - 5}"
 
-    icon, delay_str, time_est = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
+    icon, delay_str, time_est = _DELAY_LABELS_LEAVE.get(
+        delay_mode, ("🧠 Умный", "авто", "переменно")
+    )
     n = len(channels) * len(acc_ids)
     cap_line, intel = await asyncio.gather(
         _capacity_line(pool, callback.from_user.id, "leave", n, acc_ids),
@@ -1968,7 +2340,9 @@ async def cb_bulk_leave_confirm(
         return
 
     # Проверка давления инфраструктуры
-    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    ready, reason = await infra_orchestrator.is_ready_for_op(
+        pool, callback.from_user.id
+    )
     if not ready:
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
@@ -1981,7 +2355,10 @@ async def cb_bulk_leave_confirm(
     params = {"channels": channels, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
         op_id = await operation_bus.submit(
-            pool, callback.from_user.id, "bulk_leave", params,
+            pool,
+            callback.from_user.id,
+            "bulk_leave",
+            params,
             total_items=len(channels) * len(acc_ids),
         )
     except Exception as e:
@@ -2042,6 +2419,7 @@ _OP_TYPE_META = {
 
 # ── Шаг 1: Выбор типа операции ────────────────────────────────────────────
 
+
 @router.callback_query(MassOpCb.filter(F.action == "build"))
 async def cb_build_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
@@ -2072,6 +2450,7 @@ async def cb_build_start(
 
 # ── Шаг 2: Выбор целей ────────────────────────────────────────────────────
 
+
 @router.callback_query(MassOpCb.filter(F.action == "ob_type"))
 async def cb_ob_type_chosen(
     callback: CallbackQuery,
@@ -2093,7 +2472,13 @@ async def cb_ob_type_chosen(
     if not await require_plan(pool, callback.from_user.id, required_plan):
         await callback.answer()
         plan_label = "PRO" if required_plan == "pro" else "STARTER+"
-        await safe_edit(callback, f"🔒 <b>{meta['label']} — {plan_label}</b>\n\nОформите подписку: /subscription", reply_markup=subscription_locked_markup(required_plan, back_callback=MassOpCb(action="build")))
+        await safe_edit(
+            callback,
+            f"🔒 <b>{meta['label']} — {plan_label}</b>\n\nОформите подписку: /subscription",
+            reply_markup=subscription_locked_markup(
+                required_plan, back_callback=MassOpCb(action="build")
+            ),
+        )
         return
 
     await callback.answer()
@@ -2103,10 +2488,19 @@ async def cb_ob_type_chosen(
     kb = InlineKeyboardBuilder()
 
     if op_type == "mass_publish":
-        kb.button(text="📢 Каналы",              callback_data=MassOpCb(action="ob_target", op_type="channels"))
-        kb.button(text="👥 Группы",              callback_data=MassOpCb(action="ob_target", op_type="groups"))
-        kb.button(text="📢+👥 Каналы и группы", callback_data=MassOpCb(action="ob_target", op_type="both"))
-        kb.button(text="◀️ Назад",               callback_data=MassOpCb(action="build"))
+        kb.button(
+            text="📢 Каналы",
+            callback_data=MassOpCb(action="ob_target", op_type="channels"),
+        )
+        kb.button(
+            text="👥 Группы",
+            callback_data=MassOpCb(action="ob_target", op_type="groups"),
+        )
+        kb.button(
+            text="📢+👥 Каналы и группы",
+            callback_data=MassOpCb(action="ob_target", op_type="both"),
+        )
+        kb.button(text="◀️ Назад", callback_data=MassOpCb(action="build"))
         kb.adjust(2, 1, 1)
         await safe_edit(
             callback,
@@ -2135,11 +2529,23 @@ async def cb_ob_type_chosen(
         )
 
     elif op_type == "bulk_bot_edit":
-        kb.button(text="✏️ Имя бота",         callback_data=MassOpCb(action="ob_target", op_type="name"))
-        kb.button(text="📄 Описание",         callback_data=MassOpCb(action="ob_target", op_type="desc"))
-        kb.button(text="📝 Краткое описание", callback_data=MassOpCb(action="ob_target", op_type="short_desc"))
-        kb.button(text="⌨️ Команды",          callback_data=MassOpCb(action="ob_target", op_type="commands"))
-        kb.button(text="◀️ Назад",            callback_data=MassOpCb(action="build"))
+        kb.button(
+            text="✏️ Имя бота",
+            callback_data=MassOpCb(action="ob_target", op_type="name"),
+        )
+        kb.button(
+            text="📄 Описание",
+            callback_data=MassOpCb(action="ob_target", op_type="desc"),
+        )
+        kb.button(
+            text="📝 Краткое описание",
+            callback_data=MassOpCb(action="ob_target", op_type="short_desc"),
+        )
+        kb.button(
+            text="⌨️ Команды",
+            callback_data=MassOpCb(action="ob_target", op_type="commands"),
+        )
+        kb.button(text="◀️ Назад", callback_data=MassOpCb(action="build"))
         kb.adjust(2, 2, 1)
         await safe_edit(
             callback,
@@ -2150,6 +2556,7 @@ async def cb_ob_type_chosen(
 
 
 # ── Шаг 2b: Выбор целей mass_publish и bulk_bot_edit ─────────────────────
+
 
 @router.callback_query(MassOpCb.filter(F.action == "ob_target"))
 async def cb_ob_target_chosen(
@@ -2173,22 +2580,22 @@ async def cb_ob_target_chosen(
         target_label = _TARGET_LABELS.get(target, target)
         await safe_edit(
             callback,
-            f"🛠️ <b>Построитель: {meta.get('icon','')} {meta.get('label','')}</b>\n"
+            f"🛠️ <b>Построитель: {meta.get('icon', '')} {meta.get('label', '')}</b>\n"
             f"Цели: <b>{target_label}</b>\n\n"
             "Шаг 3/4: Введите текст поста (поддерживается HTML):",
             reply_markup=kb.as_markup(),
         )
     elif op_type == "bulk_bot_edit":
         _FIELD_LABELS_OB = {
-            "name":       "имя бота",
-            "desc":       "описание",
+            "name": "имя бота",
+            "desc": "описание",
             "short_desc": "краткое описание",
-            "commands":   "команды (формат: /cmd - описание, по одному на строку)",
+            "commands": "команды (формат: /cmd - описание, по одному на строку)",
         }
         field_label = _FIELD_LABELS_OB.get(target, target)
         await safe_edit(
             callback,
-            f"🛠️ <b>Построитель: {meta.get('icon','')} {meta.get('label','')}</b>\n"
+            f"🛠️ <b>Построитель: {meta.get('icon', '')} {meta.get('label', '')}</b>\n"
             f"Поле: <b>{field_label}</b>\n\n"
             f"Шаг 3/4: Введите новое значение для всех ботов:",
             reply_markup=kb.as_markup(),
@@ -2196,6 +2603,7 @@ async def cb_ob_target_chosen(
 
 
 # ── Шаг 3: Ввод параметров (текстовые сообщения) ─────────────────────────
+
 
 @router.message(OpBuilderFSM.entering_params)
 async def fsm_ob_entering_params(
@@ -2228,14 +2636,23 @@ async def fsm_ob_entering_params(
     await _ob_show_preview(message, state, pool, meta, op_type, edit=False)
 
 
-async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dict, op_type: str, edit: bool = False) -> None:
+async def _ob_show_preview(
+    msg,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    meta: dict,
+    op_type: str,
+    edit: bool = False,
+) -> None:
     """Показать preview и кнопку подтверждения."""
     sd = await state.get_data()
     target = sd.get("ob_target", "")
     ob_param = sd.get("ob_param", "")
     ob_links = sd.get("ob_links", [])
 
-    target_label = _TARGET_LABELS.get(target, target) if op_type == "mass_publish" else target
+    target_label = (
+        _TARGET_LABELS.get(target, target) if op_type == "mass_publish" else target
+    )
 
     # Считаем количество аккаунтов/целей
     uid = msg.from_user.id if hasattr(msg, "from_user") else msg.chat.id
@@ -2244,10 +2661,12 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
         accounts = await _get_active_accounts(pool, uid)
         acc_count = len(accounts)
     except Exception:
-        log_exc_swallow(log, "Не удалось посчитать активные аккаунты для предпросмотра операции")
+        log_exc_swallow(
+            log, "Не удалось посчитать активные аккаунты для предпросмотра операции"
+        )
 
     lines = []
-    lines.append(f"🛠️ <b>Построитель — Предпросмотр операции</b>")
+    lines.append("🛠️ <b>Построитель — Предпросмотр операции</b>")
     lines.append("")
     lines.append(f"Тип: {meta.get('icon', '')} <b>{meta.get('label', op_type)}</b>")
 
@@ -2260,13 +2679,19 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
         chan_count = 0
         try:
             if target_filter in ("channels", "both"):
-                chan_count += await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
-                ) or 0
+                chan_count += (
+                    await pool.fetchval(
+                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+                    )
+                    or 0
+                )
             if target_filter in ("groups", "both"):
-                chan_count += await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
-                ) or 0
+                chan_count += (
+                    await pool.fetchval(
+                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+                    )
+                    or 0
+                )
         except Exception:
             log_exc_swallow(log, "_ob_show_preview: channel count failed")
         if chan_count > 0:
@@ -2274,7 +2699,9 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
             eta_secs = chan_count * 30
             eta_min = eta_secs // 60
             eta_str = f"~{eta_min}м" if eta_min > 0 else "<1м"
-            lines.append(f"Каналов/групп: <b>{chan_count}</b> | ⏱️ ETA: <b>{eta_str}</b>")
+            lines.append(
+                f"Каналов/групп: <b>{chan_count}</b> | ⏱️ ETA: <b>{eta_str}</b>"
+            )
         lines.append(f"\nТекст поста:\n<i>{preview_text}</i>")
     elif op_type in ("bulk_join", "bulk_leave"):
         action_word = "вступления" if op_type == "bulk_join" else "выхода"
@@ -2293,8 +2720,10 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
         lines.append(f"\n<b>Список:</b>\n{link_preview}")
     elif op_type == "bulk_bot_edit":
         _FIELD_LABELS_OB = {
-            "name": "Имя", "desc": "Описание",
-            "short_desc": "Краткое описание", "commands": "Команды",
+            "name": "Имя",
+            "desc": "Описание",
+            "short_desc": "Краткое описание",
+            "commands": "Команды",
         }
         field_label = _FIELD_LABELS_OB.get(target, target)
         preview_val = html.escape(ob_param[:200])
@@ -2306,27 +2735,38 @@ async def _ob_show_preview(msg, state: FSMContext, pool: asyncpg.Pool, meta: dic
 
     preview_text_full = "\n".join(lines)
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Подтвердить и поставить в очередь", callback_data=MassOpCb(action="ob_confirm"))
-    kb.button(text="❌ Отмена",                            callback_data=MassOpCb(action="menu"))
+    kb.button(
+        text="✅ Подтвердить и поставить в очередь",
+        callback_data=MassOpCb(action="ob_confirm"),
+    )
+    kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
 
     if edit:
         try:
-            await msg.edit_text(preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup())
+            await msg.edit_text(
+                preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup()
+            )
             return
         except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать предпросмотр построителя операций, отправляем новое")
+            log_exc_swallow(
+                log,
+                "Не удалось отредактировать предпросмотр построителя операций, отправляем новое",
+            )
     await msg.answer(preview_text_full, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Шаг 4: Подтверждение и запись в operation_queue ──────────────────────
+
 
 @router.callback_query(MassOpCb.filter(F.action == "ob_confirm"))
 async def cb_ob_confirm(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     # Проверка давления инфраструктуры
-    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    ready, reason = await infra_orchestrator.is_ready_for_op(
+        pool, callback.from_user.id
+    )
     if not ready:
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
@@ -2350,7 +2790,7 @@ async def cb_ob_confirm(
             "filter": "all",
             "text": ob_param,
             "delay_seconds": 30,  # op_worker uses "delay_seconds" key
-            "delay": 30,          # backward-compat alias
+            "delay": 30,  # backward-compat alias
             "source": "builder",
         }
         total_items = 1  # воркер посчитает реальное кол-во каналов при запуске
@@ -2368,24 +2808,35 @@ async def cb_ob_confirm(
         params = {"field": target, "value": ob_param, "source": "builder"}
         total_items = 1  # воркер посчитает реальное кол-во ботов при запуске
     else:
-        await safe_edit(callback, "⚠️ Неизвестный тип операции.", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "⚠️ Неизвестный тип операции.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     try:
         op_id = await operation_bus.submit(
-            pool, uid, op_type, params,
+            pool,
+            uid,
+            op_type,
+            params,
             total_items=total_items,
         )
     except Exception as e:
         log.error("ob_confirm insert error: %s", e)
-        await safe_edit(callback, "⚠️ Ошибка создания операции. Попробуйте ещё раз.", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "⚠️ Ошибка создания операции. Попробуйте ещё раз.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     icon = meta.get("icon", "")
     label = meta.get("label", op_type)
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Меню",             callback_data=MassOpCb(action="menu"))
+    kb.button(text="◀️ Меню", callback_data=MassOpCb(action="menu"))
     kb.adjust(2)
     await safe_edit(
         callback,

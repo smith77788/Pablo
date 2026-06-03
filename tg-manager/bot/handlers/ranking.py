@@ -265,7 +265,9 @@ async def msg_add_keyword(
                 pool, message.from_user.id, keyword
             )
         except Exception:
-            log_exc_swallow(log, "Не удалось записать поведенческое событие для ключевого слова")
+            log_exc_swallow(
+                log, "Не удалось записать поведенческое событие для ключевого слова"
+            )
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -442,7 +444,10 @@ async def cb_rank_check_now(
     account: dict | None = None
     try:
         from services import resource_selector
-        account = await resource_selector.select_account(pool, owner_id, action_type="search")
+
+        account = await resource_selector.select_account(
+            pool, owner_id, action_type="search"
+        )
     except Exception as exc:
         log.warning("Ошибка при выборе аккаунта для ranking: %s", exc)
 
@@ -1130,7 +1135,9 @@ async def vis_all_positions(
 
     if not rows:
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="➕ Добавить слово", callback_data=VisCb(action="add_keyword"))
+        empty_kb.button(
+            text="➕ Добавить слово", callback_data=VisCb(action="add_keyword")
+        )
         empty_kb.button(text="🔄 Обновить", callback_data=VisCb(action="all_positions"))
         empty_kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
         empty_kb.adjust(1)
@@ -1279,7 +1286,9 @@ async def vis_by_bot(
             text="➕ Добавить слово",
             callback_data=VisCb(action="add_keyword"),
         )
-        empty_kb.button(text="📈 Тренды", callback_data=VisCb(action="trends", bot_id=bot_id))
+        empty_kb.button(
+            text="📈 Тренды", callback_data=VisCb(action="trends", bot_id=bot_id)
+        )
         empty_kb.button(text="◀️ Назад", callback_data=VisCb(action="select_bot"))
         empty_kb.adjust(1)
         await safe_edit(
@@ -1495,7 +1504,9 @@ async def vis_receive_region(
         await pool.execute(
             "INSERT INTO tracked_keywords(bot_id, owner_id, keyword) VALUES($1,$2,$3) "
             "ON CONFLICT(bot_id, keyword) DO NOTHING",
-            bot_id, owner_id, keyword,
+            bot_id,
+            owner_id,
+            keyword,
         )
         saved = True
     except Exception as exc:

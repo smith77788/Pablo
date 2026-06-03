@@ -30,6 +30,7 @@ _PRESSURE_SOFT_WARN = 70
 @dataclass
 class InfraState:
     """Снимок состояния инфраструктуры."""
+
     owner_id: int
     pressure_score: int = 0
     pressure_emoji: str = "🟢"
@@ -74,7 +75,6 @@ async def get_state(pool: asyncpg.Pool, owner_id: int) -> InfraState:
     Запускает все sub-запросы параллельно. Устойчив к частичным сбоям:
     любой упавший компонент не блокирует остальные — данные будут нулевые.
     """
-    from services import infra_pressure, infra_advisor
 
     pressure_task = asyncio.create_task(_safe_pressure(pool, owner_id))
     recs_task = asyncio.create_task(_safe_recommendations(pool, owner_id))
@@ -119,7 +119,8 @@ async def recommend_accounts(
 
     if include_ids:
         candidates = await resource_selector.select_all_active(
-            pool, owner_id,
+            pool,
+            owner_id,
             include_ids=include_ids,
             pool_name=pool_name,
             tags=tags,
@@ -129,7 +130,9 @@ async def recommend_accounts(
         )
         score_map = {acc_id: score for acc_id, score in scored}
         cands_by_id = {a["id"]: dict(a) for a in candidates}
-        sorted_ids = sorted(cands_by_id.keys(), key=lambda i: score_map.get(i, 0.5), reverse=True)
+        sorted_ids = sorted(
+            cands_by_id.keys(), key=lambda i: score_map.get(i, 0.5), reverse=True
+        )
         return [cands_by_id[i] for i in sorted_ids[:count]]
 
     if count == 1:
@@ -157,6 +160,7 @@ async def estimate_capacity(
       safe_to_start (bool), summary_text
     """
     from services.capacity_planner import plan_operation
+
     try:
         plan = await plan_operation(pool, owner_id, op_type, total_items, account_ids)
         return {
@@ -168,7 +172,12 @@ async def estimate_capacity(
             "summary_text": plan.summary_text,
         }
     except Exception as e:
-        log.warning("infra_orchestrator.estimate_capacity failed owner=%d op=%s: %s", owner_id, op_type, e)
+        log.warning(
+            "infra_orchestrator.estimate_capacity failed owner=%d op=%s: %s",
+            owner_id,
+            op_type,
+            e,
+        )
         return {
             "account_count": 0,
             "estimated_minutes": 0,
@@ -191,14 +200,16 @@ async def is_ready_for_op(
     Возвращает (True, "") или (False, reason_text).
     Быстрая проверка — только давление + наличие доступных аккаунтов.
     """
-    from services import infra_pressure
 
     try:
         pressure = await _safe_pressure(pool, owner_id)
         score = pressure.get("score", 0)
         if score >= pressure_limit:
             label = pressure.get("level_label", "Высокая")
-            return False, f"Давление инфраструктуры {label} ({score}/100) — операция заблокирована"
+            return (
+                False,
+                f"Давление инфраструктуры {label} ({score}/100) — операция заблокирована",
+            )
     except Exception as e:
         log.debug("infra_orchestrator.is_ready_for_op pressure check failed: %s", e)
 
@@ -234,21 +245,31 @@ async def get_pressure_warning(
 
 # ── Private helpers ─────────────────────────────────────────────────────────
 
+
 async def _safe_pressure(pool: asyncpg.Pool, owner_id: int) -> dict:
     try:
         from services.infra_pressure import compute_pressure
+
         return await compute_pressure(pool, owner_id)
     except Exception as e:
         log.debug("infra_orchestrator: pressure query failed owner=%d: %s", owner_id, e)
-        return {"score": 0, "level_emoji": "🟢", "level_label": "Норма", "breakdown": {}}
+        return {
+            "score": 0,
+            "level_emoji": "🟢",
+            "level_label": "Норма",
+            "breakdown": {},
+        }
 
 
 async def _safe_recommendations(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     try:
         from services.infra_advisor import get_recommendations
+
         return await get_recommendations(pool, owner_id)
     except Exception as e:
-        log.debug("infra_orchestrator: recommendations failed owner=%d: %s", owner_id, e)
+        log.debug(
+            "infra_orchestrator: recommendations failed owner=%d: %s", owner_id, e
+        )
         return []
 
 
@@ -300,8 +321,14 @@ async def get_full_intelligence(
       formatted_block (str)  — готовый HTML для Telegram
     """
     try:
-        from services.intelligence_engine import get_pre_launch_intelligence, format_pre_launch_block
-        intel = await get_pre_launch_intelligence(pool, owner_id, op_type, item_count, account_ids)
+        from services.intelligence_engine import (
+            get_pre_launch_intelligence,
+            format_pre_launch_block,
+        )
+
+        intel = await get_pre_launch_intelligence(
+            pool, owner_id, op_type, item_count, account_ids
+        )
         return {
             "go": intel.go_decision,
             "reason": intel.go_reason,
@@ -315,11 +342,21 @@ async def get_full_intelligence(
             "formatted_block": format_pre_launch_block(intel),
         }
     except Exception as e:
-        log.warning("infra_orchestrator.get_full_intelligence failed owner=%d op=%s: %s", owner_id, op_type, e)
+        log.warning(
+            "infra_orchestrator.get_full_intelligence failed owner=%d op=%s: %s",
+            owner_id,
+            op_type,
+            e,
+        )
         return {
-            "go": True, "reason": "", "warning": "",
-            "risk_level": "unknown", "risk_score": 0,
-            "pressure": 0, "accounts_available": 0,
-            "prediction_minutes": 0, "success_probability": 0.8,
+            "go": True,
+            "reason": "",
+            "warning": "",
+            "risk_level": "unknown",
+            "risk_score": 0,
+            "pressure": 0,
+            "accounts_available": 0,
+            "prediction_minutes": 0,
+            "success_probability": 0.8,
             "formatted_block": "",
         }

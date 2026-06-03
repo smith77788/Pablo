@@ -10,7 +10,6 @@ Capacity Planner — прогнозирование нагрузки и безо
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
@@ -54,12 +53,12 @@ class CapacityPlan:
             self.risk_level, "⚪"
         )
         lines = [
-            f"📊 <b>Прогноз операции</b>",
-            f"",
+            "📊 <b>Прогноз операции</b>",
+            "",
             f"Тип: <b>{self.op_type}</b>",
             f"Элементов: <b>{self.total_items}</b>",
             f"Аккаунтов: <b>{self.account_count}</b>",
-            f"",
+            "",
             f"⏱️ Ожидаемое время: <b>~{self.estimated_minutes:.0f} мин</b>",
             f"📦 На аккаунт: ~{self.items_per_account} элементов",
             f"{risk_emoji} Риск: <b>{self.risk_level}</b>",
@@ -177,7 +176,7 @@ async def plan_operation(
         risk_level = "low"
 
     if estimated_minutes > 60 * 8:
-        warnings.append(f"Операция займёт более 8 часов")
+        warnings.append("Операция займёт более 8 часов")
 
     return CapacityPlan(
         op_type=op_type,

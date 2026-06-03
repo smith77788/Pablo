@@ -80,7 +80,10 @@ async def select_accounts(
 
     log.debug(
         "resource_selector.select_accounts: owner=%d requested=%d got=%d action=%s",
-        owner_id, count, len(selected), action_type,
+        owner_id,
+        count,
+        len(selected),
+        action_type,
     )
     return selected
 
@@ -111,7 +114,11 @@ async def select_for_wave(
     )
     log.info(
         "resource_selector: wave=%d size=%d got=%d accs action=%s owner=%d",
-        wave_num, wave_size, len(accs), action_type, owner_id,
+        wave_num,
+        wave_size,
+        len(accs),
+        action_type,
+        owner_id,
     )
     return accs
 

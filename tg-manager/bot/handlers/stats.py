@@ -28,7 +28,9 @@ async def cb_stats_menu(
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
     stats = await db.get_bot_stats(pool, callback_data.bot_id)
-    daily_growth = await db.get_audience_daily_growth(pool, callback_data.bot_id, days=7)
+    daily_growth = await db.get_audience_daily_growth(
+        pool, callback_data.bot_id, days=7
+    )
 
     label = (
         f"@{row.get('username')}"
@@ -51,9 +53,7 @@ async def cb_stats_menu(
     # Pad left with zeros if fewer than 5 days
     last5 = [0] * (5 - len(last5)) + last5
     if weekly_max > 0:
-        trend_bar = "".join(
-            "▓" if (v / weekly_max) >= 0.2 else "░" for v in last5
-        )
+        trend_bar = "".join("▓" if (v / weekly_max) >= 0.2 else "░" for v in last5)
     else:
         trend_bar = "░░░░░"
 

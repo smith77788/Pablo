@@ -17,7 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ProxyCb, BotCb, BmCb
+from bot.callbacks import ProxyCb, BmCb
 from bot.states import AddProxyFSM
 from database import db
 from services.logger import log_exc_swallow
@@ -389,7 +389,9 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             # Log to proxy_quality_log (Proxy Intelligence)
             try:
                 error_msg = None if alive else "Недоступен"
-                await db.log_proxy_quality(pool, row["id"], latency_ms, alive, error_msg)
+                await db.log_proxy_quality(
+                    pool, row["id"], latency_ms, alive, error_msg
+                )
             except Exception:
                 log_exc_swallow(log, "Не удалось сохранить запись в proxy_quality_log")
 

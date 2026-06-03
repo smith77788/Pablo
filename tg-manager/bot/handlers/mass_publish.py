@@ -28,7 +28,6 @@ from bot.states import MassPublishFSM2
 from bot.utils.op_helpers import (
     _acc_label,
     _get_active_accounts,
-    _progress_bar,
     _format_duration,
     _progress_text as _progress_text_base,
 )
@@ -309,7 +308,8 @@ async def _show_preview(
         "SELECT acc_id, COUNT(*) AS cnt FROM managed_channels "
         "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
         "GROUP BY acc_id",
-        callback.from_user.id, acc_ids,
+        callback.from_user.id,
+        acc_ids,
     )
     total_channels = sum(r["cnt"] for r in channel_counts)
     acc_count = len(channel_counts)
@@ -325,12 +325,14 @@ async def _show_preview(
 
     channels_hint = (
         "\n⚠️ <i>Каналы не импортированы. При запуске найдём через Telegram.</i>"
-        if total_channels == 0 else ""
+        if total_channels == 0
+        else ""
     )
     dry_run_banner = (
         "\n\n⚠️ <b>Сухой прогон — реальная публикация НЕ выполнится.</b>\n"
         "<i>Это только предпросмотр: каналы посчитаны, пост НЕ отправлен.</i>"
-        if dry_run else ""
+        if dry_run
+        else ""
     )
 
     # Intelligence block
@@ -338,8 +340,12 @@ async def _show_preview(
     if not dry_run:
         try:
             from services import intelligence_engine
+
             intel = await intelligence_engine.get_pre_launch_intelligence(
-                pool, callback.from_user.id, "mass_publish", total_channels or 1,
+                pool,
+                callback.from_user.id,
+                "mass_publish",
+                total_channels or 1,
                 account_ids=acc_ids if acc_ids else None,
             )
             intel_text = "\n\n" + intelligence_engine.format_pre_launch_block(intel)
@@ -409,15 +415,23 @@ async def cb_mpub_confirm_send(
         db_channels = await pool.fetch(
             "SELECT channel_id AS id, title, access_hash FROM managed_channels "
             "WHERE owner_id=$1 AND acc_id=$2",
-            callback.from_user.id, acc["id"],
+            callback.from_user.id,
+            acc["id"],
         )
         if db_channels:
             for ch in db_channels:
                 pairs.append((acc_dict, dict(ch)))
         else:
             # Fallback: live dialogs if managed_channels empty
-            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc_dict) or []
-            channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+            dialogs = (
+                await account_manager.get_dialogs(acc["session_str"], _acc=acc_dict)
+                or []
+            )
+            channels = [
+                d
+                for d in dialogs
+                if d.get("type") in ("channel", "megagroup", "supergroup")
+            ]
             for ch in channels:
                 pairs.append((acc_dict, ch))
 
@@ -506,8 +520,8 @@ async def _mpub_bg(
         _is_user = bool(_ce.args and _ce.args[0] == "user_requested")
         _pub_msg = (
             f"📤 <b>Публикация отменена</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}"
-            if _is_user else
-            f"📤 <b>Публикация прервана (перезапуск)</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}\n\n<i>Повторите операцию.</i>"
+            if _is_user
+            else f"📤 <b>Публикация прервана (перезапуск)</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}\n\n<i>Повторите операцию.</i>"
         )
         try:
             await bot.send_message(user_id, _pub_msg, parse_mode="HTML")

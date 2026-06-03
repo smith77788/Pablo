@@ -19,7 +19,6 @@ import asyncio
 import logging
 from typing import Optional, Callable, Any
 
-import asyncpg
 
 from services.logger import log_exc_swallow
 
@@ -72,7 +71,6 @@ async def leave_all_chats(
             if not dry_run:
                 try:
                     from telethon.tl.functions.channels import LeaveChannelRequest
-                    from telethon.tl.functions.messages import DeleteChatUserRequest
 
                     if dialog.is_channel or dialog.is_group:
                         await client(LeaveChannelRequest(entity))

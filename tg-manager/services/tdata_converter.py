@@ -4,6 +4,7 @@
 
 Поддерживает: Telegram Desktop 2.x/3.x/4.x, tdata без пароля (стандартный случай).
 """
+
 from __future__ import annotations
 
 import base64
@@ -19,6 +20,7 @@ log = logging.getLogger(__name__)
 
 # ── Крипто-утилиты ────────────────────────────────────────────────────────────
 
+
 def _xor(a: bytes, b: bytes) -> bytes:
     return bytes(x ^ y for x, y in zip(a, b))
 
@@ -26,11 +28,12 @@ def _xor(a: bytes, b: bytes) -> bytes:
 def _aes_ige_decrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
     """AES-256-IGE расшифровка (режим MTProto/TDesktop)."""
     from Crypto.Cipher import AES as _AES  # type: ignore
+
     aes = _AES.new(key, _AES.MODE_ECB)
     m_prev, c_prev = iv[:16], iv[16:]
     out = bytearray()
     for i in range(0, len(data), 16):
-        c = data[i:i + 16]
+        c = data[i : i + 16]
         m = _xor(aes.decrypt(_xor(c, m_prev)), c_prev)
         c_prev, m_prev = c, m
         out.extend(m)
@@ -46,22 +49,22 @@ def _pass_key_legacy(passphrase: bytes, salt: bytes):
 def _prep_aes_local(auth_key: bytes, msg_key: bytes, decrypt: bool = True):
     """SHA-1 PrepareAES для локальных данных TDesktop (legacy формат)."""
     x = 8 if decrypt else 0
-    sha1a = hashlib.sha1(msg_key + auth_key[x:x + 36]).digest()
-    sha1b = hashlib.sha1(auth_key[x + 40:x + 76] + msg_key).digest()
-    sha1c = hashlib.sha1(auth_key[x + 84:x + 120] + msg_key).digest()
-    sha1d = hashlib.sha1(msg_key + auth_key[x + 128:x + 160]).digest()
+    sha1a = hashlib.sha1(msg_key + auth_key[x : x + 36]).digest()
+    sha1b = hashlib.sha1(auth_key[x + 40 : x + 76] + msg_key).digest()
+    sha1c = hashlib.sha1(auth_key[x + 84 : x + 120] + msg_key).digest()
+    sha1d = hashlib.sha1(msg_key + auth_key[x + 128 : x + 160]).digest()
     aes_key = sha1a[:8] + sha1b[8:20] + sha1c[4:16]
-    aes_iv  = sha1a[8:20] + sha1b[:8] + sha1c[16:20] + sha1d[:8]
+    aes_iv = sha1a[8:20] + sha1b[:8] + sha1c[16:20] + sha1d[:8]
     return aes_key, aes_iv
 
 
 def _prep_aes_local_sha256(auth_key: bytes, msg_key: bytes, decrypt: bool = True):
     """SHA-256 PrepareAES для локальных данных TDesktop (новый формат 3.x+)."""
     x = 4 if decrypt else 0
-    sha256a = hashlib.sha256(msg_key + auth_key[x:x + 36]).digest()
-    sha256b = hashlib.sha256(auth_key[x + 40:x + 76] + msg_key).digest()
+    sha256a = hashlib.sha256(msg_key + auth_key[x : x + 36]).digest()
+    sha256b = hashlib.sha256(auth_key[x + 40 : x + 76] + msg_key).digest()
     aes_key = sha256a[:8] + sha256b[8:24] + sha256a[24:32]
-    aes_iv  = sha256b[:8] + sha256a[8:24] + sha256b[24:32]
+    aes_iv = sha256b[:8] + sha256a[8:24] + sha256b[24:32]
     return aes_key, aes_iv
 
 
@@ -98,6 +101,7 @@ def _tdf_read(base: str, name: str) -> bytes:
 
 
 # ── Qt DataStream ─────────────────────────────────────────────────────────────
+
 
 class _QS:
     def __init__(self, data: bytes):
@@ -166,7 +170,7 @@ def _read_local_key(tdata_dir: str, passphrase: bytes = b"") -> bytes:
         raise ValueError("key_datas: нет зашифрованных данных")
     # Выравниваем на 16 байт
     if len(encrypted) % 16 != 0:
-        encrypted = encrypted[:len(encrypted) - len(encrypted) % 16]
+        encrypted = encrypted[: len(encrypted) - len(encrypted) % 16]
 
     aes_key, aes_iv = _pass_key_legacy(passphrase, salt)
     try:
@@ -191,10 +195,13 @@ def _read_local_key(tdata_dir: str, passphrase: bytes = b"") -> bytes:
         log.debug("tdata: LocalKey fallback (raw bytes)")
         return decrypted[:_LOCAL_KEY_SIZE]
 
-    raise ValueError(f"tdata: не удалось извлечь LocalKey (decrypted={len(decrypted)}B)")
+    raise ValueError(
+        f"tdata: не удалось извлечь LocalKey (decrypted={len(decrypted)}B)"
+    )
 
 
 # ── Расшифровка файлов аккаунта ───────────────────────────────────────────────
+
 
 def _decrypt_account_file(content: bytes, local_key: bytes) -> Optional[bytes]:
     """
@@ -207,7 +214,7 @@ def _decrypt_account_file(content: bytes, local_key: bytes) -> Optional[bytes]:
     msg_key = content[8:24]
     encrypted = content[24:]
     if len(encrypted) % 16 != 0:
-        encrypted = encrypted[:len(encrypted) - len(encrypted) % 16]
+        encrypted = encrypted[: len(encrypted) - len(encrypted) % 16]
 
     for prep_fn, decrypt_flag in [
         (_prep_aes_local, True),
@@ -273,7 +280,7 @@ def _scan_for_dc_id(data: bytes) -> Optional[int]:
     # DC ID хранится как int32 или uint32 в диапазоне 1-5
     for i in range(0, min(len(data) - 4, 256), 4):
         try:
-            v = struct.unpack(">I", data[i:i + 4])[0]
+            v = struct.unpack(">I", data[i : i + 4])[0]
             if 1 <= v <= 5:
                 # Проверяем на соседние данные — рядом должен быть разумный контент
                 return v
@@ -284,16 +291,15 @@ def _scan_for_dc_id(data: bytes) -> Optional[int]:
 
 # ── Сборка Telethon StringSession ────────────────────────────────────────────
 
-def _build_string_session(dc_id: int, server_ip: str, port: int, auth_key: bytes) -> str:
+
+def _build_string_session(
+    dc_id: int, server_ip: str, port: int, auth_key: bytes
+) -> str:
     """Собирает Telethon StringSession v1 из компонентов."""
     import ipaddress
+
     ip_bytes = ipaddress.IPv4Address(server_ip).packed  # 4 bytes
-    data = (
-        struct.pack(">B", dc_id)
-        + ip_bytes
-        + struct.pack(">H", port)
-        + auth_key
-    )
+    data = struct.pack(">B", dc_id) + ip_bytes + struct.pack(">H", port) + auth_key
     return "1" + base64.urlsafe_b64encode(data).decode()
 
 
@@ -335,6 +341,7 @@ def _find_account_files(tdata_dir: str) -> list[str]:
 
 
 # ── Главная точка входа ───────────────────────────────────────────────────────
+
 
 def convert_tdata(tdata_dir: str, passphrase: str = "") -> list[dict]:
     """
@@ -381,15 +388,20 @@ def convert_tdata(tdata_dir: str, passphrase: str = "") -> list[dict]:
             server_ip = _DC_IPS[dc_id]
 
             for auth_key in auth_keys[:1]:  # берём первый кандидат
-                session_str = _build_string_session(dc_id, server_ip, _DC_PORT, auth_key)
-                sessions.append({
-                    "session_str": session_str,
-                    "dc_id": dc_id,
-                    "source_file": os.path.basename(fpath),
-                })
+                session_str = _build_string_session(
+                    dc_id, server_ip, _DC_PORT, auth_key
+                )
+                sessions.append(
+                    {
+                        "session_str": session_str,
+                        "dc_id": dc_id,
+                        "source_file": os.path.basename(fpath),
+                    }
+                )
                 log.info(
                     "tdata: сессия создана из %s, DC=%d",
-                    os.path.basename(fpath), dc_id,
+                    os.path.basename(fpath),
+                    dc_id,
                 )
         except Exception as e:
             log.debug("tdata: ошибка файла %s: %s", os.path.basename(fpath), e)
@@ -401,6 +413,7 @@ def check_pycryptodome() -> bool:
     """Проверяет наличие pycryptodome (AES)."""
     try:
         from Crypto.Cipher import AES  # type: ignore  # noqa
+
         return True
     except ImportError:
         return False

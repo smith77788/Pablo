@@ -32,10 +32,13 @@ async def cb_net_bc_target(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         from bot.callbacks import NetworkCb
+
         await callback.message.edit_text(
             locked_text("Сетевая рассылка v2", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=NetworkCb(action="menu")),
+            reply_markup=subscription_locked_markup(
+                "enterprise", back_callback=NetworkCb(action="menu")
+            ),
         )
         return
     bots = await db.get_bots(pool, callback.from_user.id)
@@ -65,7 +68,11 @@ def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
     kb = InlineKeyboardBuilder()
     for b in bots:
         bid = b["bot_id"]
-        label = f"@{b['username']}" if b.get("username") else b.get("first_name", f"Bot {bid}")
+        label = (
+            f"@{b['username']}"
+            if b.get("username")
+            else b.get("first_name", f"Bot {bid}")
+        )
         aud = b.get("audience_count", 0)
         check = "✅ " if bid in selected else "☐ "
         kb.button(
@@ -283,7 +290,9 @@ async def msg_net_bc_text(
     # Ограничиваем превью длинных сообщений
     preview_text = message.text or ""
     if len(preview_text) > 500:
-        preview_text = preview_text[:500] + "...\n<i>[сообщение обрезано для предпросмотра]</i>"
+        preview_text = (
+            preview_text[:500] + "...\n<i>[сообщение обрезано для предпросмотра]</i>"
+        )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить", callback_data=NetBcCb(action="confirm"))
@@ -320,9 +329,9 @@ async def cb_net_bc_confirm(
         await callback.message.edit_text(
             "⚠️ <b>Ошибка</b>\n\nТекст рассылки не найден. Попробуйте снова.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ Назад", callback_data=NetBcCb(action="choose_target")
-            ).as_markup(),
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
+            .as_markup(),
         )
         return
 
@@ -464,8 +473,13 @@ async def cb_net_bc_confirm(
     kb.adjust(1)
     if total_started == 0:
         kb_empty = InlineKeyboardBuilder()
-        kb_empty.button(text="🔄 Выбрать другой сегмент", callback_data=NetBcCb(action="choose_target"))
-        kb_empty.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+        kb_empty.button(
+            text="🔄 Выбрать другой сегмент",
+            callback_data=NetBcCb(action="choose_target"),
+        )
+        kb_empty.button(
+            text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu")
+        )
         kb_empty.adjust(1)
         await callback.message.edit_text(
             "⚠️ <b>Рассылка не запущена</b>\n\n"

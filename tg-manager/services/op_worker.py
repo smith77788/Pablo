@@ -1,4 +1,5 @@
 """Фоновый воркер для выполнения очереди операций (параллельный режим)."""
+
 import asyncio
 import json
 import logging
@@ -14,20 +15,28 @@ from services import resource_selector
 from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
-_POLL_INTERVAL = 10   # секунд между проверками очереди
-_MAX_PARALLEL = 3     # максимум параллельных операций
+_POLL_INTERVAL = 10  # секунд между проверками очереди
+_MAX_PARALLEL = 3  # максимум параллельных операций
 
 
 # ── Retry Intelligence ─────────────────────────────────────────────────────────
 
 _RETRYABLE_ERRORS = {
-    "TimeoutError", "ConnectionError", "NetworkError",
-    "ConnectionResetError", "ServerError", "OSError",
-    "asyncio.TimeoutError", "TelegramNetworkError",
+    "TimeoutError",
+    "ConnectionError",
+    "NetworkError",
+    "ConnectionResetError",
+    "ServerError",
+    "OSError",
+    "asyncio.TimeoutError",
+    "TelegramNetworkError",
 }
 _FATAL_ERRORS = {
-    "AuthKeyUnregisteredError", "SessionRevokedError",
-    "UserDeactivatedBan", "BotKicked", "PhoneNumberBanned",
+    "AuthKeyUnregisteredError",
+    "SessionRevokedError",
+    "UserDeactivatedBan",
+    "BotKicked",
+    "PhoneNumberBanned",
 }
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 
@@ -74,9 +83,17 @@ def _classify_op_error(exc: Exception) -> str:
         return "fatal"
     if _FLOOD_PATTERNS.search(msg) or _FLOOD_PATTERNS.search(name):
         return "flood"
-    if name in _RETRYABLE_ERRORS or "timeout" in msg.lower() or "connection" in msg.lower():
+    if (
+        name in _RETRYABLE_ERRORS
+        or "timeout" in msg.lower()
+        or "connection" in msg.lower()
+    ):
         return "retry"
-    if "CHANNEL_PRIVATE" in msg or "CHAT_ADMIN_REQUIRED" in msg or "ChatAdminRequired" in name:
+    if (
+        "CHANNEL_PRIVATE" in msg
+        or "CHAT_ADMIN_REQUIRED" in msg
+        or "ChatAdminRequired" in name
+    ):
         return "skip"
     return "retry"
 
@@ -112,9 +129,18 @@ async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool
                 scheduled_for=now() + ($4 * interval '1 second'),
                 started_at=NULL
             WHERE id=$3""",
-        retry_count, str(exc)[:300], op_id, backoff,
+        retry_count,
+        str(exc)[:300],
+        op_id,
+        backoff,
     )
-    log.info("op_worker: op %d queued for retry %d/%d in %ds", op_id, retry_count, max_retries, backoff)
+    log.info(
+        "op_worker: op %d queued for retry %d/%d in %ds",
+        op_id,
+        retry_count,
+        max_retries,
+        backoff,
+    )
     return True
 
 
@@ -137,11 +163,21 @@ async def _audit(
                    owner_id, operation_id, account_id, action, target,
                    result, error_msg, flood_wait_s, duration_ms
                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
-            owner_id, operation_id, account_id, action, target,
-            result, error_msg, flood_wait_s, duration_ms,
+            owner_id,
+            operation_id,
+            account_id,
+            action,
+            target,
+            result,
+            error_msg,
+            flood_wait_s,
+            duration_ms,
         )
     except Exception as e:
-        log.warning("audit write failed for op=%s action=%s: %s", operation_id, action, e)
+        log.warning(
+            "audit write failed for op=%s action=%s: %s", operation_id, action, e
+        )
+
 
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
@@ -159,6 +195,7 @@ async def _get_owner_semaphore(owner_id: int) -> asyncio.Semaphore:
             _owner_semaphores[owner_id] = asyncio.Semaphore(_MAX_PARALLEL_PER_OWNER)
         return _owner_semaphores[owner_id]
 
+
 # Track last progress milestone notified per op (25/50/75%)
 _progress_milestones: dict[int, int] = {}
 
@@ -167,7 +204,9 @@ _cancel_cache: dict[int, tuple[bool, float]] = {}
 _CANCEL_CACHE_TTL = 5.0  # seconds between DB checks in tight loops
 
 
-async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str) -> None:
+async def _progress_monitor(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, op_type: str
+) -> None:
     """Периодически проверяет прогресс и уведомляет на 25/50/75% (один раз каждый milestone)."""
     _progress_milestones[op_id] = 0
     try:
@@ -175,7 +214,8 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
             await asyncio.sleep(15)
             try:
                 row = await pool.fetchrow(
-                    "SELECT total_items, done_items, status FROM operation_queue WHERE id=$1", op_id
+                    "SELECT total_items, done_items, status FROM operation_queue WHERE id=$1",
+                    op_id,
                 )
                 if not row or row["status"] != "running":
                     break
@@ -199,10 +239,16 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
                 bar = "█" * bar_filled + "░" * (10 - bar_filled)
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 from bot.callbacks import BmCb
+
                 kb = InlineKeyboardBuilder()
-                kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
+                kb.button(
+                    text="📋 Очередь операций", callback_data=BmCb(action="op_reports")
+                )
                 await db.notify_if_enabled(
-                    pool, bot, owner_id, "op_complete",
+                    pool,
+                    bot,
+                    owner_id,
+                    "op_complete",
                     f"⏳ <b>Операция #{op_id}</b> — {milestone}%\n"
                     f"[{bar}] {done}/{total}\n"
                     f"<code>{op_type}</code>",
@@ -310,7 +356,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     op_id = row["id"]
     owner_id = row["owner_id"]
     op_type = row["op_type"]
-    params = row["params"] if isinstance(row["params"], dict) else json.loads(row["params"] or "{}")
+    params = (
+        row["params"]
+        if isinstance(row["params"], dict)
+        else json.loads(row["params"] or "{}")
+    )
 
     # Skip operations waiting for user approval
     if row.get("requires_approval") and row.get("status") == "waiting_approval":
@@ -323,7 +373,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
     progress_task: asyncio.Task | None = None
     _t_start = time.monotonic()
-    log.info("op_worker: starting op_id=%d op_type=%s owner=%d", op_id, op_type, owner_id)
+    log.info(
+        "op_worker: starting op_id=%d op_type=%s owner=%d", op_id, op_type, owner_id
+    )
 
     async with owner_sem:
         try:
@@ -331,15 +383,23 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             try:
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 from bot.callbacks import BmCb
+
                 start_kb = InlineKeyboardBuilder()
-                start_kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
+                start_kb.button(
+                    text="📋 Очередь операций", callback_data=BmCb(action="op_reports")
+                )
                 await db.notify_if_enabled(
-                    pool, bot, owner_id, "op_complete",
+                    pool,
+                    bot,
+                    owner_id,
+                    "op_complete",
                     f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>",
                     reply_markup=start_kb.as_markup(),
                 )
             except Exception:
-                log_exc_swallow(log, f"Сбой отправки уведомления о запуске операции #{op_id}")
+                log_exc_swallow(
+                    log, f"Сбой отправки уведомления о запуске операции #{op_id}"
+                )
 
             # Запустить фоновый монитор прогресса для длинных операций
             progress_task = asyncio.create_task(
@@ -355,19 +415,34 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             elif op_type == "bulk_leave":
                 result = await _exec_bulk_leave(pool, bot, op_id, owner_id, params)
             elif op_type == "global_presence_channel":
-                result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+                result = await _exec_global_presence_channel(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type == "global_presence_group":
-                result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+                result = await _exec_global_presence_channel(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type == "global_presence_bot":
-                result = await _exec_global_presence_bot(pool, bot, op_id, owner_id, params)
+                result = await _exec_global_presence_bot(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type == "bulk_create_channels":
-                result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
+                result = await _exec_bulk_create_channels(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type in ("global_presence_full_package", "global_presence_package"):
-                result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+                result = await _exec_global_presence_channel(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type == "strike":
                 result = await _exec_strike(pool, bot, op_id, owner_id, params)
             else:
-                log.warning("op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped", op_type, op_id, owner_id)
+                log.warning(
+                    "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
+                    op_type,
+                    op_id,
+                    owner_id,
+                )
                 result = {
                     "status": "skipped",
                     "reason": f"unknown op_type: {op_type}",
@@ -378,7 +453,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             if result.get("status") == "cancelled":
                 return
 
-            current = await pool.fetchrow("SELECT status FROM operation_queue WHERE id=$1", op_id)
+            current = await pool.fetchrow(
+                "SELECT status FROM operation_queue WHERE id=$1", op_id
+            )
             if current and current["status"] == "cancelled":
                 return
 
@@ -387,27 +464,42 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             result = _normalize_result(result, op_type, duration_seconds)
             log.info(
                 "op_worker: op_id=%d op_type=%s done in %.1fs (duration_seconds=%.1f) — %s",
-                op_id, op_type, elapsed, duration_seconds, result.get("summary", ""),
+                op_id,
+                op_type,
+                elapsed,
+                duration_seconds,
+                result.get("summary", ""),
             )
             await pool.execute(
                 "UPDATE operation_queue SET status='done', finished_at=now(), result=$1::jsonb WHERE id=$2",
-                json.dumps(result), op_id,
+                json.dumps(result),
+                op_id,
             )
             summary = result.get("summary", "")
             from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot.callbacks import BmCb
+
             kb = InlineKeyboardBuilder()
-            kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+            kb.button(
+                text="📋 Детали операции",
+                callback_data=BmCb(action="op_detail", op_id=op_id),
+            )
             await db.notify_if_enabled(
-                pool, bot, owner_id, "op_complete",
+                pool,
+                bot,
+                owner_id,
+                "op_complete",
                 f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n{summary}",
                 reply_markup=kb.as_markup(),
             )
             # Фиксируем успех в Infrastructure Memory для всех аккаунтов из params
             try:
                 from services.infra_memory import record_account_op
-                for _acc_id in (params.get("account_ids") or []):
-                    record_account_op(int(_acc_id), op_type, success=True, duration_s=duration_seconds)
+
+                for _acc_id in params.get("account_ids") or []:
+                    record_account_op(
+                        int(_acc_id), op_type, success=True, duration_s=duration_seconds
+                    )
             except Exception:
                 pass
 
@@ -416,8 +508,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # Фиксируем ошибку в Infrastructure Memory
             try:
                 from services.infra_memory import record_account_op
-                for _acc_id in (params.get("account_ids") or []):
-                    record_account_op(int(_acc_id), op_type, success=False, error=str(e)[:100])
+
+                for _acc_id in params.get("account_ids") or []:
+                    record_account_op(
+                        int(_acc_id), op_type, success=False, error=str(e)[:100]
+                    )
             except Exception:
                 pass
             # Попытаться поставить на повтор перед тем как помечать как failed
@@ -425,12 +520,17 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             if not requeued:
                 await pool.execute(
                     "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
-                    str(e)[:500], op_id,
+                    str(e)[:500],
+                    op_id,
                 )
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 from bot.callbacks import BmCb
+
                 kb = InlineKeyboardBuilder()
-                kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+                kb.button(
+                    text="📋 Детали операции",
+                    callback_data=BmCb(action="op_detail", op_id=op_id),
+                )
                 retry_row = await pool.fetchrow(
                     "SELECT retry_count FROM operation_queue WHERE id=$1", op_id
                 )
@@ -438,7 +538,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 if retry_row and (retry_row["retry_count"] or 0) > 0:
                     retry_info = f"\nПопыток: {retry_row['retry_count']}"
                 await db.notify_if_enabled(
-                    pool, bot, owner_id, "op_complete",
+                    pool,
+                    bot,
+                    owner_id,
+                    "op_complete",
                     f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n"
                     f"<code>{str(e)[:200]}</code>{retry_info}",
                     reply_markup=kb.as_markup(),
@@ -451,13 +554,18 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             duration_seconds_total = round(elapsed_total, 1)
             log.info(
                 "op_worker: op_id=%d op_type=%s finished (total %.1fs, duration_seconds=%.1f)",
-                op_id, op_type, elapsed_total, duration_seconds_total,
+                op_id,
+                op_type,
+                elapsed_total,
+                duration_seconds_total,
             )
             async with _active_lock:
                 _active_op_ids.discard(op_id)
 
 
-async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:
+async def _exec_mass_publish(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
     """Выполнить массовую публикацию."""
     from services import account_manager
 
@@ -467,12 +575,17 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
     accounts = await resource_selector.select_all_active(
-        pool, owner_id,
+        pool,
+        owner_id,
         include_ids=account_ids or None,
     )
 
     if not accounts:
-        log.warning("op_worker mass_publish #%d: no active accounts for owner=%d", op_id, owner_id)
+        log.warning(
+            "op_worker mass_publish #%d: no active accounts for owner=%d",
+            op_id,
+            owner_id,
+        )
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) "
             "VALUES($1,1,'system','error','no active accounts found')",
@@ -490,66 +603,109 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
 
     for acc in accounts:
         if await _is_cancelled(pool, op_id):
-            return {"status": "cancelled", "sent": total_sent, "failed": total_failed,
-                    "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}"}
+            return {
+                "status": "cancelled",
+                "sent": total_sent,
+                "failed": total_failed,
+                "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}",
+            }
         acc_dict = dict(acc)
         try:
-            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc_dict)
-            channels = [d for d in (dialogs or []) if d.get("type") in ("channel", "megagroup", "gigagroup")]
+            dialogs = await account_manager.get_dialogs(
+                acc["session_str"], _acc=acc_dict
+            )
+            channels = [
+                d
+                for d in (dialogs or [])
+                if d.get("type") in ("channel", "megagroup", "gigagroup")
+            ]
 
             if not channels:
                 log.info(
                     "op_worker mass_publish #%d: acc=%s has no channels — skipping",
-                    op_id, acc_dict.get("phone", acc_dict.get("id")),
+                    op_id,
+                    acc_dict.get("phone", acc_dict.get("id")),
                 )
 
             for ch in channels:
                 if await _is_cancelled(pool, op_id):
-                    return {"status": "cancelled", "sent": total_sent, "failed": total_failed,
-                            "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}"}
+                    return {
+                        "status": "cancelled",
+                        "sent": total_sent,
+                        "failed": total_failed,
+                        "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}",
+                    }
                 flood_extra = 0
                 t0_pub = time.monotonic()
                 try:
                     result = await account_manager.post_to_channel(
                         acc["session_str"], ch["id"], text, _acc=acc_dict
                     )
-                    if isinstance(result, dict) and (result.get("error") or result.get("banned")):
+                    if isinstance(result, dict) and (
+                        result.get("error") or result.get("banned")
+                    ):
                         raise Exception(result.get("error") or "banned")
                     pub_dur_s = time.monotonic() - t0_pub
                     total_sent += 1
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok','sent')",
-                        op_id, total_sent, str(ch["id"]),
+                        op_id,
+                        total_sent,
+                        str(ch["id"]),
                     )
                     await pool.execute(
-                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                        op_id,
                     )
                     try:
                         from services.flood_engine import record_success
+
                         await record_success(acc_dict["id"], "publish")
                     except Exception:
-                        log_exc_swallow(log, f"Сбой записи успешной публикации в flood_engine аккаунта {acc_dict.get('id')}")
-                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=True, duration_s=pub_dur_s)
+                        log_exc_swallow(
+                            log,
+                            f"Сбой записи успешной публикации в flood_engine аккаунта {acc_dict.get('id')}",
+                        )
+                    _infra_mem.record_account_op(
+                        acc_dict["id"], "publish", success=True, duration_s=pub_dur_s
+                    )
                 except Exception as e:
                     total_failed += 1
                     err_str = str(e)[:200]
                     flood_wait = extract_flood_wait(e, err_str)
-                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=False, error=err_str[:100])
+                    _infra_mem.record_account_op(
+                        acc_dict["id"], "publish", success=False, error=err_str[:100]
+                    )
                     if flood_wait:
                         try:
                             from services.flood_engine import record_flood
-                            await record_flood(pool, acc_dict["id"], flood_wait, "publish", op_id)
+
+                            await record_flood(
+                                pool, acc_dict["id"], flood_wait, "publish", op_id
+                            )
                         except Exception:
-                            log_exc_swallow(log, f"Сбой записи flood в flood_engine аккаунта {acc_dict.get('id')}")
+                            log_exc_swallow(
+                                log,
+                                f"Сбой записи flood в flood_engine аккаунта {acc_dict.get('id')}",
+                            )
                         flood_extra = flood_wait
                     else:
-                        log.warning("op_worker mass_publish: post failed ch=%s acc=%s: %s", ch["id"], acc_dict.get("phone"), err_str)
+                        log.warning(
+                            "op_worker mass_publish: post failed ch=%s acc=%s: %s",
+                            ch["id"],
+                            acc_dict.get("phone"),
+                            err_str,
+                        )
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                        op_id, total_sent + total_failed, str(ch["id"]), err_str,
+                        op_id,
+                        total_sent + total_failed,
+                        str(ch["id"]),
+                        err_str,
                     )
                     await pool.execute(
-                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                        op_id,
                     )
                 actual_delay = max(delay, flood_extra + 5 if flood_extra else 0)
                 await asyncio.sleep(actual_delay)
@@ -560,8 +716,9 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
             await pool.execute(
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
-                op_id, total_sent + total_failed,
-                f"account:{acc.get('phone','unknown')}",
+                op_id,
+                total_sent + total_failed,
+                f"account:{acc.get('phone', 'unknown')}",
                 f"get_dialogs/connect error: {str(e)[:200]}",
             )
             await pool.execute(
@@ -569,7 +726,9 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
             )
 
     # Account-level exceptions may cause done_items < total_items — sync at end.
-    row = await pool.fetchrow("SELECT total_items, done_items FROM operation_queue WHERE id=$1", op_id)
+    row = await pool.fetchrow(
+        "SELECT total_items, done_items FROM operation_queue WHERE id=$1", op_id
+    )
     if row:
         total = row["total_items"] or 0
         done = row["done_items"] or 0
@@ -579,11 +738,19 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                 "UPDATE operation_queue SET done_items=total_items WHERE id=$1", op_id
             )
             total_failed += gap
-            log.warning("op_worker mass_publish #%d: synced done_items (+%d unaccounted)", op_id, gap)
+            log.warning(
+                "op_worker mass_publish #%d: synced done_items (+%d unaccounted)",
+                op_id,
+                gap,
+            )
 
     if total_sent == 0 and total_failed == 0:
         # No channels found across all accounts
-        log.warning("op_worker mass_publish #%d: no channels found for any account (owner=%d)", op_id, owner_id)
+        log.warning(
+            "op_worker mass_publish #%d: no channels found for any account (owner=%d)",
+            op_id,
+            owner_id,
+        )
         return {
             "status": "failed",
             "sent": 0,
@@ -591,7 +758,9 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
             "summary": "Нет каналов для публикации. Проверьте подключение аккаунтов и наличие каналов/групп.",
         }
 
-    final_status = "done" if total_failed == 0 else ("failed" if total_sent == 0 else "done")
+    final_status = (
+        "done" if total_failed == 0 else ("failed" if total_sent == 0 else "done")
+    )
     return {
         "status": final_status,
         "sent": total_sent,
@@ -600,13 +769,16 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     }
 
 
-async def _exec_bulk_bot_edit(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:
+async def _exec_bulk_bot_edit(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
     """Выполнить массовое редактирование ботов через Bot API."""
     field = params.get("field", "")
     value = params.get("value", "")
 
     bots_rows = await pool.fetch(
-        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", owner_id
+        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+        owner_id,
     )
 
     ok_count = 0
@@ -624,10 +796,20 @@ async def _exec_bulk_bot_edit(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id
     async with aiohttp.ClientSession() as sess:
         for b in bots_rows:
             if await _is_cancelled(pool, op_id):
-                return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
-                        "summary": f"Отменено. Обновлено: {ok_count}, ошибок: {fail_count}"}
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "failed": fail_count,
+                    "summary": f"Отменено. Обновлено: {ok_count}, ошибок: {fail_count}",
+                }
             try:
-                payload = {"name" if field == "name" else "description" if field == "desc" else "short_description": value}
+                payload = {
+                    "name"
+                    if field == "name"
+                    else "description"
+                    if field == "desc"
+                    else "short_description": value
+                }
                 resp = await sess.post(
                     f"https://api.telegram.org/bot{b['token']}/{method}",
                     json=payload,
@@ -638,13 +820,20 @@ async def _exec_bulk_bot_edit(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id
                     ok_count += 1
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
-                        op_id, ok_count + fail_count, str(b["id"]),
+                        op_id,
+                        ok_count + fail_count,
+                        str(b["id"]),
                     )
                 else:
                     fail_count += 1
             except Exception as e:
                 fail_count += 1
-                log.warning("op_worker bulk_bot_edit: bot=%s field=%s error=%s", b.get("id"), field, e)
+                log.warning(
+                    "op_worker bulk_bot_edit: bot=%s field=%s error=%s",
+                    b.get("id"),
+                    field,
+                    e,
+                )
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
@@ -669,7 +858,8 @@ async def _exec_bulk_join(
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
     accounts = await resource_selector.select_all_active(
-        pool, owner_id,
+        pool,
+        owner_id,
         include_ids=account_ids or None,
     )
 
@@ -681,12 +871,18 @@ async def _exec_bulk_join(
         acc_dict = dict(acc)
         for i, link in enumerate(links):
             if await _is_cancelled(pool, op_id):
-                return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
-                        "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}"}
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "failed": fail_count,
+                    "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}",
+                }
             step += 1
             t0 = time.monotonic()
             try:
-                res = await account_manager.join_channel(acc["session_str"], link, _acc=acc_dict)
+                res = await account_manager.join_channel(
+                    acc["session_str"], link, _acc=acc_dict
+                )
                 if res.get("error"):
                     raise Exception(res["error"])
                 ok_count += 1
@@ -694,46 +890,82 @@ async def _exec_bulk_join(
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','joined')",
-                    op_id, step, link,
+                    op_id,
+                    step,
+                    link,
                 )
                 await pool.execute(
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
                 )
-                await _audit(pool, owner_id, "join", "success",
-                             operation_id=op_id, account_id=acc["id"],
-                             target=link, duration_ms=dur_ms)
+                await _audit(
+                    pool,
+                    owner_id,
+                    "join",
+                    "success",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=link,
+                    duration_ms=dur_ms,
+                )
                 try:
                     from services.flood_engine import record_success
+
                     await record_success(acc["id"], "join")
                 except Exception:
-                    log_exc_swallow(log, f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}")
-                _infra_mem.record_account_op(acc["id"], "join", success=True, duration_s=dur_ms / 1000)
+                    log_exc_swallow(
+                        log,
+                        f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}",
+                    )
+                _infra_mem.record_account_op(
+                    acc["id"], "join", success=True, duration_s=dur_ms / 1000
+                )
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
                 flood_wait = extract_flood_wait(e, err_str)
-                _infra_mem.record_account_op(acc["id"], "join", success=False, error=err_str[:100])
+                _infra_mem.record_account_op(
+                    acc["id"], "join", success=False, error=err_str[:100]
+                )
                 if flood_wait:
                     try:
                         from services.flood_engine import record_flood
+
                         await record_flood(pool, acc["id"], flood_wait, "join", op_id)
                     except Exception:
-                        log_exc_swallow(log, f"Сбой записи flood в flood_engine для аккаунта {acc['id']}")
+                        log_exc_swallow(
+                            log,
+                            f"Сбой записи flood в flood_engine для аккаунта {acc['id']}",
+                        )
                 else:
                     log.warning(
                         "op_worker bulk_join: link=%s acc=%s error: %s",
-                        link, acc_dict.get("phone"), err_str,
+                        link,
+                        acc_dict.get("phone"),
+                        err_str,
                     )
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, step, link, err_str,
+                    op_id,
+                    step,
+                    link,
+                    err_str,
                 )
-                await _audit(pool, owner_id, "join", "flood_wait" if flood_wait else "error",
-                             operation_id=op_id, account_id=acc["id"],
-                             target=link, error_msg=err_str, flood_wait_s=flood_wait or None)
+                await _audit(
+                    pool,
+                    owner_id,
+                    "join",
+                    "flood_wait" if flood_wait else "error",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=link,
+                    error_msg=err_str,
+                    flood_wait_s=flood_wait or None,
+                )
                 await pool.execute(
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
                 )
             # Apply pacing based on delay_mode from params
             delay_mode = params.get("delay_mode", "smart")
@@ -772,7 +1004,8 @@ async def _exec_bulk_leave(
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
     accounts = await resource_selector.select_all_active(
-        pool, owner_id,
+        pool,
+        owner_id,
         include_ids=account_ids or None,
     )
 
@@ -784,13 +1017,19 @@ async def _exec_bulk_leave(
         acc_dict = dict(acc)
         for i, channel in enumerate(channels):
             if await _is_cancelled(pool, op_id):
-                return {"status": "cancelled", "ok": ok_count, "failed": fail_count,
-                        "summary": f"Отменено. Вышли: {ok_count}, ошибок: {fail_count}"}
+                return {
+                    "status": "cancelled",
+                    "ok": ok_count,
+                    "failed": fail_count,
+                    "summary": f"Отменено. Вышли: {ok_count}, ошибок: {fail_count}",
+                }
             step += 1
             t0 = time.monotonic()
             flood_wait = 0
             try:
-                left = await account_manager.leave_channel(acc["session_str"], channel, _acc=acc_dict)
+                left = await account_manager.leave_channel(
+                    acc["session_str"], channel, _acc=acc_dict
+                )
                 if not left:
                     raise Exception(f"leave_channel returned False for {channel}")
                 ok_count += 1
@@ -798,47 +1037,83 @@ async def _exec_bulk_leave(
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'ok','left')",
-                    op_id, step, str(channel),
+                    op_id,
+                    step,
+                    str(channel),
                 )
                 await pool.execute(
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
                 )
-                await _audit(pool, owner_id, "leave", "success",
-                             operation_id=op_id, account_id=acc["id"],
-                             target=str(channel), duration_ms=dur_ms)
+                await _audit(
+                    pool,
+                    owner_id,
+                    "leave",
+                    "success",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=str(channel),
+                    duration_ms=dur_ms,
+                )
                 try:
                     from services.flood_engine import record_success
+
                     await record_success(acc["id"], "leave")
                 except Exception:
-                    log_exc_swallow(log, f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}")
-                _infra_mem.record_account_op(acc["id"], "leave", success=True, duration_s=dur_ms / 1000)
+                    log_exc_swallow(
+                        log,
+                        f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}",
+                    )
+                _infra_mem.record_account_op(
+                    acc["id"], "leave", success=True, duration_s=dur_ms / 1000
+                )
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
                 flood_wait = extract_flood_wait(e, err_str)
-                _infra_mem.record_account_op(acc["id"], "leave", success=False, error=err_str[:100])
+                _infra_mem.record_account_op(
+                    acc["id"], "leave", success=False, error=err_str[:100]
+                )
                 if flood_wait:
                     try:
                         from services.flood_engine import record_flood
+
                         await record_flood(pool, acc["id"], flood_wait, "leave", op_id)
                     except Exception:
-                        log_exc_swallow(log, f"Сбой записи flood в flood_engine для аккаунта {acc['id']}")
+                        log_exc_swallow(
+                            log,
+                            f"Сбой записи flood в flood_engine для аккаунта {acc['id']}",
+                        )
                 else:
                     log.warning(
                         "op_worker bulk_leave: channel=%s acc=%s error: %s",
-                        channel, acc_dict.get("phone"), err_str,
+                        channel,
+                        acc_dict.get("phone"),
+                        err_str,
                     )
                 await pool.execute(
                     "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                     "VALUES($1,$2,$3,'error',$4)",
-                    op_id, step, str(channel), err_str,
+                    op_id,
+                    step,
+                    str(channel),
+                    err_str,
                 )
                 await pool.execute(
-                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
                 )
-                await _audit(pool, owner_id, "leave", "flood_wait" if flood_wait else "error",
-                             operation_id=op_id, account_id=acc["id"],
-                             target=str(channel), error_msg=err_str, flood_wait_s=flood_wait or None)
+                await _audit(
+                    pool,
+                    owner_id,
+                    "leave",
+                    "flood_wait" if flood_wait else "error",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=str(channel),
+                    error_msg=err_str,
+                    flood_wait_s=flood_wait or None,
+                )
             # Apply pacing based on delay_mode from params
             delay_mode = params.get("delay_mode", "smart")
             chaos = session_simulator.chaos_factor()
@@ -876,7 +1151,8 @@ async def _exec_global_presence_channel(
 
     plan = await pool.fetchrow(
         "SELECT asset_type FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
-        plan_id, owner_id,
+        plan_id,
+        owner_id,
     )
     if not plan:
         return {"status": "failed", "reason": "План не найден"}
@@ -886,7 +1162,8 @@ async def _exec_global_presence_channel(
 
     await pool.execute(
         "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1 AND owner_id=$2",
-        plan_id, owner_id,
+        plan_id,
+        owner_id,
     )
 
     targets = await pool.fetch(
@@ -895,11 +1172,19 @@ async def _exec_global_presence_channel(
     )
     if not targets:
         await pool.execute(
-            "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1", plan_id
+            "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
+            plan_id,
         )
-        return {"status": "done", "created": 0, "failed": 0, "summary": "Нет ожидающих целей"}
+        return {
+            "status": "done",
+            "created": 0,
+            "failed": 0,
+            "summary": "Нет ожидающих целей",
+        }
 
-    acc_ids = list({t["selected_account_id"] for t in targets if t["selected_account_id"]})
+    acc_ids = list(
+        {t["selected_account_id"] for t in targets if t["selected_account_id"]}
+    )
     if not acc_ids:
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
@@ -916,7 +1201,8 @@ async def _exec_global_presence_channel(
     for i, target in enumerate(targets):
         if await _is_cancelled(pool, op_id):
             await pool.execute(
-                "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1", plan_id
+                "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
+                plan_id,
             )
             return {
                 "status": "cancelled",
@@ -931,10 +1217,13 @@ async def _exec_global_presence_channel(
         if not acc:
             await pool.execute(
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                "Аккаунт недоступен", target["id"],
+                "Аккаунт недоступен",
+                target["id"],
             )
             failed_count += 1
-            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
             continue
 
         # ── Проверка trust_score аккаунта перед использованием ──
@@ -943,32 +1232,44 @@ async def _exec_global_presence_channel(
             log.warning(
                 "op_worker gp_%s: skipping account %s with low trust_score=%.2f",
                 "group" if is_group else "channel",
-                acc["phone"], trust_score,
+                acc["phone"],
+                trust_score,
             )
             # Попробовать найти альтернативный аккаунт с лучшим trust_score
             alt_acc = None
             for a in accounts_rows:
                 if a["id"] != acc_id and (a.get("trust_score") or 0.5) >= 0.5:
                     alt_acc = dict(a)
-                    log.info("op_worker gp: switching to account %s with trust=%.2f", a["phone"], a.get("trust_score"))
+                    log.info(
+                        "op_worker gp: switching to account %s with trust=%.2f",
+                        a["phone"],
+                        a.get("trust_score"),
+                    )
                     break
 
             if not alt_acc:
                 await pool.execute(
                     "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                    f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})", target["id"],
+                    f"Все аккаунты имеют низкий trust_score (мин: {trust_score:.2f})",
+                    target["id"],
                 )
                 failed_count += 1
-                await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                    op_id,
+                )
                 continue
 
             acc = alt_acc
 
         await pool.execute(
-            "UPDATE global_presence_targets SET status='running' WHERE id=$1", target["id"]
+            "UPDATE global_presence_targets SET status='running' WHERE id=$1",
+            target["id"],
         )
 
-        title = target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
+        title = (
+            target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
+        )
 
         # ── Умная задержка перед созданием ──
         await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
@@ -994,15 +1295,22 @@ async def _exec_global_presence_channel(
         if result.get("error"):
             await pool.execute(
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                str(result["error"])[:500], target["id"],
+                str(result["error"])[:500],
+                target["id"],
             )
             failed_count += 1
             _infra_mem.record_account_op(
-                acc["id"], "global_presence_channel", success=False,
+                acc["id"],
+                "global_presence_channel",
+                success=False,
                 error=str(result["error"])[:100],
             )
-            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            await asyncio.sleep(random.uniform(10, 25) * session_simulator.chaos_factor())
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            await asyncio.sleep(
+                random.uniform(10, 25) * session_simulator.chaos_factor()
+            )
             continue
 
         channel_id = result.get("channel_id")
@@ -1017,14 +1325,22 @@ async def _exec_global_presence_channel(
                 acc["session_str"], channel_id, planned_username, _acc=acc
             )
             if err:
-                log.info("op_worker gp_channel: username '%s' failed (%s), trying variants", planned_username, err[:80])
+                log.info(
+                    "op_worker gp_channel: username '%s' failed (%s), trying variants",
+                    planned_username,
+                    err[:80],
+                )
                 if "flood" in err.lower() or "FloodWait" in err:
                     import re as _re
+
                     m = _re.search(r"(\d+)", err)
                     flood_wait = int(m.group(1)) + 5 if m else 60
-                    log.info("op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait)
+                    log.info(
+                        "op_worker gp_channel: FloodWait %ds, sleeping...", flood_wait
+                    )
                     await asyncio.sleep(flood_wait)
                 from services.username_engine import generate_username_variants
+
                 geo = {
                     "country_code": target.get("country_code", ""),
                     "city": target.get("city", ""),
@@ -1037,17 +1353,30 @@ async def _exec_global_presence_channel(
                         acc["session_str"], channel_id, variant, _acc=acc
                     )
                     if not err2:
-                        log.info("op_worker gp_channel: username variant '%s' accepted", variant)
+                        log.info(
+                            "op_worker gp_channel: username variant '%s' accepted",
+                            variant,
+                        )
                         err = None
                         break
-                    log.info("op_worker gp_channel: variant '%s' also failed: %s", variant, err2[:60])
+                    log.info(
+                        "op_worker gp_channel: variant '%s' also failed: %s",
+                        variant,
+                        err2[:60],
+                    )
                 username_error = err
 
         await pool.execute(
             "UPDATE global_presence_targets SET status='done', result_asset_id=$1 WHERE id=$2",
-            channel_id, target["id"],
+            channel_id,
+            target["id"],
         )
-        _infra_mem.record_account_op(acc["id"], "global_presence_channel", success=True, duration_s=time.monotonic() - t0_gp)
+        _infra_mem.record_account_op(
+            acc["id"],
+            "global_presence_channel",
+            success=True,
+            duration_s=time.monotonic() - t0_gp,
+        )
 
         # Link to ecosystem if one exists for this owner
         try:
@@ -1057,6 +1386,7 @@ async def _exec_global_presence_channel(
             )
             if ecos and channel_id:
                 from services import ecosystem_brain as _eb
+
                 eco_id = ecos[0]["id"]
                 obj_type = "group" if is_group else "channel"
                 await _eb.add_member(pool, eco_id, owner_id, obj_type, channel_id)
@@ -1069,11 +1399,13 @@ async def _exec_global_presence_channel(
         try:
             if _gp_eco_id is None:
                 _eco_row = await pool.fetchrow(
-                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1", plan_id
+                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
+                    plan_id,
                 )
                 _gp_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
             if _gp_eco_id:
                 from services import ecosystem_brain as _eb
+
                 await _eb.add_member(pool, _gp_eco_id, owner_id, "channel", channel_id)
                 await _eb.add_member(pool, _gp_eco_id, owner_id, "account", acc["id"])
         except Exception:
@@ -1081,42 +1413,64 @@ async def _exec_global_presence_channel(
 
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-            op_id, created_count + failed_count,
+            op_id,
+            created_count + failed_count,
             f"{target.get('city', '?')} → {title}",
-            f"channel_id={channel_id}" + (f" | username_err={username_error}" if username_error else ""),
+            f"channel_id={channel_id}"
+            + (f" | username_err={username_error}" if username_error else ""),
         )
-        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
 
         if created_count > 0 and created_count % 10 == 0:
             try:
                 await db.notify_if_enabled(
-                    pool, bot, owner_id, "op_complete",
+                    pool,
+                    bot,
+                    owner_id,
+                    "op_complete",
                     f"🌍 <b>Создание каналов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                     f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
                 )
             except Exception:
-                log_exc_swallow(log, f"Сбой отправки прогресса создания каналов плана #{plan_id} владельцу {owner_id}")
+                log_exc_swallow(
+                    log,
+                    f"Сбой отправки прогресса создания каналов плана #{plan_id} владельцу {owner_id}",
+                )
 
         if i < total - 1:
             # ── Почитай daily rhythm и избегай ночных часов пиков ──
-            tod_factor = session_simulator.time_of_day_factor()  # 2-5x at night, 0.75x at peak
+            tod_factor = (
+                session_simulator.time_of_day_factor()
+            )  # 2-5x at night, 0.75x at peak
             chaos = session_simulator.chaos_factor()  # 0.7-1.3
-            jitter = session_simulator.chaos_factor(1.0, 0.1)  # ±10% микро-шум (sync float)
+            jitter = session_simulator.chaos_factor(
+                1.0, 0.1
+            )  # ±10% микро-шум (sync float)
 
             if i % 5 == 4:
                 # Длинная пауза каждые 5 операций (имитация человеческого перерыва)
                 cooldown = random.uniform(300, 600) * chaos * tod_factor * jitter
-                log.info("op_worker gp_channel: cooldown %.0fs after %d items (tod_factor=%.2f)", cooldown, i + 1, tod_factor)
+                log.info(
+                    "op_worker gp_channel: cooldown %.0fs after %d items (tod_factor=%.2f)",
+                    cooldown,
+                    i + 1,
+                    tod_factor,
+                )
                 await asyncio.sleep(cooldown)
             else:
                 # Короткая пауза между операциями
                 delay = random.uniform(45, 90) * chaos * tod_factor * jitter
                 await asyncio.sleep(delay)
 
-    final_status = "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
+    final_status = (
+        "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
+    )
     await pool.execute(
         "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
-        final_status, plan_id,
+        final_status,
+        plan_id,
     )
 
     return {
@@ -1139,13 +1493,18 @@ async def _exec_global_presence_bot(
     if not plan_id:
         return {"status": "failed", "reason": "no plan_id in params"}
 
-    plan = await pool.fetchrow("SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, owner_id)
+    plan = await pool.fetchrow(
+        "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        plan_id,
+        owner_id,
+    )
     if not plan:
         return {"status": "failed", "reason": f"plan {plan_id} not found"}
 
     account_selection = plan["account_selection"] or {}
     if isinstance(account_selection, str):
         import json as _json
+
         try:
             account_selection = _json.loads(account_selection)
         except Exception:
@@ -1153,14 +1512,16 @@ async def _exec_global_presence_bot(
     selected_acc_ids = account_selection.get("account_ids") or []
 
     accounts = await resource_selector.select_all_active(
-        pool, owner_id,
+        pool,
+        owner_id,
         include_ids=selected_acc_ids or None,
         respect_cooldown=False,
     )
 
     if not accounts:
         await pool.execute(
-            "UPDATE global_presence_plans SET status='failed', updated_at=now() WHERE id=$1", plan_id
+            "UPDATE global_presence_plans SET status='failed', updated_at=now() WHERE id=$1",
+            plan_id,
         )
         return {"status": "failed", "reason": "no active accounts found"}
 
@@ -1169,10 +1530,16 @@ async def _exec_global_presence_bot(
         plan_id,
     )
     if not targets:
-        await pool.execute("UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1", plan_id)
+        await pool.execute(
+            "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
+            plan_id,
+        )
         return {"status": "done", "created": 0, "failed": 0, "plan_id": plan_id}
 
-    await pool.execute("UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1", plan_id)
+    await pool.execute(
+        "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1",
+        plan_id,
+    )
 
     created_count = 0
     failed_count = 0
@@ -1185,7 +1552,10 @@ async def _exec_global_presence_bot(
             "SELECT status FROM operation_queue WHERE id=$1", op_id
         )
         if cancelled == "cancelled":
-            await pool.execute("UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1", plan_id)
+            await pool.execute(
+                "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
+                plan_id,
+            )
             return {"status": "cancelled"}
 
         acc = dict(accounts[acc_idx % len(accounts)])
@@ -1197,7 +1567,10 @@ async def _exec_global_presence_bot(
         if bot_username and not bot_username.lower().endswith("bot"):
             bot_username = bot_username + "_bot"
 
-        await pool.execute("UPDATE global_presence_targets SET status='running' WHERE id=$1", target["id"])
+        await pool.execute(
+            "UPDATE global_presence_targets SET status='running' WHERE id=$1",
+            target["id"],
+        )
         await session_simulator.typing_delay(bot_name)
 
         t0_gp_bot = time.monotonic()
@@ -1208,29 +1581,41 @@ async def _exec_global_presence_bot(
         # BotFather flood_wait — ждём указанное время и пробуем другим аккаунтом
         if result.get("error") and result.get("flood_wait"):
             wait_s = int(result["flood_wait"]) + random.randint(30, 60)
-            log.info("op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying", wait_s)
+            log.info(
+                "op_worker gp_bot: BotFather flood_wait %ds, switching account and retrying",
+                wait_s,
+            )
             await pool.execute(
-                "UPDATE global_presence_targets SET status='pending' WHERE id=$1", target["id"]
+                "UPDATE global_presence_targets SET status='pending' WHERE id=$1",
+                target["id"],
             )
             await asyncio.sleep(wait_s)
             # Switch to next account for retry
             acc_idx += 1
             acc = dict(accounts[acc_idx % len(accounts)])
             result = await account_manager.create_bot_via_botfather(
-                acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
+                acc["session_str"],
+                bot_name,
+                bot_username or f"geo_{i + 1}_bot",
+                _acc=acc,
             )
 
         if result.get("error"):
             await pool.execute(
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                str(result["error"])[:500], target["id"],
+                str(result["error"])[:500],
+                target["id"],
             )
             failed_count += 1
             _infra_mem.record_account_op(
-                acc["id"], "global_presence_bot", success=False,
+                acc["id"],
+                "global_presence_bot",
+                success=False,
                 error=str(result["error"])[:100],
             )
-            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
             await asyncio.sleep(random.uniform(30, 60))
             continue
 
@@ -1240,58 +1625,84 @@ async def _exec_global_presence_bot(
         # Save bot to managed_bots (token format: "{bot_id}:{hash}")
         try:
             from database import db as _db
+
             if token and ":" in token:
                 bot_id_int = int(token.split(":")[0])
-                await _db.add_bot(pool, token, bot_id_int, actual_username, bot_name, owner_id)
+                await _db.add_bot(
+                    pool, token, bot_id_int, actual_username, bot_name, owner_id
+                )
         except Exception as e:
             log.warning("op_worker gp_bot: managed_bots insert failed: %s", e)
 
         await pool.execute(
             "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
         )
-        _infra_mem.record_account_op(acc["id"], "global_presence_bot", success=True, duration_s=time.monotonic() - t0_gp_bot)
+        _infra_mem.record_account_op(
+            acc["id"],
+            "global_presence_bot",
+            success=True,
+            duration_s=time.monotonic() - t0_gp_bot,
+        )
 
         # Add created bot to ecosystem
         try:
             if _gp_bot_eco_id is None:
                 _eco_row = await pool.fetchrow(
-                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1", plan_id
+                    "SELECT ecosystem_id FROM global_presence_plans WHERE id=$1",
+                    plan_id,
                 )
                 _gp_bot_eco_id = (_eco_row["ecosystem_id"] if _eco_row else None) or 0
             if _gp_bot_eco_id and token and ":" in token:
                 from services import ecosystem_brain as _eb
+
                 _bot_id_for_eco = int(token.split(":")[0])
-                await _eb.add_member(pool, _gp_bot_eco_id, owner_id, "bot", _bot_id_for_eco)
-                await _eb.add_member(pool, _gp_bot_eco_id, owner_id, "account", acc["id"])
+                await _eb.add_member(
+                    pool, _gp_bot_eco_id, owner_id, "bot", _bot_id_for_eco
+                )
+                await _eb.add_member(
+                    pool, _gp_bot_eco_id, owner_id, "account", acc["id"]
+                )
         except Exception:
             pass
 
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-            op_id, created_count + failed_count + 1,
+            op_id,
+            created_count + failed_count + 1,
             f"{target.get('city', '?')} → @{actual_username}",
             f"bot created: @{actual_username}",
         )
-        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
         created_count += 1
 
         if created_count % 5 == 0:
             try:
                 await db.notify_if_enabled(
-                    pool, bot, owner_id, "op_complete",
+                    pool,
+                    bot,
+                    owner_id,
+                    "op_complete",
                     f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                     f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
                 )
             except Exception:
-                log_exc_swallow(log, f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}")
+                log_exc_swallow(
+                    log,
+                    f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}",
+                )
 
         # Humanized delay between BotFather interactions
         await asyncio.sleep(random.uniform(60, 120) * session_simulator.chaos_factor())
 
-    final_status = "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
+    final_status = (
+        "done" if failed_count == 0 else ("failed" if created_count == 0 else "done")
+    )
     await pool.execute(
         "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
-        final_status, plan_id,
+        final_status,
+        plan_id,
     )
     return {
         "status": "done",
@@ -1362,14 +1773,22 @@ async def _exec_bulk_create_channels(
                 acc["session_str"], title, about=about, _acc=acc
             )
 
-        if isinstance(result, dict) and result.get("channel_id") and not result.get("error"):
+        if (
+            isinstance(result, dict)
+            and result.get("channel_id")
+            and not result.get("error")
+        ):
             ch_id = result["channel_id"]
             # Save to managed_channels
             await pool.execute(
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
                    VALUES($1,$2,$3,$4,$5)
                    ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
-                owner_id, acc["id"], ch_id, title, username or None,
+                owner_id,
+                acc["id"],
+                ch_id,
+                title,
+                username or None,
             )
             # Set username if pattern provided — with variant fallback on collision
             if username:
@@ -1378,24 +1797,39 @@ async def _exec_bulk_create_channels(
                     acc["session_str"], ch_id, username, _acc=acc
                 )
                 if err:
-                    log.info("op_worker bulk_channels: username '%s' failed (%s), trying variants", username, err[:80])
+                    log.info(
+                        "op_worker bulk_channels: username '%s' failed (%s), trying variants",
+                        username,
+                        err[:80],
+                    )
                     # Try up to 3 variants: add numeric suffix
-                    for suffix in (f"_{i+1}", f"_{i+1}x", f"_{i+1}_{random.randint(10,99)}"):
+                    for suffix in (
+                        f"_{i + 1}",
+                        f"_{i + 1}x",
+                        f"_{i + 1}_{random.randint(10, 99)}",
+                    ):
                         variant = username.rstrip("_") + suffix
                         await asyncio.sleep(random.uniform(5, 10))
                         err2 = await account_manager.set_channel_username(
                             acc["session_str"], ch_id, variant, _acc=acc
                         )
                         if not err2:
-                            log.info("op_worker bulk_channels: variant '%s' accepted", variant)
+                            log.info(
+                                "op_worker bulk_channels: variant '%s' accepted",
+                                variant,
+                            )
                             err = None
                             break
                     if err:
-                        log.info("op_worker bulk_channels: all username variants failed, channel created without username")
+                        log.info(
+                            "op_worker bulk_channels: all username variants failed, channel created without username"
+                        )
 
             await pool.execute(
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
-                op_id, num, f"{title}",
+                op_id,
+                num,
+                f"{title}",
                 f"channel_id={ch_id}" + (f" @{username}" if username else ""),
             )
             created_count += 1
@@ -1403,18 +1837,27 @@ async def _exec_bulk_create_channels(
             err_msg = result if isinstance(result, str) else str(result)
             await pool.execute(
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
-                op_id, num, f"{title}", err_msg[:200],
+                op_id,
+                num,
+                f"{title}",
+                err_msg[:200],
             )
             failed_count += 1
 
-        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
 
         if i < count - 1:
             tod_factor = session_simulator.time_of_day_factor()
             chaos = session_simulator.chaos_factor()
             if i % 5 == 4:
                 cooldown = random.uniform(300, 600) * chaos * tod_factor
-                log.info("op_worker bulk_channels: cooldown %.0fs after %d items", cooldown, i + 1)
+                log.info(
+                    "op_worker bulk_channels: cooldown %.0fs after %d items",
+                    cooldown,
+                    i + 1,
+                )
                 await asyncio.sleep(cooldown)
             else:
                 delay = random.uniform(45, 90) * chaos * tod_factor
@@ -1424,12 +1867,18 @@ async def _exec_bulk_create_channels(
         if created_count > 0 and created_count % 5 == 0:
             try:
                 await db.notify_if_enabled(
-                    pool, bot, owner_id, "op_complete",
+                    pool,
+                    bot,
+                    owner_id,
+                    "op_complete",
                     f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
                     f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
                 )
             except Exception:
-                log_exc_swallow(log, f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}")
+                log_exc_swallow(
+                    log,
+                    f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}",
+                )
 
     return {
         "status": "done",
@@ -1439,7 +1888,9 @@ async def _exec_bulk_create_channels(
     }
 
 
-async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:
+async def _exec_strike(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
     """Выполнить Strike-операцию через staggered_strike() из strike_engine.
 
     Параметры params:
@@ -1451,8 +1902,11 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
       label         — метка операции (опционально)
     """
     from services.strike_engine import (
-        StrikePlan, staggered_strike, format_strike_summary,
-        preflight_accounts, plan_waves,
+        StrikePlan,
+        staggered_strike,
+        format_strike_summary,
+        preflight_accounts,
+        plan_waves,
     )
     import time as _time
 
@@ -1467,7 +1921,7 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
         num_waves = 3
 
     account_ids: list[int] = []
-    for _x in (params.get("account_ids") or []):
+    for _x in params.get("account_ids") or []:
         try:
             account_ids.append(int(_x))
         except (ValueError, TypeError):
@@ -1478,7 +1932,8 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
 
     # ── Загрузить аккаунты через resource_selector (flood-aware + cooldown) ───
     raw_accounts = await resource_selector.select_all_active(
-        pool, owner_id,
+        pool,
+        owner_id,
         include_ids=account_ids or None,
         respect_cooldown=False,  # preflight_accounts делает свою cooldown проверку
     )
@@ -1501,7 +1956,8 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
 
     await pool.execute(
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
-        len(viable), op_id,
+        len(viable),
+        op_id,
     )
 
     plan = StrikePlan(
@@ -1516,7 +1972,7 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
         intel={},
         waves=waves,
         started_at=_time.time(),
-        phase="recon",   # начальная фаза: strike_engine начнёт со сбора данных
+        phase="recon",  # начальная фаза: strike_engine начнёт со сбора данных
         mode="normal",
         owner_id=owner_id,
     )
@@ -1533,7 +1989,8 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
             try:
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-                    pct_items, op_id,
+                    pct_items,
+                    op_id,
                 )
             except Exception:
                 pass
@@ -1549,7 +2006,8 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
 
     await pool.execute(
         "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-        len(viable), op_id,
+        len(viable),
+        op_id,
     )
 
     summary_text = format_strike_summary(results)
@@ -1561,6 +2019,9 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
         "waves_planned": num_waves,
         "accounts_used": len(viable),
         "total_reported": total_reported,
-        "summary": (summary_text[:500] if summary_text
-                    else f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}"),
+        "summary": (
+            summary_text[:500]
+            if summary_text
+            else f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}"
+        ),
     }

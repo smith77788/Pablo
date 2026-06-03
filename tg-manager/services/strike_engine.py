@@ -19,6 +19,7 @@
   Фаза 6: Escalation — внешние abuse-формы + @SpamBot
   Фаза 7: Verification — проверка результата
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,11 +37,14 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 # ── Константы ──────────────────────────────────────────────────────────────────
-_CONCURRENCY = 3          # макс параллельных аккаунтов в тяжёлой фазе (GetHistory+MsgReport)
-_WAVE_COOLDOWN = (120, 300)  # секунд между волнами — Telegram должен успеть принять жалобы
+_CONCURRENCY = 3  # макс параллельных аккаунтов в тяжёлой фазе (GetHistory+MsgReport)
+_WAVE_COOLDOWN = (
+    120,
+    300,
+)  # секунд между волнами — Telegram должен успеть принять жалобы
 _VERIFY_WAIT = (30, 120)  # секунд ожидания перед верификацией
-_MAX_RETRIES = 2          # макс ретраев при FloodWait на аккаунт
-_FLOOD_CAP = 65.0         # кап exponential backoff
+_MAX_RETRIES = 2  # макс ретраев при FloodWait на аккаунт
+_FLOOD_CAP = 65.0  # кап exponential backoff
 # Минимальный интервал между аккаунтами внутри волны (в секундах).
 # Telegram rate-limit работает per-peer: >2 GetHistory на один канал за 60с = FLOOD_WAIT.
 _STAGGER_BASE = (25, 45)
@@ -264,35 +268,35 @@ TEXTS: dict[str, list[str]] = {
 
 # Маппинг пресетов на базовые причины
 PRESET_TO_REASON = {
-    "drugs":     "other",
+    "drugs": "other",
     "terrorism": "violence",
-    "fraud":     "spam",
-    "csam":      "childabuse",
-    "weapons":   "violence",
-    "darknet":   "other",
-    "escort":    "pornography",
+    "fraud": "spam",
+    "csam": "childabuse",
+    "weapons": "violence",
+    "darknet": "other",
+    "escort": "pornography",
 }
 PRESET_TEXTS = {
-    "drugs":     TEXTS["drugs"],
+    "drugs": TEXTS["drugs"],
     "terrorism": TEXTS["terrorism"],
-    "csam":      TEXTS["childabuse"],
-    "fraud":     TEXTS["fraud"],
-    "weapons":   TEXTS["weapons"],
-    "darknet":   TEXTS["darknet"],
-    "escort":    TEXTS["escort"],
+    "csam": TEXTS["childabuse"],
+    "fraud": TEXTS["fraud"],
+    "weapons": TEXTS["weapons"],
+    "darknet": TEXTS["darknet"],
+    "escort": TEXTS["escort"],
 }
 
 # Приоритетные причины для эскалации (наиболее эффективные)
 # CSAM/drugs — мгновенная реакция, violence — быстрая, spam — медленная
 _REASON_PRIORITY = {
-    "childabuse": 0,   # highest priority
+    "childabuse": 0,  # highest priority
     "csam": 0,
     "terrorism": 1,
     "drugs": 2,
     "weapons": 3,
     "fraud": 4,
     "pornography": 5,
-    "escort":   5,
+    "escort": 5,
     "spam": 6,
     "other": 7,
 }
@@ -300,7 +304,11 @@ _REASON_PRIORITY = {
 
 def assign_texts(reason_or_preset: str, count: int) -> list[str]:
     """Выдаёт `count` уникальных текстов — каждому аккаунту свой."""
-    pool = PRESET_TEXTS.get(reason_or_preset) or TEXTS.get(reason_or_preset) or TEXTS["other"]
+    pool = (
+        PRESET_TEXTS.get(reason_or_preset)
+        or TEXTS.get(reason_or_preset)
+        or TEXTS["other"]
+    )
     if count <= len(pool):
         return random.sample(pool, count)
     result: list[str] = []
@@ -316,22 +324,24 @@ def assign_texts(reason_or_preset: str, count: int) -> list[str]:
 @dataclass
 class StrikePlan:
     """План атаки: какие аккаунты, на какие цели, в каком порядке."""
-    targets: list[str]                          # @usernames целей
-    accounts: list[dict]                        # отсортированные аккаунты
-    reason: str                                 # базовая причина
-    preset: str | None                          # пресет (drugs, fraud, etc.)
-    label: str                                  # человекочитаемая метка
+
+    targets: list[str]  # @usernames целей
+    accounts: list[dict]  # отсортированные аккаунты
+    reason: str  # базовая причина
+    preset: str | None  # пресет (drugs, fraud, etc.)
+    label: str  # человекочитаемая метка
     intel: dict[str, dict] = field(default_factory=dict)  # peer → intel
     waves: list[list[dict]] = field(default_factory=list)  # аккаунты по волнам
     started_at: float = 0.0
     phase: str = "init"
-    mode: str = "normal"   # fast | normal | maximum
-    owner_id: int = 0       # для email-эскалации (загрузка ящиков из DB)
+    mode: str = "normal"  # fast | normal | maximum
+    owner_id: int = 0  # для email-эскалации (загрузка ящиков из DB)
 
 
 @dataclass
 class StrikeResult:
     """Результат strike-операции."""
+
     target: str
     total_reports: int = 0
     unique_accounts: int = 0
@@ -351,9 +361,9 @@ class StrikeResult:
     network_nodes: int = 0
     network_reports: int = 0
     abuse_form_ok: bool = False
-    verified_down: bool | None = None   # None = не проверено
-    spambot_escalation: str = "skipped"   # sent | skipped | error
-    emails_sent: int = 0                  # кол-во успешно отправленных email
+    verified_down: bool | None = None  # None = не проверено
+    spambot_escalation: str = "skipped"  # sent | skipped | error
+    emails_sent: int = 0  # кол-во успешно отправленных email
     email_escalation: dict = field(default_factory=dict)  # детали email-фазы
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
@@ -380,12 +390,14 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
 
     try:
         from services import flood_engine as _fe
+
         fe_available = True
     except Exception:
         fe_available = False
 
     try:
         from services.infra_memory import get_account_score as _mem_score
+
         mem_available = True
     except Exception:
         mem_available = False
@@ -397,11 +409,17 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
         cooldown = acc.get("cooldown_until")
         if cooldown:
             try:
-                cd_ts = cooldown.timestamp() if hasattr(cooldown, "timestamp") else float(cooldown)
+                cd_ts = (
+                    cooldown.timestamp()
+                    if hasattr(cooldown, "timestamp")
+                    else float(cooldown)
+                )
                 if cd_ts > now:
                     continue
             except (TypeError, ValueError, OSError):
-                log_exc_swallow(log, "Не удалось распарсить cooldown_until аккаунта в preflight")
+                log_exc_swallow(
+                    log, "Не удалось распарсить cooldown_until аккаунта в preflight"
+                )
         # Проверка in-memory cooldown в flood_engine
         if fe_available and acc.get("id") and _fe.is_account_cooling(acc["id"]):
             continue
@@ -414,7 +432,11 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
     # Composite sort: trust + memory_score − risk (все в диапазоне [0,1])
     def _sort_key(a: dict) -> float:
         trust = (a.get("trust_score") or 0) / 100.0  # нормализуем 0-100 → 0-1
-        risk = _fe.get_account_state(a["id"]).risk_score if fe_available and a.get("id") else 0.0
+        risk = (
+            _fe.get_account_state(a["id"]).risk_score
+            if fe_available and a.get("id")
+            else 0.0
+        )
         mem = _mem_score(a["id"], "strike") if mem_available and a.get("id") else 0.5
         return -(trust + mem - risk)  # minus = DESC order
 
@@ -484,7 +506,11 @@ async def _one_account_strike(
     # acc_0 стартует сразу, acc_1 через ~35с, acc_2 через ~70с и т.д.
     # Это предотвращает одновременный GetHistory на один канал от нескольких аккаунтов
     # и защищает от FLOOD_WAIT, который иначе убивает всю волну за раз.
-    stagger_delay = random.uniform(*_STAGGER_BASE) * acc_index if acc_index > 0 else random.uniform(1.5, 4.0)
+    stagger_delay = (
+        random.uniform(*_STAGGER_BASE) * acc_index
+        if acc_index > 0
+        else random.uniform(1.5, 4.0)
+    )
     await asyncio.sleep(stagger_delay)
 
     text = texts[acc_index % len(texts)]
@@ -493,27 +519,47 @@ async def _one_account_strike(
     if mode == "fast":
         # fast: нет join, нет доп. векторов — только быстрые жалобы
         kwargs: dict = dict(
-            join_first=False, negative_react=False, report_admins=False,
-            report_linked_group=False, report_linked_bots=False,
-            forward_to_bot=False, block_after=False, multi_reason=True,
-            max_msg_reports=30, report_photo=True, report_pinned=True,
+            join_first=False,
+            negative_react=False,
+            report_admins=False,
+            report_linked_group=False,
+            report_linked_bots=False,
+            forward_to_bot=False,
+            block_after=False,
+            multi_reason=True,
+            max_msg_reports=30,
+            report_photo=True,
+            report_pinned=True,
         )
     elif mode == "maximum":
         # maximum: join во всех волнах — нужен для msg reporting
         kwargs = dict(
-            join_first=True, negative_react=True, report_admins=True,
-            report_linked_group=(wave_num == 0), report_linked_bots=True,
-            forward_to_bot=(wave_num <= 1), block_after=(wave_num >= 2),
-            multi_reason=True, max_msg_reports=100, report_photo=True, report_pinned=True,
+            join_first=True,
+            negative_react=True,
+            report_admins=True,
+            report_linked_group=(wave_num == 0),
+            report_linked_bots=True,
+            forward_to_bot=(wave_num <= 1),
+            block_after=(wave_num >= 2),
+            multi_reason=True,
+            max_msg_reports=100,
+            report_photo=True,
+            report_pinned=True,
         )
     else:  # normal
         # normal: join во всех волнах — без join MsgReportRequest не работает
         kwargs = dict(
-            join_first=True, negative_react=(wave_num <= 1),
-            report_admins=(wave_num <= 1), report_linked_group=(wave_num == 0),
-            report_linked_bots=True, forward_to_bot=(wave_num <= 1),
-            block_after=(wave_num >= 2), multi_reason=True,
-            max_msg_reports=60, report_photo=True, report_pinned=True,
+            join_first=True,
+            negative_react=(wave_num <= 1),
+            report_admins=(wave_num <= 1),
+            report_linked_group=(wave_num == 0),
+            report_linked_bots=True,
+            forward_to_bot=(wave_num <= 1),
+            block_after=(wave_num >= 2),
+            multi_reason=True,
+            max_msg_reports=60,
+            report_photo=True,
+            report_pinned=True,
         )
 
     async with sem:
@@ -521,7 +567,9 @@ async def _one_account_strike(
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 result = await account_manager.report_peer_deep_v2(
-                    acc["session_str"], peer_username, reason,
+                    acc["session_str"],
+                    peer_username,
+                    reason,
                     message=text,
                     msg_messages=msg_texts,
                     wave_num=wave_num,
@@ -535,7 +583,13 @@ async def _one_account_strike(
                 # Фиксируем успех в Infrastructure Memory
                 try:
                     from services.infra_memory import record_account_op
-                    record_account_op(acc["id"], "strike", success=True, duration_s=time.monotonic() - t0_strike)
+
+                    record_account_op(
+                        acc["id"],
+                        "strike",
+                        success=True,
+                        duration_s=time.monotonic() - t0_strike,
+                    )
                 except Exception:
                     pass
                 return result
@@ -544,45 +598,69 @@ async def _one_account_strike(
                 # Если FloodWait — записываем в flood_engine, ждём и ретраим
                 if "FLOOD_WAIT" in err_str.upper() or "flood" in err_str.lower():
                     import re as _re
-                    wait_match = _re.search(r'(\d+)', err_str)
-                    wait_s = min(_FLOOD_CAP, float(wait_match.group(1)) if wait_match else 30.0)
-                    log.warning("strike acc %s wave %d: FloodWait %ss, retry %d/%d",
-                                acc.get("id"), wave_num, wait_s, attempt + 1, _MAX_RETRIES)
+
+                    wait_match = _re.search(r"(\d+)", err_str)
+                    wait_s = min(
+                        _FLOOD_CAP, float(wait_match.group(1)) if wait_match else 30.0
+                    )
+                    log.warning(
+                        "strike acc %s wave %d: FloodWait %ss, retry %d/%d",
+                        acc.get("id"),
+                        wave_num,
+                        wait_s,
+                        attempt + 1,
+                        _MAX_RETRIES,
+                    )
                     if pool is not None:
                         try:
                             from services.flood_engine import record_flood
+
                             await record_flood(pool, acc["id"], int(wait_s), "strike")
                         except Exception:
-                            log_exc_swallow(log, f"strike: record_flood failed acc={acc.get('id')}")
+                            log_exc_swallow(
+                                log, f"strike: record_flood failed acc={acc.get('id')}"
+                            )
                     else:
                         try:
                             from services.flood_engine import get_account_state
+
                             state = get_account_state(acc["id"])
                             import time as _time
+
                             state.consecutive_floods += 1
                             state.last_flood_at = _time.monotonic()
                             state.cooldown_until = _time.monotonic() + wait_s + 10
                             state.risk_score = min(1.0, state.risk_score + 0.15)
                         except Exception:
-                            log.warning("strike: in-memory flood state update failed acc=%s wait=%s", acc.get("id"), wait_s)
+                            log.warning(
+                                "strike: in-memory flood state update failed acc=%s wait=%s",
+                                acc.get("id"),
+                                wait_s,
+                            )
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
-                log.warning("strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str)
+                log.warning(
+                    "strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str
+                )
                 # Фиксируем ошибку в Infrastructure Memory
                 try:
                     from services.infra_memory import record_account_op
+
                     record_account_op(acc["id"], "strike", success=False, error=err_str)
                 except Exception:
                     pass
                 return {
-                    "peer_reported": False, "error": err_str,
-                    "_acc_id": acc.get("id"), "_wave": wave_num,
+                    "peer_reported": False,
+                    "error": err_str,
+                    "_acc_id": acc.get("id"),
+                    "_wave": wave_num,
                 }
 
         return {
             "peer_reported": False,
             "error": f"max retries ({_MAX_RETRIES}) exceeded",
-            "_acc_id": acc.get("id"), "_wave": wave_num,
+            "_acc_id": acc.get("id"),
+            "_wave": wave_num,
         }
 
 
@@ -604,33 +682,82 @@ def _reason_to_email_cat(reason: str, preset: str | None) -> dict:
     """Возвращает cat-dict для email по reason/preset из основного Strike."""
     key = (preset or reason or "").lower()
     _map: dict[str, dict] = {
-        "csam": {"tg_reason": "childabuse", "severity": "CRITICAL", "ncmec": True,
-                 "email_subject": "URGENT: CSAM on Telegram"},
-        "childabuse": {"tg_reason": "childabuse", "severity": "CRITICAL", "ncmec": True,
-                       "email_subject": "URGENT: CSAM on Telegram"},
-        "drugs": {"tg_reason": "drugs", "severity": "HIGH", "ncmec": False,
-                  "email_subject": "Report: Illegal Drug Sales on Telegram"},
-        "terrorism": {"tg_reason": "violence", "severity": "CRITICAL", "ncmec": False,
-                      "email_subject": "Report: Terrorism/Extremism on Telegram"},
-        "violence": {"tg_reason": "violence", "severity": "HIGH", "ncmec": False,
-                     "email_subject": "Report: Violent Content on Telegram"},
-        "weapons": {"tg_reason": "violence", "severity": "HIGH", "ncmec": False,
-                    "email_subject": "Report: Illegal Weapons on Telegram"},
-        "fraud": {"tg_reason": "spam", "severity": "MEDIUM", "ncmec": False,
-                  "email_subject": "Report: Fraud/Scam on Telegram"},
-        "spam": {"tg_reason": "spam", "severity": "MEDIUM", "ncmec": False,
-                 "email_subject": "Report: Spam/Scam on Telegram"},
-        "prostitution": {"tg_reason": "pornography", "severity": "HIGH", "ncmec": False,
-                         "email_subject": "Report: Sex Trafficking on Telegram"},
-        "pornography": {"tg_reason": "pornography", "severity": "HIGH", "ncmec": False,
-                        "email_subject": "Report: Illegal Pornography on Telegram"},
-        "darknet": {"tg_reason": "other", "severity": "HIGH", "ncmec": False,
-                    "email_subject": "Report: Darknet Services on Telegram"},
+        "csam": {
+            "tg_reason": "childabuse",
+            "severity": "CRITICAL",
+            "ncmec": True,
+            "email_subject": "URGENT: CSAM on Telegram",
+        },
+        "childabuse": {
+            "tg_reason": "childabuse",
+            "severity": "CRITICAL",
+            "ncmec": True,
+            "email_subject": "URGENT: CSAM on Telegram",
+        },
+        "drugs": {
+            "tg_reason": "drugs",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Illegal Drug Sales on Telegram",
+        },
+        "terrorism": {
+            "tg_reason": "violence",
+            "severity": "CRITICAL",
+            "ncmec": False,
+            "email_subject": "Report: Terrorism/Extremism on Telegram",
+        },
+        "violence": {
+            "tg_reason": "violence",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Violent Content on Telegram",
+        },
+        "weapons": {
+            "tg_reason": "violence",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Illegal Weapons on Telegram",
+        },
+        "fraud": {
+            "tg_reason": "spam",
+            "severity": "MEDIUM",
+            "ncmec": False,
+            "email_subject": "Report: Fraud/Scam on Telegram",
+        },
+        "spam": {
+            "tg_reason": "spam",
+            "severity": "MEDIUM",
+            "ncmec": False,
+            "email_subject": "Report: Spam/Scam on Telegram",
+        },
+        "prostitution": {
+            "tg_reason": "pornography",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Sex Trafficking on Telegram",
+        },
+        "pornography": {
+            "tg_reason": "pornography",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Illegal Pornography on Telegram",
+        },
+        "darknet": {
+            "tg_reason": "other",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Darknet Services on Telegram",
+        },
     }
-    return _map.get(key, {
-        "tg_reason": reason or "other", "severity": "MEDIUM", "ncmec": False,
-        "email_subject": f"Report: ToS Violation on Telegram ({key})",
-    })
+    return _map.get(
+        key,
+        {
+            "tg_reason": reason or "other",
+            "severity": "MEDIUM",
+            "ncmec": False,
+            "email_subject": f"Report: ToS Violation on Telegram ({key})",
+        },
+    )
 
 
 async def _run_email_escalation(
@@ -651,7 +778,12 @@ async def _run_email_escalation(
     from datetime import datetime, timezone
 
     if not pool or not owner_id:
-        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "no pool/owner"}
+        return {
+            "total_sent": 0,
+            "emails": [],
+            "ncmec": False,
+            "skip_reason": "no pool/owner",
+        }
 
     cat = _reason_to_email_cat(reason, preset)
     target_clean = target.lstrip("@")
@@ -672,13 +804,24 @@ async def _run_email_escalation(
         db_emails = [dict(r) for r in rows]
     except Exception as e:
         log.debug("staggered_strike: email accounts fetch skipped: %s", e)
-        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": str(e)[:80]}
+        return {
+            "total_sent": 0,
+            "emails": [],
+            "ncmec": False,
+            "skip_reason": str(e)[:80],
+        }
 
     if not db_emails:
-        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "no email accounts configured"}
+        return {
+            "total_sent": 0,
+            "emails": [],
+            "ncmec": False,
+            "skip_reason": "no email accounts configured",
+        }
 
     # Resolve helpers defined later in this file via module globals (safe at call-time)
     import sys as _sys
+
     _mod = _sys.modules[__name__]
     _STRIKE_EMAIL_TARGETS = getattr(_mod, "_STRIKE_EMAIL_TARGETS", [])
     _build_abuse_tg_email = getattr(_mod, "_build_abuse_tg_email", None)
@@ -687,7 +830,12 @@ async def _run_email_escalation(
     _send_email = getattr(_mod, "_send_email", None)
 
     if not _STRIKE_EMAIL_TARGETS or not _send_email:
-        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "email helpers not loaded"}
+        return {
+            "total_sent": 0,
+            "emails": [],
+            "ncmec": False,
+            "skip_reason": "email helpers not loaded",
+        }
 
     for ea in db_emails:
         any_ok = False
@@ -695,24 +843,45 @@ async def _run_email_escalation(
             if tgt["email_type"] == "abuse":
                 body = _build_abuse_tg_email(target_clean, cat, report_time)
             else:
-                body = _build_dmca_gdpr_email(target_clean, cat, report_time, tgt["email_type"])
+                body = _build_dmca_gdpr_email(
+                    target_clean, cat, report_time, tgt["email_type"]
+                )
 
-            subject = f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
-            ok, err = await _send_email(
-                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
-                ea["email"], tgt["addr"],
-                subject, body,
+            subject = (
+                f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
             )
-            result["emails"].append({
-                "from": ea["email"], "to": tgt["addr"],
-                "label": tgt["label"], "ok": ok, "err": err,
-            })
+            ok, err = await _send_email(
+                ea["smtp_host"],
+                ea["smtp_port"],
+                ea["email"],
+                ea["smtp_pass"],
+                ea["email"],
+                tgt["addr"],
+                subject,
+                body,
+            )
+            result["emails"].append(
+                {
+                    "from": ea["email"],
+                    "to": tgt["addr"],
+                    "label": tgt["label"],
+                    "ok": ok,
+                    "err": err,
+                }
+            )
             if ok:
                 result["total_sent"] += 1
                 any_ok = True
-                log.info("staggered_strike: email sent %s → %s", ea["email"], tgt["addr"])
+                log.info(
+                    "staggered_strike: email sent %s → %s", ea["email"], tgt["addr"]
+                )
             else:
-                log.warning("staggered_strike: email failed %s → %s: %s", ea["email"], tgt["addr"], err)
+                log.warning(
+                    "staggered_strike: email failed %s → %s: %s",
+                    ea["email"],
+                    tgt["addr"],
+                    err,
+                )
 
         if any_ok:
             try:
@@ -721,7 +890,9 @@ async def _run_email_escalation(
                     ea["id"],
                 )
             except Exception:
-                log_exc_swallow(log, f"staggered_strike: email success update id={ea.get('id')}")
+                log_exc_swallow(
+                    log, f"staggered_strike: email success update id={ea.get('id')}"
+                )
         else:
             try:
                 await pool.execute(
@@ -732,7 +903,9 @@ async def _run_email_escalation(
                     ea["id"],
                 )
             except Exception:
-                log_exc_swallow(log, f"staggered_strike: email fail_count update id={ea.get('id')}")
+                log_exc_swallow(
+                    log, f"staggered_strike: email fail_count update id={ea.get('id')}"
+                )
 
     # NCMEC только для CSAM
     if cat.get("ncmec") and db_emails:
@@ -740,15 +913,24 @@ async def _run_email_escalation(
         body_ncmec = _build_ncmec_email(target_clean, report_time)
         for ea in db_emails:
             ok_n, err_n = await _send_email(
-                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
-                ea["email"], ncmec_addr,
+                ea["smtp_host"],
+                ea["smtp_port"],
+                ea["email"],
+                ea["smtp_pass"],
+                ea["email"],
+                ncmec_addr,
                 f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
                 body_ncmec,
             )
-            result["emails"].append({
-                "from": ea["email"], "to": ncmec_addr,
-                "label": "ncmec", "ok": ok_n, "err": err_n,
-            })
+            result["emails"].append(
+                {
+                    "from": ea["email"],
+                    "to": ncmec_addr,
+                    "label": "ncmec",
+                    "ok": ok_n,
+                    "err": err_n,
+                }
+            )
             if ok_n:
                 result["total_sent"] += 1
                 result["ncmec"] = True
@@ -786,74 +968,128 @@ async def staggered_strike(
         t_start = time.time()
 
         if progress_cb:
-            await progress_cb("strike_wave1", f"🎯 {target}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов")
+            await progress_cb(
+                "strike_wave1",
+                f"🎯 {target}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов",
+            )
 
         # ═══ Волна 1: ReportPeer + ReportSpam + Join + Internal ═══
         wave_results: list[dict] = []
         if plan.waves:
             texts_w1 = assign_texts(plan.preset or plan.reason, len(plan.waves[0]))
             tasks = [
-                _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w1, i, 0, sem, mode=plan.mode, pool=pool)
+                _one_account_strike(
+                    acc,
+                    target,
+                    intel,
+                    plan.reason,
+                    plan.preset,
+                    texts_w1,
+                    i,
+                    0,
+                    sem,
+                    mode=plan.mode,
+                    pool=pool,
+                )
                 for i, acc in enumerate(plan.waves[0])
             ]
-            wave_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
+            wave_results = _safe_gather_results(
+                await asyncio.gather(*tasks, return_exceptions=True)
+            )
 
         # Пауза между волнами
         if len(plan.waves) > 1:
             wc = random.uniform(*_WAVE_COOLDOWN)
             if progress_cb:
-                await progress_cb("strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2...")
+                await progress_cb(
+                    "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2..."
+                )
             await asyncio.sleep(wc)
 
         # ═══ Волна 2: Поддержка — другие причины, админы, боты ═══
         if len(plan.waves) > 1 and plan.waves[1]:
             if progress_cb:
-                await progress_cb("strike_wave2", f"🎯 {target}: Волна 2 — {len(plan.waves[1])} аккаунтов")
+                await progress_cb(
+                    "strike_wave2",
+                    f"🎯 {target}: Волна 2 — {len(plan.waves[1])} аккаунтов",
+                )
             texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
             tasks = [
-                _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w2, i, 1, sem, mode=plan.mode, pool=pool)
+                _one_account_strike(
+                    acc,
+                    target,
+                    intel,
+                    plan.reason,
+                    plan.preset,
+                    texts_w2,
+                    i,
+                    1,
+                    sem,
+                    mode=plan.mode,
+                    pool=pool,
+                )
                 for i, acc in enumerate(plan.waves[1])
             ]
-            w2_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
+            w2_results = _safe_gather_results(
+                await asyncio.gather(*tasks, return_exceptions=True)
+            )
             wave_results.extend(w2_results)
 
         # Пауза перед финальной волной
         if len(plan.waves) > 2:
             wc = random.uniform(*_WAVE_COOLDOWN)
             if progress_cb:
-                await progress_cb("strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3...")
+                await progress_cb(
+                    "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3..."
+                )
             await asyncio.sleep(wc)
 
         # ═══ Волна 3: Завершение — блокировка, финальные жалобы ═══
         if len(plan.waves) > 2 and plan.waves[2]:
             if progress_cb:
-                await progress_cb("strike_wave3", f"🎯 {target}: Волна 3 (финал) — {len(plan.waves[2])} аккаунтов")
+                await progress_cb(
+                    "strike_wave3",
+                    f"🎯 {target}: Волна 3 (финал) — {len(plan.waves[2])} аккаунтов",
+                )
             texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
             tasks = [
-                _one_account_strike(acc, target, intel, plan.reason, plan.preset,
-                                    texts_w3, i, 2, sem, mode=plan.mode, pool=pool)
+                _one_account_strike(
+                    acc,
+                    target,
+                    intel,
+                    plan.reason,
+                    plan.preset,
+                    texts_w3,
+                    i,
+                    2,
+                    sem,
+                    mode=plan.mode,
+                    pool=pool,
+                )
                 for i, acc in enumerate(plan.waves[2])
             ]
-            w3_results = _safe_gather_results(await asyncio.gather(*tasks, return_exceptions=True))
+            w3_results = _safe_gather_results(
+                await asyncio.gather(*tasks, return_exceptions=True)
+            )
             wave_results.extend(w3_results)
 
         # Агрегация — явный маппинг ключей aggregate_results → поля StrikeResult
         agg = aggregate_results(wave_results)
-        result.peer_reported          += agg.get("peer", 0)
-        result.multi_reason           += agg.get("multi", 0)
-        result.photo_reported          = result.photo_reported or bool(agg.get("photo", 0))
-        result.pinned_reported        += agg.get("pinned", 0)
-        result.msgs_reported          += agg.get("msgs", 0)
-        result.msgs_fetched           += agg.get("msgs_fetched", 0)
-        result.spam_signaled          += agg.get("spam", 0)
-        result.reactions              += agg.get("reacts", 0)
-        result.admins_reported        += agg.get("admins", 0)
-        result.linked_group_reported   = result.linked_group_reported or bool(agg.get("linked_grp", 0))
-        result.bots_reported          += agg.get("bots", 0)
-        result.forwarded              += agg.get("fwd", 0)
-        result.blocked                += agg.get("blocked", 0)
+        result.peer_reported += agg.get("peer", 0)
+        result.multi_reason += agg.get("multi", 0)
+        result.photo_reported = result.photo_reported or bool(agg.get("photo", 0))
+        result.pinned_reported += agg.get("pinned", 0)
+        result.msgs_reported += agg.get("msgs", 0)
+        result.msgs_fetched += agg.get("msgs_fetched", 0)
+        result.spam_signaled += agg.get("spam", 0)
+        result.reactions += agg.get("reacts", 0)
+        result.admins_reported += agg.get("admins", 0)
+        result.linked_group_reported = result.linked_group_reported or bool(
+            agg.get("linked_grp", 0)
+        )
+        result.bots_reported += agg.get("bots", 0)
+        result.forwarded += agg.get("fwd", 0)
+        result.blocked += agg.get("blocked", 0)
         result.errors = [r.get("error") for r in wave_results if r.get("error")]
         for wave_result in wave_results:
             result.errors.extend(wave_result.get("errors", [])[:3])
@@ -869,47 +1105,76 @@ async def staggered_strike(
             log.info(
                 "strike_engine: target=%s peer_reports=%d multi=%d msgs=%d "
                 "spam=%d admins=%d accounts=%d/%d",
-                target, result.peer_reported, result.multi_reason,
-                result.msgs_reported, result.spam_signaled, result.admins_reported,
-                result.peer_reported, total_accounts,
+                target,
+                result.peer_reported,
+                result.multi_reason,
+                result.msgs_reported,
+                result.spam_signaled,
+                result.admins_reported,
+                result.peer_reported,
+                total_accounts,
             )
         else:
             log.warning(
                 "strike_engine: target=%s NO peer_reports — %d/%d accounts failed, "
                 "errors=%s",
-                target, failed_accounts, total_accounts,
+                target,
+                failed_accounts,
+                total_accounts,
                 "; ".join(result.errors[:2])[:120] if result.errors else "none",
             )
 
         # ═══ Фаза: Network nodes (параллельно) ═══
         if progress_cb:
             await progress_cb("strike_network", f"🌐 {target}: Атака сетевых узлов...")
-        net = await strike_network_nodes_v2(plan.accounts, intel, plan.reason, plan.preset)
+        net = await strike_network_nodes_v2(
+            plan.accounts, intel, plan.reason, plan.preset
+        )
         result.network_nodes = net.get("nodes_attacked", 0)
         result.network_reports = net.get("total_reports", 0)
 
         # ═══ Фаза: External escalation ═══
         if progress_cb:
             await progress_cb("strike_escalation", f"📤 {target}: Внешняя эскалация...")
-        abuse_res = await submit_abuse_form(target, plan.preset or plan.reason,
-                                            title=intel.get("title", ""),
-                                            members=intel.get("members", 0))
+        abuse_res = await submit_abuse_form(
+            target,
+            plan.preset or plan.reason,
+            title=intel.get("title", ""),
+            members=intel.get("members", 0),
+        )
         result.abuse_form_ok = abuse_res.get("ok", False)
-        log.info("strike_engine: abuse_forms target=%s submitted=%d/%d ok=%s",
-                 target, abuse_res.get("submitted", 0), abuse_res.get("total", 0), result.abuse_form_ok)
+        log.info(
+            "strike_engine: abuse_forms target=%s submitted=%d/%d ok=%s",
+            target,
+            abuse_res.get("submitted", 0),
+            abuse_res.get("total", 0),
+            result.abuse_form_ok,
+        )
 
         # ═══ Фаза: SpamBot + anti-scam боты ═══
         # Используем лучший аккаунт (первый по trust_score после pre-flight сортировки)
-        spambot_result = await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
-        result.spambot_escalation = spambot_result.get("status", "unknown") if isinstance(spambot_result, dict) else "skipped"
-        log.info("strike_engine: spambot_escalation target=%s status=%s bots=%s",
-                 target, result.spambot_escalation,
-                 spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {})
+        spambot_result = await _escalate_to_spambot(
+            plan.accounts[0] if plan.accounts else None, target
+        )
+        result.spambot_escalation = (
+            spambot_result.get("status", "unknown")
+            if isinstance(spambot_result, dict)
+            else "skipped"
+        )
+        log.info(
+            "strike_engine: spambot_escalation target=%s status=%s bots=%s",
+            target,
+            result.spambot_escalation,
+            spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {},
+        )
 
         # ═══ Фаза: Email-эскалация ═══
         if pool and plan.owner_id:
             if progress_cb:
-                await progress_cb("strike_email", f"📧 {target}: Email-эскалация (abuse/dmca/dpo/security)...")
+                await progress_cb(
+                    "strike_email",
+                    f"📧 {target}: Email-эскалация (abuse/dmca/dpo/security)...",
+                )
             try:
                 email_res = await _run_email_escalation(
                     pool, plan.owner_id, target, plan.reason, plan.preset
@@ -918,17 +1183,26 @@ async def staggered_strike(
                 result.email_escalation = email_res
                 log.info(
                     "strike_engine: email_escalation target=%s sent=%d ncmec=%s",
-                    target, result.emails_sent, email_res.get("ncmec", False),
+                    target,
+                    result.emails_sent,
+                    email_res.get("ncmec", False),
                 )
             except Exception:
-                log_exc_swallow(log, f"staggered_strike: email_escalation failed target={target}")
+                log_exc_swallow(
+                    log, f"staggered_strike: email_escalation failed target={target}"
+                )
 
         result.duration_s = time.time() - t_start
         log.info(
             "strike_engine: staggered_strike done target=%s duration=%.1fs "
             "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d",
-            target, result.duration_s, result.peer_reported, result.msgs_reported,
-            result.network_nodes, result.abuse_form_ok, result.spambot_escalation,
+            target,
+            result.duration_s,
+            result.peer_reported,
+            result.msgs_reported,
+            result.network_nodes,
+            result.abuse_form_ok,
+            result.spambot_escalation,
             result.emails_sent,
         )
         all_results.append(result)
@@ -955,7 +1229,9 @@ async def _attack_single_node(
     async with sem:
         try:
             res = await account_manager.report_peer_deep_v2(
-                acc["session_str"], node, reason,
+                acc["session_str"],
+                node,
+                reason,
                 message=text,
                 msg_messages=assign_texts(label, 8),
                 max_msg_reports=30,
@@ -972,8 +1248,11 @@ async def _attack_single_node(
                 wave_num=99,  # network node — отдельная волна
                 _acc=acc,
             )
-            return {"node": node, "ok": res.get("peer_reported", False),
-                    "reports": 1 + res.get("multi_reason_sent", 0)}
+            return {
+                "node": node,
+                "ok": res.get("peer_reported", False),
+                "reports": 1 + res.get("multi_reason_sent", 0),
+            }
         except Exception as e:
             log.warning("strike_network_node %s: %s", node, e)
             return {"node": node, "ok": False, "error": str(e)[:100]}
@@ -1031,30 +1310,54 @@ async def submit_abuse_form(
     """Отправляет жалобы сразу в несколько официальных каналов Telegram."""
     clean = target_username.lstrip("@")
     reason_map = {
-        "drugs":      ("illegal drug sales and drug trafficking",
-                       "Незаконная торговля наркотиками и психоактивными веществами"),
-        "terrorism":  ("terrorism, extremism and incitement to violence",
-                       "Террористический контент, экстремизм, призывы к насилию"),
-        "childabuse": ("child sexual abuse material (CSAM) — urgent",
-                       "Материалы сексуальной эксплуатации детей (CSAM) — срочно"),
-        "csam":       ("child sexual abuse material (CSAM) — urgent",
-                       "Материалы сексуальной эксплуатации детей — требует немедленных действий"),
-        "fraud":      ("financial fraud, scam and money theft",
-                       "Финансовое мошенничество, скам, кража денег"),
-        "weapons":    ("illegal weapons trafficking",
-                       "Незаконный оборот оружия и взрывчатых веществ"),
-        "darknet":    ("darknet criminal marketplace distributing illegal goods",
-                       "Даркнет-маркетплейс — незаконная торговля запрещёнными товарами"),
-        "violence":   ("graphic violence and promotion of violent acts",
-                       "Пропаганда насилия и жестокости"),
-        "spam":       ("coordinated spam and platform manipulation",
-                       "Координированный спам и манипуляции с платформой"),
-        "pornography": ("illegal pornographic content distributed without age verification",
-                        "Незаконный порнографический контент без проверки возраста"),
-        "escort":     ("prostitution and sexual exploitation services",
-                       "Проституция, эскорт и сексуальная эксплуатация"),
-        "other":      ("systematic Terms of Service violation",
-                       "Систематическое нарушение Условий использования"),
+        "drugs": (
+            "illegal drug sales and drug trafficking",
+            "Незаконная торговля наркотиками и психоактивными веществами",
+        ),
+        "terrorism": (
+            "terrorism, extremism and incitement to violence",
+            "Террористический контент, экстремизм, призывы к насилию",
+        ),
+        "childabuse": (
+            "child sexual abuse material (CSAM) — urgent",
+            "Материалы сексуальной эксплуатации детей (CSAM) — срочно",
+        ),
+        "csam": (
+            "child sexual abuse material (CSAM) — urgent",
+            "Материалы сексуальной эксплуатации детей — требует немедленных действий",
+        ),
+        "fraud": (
+            "financial fraud, scam and money theft",
+            "Финансовое мошенничество, скам, кража денег",
+        ),
+        "weapons": (
+            "illegal weapons trafficking",
+            "Незаконный оборот оружия и взрывчатых веществ",
+        ),
+        "darknet": (
+            "darknet criminal marketplace distributing illegal goods",
+            "Даркнет-маркетплейс — незаконная торговля запрещёнными товарами",
+        ),
+        "violence": (
+            "graphic violence and promotion of violent acts",
+            "Пропаганда насилия и жестокости",
+        ),
+        "spam": (
+            "coordinated spam and platform manipulation",
+            "Координированный спам и манипуляции с платформой",
+        ),
+        "pornography": (
+            "illegal pornographic content distributed without age verification",
+            "Незаконный порнографический контент без проверки возраста",
+        ),
+        "escort": (
+            "prostitution and sexual exploitation services",
+            "Проституция, эскорт и сексуальная эксплуатация",
+        ),
+        "other": (
+            "systematic Terms of Service violation",
+            "Систематическое нарушение Условий использования",
+        ),
     }
     en_text, ru_text = reason_map.get(reason, reason_map["other"])
 
@@ -1104,12 +1407,22 @@ async def submit_abuse_form(
                 await asyncio.sleep(random.uniform(2.0, 5.0))  # между отправками
                 async with sess.post(
                     "https://telegram.org/support",
-                    data={"message": body, "technical_info": f"@{clean}", "question_type": "report"},
+                    data={
+                        "message": body,
+                        "technical_info": f"@{clean}",
+                        "question_type": "report",
+                    },
                     allow_redirects=True,
                 ) as resp:
                     ok = resp.status in (200, 201, 302)
                     results.append(ok)
-                    log.info("abuse_form[%d] status=%d ok=%s target=%s", idx, resp.status, ok, clean)
+                    log.info(
+                        "abuse_form[%d] status=%d ok=%s target=%s",
+                        idx,
+                        resp.status,
+                        ok,
+                        clean,
+                    )
         except Exception as e:
             log.warning("submit_abuse_form[%d]: %s", idx, e)
             results.append(False)
@@ -1125,6 +1438,7 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
     if not acc:
         return {"status": "no_account"}
     from services import account_manager
+
     clean = target_username.lstrip("@")
     # Официальные боты приёма жалоб: SpamBot + anti-scam инстанции
     escalation_bots = ["SpamBot", "notoscam", "stopCA"]
@@ -1134,13 +1448,17 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
         await asyncio.wait_for(client.connect(), timeout=15)
         msgs = []
         try:
-            msgs = await asyncio.wait_for(client.get_messages(clean, limit=5), timeout=15)
+            msgs = await asyncio.wait_for(
+                client.get_messages(clean, limit=5), timeout=15
+            )
             msgs = [m for m in (msgs or []) if m and not m.service]
         except Exception:
             pass
         for bot_name in escalation_bots:
             try:
-                bot_entity = await asyncio.wait_for(client.get_entity(bot_name), timeout=8)
+                bot_entity = await asyncio.wait_for(
+                    client.get_entity(bot_name), timeout=8
+                )
                 await client.send_message(bot_entity, "/start")
                 await asyncio.sleep(random.uniform(1.5, 3.0))
                 fwd_count = 0
@@ -1159,11 +1477,22 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
                     except Exception:
                         pass
                 results[bot_name] = "sent" if fwd_count > 0 else "no_msgs"
-                log.info("escalate_spambot: %s → %s fwd=%d target=%s", bot_name, results[bot_name], fwd_count, clean)
+                log.info(
+                    "escalate_spambot: %s → %s fwd=%d target=%s",
+                    bot_name,
+                    results[bot_name],
+                    fwd_count,
+                    clean,
+                )
                 await asyncio.sleep(random.uniform(2.0, 4.0))
             except Exception as e:
                 results[bot_name] = f"err:{str(e)[:40]}"
-                log.warning("escalate_spambot[%s] acc=%s: %s", bot_name, acc.get("id"), str(e)[:80])
+                log.warning(
+                    "escalate_spambot[%s] acc=%s: %s",
+                    bot_name,
+                    acc.get("id"),
+                    str(e)[:80],
+                )
     except Exception as e:
         log.warning("_escalate_to_spambot connect: %s", e)
         results["connect"] = f"err:{str(e)[:40]}"
@@ -1173,7 +1502,11 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
         except Exception:
             pass
     sent = sum(1 for v in results.values() if v == "sent")
-    return {"status": "sent" if sent > 0 else "failed", "bots": results, "sent_count": sent}
+    return {
+        "status": "sent" if sent > 0 else "failed",
+        "bots": results,
+        "sent_count": sent,
+    }
 
 
 # ── Verification loop ──────────────────────────────────────────────────────────
@@ -1210,7 +1543,6 @@ async def verify_target_takedown(
             entity = await client.get_entity(clean)
 
             # Проверка на бан/ограничение
-            from telethon.tl.types import Channel
             if hasattr(entity, "restricted") and entity.restricted:
                 await client.disconnect()
                 return True
@@ -1227,15 +1559,29 @@ async def verify_target_takedown(
                 log_exc_swallow(log, "Сбой disconnect клиента в verify_target_takedown")
             err_str = str(e).lower()
             # Эти ошибки означают что канал удалён/недоступен
-            if any(kw in err_str for kw in (
-                "not found", "no user", "channel private", "banned",
-                "deactivated", "invalid", "username not found",
-                "cannot get entity", "peer not found",
-            )):
+            if any(
+                kw in err_str
+                for kw in (
+                    "not found",
+                    "no user",
+                    "channel private",
+                    "banned",
+                    "deactivated",
+                    "invalid",
+                    "username not found",
+                    "cannot get entity",
+                    "peer not found",
+                )
+            ):
                 return True
             # Другие ошибки — возможно временные, пробуем ещё
-            log.info("verify_takedown attempt %d/%d for %s: %s",
-                     attempt + 1, max_attempts, clean, err_str[:80])
+            log.info(
+                "verify_takedown attempt %d/%d for %s: %s",
+                attempt + 1,
+                max_attempts,
+                clean,
+                err_str[:80],
+            )
 
     return False  # цель всё ещё жива после всех попыток
 
@@ -1246,9 +1592,20 @@ async def verify_target_takedown(
 def aggregate_results(results: list[dict]) -> dict:
     """Суммирует результаты атаки."""
     s = {
-        "peer": 0, "multi": 0, "photo": 0, "pinned": 0,
-        "msgs": 0, "msgs_fetched": 0, "spam": 0, "reacts": 0, "admins": 0,
-        "linked_grp": 0, "bots": 0, "fwd": 0, "blocked": 0, "failed": 0,
+        "peer": 0,
+        "multi": 0,
+        "photo": 0,
+        "pinned": 0,
+        "msgs": 0,
+        "msgs_fetched": 0,
+        "spam": 0,
+        "reacts": 0,
+        "admins": 0,
+        "linked_grp": 0,
+        "bots": 0,
+        "fwd": 0,
+        "blocked": 0,
+        "failed": 0,
     }
     for r in results:
         if not r:
@@ -1258,18 +1615,18 @@ def aggregate_results(results: list[dict]) -> dict:
             s["peer"] += 1
         else:
             s["failed"] += 1
-        s["multi"]     += r.get("multi_reason_sent", 0)
-        s["photo"]     += 1 if r.get("photo_reported") else 0
-        s["pinned"]    += r.get("pinned_reported", 0)
-        s["msgs"]      += r.get("msg_reported", 0)
+        s["multi"] += r.get("multi_reason_sent", 0)
+        s["photo"] += 1 if r.get("photo_reported") else 0
+        s["pinned"] += r.get("pinned_reported", 0)
+        s["msgs"] += r.get("msg_reported", 0)
         s["msgs_fetched"] += r.get("msgs_fetched", 0)
-        s["spam"]      += r.get("spam_signaled", 0)
-        s["reacts"]    += r.get("reactions_sent", 0)
-        s["admins"]    += r.get("admins_reported", 0)
+        s["spam"] += r.get("spam_signaled", 0)
+        s["reacts"] += r.get("reactions_sent", 0)
+        s["admins"] += r.get("admins_reported", 0)
         s["linked_grp"] += 1 if r.get("linked_group_reported") else 0
-        s["bots"]      += r.get("bots_reported", 0)
-        s["fwd"]       += r.get("forwarded", 0)
-        s["blocked"]   += 1 if r.get("blocked") else 0
+        s["bots"] += r.get("bots_reported", 0)
+        s["fwd"] += r.get("forwarded", 0)
+        s["blocked"] += 1 if r.get("blocked") else 0
     return s
 
 
@@ -1312,7 +1669,9 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
         # 🔴 только если peer_reported=0 (удар вообще не прошёл).
         if r.verified_down:
             status = "🟢"  # подтверждено удаление
-        elif r.peer_reported > 0 and (r.msgs_reported > 0 or r.pinned_reported > 0 or r.msgs_fetched > 0):
+        elif r.peer_reported > 0 and (
+            r.msgs_reported > 0 or r.pinned_reported > 0 or r.msgs_fetched > 0
+        ):
             status = "⚔️"  # полноценный удар (жалобы + сообщения)
         elif r.peer_reported > 0:
             status = "🟡"  # частичный удар (только ReportPeer, без сообщений)
@@ -1338,8 +1697,13 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"SpamBot: <b>{'✅' if r.spambot_escalation == 'sent' else '❌'}</b> · "
             f"Заблокирован: <b>{r.blocked}</b>\n"
             f"  ├ 📧 Email: <b>{r.emails_sent}</b> отправлено"
-            + (f" · NCMEC: ✅" if r.email_escalation.get("ncmec") else "")
-            + (f" (<i>{r.email_escalation.get('skip_reason', 'не настроен')}</i>" if r.emails_sent == 0 and r.email_escalation.get("skip_reason") not in (None, "no pool/owner") else "")
+            + (" · NCMEC: ✅" if r.email_escalation.get("ncmec") else "")
+            + (
+                f" (<i>{r.email_escalation.get('skip_reason', 'не настроен')}</i>"
+                if r.emails_sent == 0
+                and r.email_escalation.get("skip_reason") not in (None, "no pool/owner")
+                else ""
+            )
             + "\n"
             f"  └ Длительность: <b>{r.duration_s:.0f}с</b> · "
             f"Аккаунтов: <b>{r.unique_accounts}</b>"
@@ -1371,7 +1735,9 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             diag_text = html.escape(", ".join(diagnostics))
             lines.append(f"  🧪 Диагностика: <code>{diag_text}</code>")
         if r.verified_down is not None:
-            lines.append(f"  🔍 Проверка: {'✅ УДАЛЁН' if r.verified_down else '⚠️ Всё ещё активен'}")
+            lines.append(
+                f"  🔍 Проверка: {'✅ УДАЛЁН' if r.verified_down else '⚠️ Всё ещё активен'}"
+            )
     return "\n".join(lines)
 
 
@@ -1399,7 +1765,9 @@ async def parallel_strike(
         async with sem:
             try:
                 return await account_manager.report_peer_deep_v2(
-                    acc["session_str"], peer_username, reason,
+                    acc["session_str"],
+                    peer_username,
+                    reason,
                     message=text,
                     msg_messages=assign_texts(label, 10),
                     max_msg_reports=50,
@@ -1421,7 +1789,10 @@ async def parallel_strike(
                 return {"peer_reported": False, "error": str(e)[:100]}
 
     results = _safe_gather_results(
-        await asyncio.gather(*[_one(acc, txt) for acc, txt in zip(accounts, texts)], return_exceptions=True)
+        await asyncio.gather(
+            *[_one(acc, txt) for acc, txt in zip(accounts, texts)],
+            return_exceptions=True,
+        )
     )
     return list(results)
 
@@ -1579,14 +1950,17 @@ def _build_abuse_tg_email(target: str, cat: dict, report_time: str) -> str:
         "darknet": "HIGH — Darknet Criminal Services",
     }
     category_key = cat.get("report_msg_key", "other")
-    legal_block = legal_refs.get(category_key, (
-        "Legal basis:\n"
-        "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown obligation\n"
-        "• GDPR Article 17 — Right to Erasure of unlawfully processed data\n"
-        "• Russian Federal Law No. 149-FZ (Information, Information Technologies "
-        "and Information Protection)\n"
-        "• Telegram Terms of Service — Community Guidelines"
-    ))
+    legal_block = legal_refs.get(
+        category_key,
+        (
+            "Legal basis:\n"
+            "• EU Digital Services Act (DSA) Article 16 — Notice and Takedown obligation\n"
+            "• GDPR Article 17 — Right to Erasure of unlawfully processed data\n"
+            "• Russian Federal Law No. 149-FZ (Information, Information Technologies "
+            "and Information Protection)\n"
+            "• Telegram Terms of Service — Community Guidelines"
+        ),
+    )
     severity_str = severity_map.get(category_key, f"{cat['severity']} — {cat['label']}")
 
     return (
@@ -1668,8 +2042,14 @@ def _build_ncmec_email(target: str, report_time: str) -> str:
 
 
 def _smtp_send_sync(
-    smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass: str,
-    from_addr: str, to_addr: str, subject: str, body: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_user: str,
+    smtp_pass: str,
+    from_addr: str,
+    to_addr: str,
+    subject: str,
+    body: str,
 ) -> None:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -1690,15 +2070,27 @@ def _smtp_send_sync(
 
 
 async def _send_email(
-    smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass: str,
-    from_addr: str, to_addr: str, subject: str, body: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_user: str,
+    smtp_pass: str,
+    from_addr: str,
+    to_addr: str,
+    subject: str,
+    body: str,
 ) -> tuple[bool, str]:
     """Async email via thread executor. Returns (ok, error)."""
     try:
         await asyncio.to_thread(
             _smtp_send_sync,
-            smtp_host, smtp_port, smtp_user, smtp_pass,
-            from_addr, to_addr, subject, body,
+            smtp_host,
+            smtp_port,
+            smtp_user,
+            smtp_pass,
+            from_addr,
+            to_addr,
+            subject,
+            body,
         )
         log.info("mini_strike: email sent → %s", to_addr)
         return True, ""
@@ -1707,10 +2099,14 @@ async def _send_email(
         return False, str(e)[:120]
 
 
-def _build_dmca_gdpr_email(target: str, cat: dict, report_time: str, email_type: str) -> str:
+def _build_dmca_gdpr_email(
+    target: str, cat: dict, report_time: str, email_type: str
+) -> str:
     """Строит письмо для dpo@telegram.org (GDPR) или dmca@telegram.org или security@telegram.org."""
     chan_url = f"https://t.me/{target}"
-    ref_id = f"{email_type.upper()}-{target.upper()}-{report_time[:10].replace('-', '')}"
+    ref_id = (
+        f"{email_type.upper()}-{target.upper()}-{report_time[:10].replace('-', '')}"
+    )
 
     if email_type == "dmca":
         subject_prefix = "DMCA Takedown Notice"
@@ -1847,10 +2243,6 @@ async def execute_mini_strike(
     import json
     from datetime import datetime, timezone
     from services import account_manager
-    from config import (
-        SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
-        REPORT_FROM_EMAIL, NCMEC_EMAIL,
-    )
 
     cat = MINI_CATEGORIES.get(category, MINI_CATEGORIES["fraud"])
     target_clean = (
@@ -1926,6 +2318,7 @@ async def execute_mini_strike(
         # Register success so flood_engine can decay risk_score
         try:
             from services.flood_engine import record_success
+
             await record_success(acc["id"], "strike")
         except Exception:
             log_exc_swallow(log, "mini_strike: record_success flood_engine failed")
@@ -1936,10 +2329,12 @@ async def execute_mini_strike(
         # Register FloodWait so flood_engine sets proper cooldown on the account
         if "FLOOD_WAIT" in err_str.upper() or "flood" in err_str.lower():
             import re as _re
-            _m = _re.search(r'(\d+)', err_str)
+
+            _m = _re.search(r"(\d+)", err_str)
             flood_wait = int(_m.group(1)) if _m else 60
             try:
                 from services.flood_engine import record_flood
+
                 await record_flood(pool, acc["id"], flood_wait, "strike")
             except Exception:
                 log_exc_swallow(log, "mini_strike: record_flood flood_engine failed")
@@ -1977,23 +2372,33 @@ async def execute_mini_strike(
                 if tgt["email_type"] == "abuse":
                     body = _build_abuse_tg_email(target_clean, cat, report_time)
                 else:
-                    body = _build_dmca_gdpr_email(target_clean, cat, report_time, tgt["email_type"])
+                    body = _build_dmca_gdpr_email(
+                        target_clean, cat, report_time, tgt["email_type"]
+                    )
 
-                subject = f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
+                subject = (
+                    f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
+                )
                 ok, err = await _send_email(
-                    ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
-                    ea["email"], tgt["addr"],
+                    ea["smtp_host"],
+                    ea["smtp_port"],
+                    ea["email"],
+                    ea["smtp_pass"],
+                    ea["email"],
+                    tgt["addr"],
                     subject,
                     body,
                 )
-                result["emails"].append({
-                    "from": ea["email"],
-                    "to": tgt["addr"],
-                    "label": tgt["label"],
-                    "description": tgt["description"],
-                    "ok": ok,
-                    "err": err,
-                })
+                result["emails"].append(
+                    {
+                        "from": ea["email"],
+                        "to": tgt["addr"],
+                        "label": tgt["label"],
+                        "description": tgt["description"],
+                        "ok": ok,
+                        "err": err,
+                    }
+                )
                 if ok:
                     result["total_emails"] += 1
                     any_ok = True
@@ -2003,7 +2408,9 @@ async def execute_mini_strike(
                 else:
                     log.warning(
                         "mini_strike: email failed %s → %s: %s",
-                        ea["email"], tgt["addr"], err,
+                        ea["email"],
+                        tgt["addr"],
+                        err,
                     )
 
             # Обновляем статус ящика по итогу отправки хотя бы одного письма
@@ -2014,7 +2421,10 @@ async def execute_mini_strike(
                         ea["id"],
                     )
                 except Exception:
-                    log_exc_swallow(log, f"mini_strike: failed to update email account success status id={ea.get('id')}")
+                    log_exc_swallow(
+                        log,
+                        f"mini_strike: failed to update email account success status id={ea.get('id')}",
+                    )
             else:
                 try:
                     await pool.execute(
@@ -2025,38 +2435,51 @@ async def execute_mini_strike(
                         ea["id"],
                     )
                 except Exception:
-                    log_exc_swallow(log, f"mini_strike: failed to update email account fail_count id={ea.get('id')}")
+                    log_exc_swallow(
+                        log,
+                        f"mini_strike: failed to update email account fail_count id={ea.get('id')}",
+                    )
 
         # Phase 3: NCMEC (только CSAM, отправляем с первого рабочего ящика)
         if cat.get("ncmec"):
-            await _prog("📧 <b>Фаза 3/4:</b> NCMEC CyberTipline — экстренный CSAM-репорт...")
+            await _prog(
+                "📧 <b>Фаза 3/4:</b> NCMEC CyberTipline — экстренный CSAM-репорт..."
+            )
             ncmec_addr = "cybertipline@ncmec.org"
             body_ncmec = _build_ncmec_email(target_clean, report_time)
             for ea in db_emails:
                 ok_n, err_n = await _send_email(
-                    ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
-                    ea["email"], ncmec_addr,
+                    ea["smtp_host"],
+                    ea["smtp_port"],
+                    ea["email"],
+                    ea["smtp_pass"],
+                    ea["email"],
+                    ncmec_addr,
                     f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
                     body_ncmec,
                 )
-                result["emails"].append({
-                    "from": ea["email"],
-                    "to": ncmec_addr,
-                    "label": "ncmec",
-                    "description": "NCMEC CyberTipline",
-                    "ok": ok_n,
-                    "err": err_n,
-                })
+                result["emails"].append(
+                    {
+                        "from": ea["email"],
+                        "to": ncmec_addr,
+                        "label": "ncmec",
+                        "description": "NCMEC CyberTipline",
+                        "ok": ok_n,
+                        "err": err_n,
+                    }
+                )
                 if ok_n:
                     result["total_emails"] += 1
                     break  # Достаточно одного NCMEC-репорта
     else:
-        result["emails"].append({
-            "to": "abuse@telegram.org",
-            "label": "abuse",
-            "ok": False,
-            "err": "Email не настроены. Добавьте в Strike → ⚙️ Настройки → 📧 Email аккаунты",
-        })
+        result["emails"].append(
+            {
+                "to": "abuse@telegram.org",
+                "label": "abuse",
+                "ok": False,
+                "err": "Email не настроены. Добавьте в Strike → ⚙️ Настройки → 📧 Email аккаунты",
+            }
+        )
 
     # ── Phase 4: Abuse form telegram.org/support ──────────────────────────────
     await _prog("🌐 <b>Фаза 4/4:</b> Форма telegram.org/support...")
@@ -2078,24 +2501,31 @@ async def execute_mini_strike(
                (owner_id, target, category, tg_reports_sent, emails_sent,
                 total_reports, details)
                VALUES ($1, $2, $3, $4, $5, $6, $7)""",
-            owner_id, target_clean, category,
+            owner_id,
+            target_clean,
+            category,
             result["total_tg_reports"],
             result["total_emails"],
             result["total_tg_reports"] + result["total_emails"],
-            json.dumps({
-                "tg": result["tg"],
-                "emails": result["emails"],
-                "abuse_form": result["abuse_form"],
-                "errors": result["errors"],
-            }),
+            json.dumps(
+                {
+                    "tg": result["tg"],
+                    "emails": result["emails"],
+                    "abuse_form": result["abuse_form"],
+                    "errors": result["errors"],
+                }
+            ),
         )
     except Exception as e:
         log.debug("mini_strike: DB save skipped: %s", e)
 
     log.info(
         "mini_strike: DONE target=%s tg=%d emails=%d form=%s errors=%d",
-        target_clean, result["total_tg_reports"], result["total_emails"],
-        result["abuse_form"].get("ok"), len(result["errors"]),
+        target_clean,
+        result["total_tg_reports"],
+        result["total_emails"],
+        result["abuse_form"].get("ok"),
+        len(result["errors"]),
     )
     return result
 
@@ -2103,26 +2533,29 @@ async def execute_mini_strike(
 def format_mini_result(r: dict) -> str:
     """Форматировать финальный отчёт мини-страйка для Telegram HTML."""
     import html as _html
+
     tg = r.get("tg", {})
     emails = r.get("emails", [])
     af = r.get("abuse_form", {})
     email_accounts_used: list[str] = r.get("email_accounts_used", [])
 
     # Подсчёт успешных MTProto-векторов
-    vectors_ok = sum([
-        bool(tg.get("peer_reported")),
-        bool(tg.get("photo_reported")),
-        bool(tg.get("joined")),
-        tg.get("pinned_reported", 0) > 0,
-        tg.get("msg_reported", 0) > 0,
-        tg.get("spam_signaled", 0) > 0,
-        tg.get("reactions_sent", 0) > 0,
-        tg.get("admins_reported", 0) > 0,
-        bool(tg.get("linked_group_reported")),
-        tg.get("bots_reported", 0) > 0,
-        tg.get("forwarded", 0) > 0,
-        bool(tg.get("blocked")),
-    ])
+    vectors_ok = sum(
+        [
+            bool(tg.get("peer_reported")),
+            bool(tg.get("photo_reported")),
+            bool(tg.get("joined")),
+            tg.get("pinned_reported", 0) > 0,
+            tg.get("msg_reported", 0) > 0,
+            tg.get("spam_signaled", 0) > 0,
+            tg.get("reactions_sent", 0) > 0,
+            tg.get("admins_reported", 0) > 0,
+            bool(tg.get("linked_group_reported")),
+            tg.get("bots_reported", 0) > 0,
+            tg.get("forwarded", 0) > 0,
+            bool(tg.get("blocked")),
+        ]
+    )
     vectors_total = 12
 
     # Подсчёт email по получателям
@@ -2159,7 +2592,9 @@ def format_mini_result(r: dict) -> str:
         return f"  {'✅' if flag else '—'} {label}"
 
     def _vn(n: int, label: str, unit: str = " шт.") -> str:
-        return f"  {'✅' if n > 0 else '—'} {label}{': ' + str(n) + unit if n > 0 else ''}"
+        return (
+            f"  {'✅' if n > 0 else '—'} {label}{': ' + str(n) + unit if n > 0 else ''}"
+        )
 
     lines = [
         f"{header_emoji} <b>Мини-страйк завершён — @{_html.escape(r['target'])}</b>",
@@ -2168,8 +2603,10 @@ def format_mini_result(r: dict) -> str:
         f"MTProto-векторов: <b>{vectors_ok}/{vectors_total}</b>",
         "",
         "<b>📡 Telegram MTProto:</b>",
-        _vb(bool(tg.get("peer_reported")),
-            f"ReportPeer + {tg.get('multi_reason_sent', 0)} доп. причин"),
+        _vb(
+            bool(tg.get("peer_reported")),
+            f"ReportPeer + {tg.get('multi_reason_sent', 0)} доп. причин",
+        ),
         _vb(bool(tg.get("photo_reported")), "Жалоба на фото профиля"),
         _vb(bool(tg.get("joined")), "Вступление в канал изнутри"),
         _vn(tg.get("pinned_reported", 0), "Закреплённые посты"),
@@ -2200,17 +2637,21 @@ def format_mini_result(r: dict) -> str:
         for to_addr, sends in by_target.items():
             ok_sends = [s for s in sends if s.get("ok")]
             fail_sends = [s for s in sends if not s.get("ok")]
-            label = sends[0].get("label", "")
+            sends[0].get("label", "")
             desc = sends[0].get("description", to_addr)
 
             if ok_sends:
                 from_list = ", ".join(
                     _html.escape(s.get("from", "?")) for s in ok_sends
                 )
-                lines.append(f"  ✅ <b>{_html.escape(to_addr)}</b> — {_html.escape(desc)}")
+                lines.append(
+                    f"  ✅ <b>{_html.escape(to_addr)}</b> — {_html.escape(desc)}"
+                )
                 lines.append(f"      отправлено с: {from_list}")
             else:
-                lines.append(f"  ❌ <b>{_html.escape(to_addr)}</b> — {_html.escape(desc)}")
+                lines.append(
+                    f"  ❌ <b>{_html.escape(to_addr)}</b> — {_html.escape(desc)}"
+                )
                 if fail_sends and fail_sends[0].get("err"):
                     err_short = _html.escape((fail_sends[0]["err"])[:80])
                     lines.append(f"      ошибка: {err_short}")

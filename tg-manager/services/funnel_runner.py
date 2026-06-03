@@ -65,7 +65,6 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 try:
                     # Try up to 3 times with backoff before giving up on this step
                     sent_ok = False
-                    retry_info = ""
                     for attempt in range(3):
                         ok, retry_after = await bot_api.send_message(
                             http, row["token"], row["user_id"], row["message_text"]
@@ -74,20 +73,30 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             sent_ok = True
                             break
                         if retry_after:
-                            log.info("Funnel step %d for sub %d rate-limited, sleeping %ds",
-                                     row["current_step"] + 1, row["sub_id"], retry_after)
+                            log.info(
+                                "Funnel step %d for sub %d rate-limited, sleeping %ds",
+                                row["current_step"] + 1,
+                                row["sub_id"],
+                                retry_after,
+                            )
                             await asyncio.sleep(retry_after)
-                            retry_info = f" (retry {attempt + 1}, {retry_after}s)"
+                            f" (retry {attempt + 1}, {retry_after}s)"
                             continue
                         # Non-429 failure (user blocked, bot kicked, etc.) — don't retry
-                        log.warning("Funnel step %d for sub %d failed: non-retryable",
-                                    row["current_step"] + 1, row["sub_id"])
+                        log.warning(
+                            "Funnel step %d for sub %d failed: non-retryable",
+                            row["current_step"] + 1,
+                            row["sub_id"],
+                        )
                         break
 
                     if not sent_ok:
                         # Don't advance — will retry on next loop iteration
-                        log.warning("Funnel step %d for sub %d skipped after retries, will retry",
-                                    row["current_step"] + 1, row["sub_id"])
+                        log.warning(
+                            "Funnel step %d for sub %d skipped after retries, will retry",
+                            row["current_step"] + 1,
+                            row["sub_id"],
+                        )
                         continue
 
                     next_step = row["current_step"] + 1

@@ -10,6 +10,7 @@ Provides:
 
 Entry point: ChanFactCb(action="menu")
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,6 @@ from bot.states import (
 from bot.utils.op_helpers import (
     _acc_label,
     _get_active_accounts,
-    _progress_bar,
     _progress_text,
     backoff,
 )
@@ -79,17 +79,23 @@ async def _send_or_edit(event, text: str, kb: InlineKeyboardBuilder) -> None:
 
 # ── Main menu ──────────────────────────────────────────────────────────────
 
+
 def _main_menu_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Создать канал",          callback_data=ChanFactCb(action="create"))
-    kb.button(text="📋 Массовое создание",      callback_data=ChanFactCb(action="bulk_create"))
-    kb.button(text="📥 Импорт из Telegram",     callback_data=ChanFactCb(action="import"))
-    kb.button(text="✏️ Редактировать",          callback_data=ChanFactCb(action="bulk_edit"))
-    kb.button(text="📤 Массовая публикация",    callback_data=ChanFactCb(action="mass_pub_redirect"))
-    kb.button(text="📊 Статистика каналов",     callback_data=ChanFactCb(action="stats"))
-    kb.button(text="📈 SEO-оптимизация",        callback_data=ChanFactCb(action="seo_pick"))
-    kb.button(text="🔗 Генерация ссылок",       callback_data=ChanFactCb(action="gen_links"))
-    kb.button(text="◀️ Назад",                 callback_data=ChanFactCb(action="back_to_ops"))
+    kb.button(text="➕ Создать канал", callback_data=ChanFactCb(action="create"))
+    kb.button(
+        text="📋 Массовое создание", callback_data=ChanFactCb(action="bulk_create")
+    )
+    kb.button(text="📥 Импорт из Telegram", callback_data=ChanFactCb(action="import"))
+    kb.button(text="✏️ Редактировать", callback_data=ChanFactCb(action="bulk_edit"))
+    kb.button(
+        text="📤 Массовая публикация",
+        callback_data=ChanFactCb(action="mass_pub_redirect"),
+    )
+    kb.button(text="📊 Статистика каналов", callback_data=ChanFactCb(action="stats"))
+    kb.button(text="📈 SEO-оптимизация", callback_data=ChanFactCb(action="seo_pick"))
+    kb.button(text="🔗 Генерация ссылок", callback_data=ChanFactCb(action="gen_links"))
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="back_to_ops"))
     kb.adjust(2, 2, 2, 2, 1)
     return kb
 
@@ -116,6 +122,7 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
     """Redirect back to the channel ops main menu."""
     await callback.answer()
     from bot.callbacks import ChanCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 Перейти в операции", callback_data=ChanCb(action="menu"))
     await callback.message.edit_text(
@@ -129,10 +136,9 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
 # IMPORT EXISTING CHANNELS — подключить уже существующие каналы
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(ChanFactCb.filter(F.action == "import"))
-async def cb_chanf_import(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_chanf_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: выбор аккаунта для импорта каналов."""
     await callback.answer()
     accounts = await _get_active_accounts(pool, callback.from_user.id)
@@ -151,7 +157,9 @@ async def cb_chanf_import(
             text=_acc_label(acc),
             callback_data=ChanFactCb(action="import_acc", acc_id=acc["id"]),
         )
-    kb.button(text="🔄 Все аккаунты сразу", callback_data=ChanFactCb(action="import_all_accs"))
+    kb.button(
+        text="🔄 Все аккаунты сразу", callback_data=ChanFactCb(action="import_all_accs")
+    )
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(2, 1, 1)
     await callback.message.edit_text(
@@ -176,7 +184,8 @@ async def cb_chanf_import_acc(
         "SELECT id, session_str, phone, first_name, username, "
         "device_model, system_version, app_version FROM tg_accounts "
         "WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -187,7 +196,10 @@ async def cb_chanf_import_acc(
     from database.db import upsert_managed_channels
 
     try:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+        dialogs = (
+            await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc)
+            or []
+        )
     except Exception as e:
         log.warning("import_acc get_dialogs error: %s", e)
         await callback.message.edit_text(
@@ -198,7 +210,8 @@ async def cb_chanf_import_acc(
         return
 
     channels = [
-        d for d in dialogs
+        d
+        for d in dialogs
         if d.get("type") in ("channel", "megagroup", "supergroup", "gigagroup")
     ]
     if not channels:
@@ -224,8 +237,11 @@ async def cb_chanf_import_acc(
     lines.append(f"\n<i>Аккаунт: {html.escape(acc_label)}</i>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Открыть публикацию", callback_data=ChanFactCb(action="mass_pub_redirect"))
-    kb.button(text="◀️ В меню каналов",     callback_data=ChanFactCb(action="menu"))
+    kb.button(
+        text="📤 Открыть публикацию",
+        callback_data=ChanFactCb(action="mass_pub_redirect"),
+    )
+    kb.button(text="◀️ В меню каналов", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines),
@@ -235,9 +251,7 @@ async def cb_chanf_import_acc(
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "import_all_accs"))
-async def cb_chanf_import_all_accs(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_chanf_import_all_accs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Импортировать каналы со ВСЕХ активных аккаунтов."""
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
@@ -257,16 +271,24 @@ async def cb_chanf_import_all_accs(
 
     for idx, acc in enumerate(accounts):
         try:
-            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+            dialogs = (
+                await account_manager.get_dialogs(
+                    acc["session_str"], limit=200, _acc=acc
+                )
+                or []
+            )
             channels = [
-                d for d in dialogs
+                d
+                for d in dialogs
                 if d.get("type") in ("channel", "megagroup", "supergroup", "gigagroup")
             ]
             if channels:
-                await upsert_managed_channels(pool, callback.from_user.id, acc["id"], channels)
+                await upsert_managed_channels(
+                    pool, callback.from_user.id, acc["id"], channels
+                )
                 total_imported += len(channels)
             await progress_msg.edit_text(
-                f"⏳ Обработка аккаунтов: {idx+1}/{len(accounts)}...\n"
+                f"⏳ Обработка аккаунтов: {idx + 1}/{len(accounts)}...\n"
                 f"Найдено каналов: {total_imported}",
                 parse_mode="HTML",
             )
@@ -282,8 +304,11 @@ async def cb_chanf_import_all_accs(
     text += "\n\nТеперь вы можете использовать эти каналы для публикации и операций."
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Открыть публикацию", callback_data=ChanFactCb(action="mass_pub_redirect"))
-    kb.button(text="◀️ В меню каналов",     callback_data=ChanFactCb(action="menu"))
+    kb.button(
+        text="📤 Открыть публикацию",
+        callback_data=ChanFactCb(action="mass_pub_redirect"),
+    )
+    kb.button(text="◀️ В меню каналов", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -293,6 +318,7 @@ async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
     """Redirect user to mass publish wizard."""
     await callback.answer()
     from bot.callbacks import MassPubCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="📤 Открыть Mass Publish", callback_data=MassPubCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
@@ -309,12 +335,14 @@ async def cb_chanf_mass_pub_redirect(callback: CallbackQuery) -> None:
 # 1. CREATE SINGLE CHANNEL  (FSM: ChannelFactoryFSM)
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(ChanFactCb.filter(F.action == "create"))
 async def cb_chanf_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
             "🔒 <b>Создание каналов — PRO</b>\n\nОформите: /subscription",
@@ -334,7 +362,10 @@ async def cb_chanf_create_start(
         return
     kb = InlineKeyboardBuilder()
     for i, acc in enumerate(accounts):
-        kb.button(text=_acc_label(acc), callback_data=ChanFactCb(action="create_acc", acc_id=acc["id"]))
+        kb.button(
+            text=_acc_label(acc),
+            callback_data=ChanFactCb(action="create_acc", acc_id=acc["id"]),
+        )
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(3)
     await state.set_state(ChannelFactoryFSM.choosing_account)
@@ -347,12 +378,16 @@ async def cb_chanf_create_start(
 
 @router.callback_query(ChanFactCb.filter(F.action == "create_acc"))
 async def cb_chanf_create_acc_chosen(
-    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: ChanFactCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT id, phone, first_name, username, session_str "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -393,7 +428,10 @@ async def fsm_chanf_title(message: Message, state: FSMContext) -> None:
     if not title or len(title) > 128:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
-        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:",
+            reply_markup=kb.as_markup(),
+        )
         return
     await state.update_data(title=title)
     await state.set_state(ChannelFactoryFSM.waiting_about)
@@ -439,23 +477,31 @@ async def _ask_username(msg, edit: bool) -> None:
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать сообщение при показе username")
+            log_exc_swallow(
+                log, "Не удалось отредактировать сообщение при показе username"
+            )
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "skip_username"))
-async def cb_chanf_skip_username(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_chanf_skip_username(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     await state.update_data(channel_username="")
     await _show_chanf_cluster_or_confirm(callback, state, pool)
 
 
 @router.message(ChannelFactoryFSM.waiting_username)
-async def fsm_chanf_username(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def fsm_chanf_username(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     uname = (message.text or "").strip().lstrip("@")
     if uname and (len(uname) < 5 or not all(c.isalnum() or c == "_" for c in uname)):
         kb = InlineKeyboardBuilder()
-        kb.button(text="⏭ Без username", callback_data=ChanFactCb(action="skip_username"))
+        kb.button(
+            text="⏭ Без username", callback_data=ChanFactCb(action="skip_username")
+        )
         kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
         kb.adjust(1)
         await message.answer(
@@ -467,7 +513,9 @@ async def fsm_chanf_username(message: Message, state: FSMContext, pool: asyncpg.
     await _show_chanf_cluster_or_confirm(message, state, pool)
 
 
-async def _show_chanf_cluster_or_confirm(event, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def _show_chanf_cluster_or_confirm(
+    event, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     """Try to show cluster selection; if no clusters — go straight to confirm."""
     owner_id = (
         event.from_user.id
@@ -502,10 +550,14 @@ async def _show_chanf_cluster_or_confirm(event, state: FSMContext, pool: asyncpg
     text = "🗂 <b>Кластер</b>\n\nВыберите кластер для канала или пропустите:"
     if hasattr(event, "message"):
         try:
-            await event.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            await event.message.edit_text(
+                text, parse_mode="HTML", reply_markup=kb.as_markup()
+            )
             return
         except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать сообщение при выборе кластера")
+            log_exc_swallow(
+                log, "Не удалось отредактировать сообщение при выборе кластера"
+            )
         await event.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
@@ -513,12 +565,19 @@ async def _show_chanf_cluster_or_confirm(event, state: FSMContext, pool: asyncpg
 
 @router.callback_query(ChanFactCb.filter(F.action == "pick_cluster"))
 async def cb_chanf_pick_cluster(
-    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: ChanFactCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     await callback.answer()
-    cl = await pool.fetchrow("SELECT id, name FROM clusters WHERE id=$1", callback_data.channel_id)
+    cl = await pool.fetchrow(
+        "SELECT id, name FROM clusters WHERE id=$1", callback_data.channel_id
+    )
     cluster_name = cl["name"] if cl else ""
-    await state.update_data(cluster_id=callback_data.channel_id, cluster_name=cluster_name)
+    await state.update_data(
+        cluster_id=callback_data.channel_id, cluster_name=cluster_name
+    )
     await state.set_state(ChannelFactoryFSM.confirming)
     await _show_chanf_confirm(callback, state)
 
@@ -557,7 +616,10 @@ async def _show_chanf_confirm(event, state: FSMContext) -> None:
             await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать сообщение подтверждения создания канала")
+            log_exc_swallow(
+                log,
+                "Не удалось отредактировать сообщение подтверждения создания канала",
+            )
         await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -582,7 +644,8 @@ async def cb_chanf_do_create(
     acc = await pool.fetchrow(
         "SELECT id, session_str, device_model, system_version, app_version "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, callback.from_user.id,
+        acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.message.edit_text(
@@ -593,6 +656,7 @@ async def cb_chanf_do_create(
         return
 
     from services import account_manager
+
     result = await account_manager.create_channel(
         acc["session_str"],
         title=data["title"],
@@ -621,29 +685,42 @@ async def cb_chanf_do_create(
             err_u = await account_manager.set_channel_username(
                 acc["session_str"], channel_id, uname, _acc=acc
             )
-            uname_result = f"\nUsername: @{html.escape(uname)}" if not err_u else f"\n⚠️ Username не установлен: {html.escape(err_u)}"
+            uname_result = (
+                f"\nUsername: @{html.escape(uname)}"
+                if not err_u
+                else f"\n⚠️ Username не установлен: {html.escape(err_u)}"
+            )
         except Exception as e:
             uname_result = f"\n⚠️ Username не установлен: {html.escape(str(e))}"
 
     # Build t.me/username link if username was set successfully
     tme_link = ""
     if uname and "не установлен" not in uname_result:
-        tme_link = f"\nt.me: <a href=\"https://t.me/{html.escape(uname)}\">t.me/{html.escape(uname)}</a>"
+        tme_link = f'\nt.me: <a href="https://t.me/{html.escape(uname)}">t.me/{html.escape(uname)}</a>'
 
     # EPOCH III: auto-add channel to most recent active ecosystem
     try:
         from services import ecosystem_brain as _eb
+
         ecos = await _eb.list_ecosystems(pool, callback.from_user.id)
         if ecos:
-            await _eb.add_member(pool, ecos[0]["id"], callback.from_user.id, "channel", channel_id)
+            await _eb.add_member(
+                pool, ecos[0]["id"], callback.from_user.id, "channel", channel_id
+            )
     except Exception:
         pass
 
     kb = InlineKeyboardBuilder()
     if uname and "не установлен" not in uname_result:
-        kb.button(text=f"🔗 Открыть t.me/{html.escape(uname)}", url=f"https://t.me/{uname}")
-    kb.button(text="🌐 Добавить в экосистему",
-              callback_data=EcoPickCb(action="list", object_type="channel", object_id=channel_id))
+        kb.button(
+            text=f"🔗 Открыть t.me/{html.escape(uname)}", url=f"https://t.me/{uname}"
+        )
+    kb.button(
+        text="🌐 Добавить в экосистему",
+        callback_data=EcoPickCb(
+            action="list", object_type="channel", object_id=channel_id
+        ),
+    )
     kb.button(text="◀️ Меню", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
@@ -662,12 +739,14 @@ async def cb_chanf_do_create(
 # 2. BULK CREATE  (FSM: BulkChannelCreateFSM)
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(ChanFactCb.filter(F.action == "bulk_create"))
 async def cb_chanf_bulk_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     await callback.answer()
     from bot.utils.subscription import require_plan
+
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
             "🔒 <b>Массовое создание — PRO</b>\n\nОформите: /subscription",
@@ -703,12 +782,16 @@ async def cb_chanf_bulk_create_start(
 
 @router.callback_query(ChanFactCb.filter(F.action == "bulk_create_acc"))
 async def cb_chanf_bulk_create_acc(
-    callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: ChanFactCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT id, phone, first_name, username, session_str "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -754,7 +837,10 @@ async def fsm_bulk_chan_prefix(message: Message, state: FSMContext) -> None:
     if not prefix or len(prefix) > 100:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
-        await message.answer("⚠️ Название от 1 до 100 символов. Попробуйте ещё раз:", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Название от 1 до 100 символов. Попробуйте ещё раз:",
+            reply_markup=kb.as_markup(),
+        )
         return
     await state.update_data(prefix=prefix)
     await state.set_state(BulkChannelCreateFSM.waiting_about)
@@ -817,7 +903,10 @@ async def _show_bulk_confirm(event, state: FSMContext) -> None:
             await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать сообщение подтверждения массового создания")
+            log_exc_swallow(
+                log,
+                "Не удалось отредактировать сообщение подтверждения массового создания",
+            )
         await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
     else:
         await event.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -839,7 +928,8 @@ async def cb_chanf_do_bulk_create(
     acc = await pool.fetchrow(
         "SELECT id, session_str, device_model, system_version, app_version "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, callback.from_user.id,
+        acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.message.edit_text(
@@ -851,6 +941,7 @@ async def cb_chanf_do_bulk_create(
     acc = dict(acc)
 
     from services import account_manager
+
     results_ok: list[str] = []
     results_err: list[str] = []
     progress_msg = await callback.message.edit_text(
@@ -869,17 +960,23 @@ async def cb_chanf_do_bulk_create(
             _acc=acc,
         )
         if "error" in result:
-            results_err.append(f"❌ {html.escape(title)}: {html.escape(result['error'][:60])}")
+            results_err.append(
+                f"❌ {html.escape(title)}: {html.escape(result['error'][:60])}"
+            )
         else:
             ch_id = result["channel_id"]
             results_ok.append(f"✅ {html.escape(title)} — id={ch_id}")
         try:
             await progress_msg.edit_text(
-                _progress_text("Создание каналов...", i, count, len(results_ok), len(results_err)),
+                _progress_text(
+                    "Создание каналов...", i, count, len(results_ok), len(results_err)
+                ),
                 parse_mode="HTML",
             )
         except Exception:
-            log_exc_swallow(log, "Не удалось обновить прогресс массового создания каналов")
+            log_exc_swallow(
+                log, "Не удалось обновить прогресс массового создания каналов"
+            )
         if i < count:
             # Smart anti-flood: human-like delay between channel creations
             # Every 5 channels — longer pause (5-10 min), otherwise 45-90s
@@ -901,6 +998,7 @@ async def cb_chanf_do_bulk_create(
 # 3. BULK EDIT CHANNELS  (FSM: EditChannelBulkFSM)
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(ChanFactCb.filter(F.action == "bulk_edit"))
 async def cb_chanf_bulk_edit_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -917,7 +1015,9 @@ async def cb_chanf_bulk_edit_start(callback: CallbackQuery, state: FSMContext) -
     )
 
 
-@router.callback_query(ChanFactCb.filter(F.action.in_({"be_field_title", "be_field_about"})))
+@router.callback_query(
+    ChanFactCb.filter(F.action.in_({"be_field_title", "be_field_about"}))
+)
 async def cb_chanf_be_field(
     callback: CallbackQuery, callback_data: ChanFactCb, state: FSMContext
 ) -> None:
@@ -926,7 +1026,10 @@ async def cb_chanf_be_field(
     await state.update_data(edit_field=field)
     await state.set_state(EditChannelBulkFSM.choosing_scope)
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌍 Все каналы (все аккаунты)", callback_data=ChanFactCb(action="be_scope_all"))
+    kb.button(
+        text="🌍 Все каналы (все аккаунты)",
+        callback_data=ChanFactCb(action="be_scope_all"),
+    )
     kb.button(text="👤 По аккаунту", callback_data=ChanFactCb(action="be_scope_acc"))
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="bulk_edit"))
     kb.adjust(1)
@@ -1009,7 +1112,9 @@ async def fsm_be_value(message: Message, state: FSMContext) -> None:
     if not value:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
-        await message.answer("⚠️ Введите непустое значение:", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Введите непустое значение:", reply_markup=kb.as_markup()
+        )
         return
     await state.update_data(edit_value=value)
     await state.set_state(EditChannelBulkFSM.previewing)
@@ -1056,10 +1161,12 @@ async def cb_chanf_be_confirm(
     accounts = await pool.fetch(
         "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
         "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        callback.from_user.id, acc_ids,
+        callback.from_user.id,
+        acc_ids,
     )
 
     from services import account_manager
+
     ok_total = 0
     err_total = 0
     progress_msg = await callback.message.edit_text(
@@ -1069,13 +1176,21 @@ async def cb_chanf_be_confirm(
 
     for acc in accounts:
         dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-        channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+        channels = [
+            d
+            for d in dialogs
+            if d.get("type") in ("channel", "megagroup", "supergroup")
+        ]
         for ch in channels:
             ch_id = ch["id"]
             if field == "title":
-                ok = await account_manager.edit_channel_title(acc["session_str"], ch_id, value, _acc=acc)
+                ok = await account_manager.edit_channel_title(
+                    acc["session_str"], ch_id, value, _acc=acc
+                )
             else:
-                ok = await account_manager.edit_channel_about(acc["session_str"], ch_id, value, _acc=acc)
+                ok = await account_manager.edit_channel_about(
+                    acc["session_str"], ch_id, value, _acc=acc
+                )
             if ok:
                 ok_total += 1
             else:
@@ -1094,6 +1209,7 @@ async def cb_chanf_be_confirm(
 # ══════════════════════════════════════════════════════════════════════════
 # 4. GENERATE INVITE LINKS
 # ══════════════════════════════════════════════════════════════════════════
+
 
 @router.callback_query(ChanFactCb.filter(F.action == "gen_links"))
 async def cb_chanf_gen_links(
@@ -1129,18 +1245,24 @@ async def cb_chanf_gen_links_acc(
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
+
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-    channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+    channels = [
+        d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")
+    ]
     if not channels:
         kb_empty = InlineKeyboardBuilder()
-        kb_empty.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
+        kb_empty.button(
+            text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import")
+        )
         kb_empty.button(text="◀️ Назад", callback_data=ChanFactCb(action="gen_links"))
         kb_empty.adjust(1)
         await callback.message.edit_text(
@@ -1177,19 +1299,26 @@ async def cb_chanf_gen_link(
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
     await callback.answer("⏳ Генерирую ссылку...")
     from services import account_manager
+
     link = await account_manager.get_channel_invite_link(
         acc["session_str"], callback_data.channel_id, _acc=acc
     )
     if link:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад к каналам", callback_data=ChanFactCb(action="gen_links_acc", acc_id=callback_data.acc_id))
+        kb.button(
+            text="◀️ Назад к каналам",
+            callback_data=ChanFactCb(
+                action="gen_links_acc", acc_id=callback_data.acc_id
+            ),
+        )
         await callback.message.edit_text(
             f"🔗 <b>Ссылка-приглашение</b>\n\n<code>{html.escape(link)}</code>",
             parse_mode="HTML",
@@ -1207,10 +1336,9 @@ async def cb_chanf_gen_link(
 # 5. CHANNEL STATS
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(ChanFactCb.filter(F.action == "stats"))
-async def cb_chanf_stats(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_chanf_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: choose account to list channels from."""
     await callback.answer()
     accounts = await _get_active_accounts(pool, callback.from_user.id)
@@ -1247,19 +1375,25 @@ async def cb_chanf_stats_acc(
         "SELECT id, session_str, first_name, phone, username, "
         "device_model, system_version, app_version "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
+
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-    channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+    channels = [
+        d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")
+    ]
 
     if not channels:
         kb_empty = InlineKeyboardBuilder()
-        kb_empty.button(text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import"))
+        kb_empty.button(
+            text="📥 Импортировать каналы", callback_data=ChanFactCb(action="import")
+        )
         kb_empty.button(text="◀️ Назад", callback_data=ChanFactCb(action="stats"))
         kb_empty.adjust(1)
         await callback.message.edit_text(
@@ -1300,7 +1434,8 @@ async def cb_chanf_stats_chan(
         "SELECT id, session_str, first_name, phone, username, "
         "device_model, system_version, app_version "
         "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -1310,9 +1445,7 @@ async def cb_chanf_stats_chan(
 
     # Get dialogs to find the channel metadata
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
-    chan_data = next(
-        (d for d in dialogs if d["id"] == callback_data.channel_id), None
-    )
+    chan_data = next((d for d in dialogs if d["id"] == callback_data.channel_id), None)
 
     if not chan_data:
         await callback.message.edit_text(
@@ -1365,7 +1498,9 @@ async def cb_chanf_stats_chan(
     kb.button(text="🏠 Меню", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ── SEO Pick (account → channel picker → SeoCb) ────────────────────────────
@@ -1383,7 +1518,8 @@ async def cb_chanf_seo_pick_acc(
     if not accounts:
         await callback.message.edit_text(
             "⚠️ <b>Нет активных аккаунтов</b>\n\nДобавьте аккаунт в разделе 📱 Аккаунты.",
-            parse_mode="HTML", reply_markup=_back_menu_kb().as_markup(),
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
         )
         return
     if len(accounts) == 1:
@@ -1400,7 +1536,8 @@ async def cb_chanf_seo_pick_acc(
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     await callback.message.edit_text(
         "📈 <b>SEO-оптимизация канала</b>\n\nВыберите аккаунт, которому принадлежит канал:",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -1409,7 +1546,9 @@ async def cb_chanf_seo_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    await _show_seo_chan_picker(callback, pool, callback_data.acc_id, callback.from_user.id, page=0)
+    await _show_seo_chan_picker(
+        callback, pool, callback_data.acc_id, callback.from_user.id, page=0
+    )
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "seo_chan_page"))
@@ -1417,7 +1556,13 @@ async def cb_chanf_seo_chan_page(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    await _show_seo_chan_picker(callback, pool, callback_data.acc_id, callback.from_user.id, page=callback_data.page)
+    await _show_seo_chan_picker(
+        callback,
+        pool,
+        callback_data.acc_id,
+        callback.from_user.id,
+        page=callback_data.page,
+    )
 
 
 async def _show_seo_chan_picker(
@@ -1427,11 +1572,16 @@ async def _show_seo_chan_picker(
     channels = await pool.fetch(
         "SELECT id, title, username FROM managed_channels "
         "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title LIMIT $3 OFFSET $4",
-        user_id, acc_id, _SEO_PAGE + 1, offset,
+        user_id,
+        acc_id,
+        _SEO_PAGE + 1,
+        offset,
     )
     if not channels and page == 0:
         kb = InlineKeyboardBuilder()
-        kb.button(text="📥 Импорт из Telegram", callback_data=ChanFactCb(action="import"))
+        kb.button(
+            text="📥 Импорт из Telegram", callback_data=ChanFactCb(action="import")
+        )
         kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="seo_pick"))
         kb.adjust(1)
         await callback.message.edit_text(
@@ -1439,7 +1589,8 @@ async def _show_seo_chan_picker(
             "Импортируйте каналы через меню <b>Каналы → Импорт из Telegram</b>, "
             "после этого SEO-оптимизация станет доступна для каждого канала.\n\n"
             "💡 Импорт сканирует все каналы и группы, где вы являетесь администратором.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
     has_more = len(channels) > _SEO_PAGE
@@ -1447,7 +1598,11 @@ async def _show_seo_chan_picker(
 
     kb = InlineKeyboardBuilder()
     for ch in channels:
-        label = f"@{ch['username']}" if ch.get("username") else ch["title"] or f"id{ch['id']}"
+        label = (
+            f"@{ch['username']}"
+            if ch.get("username")
+            else ch["title"] or f"id{ch['id']}"
+        )
         kb.button(
             text=f"📡 {label[:35]}",
             callback_data=SeoCb(action="chan_menu", chan_id=ch["id"], acc_id=acc_id),
@@ -1456,9 +1611,19 @@ async def _show_seo_chan_picker(
 
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="◀️", callback_data=ChanFactCb(action="seo_chan_page", acc_id=acc_id, page=page - 1))
+        nav.button(
+            text="◀️",
+            callback_data=ChanFactCb(
+                action="seo_chan_page", acc_id=acc_id, page=page - 1
+            ),
+        )
     if has_more:
-        nav.button(text="▶️", callback_data=ChanFactCb(action="seo_chan_page", acc_id=acc_id, page=page + 1))
+        nav.button(
+            text="▶️",
+            callback_data=ChanFactCb(
+                action="seo_chan_page", acc_id=acc_id, page=page + 1
+            ),
+        )
     if page > 0 or has_more:
         nav.adjust(2)
         kb.attach(nav)
@@ -1466,5 +1631,6 @@ async def _show_seo_chan_picker(
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="seo_pick"))
     await callback.message.edit_text(
         "📈 <b>SEO-оптимизация — выберите канал:</b>",
-        parse_mode="HTML", reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )

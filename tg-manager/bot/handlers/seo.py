@@ -1,4 +1,5 @@
 """SEO score analyzer and optimizer for bots, channels and groups."""
+
 from __future__ import annotations
 import asyncio
 import html
@@ -11,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import SeoCb, EditCb, ChanFactCb, BmCb
-from bot.keyboards import seo_menu, subscription_locked_markup
+from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from bot.states import SeoFSM
 from database import db
@@ -22,9 +23,14 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
-def _seo_score(name: str, description: str, short_desc: str,
-               commands: list, audience: int,
-               username: str = "") -> tuple[int, list[str]]:
+def _seo_score(
+    name: str,
+    description: str,
+    short_desc: str,
+    commands: list,
+    audience: int,
+    username: str = "",
+) -> tuple[int, list[str]]:
     score = 0
     tips = []
 
@@ -32,61 +38,100 @@ def _seo_score(name: str, description: str, short_desc: str,
     ulen = len(username) if username else 0
     if username:
         score += 8
-        if 5 <= ulen <= 20: score += 4
-        if not any(c.isdigit() for c in username): score += 3
+        if 5 <= ulen <= 20:
+            score += 4
+        if not any(c.isdigit() for c in username):
+            score += 3
         if ulen > 25:
-            tips.append(f"🔗 Username длинный ({ulen} симв.) — короткий запоминается лучше")
+            tips.append(
+                f"🔗 Username длинный ({ulen} симв.) — короткий запоминается лучше"
+            )
     else:
-        tips.append("🔗 Username не задан — он определяет вашу позицию в поиске Telegram по @имени")
+        tips.append(
+            "🔗 Username не задан — он определяет вашу позицию в поиске Telegram по @имени"
+        )
 
     # Name: 0–20 pts
     name_len = len(name) if name else 0
-    if name_len >= 3:   score += 8
-    if name_len >= 8:   score += 7
-    if name_len <= 30:  score += 5
+    if name_len >= 3:
+        score += 8
+    if name_len >= 8:
+        score += 7
+    if name_len <= 30:
+        score += 5
     if not name or name_len < 3:
         tips.append("📛 Имя слишком короткое — добавьте ключевые слова в название")
     elif name_len > 32:
-        tips.append("📛 Имя длиннее 32 симв. — Telegram обрежет его в результатах поиска")
+        tips.append(
+            "📛 Имя длиннее 32 симв. — Telegram обрежет его в результатах поиска"
+        )
 
     # Description: 0–30 pts
     desc_len = len(description) if description else 0
-    if desc_len >= 50:   score += 10
-    if desc_len >= 200:  score += 10
-    if desc_len >= 400:  score += 10
+    if desc_len >= 50:
+        score += 10
+    if desc_len >= 200:
+        score += 10
+    if desc_len >= 400:
+        score += 10
     if not description:
-        tips.append("📄 Описание пустое — это критично для SEO! Добавьте его в «✏️ Профиль»")
+        tips.append(
+            "📄 Описание пустое — это критично для SEO! Добавьте его в «✏️ Профиль»"
+        )
     elif desc_len < 150:
-        tips.append(f"📄 Описание короткое ({desc_len}/512 симв.) — добавьте функции и ключевые слова")
+        tips.append(
+            f"📄 Описание короткое ({desc_len}/512 симв.) — добавьте функции и ключевые слова"
+        )
     elif desc_len < 350:
-        tips.append(f"📄 Описание можно расширить ({desc_len}/512 симв.) — используйте всё пространство")
+        tips.append(
+            f"📄 Описание можно расширить ({desc_len}/512 симв.) — используйте всё пространство"
+        )
 
     # Short description: 0–15 pts
     short_len = len(short_desc) if short_desc else 0
-    if short_len >= 10:  score += 7
-    if short_len >= 50:  score += 8
+    if short_len >= 10:
+        score += 7
+    if short_len >= 50:
+        score += 8
     if not short_desc:
-        tips.append("📃 Краткое описание пустое — оно показывается в поиске! Добавьте CTA")
+        tips.append(
+            "📃 Краткое описание пустое — оно показывается в поиске! Добавьте CTA"
+        )
     elif short_len < 50:
-        tips.append(f"📃 Краткое описание мало ({short_len}/120 симв.) — добавьте призыв к действию")
+        tips.append(
+            f"📃 Краткое описание мало ({short_len}/120 симв.) — добавьте призыв к действию"
+        )
 
     # Commands: 0–15 pts
     cmd_count = len(commands)
-    if cmd_count >= 1:   score += 5
-    if cmd_count >= 3:   score += 5
-    if cmd_count >= 6:   score += 5
+    if cmd_count >= 1:
+        score += 5
+    if cmd_count >= 3:
+        score += 5
+    if cmd_count >= 6:
+        score += 5
     if cmd_count == 0:
-        tips.append("🤖 Нет команд — добавьте /help, /start и др. через раздел «🤖 Команды»")
+        tips.append(
+            "🤖 Нет команд — добавьте /help, /start и др. через раздел «🤖 Команды»"
+        )
     elif cmd_count < 3:
-        tips.append(f"🤖 Мало команд ({cmd_count}) — добавьте ещё, это повышает доверие к боту")
+        tips.append(
+            f"🤖 Мало команд ({cmd_count}) — добавьте ещё, это повышает доверие к боту"
+        )
 
     # Audience: 0–20 pts
-    if audience >= 10:     score += 5
-    if audience >= 100:    score += 5
-    if audience >= 1000:   score += 5
-    if audience >= 10000:  score += 5
+    if audience >= 10:
+        score += 5
+    if audience >= 100:
+        score += 5
+    if audience >= 1000:
+        score += 5
+    if audience >= 10000:
+        score += 5
     if audience < 100:
-        tips.append(f"👥 Аудитория мала ({audience} чел.) — растите базу через «🔗 Диплинки»")
+        tips.append(
+            f"👥 Аудитория мала ({audience} чел.) — растите базу через «🔗 Диплинки»"
+        )
     elif audience < 1000:
         tips.append(f"👥 Хороший старт! Цель: 1 000+ пользователей (сейчас {audience})")
 
@@ -106,14 +151,18 @@ def _score_bar(score: int) -> str:
 
 
 @router.callback_query(SeoCb.filter(F.action == "menu"))
-async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
-                       pool: asyncpg.Pool) -> None:
+async def cb_seo_menu(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("SEO и аналитика поиска", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
+            locked_text("SEO и аналитика поиска", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="analytics")
+            ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -125,18 +174,42 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
     label = f"@{bot_uname}" if bot_uname else (row.get("first_name") or "бот")
     uname_status = (
         f"🔗 Username: <b>@{html.escape(bot_uname)}</b> — ключевой сигнал для поиска"
-        if bot_uname else
-        "⚠️ <b>Username не задан</b> — задайте через @BotFather → /setusername"
+        if bot_uname
+        else "⚠️ <b>Username не задан</b> — задайте через @BotFather → /setusername"
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Анализ профиля",        callback_data=SeoCb(action="analyze",     bot_id=callback_data.bot_id))
-    kb.button(text="🔍 Превью в поиске",       callback_data=SeoCb(action="preview",     bot_id=callback_data.bot_id))
-    kb.button(text="📈 Динамика позиций",      callback_data=SeoCb(action="momentum",    bot_id=callback_data.bot_id))
-    kb.button(text="📊 Keyword Gap",           callback_data=SeoCb(action="content_gap", bot_id=callback_data.bot_id))
-    kb.button(text="🔗 Альтернативы username", callback_data=SeoCb(action="uname_alts",  bot_id=callback_data.bot_id))
-    kb.button(text="🔑 Ключевые слова",        callback_data=SeoCb(action="keywords",    bot_id=callback_data.bot_id))
-    kb.button(text="📖 Гайд SEO 2026",         callback_data=SeoCb(action="full_guide",  bot_id=callback_data.bot_id))
-    kb.button(text="✏️ Редактировать профиль", callback_data=EditCb(action="menu",       bot_id=callback_data.bot_id))
+    kb.button(
+        text="📊 Анализ профиля",
+        callback_data=SeoCb(action="analyze", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="🔍 Превью в поиске",
+        callback_data=SeoCb(action="preview", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="📈 Динамика позиций",
+        callback_data=SeoCb(action="momentum", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="📊 Keyword Gap",
+        callback_data=SeoCb(action="content_gap", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="🔗 Альтернативы username",
+        callback_data=SeoCb(action="uname_alts", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="🔑 Ключевые слова",
+        callback_data=SeoCb(action="keywords", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="📖 Гайд SEO 2026",
+        callback_data=SeoCb(action="full_guide", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="✏️ Редактировать профиль",
+        callback_data=EditCb(action="menu", bot_id=callback_data.bot_id),
+    )
     kb.adjust(1, 2, 2, 2, 1)
     await callback.message.edit_text(
         f"📈 <b>SEO — {label}</b>\n\n"
@@ -157,8 +230,12 @@ async def cb_seo_menu(callback: CallbackQuery, callback_data: SeoCb,
 
 
 @router.callback_query(SeoCb.filter(F.action == "analyze"))
-async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
-                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_seo_analyze(
+    callback: CallbackQuery,
+    callback_data: SeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -174,25 +251,42 @@ async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
         bot_api.get_my_commands(http, token),
         return_exceptions=True,
     )
-    if isinstance(name, Exception):        name = row.get("first_name", "")
-    if isinstance(description, Exception): description = ""
-    if isinstance(short_desc, Exception):  short_desc = ""
-    if isinstance(commands, Exception):    commands = []
+    if isinstance(name, Exception):
+        name = row.get("first_name", "")
+    if isinstance(description, Exception):
+        description = ""
+    if isinstance(short_desc, Exception):
+        short_desc = ""
+    if isinstance(commands, Exception):
+        commands = []
 
-    audience = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
-    ) or 0
+    audience = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+        )
+        or 0
+    )
 
     bot_username = row.get("username") or ""
-    score, tips = _seo_score(name, description, short_desc, commands or [], int(audience),
-                             username=bot_username)
+    score, tips = _seo_score(
+        name,
+        description,
+        short_desc,
+        commands or [],
+        int(audience),
+        username=bot_username,
+    )
     bar = _score_bar(score)
 
-    label = f"@{bot_username}" if bot_username else (row.get("first_name") or str(row["bot_id"]))
+    label = (
+        f"@{bot_username}"
+        if bot_username
+        else (row.get("first_name") or str(row["bot_id"]))
+    )
     uname_line = (
         f"  🔗 Username: <b>@{html.escape(bot_username)}</b> ✅ — индексируется в поиске"
-        if bot_username else
-        "  🔗 Username: <b>⚠️ не задан</b> — задайте через @BotFather → /setusername"
+        if bot_username
+        else "  🔗 Username: <b>⚠️ не задан</b> — задайте через @BotFather → /setusername"
     )
     lines = [
         f"📈 <b>SEO-скор профиля — {label}</b>\n",
@@ -217,27 +311,38 @@ async def cb_seo_analyze(callback: CallbackQuery, callback_data: SeoCb,
         lines.append("\n🔴 <b>Требует доработки.</b> Начните с описания бота.")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Редактировать профиль",
-              callback_data=EditCb(action="menu", bot_id=callback_data.bot_id))
-    kb.button(text="🔄 Обновить анализ",
-              callback_data=SeoCb(action="analyze", bot_id=callback_data.bot_id))
-    kb.button(text="◀️ Назад к SEO",
-              callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="✏️ Редактировать профиль",
+        callback_data=EditCb(action="menu", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="🔄 Обновить анализ",
+        callback_data=SeoCb(action="analyze", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="◀️ Назад к SEO",
+        callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id),
+    )
     kb.adjust(1)
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 @router.callback_query(SeoCb.filter(F.action == "keywords"))
-async def cb_seo_keywords(callback: CallbackQuery, callback_data: SeoCb,
-                           pool: asyncpg.Pool) -> None:
+async def cb_seo_keywords(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
 
     await callback.answer()
     keywords = await db.get_top_keywords(pool, callback_data.bot_id, limit=20)
     summary = await db.get_keyword_stats_summary(pool, callback_data.bot_id)
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id)
+    )
 
     if keywords:
         max_cnt = keywords[0]["count"]
@@ -247,9 +352,13 @@ async def cb_seo_keywords(callback: CallbackQuery, callback_data: SeoCb,
             bar = "▓" * bar_len + "░" * (8 - bar_len)
             lines.append(f"<code>{kw['keyword']:<14}</code>{bar} {kw['count']}")
         body = "\n".join(lines)
-        hint = "\n\n<i>💡 Добавьте популярные слова в описание бота — это улучшит SEO</i>"
+        hint = (
+            "\n\n<i>💡 Добавьте популярные слова в описание бота — это улучшит SEO</i>"
+        )
     else:
-        body = "Нет данных. Ключевые слова накапливаются по мере сообщений пользователей."
+        body = (
+            "Нет данных. Ключевые слова накапливаются по мере сообщений пользователей."
+        )
         hint = ""
 
     await callback.message.edit_text(
@@ -266,10 +375,13 @@ async def cb_seo_keywords(callback: CallbackQuery, callback_data: SeoCb,
 async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
     await callback.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Запустить анализ",
-              callback_data=SeoCb(action="analyze", bot_id=callback_data.bot_id))
-    kb.button(text="◀️ Назад",
-              callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="📊 Запустить анализ",
+        callback_data=SeoCb(action="analyze", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id)
+    )
     kb.adjust(1)
     await callback.message.edit_text(
         "💡 <b>SEO-советы для роста в поиске Telegram</b>\n\n"
@@ -304,62 +416,98 @@ async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
 # SEO OPTIMIZER — CHANNELS & GROUPS
 # ══════════════════════════════════════════════════════════════════
 
-def _chan_seo_score(title: str, about: str, username: str, members: int) -> tuple[int, list[str]]:
+
+def _chan_seo_score(
+    title: str, about: str, username: str, members: int
+) -> tuple[int, list[str]]:
     """Calculate SEO score 0-100 for a channel or group."""
     score = 0
     tips: list[str] = []
 
     # Title: 0-25 pts
     tlen = len(title) if title else 0
-    if tlen >= 5:    score += 8
-    if tlen >= 15:   score += 10
-    if tlen <= 35:   score += 7
+    if tlen >= 5:
+        score += 8
+    if tlen >= 15:
+        score += 10
+    if tlen <= 35:
+        score += 7
     if tlen < 5:
         tips.append("📛 Название слишком короткое — добавьте ключевые слова")
     elif tlen > 50:
-        tips.append("📛 Название слишком длинное (>50 симв.) — Telegram обрежет в поиске")
+        tips.append(
+            "📛 Название слишком длинное (>50 симв.) — Telegram обрежет в поиске"
+        )
     elif tlen < 15:
-        tips.append(f"📛 Название можно расширить ({tlen}/50 симв.) — добавьте тематику")
+        tips.append(
+            f"📛 Название можно расширить ({tlen}/50 симв.) — добавьте тематику"
+        )
 
     # About/description: 0-35 pts
     alen = len(about) if about else 0
-    if alen >= 30:    score += 10
-    if alen >= 150:   score += 12
-    if alen >= 300:   score += 13
+    if alen >= 30:
+        score += 10
+    if alen >= 150:
+        score += 12
+    if alen >= 300:
+        score += 13
     if not about:
-        tips.append("📄 Описание пустое — это критично! Добавьте описание с ключевыми словами")
+        tips.append(
+            "📄 Описание пустое — это критично! Добавьте описание с ключевыми словами"
+        )
     elif alen < 100:
-        tips.append(f"📄 Описание короткое ({alen}/255 симв.) — расширьте до 150+ символов")
+        tips.append(
+            f"📄 Описание короткое ({alen}/255 симв.) — расширьте до 150+ символов"
+        )
     elif alen < 200:
-        tips.append(f"📄 Описание можно улучшить ({alen}/255 симв.) — используйте всё пространство")
+        tips.append(
+            f"📄 Описание можно улучшить ({alen}/255 симв.) — используйте всё пространство"
+        )
 
     # Username: 0-20 pts
     if username:
         ulen = len(username)
         score += 10
-        if 5 <= ulen <= 20:  score += 5
-        if not any(c.isdigit() for c in username):  score += 5
+        if 5 <= ulen <= 20:
+            score += 5
+        if not any(c.isdigit() for c in username):
+            score += 5
         if ulen > 25:
-            tips.append(f"🔗 Username длинный ({ulen} симв.) — короткий username запоминается лучше")
+            tips.append(
+                f"🔗 Username длинный ({ulen} симв.) — короткий username запоминается лучше"
+            )
     else:
-        tips.append("🔗 Нет username — без него канал значительно хуже ранжируется в поиске")
+        tips.append(
+            "🔗 Нет username — без него канал значительно хуже ранжируется в поиске"
+        )
 
     # Members: 0-20 pts
-    if members >= 100:    score += 5
-    if members >= 1_000:  score += 5
-    if members >= 10_000: score += 5
-    if members >= 50_000: score += 5
+    if members >= 100:
+        score += 5
+    if members >= 1_000:
+        score += 5
+    if members >= 10_000:
+        score += 5
+    if members >= 50_000:
+        score += 5
     if members < 100:
-        tips.append(f"👥 Мало подписчиков ({members}) — используйте массовые инвайты и кросс-промо")
+        tips.append(
+            f"👥 Мало подписчиков ({members}) — используйте массовые инвайты и кросс-промо"
+        )
     elif members < 1_000:
-        tips.append(f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {members:,})")
+        tips.append(
+            f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {members:,})"
+        )
 
     return min(score, 100), tips
 
 
 def _generate_seo_fallback(
-    title: str, about: str, username: str,
-    keywords: list[str], preferred_username: str = "",
+    title: str,
+    about: str,
+    username: str,
+    keywords: list[str],
+    preferred_username: str = "",
 ) -> dict:
     """Rule-based SEO suggestion when AI is not available."""
     kw_list = [k for k in keywords[:6] if k]
@@ -369,7 +517,9 @@ def _generate_seo_fallback(
     # Title: suggest adding keyword if too short
     new_title = title or ""
     if kw_list and len(new_title) < 12:
-        candidate = f"{new_title} — {kw_list[0]}" if new_title else kw_list[0].capitalize()
+        candidate = (
+            f"{new_title} — {kw_list[0]}" if new_title else kw_list[0].capitalize()
+        )
         new_title = candidate[:50]
 
     # Description template
@@ -398,8 +548,11 @@ def _generate_seo_fallback(
 
 async def _ai_generate_seo(
     http: aiohttp.ClientSession,
-    title: str, about: str, username: str,
-    entity_type: str, keywords: list[str],
+    title: str,
+    about: str,
+    username: str,
+    entity_type: str,
+    keywords: list[str],
     user_feedback: str = "",
     preferred_username: str = "",
 ) -> dict | None:
@@ -410,6 +563,7 @@ async def _ai_generate_seo(
     """
     try:
         from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
+
         if not OPENROUTER_API_KEY:
             return None
     except ImportError:
@@ -424,10 +578,14 @@ async def _ai_generate_seo(
     actual_username = preferred_username or username
     if actual_username:
         username_rule = f'- username: MUST return exactly "{actual_username.lstrip("@")}" — do NOT change it'
-        about_rule = f'- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA'
+        about_rule = (
+            "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA"
+        )
     else:
         username_rule = '- username: return empty string "" — do NOT suggest a username, user will set it separately'
-        about_rule = "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA"
+        about_rule = (
+            "- about: 150-255 chars, include 3-5 keywords naturally, ends with CTA"
+        )
 
     feedback_section = ""
     if user_feedback:
@@ -482,6 +640,7 @@ async def _ai_generate_seo(
 
 # ── Channel/Group SEO menu ────────────────────────────────────────
 
+
 @router.callback_query(SeoCb.filter(F.action == "chan_menu"))
 async def cb_seo_chan_menu(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
@@ -489,39 +648,67 @@ async def cb_seo_chan_menu(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(
-            locked_text("SEO-оптимизация канала", "starter"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
+            locked_text("SEO-оптимизация канала", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="analytics")
+            ),
         )
         return
     chan_id = callback_data.chan_id
-    acc_id  = callback_data.acc_id
+    acc_id = callback_data.acc_id
 
     chan = await pool.fetchrow(
         "SELECT title, username, access_hash FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, callback.from_user.id,
+        chan_id,
+        callback.from_user.id,
     )
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
     await callback.answer()
 
-    name = f"@{chan['username']}" if chan.get("username") else html.escape(chan["title"] or "")
+    name = (
+        f"@{chan['username']}"
+        if chan.get("username")
+        else html.escape(chan["title"] or "")
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Анализ SEO-скора",      callback_data=SeoCb(action="chan_analyze",    chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔍 Превью в поиске",       callback_data=SeoCb(action="chan_preview",    chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🤖 AI-оптимизация",        callback_data=SeoCb(action="chan_ai",         chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📊 Keyword Gap",           callback_data=SeoCb(action="chan_content_gap",chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔗 Альтернативы username", callback_data=SeoCb(action="chan_uname_alts", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="✏️ Применить изменения",   callback_data=SeoCb(action="chan_apply",      chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📖 Гайд SEO 2026",         callback_data=SeoCb(action="full_guide",      bot_id=0))
-    kb.button(text="◀️ Назад",                 callback_data=ChanFactCb(action="menu"))
+    kb.button(
+        text="📊 Анализ SEO-скора",
+        callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔍 Превью в поиске",
+        callback_data=SeoCb(action="chan_preview", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🤖 AI-оптимизация",
+        callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📊 Keyword Gap",
+        callback_data=SeoCb(action="chan_content_gap", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔗 Альтернативы username",
+        callback_data=SeoCb(action="chan_uname_alts", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="✏️ Применить изменения",
+        callback_data=SeoCb(action="chan_apply", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📖 Гайд SEO 2026", callback_data=SeoCb(action="full_guide", bot_id=0)
+    )
+    kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1, 2, 2, 2, 1)
     has_username = bool(chan.get("username"))
     username_hint = (
         f"🔗 Username: <b>@{html.escape(chan['username'])}</b> — учитывается в поиске"
-        if has_username else
-        "⚠️ <b>Username не задан</b> — это снижает видимость в поиске Telegram"
+        if has_username
+        else "⚠️ <b>Username не задан</b> — это снижает видимость в поиске Telegram"
     )
     await callback.message.edit_text(
         f"📈 <b>SEO-оптимизация — {name}</b>\n\n"
@@ -540,17 +727,19 @@ async def cb_seo_chan_menu(
 
 # ── Channel SEO analysis ──────────────────────────────────────────
 
+
 @router.callback_query(SeoCb.filter(F.action == "chan_analyze"))
 async def cb_seo_chan_analyze(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     chan_id = callback_data.chan_id
-    acc_id  = callback_data.acc_id
+    acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
     chan = await pool.fetchrow(
         "SELECT id, title, username, access_hash, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, user_id,
+        chan_id,
+        user_id,
     )
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
@@ -566,15 +755,21 @@ async def cb_seo_chan_analyze(
     # Try to get full about from Telethon
     about = ""
     members = 0
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, user_id,
-    ) if acc_id else None
+    acc = (
+        await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+        if acc_id
+        else None
+    )
 
     if acc:
         try:
             from services import account_manager
+
             info = await account_manager.get_full_channel_info(
                 acc["session_str"], chan["channel_id"], _acc=acc
             )
@@ -592,15 +787,16 @@ async def cb_seo_chan_analyze(
     display = f"@{username}" if username else html.escape(title)
     uname_line = (
         f"  🔗 Username: <b>@{html.escape(username)}</b> ✅ — ключевой фактор поиска"
-        if username else
-        "  🔗 Username: <b>⚠️ не задан</b> — без него канал почти не виден в поиске"
+        if username
+        else "  🔗 Username: <b>⚠️ не задан</b> — без него канал почти не виден в поиске"
     )
     lines = [
         f"📊 <b>SEO-скор — {display}</b>\n",
         f"<b>{bar}</b>\n",
         "<b>Параметры (влияние на ранжирование):</b>",
         f"  📛 Название: <b>{html.escape(title)}</b>  ({len(title)}/50 симв.)",
-        f"  📄 Описание: {len(about)}/255 симв." + (" ✅" if len(about) >= 150 else " ⚠️ мало"),
+        f"  📄 Описание: {len(about)}/255 симв."
+        + (" ✅" if len(about) >= 150 else " ⚠️ мало"),
         uname_line,
         f"  👥 Подписчиков: {members:,}",
     ]
@@ -618,16 +814,32 @@ async def cb_seo_chan_analyze(
     elif score >= 50:
         lines.append("\n🟡 <b>Средний SEO.</b> Следуйте советам выше.")
     else:
-        lines.append("\n🔴 <b>Слабый SEO.</b> Приоритет: задать username + расширить описание.")
+        lines.append(
+            "\n🔴 <b>Слабый SEO.</b> Приоритет: задать username + расширить описание."
+        )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 AI-оптимизация",      callback_data=SeoCb(action="chan_ai",         chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📋 Экспорт как текст",   callback_data=SeoCb(action="chan_export_txt",  chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔄 Обновить анализ",     callback_data=SeoCb(action="chan_analyze",     chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",               callback_data=SeoCb(action="chan_menu",        chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="🤖 AI-оптимизация",
+        callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📋 Экспорт как текст",
+        callback_data=SeoCb(action="chan_export_txt", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔄 Обновить анализ",
+        callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     kb.adjust(2, 1, 1)
     try:
-        await progress_msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+        await progress_msg.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+        )
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             raise
@@ -635,44 +847,52 @@ async def cb_seo_chan_analyze(
 
 # ── Export SEO report as plain text ──────────────────────────────
 
+
 @router.callback_query(SeoCb.filter(F.action == "chan_export_txt"))
 async def cb_seo_chan_export_txt(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     """Send SEO analysis as a plain-text message for easy copy-paste."""
     chan_id = callback_data.chan_id
-    acc_id  = callback_data.acc_id
+    acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
     chan = await pool.fetchrow(
         "SELECT id, title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, user_id,
+        chan_id,
+        user_id,
     )
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
     await callback.answer("📋 Формирую отчёт...")
 
-    title    = chan["title"] or ""
+    title = chan["title"] or ""
     username = chan["username"] or ""
-    display  = f"@{username}" if username else title
+    display = f"@{username}" if username else title
 
-    about   = ""
+    about = ""
     members = 0
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, user_id,
-    ) if acc_id else None
+    acc = (
+        await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+        if acc_id
+        else None
+    )
 
     if acc:
         try:
             from services import account_manager
+
             info = await account_manager.get_full_channel_info(
                 acc["session_str"], chan["channel_id"], _acc=acc
             )
             if info:
-                about   = info.get("about", "") or ""
+                about = info.get("about", "") or ""
                 members = info.get("members_count", 0) or 0
         except Exception as e:
             log.debug("chan_export_txt get_full_channel_info: %s", e)
@@ -709,18 +929,23 @@ async def cb_seo_chan_export_txt(
 
 # ── AI SEO generation ─────────────────────────────────────────────
 
+
 @router.callback_query(SeoCb.filter(F.action == "chan_ai"))
 async def cb_seo_chan_ai(
-    callback: CallbackQuery, callback_data: SeoCb,
-    pool: asyncpg.Pool, http: aiohttp.ClientSession, state: FSMContext,
+    callback: CallbackQuery,
+    callback_data: SeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+    state: FSMContext,
 ) -> None:
     chan_id = callback_data.chan_id
-    acc_id  = callback_data.acc_id
+    acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
     chan = await pool.fetchrow(
         "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, user_id,
+        chan_id,
+        user_id,
     )
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
@@ -729,22 +954,30 @@ async def cb_seo_chan_ai(
 
     # Берём текущее описание через Telethon
     about = ""
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, user_id,
-    ) if acc_id else None
+    acc = (
+        await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+        if acc_id
+        else None
+    )
 
     if acc:
         try:
             from services import account_manager
+
             info = await account_manager.get_full_channel_info(
                 acc["session_str"], chan["channel_id"], _acc=acc
             )
             if info:
                 about = info.get("about", "")
         except Exception:
-            log_exc_swallow(log, "Не удалось получить about канала через get_full_channel_info")
+            log_exc_swallow(
+                log, "Не удалось получить about канала через get_full_channel_info"
+            )
 
     # Ключевые слова из поисковой памяти
     kw_rows = await pool.fetch(
@@ -755,8 +988,16 @@ async def cb_seo_chan_ai(
 
     # Получаем сохранённый фидбек и preferred_username из FSM (если это перегенерация)
     fsm_data = await state.get_data()
-    user_feedback = fsm_data.get("seo_feedback", "") if fsm_data.get("seo_chan_id") == chan_id else ""
-    preferred_username = fsm_data.get("seo_preferred_username", "") if fsm_data.get("seo_chan_id") == chan_id else ""
+    user_feedback = (
+        fsm_data.get("seo_feedback", "")
+        if fsm_data.get("seo_chan_id") == chan_id
+        else ""
+    )
+    preferred_username = (
+        fsm_data.get("seo_preferred_username", "")
+        if fsm_data.get("seo_chan_id") == chan_id
+        else ""
+    )
 
     result = await _ai_generate_seo(
         http,
@@ -779,10 +1020,10 @@ async def cb_seo_chan_ai(
             preferred_username=preferred_username,
         )
 
-    new_title    = result.get("title", "")
-    new_about    = result.get("about", "")
+    new_title = result.get("title", "")
+    new_about = result.get("about", "")
     new_username = result.get("username", "")  # Будет пустой если у канала нет username
-    reasoning    = result.get("reasoning", "")
+    reasoning = result.get("reasoning", "")
 
     # Сохраняем предложение в БД
     try:
@@ -791,10 +1032,16 @@ async def cb_seo_chan_ai(
                VALUES($1,$2,$3,$4,$5,now())
                ON CONFLICT(owner_id, chan_id) DO UPDATE
                SET title=$3, about=$4, username=$5, created_at=now()""",
-            user_id, chan_id, new_title, new_about, new_username,
+            user_id,
+            chan_id,
+            new_title,
+            new_about,
+            new_username,
         )
     except Exception:
-        log_exc_swallow(log, "Не удалось сохранить SEO-предложение в сессионном AI-анализе")
+        log_exc_swallow(
+            log, "Не удалось сохранить SEO-предложение в сессионном AI-анализе"
+        )
 
     # Сохраняем контекст в FSM для возможных правок
     await state.update_data(
@@ -817,27 +1064,51 @@ async def cb_seo_chan_ai(
     lines.append("\n✏️ <i>Напишите правки текстом — я учту их при перегенерации</i>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Применить всё",     callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📛 Только название",   callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📄 Только описание",   callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="✅ Применить всё",
+        callback_data=SeoCb(action="apply_all", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📛 Только название",
+        callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📄 Только описание",
+        callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id),
+    )
     if new_username:
-        kb.button(text="🔗 Только username",  callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔤 Задать username",   callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔄 Перегенерировать",  callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",             callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+        kb.button(
+            text="🔗 Только username",
+            callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id),
+        )
+    kb.button(
+        text="🔤 Задать username",
+        callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔄 Перегенерировать",
+        callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     if new_username:
         kb.adjust(1, 3, 2)
     else:
         kb.adjust(1, 2, 2)
 
     try:
-        await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+        )
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             raise
 
 
 # ── FSM: текстовый фидбек к AI-предложению ───────────────────────
+
 
 @router.message(SeoFSM.waiting_feedback)
 async def fsm_seo_feedback(
@@ -851,7 +1122,7 @@ async def fsm_seo_feedback(
 
     data = await state.get_data()
     chan_id = data.get("seo_chan_id")
-    acc_id  = data.get("seo_acc_id", 0)
+    acc_id = data.get("seo_acc_id", 0)
 
     if not chan_id:
         await state.clear()
@@ -864,32 +1135,46 @@ async def fsm_seo_feedback(
     await state.update_data(seo_feedback=combined_feedback)
 
     # Запускаем перегенерацию через callback simulation
-    thinking = await message.answer("🔄 <b>Обновляю SEO-предложение с учётом ваших правок...</b>", parse_mode="HTML")
+    thinking = await message.answer(
+        "🔄 <b>Обновляю SEO-предложение с учётом ваших правок...</b>", parse_mode="HTML"
+    )
 
     # Получаем данные канала
     chan = await pool.fetchrow(
         "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, message.from_user.id,
+        chan_id,
+        message.from_user.id,
     )
     if not chan:
         await thinking.edit_text("⚠️ Канал не найден. Откройте меню заново.")
         return
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, message.from_user.id,
-    ) if acc_id else None
+    acc = (
+        await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            message.from_user.id,
+        )
+        if acc_id
+        else None
+    )
 
     about = ""
     if acc:
         try:
             from services import account_manager
-            info = await account_manager.get_full_channel_info(acc["session_str"], chan["channel_id"], _acc=acc)
+
+            info = await account_manager.get_full_channel_info(
+                acc["session_str"], chan["channel_id"], _acc=acc
+            )
             if info:
                 about = info.get("about", "")
         except Exception:
-            log_exc_swallow(log, "Не удалось получить about канала через get_full_channel_info (обновление)")
+            log_exc_swallow(
+                log,
+                "Не удалось получить about канала через get_full_channel_info (обновление)",
+            )
 
     kw_rows = await pool.fetch(
         "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
@@ -918,10 +1203,10 @@ async def fsm_seo_feedback(
             preferred_username=preferred_username,
         )
 
-    new_title    = result.get("title", "")
-    new_about    = result.get("about", "")
+    new_title = result.get("title", "")
+    new_about = result.get("about", "")
     new_username = result.get("username", "")
-    reasoning    = result.get("reasoning", "")
+    reasoning = result.get("reasoning", "")
 
     try:
         await pool.execute(
@@ -929,7 +1214,11 @@ async def fsm_seo_feedback(
                VALUES($1,$2,$3,$4,$5,now())
                ON CONFLICT(owner_id, chan_id) DO UPDATE
                SET title=$3, about=$4, username=$5, created_at=now()""",
-            message.from_user.id, chan_id, new_title, new_about, new_username,
+            message.from_user.id,
+            chan_id,
+            new_title,
+            new_about,
+            new_username,
         )
     except Exception:
         log_exc_swallow(log, "Не удалось сохранить SEO-предложение в БД (обновление)")
@@ -948,32 +1237,70 @@ async def fsm_seo_feedback(
     lines.append("\n✏️ <i>Ещё правки? Напишите их текстом</i>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Применить всё",    callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📛 Только название",  callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📄 Только описание",  callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="✅ Применить всё",
+        callback_data=SeoCb(action="apply_all", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📛 Только название",
+        callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📄 Только описание",
+        callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id),
+    )
     if new_username:
-        kb.button(text="🔗 Только username", callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔤 Задать username",  callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔄 Перегенерировать", callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",            callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+        kb.button(
+            text="🔗 Только username",
+            callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id),
+        )
+    kb.button(
+        text="🔤 Задать username",
+        callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔄 Перегенерировать",
+        callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     kb.adjust(1, 2, 2)
 
-    await thinking.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await thinking.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ── Задать желаемый username ───────────────────────────────────────
+
 
 @router.callback_query(SeoCb.filter(F.action == "ask_username"))
 async def cb_seo_ask_username(
     callback: CallbackQuery, callback_data: SeoCb, state: FSMContext
 ) -> None:
     await callback.answer()
-    await state.update_data(seo_chan_id=callback_data.chan_id, seo_acc_id=callback_data.acc_id)
+    await state.update_data(
+        seo_chan_id=callback_data.chan_id, seo_acc_id=callback_data.acc_id
+    )
     await state.set_state(SeoFSM.waiting_username)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⏭ Пропустить", callback_data=SeoCb(action="chan_ai", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
-    kb.button(text="◀️ Назад", callback_data=SeoCb(action="chan_menu", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
+    kb.button(
+        text="⏭ Пропустить",
+        callback_data=SeoCb(
+            action="chan_ai", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id
+        ),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(
+            action="chan_menu",
+            chan_id=callback_data.chan_id,
+            acc_id=callback_data.acc_id,
+        ),
+    )
     kb.adjust(1)
     await callback.message.edit_text(
         "🔤 <b>Желаемый username для канала</b>\n\n"
@@ -994,8 +1321,9 @@ async def fsm_seo_username(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     import re
+
     uname = (message.text or "").strip().lstrip("@")
-    if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]{4,31}$', uname):
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", uname):
         await message.answer(
             "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:"
         )
@@ -1006,7 +1334,7 @@ async def fsm_seo_username(
     await state.set_state(SeoFSM.waiting_feedback)
 
     chan_id = data.get("seo_chan_id", 0)
-    acc_id  = data.get("seo_acc_id", 0)
+    acc_id = data.get("seo_acc_id", 0)
 
     await message.answer(
         f"✅ Username <code>@{html.escape(uname)}</code> запомнен.\n\n"
@@ -1017,26 +1345,38 @@ async def fsm_seo_username(
     # Имитируем нажатие кнопки "Перегенерировать"
     chan = await pool.fetchrow(
         "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, message.from_user.id,
+        chan_id,
+        message.from_user.id,
     )
     if not chan:
         await message.answer("⚠️ Канал не найден.")
         return
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, message.from_user.id,
-    ) if acc_id else None
+    acc = (
+        await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            message.from_user.id,
+        )
+        if acc_id
+        else None
+    )
     about = ""
     if acc:
         try:
             from services import account_manager
-            info = await account_manager.get_full_channel_info(acc["session_str"], chan["channel_id"], _acc=acc)
+
+            info = await account_manager.get_full_channel_info(
+                acc["session_str"], chan["channel_id"], _acc=acc
+            )
             if info:
                 about = info.get("about", "")
         except Exception:
-            log_exc_swallow(log, "Не удалось получить about канала через get_full_channel_info (по username)")
+            log_exc_swallow(
+                log,
+                "Не удалось получить about канала через get_full_channel_info (по username)",
+            )
 
     kw_rows = await pool.fetch(
         "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
@@ -1060,9 +1400,9 @@ async def fsm_seo_username(
         await message.answer("⚠️ AI недоступен. Проверьте OPENROUTER_API_KEY.")
         return
 
-    new_title    = result.get("title", "")
-    new_about    = result.get("about", "")
-    reasoning    = result.get("reasoning", "")
+    new_title = result.get("title", "")
+    new_about = result.get("about", "")
+    reasoning = result.get("reasoning", "")
 
     try:
         await pool.execute(
@@ -1070,7 +1410,11 @@ async def fsm_seo_username(
                VALUES($1,$2,$3,$4,$5,now())
                ON CONFLICT(owner_id, chan_id) DO UPDATE
                SET title=$3, about=$4, username=$5, created_at=now()""",
-            message.from_user.id, chan_id, new_title, new_about, uname,
+            message.from_user.id,
+            chan_id,
+            new_title,
+            new_about,
+            uname,
         )
     except Exception:
         log_exc_swallow(log, "Не удалось сохранить SEO-предложение в БД (по username)")
@@ -1086,26 +1430,51 @@ async def fsm_seo_username(
     lines.append("\n✏️ <i>Ещё правки? Напишите их текстом</i>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Применить всё",    callback_data=SeoCb(action="apply_all",   chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📛 Только название",  callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="📄 Только описание",  callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔗 Только username",  callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔤 Изменить username", callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="🔄 Перегенерировать", callback_data=SeoCb(action="chan_ai",     chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",            callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="✅ Применить всё",
+        callback_data=SeoCb(action="apply_all", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📛 Только название",
+        callback_data=SeoCb(action="apply_title", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="📄 Только описание",
+        callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔗 Только username",
+        callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔤 Изменить username",
+        callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="🔄 Перегенерировать",
+        callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     kb.adjust(1, 3, 2)
 
-    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await message.answer(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ── Apply optimizations ───────────────────────────────────────────
+
 
 async def _get_seo_suggestion(pool: asyncpg.Pool, user_id: int, chan_id: int) -> dict:
     """Retrieve last AI suggestion for a channel."""
     try:
         row = await pool.fetchrow(
             "SELECT title, about, username FROM seo_ai_suggestions WHERE owner_id=$1 AND chan_id=$2",
-            user_id, chan_id,
+            user_id,
+            chan_id,
         )
         return dict(row) if row else {}
     except Exception:
@@ -1113,38 +1482,55 @@ async def _get_seo_suggestion(pool: asyncpg.Pool, user_id: int, chan_id: int) ->
 
 
 async def _apply_chan_field(
-    pool: asyncpg.Pool, user_id: int, chan_id: int, acc_id: int,
-    field: str, value: str,
+    pool: asyncpg.Pool,
+    user_id: int,
+    chan_id: int,
+    acc_id: int,
+    field: str,
+    value: str,
 ) -> tuple[bool, str]:
     """Apply a single field change to channel via Telethon."""
     chan = await pool.fetchrow(
         "SELECT channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, user_id,
+        chan_id,
+        user_id,
     )
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, user_id,
-    ) if acc_id else None
+    acc = (
+        await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+        if acc_id
+        else None
+    )
 
     if not chan or not acc:
         return False, "Канал или аккаунт не найден"
 
     from services import account_manager
+
     tg_chan_id = chan["channel_id"]
 
     if field == "title":
-        ok = await account_manager.edit_channel_title(acc["session_str"], tg_chan_id, value, _acc=acc)
+        ok = await account_manager.edit_channel_title(
+            acc["session_str"], tg_chan_id, value, _acc=acc
+        )
         if ok:
             await pool.execute(
                 "UPDATE managed_channels SET title=$1 WHERE id=$2", value, chan_id
             )
         return ok, "" if ok else "Ошибка обновления названия"
     elif field == "about":
-        ok = await account_manager.edit_channel_about(acc["session_str"], tg_chan_id, value, _acc=acc)
+        ok = await account_manager.edit_channel_about(
+            acc["session_str"], tg_chan_id, value, _acc=acc
+        )
         return ok, "" if ok else "Ошибка обновления описания"
     elif field == "username":
-        err = await account_manager.set_channel_username(acc["session_str"], tg_chan_id, value, _acc=acc)
+        err = await account_manager.set_channel_username(
+            acc["session_str"], tg_chan_id, value, _acc=acc
+        )
         if not err:
             await pool.execute(
                 "UPDATE managed_channels SET username=$1 WHERE id=$2", value, chan_id
@@ -1153,27 +1539,45 @@ async def _apply_chan_field(
     return False, "Неизвестное поле"
 
 
-@router.callback_query(SeoCb.filter(F.action.in_({"apply_all", "apply_title", "apply_about", "apply_uname", "chan_apply"})))
+@router.callback_query(
+    SeoCb.filter(
+        F.action.in_(
+            {"apply_all", "apply_title", "apply_about", "apply_uname", "chan_apply"}
+        )
+    )
+)
 async def cb_seo_apply(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     chan_id = callback_data.chan_id
-    acc_id  = callback_data.acc_id
+    acc_id = callback_data.acc_id
     user_id = callback.from_user.id
-    action  = callback_data.action
+    action = callback_data.action
 
     if action == "chan_apply":
         await callback.answer()
         kb = InlineKeyboardBuilder()
-        kb.button(text="📛 Изменить название",  callback_data=SeoCb(action="edit_title", chan_id=chan_id, acc_id=acc_id))
-        kb.button(text="📄 Изменить описание",  callback_data=SeoCb(action="edit_about", chan_id=chan_id, acc_id=acc_id))
-        kb.button(text="🔗 Изменить username",  callback_data=SeoCb(action="edit_uname", chan_id=chan_id, acc_id=acc_id))
-        kb.button(text="◀️ Назад",              callback_data=SeoCb(action="chan_menu",  chan_id=chan_id, acc_id=acc_id))
+        kb.button(
+            text="📛 Изменить название",
+            callback_data=SeoCb(action="edit_title", chan_id=chan_id, acc_id=acc_id),
+        )
+        kb.button(
+            text="📄 Изменить описание",
+            callback_data=SeoCb(action="edit_about", chan_id=chan_id, acc_id=acc_id),
+        )
+        kb.button(
+            text="🔗 Изменить username",
+            callback_data=SeoCb(action="edit_uname", chan_id=chan_id, acc_id=acc_id),
+        )
+        kb.button(
+            text="◀️ Назад",
+            callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+        )
         kb.adjust(1)
         await callback.message.edit_text(
-            "✏️ <b>Применить SEO-изменения</b>\n\n"
-            "Выберите что изменить прямо сейчас:",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            "✏️ <b>Применить SEO-изменения</b>\n\nВыберите что изменить прямо сейчас:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
@@ -1185,25 +1589,39 @@ async def cb_seo_apply(
 
     results = []
     if action in ("apply_all", "apply_title") and suggestion.get("title"):
-        ok, err = await _apply_chan_field(pool, user_id, chan_id, acc_id, "title", suggestion["title"])
+        ok, err = await _apply_chan_field(
+            pool, user_id, chan_id, acc_id, "title", suggestion["title"]
+        )
         results.append(f"📛 Название: {'✅' if ok else '❌ ' + err}")
 
     if action in ("apply_all", "apply_about") and suggestion.get("about"):
-        ok, err = await _apply_chan_field(pool, user_id, chan_id, acc_id, "about", suggestion["about"])
+        ok, err = await _apply_chan_field(
+            pool, user_id, chan_id, acc_id, "about", suggestion["about"]
+        )
         results.append(f"📄 Описание: {'✅' if ok else '❌ ' + err}")
 
     if action in ("apply_all", "apply_uname") and suggestion.get("username"):
-        ok, err = await _apply_chan_field(pool, user_id, chan_id, acc_id, "username", suggestion["username"])
+        ok, err = await _apply_chan_field(
+            pool, user_id, chan_id, acc_id, "username", suggestion["username"]
+        )
         results.append(f"🔗 Username: {'✅' if ok else '❌ ' + err}")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Новый анализ", callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",        callback_data=SeoCb(action="chan_menu",   chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="📊 Новый анализ",
+        callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     kb.adjust(1)
     try:
         await callback.message.edit_text(
-            "<b>✏️ Результат применения SEO</b>\n\n" + "\n".join(results or ["Нечего применять."]),
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            "<b>✏️ Результат применения SEO</b>\n\n"
+            + "\n".join(results or ["Нечего применять."]),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
     except Exception as e:
         if "message is not modified" not in str(e).lower():
@@ -1213,13 +1631,24 @@ async def cb_seo_apply(
 # ── Ручное редактирование поля канала из SEO-меню ─────────────────────────
 
 _SEO_EDIT_PROMPTS = {
-    "edit_title": ("title",    "📛 <b>Введите новое название канала</b> (до 128 символов):"),
-    "edit_about": ("about",    "📄 <b>Введите новое описание канала</b> (до 255 символов):"),
-    "edit_uname": ("username", "🔗 <b>Введите новый username</b> (без @, 5–32 символа, a–z/0–9/_):"),
+    "edit_title": (
+        "title",
+        "📛 <b>Введите новое название канала</b> (до 128 символов):",
+    ),
+    "edit_about": (
+        "about",
+        "📄 <b>Введите новое описание канала</b> (до 255 символов):",
+    ),
+    "edit_uname": (
+        "username",
+        "🔗 <b>Введите новый username</b> (без @, 5–32 символа, a–z/0–9/_):",
+    ),
 }
 
 
-@router.callback_query(SeoCb.filter(F.action.in_({"edit_title", "edit_about", "edit_uname"})))
+@router.callback_query(
+    SeoCb.filter(F.action.in_({"edit_title", "edit_about", "edit_uname"}))
+)
 async def cb_seo_edit_field(
     callback: CallbackQuery, callback_data: SeoCb, state: FSMContext
 ) -> None:
@@ -1233,8 +1662,17 @@ async def cb_seo_edit_field(
     )
     await state.set_state(SeoFSM.waiting_edit_value)
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=SeoCb(action="chan_menu", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id))
-    await callback.message.edit_text(prompt, parse_mode="HTML", reply_markup=kb.as_markup())
+    kb.button(
+        text="❌ Отмена",
+        callback_data=SeoCb(
+            action="chan_menu",
+            chan_id=callback_data.chan_id,
+            acc_id=callback_data.acc_id,
+        ),
+    )
+    await callback.message.edit_text(
+        prompt, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.message(SeoFSM.waiting_edit_value)
@@ -1258,27 +1696,35 @@ async def fsm_seo_edit_value(
         value = value[:255]
     if field == "username":
         import re as _re
+
         value = value.lstrip("@")
-        if not _re.match(r'^[a-zA-Z][a-zA-Z0-9_]{4,31}$', value):
+        if not _re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", value):
             await message.answer(
                 "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:"
             )
             return
 
     await state.clear()
-    ok, err = await _apply_chan_field(pool, message.from_user.id, chan_id, acc_id, field, value)
+    ok, err = await _apply_chan_field(
+        pool, message.from_user.id, chan_id, acc_id, field, value
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ К каналу", callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="◀️ К каналу",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     if ok:
         await message.answer(
             f"✅ <b>Обновлено успешно!</b>\nНовое значение: <code>{value[:100]}</code>",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
     else:
         await message.answer(
             f"❌ <b>Ошибка обновления:</b> {err}",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
 
 
@@ -1291,19 +1737,16 @@ _FULL_GUIDE_PAGES = [
     (
         "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
         "<i>Страница 1/3 — Профиль</i>\n\n"
-
         "🥇 <b>USERNAME — фактор №1 (вес ~35%)</b>\n"
         "Telegram ищет точное совпадение @username первым. Если пользователь ищет «vpn bot» и ваш username содержит «vpn» — вы в топ-3. Без username вы <b>невидимы</b> в прямом поиске по @.\n"
         "• Оптимально: 8–16 символов, ключевое слово + тема\n"
         "• Без цифр в конце — они снижают доверие алгоритма\n"
         "• Смена username сбрасывает накопленный «search authority» на ~2 недели\n\n"
-
         "🥈 <b>НАЗВАНИЕ / ИМЯ — фактор №2 (вес ~25%)</b>\n"
         "Telegram индексирует имя для полнотекстового поиска. 2–3 ключевых слова в начале названия — оптимум. Длина 20–40 символов.\n"
         "• ✅ «PDF Конвертер — Все форматы» → 3 сигнала\n"
         "• ❌ «Bot Helper Pro» → 0 тематических сигналов\n"
         "• Emoji в начале названия визуально выделяет в списке, но не влияет на ранг\n\n"
-
         "🥉 <b>ОПИСАНИЕ — фактор №3 (вес ~20%)</b>\n"
         "Полнотекстовый индекс. Telegram читает первые 255 символов для snippet в поиске.\n"
         "• Первые 2 предложения = ваш «meta description»\n"
@@ -1315,24 +1758,20 @@ _FULL_GUIDE_PAGES = [
     (
         "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
         "<i>Страница 2/3 — Сигналы вовлечённости</i>\n\n"
-
         "📊 <b>АУДИТОРИЯ И РОСТ (вес ~10%)</b>\n"
         "Важен не размер, а скорость роста за последние 30 дней. Канал с 500 подписчиками и +50/нед обгоняет канал с 10k и -100/нед.\n"
         "• Join/Leave ratio: если >30% уходят за месяц — ranking penalty\n"
         "• Premium-подписчики в вашей аудитории = повышенный trust signal\n\n"
-
         "🔥 <b>АКТИВНОСТЬ И СВЕЖЕСТЬ (вес ~8%)</b>\n"
         "Telegram понижает каналы без публикаций 30+ дней.\n"
         "• Для ботов: рассылки раз в неделю поддерживают «freshness score»\n"
         "• Для каналов: 3–5 постов в неделю — оптимум по алгоритму 2026\n"
         "• Пиковое время публикации (18–21 МСК) даёт больший охват в первый час\n\n"
-
         "💬 <b>ENGAGEMENT SIGNALS (скрытые)</b>\n"
         "• Reaction rate: >2% просмотров = сильный сигнал качества\n"
         "• Forward depth: если пост пересылают в 3+ каналов — massive boost\n"
         "• CTR из поиска: Telegram видит кто нажал на результат и кто нет. Слабый CTR снижает позицию.\n"
         "• Time-in-bot: для ботов — чем дольше сессия, тем выше retention score\n\n"
-
         "🌐 <b>BACKLINKS TELEGRAM-STYLE</b>\n"
         "Telegram анализирует упоминания вашего @username в других публичных каналах.\n"
         "• Упоминание в канале с 10k+ подписчиков = «backlink высокого DA»\n"
@@ -1343,30 +1782,22 @@ _FULL_GUIDE_PAGES = [
     (
         "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
         "<i>Страница 3/3 — Продвинутые факторы</i>\n\n"
-
         "🔬 <b>ФАКТОРЫ, О КОТОРЫХ НЕ ГОВОРЯТ</b>\n\n"
-
         "🏷 <b>Языковая консистентность</b>\n"
         "Telegram определяет язык канала и показывает его носителям этого языка. Смешанный контент снижает языковой confidence — канал перестаёт приоритизироваться в обоих сегментах.\n\n"
-
         "🗺 <b>Геотаргетинг через username</b>\n"
-        "Пользователи ищут «доставка москва», «spb news», «dubai crypto». Username с geo-частью (\"_msk\", \"_spb\", \"dubai\") напрямую попадает в локальные запросы.\n\n"
-
+        'Пользователи ищут «доставка москва», «spb news», «dubai crypto». Username с geo-частью ("_msk", "_spb", "dubai") напрямую попадает в локальные запросы.\n\n'
         "⚡ <b>Fragment / TON эффект</b>\n"
         "Каналы с зарезервированным @username на Fragment.com получают дополнительный verification signal. Telegram проверяет право собственности.\n\n"
-
         "🤖 <b>Для ботов: Bot API quality score</b>\n"
         "Telegram внутренне оценивает ботов по паттернам API-запросов:\n"
         "• Быстрый ответ (&lt;2с) = качественный бот\n"
         "• Частые ошибки/таймауты = снижение видимости\n"
         "• Inline mode с хорошим CTR = отдельный позитивный сигнал\n\n"
-
         "📌 <b>Pinned message как SEO-элемент</b>\n"
         "В некоторых контекстах поиска Telegram показывает первое закреплённое сообщение как preview. Сделайте его keyword-rich.\n\n"
-
         "🔢 <b>Hashtag-индексирование</b>\n"
         "Посты с хэштегами индексируются отдельно. #тема → канал попадает в поиск по хэштегу. 1–3 тематических хэштега на пост — оптимум.\n\n"
-
         "⚠️ <b>Антипаттерны (штрафы):</b>\n"
         "• Keyword stuffing (>5 повторов слова) → мягкий фильтр\n"
         "• Накрутка подписчиков ботами → trust collapse\n"
@@ -1376,28 +1807,40 @@ _FULL_GUIDE_PAGES = [
 ]
 
 
-@router.callback_query(SeoCb.filter(F.action.in_({"full_guide", "full_guide_p2", "full_guide_p3"})))
+@router.callback_query(
+    SeoCb.filter(F.action.in_({"full_guide", "full_guide_p2", "full_guide_p3"}))
+)
 async def cb_seo_full_guide(callback: CallbackQuery, callback_data: SeoCb) -> None:
     await callback.answer()
     page_map = {"full_guide": 0, "full_guide_p2": 1, "full_guide_p3": 2}
     page = page_map.get(callback_data.action, 0)
     text = _FULL_GUIDE_PAGES[page]
     next_actions = ["full_guide_p2", "full_guide_p3", None]
-    next_labels  = ["▶️ Стр. 2: Вовлечённость →", "▶️ Стр. 3: Продвинутые факторы →", None]
+    next_labels = ["▶️ Стр. 2: Вовлечённость →", "▶️ Стр. 3: Продвинутые факторы →", None]
     bot_id = callback_data.bot_id
 
     kb = InlineKeyboardBuilder()
     if next_actions[page]:
-        kb.button(text=next_labels[page],
-                  callback_data=SeoCb(action=next_actions[page], bot_id=bot_id))
+        kb.button(
+            text=next_labels[page],
+            callback_data=SeoCb(action=next_actions[page], bot_id=bot_id),
+        )
     if page > 0:
         prev = ["full_guide", "full_guide", "full_guide_p2"][page]
-        kb.button(text=f"◀️ Стр. {page}", callback_data=SeoCb(action=prev, bot_id=bot_id))
-    kb.button(text="🏠 К SEO-меню",
-              callback_data=SeoCb(action="menu", bot_id=bot_id) if bot_id else SeoCb(action="chan_menu"))
+        kb.button(
+            text=f"◀️ Стр. {page}", callback_data=SeoCb(action=prev, bot_id=bot_id)
+        )
+    kb.button(
+        text="🏠 К SEO-меню",
+        callback_data=SeoCb(action="menu", bot_id=bot_id)
+        if bot_id
+        else SeoCb(action="chan_menu"),
+    )
     kb.adjust(1)
     try:
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
     except Exception as e:
         if "message is not modified" not in str(e).lower():
             raise
@@ -1407,9 +1850,14 @@ async def cb_seo_full_guide(callback: CallbackQuery, callback_data: SeoCb) -> No
 # ПОИСКОВЫЙ PREVIEW — как вы выглядите в поиске Telegram
 # ══════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(SeoCb.filter(F.action == "preview"))
-async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
-                          pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_seo_preview(
+    callback: CallbackQuery,
+    callback_data: SeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -1421,17 +1869,24 @@ async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
         bot_api.get_my_short_description(http, token),
         return_exceptions=True,
     )
-    if isinstance(name, Exception): name = row.get("first_name") or "Бот"
-    if isinstance(short_desc, Exception): short_desc = ""
+    if isinstance(name, Exception):
+        name = row.get("first_name") or "Бот"
+    if isinstance(short_desc, Exception):
+        short_desc = ""
 
     uname = row.get("username") or ""
-    audience = await pool.fetchval(
-        "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
-    ) or 0
+    audience = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+        )
+        or 0
+    )
 
     uname_line = f"@{uname}" if uname else "⚠️ username не задан"
     aud_str = f"{int(audience):,}" if int(audience) >= 1000 else str(int(audience))
-    short_preview = (short_desc[:72] + "…") if len(short_desc or "") > 72 else (short_desc or "")
+    short_preview = (
+        (short_desc[:72] + "…") if len(short_desc or "") > 72 else (short_desc or "")
+    )
 
     score, _ = _seo_score(name or "", "", short_desc or "", [], int(audience), uname)
     bar = _score_bar(score)
@@ -1454,7 +1909,9 @@ async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
     if not short_desc:
         issues.append("❌ Нет краткого описания — третья строка пустая")
     elif len(short_desc) < 40:
-        issues.append(f"⚠️ Краткое описание короткое ({len(short_desc)}/120) — добавьте ключевые слова")
+        issues.append(
+            f"⚠️ Краткое описание короткое ({len(short_desc)}/120) — добавьте ключевые слова"
+        )
     if not name or len(name) < 5:
         issues.append("❌ Короткое имя — добавьте тематические слова")
     if not issues:
@@ -1464,21 +1921,28 @@ async def cb_seo_preview(callback: CallbackQuery, callback_data: SeoCb,
         lines.append(f"  {i}")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Редактировать профиль",
-              callback_data=EditCb(action="menu", bot_id=callback_data.bot_id))
-    kb.button(text="◀️ Назад",
-              callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="✏️ Редактировать профиль",
+        callback_data=EditCb(action="menu", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=callback_data.bot_id)
+    )
     kb.adjust(1)
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(SeoCb.filter(F.action == "chan_preview"))
-async def cb_seo_chan_preview(callback: CallbackQuery, callback_data: SeoCb,
-                               pool: asyncpg.Pool) -> None:
+async def cb_seo_chan_preview(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
     chan_id = callback_data.chan_id
     chan = await pool.fetchrow(
         "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, callback.from_user.id,
+        chan_id,
+        callback.from_user.id,
     )
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
@@ -1507,21 +1971,33 @@ async def cb_seo_chan_preview(callback: CallbackQuery, callback_data: SeoCb,
             "и теряет ~35% потенциального поискового трафика."
         )
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 AI-оптимизация",
-              callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=callback_data.acc_id))
-    kb.button(text="◀️ Назад",
-              callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=callback_data.acc_id))
+    kb.button(
+        text="🤖 AI-оптимизация",
+        callback_data=SeoCb(
+            action="chan_ai", chan_id=chan_id, acc_id=callback_data.acc_id
+        ),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(
+            action="chan_menu", chan_id=chan_id, acc_id=callback_data.acc_id
+        ),
+    )
     kb.adjust(1)
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
 # MOMENTUM — динамика позиций по ключевым словам
 # ══════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(SeoCb.filter(F.action == "momentum"))
-async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
-                           pool: asyncpg.Pool) -> None:
+async def cb_seo_momentum(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
     bot_id = callback_data.bot_id
     row = await db.get_bot(pool, bot_id, callback.from_user.id)
     if not row:
@@ -1537,11 +2013,16 @@ async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
             "📈 <b>Нет данных о позициях</b>\n\n"
             "Добавьте ключевые слова в разделе /menu → 📊 Аналитика → 🔍 Ключевые слова. "
             "После первых проверок здесь появится динамика.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
-    label = f"@{row.get('username')}" if row.get("username") else row.get("first_name", str(bot_id))
+    label = (
+        f"@{row.get('username')}"
+        if row.get("username")
+        else row.get("first_name", str(bot_id))
+    )
     lines = [f"📈 <b>Динамика позиций — {label}</b>\n"]
     total_up = total_down = total_same = 0
 
@@ -1549,24 +2030,33 @@ async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
         history = await db.get_ranking_history(pool, kw["id"], limit=5)
         if not history or len(history) < 2:
             pos_now = history[0]["position"] if history else "—"
-            lines.append(f"  ⚪→ <code>{html.escape(kw['keyword'])[:18]:<18}</code> #{pos_now} (мало данных)")
+            lines.append(
+                f"  ⚪→ <code>{html.escape(kw['keyword'])[:18]:<18}</code> #{pos_now} (мало данных)"
+            )
             continue
-        pos_now  = history[0]["position"]
+        pos_now = history[0]["position"]
         pos_prev = history[-1]["position"]
         if pos_now is None:
             arrow, diff_str = "⚪", "нет данных"
         elif pos_prev is None:
             arrow, diff_str = "🆕", f"#{pos_now}"
         elif pos_now < pos_prev:
-            arrow, diff_str = "🟢↑", f"#{pos_now} (+{pos_prev - pos_now})"; total_up += 1
+            arrow, diff_str = "🟢↑", f"#{pos_now} (+{pos_prev - pos_now})"
+            total_up += 1
         elif pos_now > pos_prev:
-            arrow, diff_str = "🔴↓", f"#{pos_now} (-{pos_now - pos_prev})"; total_down += 1
+            arrow, diff_str = "🔴↓", f"#{pos_now} (-{pos_now - pos_prev})"
+            total_down += 1
         else:
-            arrow, diff_str = "⚪→", f"#{pos_now}"; total_same += 1
-        lines.append(f"  {arrow} <code>{html.escape(kw['keyword'])[:18]:<18}</code> {diff_str}")
+            arrow, diff_str = "⚪→", f"#{pos_now}"
+            total_same += 1
+        lines.append(
+            f"  {arrow} <code>{html.escape(kw['keyword'])[:18]:<18}</code> {diff_str}"
+        )
 
     if total_up or total_down or total_same:
-        lines.append(f"\n📊 🟢 Растут: {total_up} | 🔴 Падают: {total_down} | ⚪ Стабильны: {total_same}")
+        lines.append(
+            f"\n📊 🟢 Растут: {total_up} | 🔴 Падают: {total_down} | ⚪ Стабильны: {total_same}"
+        )
         if total_up > total_down:
             lines.append("💪 Хороший momentum! Оптимизация работает.")
         elif total_down > total_up:
@@ -1574,12 +2064,15 @@ async def cb_seo_momentum(callback: CallbackQuery, callback_data: SeoCb,
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
 # KEYWORD GAP — анализ покрытия ключевых слов в описании
 # ══════════════════════════════════════════════════════════════════
+
 
 def _keyword_coverage(text: str, keywords: list[str]) -> list[tuple[str, bool]]:
     text_lower = text.lower()
@@ -1587,8 +2080,12 @@ def _keyword_coverage(text: str, keywords: list[str]) -> list[tuple[str, bool]]:
 
 
 @router.callback_query(SeoCb.filter(F.action == "content_gap"))
-async def cb_seo_content_gap(callback: CallbackQuery, callback_data: SeoCb,
-                              pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+async def cb_seo_content_gap(
+    callback: CallbackQuery,
+    callback_data: SeoCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
     bot_id = callback_data.bot_id
     row = await db.get_bot(pool, bot_id, callback.from_user.id)
     if not row:
@@ -1602,29 +2099,41 @@ async def cb_seo_content_gap(callback: CallbackQuery, callback_data: SeoCb,
         bot_api.get_my_short_description(http, token),
         return_exceptions=True,
     )
-    if isinstance(name, Exception): name = row.get("first_name") or ""
-    if isinstance(description, Exception): description = ""
-    if isinstance(short_desc, Exception): short_desc = ""
+    if isinstance(name, Exception):
+        name = row.get("first_name") or ""
+    if isinstance(description, Exception):
+        description = ""
+    if isinstance(short_desc, Exception):
+        short_desc = ""
 
-    user_kws  = await db.get_top_keywords(pool, bot_id, limit=15)
-    tracked   = await db.get_tracked_keywords(pool, bot_id)
-    all_text  = f"{name} {description} {short_desc}"
-    combined  = list(dict.fromkeys([r["keyword"] for r in user_kws] + [r["keyword"] for r in tracked]))[:20]
+    user_kws = await db.get_top_keywords(pool, bot_id, limit=15)
+    tracked = await db.get_tracked_keywords(pool, bot_id)
+    all_text = f"{name} {description} {short_desc}"
+    combined = list(
+        dict.fromkeys(
+            [r["keyword"] for r in user_kws] + [r["keyword"] for r in tracked]
+        )
+    )[:20]
 
     if not combined:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
         await callback.message.edit_text(
             "📊 <b>Нет данных для анализа</b>\n\nНакопите ключевые слова пользователей или добавьте keywords в Visibility.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
     coverage = _keyword_coverage(all_text, combined)
-    found   = [kw for kw, ok in coverage if ok]
+    found = [kw for kw, ok in coverage if ok]
     missing = [kw for kw, ok in coverage if not ok]
     pct = round(len(found) / len(coverage) * 100) if coverage else 0
-    label = f"@{row.get('username')}" if row.get("username") else row.get("first_name", str(bot_id))
+    label = (
+        f"@{row.get('username')}"
+        if row.get("username")
+        else row.get("first_name", str(bot_id))
+    )
 
     lines = [
         f"📊 <b>Keyword Gap — {label}</b>\n",
@@ -1639,26 +2148,34 @@ async def cb_seo_content_gap(callback: CallbackQuery, callback_data: SeoCb,
         for kw in found[:6]:
             lines.append(f"  • <code>{html.escape(kw)}</code>")
     if missing:
-        lines.append("\n💡 Добавьте отсутствующие слова в описание → больший охват в поиске.")
+        lines.append(
+            "\n💡 Добавьте отсутствующие слова в описание → больший охват в поиске."
+        )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✏️ Редактировать профиль",
-              callback_data=EditCb(action="menu", bot_id=bot_id))
+    kb.button(
+        text="✏️ Редактировать профиль",
+        callback_data=EditCb(action="menu", bot_id=bot_id),
+    )
     kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(SeoCb.filter(F.action == "chan_content_gap"))
-async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
-                                   pool: asyncpg.Pool) -> None:
+async def cb_seo_chan_content_gap(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
     chan_id = callback_data.chan_id
-    acc_id  = callback_data.acc_id
+    acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
     chan = await pool.fetchrow(
         "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id, user_id,
+        chan_id,
+        user_id,
     )
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
@@ -1669,18 +2186,23 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
     if acc_id:
         acc = await pool.fetchrow(
             "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, user_id,
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
         )
         if acc:
             try:
                 from services import account_manager
+
                 info = await account_manager.get_full_channel_info(
                     acc["session_str"], chan["channel_id"], _acc=acc
                 )
                 if info:
                     about = info.get("about", "") or ""
             except Exception:
-                log_exc_swallow(log, "Не удалось получить about канала для анализа ключевых слов")
+                log_exc_swallow(
+                    log, "Не удалось получить about канала для анализа ключевых слов"
+                )
 
     all_text = f"{chan.get('title', '')} {chan.get('username', '')} {about}"
     tracked = await pool.fetch(
@@ -1691,20 +2213,27 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
 
     if not kw_list:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад",
-                  callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+        kb.button(
+            text="◀️ Назад",
+            callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+        )
         await callback.message.edit_text(
             "📊 <b>Нет ключевых слов для сравнения</b>\n\n"
             "Добавьте отслеживаемые ключевые слова через 📊 Аналитика → Ключевые слова.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
     coverage = _keyword_coverage(all_text, kw_list)
-    found   = [kw for kw, ok in coverage if ok]
+    found = [kw for kw, ok in coverage if ok]
     missing = [kw for kw, ok in coverage if not ok]
     pct = round(len(found) / len(coverage) * 100) if coverage else 0
-    name_d  = f"@{chan['username']}" if chan.get("username") else html.escape(chan.get("title", ""))
+    name_d = (
+        f"@{chan['username']}"
+        if chan.get("username")
+        else html.escape(chan.get("title", ""))
+    )
 
     lines = [
         f"📊 <b>Keyword Gap — {name_d}</b>\n",
@@ -1720,34 +2249,47 @@ async def cb_seo_chan_content_gap(callback: CallbackQuery, callback_data: SeoCb,
             lines.append(f"  • <code>{html.escape(kw)}</code>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 AI — добавить в описание",
-              callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id))
-    kb.button(text="◀️ Назад",
-              callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id))
+    kb.button(
+        text="🤖 AI — добавить в описание",
+        callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
     kb.adjust(1)
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
 # USERNAME ALTERNATIVES — предложения лучших username
 # ══════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(SeoCb.filter(F.action.in_({"uname_alts", "chan_uname_alts"})))
-async def cb_seo_uname_alts(callback: CallbackQuery, callback_data: SeoCb,
-                              pool: asyncpg.Pool) -> None:
+async def cb_seo_uname_alts(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
     is_chan = callback_data.action == "chan_uname_alts"
 
     if is_chan:
         chan = await pool.fetchrow(
             "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
-            callback_data.chan_id, callback.from_user.id,
+            callback_data.chan_id,
+            callback.from_user.id,
         )
         if not chan:
             await callback.answer("Не найдено.", show_alert=True)
             return
         current = chan.get("username") or ""
         base = current or chan.get("title") or "channel"
-        back_cb = SeoCb(action="chan_menu", chan_id=callback_data.chan_id, acc_id=callback_data.acc_id)
+        back_cb = SeoCb(
+            action="chan_menu",
+            chan_id=callback_data.chan_id,
+            acc_id=callback_data.acc_id,
+        )
     else:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
         if not row:
@@ -1759,6 +2301,7 @@ async def cb_seo_uname_alts(callback: CallbackQuery, callback_data: SeoCb,
     await callback.answer()
 
     from services.username_engine import generate_username_variants
+
     variants = generate_username_variants(base, geo=None)
     all_variants = [v for v in variants if v != current][:8]
 
@@ -1785,4 +2328,6 @@ async def cb_seo_uname_alts(callback: CallbackQuery, callback_data: SeoCb,
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=back_cb)
-    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )

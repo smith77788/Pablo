@@ -92,7 +92,9 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         for row in rows:
             cluster_name = row["cluster"]
             bot_count = row["bot_count"]
-            lines.append(f"🔗 <b>{_html.escape(cluster_name)}</b> — {bot_count} бот(ов)")
+            lines.append(
+                f"🔗 <b>{_html.escape(cluster_name)}</b> — {bot_count} бот(ов)"
+            )
             kb.button(
                 text=f"🔗 {cluster_name} ({bot_count})",
                 callback_data=ClustMCb(action="view", cluster_name=cluster_name),
@@ -251,7 +253,7 @@ async def cb_cluster_view(
 
     lines = [f"🔗 <b>Кластер: {_html.escape(cluster_name)}</b>\n"]
     kb = InlineKeyboardBuilder()
-    bot_count = len(rows)
+    len(rows)
 
     if not rows:
         lines.append(

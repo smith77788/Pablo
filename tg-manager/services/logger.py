@@ -29,14 +29,16 @@ import logging
 import time
 import traceback
 import uuid
-from collections.abc import Callable
-from contextlib import contextmanager
 from typing import Any, ClassVar
 
 # ── Correlation context ────────────────────────────────────────────
 
-_correlation_id: contextvars.ContextVar[str] = contextvars.ContextVar("correlation_id", default="")
-_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("user_id", default=None)
+_correlation_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "correlation_id", default=""
+)
+_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "user_id", default=None
+)
 _op_id: contextvars.ContextVar[str] = contextvars.ContextVar("op_id", default="")
 
 
@@ -74,15 +76,23 @@ def correlation_id() -> str:
 
 # ── JSON formatter ──────────────────────────────────────────────────
 
+
 class _StructuredFormatter(logging.Formatter):
     """JSON log formatter with extra field support.
 
     Set LOG_FORMAT=json via env to enable; defaults to human-readable text.
     """
 
-    _reserved: ClassVar[frozenset[str]] = frozenset({
-        "name", "levelname", "asctime", "message", "exc_info", "exc_text",
-    })
+    _reserved: ClassVar[frozenset[str]] = frozenset(
+        {
+            "name",
+            "levelname",
+            "asctime",
+            "message",
+            "exc_info",
+            "exc_text",
+        }
+    )
 
     def __init__(self, use_json: bool = False):
         super().__init__()
@@ -98,7 +108,9 @@ class _StructuredFormatter(logging.Formatter):
         ts = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
         cid = _correlation_id.get()
         cid_part = f"  cid={cid}" if cid else ""
-        return f"{ts} [{record.name}] {record.levelname}: {record.getMessage()}{cid_part}"
+        return (
+            f"{ts} [{record.name}] {record.levelname}: {record.getMessage()}{cid_part}"
+        )
 
     def _format_json(self, record: logging.LogRecord) -> str:
         base: dict[str, Any] = {
@@ -121,7 +133,8 @@ class _StructuredFormatter(logging.Formatter):
 
         # Merge extra fields from record.__dict__
         extra: dict[str, Any] = {
-            k: v for k, v in record.__dict__.items()
+            k: v
+            for k, v in record.__dict__.items()
             if k not in self._reserved and not k.startswith("_")
         }
         if extra:
@@ -147,6 +160,7 @@ def configure_root_logger(level: int = logging.INFO, use_json: bool = False) -> 
 
 # ── Logger factory ─────────────────────────────────────────────────
 
+
 def get_logger(name: str) -> logging.Logger:
     """Return a logger configured for structured logging.
 
@@ -156,6 +170,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 # ── Timing utilities ───────────────────────────────────────────────
+
 
 class _Timed:
     """Context manager / decorator for timing operations.
@@ -249,6 +264,7 @@ def timed(
 
 # ── Safe-log helpers ────────────────────────────────────────────────
 
+
 def log_exc_swallow(
     log: logging.Logger,
     msg: str,
@@ -266,7 +282,13 @@ def log_exc_swallow(
             log_exc_swallow(log, "Optional context message", account_id=acc_id)
     """
     try:
-        log.log(level, "%s  | swallowed: %s", msg, traceback.format_exc().strip().split("\n")[-1], extra=extra)
+        log.log(
+            level,
+            "%s  | swallowed: %s",
+            msg,
+            traceback.format_exc().strip().split("\n")[-1],
+            extra=extra,
+        )
     except Exception:
         log.debug("log_exc_swallow itself failed: %s", msg, exc_info=True)
 

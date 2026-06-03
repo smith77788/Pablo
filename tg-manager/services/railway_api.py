@@ -171,11 +171,15 @@ def is_configured() -> bool:
     return bool(_token() and _project_id())
 
 
-async def get_deployment(http: aiohttp.ClientSession, deployment_id: str) -> dict | None:
+async def get_deployment(
+    http: aiohttp.ClientSession, deployment_id: str
+) -> dict | None:
     """Get deployment details from Railway GraphQL API."""
     if not is_configured():
         return None
-    data = await _gql(http, """
+    data = await _gql(
+        http,
+        """
         query Deployment($id: String!) {
             deployment(id: $id) {
                 id
@@ -188,16 +192,22 @@ async def get_deployment(http: aiohttp.ClientSession, deployment_id: str) -> dic
                 project { name id }
             }
         }
-    """, {"id": deployment_id})
+    """,
+        {"id": deployment_id},
+    )
     return data.get("deployment")
 
 
-async def get_recent_deployments(http: aiohttp.ClientSession, limit: int = 5) -> list[dict]:
+async def get_recent_deployments(
+    http: aiohttp.ClientSession, limit: int = 5
+) -> list[dict]:
     """Get recent deployments for the project's environment."""
     if not is_configured():
         return []
     service_id, env_id = await _resolve_ids(http)
-    data = await _gql(http, """
+    data = await _gql(
+        http,
+        """
         query Deployments($projectId: String!, $environmentId: String!, $serviceId: String!, $first: Int!) {
             deployments(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, first: $first) {
                 edges {
@@ -213,5 +223,12 @@ async def get_recent_deployments(http: aiohttp.ClientSession, limit: int = 5) ->
                 }
             }
         }
-    """, {"projectId": _project_id(), "environmentId": env_id, "serviceId": service_id, "first": limit})
+    """,
+        {
+            "projectId": _project_id(),
+            "environmentId": env_id,
+            "serviceId": service_id,
+            "first": limit,
+        },
+    )
     return [e["node"] for e in data.get("deployments", {}).get("edges", [])]

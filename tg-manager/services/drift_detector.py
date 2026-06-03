@@ -5,6 +5,7 @@ title / username / about и записывает дрейф в restriction_event
 Также сравнивает обнаруженные изменения с asset templates владельца
 для определения: ожидаемый дрейф (по шаблону) или неожиданный.
 """
+
 import asyncio
 import json
 import logging
@@ -17,9 +18,9 @@ from services import account_manager
 
 log = logging.getLogger(__name__)
 
-_INTERVAL = 4 * 3600          # 4 часа между полными сканами
-_BATCH_SIZE = 10               # каналов за одну сессию аккаунта
-_PAUSE_BETWEEN = 3.0           # секунд между запросами к одному аккаунту
+_INTERVAL = 4 * 3600  # 4 часа между полными сканами
+_BATCH_SIZE = 10  # каналов за одну сессию аккаунта
+_PAUSE_BETWEEN = 3.0  # секунд между запросами к одному аккаунту
 
 
 async def run(pool: asyncpg.Pool, bot) -> None:
@@ -118,14 +119,16 @@ async def _compare_with_templates(
 
         if total > 0 and score > 0:
             match_ratio = score / total
-            matched.append({
-                "template_id": tpl["id"],
-                "template_name": tpl["name"],
-                "score": score,
-                "total": total,
-                "ratio": match_ratio,
-                "details": details,
-            })
+            matched.append(
+                {
+                    "template_id": tpl["id"],
+                    "template_name": tpl["name"],
+                    "score": score,
+                    "total": total,
+                    "ratio": match_ratio,
+                    "details": details,
+                }
+            )
 
     if matched:
         best = max(matched, key=lambda m: m["ratio"])
@@ -175,7 +178,11 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                     acc_dict["session_str"], ch["channel_id"], _acc=acc_dict
                 )
             except Exception as e:
-                log.warning("drift_detector get_full_channel_info error for channel %s: %s", ch["channel_id"], e)
+                log.warning(
+                    "drift_detector get_full_channel_info error for channel %s: %s",
+                    ch["channel_id"],
+                    e,
+                )
                 info = None
 
             # Always update last_drift_check
@@ -188,13 +195,13 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                 await asyncio.sleep(1.0)
                 continue
 
-            new_title    = (info.get("title") or "").strip()
+            new_title = (info.get("title") or "").strip()
             new_username = (info.get("username") or "").strip()
-            new_about    = (info.get("about") or "").strip()
+            new_about = (info.get("about") or "").strip()
 
-            old_title    = (ch["title"] or "").strip()
+            old_title = (ch["title"] or "").strip()
             old_username = (ch["username"] or "").strip()
-            old_about    = (ch["about"] or "").strip()
+            old_about = (ch["about"] or "").strip()
 
             changes: dict = {}
             if old_title and new_title and new_title != old_title:
@@ -210,7 +217,8 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
             if changes:
                 log.info(
                     "drift_detector: channel %d changed — %s",
-                    ch["channel_id"], list(changes),
+                    ch["channel_id"],
+                    list(changes),
                 )
 
                 # Compare with templates
@@ -227,23 +235,29 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                     "INSERT INTO restriction_events"
                     "(owner_id, event_type, severity, details) "
                     "VALUES ($1, 'drift_detected', $2, $3)",
-                    owner_id, severity,
-                    json.dumps({
-                        "channel_id": ch["channel_id"],
-                        "channel_title": old_title or new_title,
-                        "changes": changes,
-                        "template_verdict": verdict,
-                        "matched_templates": [
-                            {"name": m["template_name"], "ratio": m["ratio"]}
-                            for m in tpl_result["matched_templates"]
-                        ],
-                    }),
+                    owner_id,
+                    severity,
+                    json.dumps(
+                        {
+                            "channel_id": ch["channel_id"],
+                            "channel_title": old_title or new_title,
+                            "changes": changes,
+                            "template_verdict": verdict,
+                            "matched_templates": [
+                                {"name": m["template_name"], "ratio": m["ratio"]}
+                                for m in tpl_result["matched_templates"]
+                            ],
+                        }
+                    ),
                 )
                 # Update stored values
                 await pool.execute(
                     "UPDATE managed_channels "
                     "SET title=$2, username=$3, about=$4 WHERE id=$1",
-                    ch["id"], new_title or old_title, new_username or old_username, new_about,
+                    ch["id"],
+                    new_title or old_title,
+                    new_username or old_username,
+                    new_about,
                 )
                 # Notify owner
                 ch_name = old_title or new_title or f"#{ch['channel_id']}"
@@ -270,7 +284,9 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                     tpl_note = f"\n\n🟡 Частично совпадает с шаблонами: {tpl_names}"
                 elif verdict == "unexpected":
                     header = "🔴 <b>Неожиданный дрейф канала</b>"
-                    tpl_note = "\n\n🔴 Не соответствует ни одному шаблону — <i>проверьте!</i>"
+                    tpl_note = (
+                        "\n\n🔴 Не соответствует ни одному шаблону — <i>проверьте!</i>"
+                    )
                 else:
                     header = "⚠️ <b>Дрейф канала</b>"
                     tpl_note = ""
@@ -286,7 +302,8 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                 # First-time about capture — just store it silently
                 await pool.execute(
                     "UPDATE managed_channels SET about=$2 WHERE id=$1",
-                    ch["id"], new_about,
+                    ch["id"],
+                    new_about,
                 )
 
             await asyncio.sleep(_PAUSE_BETWEEN)

@@ -221,8 +221,16 @@ async def cb_export_xlsx(
     thin = Side(style="thin", color="D1D5DB")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    headers = ["user_id", "username", "first_name", "last_name", "language_code",
-               "first_seen", "last_seen", "is_active"]
+    headers = [
+        "user_id",
+        "username",
+        "first_name",
+        "last_name",
+        "language_code",
+        "first_seen",
+        "last_seen",
+        "is_active",
+    ]
     col_widths = [14, 22, 20, 20, 14, 22, 22, 12]
 
     for col_idx, (h, w) in enumerate(zip(headers, col_widths), start=1):
@@ -388,11 +396,15 @@ async def cb_send_user(
     callback: CallbackQuery, callback_data: AudCb, state: FSMContext
 ) -> None:
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
+
     await callback.answer()
     await state.set_state(SendToUser.waiting_user_id)
     await state.update_data(bot_id=callback_data.bot_id)
     kb = _Kb()
-    kb.button(text="❌ Отмена", callback_data=AudCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="❌ Отмена",
+        callback_data=AudCb(action="menu", bot_id=callback_data.bot_id),
+    )
     await callback.message.edit_text(
         "📤 <b>Написать пользователю</b>\n\n"
         "Введите Telegram User ID пользователя\n"
@@ -541,7 +553,9 @@ async def cb_block_user(
     u_label = f"@{_uname}" if _uname else (_full_name or str(user["user_id"]))
     action_text = "заблокирован" if blocked else "разблокирован"
     lang = user.get("language_code") or "—"
-    phone_line = f"\n📱 Телефон: <code>{user['phone']}</code>" if user.get("phone") else ""
+    phone_line = (
+        f"\n📱 Телефон: <code>{user['phone']}</code>" if user.get("phone") else ""
+    )
     await callback.message.edit_text(
         f"👤 <b>Пользователь {u_label}</b>\n"
         f"ID: <code>{user['user_id']}</code>\n"

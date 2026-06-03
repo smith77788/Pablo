@@ -233,7 +233,9 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
                     parse_mode="HTML",
                 )
             except Exception:
-                log_exc_swallow(log, "Сбой уведомления реферера о платеже", referrer_id=referrer_id)
+                log_exc_swallow(
+                    log, "Сбой уведомления реферера о платеже", referrer_id=referrer_id
+                )
     except Exception as e:
         log.warning("Referral paid hook error: %s", e)
 
@@ -260,7 +262,9 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
             parse_mode="HTML",
         )
     except Exception:
-        log_exc_swallow(log, "Сбой уведомления пользователя о платеже", user_id=payment["user_id"])
+        log_exc_swallow(
+            log, "Сбой уведомления пользователя о платеже", user_id=payment["user_id"]
+        )
 
 
 async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> None:

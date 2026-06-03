@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-from typing import Optional
 
 import asyncpg
 
@@ -30,11 +29,13 @@ _snooze_until: dict[int, float] = {}
 
 def snooze_ecosystem_alerts(owner_id: int, hours: float) -> None:
     import time
+
     _snooze_until[owner_id] = time.time() + hours * 3600
 
 
 def is_snoozed(owner_id: int) -> bool:
     import time
+
     exp = _snooze_until.get(owner_id, 0.0)
     if exp and time.time() < exp:
         return True
@@ -43,6 +44,7 @@ def is_snoozed(owner_id: int) -> bool:
 
 
 # ── Alert formatting ──────────────────────────────────────────────────────────
+
 
 def _format_ecosystem_alert(alerts: list[dict]) -> str:
     lines = ["🌐 <b>Ecosystem Copilot: проблемы экосистем</b>\n"]
@@ -58,9 +60,10 @@ def _format_ecosystem_alert(alerts: list[dict]) -> str:
 def _snooze_markup():
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import EcoCb
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="😴 1ч",  callback_data=EcoCb(action="eco_snooze", page=1))
-    kb.button(text="😴 6ч",  callback_data=EcoCb(action="eco_snooze", page=6))
+    kb.button(text="😴 1ч", callback_data=EcoCb(action="eco_snooze", page=1))
+    kb.button(text="😴 6ч", callback_data=EcoCb(action="eco_snooze", page=6))
     kb.button(text="😴 24ч", callback_data=EcoCb(action="eco_snooze", page=24))
     kb.button(text="🌐 Экосистемы", callback_data=EcoCb(action="menu"))
     kb.adjust(3, 1)
@@ -68,6 +71,7 @@ def _snooze_markup():
 
 
 # ── Main analysis ─────────────────────────────────────────────────────────────
+
 
 async def _analyze_owner(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     """Анализирует все экосистемы owner_id. Возвращает список критических проблем."""
@@ -86,28 +90,38 @@ async def _analyze_owner(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
                 # Critical health degradation
                 if health.overall < 0.35:
-                    alerts.append({
-                        "name": name,
-                        "issue": f"Критическое ухудшение здоровья: {health.overall:.0%}",
-                        "suggestion": "Проверьте аккаунты и прокси экосистемы",
-                    })
+                    alerts.append(
+                        {
+                            "name": name,
+                            "issue": f"Критическое ухудшение здоровья: {health.overall:.0%}",
+                            "suggestion": "Проверьте аккаунты и прокси экосистемы",
+                        }
+                    )
 
                 # High pressure
                 elif pressure.score >= 80:
-                    alerts.append({
-                        "name": name,
-                        "issue": f"Критическое давление: {pressure.score}/100",
-                        "suggestion": "Остановите часть операций или добавьте аккаунты",
-                    })
+                    alerts.append(
+                        {
+                            "name": name,
+                            "issue": f"Критическое давление: {pressure.score}/100",
+                            "suggestion": "Остановите часть операций или добавьте аккаунты",
+                        }
+                    )
 
                 # Critical risk
                 elif risk.level == "critical":
-                    reason = risk.reasons[0] if risk.reasons else "Множественные факторы риска"
-                    alerts.append({
-                        "name": name,
-                        "issue": f"Критический риск: {reason}",
-                        "suggestion": "Откройте экосистему → Риски для деталей",
-                    })
+                    reason = (
+                        risk.reasons[0]
+                        if risk.reasons
+                        else "Множественные факторы риска"
+                    )
+                    alerts.append(
+                        {
+                            "name": name,
+                            "issue": f"Критический риск: {reason}",
+                            "suggestion": "Откройте экосистему → Риски для деталей",
+                        }
+                    )
 
                 await asyncio.sleep(0.1)
             except Exception as e:
@@ -120,6 +134,7 @@ async def _analyze_owner(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
 
 # ── Background loop ───────────────────────────────────────────────────────────
+
 
 async def run_ecosystem_copilot_loop(pool: asyncpg.Pool, bot) -> None:
     """Фоновый цикл: каждые 60 минут анализирует все экосистемы."""
@@ -146,7 +161,10 @@ async def run_ecosystem_copilot_loop(pool: asyncpg.Pool, bot) -> None:
                         report = _format_ecosystem_alert(alerts)
                         markup = _snooze_markup()
                         await _db.notify_if_enabled(
-                            pool, bot, owner_id, "restriction",
+                            pool,
+                            bot,
+                            owner_id,
+                            "restriction",
                             report,
                             reply_markup=markup,
                         )

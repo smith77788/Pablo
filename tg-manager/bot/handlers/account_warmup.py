@@ -56,10 +56,15 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     active_sessions = sessions[0]["c"] if sessions else 0
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🎯 Новая сессия прогрева", callback_data=WarmupCb(action="new_session"))
+    kb.button(
+        text="🎯 Новая сессия прогрева", callback_data=WarmupCb(action="new_session")
+    )
     kb.button(text="📋 Активные сессии", callback_data=WarmupCb(action="session_list"))
     kb.button(text="📡 Активность ресурсов", callback_data=ResourceActCb(action="menu"))
-    kb.button(text="🔧 Одиночный план (1 аккаунт)", callback_data=WarmupCb(action="create_list"))
+    kb.button(
+        text="🔧 Одиночный план (1 аккаунт)",
+        callback_data=WarmupCb(action="create_list"),
+    )
     kb.button(text="📊 Активные планы", callback_data=WarmupCb(action="active_plans"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
     kb.adjust(1)
@@ -179,7 +184,9 @@ async def cb_warmup_select_plan(
 
 
 @router.callback_query(WarmupCb.filter(F.action == "select_all_plan"))
-async def cb_warmup_select_all_plan(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_warmup_select_all_plan(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
 
     count = await pool.fetchval(
@@ -299,7 +306,10 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
     if not plans:
         empty_kb = InlineKeyboardBuilder()
-        empty_kb.button(text="➕ Создать план разогрева", callback_data=WarmupCb(action="create_list"))
+        empty_kb.button(
+            text="➕ Создать план разогрева",
+            callback_data=WarmupCb(action="create_list"),
+        )
         empty_kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
         empty_kb.adjust(1)
         await callback.message.edit_text(
@@ -329,7 +339,9 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         # Next session: last_action_at + 24h (warmup runs every ~24h)
         last_run = plan.get("last_action_at")
         if last_run:
-            last_run_aware = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+            last_run_aware = (
+                last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+            )
             next_run = last_run_aware + timedelta(hours=24)
             if next_run > now_utc:
                 diff = next_run - now_utc
@@ -364,11 +376,15 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         # Кнопки: Лог + Запустить сейчас + Остановить
         kb.button(
             text=f"📋 Лог {label[:10]}",
-            callback_data=WarmupCb(action="plan_log", plan_id=plan["id"], account_id=plan["account_id"]),
+            callback_data=WarmupCb(
+                action="plan_log", plan_id=plan["id"], account_id=plan["account_id"]
+            ),
         )
         kb.button(
             text=f"▶️ Запуск {label[:10]}",
-            callback_data=WarmupCb(action="run_one", plan_id=plan["id"], account_id=plan["account_id"]),
+            callback_data=WarmupCb(
+                action="run_one", plan_id=plan["id"], account_id=plan["account_id"]
+            ),
         )
         kb.button(
             text=f"🗑 Удалить {label[:10]}",
@@ -426,14 +442,18 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
     async def _run_all():
         for plan in plans:
-            label = plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
+            label = (
+                plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
+            )
             try:
                 await run_daily_warmup(pool, plan)
             except Exception as exc:
                 log.warning("warmup run_all error acc=%s: %s", label, exc)
 
     task = asyncio.create_task(_run_all())
-    task_registry.register(user_id, "warmup", f"Разогрев всех аккаунтов ({len(plans)})", task)
+    task_registry.register(
+        user_id, "warmup", f"Разогрев всех аккаунтов ({len(plans)})", task
+    )
 
     await callback.message.edit_text(
         f"🌡 <b>Разогрев запущен в фоне</b>\n\n"
@@ -482,7 +502,10 @@ async def cb_warmup_run_one(
     task_registry.register(user_id, "warmup", f"Разогрев: {label}", task)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Лог разогрева", callback_data=WarmupCb(action="plan_log", plan_id=plan_id, account_id=acc_id))
+    kb.button(
+        text="📋 Лог разогрева",
+        callback_data=WarmupCb(action="plan_log", plan_id=plan_id, account_id=acc_id),
+    )
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="active_plans"))
     kb.adjust(1)
 
@@ -499,24 +522,24 @@ async def cb_warmup_run_one(
 # ── Warmup plan action log ─────────────────────────────────────────────────────
 
 _ACTION_LABELS = {
-    "read_channel":    "📖 Читал канал",
-    "join_channel":    "🔔 Вступил в канал",
-    "send_reaction":   "❤️ Поставил реакцию",
-    "search":          "🔍 Поиск по слову",
-    "view_profile":    "👁 Смотрел профиль",
-    "open_chat":       "💬 Открыл чат",
-    "dm_bot":          "🤖 Написал боту /start",
-    "mark_read":       "✅ Отметил прочитанным",
+    "read_channel": "📖 Читал канал",
+    "join_channel": "🔔 Вступил в канал",
+    "send_reaction": "❤️ Поставил реакцию",
+    "search": "🔍 Поиск по слову",
+    "view_profile": "👁 Смотрел профиль",
+    "open_chat": "💬 Открыл чат",
+    "dm_bot": "🤖 Написал боту /start",
+    "mark_read": "✅ Отметил прочитанным",
     "update_presence": "🟢 Онлайн-присутствие",
-    "browse_dialogs":  "📱 Проверил диалоги",
-    "forward_to_saved":"📌 Сохранил пост",
-    "vote_poll":       "📊 Проголосовал в опросе",
-    "send_comment":    "💬 Оставил комментарий",
-    "own_channel_read":"📡 Читал свой канал",
+    "browse_dialogs": "📱 Проверил диалоги",
+    "forward_to_saved": "📌 Сохранил пост",
+    "vote_poll": "📊 Проголосовал в опросе",
+    "send_comment": "💬 Оставил комментарий",
+    "own_channel_read": "📡 Читал свой канал",
     "smart_bot_start": "🤖 /start своему боту",
-    "smart_bot_help":  "🤖 /help своему боту",
-    "own_bot_start":   "🤖 Запустил своего бота",
-    "read_messages":   "📨 Читал сообщения",
+    "smart_bot_help": "🤖 /help своему боту",
+    "own_bot_start": "🤖 Запустил своего бота",
+    "read_messages": "📨 Читал сообщения",
 }
 
 
@@ -565,9 +588,12 @@ async def cb_warmup_plan_log(
     else:
         # Group by day
         from collections import defaultdict
+
         by_day: dict[str, list] = defaultdict(list)
         for r in rows:
-            day_key = r["performed_at"].strftime("%d.%m") if r.get("performed_at") else "?"
+            day_key = (
+                r["performed_at"].strftime("%d.%m") if r.get("performed_at") else "?"
+            )
             by_day[day_key].append(r)
 
         for day_key, actions in list(by_day.items())[:5]:
@@ -608,9 +634,17 @@ async def cb_warmup_plan_log(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SESSION_PLAN_CONFIG = {
-    "gentle":     {"days": 21, "daily": 5,  "label": "🌱 Gentle (21 дн, 5 действий/день)"},
-    "standard":   {"days": 14, "daily": 10, "label": "🌿 Standard (14 дн, 10 действий/день)"},
-    "aggressive": {"days": 7,  "daily": 20, "label": "🔥 Aggressive (7 дн, 20 действий/день)"},
+    "gentle": {"days": 21, "daily": 5, "label": "🌱 Gentle (21 дн, 5 действий/день)"},
+    "standard": {
+        "days": 14,
+        "daily": 10,
+        "label": "🌿 Standard (14 дн, 10 действий/день)",
+    },
+    "aggressive": {
+        "days": 7,
+        "daily": 20,
+        "label": "🔥 Aggressive (7 дн, 20 действий/день)",
+    },
 }
 
 
@@ -668,9 +702,14 @@ async def cb_wu_new_session(
     await _show_account_picker(callback, state, pool)
 
 
-@router.callback_query(WarmupCb.filter(F.action == "tog_acc"), WarmupSessionFSM.choosing_accounts)
+@router.callback_query(
+    WarmupCb.filter(F.action == "tog_acc"), WarmupSessionFSM.choosing_accounts
+)
 async def cb_wu_toggle_acc(
-    callback: CallbackQuery, callback_data: WarmupCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: WarmupCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -684,10 +723,10 @@ async def cb_wu_toggle_acc(
     await _show_account_picker(callback, state, pool)
 
 
-@router.callback_query(WarmupCb.filter(F.action == "accs_done"), WarmupSessionFSM.choosing_accounts)
-async def cb_wu_accs_done(
-    callback: CallbackQuery, state: FSMContext
-) -> None:
+@router.callback_query(
+    WarmupCb.filter(F.action == "accs_done"), WarmupSessionFSM.choosing_accounts
+)
+async def cb_wu_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     data = await state.get_data()
     if not data.get("sel_acc_ids"):
@@ -696,7 +735,9 @@ async def cb_wu_accs_done(
     await state.set_state(WarmupSessionFSM.choosing_target_type)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏗️ Из моей инфраструктуры", callback_data=WarmupCb(action="tgt_infra"))
+    kb.button(
+        text="🏗️ Из моей инфраструктуры", callback_data=WarmupCb(action="tgt_infra")
+    )
     kb.button(text="📝 По username/ссылке", callback_data=WarmupCb(action="tgt_manual"))
     kb.button(text="📋 Списком (несколько)", callback_data=WarmupCb(action="tgt_list"))
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="new_session"))
@@ -790,9 +831,14 @@ async def cb_wu_tgt_infra(
     await _show_infra_picker(callback, state, pool)
 
 
-@router.callback_query(WarmupCb.filter(F.action == "tog_tgt"), WarmupSessionFSM.picking_infra)
+@router.callback_query(
+    WarmupCb.filter(F.action == "tog_tgt"), WarmupSessionFSM.picking_infra
+)
 async def cb_wu_toggle_tgt(
-    callback: CallbackQuery, callback_data: WarmupCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: WarmupCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -809,7 +855,9 @@ async def cb_wu_toggle_tgt(
     await _show_infra_picker(callback, state, pool)
 
 
-@router.callback_query(WarmupCb.filter(F.action == "tgts_done"), WarmupSessionFSM.picking_infra)
+@router.callback_query(
+    WarmupCb.filter(F.action == "tgts_done"), WarmupSessionFSM.picking_infra
+)
 async def cb_wu_infra_done(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -852,13 +900,19 @@ async def cb_wu_tgt_manual(
 @router.message(WarmupSessionFSM.entering_targets)
 async def fsm_wu_targets_text(message: Message, state: FSMContext) -> None:
     import re
+
     raw = (message.text or "").strip()
     if not raw:
         await message.answer("⚠️ Введите хотя бы один username или ссылку.")
         return
 
     parts = re.split(r"[\s,;]+", raw)
-    refs = [p.strip() for p in parts if p.strip() and (p.startswith("@") or p.startswith("http") or p.startswith("+"))]
+    refs = [
+        p.strip()
+        for p in parts
+        if p.strip()
+        and (p.startswith("@") or p.startswith("http") or p.startswith("+"))
+    ]
     if not refs:
         refs = [p.strip() for p in parts if p.strip()]
 
@@ -871,7 +925,7 @@ async def fsm_wu_targets_text(message: Message, state: FSMContext) -> None:
 
     refs_preview = "\n".join(f"  • <code>{html.escape(r)}</code>" for r in refs[:10])
     if len(refs) > 10:
-        refs_preview += f"\n  <i>...и ещё {len(refs)-10}</i>"
+        refs_preview += f"\n  <i>...и ещё {len(refs) - 10}</i>"
 
     await message.answer(
         f"📋 <b>Найдено целей: {len(refs)}</b>\n\n{refs_preview}\n\nПодтвердить?",
@@ -908,11 +962,16 @@ async def _show_mode_picker(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(
-    WarmupCb.filter(F.action.in_({"sess_mode_gentle", "sess_mode_standard", "sess_mode_aggressive"})),
+    WarmupCb.filter(
+        F.action.in_({"sess_mode_gentle", "sess_mode_standard", "sess_mode_aggressive"})
+    ),
     WarmupSessionFSM.choosing_mode,
 )
 async def cb_wu_mode(
-    callback: CallbackQuery, callback_data: WarmupCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: WarmupCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     plan_type = callback_data.action.replace("sess_mode_", "")
@@ -933,10 +992,10 @@ async def cb_wu_mode(
 
     tgt_preview = "\n".join(f"  • <code>{html.escape(r)}</code>" for r in tgt_refs[:5])
     if len(tgt_refs) > 5:
-        tgt_preview += f"\n  <i>...и ещё {len(tgt_refs)-5}</i>"
+        tgt_preview += f"\n  <i>...и ещё {len(tgt_refs) - 5}</i>"
     acc_preview = ", ".join(acc_labels[:5])
     if len(acc_labels) > 5:
-        acc_preview += f" и ещё {len(acc_labels)-5}"
+        acc_preview += f" и ещё {len(acc_labels) - 5}"
 
     kb = InlineKeyboardBuilder()
     kb.button(text="▶️ Запустить сессию", callback_data=WarmupCb(action="sess_start"))
@@ -957,7 +1016,9 @@ async def cb_wu_mode(
     )
 
 
-@router.callback_query(WarmupCb.filter(F.action == "sess_start"), WarmupSessionFSM.confirming)
+@router.callback_query(
+    WarmupCb.filter(F.action == "sess_start"), WarmupSessionFSM.confirming
+)
 async def cb_wu_sess_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -987,7 +1048,10 @@ async def cb_wu_sess_start(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Все сессии", callback_data=WarmupCb(action="session_list"))
-    kb.button(text="▶️ Запустить сейчас", callback_data=WarmupCb(action="sess_run", session_id=session_id))
+    kb.button(
+        text="▶️ Запустить сейчас",
+        callback_data=WarmupCb(action="sess_run", session_id=session_id),
+    )
     kb.button(text="◀️ В меню прогрева", callback_data=WarmupCb(action="menu"))
     kb.adjust(1)
 
@@ -1048,7 +1112,9 @@ async def cb_wu_session_list(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
         last_run = s["last_run_at"]
         if last_run:
-            last_run_aware = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+            last_run_aware = (
+                last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
+            )
             next_run = last_run_aware + timedelta(hours=24)
             if next_run > now_utc:
                 diff = next_run - now_utc
@@ -1094,7 +1160,8 @@ async def cb_wu_sess_detail(
 
     s = await pool.fetchrow(
         "SELECT * FROM warmup_sessions WHERE id=$1 AND owner_id=$2",
-        sess_id, callback.from_user.id,
+        sess_id,
+        callback.from_user.id,
     )
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
@@ -1136,11 +1203,23 @@ async def cb_wu_sess_detail(
 
     kb = InlineKeyboardBuilder()
     if s["status"] == "active":
-        kb.button(text="▶️ Запустить сейчас", callback_data=WarmupCb(action="sess_run", session_id=sess_id))
-        kb.button(text="⏸ Пауза", callback_data=WarmupCb(action="sess_pause", session_id=sess_id))
+        kb.button(
+            text="▶️ Запустить сейчас",
+            callback_data=WarmupCb(action="sess_run", session_id=sess_id),
+        )
+        kb.button(
+            text="⏸ Пауза",
+            callback_data=WarmupCb(action="sess_pause", session_id=sess_id),
+        )
     else:
-        kb.button(text="▶️ Возобновить", callback_data=WarmupCb(action="sess_resume", session_id=sess_id))
-    kb.button(text="🗑 Удалить", callback_data=WarmupCb(action="sess_delete", session_id=sess_id))
+        kb.button(
+            text="▶️ Возобновить",
+            callback_data=WarmupCb(action="sess_resume", session_id=sess_id),
+        )
+    kb.button(
+        text="🗑 Удалить",
+        callback_data=WarmupCb(action="sess_delete", session_id=sess_id),
+    )
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="session_list"))
     kb.adjust(2)
 
@@ -1161,7 +1240,8 @@ async def cb_wu_sess_run(
     sess_id = callback_data.session_id
     s = await pool.fetchrow(
         "SELECT * FROM warmup_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
-        sess_id, callback.from_user.id,
+        sess_id,
+        callback.from_user.id,
     )
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
@@ -1169,12 +1249,17 @@ async def cb_wu_sess_run(
 
     task = asyncio.create_task(run_warmup_session(pool, dict(s)))
     task_registry.register(
-        callback.from_user.id, "warmup_session",
-        f"Прогрев сессии #{sess_id} ({s['plan_type']})", task,
+        callback.from_user.id,
+        "warmup_session",
+        f"Прогрев сессии #{sess_id} ({s['plan_type']})",
+        task,
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Детали сессии", callback_data=WarmupCb(action="sess_detail", session_id=sess_id))
+    kb.button(
+        text="📊 Детали сессии",
+        callback_data=WarmupCb(action="sess_detail", session_id=sess_id),
+    )
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="session_list"))
     kb.adjust(1)
 
@@ -1194,7 +1279,8 @@ async def cb_wu_sess_pause(
     sess_id = callback_data.session_id
     await pool.execute(
         "UPDATE warmup_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
-        sess_id, callback.from_user.id,
+        sess_id,
+        callback.from_user.id,
     )
     await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
 
@@ -1207,7 +1293,8 @@ async def cb_wu_sess_resume(
     sess_id = callback_data.session_id
     await pool.execute(
         "UPDATE warmup_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
-        sess_id, callback.from_user.id,
+        sess_id,
+        callback.from_user.id,
     )
     await callback.answer("▶️ Сессия возобновлена", show_alert=True)
 
@@ -1220,7 +1307,8 @@ async def cb_wu_sess_delete(
     sess_id = callback_data.session_id
     await pool.execute(
         "DELETE FROM warmup_sessions WHERE id=$1 AND owner_id=$2",
-        sess_id, callback.from_user.id,
+        sess_id,
+        callback.from_user.id,
     )
     await callback.message.edit_text(
         "🗑 <b>Сессия удалена</b>",
@@ -1236,16 +1324,20 @@ async def cb_wu_sess_delete(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RACT_PROFILE_LABELS = {
-    "reader":    "📖 Reader — чтение и просмотр (низкий риск)",
+    "reader": "📖 Reader — чтение и просмотр (низкий риск)",
     "commenter": "💬 Commenter — акцент на комментарии",
-    "reactor":   "❤️ Reactor — акцент на реакции",
-    "mixed":     "🔀 Mixed — все типы действий",
+    "reactor": "❤️ Reactor — акцент на реакции",
+    "mixed": "🔀 Mixed — все типы действий",
 }
 
 _RACT_CONFIG = {
-    "short":    {"days": 7,  "daily": 6,  "label": "⚡ Короткий (7 дней, 6 действий/день)"},
-    "standard": {"days": 14, "daily": 8,  "label": "🌿 Стандарт (14 дней, 8 действий/день)"},
-    "long":     {"days": 30, "daily": 5,  "label": "🌱 Долгий (30 дней, 5 действий/день)"},
+    "short": {"days": 7, "daily": 6, "label": "⚡ Короткий (7 дней, 6 действий/день)"},
+    "standard": {
+        "days": 14,
+        "daily": 8,
+        "label": "🌿 Стандарт (14 дней, 8 действий/день)",
+    },
+    "long": {"days": 30, "daily": 5, "label": "🌱 Долгий (30 дней, 5 действий/день)"},
 }
 
 
@@ -1260,27 +1352,35 @@ async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
     try:
-        active_count = await pool.fetchval(
-            "SELECT COUNT(*) FROM resource_activity_sessions WHERE owner_id=$1 AND status='active'",
-            uid,
-        ) or 0
+        active_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM resource_activity_sessions WHERE owner_id=$1 AND status='active'",
+                uid,
+            )
+            or 0
+        )
     except Exception:
         active_count = 0
 
     try:
-        resources = await pool.fetchval(
-            """SELECT COUNT(*) FROM (
+        resources = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM (
                SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1
                UNION ALL
                SELECT DISTINCT bot_id FROM managed_bots WHERE added_by=$1 AND is_active=TRUE
                ) x""",
-            uid,
-        ) or 0
+                uid,
+            )
+            or 0
+        )
     except Exception:
         resources = 0
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Новая сессия активности", callback_data=ResourceActCb(action="new"))
+    kb.button(
+        text="➕ Новая сессия активности", callback_data=ResourceActCb(action="new")
+    )
     kb.button(text="📋 Мои сессии", callback_data=ResourceActCb(action="list"))
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="menu"))
     kb.adjust(1)
@@ -1355,9 +1455,14 @@ async def cb_ract_new(
     await _show_ract_account_picker(callback, state, pool)
 
 
-@router.callback_query(ResourceActCb.filter(F.action == "tog_acc"), ResourceActivityFSM.choosing_accounts)
+@router.callback_query(
+    ResourceActCb.filter(F.action == "tog_acc"), ResourceActivityFSM.choosing_accounts
+)
 async def cb_ract_toggle_acc(
-    callback: CallbackQuery, callback_data: ResourceActCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: ResourceActCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -1371,10 +1476,10 @@ async def cb_ract_toggle_acc(
     await _show_ract_account_picker(callback, state, pool)
 
 
-@router.callback_query(ResourceActCb.filter(F.action == "accs_done"), ResourceActivityFSM.choosing_accounts)
-async def cb_ract_accs_done(
-    callback: CallbackQuery, state: FSMContext
-) -> None:
+@router.callback_query(
+    ResourceActCb.filter(F.action == "accs_done"), ResourceActivityFSM.choosing_accounts
+)
+async def cb_ract_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     data = await state.get_data()
     if not data.get("ract_acc_ids"):
@@ -1384,7 +1489,10 @@ async def cb_ract_accs_done(
 
     kb = InlineKeyboardBuilder()
     for profile_key, profile_label in _RACT_PROFILE_LABELS.items():
-        kb.button(text=profile_label, callback_data=ResourceActCb(action=f"profile_{profile_key}"))
+        kb.button(
+            text=profile_label,
+            callback_data=ResourceActCb(action=f"profile_{profile_key}"),
+        )
     kb.button(text="❌ Отмена", callback_data=ResourceActCb(action="menu"))
     kb.adjust(1)
 
@@ -1403,11 +1511,18 @@ async def cb_ract_accs_done(
 
 
 @router.callback_query(
-    ResourceActCb.filter(F.action.in_({"profile_reader", "profile_commenter", "profile_reactor", "profile_mixed"})),
+    ResourceActCb.filter(
+        F.action.in_(
+            {"profile_reader", "profile_commenter", "profile_reactor", "profile_mixed"}
+        )
+    ),
     ResourceActivityFSM.choosing_profile,
 )
 async def cb_ract_profile(
-    callback: CallbackQuery, callback_data: ResourceActCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: ResourceActCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     profile = callback_data.action.replace("profile_", "")
@@ -1423,7 +1538,9 @@ async def cb_ract_profile(
            FROM managed_channels WHERE owner_id=$1 LIMIT 5""",
         callback.from_user.id,
     )
-    res_preview = "\n".join(f"  • <code>{html.escape(str(r['label']))}</code>" for r in resources)
+    res_preview = "\n".join(
+        f"  • <code>{html.escape(str(r['label']))}</code>" for r in resources
+    )
     if not res_preview:
         res_preview = "  <i>Ресурсы из инфраструктуры (авто)</i>"
 
@@ -1433,14 +1550,16 @@ async def cb_ract_profile(
     )
     acc_preview = ", ".join(html.escape(str(r["label"])) for r in acc_rows[:4])
     if len(acc_rows) > 4:
-        acc_preview += f" и ещё {len(acc_rows)-4}"
+        acc_preview += f" и ещё {len(acc_rows) - 4}"
 
     profile_label = _RACT_PROFILE_LABELS.get(profile, profile)
     cfg = _RACT_CONFIG["standard"]
 
     kb = InlineKeyboardBuilder()
     kb.button(text="▶️ Запустить", callback_data=ResourceActCb(action="start"))
-    kb.button(text="◀️ Изменить профиль", callback_data=ResourceActCb(action="accs_done"))
+    kb.button(
+        text="◀️ Изменить профиль", callback_data=ResourceActCb(action="accs_done")
+    )
     kb.button(text="❌ Отмена", callback_data=ResourceActCb(action="menu"))
     kb.adjust(1)
 
@@ -1457,7 +1576,9 @@ async def cb_ract_profile(
     )
 
 
-@router.callback_query(ResourceActCb.filter(F.action == "start"), ResourceActivityFSM.confirming)
+@router.callback_query(
+    ResourceActCb.filter(F.action == "start"), ResourceActivityFSM.confirming
+)
 async def cb_ract_start(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -1484,7 +1605,10 @@ async def cb_ract_start(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Мои сессии", callback_data=ResourceActCb(action="list"))
-    kb.button(text="▶️ Запустить сейчас", callback_data=ResourceActCb(action="run", session_id=sess_id))
+    kb.button(
+        text="▶️ Запустить сейчас",
+        callback_data=ResourceActCb(action="run", session_id=sess_id),
+    )
     kb.button(text="◀️ В меню", callback_data=ResourceActCb(action="menu"))
     kb.adjust(1)
 
@@ -1533,12 +1657,14 @@ async def cb_ract_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     for s in sessions:
         n_acc = len(s["account_ids"] or [])
-        day   = s["current_day"] or 0
-        days  = max(s["target_days"] or 1, 1)
-        pct   = round(day / days * 100)
-        bar   = "▓" * (pct // 10) + "░" * (10 - pct // 10)
-        icon  = "🟢" if s["status"] == "active" else "⏸"
-        profile_label = _RACT_PROFILE_LABELS.get(s["profile_type"], s["profile_type"]).split(" — ")[0]
+        day = s["current_day"] or 0
+        days = max(s["target_days"] or 1, 1)
+        pct = round(day / days * 100)
+        bar = "▓" * (pct // 10) + "░" * (10 - pct // 10)
+        icon = "🟢" if s["status"] == "active" else "⏸"
+        profile_label = _RACT_PROFILE_LABELS.get(
+            s["profile_type"], s["profile_type"]
+        ).split(" — ")[0]
 
         last = s["last_run_at"]
         if last:
@@ -1583,7 +1709,8 @@ async def cb_ract_detail(
 
     s = await pool.fetchrow(
         "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
-        sess_id, uid,
+        sess_id,
+        uid,
     )
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
@@ -1597,9 +1724,9 @@ async def cb_ract_detail(
         sess_id,
     )
 
-    day  = s["current_day"] or 0
+    day = s["current_day"] or 0
     days = s["target_days"] or 1
-    ok   = sum(1 for l in logs if l["success"])
+    ok = sum(1 for l in logs if l["success"])
     fail = len(logs) - ok
     profile_label = _RACT_PROFILE_LABELS.get(s["profile_type"], s["profile_type"])
 
@@ -1612,6 +1739,7 @@ async def cb_ract_detail(
 
     if logs:
         from services.activity_engine import _ACTION_LABELS as _AELABELS
+
         lines.append(f"<b>Последние действия</b> (✅{ok} ❌{fail}):")
         for l in logs[:10]:
             act_label = _AELABELS.get(l["action_type"], l["action_type"])
@@ -1624,11 +1752,23 @@ async def cb_ract_detail(
 
     kb = InlineKeyboardBuilder()
     if s["status"] == "active":
-        kb.button(text="▶️ Запустить сейчас", callback_data=ResourceActCb(action="run", session_id=sess_id))
-        kb.button(text="⏸ Пауза", callback_data=ResourceActCb(action="pause", session_id=sess_id))
+        kb.button(
+            text="▶️ Запустить сейчас",
+            callback_data=ResourceActCb(action="run", session_id=sess_id),
+        )
+        kb.button(
+            text="⏸ Пауза",
+            callback_data=ResourceActCb(action="pause", session_id=sess_id),
+        )
     else:
-        kb.button(text="▶️ Возобновить", callback_data=ResourceActCb(action="resume", session_id=sess_id))
-    kb.button(text="🗑 Удалить", callback_data=ResourceActCb(action="delete", session_id=sess_id))
+        kb.button(
+            text="▶️ Возобновить",
+            callback_data=ResourceActCb(action="resume", session_id=sess_id),
+        )
+    kb.button(
+        text="🗑 Удалить",
+        callback_data=ResourceActCb(action="delete", session_id=sess_id),
+    )
     kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="list"))
     kb.adjust(2)
 
@@ -1650,7 +1790,8 @@ async def cb_ract_run(
     uid = callback.from_user.id
     s = await pool.fetchrow(
         "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
-        sess_id, uid,
+        sess_id,
+        uid,
     )
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
@@ -1658,12 +1799,17 @@ async def cb_ract_run(
 
     task = asyncio.create_task(run_resource_activity_session(pool, dict(s)))
     task_registry.register(
-        uid, "resource_activity",
-        f"Активность ресурсов #{sess_id} ({s['profile_type']})", task,
+        uid,
+        "resource_activity",
+        f"Активность ресурсов #{sess_id} ({s['profile_type']})",
+        task,
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Детали", callback_data=ResourceActCb(action="detail", session_id=sess_id))
+    kb.button(
+        text="📊 Детали",
+        callback_data=ResourceActCb(action="detail", session_id=sess_id),
+    )
     kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="list"))
     kb.adjust(1)
 
@@ -1681,7 +1827,8 @@ async def cb_ract_pause(
 ) -> None:
     await pool.execute(
         "UPDATE resource_activity_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
-        callback_data.session_id, callback.from_user.id,
+        callback_data.session_id,
+        callback.from_user.id,
     )
     await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
 
@@ -1692,7 +1839,8 @@ async def cb_ract_resume(
 ) -> None:
     await pool.execute(
         "UPDATE resource_activity_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
-        callback_data.session_id, callback.from_user.id,
+        callback_data.session_id,
+        callback.from_user.id,
     )
     await callback.answer("▶️ Сессия возобновлена", show_alert=True)
 
@@ -1704,7 +1852,8 @@ async def cb_ract_delete(
     await callback.answer()
     await pool.execute(
         "DELETE FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
-        callback_data.session_id, callback.from_user.id,
+        callback_data.session_id,
+        callback.from_user.id,
     )
     await callback.message.edit_text(
         "🗑 <b>Сессия удалена</b>",

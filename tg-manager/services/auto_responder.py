@@ -1,4 +1,5 @@
 """Background auto-reply polling service."""
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -23,18 +24,23 @@ def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str
     username = from_user.get("username", "") or ""
     first_name = from_user.get("first_name", "") or ""
     last_name = from_user.get("last_name", "") or ""
-    bot_name = (bot_row.get("username") or bot_row.get("first_name") or "") if bot_row else ""
+    bot_name = (
+        (bot_row.get("username") or bot_row.get("first_name") or "") if bot_row else ""
+    )
     now = datetime.now()
-    return replace_placeholders(text, {
-        "USERNAME": f"@{username}" if username else first_name,
-        "FIRST_NAME": first_name,
-        "LAST_NAME": last_name,
-        "FULL_NAME": f"{first_name} {last_name}".strip(),
-        "BOT_NAME": bot_name,
-        "DATE": now.strftime("%d.%m.%Y"),
-        "DATE_SHORT": now.strftime("%d.%m"),
-        "TIME": now.strftime("%H:%M"),
-    })
+    return replace_placeholders(
+        text,
+        {
+            "USERNAME": f"@{username}" if username else first_name,
+            "FIRST_NAME": first_name,
+            "LAST_NAME": last_name,
+            "FULL_NAME": f"{first_name} {last_name}".strip(),
+            "BOT_NAME": bot_name,
+            "DATE": now.strftime("%d.%m.%Y"),
+            "DATE_SHORT": now.strftime("%d.%m"),
+            "TIME": now.strftime("%H:%M"),
+        },
+    )
 
 
 def _match_rule(rule: dict, text: str) -> bool:
@@ -50,8 +56,9 @@ def _match_rule(rule: dict, text: str) -> bool:
     return False
 
 
-async def _init_offset(pool: asyncpg.Pool, http: aiohttp.ClientSession,
-                       bot_id: int, token: str) -> int:
+async def _init_offset(
+    pool: asyncpg.Pool, http: aiohttp.ClientSession, bot_id: int, token: str
+) -> int:
     """On first run: skip all pending updates, store current max_id as start point."""
     data = await bot_api._call(http, token, "getUpdates", offset=-1, limit=1, timeout=0)
     updates = data.get("result", []) if data.get("ok") else []
@@ -63,16 +70,21 @@ async def _init_offset(pool: asyncpg.Pool, http: aiohttp.ClientSession,
     return max_id
 
 
-async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
-                       bot_id: int, token: str, main_bot=None) -> None:
+async def _process_bot(
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+    bot_id: int,
+    token: str,
+    main_bot=None,
+) -> None:
     try:
         offset = await db.get_update_offset(pool, bot_id)
         if offset == 0:
             await _init_offset(pool, http, bot_id, token)
             return
-        data = await bot_api._call(http, token, "getUpdates",
-                                   offset=offset + 1,
-                                   limit=100, timeout=0)
+        data = await bot_api._call(
+            http, token, "getUpdates", offset=offset + 1, limit=100, timeout=0
+        )
         updates = data.get("result", []) if data.get("ok") else []
         if not updates:
             return
@@ -114,51 +126,91 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             # Notify bot owner about new user
             if is_new_user and main_bot and bot_row and bot_row.get("added_by"):
                 owner_id = bot_row["added_by"]
-                bot_name = bot_row.get("username") or bot_row.get("first_name") or f"id{bot_id}"
-                user_name = from_user.get("username") or from_user.get("first_name") or f"id{chat_id}"
+                bot_name = (
+                    bot_row.get("username")
+                    or bot_row.get("first_name")
+                    or f"id{bot_id}"
+                )
+                user_name = (
+                    from_user.get("username")
+                    or from_user.get("first_name")
+                    or f"id{chat_id}"
+                )
                 note = f"👤 <b>Новый пользователь</b> @{user_name} подписался на @{bot_name}"
-                asyncio.create_task(db.notify_if_enabled(pool, main_bot, owner_id, "new_user", note))
+                asyncio.create_task(
+                    db.notify_if_enabled(pool, main_bot, owner_id, "new_user", note)
+                )
 
             # Register in bot_users so the user appears in broadcast audience
-            await db.upsert_users(pool, bot_id, [{
-                "user_id": chat_id,
-                "username": from_user.get("username", ""),
-                "first_name": from_user.get("first_name", ""),
-                "last_name": from_user.get("last_name", ""),
-                "language_code": from_user.get("language_code", ""),
-            }])
+            await db.upsert_users(
+                pool,
+                bot_id,
+                [
+                    {
+                        "user_id": chat_id,
+                        "username": from_user.get("username", ""),
+                        "first_name": from_user.get("first_name", ""),
+                        "last_name": from_user.get("last_name", ""),
+                        "language_code": from_user.get("language_code", ""),
+                    }
+                ],
+            )
 
             # Deep link tracking: /start <param>
             if text.strip().lower().startswith("/start "):
                 parts = text.strip().split(None, 1)
                 if len(parts) == 2:
                     param = parts[1].strip()
-                    link_id = await db.record_deep_link_visit(pool, bot_id, param, chat_id)
+                    link_id = await db.record_deep_link_visit(
+                        pool, bot_id, param, chat_id
+                    )
                     if param.startswith("ref") and param[3:].isdigit():
                         referrer_id = int(param[3:])
                         if referrer_id != chat_id:
-                            await db.record_referral(pool, bot_id, referrer_id, chat_id, link_id)
+                            await db.record_referral(
+                                pool, bot_id, referrer_id, chat_id, link_id
+                            )
 
             # Track non-command keywords for SEO analytics
             if not text.startswith("/"):
                 await db.record_message_keywords(pool, bot_id, text)
 
             # Bot admin panel: /admin TOKEN (owner only)
-            if text.strip().lower().startswith("/admin ") and bot_row and bot_row.get("added_by"):
+            if (
+                text.strip().lower().startswith("/admin ")
+                and bot_row
+                and bot_row.get("added_by")
+            ):
                 admin_token = text.strip()[7:].strip()
                 if admin_token:
-                    admin_row = await db.get_bot_admin_session_by_token(pool, admin_token)
-                    if (admin_row and admin_row["bot_id"] == bot_id
-                            and chat_id == admin_row["owner_id"]):
-                        user_count = await pool.fetchval(
-                            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id
-                        ) or 0
-                        reply_count = await pool.fetchval(
-                            "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE", bot_id
-                        ) or 0
-                        funnel_count = await pool.fetchval(
-                            "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
-                        ) or 0
+                    admin_row = await db.get_bot_admin_session_by_token(
+                        pool, admin_token
+                    )
+                    if (
+                        admin_row
+                        and admin_row["bot_id"] == bot_id
+                        and chat_id == admin_row["owner_id"]
+                    ):
+                        user_count = (
+                            await pool.fetchval(
+                                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id
+                            )
+                            or 0
+                        )
+                        reply_count = (
+                            await pool.fetchval(
+                                "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
+                                bot_id,
+                            )
+                            or 0
+                        )
+                        funnel_count = (
+                            await pool.fetchval(
+                                "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true",
+                                bot_id,
+                            )
+                            or 0
+                        )
                         panel_text = (
                             "🔧 <b>Панель управления ботом</b>\n\n"
                             f"👥 Пользователей: {user_count}\n"
@@ -171,26 +223,47 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                             "• CRM и пользователи: Inbox / Relay\n\n"
                             "<i>Авторизация подтверждена ✅</i>"
                         )
-                        ok, _ = await bot_api.send_message(http, token, chat_id, panel_text)
+                        ok, _ = await bot_api.send_message(
+                            http, token, chat_id, panel_text
+                        )
                         if not ok:
-                            log.warning("auto_responder: failed to send admin panel to chat %d bot %d", chat_id, bot_id)
+                            log.warning(
+                                "auto_responder: failed to send admin panel to chat %d bot %d",
+                                chat_id,
+                                bot_id,
+                            )
                         continue  # skip normal auto_replies
 
             # Auto-replies (first match wins)
             for rule in rules:
                 if _match_rule(rule, text):
                     rendered = _render_text(rule["response_text"], from_user, bot_row)
-                    ok, retry = await bot_api.send_message(http, token, chat_id, rendered)
+                    ok, retry = await bot_api.send_message(
+                        http, token, chat_id, rendered
+                    )
                     if not ok:
-                        log.warning("auto_responder: failed to send auto-reply to chat %d bot %d%s",
-                                    chat_id, bot_id,
-                                    f" (rate-limited {retry}s)" if retry else "")
+                        log.warning(
+                            "auto_responder: failed to send auto-reply to chat %d bot %d%s",
+                            chat_id,
+                            bot_id,
+                            f" (rate-limited {retry}s)" if retry else "",
+                        )
                     break
 
             # Swarm routing: /start on entry bot with swarm enabled
-            if is_start and bot_row and bot_row["swarm_enabled"] and bot_row["bot_role"] == "entry":
+            if (
+                is_start
+                and bot_row
+                and bot_row["swarm_enabled"]
+                and bot_row["bot_role"] == "entry"
+            ):
                 await routing_engine.make_routing_decision(
-                    pool, http, bot_id, chat_id, chat_id, token,
+                    pool,
+                    http,
+                    bot_id,
+                    chat_id,
+                    chat_id,
+                    token,
                     bot_row["cluster"] or "default",
                 )
 
@@ -207,21 +280,39 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
 
                 if triggered:
                     if arule["action_type"] == "send_message":
-                        rendered = _render_text(arule["action_value"], from_user, bot_row)
-                        ok, _ = await bot_api.send_message(http, token, chat_id, rendered)
+                        rendered = _render_text(
+                            arule["action_value"], from_user, bot_row
+                        )
+                        ok, _ = await bot_api.send_message(
+                            http, token, chat_id, rendered
+                        )
                         if not ok:
-                            log.warning("auto_responder: failed to send automation message to chat %d bot %d",
-                                        chat_id, bot_id)
+                            log.warning(
+                                "auto_responder: failed to send automation message to chat %d bot %d",
+                                chat_id,
+                                bot_id,
+                            )
                     elif arule["action_type"] == "add_tag":
-                        await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                        await db.add_user_tag(
+                            pool, bot_id, chat_id, arule["action_value"]
+                        )
                         newly_added_tags.append(arule["action_value"])
                     elif arule["action_type"] == "remove_tag":
-                        await db.remove_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                        await db.remove_user_tag(
+                            pool, bot_id, chat_id, arule["action_value"]
+                        )
                     elif arule["action_type"] == "subscribe_funnel":
                         try:
-                            await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
+                            await db.subscribe_to_funnel(
+                                pool, int(arule["action_value"]), chat_id
+                            )
                         except (ValueError, TypeError):
-                            log_exc_swallow(log, "Неверный funnel_id в правиле авто-ответа (блок 1)", rule_id=arule.get("id"), action_value=arule.get("action_value"))
+                            log_exc_swallow(
+                                log,
+                                "Неверный funnel_id в правиле авто-ответа (блок 1)",
+                                rule_id=arule.get("id"),
+                                action_value=arule.get("action_value"),
+                            )
                     elif arule["action_type"] == "webhook":
                         # action_value = URL to POST to
                         url = arule.get("action_value", "").strip()
@@ -239,15 +330,28 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                                     },
                                     "text": text,
                                 }
-                                async with http.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                    log.debug("webhook action: url=%s status=%s", url, resp.status)
+                                async with http.post(
+                                    url,
+                                    json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=10),
+                                ) as resp:
+                                    log.debug(
+                                        "webhook action: url=%s status=%s",
+                                        url,
+                                        resp.status,
+                                    )
                             except Exception as exc:
-                                log.warning("webhook action failed: url=%s error=%s", url, exc)
+                                log.warning(
+                                    "webhook action failed: url=%s error=%s", url, exc
+                                )
                     elif arule["action_type"] == "send_ai_reply":
                         # action_value = system prompt / persona description
-                        system_prompt = arule.get("action_value") or "Ты полезный ассистент."
+                        system_prompt = (
+                            arule.get("action_value") or "Ты полезный ассистент."
+                        )
                         try:
                             from config import OPENAI_API_KEY
+
                             if OPENAI_API_KEY:
                                 ai_payload = {
                                     "model": "gpt-4o-mini",
@@ -257,35 +361,58 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                                     ],
                                     "max_tokens": 300,
                                 }
-                                headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+                                headers = {
+                                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                                    "Content-Type": "application/json",
+                                }
                                 async with http.post(
                                     "https://api.openai.com/v1/chat/completions",
-                                    json=ai_payload, headers=headers,
+                                    json=ai_payload,
+                                    headers=headers,
                                     timeout=aiohttp.ClientTimeout(total=30),
                                 ) as resp:
                                     if resp.status == 200:
                                         ai_data = await resp.json()
-                                        ai_text = ai_data["choices"][0]["message"]["content"].strip()
-                                        await bot_api.send_message(http, token, chat_id, ai_text)
+                                        ai_text = ai_data["choices"][0]["message"][
+                                            "content"
+                                        ].strip()
+                                        await bot_api.send_message(
+                                            http, token, chat_id, ai_text
+                                        )
                         except Exception as exc:
                             log.warning("send_ai_reply failed: %s", exc)
 
             # tag_added rules: fire once for each tag added above (one level, no recursion)
             for arule in automation_rules:
-                if (arule["trigger_type"] == "tag_added"
-                        and arule.get("trigger_value")
-                        and arule["trigger_value"] in newly_added_tags):
+                if (
+                    arule["trigger_type"] == "tag_added"
+                    and arule.get("trigger_value")
+                    and arule["trigger_value"] in newly_added_tags
+                ):
                     if arule["action_type"] == "send_message":
-                        await bot_api.send_message(http, token, chat_id, arule["action_value"])
+                        await bot_api.send_message(
+                            http, token, chat_id, arule["action_value"]
+                        )
                     elif arule["action_type"] == "add_tag":
-                        await db.add_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                        await db.add_user_tag(
+                            pool, bot_id, chat_id, arule["action_value"]
+                        )
                     elif arule["action_type"] == "remove_tag":
-                        await db.remove_user_tag(pool, bot_id, chat_id, arule["action_value"])
+                        await db.remove_user_tag(
+                            pool, bot_id, chat_id, arule["action_value"]
+                        )
                     elif arule["action_type"] == "subscribe_funnel":
                         try:
-                            await db.subscribe_to_funnel(pool, int(arule["action_value"]), chat_id)
+                            await db.subscribe_to_funnel(
+                                pool, int(arule["action_value"]), chat_id
+                            )
                         except (ValueError, TypeError):
-                            log_exc_swallow(log, "Неверный funnel_id в правиле авто-ответа (блок 2)", rule_id=arule.get("id"), action_value=arule.get("action_value"))
+                            log_exc_swallow(
+                                log,
+                                "Неверный funnel_id в правиле авто-ответа (блок 2)",
+                                rule_id=arule.get("id"),
+                                action_value=arule.get("action_value"),
+                            )
                     elif arule["action_type"] == "webhook":
                         url = arule.get("action_value", "").strip()
                         if url:
@@ -302,14 +429,27 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                                     },
                                     "text": text,
                                 }
-                                async with http.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                    log.debug("webhook action: url=%s status=%s", url, resp.status)
+                                async with http.post(
+                                    url,
+                                    json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=10),
+                                ) as resp:
+                                    log.debug(
+                                        "webhook action: url=%s status=%s",
+                                        url,
+                                        resp.status,
+                                    )
                             except Exception as exc:
-                                log.warning("webhook action failed: url=%s error=%s", url, exc)
+                                log.warning(
+                                    "webhook action failed: url=%s error=%s", url, exc
+                                )
                     elif arule["action_type"] == "send_ai_reply":
-                        system_prompt = arule.get("action_value") or "Ты полезный ассистент."
+                        system_prompt = (
+                            arule.get("action_value") or "Ты полезный ассистент."
+                        )
                         try:
                             from config import OPENAI_API_KEY
+
                             if OPENAI_API_KEY:
                                 ai_payload = {
                                     "model": "gpt-4o-mini",
@@ -319,16 +459,24 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
                                     ],
                                     "max_tokens": 300,
                                 }
-                                headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+                                headers = {
+                                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                                    "Content-Type": "application/json",
+                                }
                                 async with http.post(
                                     "https://api.openai.com/v1/chat/completions",
-                                    json=ai_payload, headers=headers,
+                                    json=ai_payload,
+                                    headers=headers,
                                     timeout=aiohttp.ClientTimeout(total=30),
                                 ) as resp:
                                     if resp.status == 200:
                                         ai_data = await resp.json()
-                                        ai_text = ai_data["choices"][0]["message"]["content"].strip()
-                                        await bot_api.send_message(http, token, chat_id, ai_text)
+                                        ai_text = ai_data["choices"][0]["message"][
+                                            "content"
+                                        ].strip()
+                                        await bot_api.send_message(
+                                            http, token, chat_id, ai_text
+                                        )
                         except Exception as exc:
                             log.warning("send_ai_reply failed: %s", exc)
 
@@ -336,21 +484,33 @@ async def _process_bot(pool: asyncpg.Pool, http: aiohttp.ClientSession,
             for funnel in funnels:
                 if funnel["trigger_type"] == "start" and is_start:
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
-                elif (funnel["trigger_type"] == "keyword" and funnel["keyword"]
-                      and funnel["keyword"].lower() in text.lower()):
+                elif (
+                    funnel["trigger_type"] == "keyword"
+                    and funnel["keyword"]
+                    and funnel["keyword"].lower() in text.lower()
+                ):
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
 
             # A/B experiment: assign variant on /start and SEND the variant content
             if is_start and active_exp:
-                variant = await db.assign_experiment_variant(pool, bot_id, chat_id, active_exp["id"])
+                variant = await db.assign_experiment_variant(
+                    pool, bot_id, chat_id, active_exp["id"]
+                )
                 if variant and variant.get("content"):
                     await bot_api.send_message(http, token, chat_id, variant["content"])
             elif not is_start and active_exp:
                 # Conversion: any subsequent message from an assigned user counts
                 try:
-                    await db.record_experiment_conversion(pool, bot_id, chat_id, active_exp["id"])
+                    await db.record_experiment_conversion(
+                        pool, bot_id, chat_id, active_exp["id"]
+                    )
                 except Exception:
-                    log_exc_swallow(log, "Сбой record_experiment_conversion", bot_id=bot_id, chat_id=chat_id)
+                    log_exc_swallow(
+                        log,
+                        "Сбой record_experiment_conversion",
+                        bot_id=bot_id,
+                        chat_id=chat_id,
+                    )
 
         if max_update_id > offset:
             await db.set_update_offset(pool, bot_id, max_update_id)
@@ -366,7 +526,10 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
             bots = await db.get_bots_for_polling(pool)
             if bots:
                 await asyncio.gather(
-                    *(_process_bot(pool, http, b["bot_id"], b["token"], main_bot) for b in bots),
+                    *(
+                        _process_bot(pool, http, b["bot_id"], b["token"], main_bot)
+                        for b in bots
+                    ),
                     return_exceptions=True,
                 )
         except Exception:
@@ -418,28 +581,40 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                        AND ias.sent_at > NOW() - ($2 * INTERVAL '1 day')
                  )
                LIMIT 100""",
-            rule["bot_id"], inactivity_days, rule["id"],
+            rule["bot_id"],
+            inactivity_days,
+            rule["id"],
         )
 
         for user in inactive_users:
             chat_id = user["user_id"]
             try:
                 if rule["action_type"] == "send_message":
-                    await bot_api.send_message(http, rule["token"], chat_id, rule["action_value"])
+                    await bot_api.send_message(
+                        http, rule["token"], chat_id, rule["action_value"]
+                    )
                 elif rule["action_type"] == "webhook":
                     url = (rule["action_value"] or "").strip()
                     if url:
-                        await http.post(url, json={
-                            "bot_id": rule["bot_id"], "chat_id": chat_id,
-                            "trigger_type": "inactivity", "inactivity_days": inactivity_days,
-                        }, timeout=aiohttp.ClientTimeout(total=10))
+                        await http.post(
+                            url,
+                            json={
+                                "bot_id": rule["bot_id"],
+                                "chat_id": chat_id,
+                                "trigger_type": "inactivity",
+                                "inactivity_days": inactivity_days,
+                            },
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        )
 
                 # Mark as sent (prevent duplicate)
                 await pool.execute(
                     """INSERT INTO inactivity_alerts_sent(bot_id, chat_id, rule_id)
                        VALUES($1, $2, $3)
                        ON CONFLICT(bot_id, chat_id, rule_id) DO UPDATE SET sent_at=NOW()""",
-                    rule["bot_id"], chat_id, rule["id"],
+                    rule["bot_id"],
+                    chat_id,
+                    rule["id"],
                 )
                 await asyncio.sleep(0.1)  # tiny delay between messages
             except Exception as exc:

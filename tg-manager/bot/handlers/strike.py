@@ -24,22 +24,22 @@ from services.logger import log_exc_swallow
 
 # SMTP авто-определение по домену почты
 _SMTP_PRESETS: dict[str, tuple[str, int]] = {
-    "gmail.com":      ("smtp.gmail.com", 587),
+    "gmail.com": ("smtp.gmail.com", 587),
     "googlemail.com": ("smtp.gmail.com", 587),
-    "outlook.com":    ("smtp-mail.outlook.com", 587),
-    "hotmail.com":    ("smtp-mail.outlook.com", 587),
-    "live.com":       ("smtp-mail.outlook.com", 587),
-    "yahoo.com":      ("smtp.mail.yahoo.com", 587),
-    "yahoo.co.uk":    ("smtp.mail.yahoo.com", 587),
-    "yandex.ru":      ("smtp.yandex.ru", 465),
-    "yandex.com":     ("smtp.yandex.ru", 465),
-    "mail.ru":        ("smtp.mail.ru", 465),
-    "bk.ru":          ("smtp.mail.ru", 465),
-    "list.ru":        ("smtp.mail.ru", 465),
-    "icloud.com":     ("smtp.mail.me.com", 587),
-    "me.com":         ("smtp.mail.me.com", 587),
+    "outlook.com": ("smtp-mail.outlook.com", 587),
+    "hotmail.com": ("smtp-mail.outlook.com", 587),
+    "live.com": ("smtp-mail.outlook.com", 587),
+    "yahoo.com": ("smtp.mail.yahoo.com", 587),
+    "yahoo.co.uk": ("smtp.mail.yahoo.com", 587),
+    "yandex.ru": ("smtp.yandex.ru", 465),
+    "yandex.com": ("smtp.yandex.ru", 465),
+    "mail.ru": ("smtp.mail.ru", 465),
+    "bk.ru": ("smtp.mail.ru", 465),
+    "list.ru": ("smtp.mail.ru", 465),
+    "icloud.com": ("smtp.mail.me.com", 587),
+    "me.com": ("smtp.mail.me.com", 587),
     "protonmail.com": ("smtp.protonmail.com", 587),
-    "proton.me":      ("smtp.protonmail.com", 587),
+    "proton.me": ("smtp.protonmail.com", 587),
 }
 
 _APP_PASSWORD_TIPS: dict[str, str] = {
@@ -138,12 +138,16 @@ async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
 def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     if has_access:
-        kb.button(text="⚡ Мини-страйк (1 аккаунт)", callback_data=StrikeCb(action="mini"))
-        kb.button(text="🚨 Одиночная цель",           callback_data=ChanCb(action="br_mode_single"))
-        kb.button(text="📋 Список целей",             callback_data=ChanCb(action="br_mode_batch"))
-        kb.button(text="⚙️ Настройки атаки",          callback_data=StrikeCb(action="settings"))
-        kb.button(text="📜 История",                  callback_data=StrikeCb(action="history"))
-        kb.button(text="◀️ Назад",                   callback_data=BmCb(action="main"))
+        kb.button(
+            text="⚡ Мини-страйк (1 аккаунт)", callback_data=StrikeCb(action="mini")
+        )
+        kb.button(
+            text="🚨 Одиночная цель", callback_data=ChanCb(action="br_mode_single")
+        )
+        kb.button(text="📋 Список целей", callback_data=ChanCb(action="br_mode_batch"))
+        kb.button(text="⚙️ Настройки атаки", callback_data=StrikeCb(action="settings"))
+        kb.button(text="📜 История", callback_data=StrikeCb(action="history"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         kb.adjust(1, 2, 1, 1, 1)
     else:
         kb.button(text="💳 Купить за $250 USDT", callback_data=StrikeCb(action="buy"))
@@ -217,13 +221,19 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.answer()
 
     try:
-        row = await pool.fetchrow("SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id)
+        row = await pool.fetchrow(
+            "SELECT mode FROM strike_access WHERE user_id=$1", callback.from_user.id
+        )
     except Exception:
         log_exc_swallow(log, "cb_strike_settings: fetchrow mode failed")
         row = None
     current_mode = row.get("mode", "normal") if row else "normal"
 
-    mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
+    mode_labels = {
+        "fast": "⚡ Быстрый",
+        "normal": "🔥 Нормальный",
+        "maximum": "💀 Максимальный",
+    }
     mode_desc = {
         "fast": "6 векторов · быстро · безопаснее для аккаунтов",
         "normal": "12 векторов · стандартный баланс",
@@ -235,9 +245,11 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     kb = InlineKeyboardBuilder()
     for m, label in mode_labels.items():
         checked = "✅ " if m == current_mode else ""
-        kb.button(text=f"{checked}{label}", callback_data=StrikeCb(action=f"set_mode_{m}"))
+        kb.button(
+            text=f"{checked}{label}", callback_data=StrikeCb(action=f"set_mode_{m}")
+        )
     kb.button(text="📧 Email аккаунты", callback_data=StrikeCb(action="emails"))
-    kb.button(text="◀️ Назад",          callback_data=StrikeCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -255,21 +267,28 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     )
 
 
-async def _set_strike_mode(callback: CallbackQuery, pool: asyncpg.Pool, mode: str) -> None:
+async def _set_strike_mode(
+    callback: CallbackQuery, pool: asyncpg.Pool, mode: str
+) -> None:
     try:
         await _ensure_table(pool)
         await pool.execute(
             """INSERT INTO strike_access (user_id, mode)
                VALUES ($1, $2)
                ON CONFLICT (user_id) DO UPDATE SET mode = EXCLUDED.mode""",
-            callback.from_user.id, mode,
+            callback.from_user.id,
+            mode,
         )
         log.info("strike mode set user=%s mode=%s", callback.from_user.id, mode)
     except Exception:
         log_exc_swallow(log, "set_strike_mode: DB failed")
         await callback.answer("Ошибка сохранения режима.", show_alert=True)
         return
-    mode_labels = {"fast": "⚡ Быстрый", "normal": "🔥 Нормальный", "maximum": "💀 Максимальный"}
+    mode_labels = {
+        "fast": "⚡ Быстрый",
+        "normal": "🔥 Нормальный",
+        "maximum": "💀 Максимальный",
+    }
     await callback.answer(f"✅ Режим: {mode_labels.get(mode, mode)}", show_alert=True)
     await cb_strike_settings(callback, pool)
 
@@ -280,12 +299,16 @@ async def cb_strike_set_mode_fast(callback: CallbackQuery, pool: asyncpg.Pool) -
 
 
 @router.callback_query(StrikeCb.filter(F.action == "set_mode_normal"))
-async def cb_strike_set_mode_normal(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_strike_set_mode_normal(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
     await _set_strike_mode(callback, pool, "normal")
 
 
 @router.callback_query(StrikeCb.filter(F.action == "set_mode_maximum"))
-async def cb_strike_set_mode_maximum(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_strike_set_mode_maximum(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
     await _set_strike_mode(callback, pool, "maximum")
 
 
@@ -328,10 +351,16 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             wallet or "NOT_CONFIGURED",
             ref,
         )
-        log.info("strike buy: payment record created user=%s ref=%s", callback.from_user.id, ref)
+        log.info(
+            "strike buy: payment record created user=%s ref=%s",
+            callback.from_user.id,
+            ref,
+        )
     except Exception:
         log_exc_swallow(log, "cb_strike_buy: DB insert failed")
-        await callback.message.edit_text("❌ Ошибка создания платежа. Попробуйте позже.")
+        await callback.message.edit_text(
+            "❌ Ошибка создания платежа. Попробуйте позже."
+        )
         return
 
     kb = InlineKeyboardBuilder()
@@ -496,7 +525,11 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             )
         kb.adjust(2)
 
-    kb.row(InlineKeyboardButton(text="◀️ Назад", callback_data=StrikeCb(action="menu").pack()))
+    kb.row(
+        InlineKeyboardButton(
+            text="◀️ Назад", callback_data=StrikeCb(action="menu").pack()
+        )
+    )
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -516,7 +549,9 @@ async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 # Обработчик кнопки "История" из финального отчёта (callback_data="strike:history")
 @router.callback_query(F.data == "strike:history")
-async def cb_strike_history_shortcut(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_strike_history_shortcut(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
@@ -529,8 +564,10 @@ async def cb_strike_history_shortcut(callback: CallbackQuery, pool: asyncpg.Pool
 
 @router.callback_query(StrikeCb.filter(F.action == "rerun"))
 async def cb_strike_rerun(
-    callback: CallbackQuery, callback_data: StrikeCb,
-    pool: asyncpg.Pool, state: FSMContext,
+    callback: CallbackQuery,
+    callback_data: StrikeCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
@@ -539,7 +576,8 @@ async def cb_strike_rerun(
     try:
         row = await pool.fetchrow(
             "SELECT target, reason, preset FROM strike_history WHERE id=$1 AND owner_id=$2",
-            history_id, callback.from_user.id,
+            history_id,
+            callback.from_user.id,
         )
     except Exception:
         log_exc_swallow(log, "cb_strike_rerun: fetchrow failed")
@@ -565,6 +603,7 @@ async def cb_strike_rerun(
     )
 
     from bot.handlers.channel_ops import _show_bulk_report_account_picker, _get_accounts
+
     accounts = await _get_accounts(pool, callback.from_user.id)
     active = [a for a in accounts if a["is_active"]]
     if not active:
@@ -584,7 +623,11 @@ async def cb_strike_rerun(
 
     preset_info = f"пресет: <b>{preset}</b>" if preset else f"причина: <b>{reason}</b>"
     await _show_bulk_report_account_picker(
-        callback.message, active, [], target, reason,
+        callback.message,
+        active,
+        [],
+        target,
+        reason,
         edit=True,
         extra_info=f"🔁 Повтор Strike · {preset_info}",
     )
@@ -618,18 +661,19 @@ async def cb_strike_admin_grant(
 # Поток: /mini → ввод @channel → выбор категории → подтверждение → выполнение
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _build_strike_intelligence_text(state_dict: dict, capacity_dict: dict) -> str:
     """Компактный intelligence-блок для экрана подтверждения STRIKE (макс. 8 строк)."""
     pressure = state_dict.get("pressure", {})
     accounts = state_dict.get("accounts", {})
-    score    = pressure.get("score", 0)
-    emoji    = pressure.get("emoji", "🟢")
-    label    = pressure.get("label", "Норма")
+    score = pressure.get("score", 0)
+    emoji = pressure.get("emoji", "🟢")
+    label = pressure.get("label", "Норма")
     available = accounts.get("available", 0)
-    cooling   = accounts.get("cooling", 0)
-    total     = accounts.get("total", 0)
+    cooling = accounts.get("cooling", 0)
+    total = accounts.get("total", 0)
 
-    est_min  = capacity_dict.get("estimated_minutes", 0)
+    est_min = capacity_dict.get("estimated_minutes", 0)
     # Упрощённая вероятность успеха на основе давления и доступных аккаунтов
     success_pct = max(10, 100 - score) if available > 0 else 0
 
@@ -659,6 +703,7 @@ def _build_strike_intelligence_text(state_dict: dict, capacity_dict: dict) -> st
 
 def _category_kb(target: str) -> InlineKeyboardBuilder:
     from services.strike_engine import MINI_CATEGORIES
+
     kb = InlineKeyboardBuilder()
     for key, cat in MINI_CATEGORIES.items():
         kb.button(
@@ -706,8 +751,7 @@ async def msg_mini_strike_target(
 
     # Нормализация — обрабатываем публичные username и приватные invite-ссылки (+HASH)
     normalized = (
-        raw
-        .replace("https://t.me/", "")
+        raw.replace("https://t.me/", "")
         .replace("http://t.me/", "")
         .split("?")[0]
         .split("/")[0]
@@ -729,8 +773,7 @@ async def msg_mini_strike_target(
     await state.set_state(MiniStrikeFSM.awaiting_category)
 
     await message.answer(
-        f"🎯 Цель: {target_display}\n\n"
-        "Выберите категорию нарушения:",
+        f"🎯 Цель: {target_display}\n\nВыберите категорию нарушения:",
         parse_mode="HTML",
         reply_markup=_category_kb(target).as_markup(),
     )
@@ -738,20 +781,23 @@ async def msg_mini_strike_target(
 
 @router.callback_query(StrikeCb.filter(F.action.startswith("mini_cat_")))
 async def cb_mini_strike_category(
-    callback: CallbackQuery, callback_data: StrikeCb,
-    pool: asyncpg.Pool, state: FSMContext,
+    callback: CallbackQuery,
+    callback_data: StrikeCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
     # Проверяем что FSM активен (пользователь может нажать кнопку повторно)
-    current_state = await state.get_state()
+    await state.get_state()
     sd = await state.get_data()
     target = sd.get("target", "")
 
     category = callback_data.action.replace("mini_cat_", "")
     from services.strike_engine import MINI_CATEGORIES
+
     cat = MINI_CATEGORIES.get(category)
     if not cat:
         await callback.answer("Неизвестная категория.", show_alert=True)
@@ -766,8 +812,11 @@ async def cb_mini_strike_category(
 
     # Найти лучший активный аккаунт (учитывает кулдаун + risk score + infra_memory)
     from services import resource_selector
+
     try:
-        acc = await resource_selector.select_account(pool, callback.from_user.id, action_type="strike")
+        acc = await resource_selector.select_account(
+            pool, callback.from_user.id, action_type="strike"
+        )
     except Exception:
         log_exc_swallow(log, "cb_mini_strike_category: select_account failed")
         acc = None
@@ -790,12 +839,18 @@ async def cb_mini_strike_category(
     await state.update_data(category=category, acc_id=acc["id"])
 
     from config import SMTP_HOST, SMTP_USER
-    smtp_status = "✅ настроен" if (SMTP_HOST and SMTP_USER) else "⚠️ не настроен (email-репорты недоступны)"
+
+    smtp_status = (
+        "✅ настроен"
+        if (SMTP_HOST and SMTP_USER)
+        else "⚠️ не настроен (email-репорты недоступны)"
+    )
 
     # Full pre-launch intelligence (intelligence_engine)
     intel_block = ""
     try:
         from services import intelligence_engine as _ie
+
         intel = await _ie.get_pre_launch_intelligence(
             pool, callback.from_user.id, "strike", 1
         )
@@ -804,11 +859,14 @@ async def cb_mini_strike_category(
         # Fallback to simple state-based block
         try:
             from services import infra_orchestrator as _orch
+
             _intel_state, _intel_cap = await asyncio.gather(
                 _orch.get_state(pool, callback.from_user.id),
                 _orch.estimate_capacity(pool, callback.from_user.id, "strike", 1),
             )
-            intel_block = _build_strike_intelligence_text(_intel_state.to_dict(), _intel_cap)
+            intel_block = _build_strike_intelligence_text(
+                _intel_state.to_dict(), _intel_cap
+            )
         except Exception:
             pass
 
@@ -816,13 +874,20 @@ async def cb_mini_strike_category(
     eco_block = ""
     try:
         from services import ecosystem_brain as _eb
+
         _ecosystems = await _eb.list_ecosystems(pool, callback.from_user.id)
         if _ecosystems:
             _eco_lines = ["🌐 <b>Экосистемы:</b>"]
             for _eco in _ecosystems[:3]:
-                _eco_health = await _eb.compute_health(pool, _eco["id"], callback.from_user.id)
+                _eco_health = await _eb.compute_health(
+                    pool, _eco["id"], callback.from_user.id
+                )
                 _health_pct = int(_eco_health.overall * 100)
-                _health_icon = "🟢" if _eco_health.overall >= 0.7 else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
+                _health_icon = (
+                    "🟢"
+                    if _eco_health.overall >= 0.7
+                    else ("🟡" if _eco_health.overall >= 0.4 else "🔴")
+                )
                 _eco_lines.append(f"  {_health_icon} {_eco['name']}: {_health_pct}%")
             eco_block = "\n".join(_eco_lines)
     except Exception:
@@ -830,7 +895,7 @@ async def cb_mini_strike_category(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить страйк", callback_data=StrikeCb(action="mini_run"))
-    kb.button(text="❌ Отмена",           callback_data=StrikeCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -862,7 +927,10 @@ async def cb_mini_strike_run(
 
     # Проверка давления инфраструктуры
     from services import infra_orchestrator
-    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+
+    ready, reason = await infra_orchestrator.is_ready_for_op(
+        pool, callback.from_user.id
+    )
     if not ready:
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
@@ -885,7 +953,8 @@ async def cb_mini_strike_run(
             """SELECT id, phone, first_name, session_str, trust_score,
                       device_model, system_version, app_version, is_active
                FROM tg_accounts WHERE id=$1 AND owner_id=$2""",
-            acc_id, callback.from_user.id,
+            acc_id,
+            callback.from_user.id,
         )
     except Exception:
         log_exc_swallow(log, "cb_mini_strike_run: acc fetchrow failed")
@@ -912,12 +981,11 @@ async def cb_mini_strike_run(
             pass
 
     await progress(
-        f"🎯 Цель: <code>@{target}</code>\n"
-        f"📂 Категория: {category}\n\n"
-        "⚙️ Запуск..."
+        f"🎯 Цель: <code>@{target}</code>\n📂 Категория: {category}\n\n⚙️ Запуск..."
     )
 
     from services.strike_engine import execute_mini_strike, format_mini_result
+
     try:
         result = await execute_mini_strike(
             pool=pool,
@@ -939,7 +1007,7 @@ async def cb_mini_strike_run(
     report_text = format_mini_result(result)
     kb = InlineKeyboardBuilder()
     kb.button(text="🔁 Ещё один страйк", callback_data=StrikeCb(action="mini"))
-    kb.button(text="◀️ Меню Strike",     callback_data=StrikeCb(action="menu"))
+    kb.button(text="◀️ Меню Strike", callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
 
     await msg.edit_text(report_text, parse_mode="HTML", reply_markup=kb.as_markup())
@@ -949,6 +1017,7 @@ async def cb_mini_strike_run(
 # EMAIL ACCOUNT MANAGEMENT
 # Добавление, просмотр, удаление почтовых ящиков для репортов
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Показать список email аккаунтов с кнопками управления."""
@@ -978,7 +1047,9 @@ async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         for r in rows:
             status = "✅" if r["is_active"] else "⛔"
             fails = f" · ошибок: {r['fail_count']}" if r["fail_count"] else ""
-            lines.append(f"{status} <code>{r['email']}</code> ({r['smtp_host']}:{r['smtp_port']}){fails}")
+            lines.append(
+                f"{status} <code>{r['email']}</code> ({r['smtp_host']}:{r['smtp_port']}){fails}"
+            )
             # Кнопки: toggle + delete
             toggle_label = "⛔ Выключить" if r["is_active"] else "✅ Включить"
             kb.button(
@@ -991,14 +1062,18 @@ async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
         kb.adjust(2)
 
-    kb.row(InlineKeyboardButton(
-        text="➕ Добавить email",
-        callback_data=StrikeCb(action="email_add").pack(),
-    ))
-    kb.row(InlineKeyboardButton(
-        text="◀️ Настройки",
-        callback_data=StrikeCb(action="settings").pack(),
-    ))
+    kb.row(
+        InlineKeyboardButton(
+            text="➕ Добавить email",
+            callback_data=StrikeCb(action="email_add").pack(),
+        )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="◀️ Настройки",
+            callback_data=StrikeCb(action="settings").pack(),
+        )
+    )
 
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
@@ -1025,7 +1100,8 @@ async def cb_email_toggle(
     try:
         row = await pool.fetchrow(
             "SELECT is_active FROM strike_email_accounts WHERE id=$1 AND owner_id=$2",
-            email_id, callback.from_user.id,
+            email_id,
+            callback.from_user.id,
         )
         if not row:
             await callback.answer("Не найдено.", show_alert=True)
@@ -1033,7 +1109,8 @@ async def cb_email_toggle(
         new_val = not row["is_active"]
         await pool.execute(
             "UPDATE strike_email_accounts SET is_active=$1, fail_count=0 WHERE id=$2",
-            new_val, email_id,
+            new_val,
+            email_id,
         )
         await callback.answer("✅ Включён" if new_val else "⛔ Выключен")
     except Exception:
@@ -1054,7 +1131,8 @@ async def cb_email_del(
     try:
         await pool.execute(
             "DELETE FROM strike_email_accounts WHERE id=$1 AND owner_id=$2",
-            email_id, callback.from_user.id,
+            email_id,
+            callback.from_user.id,
         )
         await callback.answer("🗑 Удалён")
     except Exception:
@@ -1107,7 +1185,9 @@ async def msg_email_input(
         smtp_note = f"🔍 Определён автоматически: <b>{smtp_host}:{smtp_port}</b>"
     else:
         smtp_host, smtp_port = f"smtp.{domain}", 587
-        smtp_note = f"⚠️ Неизвестный провайдер. Попробуем: <b>{smtp_host}:{smtp_port}</b>"
+        smtp_note = (
+            f"⚠️ Неизвестный провайдер. Попробуем: <b>{smtp_host}:{smtp_port}</b>"
+        )
 
     tip = _APP_PASSWORD_TIPS.get(domain, "")
 
@@ -1171,7 +1251,9 @@ async def msg_password_input(
     )
 
     def _test_smtp() -> None:
-        import smtplib, ssl as _ssl
+        import smtplib
+        import ssl as _ssl
+
         ctx = _ssl.create_default_context()
         if smtp_port == 465:
             with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=20) as srv:
@@ -1192,13 +1274,19 @@ async def msg_password_input(
                ON CONFLICT (owner_id, email)
                DO UPDATE SET smtp_host=$3, smtp_port=$4, smtp_pass=$5,
                              is_active=TRUE, fail_count=0""",
-            message.from_user.id, email, smtp_host, smtp_port, password,
+            message.from_user.id,
+            email,
+            smtp_host,
+            smtp_port,
+            password,
         )
-        domain = email.split("@")[-1]
+        email.split("@")[-1]
         _kb_ok = InlineKeyboardBuilder()
-        _kb_ok.button(text="➕ Добавить ещё",    callback_data=StrikeCb(action="email_add"))
-        _kb_ok.button(text="◀️ Список email",    callback_data=StrikeCb(action="emails"))
-        _kb_ok.button(text="⚔️ Меню Strike",    callback_data=StrikeCb(action="menu"))
+        _kb_ok.button(
+            text="➕ Добавить ещё", callback_data=StrikeCb(action="email_add")
+        )
+        _kb_ok.button(text="◀️ Список email", callback_data=StrikeCb(action="emails"))
+        _kb_ok.button(text="⚔️ Меню Strike", callback_data=StrikeCb(action="menu"))
         _kb_ok.adjust(1)
         await status_msg.edit_text(
             f"✅ <b>Email добавлен: {email}</b>\n\n"
@@ -1213,8 +1301,10 @@ async def msg_password_input(
         err = str(e)[:120]
         log.warning("strike: email test failed %s: %s", email, err)
         kb = InlineKeyboardBuilder()
-        kb.button(text="🔁 Попробовать снова", callback_data=StrikeCb(action="email_add"))
-        kb.button(text="◀️ Список email",      callback_data=StrikeCb(action="emails"))
+        kb.button(
+            text="🔁 Попробовать снова", callback_data=StrikeCb(action="email_add")
+        )
+        kb.button(text="◀️ Список email", callback_data=StrikeCb(action="emails"))
         kb.adjust(1)
         await status_msg.edit_text(
             f"❌ <b>Не удалось подключиться</b>\n\n"

@@ -11,12 +11,10 @@ DM Engine — отправка личных сообщений для DM-кам�
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import random
 import re
 import time
-from typing import AsyncIterator
 
 import asyncpg
 from aiogram import Bot
@@ -192,9 +190,14 @@ async def run_campaign(
     )
 
     from services.flood_engine import get_active_accounts
+
     accounts = await get_active_accounts(pool, owner_id)
     if not accounts:
-        log.error("dm_engine: no active accounts for campaign %d owner=%d", campaign_id, owner_id)
+        log.error(
+            "dm_engine: no active accounts for campaign %d owner=%d",
+            campaign_id,
+            owner_id,
+        )
         await pool.execute(
             "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
         )
@@ -250,20 +253,30 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET sent_count=sent_count+1 WHERE id=$1",
                 campaign_id,
             )
-            infra_memory.record_account_op(acc["id"], "dm_campaign", True, duration_s=time.monotonic() - t0_dm)
+            infra_memory.record_account_op(
+                acc["id"], "dm_campaign", True, duration_s=time.monotonic() - t0_dm
+            )
         elif status == "flood":
             wait = result.get("wait") or _FLOOD_PAUSE
-            log.info("dm_engine: flood wait %ds acc=%d (campaign %d)", wait, acc["id"], campaign_id)
+            log.info(
+                "dm_engine: flood wait %ds acc=%d (campaign %d)",
+                wait,
+                acc["id"],
+                campaign_id,
+            )
             # Установить cooldown_until для аккаунта
             try:
                 await pool.execute(
                     "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
                     "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
                     "WHERE id=$2",
-                    min(wait, 3600), acc["id"],
+                    min(wait, 3600),
+                    acc["id"],
                 )
             except Exception:
-                log_exc_swallow(log, "dm_engine: failed to set cooldown_until for acc=%d", acc["id"])
+                log_exc_swallow(
+                    log, "dm_engine: failed to set cooldown_until for acc=%d", acc["id"]
+                )
             # Убрать аккаунт из цикла временно и подождать
             if wait <= 60:
                 await asyncio.sleep(min(wait, 60))
@@ -272,10 +285,16 @@ async def run_campaign(
                 acc_cycle_without = [a for a in acc_cycle if a["id"] != acc["id"]]
                 if acc_cycle_without:
                     acc_cycle = acc_cycle_without
-                    log.info("dm_engine: removed flooded acc %d from rotation, %d remaining", acc["id"], len(acc_cycle))
+                    log.info(
+                        "dm_engine: removed flooded acc %d from rotation, %d remaining",
+                        acc["id"],
+                        len(acc_cycle),
+                    )
                 else:
                     await asyncio.sleep(min(wait, 300))
-            infra_memory.record_account_op(acc["id"], "dm_campaign", False, "flood_wait")
+            infra_memory.record_account_op(
+                acc["id"], "dm_campaign", False, "flood_wait"
+            )
             continue
         elif status in ("blocked", "auth"):
             # Аккаунт заблокирован/невалиден — считать текущую попытку ошибкой
@@ -284,24 +303,37 @@ async def run_campaign(
             await pool.execute(
                 "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
                 "VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-                campaign_id, acc["id"], user_id, status, result.get("error", "")[:200],
+                campaign_id,
+                acc["id"],
+                user_id,
+                status,
+                result.get("error", "")[:200],
             )
             await pool.execute(
                 "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
                 campaign_id,
             )
-            infra_memory.record_account_op(acc["id"], "dm_campaign", False, result.get("error", ""))
+            infra_memory.record_account_op(
+                acc["id"], "dm_campaign", False, result.get("error", "")
+            )
             acc_cycle = [a for a in acc_cycle if a["id"] != acc["id"]]
             if not acc_cycle:
-                log.error("dm_engine: no more accounts for campaign %d, stopping", campaign_id)
+                log.error(
+                    "dm_engine: no more accounts for campaign %d, stopping", campaign_id
+                )
                 break  # Оставшиеся цели будут учтены после цикла
         elif status == "skip":
             # Пользователь заблокировал бота или деактивирован — не ошибка, пропускаем тихо
-            log.debug("dm_engine: user %d blocked/deactivated, skipping silently", user_id)
+            log.debug(
+                "dm_engine: user %d blocked/deactivated, skipping silently", user_id
+            )
             await pool.execute(
                 "INSERT INTO dm_campaign_log(campaign_id, account_id, tg_user_id, status, error_msg) "
                 "VALUES ($1,$2,$3,'skip',$4) ON CONFLICT DO NOTHING",
-                campaign_id, acc["id"], user_id, result.get("error", "")[:200],
+                campaign_id,
+                acc["id"],
+                user_id,
+                result.get("error", "")[:200],
             )
             # Не считаем как fail — пользователь просто недоступен
             continue
@@ -321,7 +353,9 @@ async def run_campaign(
                 "UPDATE dm_campaigns SET fail_count=fail_count+1 WHERE id=$1",
                 campaign_id,
             )
-            infra_memory.record_account_op(acc["id"], "dm_campaign", False, result.get("error", ""))
+            infra_memory.record_account_op(
+                acc["id"], "dm_campaign", False, result.get("error", "")
+            )
 
         # Milestone progress notifications (25%, 50%, 75%)
         if total > 0:
@@ -332,13 +366,20 @@ async def run_campaign(
                     _notified_milestones.add(_milestone)
                     try:
                         from database import db as _db
+
                         await _db.notify_if_enabled(
-                            pool, bot, owner_id, "op_complete",
+                            pool,
+                            bot,
+                            owner_id,
+                            "op_complete",
                             f"📨 <b>DM «{campaign['name']}»</b> — {_milestone}%\n"
                             f"✅ {sent} отправлено · ❌ {failed} ошибок · 📊 {total} всего",
                         )
                     except Exception:
-                        log_exc_swallow(log, f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}")
+                        log_exc_swallow(
+                            log,
+                            f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}",
+                        )
 
         # Humanized delay
         delay = random.uniform(_MIN_DELAY, _MAX_DELAY)
@@ -350,9 +391,14 @@ async def run_campaign(
         failed += unprocessed
         await pool.execute(
             "UPDATE dm_campaigns SET fail_count=fail_count+$1 WHERE id=$2",
-            unprocessed, campaign_id,
+            unprocessed,
+            campaign_id,
         )
-        log.warning("dm_engine: campaign %d — %d targets unprocessed (accounts exhausted)", campaign_id, unprocessed)
+        log.warning(
+            "dm_engine: campaign %d — %d targets unprocessed (accounts exhausted)",
+            campaign_id,
+            unprocessed,
+        )
 
     status_final = "done"
     await pool.execute(
@@ -363,12 +409,18 @@ async def run_campaign(
 
     try:
         from database import db as _db
+
         await _db.notify_if_enabled(
-            pool, bot, owner_id, "op_complete",
+            pool,
+            bot,
+            owner_id,
+            "op_complete",
             f"📨 <b>DM-кампания «{campaign['name']}» завершена</b>\n\n"
             f"✅ Отправлено: <b>{sent}</b>\n"
             f"❌ Ошибок: <b>{failed}</b>\n"
             f"📊 Всего целей: <b>{total}</b>",
         )
     except Exception:
-        log_exc_swallow(log, "Сбой уведомления о завершении DM-кампании", campaign_id=campaign_id)
+        log_exc_swallow(
+            log, "Сбой уведомления о завершении DM-кампании", campaign_id=campaign_id
+        )

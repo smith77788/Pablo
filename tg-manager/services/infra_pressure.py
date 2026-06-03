@@ -25,10 +25,10 @@ from database import db as _db
 log = logging.getLogger(__name__)
 
 _LEVEL_LABELS = {
-    range(0, 31):  ("🟢", "Норма"),
+    range(0, 31): ("🟢", "Норма"),
     range(31, 61): ("🟡", "Умеренная"),
     range(61, 81): ("🟠", "Высокая"),
-    range(81, 101):("🔴", "Критическая"),
+    range(81, 101): ("🔴", "Критическая"),
 }
 
 
@@ -45,7 +45,13 @@ async def compute_pressure(pool: asyncpg.Pool, owner_id: int) -> dict:
         return await _compute(pool, owner_id)
     except Exception as e:
         log.warning("infra_pressure compute failed owner=%d: %s", owner_id, e)
-        return {"score": 0, "level_emoji": "🟢", "level_label": "Норма", "breakdown": {}, "error": str(e)}
+        return {
+            "score": 0,
+            "level_emoji": "🟢",
+            "level_label": "Норма",
+            "breakdown": {},
+            "error": str(e),
+        }
 
 
 async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
@@ -65,7 +71,9 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
         )
         acc = acc_rows[0] if acc_rows else {}
     except Exception as e:
-        log.warning("infra_pressure: account stats query failed owner=%d: %s", owner_id, e)
+        log.warning(
+            "infra_pressure: account stats query failed owner=%d: %s", owner_id, e
+        )
     total = max(acc.get("total_active") or 1, 1)
 
     # 2. Op queue depth — isolated
@@ -77,7 +85,9 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
         )
         active_ops = (queue_rows[0]["cnt"] if queue_rows else 0) or 0
     except Exception as e:
-        log.warning("infra_pressure: queue depth query failed owner=%d: %s", owner_id, e)
+        log.warning(
+            "infra_pressure: queue depth query failed owner=%d: %s", owner_id, e
+        )
 
     # 3. Proxy failures — isolated (table may not exist on older schemas)
     proxy_fail_rate = 0.0
@@ -91,10 +101,20 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
                WHERE up.owner_id=$1 AND pql.checked_at > NOW() - INTERVAL '7 days'""",
             owner_id,
         )
-        proxy_total = ((proxy_rows[0]["ok"] or 0) + (proxy_rows[0]["fail"] or 0)) if proxy_rows else 0
-        proxy_fail_rate = (proxy_rows[0]["fail"] or 0) / max(proxy_total, 1) if proxy_total > 0 else 0.0
+        proxy_total = (
+            ((proxy_rows[0]["ok"] or 0) + (proxy_rows[0]["fail"] or 0))
+            if proxy_rows
+            else 0
+        )
+        proxy_fail_rate = (
+            (proxy_rows[0]["fail"] or 0) / max(proxy_total, 1)
+            if proxy_total > 0
+            else 0.0
+        )
     except Exception as e:
-        log.warning("infra_pressure: proxy quality query failed owner=%d: %s", owner_id, e)
+        log.warning(
+            "infra_pressure: proxy quality query failed owner=%d: %s", owner_id, e
+        )
 
     # --- Compute component scores (0-100 each) ---
 
@@ -122,12 +142,12 @@ async def _compute(pool: asyncpg.Pool, owner_id: int) -> dict:
 
     # Weighted sum
     score = int(
-        c_cooldown    * 0.25 +
-        c_restriction * 0.15 +
-        c_flood       * 0.20 +
-        c_queue       * 0.20 +
-        c_proxy       * 0.10 +
-        c_trust       * 0.10
+        c_cooldown * 0.25
+        + c_restriction * 0.15
+        + c_flood * 0.20
+        + c_queue * 0.20
+        + c_proxy * 0.10
+        + c_trust * 0.10
     )
     score = max(0, min(100, score))
 
@@ -177,12 +197,12 @@ def format_pressure_report(data: dict) -> str:
 
     # Weights match _compute(): cooldown=25, restriction=15, flood=20, queue=20, proxy=10, trust=10
     _WEIGHTS = {
-        "cooldown":    25,
+        "cooldown": 25,
         "restriction": 15,
-        "flood":       20,
-        "queue":       20,
-        "proxy":       10,
-        "trust":       10,
+        "flood": 20,
+        "queue": 20,
+        "proxy": 10,
+        "trust": 10,
     }
 
     def _pts(key: str) -> tuple[int, int]:
@@ -194,10 +214,10 @@ def format_pressure_report(data: dict) -> str:
 
     c_cool = _pts("cooldown")
     c_rest = _pts("restriction")
-    c_fld  = _pts("flood")
-    c_q    = _pts("queue")
-    c_prx  = _pts("proxy")
-    c_tr   = _pts("trust")
+    c_fld = _pts("flood")
+    c_q = _pts("queue")
+    c_prx = _pts("proxy")
+    c_tr = _pts("trust")
 
     lines = [
         "🌡 <b>Давление инфраструктуры</b>",
@@ -239,7 +259,10 @@ def format_pressure_report(data: dict) -> str:
             "• Мониторьте flood-события",
         ]
     elif score >= 31:
-        lines += ["", "💡 <b>Рекомендация:</b> инфраструктура под нагрузкой, следите за флудами."]
+        lines += [
+            "",
+            "💡 <b>Рекомендация:</b> инфраструктура под нагрузкой, следите за флудами.",
+        ]
     else:
         lines += ["", "✅ <b>Инфраструктура в норме.</b> Продолжайте в том же духе."]
 
@@ -247,6 +270,7 @@ def format_pressure_report(data: dict) -> str:
 
 
 # ── Pool Pressure Score ────────────────────────────────────────────────────────
+
 
 async def compute_pool_pressure(pool: asyncpg.Pool, owner_id: int) -> dict[str, dict]:
     """Per-pool pressure breakdown.
@@ -283,11 +307,13 @@ async def compute_pool_pressure(pool: asyncpg.Pool, owner_id: int) -> dict[str, 
             restr_ratio = restricted_cnt / total
 
             # Simplified 3-factor pressure (no queue / proxy — per-pool scope)
-            c_cool  = min(100, int(cool_ratio * 200))   # 50% → 100
+            c_cool = min(100, int(cool_ratio * 200))  # 50% → 100
             c_restr = min(100, int(restr_ratio * 300))  # 33% → 100
             c_flood = min(100, int(avg_flood / 5 * 100))
 
-            score = max(0, min(100, int(c_cool * 0.45 + c_restr * 0.30 + c_flood * 0.25)))
+            score = max(
+                0, min(100, int(c_cool * 0.45 + c_restr * 0.30 + c_flood * 0.25))
+            )
             emoji, label = pressure_level(score)
 
             result[pool_name] = {

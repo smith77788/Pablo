@@ -192,8 +192,8 @@ class ReportFSM(StatesGroup):
 
 
 class BulkReportFSM(StatesGroup):
-    waiting_peer = State()        # одиночный target
-    waiting_peers_batch = State() # список targets (batch mode)
+    waiting_peer = State()  # одиночный target
+    waiting_peers_batch = State()  # список targets (batch mode)
     choosing_reason = State()
     selecting_accounts = State()
 
@@ -218,14 +218,14 @@ class BulkDmFSM(StatesGroup):
 
 
 class BulkChanFSM(StatesGroup):
-    waiting_value   = State()   # ожидаем username-шаблон или текст описания
-    waiting_confirm = State()   # preview — ожидаем подтверждение выполнения
+    waiting_value = State()  # ожидаем username-шаблон или текст описания
+    waiting_confirm = State()  # preview — ожидаем подтверждение выполнения
 
 
 class SeoFSM(StatesGroup):
-    waiting_feedback   = State()   # ждём правки к AI-предложению
-    waiting_username   = State()   # ждём желаемый username от пользователя
-    waiting_edit_value = State()   # ждём ручное значение для поля (title/about/username)
+    waiting_feedback = State()  # ждём правки к AI-предложению
+    waiting_username = State()  # ждём желаемый username от пользователя
+    waiting_edit_value = State()  # ждём ручное значение для поля (title/about/username)
 
 
 class MyChannelsFSM(StatesGroup):
@@ -247,7 +247,7 @@ class ContactInviteFSM(StatesGroup):
 class AssetTemplateFSM(StatesGroup):
     choosing_type = State()
     waiting_name = State()
-    waiting_json = State()    # ввод параметров (name, desc, etc.)
+    waiting_json = State()  # ввод параметров (name, desc, etc.)
     confirming = State()
 
 
@@ -255,7 +255,7 @@ class CreateGroupFSM(StatesGroup):
     choosing_account = State()
     waiting_title = State()
     waiting_about = State()
-    choosing_type = State()   # supergroup or group
+    choosing_type = State()  # supergroup or group
     confirming = State()
 
 
@@ -266,35 +266,35 @@ class AnnounceGroupFSM(StatesGroup):
 
 
 class MassPublishFSM(StatesGroup):
-    choosing_targets = State()    # выбор каналов/групп
-    choosing_selector = State()   # by cluster / by tag / by account / all
-    waiting_text = State()        # текст поста
-    choosing_timing = State()     # немедленно / с задержкой
-    previewing = State()          # предпросмотр перед запуском
-    confirming = State()          # финальное подтверждение
+    choosing_targets = State()  # выбор каналов/групп
+    choosing_selector = State()  # by cluster / by tag / by account / all
+    waiting_text = State()  # текст поста
+    choosing_timing = State()  # немедленно / с задержкой
+    previewing = State()  # предпросмотр перед запуском
+    confirming = State()  # финальное подтверждение
 
 
 class BulkBotEditFSM(StatesGroup):
-    choosing_field = State()      # name | desc | short_desc | commands
+    choosing_field = State()  # name | desc | short_desc | commands
     waiting_value = State()
     previewing = State()
     confirming = State()
 
 
 class BotTokenImportFSM(StatesGroup):
-    waiting_tokens = State()    # bulk token paste
-    reviewing = State()         # review import results
+    waiting_tokens = State()  # bulk token paste
+    reviewing = State()  # review import results
 
 
 class BotCloneSettingsFSM(StatesGroup):
-    choosing_source = State()   # source bot
+    choosing_source = State()  # source bot
     choosing_targets = State()  # target bots
-    choosing_fields = State()   # what to clone
+    choosing_fields = State()  # what to clone
     confirming = State()
 
 
 class BotValidateFSM(StatesGroup):
-    waiting_tokens = State()    # paste tokens to validate
+    waiting_tokens = State()  # paste tokens to validate
 
 
 class ChannelFactoryFSM(StatesGroup):
@@ -310,23 +310,23 @@ class ChannelFactoryFSM(StatesGroup):
 class BulkChannelCreateFSM(StatesGroup):
     choosing_account = State()
     waiting_count = State()
-    waiting_prefix = State()    # prefix for channel names: "Shop 1", "Shop 2"...
+    waiting_prefix = State()  # prefix for channel names: "Shop 1", "Shop 2"...
     waiting_about = State()
     confirming = State()
 
 
 class MassPublishFSM2(StatesGroup):
-    choosing_target_type = State()   # all | by_account | by_cluster
-    choosing_target = State()        # specific account or cluster
+    choosing_target_type = State()  # all | by_account | by_cluster
+    choosing_target = State()  # specific account or cluster
     waiting_text = State()
-    choosing_timing = State()        # immediate | delay_5s | delay_30s | delay_60s
+    choosing_timing = State()  # immediate | delay_5s | delay_30s | delay_60s
     previewing = State()
     confirming = State()
 
 
 class EditChannelBulkFSM(StatesGroup):
-    choosing_field = State()     # title | about | username
-    choosing_scope = State()     # all_channels | by_account
+    choosing_field = State()  # title | about | username
+    choosing_scope = State()  # all_channels | by_account
     waiting_value = State()
     previewing = State()
     confirming = State()
@@ -340,7 +340,7 @@ class AddCompetitorFSM(StatesGroup):
 class AddKeywordFSM(StatesGroup):
     choosing_bot = State()
     waiting_keyword = State()
-    waiting_region = State()   # "ua" | "ru" | "en" | "skip"
+    waiting_region = State()  # "ua" | "ru" | "en" | "skip"
 
 
 class KeywordAlertFSM(StatesGroup):
@@ -348,7 +348,7 @@ class KeywordAlertFSM(StatesGroup):
 
 
 class AddProxyFSM(StatesGroup):
-    waiting_url = State()    # socks5://user:pass@host:port
+    waiting_url = State()  # socks5://user:pass@host:port
     waiting_label = State()
 
 
@@ -358,33 +358,35 @@ class CreateClusterFSM(StatesGroup):
 
 
 class OpPlannerFSM(StatesGroup):
-    waiting_text = State()      # текст для mass_publish
-    waiting_links = State()     # список ссылок для bulk_join/bulk_leave
+    waiting_text = State()  # текст для mass_publish
+    waiting_links = State()  # список ссылок для bulk_join/bulk_leave
     waiting_datetime = State()  # дата и время запуска
 
 
 class BulkJoinFSM(StatesGroup):
-    waiting_links = State()     # ссылки/юзернеймы каналов (по одному на строку)
-    choosing_accounts = State() # выбор аккаунтов
+    waiting_links = State()  # ссылки/юзернеймы каналов (по одному на строку)
+    choosing_accounts = State()  # выбор аккаунтов
 
 
 class BulkLeaveFSM(StatesGroup):
     waiting_channels = State()  # юзернеймы/ID каналов для выхода (по одному на строку)
-    choosing_accounts = State() # выбор аккаунтов
+    choosing_accounts = State()  # выбор аккаунтов
 
 
 class OpBuilderFSM(StatesGroup):
-    choosing_op_type = State()   # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit
-    choosing_targets = State()   # выбор целей (каналы/аккаунты/ссылки)
-    entering_params = State()    # ввод дополнительных параметров (текст поста / ссылки)
-    confirming = State()         # финальное подтверждение перед записью в operation_queue
+    choosing_op_type = (
+        State()
+    )  # тип операции: mass_publish | bulk_join | bulk_leave | bulk_bot_edit
+    choosing_targets = State()  # выбор целей (каналы/аккаунты/ссылки)
+    entering_params = State()  # ввод дополнительных параметров (текст поста / ссылки)
+    confirming = State()  # финальное подтверждение перед записью в operation_queue
 
 
 class QuickPostFSM(StatesGroup):
-    writing_text = State()       # шаг 1: ввод текста поста
-    picking_channels = State()   # шаг 2: выбор каналов
-    picking_timing = State()     # шаг 3: задержка между постами
-    confirming = State()         # шаг 4: предпросмотр и подтверждение
+    writing_text = State()  # шаг 1: ввод текста поста
+    picking_channels = State()  # шаг 2: выбор каналов
+    picking_timing = State()  # шаг 3: задержка между постами
+    confirming = State()  # шаг 4: предпросмотр и подтверждение
 
 
 class GlobalPresenceFSM(StatesGroup):
@@ -400,51 +402,51 @@ class GlobalPresenceFSM(StatesGroup):
 
 
 class DmCampaignFSM(StatesGroup):
-    waiting_name       = State()   # название кампании
-    waiting_text       = State()   # текст с spintax
-    choosing_target    = State()   # выбор типа аудитории (bot_users/crm)
-    choosing_bot       = State()   # выбор бота (для bot_users)
+    waiting_name = State()  # название кампании
+    waiting_text = State()  # текст с spintax
+    choosing_target = State()  # выбор типа аудитории (bot_users/crm)
+    choosing_bot = State()  # выбор бота (для bot_users)
 
 
 class CleanerFSM(StatesGroup):
     choosing_account = State()
-    confirm_action   = State()
+    confirm_action = State()
 
 
 class PresencePackFSM(StatesGroup):
-    entering_name        = State()
+    entering_name = State()
     entering_description = State()
-    selecting_bot        = State()
-    selecting_channels   = State()
-    selecting_groups     = State()
-    entering_target      = State()
-    previewing           = State()
+    selecting_bot = State()
+    selecting_channels = State()
+    selecting_groups = State()
+    entering_target = State()
+    previewing = State()
 
 
 class WorkspaceFSM(StatesGroup):
-    entering_name        = State()
+    entering_name = State()
     entering_description = State()
     entering_invite_code = State()
 
 
 class AiTemplateGenFSM(StatesGroup):
-    waiting_prompt = State()   # user describes desired template
-    waiting_name   = State()   # user enters name after preview
+    waiting_prompt = State()  # user describes desired template
+    waiting_name = State()  # user enters name after preview
 
 
 class MiniStrikeFSM(StatesGroup):
-    awaiting_target   = State()
+    awaiting_target = State()
     awaiting_category = State()
 
 
 class StrikeEmailFSM(StatesGroup):
-    awaiting_email    = State()  # ввод email-адреса
+    awaiting_email = State()  # ввод email-адреса
     awaiting_password = State()  # ввод пароля (stores email + smtp in FSM data)
 
 
 class ErrorReportFSM(StatesGroup):
     awaiting_description = State()  # описание ошибки
-    awaiting_screenshot  = State()  # скриншот для доказательства
+    awaiting_screenshot = State()  # скриншот для доказательства
 
 
 class EcosystemCreateFSM(StatesGroup):
@@ -456,7 +458,7 @@ class EcosystemCreateFSM(StatesGroup):
 class EcosystemAddMemberFSM(StatesGroup):
     choose_type = State()
     choose_object = State()
-    awaiting_screenshot = State()   # скриншот для доказательства
+    awaiting_screenshot = State()  # скриншот для доказательства
 
 
 class EcosystemDnaFSM(StatesGroup):
@@ -464,25 +466,25 @@ class EcosystemDnaFSM(StatesGroup):
 
 
 class EcosystemCloneFSM(StatesGroup):
-    naming  = State()  # ввод имени клона
-    region  = State()  # ввод нового региона (опционально)
+    naming = State()  # ввод имени клона
+    region = State()  # ввод нового региона (опционально)
 
 
 class WarmupSessionFSM(StatesGroup):
-    choosing_accounts    = State()  # multi-select рабочих аккаунтов
+    choosing_accounts = State()  # multi-select рабочих аккаунтов
     choosing_target_type = State()  # infra | manual
-    picking_infra        = State()  # multi-select каналов/ботов из инфраструктуры
-    entering_targets     = State()  # ввод username/ссылок вручную
-    choosing_mode        = State()  # gentle | standard | aggressive
-    confirming           = State()  # финальное подтверждение
+    picking_infra = State()  # multi-select каналов/ботов из инфраструктуры
+    entering_targets = State()  # ввод username/ссылок вручную
+    choosing_mode = State()  # gentle | standard | aggressive
+    confirming = State()  # финальное подтверждение
 
 
 class ResourceActivityFSM(StatesGroup):
     choosing_accounts = State()  # multi-select аккаунтов для активности
-    choosing_profile  = State()  # reader | commenter | reactor | mixed
-    confirming        = State()  # подтверждение перед запуском
+    choosing_profile = State()  # reader | commenter | reactor | mixed
+    confirming = State()  # подтверждение перед запуском
 
 
 class IntentFSM(StatesGroup):
     describing = State()  # ввод произвольного описания цели
-    refining   = State()  # уточнение параметров (geo, asset_type, pattern)
+    refining = State()  # уточнение параметров (geo, asset_type, pattern)

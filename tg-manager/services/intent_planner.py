@@ -1,20 +1,53 @@
 """Intent Planner — Plan Builder, Strategy Engine, Execution Forecast (Epoch IV)."""
+
 from __future__ import annotations
 
 import asyncpg
 
-from services.presence_planner import build_targets, estimate_duration_minutes
+from services.presence_planner import estimate_duration_minutes
 from services.geo_data import GEO_PRESETS
 
 # ─── Intent classification ────────────────────────────────────────────────────
 
 _INTENT_PATTERNS: list[tuple[str, list[str]]] = [
-    ("presence", ["присутствие", "presence", "городах", "городов", "регион", "geo", "глобал", "deploy"]),
-    ("strike",   ["strike", "жалоба", "репорт", "report", "страйк", "ban", "удалить"]),
-    ("network",  ["сеть", "network", "инфраструктур", "разверн", "create network", "нов"]),
-    ("sync",     ["синхронизир", "sync", "обновить все", "привести", "шаблону", "синхронизац"]),
-    ("audit",    ["проверить", "audit", "аудит", "здоровье", "health", "состояние", "диагностик"]),
-    ("growth",   ["масштаб", "growth", "расширить", "усилить", "увелич", "развить", "scale"]),
+    (
+        "presence",
+        [
+            "присутствие",
+            "presence",
+            "городах",
+            "городов",
+            "регион",
+            "geo",
+            "глобал",
+            "deploy",
+        ],
+    ),
+    ("strike", ["strike", "жалоба", "репорт", "report", "страйк", "ban", "удалить"]),
+    (
+        "network",
+        ["сеть", "network", "инфраструктур", "разверн", "create network", "нов"],
+    ),
+    (
+        "sync",
+        ["синхронизир", "sync", "обновить все", "привести", "шаблону", "синхронизац"],
+    ),
+    (
+        "audit",
+        [
+            "проверить",
+            "audit",
+            "аудит",
+            "здоровье",
+            "health",
+            "состояние",
+            "диагностик",
+        ],
+    ),
+    (
+        "growth",
+        ["масштаб", "growth", "расширить", "усилить", "увелич", "развить", "scale"],
+    ),
 ]
 
 
@@ -29,13 +62,13 @@ def classify_intent(description: str) -> str:
 # ─── Geo preset & asset detection ────────────────────────────────────────────
 
 _GEO_KEYWORDS: dict[str, list[str]] = {
-    "eu_capitals":    ["европ", "europe", "евросоюз", "eu capital"],
+    "eu_capitals": ["европ", "europe", "евросоюз", "eu capital"],
     "world_capitals": ["мир", "world", "глобальн", "global", "world capital"],
-    "cis":            ["снг", "cis", "постсоветск", "снг-страны"],
-    "dach":           ["германи", "german", "austria", "австри", "швейцар", "dach"],
-    "latam":          ["латин", "latin", "brazil", "бразил", "аргентин", "latam"],
-    "ru_cities":      ["россия", "russia", "рф", "russian", "рос"],
-    "tier1":          ["tier1", "tier-1", "крупных", "major cities", "мегаполис"],
+    "cis": ["снг", "cis", "постсоветск", "снг-страны"],
+    "dach": ["германи", "german", "austria", "австри", "швейцар", "dach"],
+    "latam": ["латин", "latin", "brazil", "бразил", "аргентин", "latam"],
+    "ru_cities": ["россия", "russia", "рф", "russian", "рос"],
+    "tier1": ["tier1", "tier-1", "крупных", "major cities", "мегаполис"],
 }
 
 
@@ -61,6 +94,7 @@ def detect_asset_type(description: str) -> str:
 
 
 # ─── Resource assessment ──────────────────────────────────────────────────────
+
 
 async def assess_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
     acc_row = await pool.fetchrow(
@@ -93,6 +127,7 @@ async def assess_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
 
 # ─── Plan Builder ─────────────────────────────────────────────────────────────
 
+
 async def build_plan(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -102,11 +137,11 @@ async def build_plan(
 ) -> dict:
     builders = {
         "presence": _build_presence_plan,
-        "network":  _build_network_plan,
-        "audit":    _build_audit_plan,
-        "sync":     _build_sync_plan,
-        "growth":   _build_growth_plan,
-        "strike":   _build_strike_plan,
+        "network": _build_network_plan,
+        "audit": _build_audit_plan,
+        "sync": _build_sync_plan,
+        "growth": _build_growth_plan,
+        "strike": _build_strike_plan,
     }
     builder = builders.get(intent_type, _build_custom_plan)
     return await builder(pool, owner_id, description, resources)
@@ -121,18 +156,23 @@ async def _build_presence_plan(pool, owner_id, description, resources):
     n_targets = preset_info["count"]
 
     asset_labels = {
-        "channel": "Каналы", "group": "Группы",
-        "bot": "Боты", "package": "Пакет (каналы + группы)",
+        "channel": "Каналы",
+        "group": "Группы",
+        "bot": "Боты",
+        "package": "Пакет (каналы + группы)",
         "full_package": "Полный пакет (каналы + группы + боты)",
     }
     asset_label = asset_labels.get(asset_type, "Каналы")
 
     # Pick best accounts
-    n_accounts_needed = max(1, min(resources["accounts_available"], max(1, n_targets // 15)))
+    n_accounts_needed = max(
+        1, min(resources["accounts_available"], max(1, n_targets // 15))
+    )
     acc_rows = await pool.fetch(
         "SELECT id FROM user_accounts WHERE owner_id=$1 AND trust_score > 0.3 "
         "ORDER BY trust_score DESC LIMIT $2",
-        owner_id, n_accounts_needed,
+        owner_id,
+        n_accounts_needed,
     )
     account_ids = [r["id"] for r in acc_rows]
 
@@ -187,7 +227,10 @@ async def _build_network_plan(pool, owner_id, description, resources):
 
     n_to_create = 10  # default
     import re
-    m = re.search(r"(\d+)\s*(каналов|ботов|групп|channel|bot|group)", description.lower())
+
+    m = re.search(
+        r"(\d+)\s*(каналов|ботов|групп|channel|bot|group)", description.lower()
+    )
     if m:
         n_to_create = min(int(m.group(1)), 500)
 
@@ -218,12 +261,18 @@ async def _build_network_plan(pool, owner_id, description, resources):
 
 
 async def _build_audit_plan(pool, owner_id, description, resources):
-    bots_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
-    ) or 0
-    channels_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-    ) or 0
+    bots_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
+    channels_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
 
     return {
         "intent_type": "audit",
@@ -246,12 +295,18 @@ async def _build_audit_plan(pool, owner_id, description, resources):
 
 
 async def _build_sync_plan(pool, owner_id, description, resources):
-    channels_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-    ) or 0
-    bots_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
-    ) or 0
+    channels_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
+    bots_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
     total = channels_cnt + bots_cnt
 
     return {
@@ -268,7 +323,8 @@ async def _build_sync_plan(pool, owner_id, description, resources):
         ],
         "risks": (
             ["⚠️ Изменения затронут все активы — рекомендуется резервная копия"]
-            if total > 10 else ["✅ Объём небольшой — риски минимальны"]
+            if total > 10
+            else ["✅ Объём небольшой — риски минимальны"]
         ),
         "executable": False,
         "action": "navigate",
@@ -345,23 +401,25 @@ async def _build_custom_plan(pool, owner_id, description, resources):
 # ─── Strategy Engine ──────────────────────────────────────────────────────────
 
 STRATEGY_LABELS: dict[str, str] = {
-    "safest":   "🛡 Безопасная",
+    "safest": "🛡 Безопасная",
     "balanced": "⚖️ Сбалансированная",
-    "fastest":  "⚡ Быстрая",
+    "fastest": "⚡ Быстрая",
     "scalable": "📈 Масштабируемая",
 }
 
 STRATEGY_DESCRIPTIONS: dict[str, str] = {
-    "safest":   "Максимальные задержки, минимальная нагрузка. Дольше, но безопаснее.",
+    "safest": "Максимальные задержки, минимальная нагрузка. Дольше, но безопаснее.",
     "balanced": "Оптимальный баланс скорости и безопасности. Рекомендуется.",
-    "fastest":  "Минимальные задержки. Быстрее, но выше риск FloodWait.",
+    "fastest": "Минимальные задержки. Быстрее, но выше риск FloodWait.",
     "scalable": "Распределение по всем аккаунтам. Хорошо для больших объёмов.",
 }
 
 
 def forecast_execution(plan: dict, strategy: str = "balanced") -> dict:
     n_targets = plan.get("n_targets", 10)
-    n_accounts = max(1, plan.get("n_accounts_selected", plan.get("n_accounts_available", 1)))
+    n_accounts = max(
+        1, plan.get("n_accounts_selected", plan.get("n_accounts_available", 1))
+    )
 
     safe_mode = strategy in ("safest", "balanced")
     base_minutes = estimate_duration_minutes(n_targets, safe_mode=safe_mode)
@@ -397,10 +455,16 @@ def forecast_execution(plan: dict, strategy: str = "balanced") -> dict:
 
 # ─── Formatting ───────────────────────────────────────────────────────────────
 
+
 def format_plan_card(plan: dict, forecast: dict, strategy: str) -> str:
     intent_icons = {
-        "presence": "🌍", "network": "🕸", "audit": "🔍",
-        "sync": "🔄", "growth": "📈", "strike": "⚔️", "custom": "🎯",
+        "presence": "🌍",
+        "network": "🕸",
+        "audit": "🔍",
+        "sync": "🔄",
+        "growth": "📈",
+        "strike": "⚔️",
+        "custom": "🎯",
     }
     icon = intent_icons.get(plan.get("intent_type", "custom"), "🎯")
 
@@ -415,7 +479,9 @@ def format_plan_card(plan: dict, forecast: dict, strategy: str) -> str:
     lines += ["", "<b>🔧 Ресурсы:</b>"]
     if "n_accounts_available" in plan:
         sel = plan.get("n_accounts_selected", plan["n_accounts_available"])
-        lines.append(f"  • Аккаунтов: {plan['n_accounts_available']} (будет использовано: {sel})")
+        lines.append(
+            f"  • Аккаунтов: {plan['n_accounts_available']} (будет использовано: {sel})"
+        )
     if "n_proxies_available" in plan:
         lines.append(f"  • Прокси: {plan['n_proxies_available']}")
     if "n_targets" in plan:

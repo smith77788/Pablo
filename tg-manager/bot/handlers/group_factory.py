@@ -5,6 +5,7 @@ Provides group management via Telethon accounts:
   - List groups/supergroups of an account
   - Send announcements to all groups of an account
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,17 +46,18 @@ def _no_accounts_kb() -> InlineKeyboardBuilder:
 
 # ── Menu ───────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(GroupFCb.filter(F.action == "menu"))
 async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Создать группу",        callback_data=GroupFCb(action="create"))
-    kb.button(text="📥 Импорт из Telegram",    callback_data=GroupFCb(action="import"))
-    kb.button(text="📋 Мои группы",            callback_data=GroupFCb(action="list"))
-    kb.button(text="👥 Участники",             callback_data=GroupFCb(action="members"))
-    kb.button(text="📢 Объявление",            callback_data=GroupFCb(action="announce"))
-    kb.button(text="◀️ Назад",                callback_data=BmCb(action="main"))
+    kb.button(text="➕ Создать группу", callback_data=GroupFCb(action="create"))
+    kb.button(text="📥 Импорт из Telegram", callback_data=GroupFCb(action="import"))
+    kb.button(text="📋 Мои группы", callback_data=GroupFCb(action="list"))
+    kb.button(text="👥 Участники", callback_data=GroupFCb(action="members"))
+    kb.button(text="📢 Объявление", callback_data=GroupFCb(action="announce"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1)
     await callback.message.edit_text(
         "👥 <b>Менеджер групп</b>\n\n"
@@ -70,6 +72,7 @@ async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 # ── Create group — Step 1: choose account ─────────────────────────────────
+
 
 @router.callback_query(GroupFCb.filter(F.action == "create"))
 async def cb_group_create_start(
@@ -113,6 +116,7 @@ async def cb_group_create_start(
 
 # ── Create group — Step 2: account chosen → ask title ─────────────────────
 
+
 @router.callback_query(GroupFCb.filter(F.action == "create_acc"))
 async def cb_group_create_acc_chosen(
     callback: CallbackQuery,
@@ -122,7 +126,8 @@ async def cb_group_create_acc_chosen(
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -159,6 +164,7 @@ async def cb_group_create_acc_chosen(
 
 # ── Create group — Step 3: title entered → ask about ──────────────────────
 
+
 @router.message(CreateGroupFSM.waiting_title)
 async def fsm_group_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
@@ -170,7 +176,7 @@ async def fsm_group_title(message: Message, state: FSMContext) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="⏭ Пропустить", callback_data=GroupFCb(action="skip_about"))
-    kb.button(text="❌ Отмена",     callback_data=GroupFCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=GroupFCb(action="menu"))
     kb.adjust(1)
     await message.answer(
         "📄 <b>Описание группы</b>\n\nВведите описание или пропустите:",
@@ -195,12 +201,13 @@ async def fsm_group_about(message: Message, state: FSMContext) -> None:
 
 # ── Create group — Step 4: choose type ────────────────────────────────────
 
+
 async def _show_type_choice(msg, state: FSMContext, edit: bool = False) -> None:
     await state.set_state(CreateGroupFSM.choosing_type)
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌐 Супергруппа",      callback_data=GroupFCb(action="type_super"))
-    kb.button(text="👥 Обычная группа",   callback_data=GroupFCb(action="type_basic"))
-    kb.button(text="❌ Отмена",           callback_data=GroupFCb(action="menu"))
+    kb.button(text="🌐 Супергруппа", callback_data=GroupFCb(action="type_super"))
+    kb.button(text="👥 Обычная группа", callback_data=GroupFCb(action="type_basic"))
+    kb.button(text="❌ Отмена", callback_data=GroupFCb(action="menu"))
     kb.adjust(2, 1)
     text = (
         "🔧 <b>Тип группы</b>\n\n"
@@ -228,6 +235,7 @@ async def cb_group_type_chosen(
 
 # ── Create group — Step 5: confirm ────────────────────────────────────────
 
+
 async def _show_group_confirm(msg, state: FSMContext, edit: bool = False) -> None:
     await state.set_state(CreateGroupFSM.confirming)
     data = await state.get_data()
@@ -243,8 +251,8 @@ async def _show_group_confirm(msg, state: FSMContext, edit: bool = False) -> Non
         f"Описание: <b>{about or '—'}</b>"
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Создать",  callback_data=GroupFCb(action="do_create"))
-    kb.button(text="❌ Отмена",  callback_data=GroupFCb(action="menu"))
+    kb.button(text="✅ Создать", callback_data=GroupFCb(action="do_create"))
+    kb.button(text="❌ Отмена", callback_data=GroupFCb(action="menu"))
     kb.adjust(2)
 
     if edit:
@@ -252,11 +260,14 @@ async def _show_group_confirm(msg, state: FSMContext, edit: bool = False) -> Non
             await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
         except Exception:
-            log_exc_swallow(log, "Ошибка редактирования сообщения подтверждения создания группы")
+            log_exc_swallow(
+                log, "Ошибка редактирования сообщения подтверждения создания группы"
+            )
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Create group — Step 6: do create ──────────────────────────────────────
+
 
 @router.callback_query(GroupFCb.filter(F.action == "do_create"))
 async def cb_group_do_create(
@@ -277,7 +288,8 @@ async def cb_group_do_create(
 
     acc = await pool.fetchrow(
         "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, callback.from_user.id,
+        acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.message.edit_text(
@@ -318,8 +330,10 @@ async def cb_group_do_create(
     group_type = "Супергруппа" if is_super else "Группа"
 
     kb_grp = InlineKeyboardBuilder()
-    kb_grp.button(text="🌐 Добавить в экосистему",
-                  callback_data=EcoPickCb(action="list", object_type="group", object_id=group_id))
+    kb_grp.button(
+        text="🌐 Добавить в экосистему",
+        callback_data=EcoPickCb(action="list", object_type="group", object_id=group_id),
+    )
     kb_grp.button(text="◀️ Меню", callback_data=GroupFCb(action="menu"))
     kb_grp.adjust(1)
     await callback.message.edit_text(
@@ -333,6 +347,7 @@ async def cb_group_do_create(
 
 
 # ── List groups ────────────────────────────────────────────────────────────
+
 
 @router.callback_query(GroupFCb.filter(F.action == "list"))
 async def cb_group_list_start(
@@ -370,16 +385,19 @@ async def cb_group_list_acc(
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
     await callback.answer("⏳ Загружаю группы...")
     from services import account_manager
+
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
     groups = [
-        d for d in (dialogs or [])
+        d
+        for d in (dialogs or [])
         if d.get("type") in ("megagroup", "supergroup", "group", "chat")
     ]
 
@@ -408,6 +426,7 @@ async def cb_group_list_acc(
 
 
 # ── Members — Step 1: choose account ─────────────────────────────────────
+
 
 @router.callback_query(GroupFCb.filter(F.action == "members"))
 async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -438,21 +457,28 @@ async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Members — Step 2: choose group ────────────────────────────────────────
 
+
 @router.callback_query(GroupFCb.filter(F.action == "members_acc"))
 async def cb_group_members_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
     await callback.answer("⏳ Загружаю группы...")
     from services import account_manager
+
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
-    groups = [d for d in (dialogs or []) if d.get("type") in ("megagroup", "supergroup", "group", "chat")]
+    groups = [
+        d
+        for d in (dialogs or [])
+        if d.get("type") in ("megagroup", "supergroup", "group", "chat")
+    ]
 
     if not groups:
         await callback.message.edit_text(
@@ -471,7 +497,9 @@ async def cb_group_members_acc(
         title = html.escape(g.get("title", f"id={g['id']}"))
         kb.button(
             text=f"{icon} {title}",
-            callback_data=GroupFCb(action="members_list", acc_id=acc["id"], group_id=g["id"]),
+            callback_data=GroupFCb(
+                action="members_list", acc_id=acc["id"], group_id=g["id"]
+            ),
         )
     kb.button(text="◀️ Назад", callback_data=GroupFCb(action="members"))
     kb.adjust(1)
@@ -484,19 +512,22 @@ async def cb_group_members_acc(
 
 # ── Members — Step 3: show members ────────────────────────────────────────
 
+
 @router.callback_query(GroupFCb.filter(F.action == "members_list"))
 async def cb_group_members_list(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
     await callback.answer("⏳ Загружаю участников...")
     from services import account_manager
+
     members = await account_manager.get_channel_members(
         acc["session_str"], callback_data.group_id, limit=50, _acc=acc
     )
@@ -537,13 +568,13 @@ async def cb_group_members_list(
 # IMPORT EXISTING GROUPS — подключить уже существующие группы
 # ══════════════════════════════════════════════════════════════════════════
 
+
 @router.callback_query(GroupFCb.filter(F.action == "import"))
-async def cb_group_import(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_group_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: выбор аккаунта для импорта групп."""
     await callback.answer()
     from bot.utils.op_helpers import _get_active_accounts, _acc_label
+
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -578,12 +609,12 @@ async def cb_group_import_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     """Загрузить группы аккаунта и сохранить в managed_channels."""
-    from bot.utils.op_helpers import _acc_label
     acc = await pool.fetchrow(
         "SELECT id, session_str, phone, first_name, username, "
         "device_model, system_version, app_version FROM tg_accounts "
         "WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -594,7 +625,10 @@ async def cb_group_import_acc(
     from database.db import upsert_managed_channels
 
     try:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+        dialogs = (
+            await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc)
+            or []
+        )
     except Exception as e:
         log.warning("group import_acc get_dialogs error: %s", e)
         await callback.message.edit_text(
@@ -605,7 +639,8 @@ async def cb_group_import_acc(
         return
 
     groups = [
-        d for d in dialogs
+        d
+        for d in dialogs
         if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
     ]
     if not groups:
@@ -641,11 +676,10 @@ async def cb_group_import_acc(
 
 
 @router.callback_query(GroupFCb.filter(F.action == "import_all"))
-async def cb_group_import_all(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
+async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Импортировать группы со всех активных аккаунтов."""
     from bot.utils.op_helpers import _get_active_accounts, _acc_label
+
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.answer("Нет активных аккаунтов.", show_alert=True)
@@ -663,16 +697,25 @@ async def cb_group_import_all(
     )
     for idx, acc in enumerate(accounts):
         try:
-            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+            dialogs = (
+                await account_manager.get_dialogs(
+                    acc["session_str"], limit=200, _acc=acc
+                )
+                or []
+            )
             groups = [
-                d for d in dialogs
-                if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+                d
+                for d in dialogs
+                if d.get("type")
+                in ("megagroup", "supergroup", "group", "chat", "gigagroup")
             ]
             if groups:
-                await upsert_managed_channels(pool, callback.from_user.id, acc["id"], groups)
+                await upsert_managed_channels(
+                    pool, callback.from_user.id, acc["id"], groups
+                )
                 total += len(groups)
             await progress_msg.edit_text(
-                f"⏳ Обработка {idx+1}/{len(accounts)} аккаунтов...\nНайдено групп: {total}",
+                f"⏳ Обработка {idx + 1}/{len(accounts)} аккаунтов...\nНайдено групп: {total}",
                 parse_mode="HTML",
             )
             if idx < len(accounts) - 1:
@@ -691,6 +734,7 @@ async def cb_group_import_all(
 
 
 # ── Announce — Step 1: choose account ─────────────────────────────────────
+
 
 @router.callback_query(GroupFCb.filter(F.action == "announce"))
 async def cb_group_announce_start(
@@ -731,13 +775,18 @@ async def cb_group_announce_start(
 
 # ── Announce — Step 2: account chosen → ask text ──────────────────────────
 
+
 @router.callback_query(GroupFCb.filter(F.action == "announce_acc"))
 async def cb_group_announce_acc(
-    callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: GroupFCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     acc = await pool.fetchrow(
         "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id, callback.from_user.id,
+        callback_data.acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
@@ -759,6 +808,7 @@ async def cb_group_announce_acc(
 
 # ── Announce — Step 3: text entered → confirm ─────────────────────────────
 
+
 @router.message(AnnounceGroupFSM.waiting_text)
 async def fsm_announce_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
@@ -771,7 +821,7 @@ async def fsm_announce_text(message: Message, state: FSMContext) -> None:
     preview = html.escape(text[:200])
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Отправить", callback_data=GroupFCb(action="do_announce"))
-    kb.button(text="❌ Отмена",   callback_data=GroupFCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=GroupFCb(action="menu"))
     kb.adjust(2)
     await message.answer(
         f"📢 <b>Подтвердите объявление</b>\n\n"
@@ -783,6 +833,7 @@ async def fsm_announce_text(message: Message, state: FSMContext) -> None:
 
 
 # ── Announce — Step 4: do send ─────────────────────────────────────────────
+
 
 @router.callback_query(GroupFCb.filter(F.action == "do_announce"))
 async def cb_group_do_announce(
@@ -804,7 +855,8 @@ async def cb_group_do_announce(
 
     acc = await pool.fetchrow(
         "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, callback.from_user.id,
+        acc_id,
+        callback.from_user.id,
     )
     if not acc:
         await callback.message.edit_text(
@@ -815,9 +867,11 @@ async def cb_group_do_announce(
         return
 
     from services import account_manager
+
     dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
     groups = [
-        d for d in (dialogs or [])
+        d
+        for d in (dialogs or [])
         if d.get("type") in ("megagroup", "supergroup", "group", "chat")
     ]
 
@@ -852,7 +906,9 @@ async def cb_group_do_announce(
             else:
                 ok_count += 1
         except Exception:
-            log_exc_swallow(log, "Ошибка отправки объявления в группу %s", grp.get("id"))
+            log_exc_swallow(
+                log, "Ошибка отправки объявления в группу %s", grp.get("id")
+            )
             err_count += 1
 
         try:

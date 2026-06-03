@@ -4,6 +4,7 @@ Background service that:
 - Recomputes behavioral scores every 15 minutes
 - Provides collector functions called from existing handlers
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +22,7 @@ _RESCORE_INTERVAL = 900  # 15 minutes
 
 
 # ── Background runner ─────────────────────────────────────────────────────
+
 
 async def run(pool: asyncpg.Pool, bot=None) -> None:
     """Main loop: periodically recompute behavioral scores and detect anomalies.
@@ -48,6 +50,7 @@ async def run(pool: asyncpg.Pool, bot=None) -> None:
 
 
 # ── Score recomputation ───────────────────────────────────────────────────
+
 
 async def _recompute_scores(pool: asyncpg.Pool) -> None:
     """Recompute attention/habit/ecosystem scores for all active entities.
@@ -103,7 +106,9 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
 
         if time_stddev > 0 and active_weeks > 0:
             # Lower stddev = more consistent = higher score
-            consistency_factor = max(0.3, 1.0 - (time_stddev / 168.0))  # 168 = hours in week
+            consistency_factor = max(
+                0.3, 1.0 - (time_stddev / 168.0)
+            )  # 168 = hours in week
         else:
             consistency_factor = 0.5
 
@@ -114,14 +119,19 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
         cross_nav = r["cross_nav_count"]
         if cross_nav > 0:
             # Check diversity: unique destination types
-            unique_dest = await pool.fetchval(
-                """SELECT COUNT(DISTINCT meta->>'to_type')
+            unique_dest = (
+                await pool.fetchval(
+                    """SELECT COUNT(DISTINCT meta->>'to_type')
                    FROM behavioral_events
                    WHERE owner_id=$1 AND entity_type=$2 AND entity_id=$3
                      AND event_type='cross_nav'
                      AND occurred_at > now() - INTERVAL '30 days'""",
-                r["owner_id"], r["entity_type"], r["entity_id"],
-            ) or 0
+                    r["owner_id"],
+                    r["entity_type"],
+                    r["entity_id"],
+                )
+                or 0
+            )
             diversity_bonus = min(1.5, 0.8 + unique_dest * 0.15)
         else:
             diversity_bonus = 1.0
@@ -129,7 +139,9 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
         ecosystem = min(100.0, float(cross_nav) * 20 * diversity_bonus)
 
         # ── Decay rate (fine-tuned) ──
-        lifespan_days = max(1.0, (r["last_event"] - r["first_event"]).total_seconds() / 86400)
+        lifespan_days = max(
+            1.0, (r["last_event"] - r["first_event"]).total_seconds() / 86400
+        )
         event_count = r["event_count"]
         if event_count > 0 and lifespan_days > 0:
             # Events per day → higher = lower decay
@@ -138,11 +150,18 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
         else:
             decay = 0.5
 
-        upserts.append((
-            r["owner_id"], r["entity_type"], r["entity_id"],
-            round(attention, 2), round(habit, 2), round(ecosystem, 2),
-            round(decay, 4), r["reentry_count"],
-        ))
+        upserts.append(
+            (
+                r["owner_id"],
+                r["entity_type"],
+                r["entity_id"],
+                round(attention, 2),
+                round(habit, 2),
+                round(ecosystem, 2),
+                round(decay, 4),
+                r["reentry_count"],
+            )
+        )
 
     await pool.executemany(
         """INSERT INTO entity_behavioral_score
@@ -164,6 +183,7 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
 
 # ── Collector functions (called from handlers) ────────────────────────────
 
+
 async def record_reentry(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -177,7 +197,9 @@ async def record_reentry(
             "INSERT INTO behavioral_events"
             "(owner_id, entity_type, entity_id, event_type, meta) "
             "VALUES ($1, $2, $3, 'reentry', $4)",
-            owner_id, entity_type, entity_id,
+            owner_id,
+            entity_type,
+            entity_id,
             json.dumps({"days_absent": round(days_absent, 1)}),
         )
     except Exception:
@@ -198,13 +220,15 @@ async def record_search_repeat(
                SET search_count  = search_memory.search_count + 1,
                    last_searched = now(),
                    affinity_score = LEAST(100, search_memory.affinity_score + 5)""",
-            owner_id, keyword,
+            owner_id,
+            keyword,
         )
         await pool.execute(
             "INSERT INTO behavioral_events"
             "(owner_id, entity_type, entity_id, event_type, meta) "
             "VALUES ($1, 'keyword', 0, 'search_repeat', $2)",
-            owner_id, json.dumps({"keyword": keyword}),
+            owner_id,
+            json.dumps({"keyword": keyword}),
         )
     except Exception:
         log.exception("record_search_repeat error")
@@ -220,21 +244,29 @@ async def record_cross_nav(
 ) -> None:
     """Record navigation between two entity types (ecosystem mapping)."""
     try:
-        meta = json.dumps({
-            "from_type": from_type, "from_id": from_id,
-            "to_type": to_type, "to_id": to_id,
-        })
+        meta = json.dumps(
+            {
+                "from_type": from_type,
+                "from_id": from_id,
+                "to_type": to_type,
+                "to_id": to_id,
+            }
+        )
         await pool.execute(
             "INSERT INTO behavioral_events"
             "(owner_id, entity_type, entity_id, event_type, meta) "
             "VALUES ($1, $2, $3, 'cross_nav', $4)",
-            owner_id, from_type, from_id, meta,
+            owner_id,
+            from_type,
+            from_id,
+            meta,
         )
     except Exception:
         log.exception("record_cross_nav error")
 
 
 # ── Anomaly detection ────────────────────────────────────────────────────
+
 
 async def _detect_anomalies(pool: asyncpg.Pool) -> None:
     """
@@ -262,12 +294,16 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "(owner_id, entity_type, entity_id, event_type, meta) "
                 "VALUES ($1, $2, $3, 'anomaly', $4) "
                 "ON CONFLICT DO NOTHING",
-                r["owner_id"], r["entity_type"], r["entity_id"],
-                json.dumps({
-                    "type": "decay_spike",
-                    "decay_rate": float(r["decay_rate"]),
-                    "attention_score": float(r["attention_score"]),
-                }),
+                r["owner_id"],
+                r["entity_type"],
+                r["entity_id"],
+                json.dumps(
+                    {
+                        "type": "decay_spike",
+                        "decay_rate": float(r["decay_rate"]),
+                        "attention_score": float(r["attention_score"]),
+                    }
+                ),
             )
 
         # 2. Affinity dropout — keywords gone cold
@@ -284,12 +320,16 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "VALUES ($1, 'keyword', 0, 'anomaly', $2) "
                 "ON CONFLICT DO NOTHING",
                 r["owner_id"],
-                json.dumps({
-                    "type": "affinity_dropout",
-                    "keyword": r["keyword"],
-                    "affinity_score": float(r["affinity_score"]),
-                    "days_absent": (datetime.now(tz=timezone.utc) - r["last_searched"]).days,
-                }),
+                json.dumps(
+                    {
+                        "type": "affinity_dropout",
+                        "keyword": r["keyword"],
+                        "affinity_score": float(r["affinity_score"]),
+                        "days_absent": (
+                            datetime.now(tz=timezone.utc) - r["last_searched"]
+                        ).days,
+                    }
+                ),
             )
 
         # 3. Reentry burst — more than 5 reentries to same entity in 1 hour
@@ -306,14 +346,18 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "INSERT INTO behavioral_events"
                 "(owner_id, entity_type, entity_id, event_type, meta) "
                 "VALUES ($1, $2, $3, 'anomaly', $4)",
-                r["owner_id"], r["entity_type"], r["entity_id"],
+                r["owner_id"],
+                r["entity_type"],
+                r["entity_id"],
                 json.dumps({"type": "reentry_burst", "count": int(r["cnt"])}),
             )
 
         if decay_anomalies or cold_keywords or burst_rows:
             log.info(
                 "behavioral_engine anomaly scan: %d decay, %d cold kw, %d bursts",
-                len(decay_anomalies), len(cold_keywords), len(burst_rows),
+                len(decay_anomalies),
+                len(cold_keywords),
+                len(burst_rows),
             )
 
         # 4. Velocity anomaly — events in last hour vs 7-day hourly average
@@ -349,13 +393,19 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "(owner_id, entity_type, entity_id, event_type, meta) "
                 "VALUES ($1, $2, $3, 'anomaly', $4) "
                 "ON CONFLICT DO NOTHING",
-                r["owner_id"], r["entity_type"], r["entity_id"],
-                json.dumps({
-                    "type": "velocity_spike",
-                    "current_hour": int(r["current_hour"]),
-                    "avg_hourly": float(r["avg_hourly"]),
-                    "ratio": round(float(r["current_hour"]) / max(1, float(r["avg_hourly"])), 1),
-                }),
+                r["owner_id"],
+                r["entity_type"],
+                r["entity_id"],
+                json.dumps(
+                    {
+                        "type": "velocity_spike",
+                        "current_hour": int(r["current_hour"]),
+                        "avg_hourly": float(r["avg_hourly"]),
+                        "ratio": round(
+                            float(r["current_hour"]) / max(1, float(r["avg_hourly"])), 1
+                        ),
+                    }
+                ),
             )
 
         # 5. Pattern deviation — current scores deviate >50% from 7-day baseline
@@ -403,21 +453,26 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "(owner_id, entity_type, entity_id, event_type, meta) "
                 "VALUES ($1, $2, $3, 'anomaly', $4) "
                 "ON CONFLICT DO NOTHING",
-                r["owner_id"], r["entity_type"], r["entity_id"],
-                json.dumps({
-                    "type": "pattern_deviation",
-                    "subtypes": dev_type,
-                    "current_attention": float(r["attention_score"]),
-                    "baseline_attention": float(r["baseline_att"] or 0),
-                    "current_ecosystem": float(r["ecosystem_score"]),
-                    "baseline_ecosystem": float(r["baseline_eco"] or 0),
-                }),
+                r["owner_id"],
+                r["entity_type"],
+                r["entity_id"],
+                json.dumps(
+                    {
+                        "type": "pattern_deviation",
+                        "subtypes": dev_type,
+                        "current_attention": float(r["attention_score"]),
+                        "baseline_attention": float(r["baseline_att"] or 0),
+                        "current_ecosystem": float(r["ecosystem_score"]),
+                        "baseline_ecosystem": float(r["baseline_eco"] or 0),
+                    }
+                ),
             )
 
         if velocity_anomalies or deviation_anomalies:
             log.info(
                 "behavioral_engine velocity/deviation scan: %d velocity, %d deviations",
-                len(velocity_anomalies), len(deviation_anomalies),
+                len(velocity_anomalies),
+                len(deviation_anomalies),
             )
 
         # 6. Schedule deviation — activity at unusual hours for this account
@@ -478,25 +533,35 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 "(owner_id, entity_type, entity_id, event_type, meta) "
                 "VALUES ($1, $2, $3, 'anomaly', $4) "
                 "ON CONFLICT DO NOTHING",
-                r["owner_id"], r["entity_type"], r["entity_id"],
-                json.dumps({
-                    "type": "schedule_deviation",
-                    "unusual_hour": unusual,
-                    "normal_hours": normal,
-                    "detail": f"Активность в {unusual}:00, обычно в {normal}",
-                }),
+                r["owner_id"],
+                r["entity_type"],
+                r["entity_id"],
+                json.dumps(
+                    {
+                        "type": "schedule_deviation",
+                        "unusual_hour": unusual,
+                        "normal_hours": normal,
+                        "detail": f"Активность в {unusual}:00, обычно в {normal}",
+                    }
+                ),
             )
 
         if schedule_anomalies:
-            log.info("behavioral_engine schedule deviation: %d anomalies", len(schedule_anomalies))
+            log.info(
+                "behavioral_engine schedule deviation: %d anomalies",
+                len(schedule_anomalies),
+            )
 
     except asyncpg.UndefinedTableError:
-        log.debug("behavioral_engine anomaly detection skipped (table may not exist yet)")
+        log.debug(
+            "behavioral_engine anomaly detection skipped (table may not exist yet)"
+        )
     except Exception:
         log.exception("behavioral_engine anomaly detection error")
 
 
 # ── Query helpers (used by dashboard) ────────────────────────────────────
+
 
 async def get_top_entities(
     pool: asyncpg.Pool,
@@ -514,7 +579,8 @@ async def get_top_entities(
         f"FROM entity_behavioral_score "
         f"WHERE owner_id=$1 "
         f"ORDER BY {score_field} DESC LIMIT $2",
-        owner_id, limit,
+        owner_id,
+        limit,
     )
 
 
@@ -528,7 +594,8 @@ async def get_search_memory(
         "SELECT keyword, search_count, affinity_score, last_searched "
         "FROM search_memory WHERE owner_id=$1 "
         "ORDER BY affinity_score DESC, search_count DESC LIMIT $2",
-        owner_id, limit,
+        owner_id,
+        limit,
     )
 
 
@@ -595,29 +662,41 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
 
             await pool.execute(
                 "UPDATE experiments SET status='completed', winner_variant_id=$1 WHERE id=$2",
-                winner_id, exp["id"],
+                winner_id,
+                exp["id"],
             )
             concluded += 1
             log.info(
                 "behavioral_engine: auto-concluded experiment %d, winner variant %d (z=%.2f)",
-                exp["id"], winner_id, z,
+                exp["id"],
+                winner_id,
+                z,
             )
             if bot:
                 try:
                     owner = await pool.fetchval(
-                        "SELECT added_by FROM managed_bots WHERE bot_id=$1", exp["bot_id"]
+                        "SELECT added_by FROM managed_bots WHERE bot_id=$1",
+                        exp["bot_id"],
                     )
                     if owner:
                         from database import db as _db
+
                         await _db.notify_if_enabled(
-                            pool, bot, owner, "op_complete",
+                            pool,
+                            bot,
+                            owner,
+                            "op_complete",
                             f"🧪 <b>A/B эксперимент #{exp['id']} завершён</b>\n\n"
                             f"🏆 Победитель: вариант #{winner_id}\n"
                             f"📊 Z-score: {z:.2f} (95% значимость)\n"
                             f"📈 Показов: {total}",
                         )
                 except Exception:
-                    log_exc_swallow(log, "Сбой уведомления о завершении A/B-эксперимента", exp_id=exp["id"])
+                    log_exc_swallow(
+                        log,
+                        "Сбой уведомления о завершении A/B-эксперимента",
+                        exp_id=exp["id"],
+                    )
         except Exception as exc:
             log.debug("auto_conclude exp %d: %s", exp["id"], exc)
 

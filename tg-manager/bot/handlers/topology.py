@@ -7,6 +7,7 @@
 
 Формат: Telegram-native (текст + ASCII-диаграммы).
 """
+
 from __future__ import annotations
 
 import asyncpg
@@ -20,7 +21,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, BotCb, ChanCb, TopoCb
+from bot.callbacks import AccCb, BotCb, TopoCb
 from database import db
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ _PAGE_SIZE = 8
 
 
 # ── Main menu ──────────────────────────────────────────────────────────────────
+
 
 @router.callback_query(TopoCb.filter(F.action == "menu"))
 async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -49,10 +51,10 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not has_data:
         # Empty state: no assets at all
-        kb.button(text="📱 Добавить аккаунт",  callback_data=AccCb(action="menu"))
-        kb.button(text="🤖 Добавить бота",      callback_data=BotCb(action="list"))
-        kb.button(text="🔄 Обновить граф",      callback_data=TopoCb(action="menu"))
-        kb.button(text="◀️ Назад",              callback_data=AccCb(action="menu"))
+        kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
+        kb.button(text="🤖 Добавить бота", callback_data=BotCb(action="list"))
+        kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
         kb.adjust(1)
         await callback.message.edit_text(
             "🗺️ <b>Topology Map — граф связей</b>\n\n"
@@ -67,11 +69,11 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    kb.button(text="🗺️ Обзорная карта",  callback_data=TopoCb(action="overview"))
-    kb.button(text="📱 По аккаунтам",    callback_data=TopoCb(action="acc_list", page=0))
-    kb.button(text="📡 По каналам",      callback_data=TopoCb(action="chan_list", page=0))
-    kb.button(text="🔄 Обновить граф",   callback_data=TopoCb(action="menu"))
-    kb.button(text="◀️ Назад",           callback_data=AccCb(action="menu"))
+    kb.button(text="🗺️ Обзорная карта", callback_data=TopoCb(action="overview"))
+    kb.button(text="📱 По аккаунтам", callback_data=TopoCb(action="acc_list", page=0))
+    kb.button(text="📡 По каналам", callback_data=TopoCb(action="chan_list", page=0))
+    kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -88,6 +90,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Overview map — ASCII таблица всех связей ──────────────────────────────────
 
+
 @router.callback_query(TopoCb.filter(F.action == "overview"))
 async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
@@ -101,7 +104,10 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     acc_map: dict[int, dict] = {}
     for a in accounts:
         acc_map[a["id"]] = {
-            "name": a.get("first_name") or a.get("username") or a.get("phone") or f"acc#{a['id']}",
+            "name": a.get("first_name")
+            or a.get("username")
+            or a.get("phone")
+            or f"acc#{a['id']}",
             "phone": a.get("phone", ""),
             "channels": [],
             "status": a.get("acc_status", "active"),
@@ -109,14 +115,22 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     for ch in channels:
         aid = ch.get("acc_id")
         if aid and aid in acc_map:
-            acc_map[aid]["channels"].append(ch.get("title") or ch.get("username") or f"chan#{ch['channel_id']}")
+            acc_map[aid]["channels"].append(
+                ch.get("title") or ch.get("username") or f"chan#{ch['channel_id']}"
+            )
 
     # Build bot → channels map (bots manage channels they broadcast to)
     lines: list[str] = ["🗺️ <b>Обзорная карта связей</b>\n"]
     lines.append("─" * 28)
 
     # ASCII diagram: each account node with connected channels
-    status_icons = {"active": "✅", "cooldown": "⏳", "spamblock": "⚠️", "banned": "❌", "deactivated": "💀"}
+    status_icons = {
+        "active": "✅",
+        "cooldown": "⏳",
+        "spamblock": "⚠️",
+        "banned": "❌",
+        "deactivated": "💀",
+    }
     for i, (aid, data) in enumerate(acc_map.items()):
         si = status_icons.get(data["status"], "❓")
         name = data["name"][:22]
@@ -138,7 +152,9 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         lines.append(f"\n🤖 <b>Боты ({len(bots)})</b>")
         for b in bots[:5]:
             bn = b.get("first_name") or b.get("username") or f"bot#{b.get('bot_id')}"
-            lines.append(f"   • @{escape(str(b.get('username', '?')))} — {escape(bn[:25])}")
+            lines.append(
+                f"   • @{escape(str(b.get('username', '?')))} — {escape(bn[:25])}"
+            )
         if len(bots) > 5:
             lines.append(f"   <i>...ещё {len(bots) - 5}</i>")
 
@@ -152,7 +168,9 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         cross_count = cross_row["cnt"] if cross_row else 0
         lines.append(f"\n🔗 Перекрёстных переходов: <b>{cross_count}</b>")
     except Exception:
-        log_exc_swallow(log, "Ошибка сбора статистики перекрёстных переходов для топологии")
+        log_exc_swallow(
+            log, "Ошибка сбора статистики перекрёстных переходов для топологии"
+        )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=TopoCb(action="overview"))
@@ -164,14 +182,19 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         text = text[:3950] + "\n\n<i>...текст обрезан</i>"
 
     await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup(),
+        text,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── Account list for topology drill-down ───────────────────────────────────────
 
+
 @router.callback_query(TopoCb.filter(F.action == "acc_list"))
-async def cb_topo_acc_list(callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool) -> None:
+async def cb_topo_acc_list(
+    callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     owner_id = callback.from_user.id
     page = callback_data.page
@@ -189,21 +212,37 @@ async def cb_topo_acc_list(callback: CallbackQuery, callback_data: TopoCb, pool:
     total_pages = max(1, (len(accounts) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
     start = page * _PAGE_SIZE
-    chunk = accounts[start:start + _PAGE_SIZE]
+    chunk = accounts[start : start + _PAGE_SIZE]
 
-    status_icons = {"active": "✅", "cooldown": "⏳", "spamblock": "⚠️", "banned": "❌", "deactivated": "💀"}
+    status_icons = {
+        "active": "✅",
+        "cooldown": "⏳",
+        "spamblock": "⚠️",
+        "banned": "❌",
+        "deactivated": "💀",
+    }
 
     lines = ["📱 <b>Топология — по аккаунтам</b>\n"]
     for acc in chunk:
         si = status_icons.get(acc.get("acc_status", "active"), "❓")
-        name = acc.get("first_name") or acc.get("username") or acc.get("phone") or f"acc#{acc['id']}"
+        name = (
+            acc.get("first_name")
+            or acc.get("username")
+            or acc.get("phone")
+            or f"acc#{acc['id']}"
+        )
         cnt = acc_chan_count.get(acc["id"], 0)
         lines.append(f"\n{si} <b>{escape(str(name)[:28])}</b>")
         lines.append(f"   📡 Каналов: <b>{cnt}</b>")
 
     kb = InlineKeyboardBuilder()
     for acc in chunk:
-        name = acc.get("first_name") or acc.get("username") or acc.get("phone") or f"acc#{acc['id']}"
+        name = (
+            acc.get("first_name")
+            or acc.get("username")
+            or acc.get("phone")
+            or f"acc#{acc['id']}"
+        )
         kb.button(
             text=f"📱 {str(name)[:18]}",
             callback_data=TopoCb(action="acc_view", acc_id=acc["id"]),
@@ -211,23 +250,32 @@ async def cb_topo_acc_list(callback: CallbackQuery, callback_data: TopoCb, pool:
     kb.adjust(2)
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="◀️ Назад", callback_data=TopoCb(action="acc_list", page=page - 1))
+        nav.button(
+            text="◀️ Назад", callback_data=TopoCb(action="acc_list", page=page - 1)
+        )
     nav.button(text=f"{page + 1}/{total_pages}", callback_data=TopoCb(action="noop"))
     if page < total_pages - 1:
-        nav.button(text="▶️ Вперёд", callback_data=TopoCb(action="acc_list", page=page + 1))
+        nav.button(
+            text="▶️ Вперёд", callback_data=TopoCb(action="acc_list", page=page + 1)
+        )
     nav.button(text="🗺️ Меню", callback_data=TopoCb(action="menu"))
     nav.adjust(3, 1)
     kb.attach(nav)
 
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── Single account view — connected channels ───────────────────────────────────
 
+
 @router.callback_query(TopoCb.filter(F.action == "acc_view"))
-async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool) -> None:
+async def cb_topo_acc_view(
+    callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool
+) -> None:
     owner_id = callback.from_user.id
     acc_id = callback_data.acc_id
 
@@ -238,15 +286,26 @@ async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool:
     await callback.answer()
 
     channels = await db.get_managed_channels(pool, owner_id, acc_id)
-    name = acc.get("first_name") or acc.get("username") or acc.get("phone") or f"acc#{acc_id}"
+    name = (
+        acc.get("first_name")
+        or acc.get("username")
+        or acc.get("phone")
+        or f"acc#{acc_id}"
+    )
     phone = acc.get("phone", "")
     status = acc.get("acc_status", "active")
 
-    st_icons = {"active": "✅", "cooldown": "⏳", "spamblock": "⚠️", "banned": "❌", "deactivated": "💀"}
+    st_icons = {
+        "active": "✅",
+        "cooldown": "⏳",
+        "spamblock": "⚠️",
+        "banned": "❌",
+        "deactivated": "💀",
+    }
     si = st_icons.get(status, "❓")
 
     lines = [
-        f"📱 <b>Топология аккаунта</b>",
+        "📱 <b>Топология аккаунта</b>",
         f"{si} <b>{escape(str(name)[:35])}</b>",
     ]
     if phone:
@@ -260,11 +319,15 @@ async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool:
         lines.append(f"📡 <b>Каналы и группы ({len(channels)})</b>:")
         # group by type
         chans = [c for c in channels if c.get("type") in ("channel", None)]
-        groups = [c for c in channels if c.get("type") in ("megagroup", "supergroup", "group")]
+        groups = [
+            c for c in channels if c.get("type") in ("megagroup", "supergroup", "group")
+        ]
         if chans:
             lines.append("  ▸ <b>Каналы:</b>")
             for c in chans[:15]:
-                title = c.get("title") or c.get("username") or f"ID:{c.get('channel_id')}"
+                title = (
+                    c.get("title") or c.get("username") or f"ID:{c.get('channel_id')}"
+                )
                 uname = f" @{c['username']}" if c.get("username") else ""
                 lines.append(f"    • {escape(str(title)[:40])}{uname}")
             if len(chans) > 15:
@@ -272,7 +335,9 @@ async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool:
         if groups:
             lines.append("  ▸ <b>Группы:</b>")
             for g in groups[:15]:
-                title = g.get("title") or g.get("username") or f"ID:{g.get('channel_id')}"
+                title = (
+                    g.get("title") or g.get("username") or f"ID:{g.get('channel_id')}"
+                )
                 uname = f" @{g['username']}" if g.get("username") else ""
                 lines.append(f"    • {escape(str(title)[:40])}{uname}")
             if len(groups) > 15:
@@ -288,54 +353,75 @@ async def cb_topo_acc_view(callback: CallbackQuery, callback_data: TopoCb, pool:
         text = text[:3950] + "\n\n<i>...текст обрезан</i>"
 
     await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup(),
+        text,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── Channel list for topology drill-down ───────────────────────────────────────
 
+
 @router.callback_query(TopoCb.filter(F.action == "chan_list"))
-async def cb_topo_chan_list(callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool) -> None:
+async def cb_topo_chan_list(
+    callback: CallbackQuery, callback_data: TopoCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     owner_id = callback.from_user.id
     page = callback_data.page
 
     channels = await db.get_managed_channels(pool, owner_id)
     accounts = await db.get_tg_accounts(pool, owner_id)
-    acc_lookup = {a["id"]: (a.get("first_name") or a.get("username") or a.get("phone") or f"acc#{a['id']}")
-                   for a in accounts}
+    acc_lookup = {
+        a["id"]: (
+            a.get("first_name")
+            or a.get("username")
+            or a.get("phone")
+            or f"acc#{a['id']}"
+        )
+        for a in accounts
+    }
 
     total_pages = max(1, (len(channels) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
     start = page * _PAGE_SIZE
-    chunk = channels[start:start + _PAGE_SIZE]
+    chunk = channels[start : start + _PAGE_SIZE]
 
     lines = ["📡 <b>Топология — по каналам</b>\n"]
     for ch in chunk:
         title = ch.get("title") or ch.get("username") or f"ID:{ch.get('channel_id')}"
         uname = f"@{ch['username']}" if ch.get("username") else ""
         acc_name = acc_lookup.get(ch.get("acc_id"), "неизв.")
-        ctype = {"megagroup": "👥", "supergroup": "👥", "group": "👥"}.get(ch.get("type", ""), "📡")
+        ctype = {"megagroup": "👥", "supergroup": "👥", "group": "👥"}.get(
+            ch.get("type", ""), "📡"
+        )
         lines.append(f"{ctype} <b>{escape(str(title)[:30])}</b> {uname}")
         lines.append(f"   ↳ аккаунт: {escape(str(acc_name)[:25])}")
 
     kb = InlineKeyboardBuilder()
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="◀️ Назад", callback_data=TopoCb(action="chan_list", page=page - 1))
+        nav.button(
+            text="◀️ Назад", callback_data=TopoCb(action="chan_list", page=page - 1)
+        )
     nav.button(text=f"{page + 1}/{total_pages}", callback_data=TopoCb(action="noop"))
     if page < total_pages - 1:
-        nav.button(text="▶️ Вперёд", callback_data=TopoCb(action="chan_list", page=page + 1))
+        nav.button(
+            text="▶️ Вперёд", callback_data=TopoCb(action="chan_list", page=page + 1)
+        )
     nav.button(text="🗺️ Меню", callback_data=TopoCb(action="menu"))
     nav.adjust(3, 1)
     kb.attach(nav)
 
     await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup(),
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
 # ── /topology command ──────────────────────────────────────────────────────────
+
 
 @router.message(Command("topology"))
 async def cmd_topology(message: Message) -> None:

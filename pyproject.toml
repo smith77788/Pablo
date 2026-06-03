@@ -21,6 +21,14 @@ dependencies = [
 target-version = "py312"
 line-length = 88
 
+[tool.ruff.lint]
+ignore = [
+    "E402",  # Legacy BotMother modules keep some local module-level imports.
+    "E701",  # Legacy compact scoring/report builders use one-line statements.
+    "E702",  # Legacy compact report counters use semicolon-separated increments.
+    "E741",  # Legacy short loop variables are common in report formatters.
+]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

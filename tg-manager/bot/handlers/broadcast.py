@@ -25,6 +25,7 @@ router = Router()
 
 def _bc_cancel_kb(bot_id: int) -> object:
     from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
+
     kb = _Kb()
     kb.button(text="❌ Отмена", callback_data=BroadcastCb(action="menu", bot_id=bot_id))
     return kb.as_markup()
@@ -72,7 +73,7 @@ async def cb_compose(
         "• <code>&lt;i&gt;курсив&lt;/i&gt;</code> — <i>курсив</i>\n"
         "• <code>&lt;u&gt;подчёркнутый&lt;/u&gt;</code> — подчёркнутый\n"
         "• <code>&lt;s&gt;зачёркнутый&lt;/s&gt;</code> — <s>зачёркнутый</s>\n"
-        "• <code>&lt;a href=\"https://...\"&gt;ссылка&lt;/a&gt;</code> — ссылка\n"
+        '• <code>&lt;a href="https://..."&gt;ссылка&lt;/a&gt;</code> — ссылка\n'
         "• <code>&lt;code&gt;моно&lt;/code&gt;</code> — моноширинный\n\n"
         "💡 <b>Плейсхолдеры (в шаблонах):</b>\n"
         "• <code>{{NAME}}</code> — будет запрошено при использовании\n"
@@ -250,7 +251,10 @@ async def msg_button_text(message: Message, state: FSMContext) -> None:
     btn_text = message.text.strip()
     if not btn_text:
         data = await state.get_data()
-        await message.answer("⚠️ Текст кнопки не может быть пустым. Введите снова:", reply_markup=_bc_cancel_kb(data.get("bot_id", 0)))
+        await message.answer(
+            "⚠️ Текст кнопки не может быть пустым. Введите снова:",
+            reply_markup=_bc_cancel_kb(data.get("bot_id", 0)),
+        )
         return
     await state.update_data(pending_btn_text=btn_text)
     await state.set_state(Broadcast.waiting_button_url)
@@ -336,6 +340,7 @@ async def cb_status(
     await callback.answer()
     if not history:
         from aiogram.utils.keyboard import InlineKeyboardBuilder as _Kb
+
         kb = _Kb()
         kb.button(
             text="➕ Новая рассылка",
@@ -498,9 +503,7 @@ async def cb_bc_stat(
         f"\n🕐 Начата: {started}\n"
         f"🏁 Завершена: {finished}",
         parse_mode="HTML",
-        reply_markup=broadcast_detail(
-            callback_data.bot_id, done_bc_id=bc["id"]
-        ),
+        reply_markup=broadcast_detail(callback_data.bot_id, done_bc_id=bc["id"]),
     )
 
 

@@ -9,6 +9,7 @@
   /post — команда бота
   QuickPostCb(action="start") — кнопка «✍️ Создать пост» в главном меню
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,7 +60,9 @@ async def _load_channels(pool: asyncpg.Pool, user_id: int) -> list[asyncpg.Recor
     )
 
 
-async def _load_post_templates(pool: asyncpg.Pool, user_id: int) -> list[asyncpg.Record]:
+async def _load_post_templates(
+    pool: asyncpg.Pool, user_id: int
+) -> list[asyncpg.Record]:
     """Возвращает шаблоны постов пользователя."""
     return await pool.fetch(
         "SELECT id, name, template FROM asset_templates "
@@ -68,12 +71,16 @@ async def _load_post_templates(pool: asyncpg.Pool, user_id: int) -> list[asyncpg
     )
 
 
-async def _save_post_template(pool: asyncpg.Pool, user_id: int, name: str, text: str) -> int:
+async def _save_post_template(
+    pool: asyncpg.Pool, user_id: int, name: str, text: str
+) -> int:
     """Сохраняет текст поста как шаблон. Возвращает id нового шаблона."""
     row = await pool.fetchrow(
         "INSERT INTO asset_templates (owner_id, asset_type, name, template) "
         "VALUES ($1, 'post', $2, $3) RETURNING id",
-        user_id, name, json.dumps({"text": text}),
+        user_id,
+        name,
+        json.dumps({"text": text}),
     )
     return row["id"]
 
@@ -220,8 +227,12 @@ async def _show_step2(
         adjust_sizes.append(nav_count)
 
     # Select all / deselect all
-    kb.button(text="☑️ Выбрать все", callback_data=QuickPostCb(action="sel_all", page=page))
-    kb.button(text="☐ Снять все", callback_data=QuickPostCb(action="desel_all", page=page))
+    kb.button(
+        text="☑️ Выбрать все", callback_data=QuickPostCb(action="sel_all", page=page)
+    )
+    kb.button(
+        text="☐ Снять все", callback_data=QuickPostCb(action="desel_all", page=page)
+    )
     adjust_sizes.append(2)
 
     # Proceed button (only when channels are selected)
@@ -324,7 +335,9 @@ async def cb_qp_from_template(
             text="➕ Создать шаблон",
             callback_data=AssetTplCb(action="choose_type", asset_type="post"),
         )
-        kb.button(text="◀️ Назад", callback_data=QuickPostCb(action="back_to_step1_prompt"))
+        kb.button(
+            text="◀️ Назад", callback_data=QuickPostCb(action="back_to_step1_prompt")
+        )
         kb.adjust(1)
         await callback.message.edit_text(
             "📄 <b>Шаблоны постов</b>\n\n"
@@ -337,7 +350,11 @@ async def cb_qp_from_template(
     kb = InlineKeyboardBuilder()
     for tpl in templates:
         try:
-            data = json.loads(tpl["template"]) if isinstance(tpl["template"], str) else tpl["template"]
+            data = (
+                json.loads(tpl["template"])
+                if isinstance(tpl["template"], str)
+                else tpl["template"]
+            )
             preview = (data.get("text") or "")[:40].replace("\n", " ")
         except Exception:
             preview = ""
@@ -374,14 +391,19 @@ async def cb_qp_use_template(
     tpl_id = callback_data.val
     row = await pool.fetchrow(
         "SELECT template FROM asset_templates WHERE id=$1 AND owner_id=$2 AND asset_type='post'",
-        tpl_id, callback.from_user.id,
+        tpl_id,
+        callback.from_user.id,
     )
     if not row:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
 
     try:
-        data = json.loads(row["template"]) if isinstance(row["template"], str) else row["template"]
+        data = (
+            json.loads(row["template"])
+            if isinstance(row["template"], str)
+            else row["template"]
+        )
         text = data.get("text", "")
     except Exception:
         text = ""
@@ -408,7 +430,9 @@ async def cb_qp_use_template(
     await _show_step2(callback.message, channels, selected_ids, page=0)
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "toggle"), QuickPostFSM.picking_channels)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "toggle"), QuickPostFSM.picking_channels
+)
 async def cb_qp_toggle(
     callback: CallbackQuery,
     callback_data: QuickPostCb,
@@ -428,7 +452,9 @@ async def cb_qp_toggle(
     await _show_step2(callback.message, channels, selected_ids, page=callback_data.page)
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "page"), QuickPostFSM.picking_channels)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "page"), QuickPostFSM.picking_channels
+)
 async def cb_qp_page(
     callback: CallbackQuery,
     callback_data: QuickPostCb,
@@ -442,7 +468,9 @@ async def cb_qp_page(
     await _show_step2(callback.message, channels, selected_ids, page=callback_data.page)
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "sel_all"), QuickPostFSM.picking_channels)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "sel_all"), QuickPostFSM.picking_channels
+)
 async def cb_qp_sel_all(
     callback: CallbackQuery,
     callback_data: QuickPostCb,
@@ -456,7 +484,9 @@ async def cb_qp_sel_all(
     await _show_step2(callback.message, channels, all_ids, page=callback_data.page)
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "desel_all"), QuickPostFSM.picking_channels)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "desel_all"), QuickPostFSM.picking_channels
+)
 async def cb_qp_desel_all(
     callback: CallbackQuery,
     callback_data: QuickPostCb,
@@ -482,7 +512,9 @@ def _timing_kb() -> InlineKeyboardBuilder:
     return kb
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "chans_done"), QuickPostFSM.picking_channels)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "chans_done"), QuickPostFSM.picking_channels
+)
 async def cb_qp_chans_done(
     callback: CallbackQuery,
     state: FSMContext,
@@ -522,7 +554,9 @@ async def cb_qp_back_chans(
 # ── Step 4: preview + confirm ──────────────────────────────────────────────
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "timing"), QuickPostFSM.picking_timing)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "timing"), QuickPostFSM.picking_timing
+)
 async def cb_qp_timing(
     callback: CallbackQuery,
     callback_data: QuickPostCb,
@@ -547,7 +581,10 @@ async def cb_qp_timing(
         text=f"✅ Опубликовать! ({_plural_channels(len(sel))})",
         callback_data=QuickPostCb(action="publish"),
     )
-    kb.button(text="💾 Сохранить как шаблон", callback_data=QuickPostCb(action="save_template"))
+    kb.button(
+        text="💾 Сохранить как шаблон",
+        callback_data=QuickPostCb(action="save_template"),
+    )
     kb.button(text="◀️ К задержке", callback_data=QuickPostCb(action="back_to_timing"))
     kb.button(text="❌ Отмена", callback_data=QuickPostCb(action="cancel"))
     kb.adjust(1)
@@ -581,7 +618,9 @@ async def cb_qp_back_timing(
     )
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "save_template"), QuickPostFSM.confirming)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "save_template"), QuickPostFSM.confirming
+)
 async def cb_qp_save_template(
     callback: CallbackQuery,
     state: FSMContext,
@@ -605,7 +644,9 @@ async def cb_qp_save_template(
 # ── Publish ────────────────────────────────────────────────────────────────
 
 
-@router.callback_query(QuickPostCb.filter(F.action == "publish"), QuickPostFSM.confirming)
+@router.callback_query(
+    QuickPostCb.filter(F.action == "publish"), QuickPostFSM.confirming
+)
 async def cb_qp_publish(
     callback: CallbackQuery,
     state: FSMContext,

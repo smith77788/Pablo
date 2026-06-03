@@ -1,4 +1,5 @@
 """Telethon user account session management."""
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -9,6 +10,7 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
+
 def _parse_proxy(proxy_url: str):
     """Parse socks5://user:pass@host:port → (socks.SOCKS5, host, port, True, user, pass).
     Returns None if proxy_url is empty.
@@ -17,6 +19,7 @@ def _parse_proxy(proxy_url: str):
         return None
     try:
         import socks
+
         url = proxy_url.strip()
         if "://" in url:
             url = url.split("://", 1)[1]
@@ -32,8 +35,11 @@ def _parse_proxy(proxy_url: str):
         host, port = hostpart.rsplit(":", 1)
         return (socks.SOCKS5, host, int(port), True, user, password)
     except Exception as e:
-        log.warning("Failed to parse TG_PROXY %r: %s — running without proxy", proxy_url, e)
+        log.warning(
+            "Failed to parse TG_PROXY %r: %s — running without proxy", proxy_url, e
+        )
         return None
+
 
 # In-memory pending clients (phone -> client) during login flow
 _pending: dict[str, object] = {}
@@ -55,31 +61,41 @@ _ANDROID_DEVICES: list[tuple[str, str]] = [
     ("Samsung SM-S918B", "Android 14"),
     ("Samsung SM-S911B", "Android 14"),
     ("Samsung SM-A546B", "Android 13"),
-    ("Xiaomi 14 Pro",    "Android 14"),
-    ("Xiaomi 13T Pro",   "Android 13"),
+    ("Xiaomi 14 Pro", "Android 14"),
+    ("Xiaomi 13T Pro", "Android 13"),
     ("Xiaomi Redmi Note 13 Pro", "Android 13"),
     ("Google Pixel 8 Pro", "Android 14"),
-    ("Google Pixel 7a",    "Android 13"),
-    ("OnePlus 12",         "Android 14"),
-    ("OnePlus 11",         "Android 13"),
-    ("POCO X6 Pro",        "Android 14"),
-    ("realme GT 5 Pro",    "Android 14"),
+    ("Google Pixel 7a", "Android 13"),
+    ("OnePlus 12", "Android 14"),
+    ("OnePlus 11", "Android 13"),
+    ("POCO X6 Pro", "Android 14"),
+    ("realme GT 5 Pro", "Android 14"),
     ("Motorola Edge 50 Pro", "Android 14"),
-    ("Samsung SM-A336B",   "Android 12"),
-    ("Xiaomi POCO M5s",    "Android 12"),
-    ("Samsung SM-A135F",   "Android 13"),
-    ("Vivo V27 Pro",       "Android 13"),
-    ("Nokia G60 5G",       "Android 12"),
-    ("Motorola Moto G84",  "Android 13"),
+    ("Samsung SM-A336B", "Android 12"),
+    ("Xiaomi POCO M5s", "Android 12"),
+    ("Samsung SM-A135F", "Android 13"),
+    ("Vivo V27 Pro", "Android 13"),
+    ("Nokia G60 5G", "Android 12"),
+    ("Motorola Moto G84", "Android 13"),
 ]
 _APP_VERSIONS: list[str] = [
-    "10.14.4", "10.14.3", "10.13.2", "10.12.2", "10.11.0",
-    "10.10.1", "10.9.1",  "10.8.2",  "10.7.0",  "10.6.2",
+    "10.14.4",
+    "10.14.3",
+    "10.13.2",
+    "10.12.2",
+    "10.11.0",
+    "10.10.1",
+    "10.9.1",
+    "10.8.2",
+    "10.7.0",
+    "10.6.2",
 ]
+
 
 def generate_device_fingerprint() -> dict:
     """Return a random realistic Android device fingerprint."""
     import random
+
     device_model, system_version = random.choice(_ANDROID_DEVICES)
     return {
         "device_model": device_model,
@@ -87,9 +103,11 @@ def generate_device_fingerprint() -> dict:
         "app_version": random.choice(_APP_VERSIONS),
     }
 
+
 def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
+
     d = device or {}
     # Per-account proxy overrides global TG_PROXY env var
     acc_proxy_url = d.get("proxy_url") or ""
@@ -109,13 +127,17 @@ def _make_client(session_string: str = "", device: dict | None = None):
         proxy=proxy,
     )
 
+
 async def start_login(phone: str) -> tuple[str, str]:
     """Начинает авторизацию по номеру телефона.
     Возвращает (phone_code_hash, delivery_hint) где delivery_hint — строка о способе доставки.
     """
     from telethon.errors import FloodWaitError
+
     if not TG_API_ID or not TG_API_HASH:
-        raise ValueError("TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды.")
+        raise ValueError(
+            "TG_API_ID / TG_API_HASH не настроены. Укажите в переменных среды."
+        )
     device = generate_device_fingerprint()
     _pending_device[phone] = device
     client = _make_client("", device)
@@ -151,18 +173,22 @@ async def start_login(phone: str) -> tuple[str, str]:
 
     return result.phone_code_hash, delivery_hint
 
+
 async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
     """Resend code via next available method (usually SMS if app was first).
     Returns (new_phone_code_hash, delivery_hint).
     """
     from telethon.tl.functions.auth import ResendCodeRequest
     from telethon.errors import FloodWaitError
+
     client = _pending.get(phone)
     if not client:
         raise ValueError("Сессия истекла — начните заново.")
     try:
         result = await asyncio.wait_for(
-            client(ResendCodeRequest(phone_number=phone, phone_code_hash=phone_code_hash)),
+            client(
+                ResendCodeRequest(phone_number=phone, phone_code_hash=phone_code_hash)
+            ),
             timeout=_CONNECT_TIMEOUT,
         )
     except FloodWaitError:
@@ -178,11 +204,15 @@ async def resend_code(phone: str, phone_code_hash: str) -> tuple[str, str]:
         hint = "💬 Код выслан повторно (SMS или звонок)"
     return result.phone_code_hash, hint
 
+
 async def confirm_code(phone: str, code: str, phone_code_hash: str):
     """Confirm SMS/TG code. Returns client or 'need_2fa'."""
     from telethon.errors import (
-        PhoneCodeInvalidError, PhoneCodeExpiredError, SessionPasswordNeededError,
+        PhoneCodeInvalidError,
+        PhoneCodeExpiredError,
+        SessionPasswordNeededError,
     )
+
     client = _pending.get(phone)
     if not client:
         raise ValueError("Сессия истекла — начните заново.")
@@ -194,9 +224,11 @@ async def confirm_code(phone: str, code: str, phone_code_hash: str):
     except (PhoneCodeInvalidError, PhoneCodeExpiredError):
         raise ValueError("Неверный или истёкший код.")
 
+
 async def confirm_2fa(phone: str, password: str):
     """Complete 2FA login. Returns client."""
     from telethon.errors import PasswordHashInvalidError
+
     client = _pending.get(phone)
     if not client:
         raise ValueError("Сессия истекла — начните заново.")
@@ -206,10 +238,13 @@ async def confirm_2fa(phone: str, password: str):
     except PasswordHashInvalidError:
         raise ValueError("Неверный пароль 2FA.")
 
+
 async def get_session_string(client) -> str:
     return client.session.save()
 
+
 # ── Session Import Helpers ─────────────────────────────────────────────────────
+
 
 async def import_from_session_string(session_string: str) -> tuple[str, dict]:
     """Validate a Telethon StringSession and return (session_str, info).
@@ -238,6 +273,7 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
         except Exception:
             log_exc_swallow(log, "Сбой в import_from_session_string")
 
+
 async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
     """Convert a Pyrogram JSON session to Telethon StringSession.
 
@@ -248,7 +284,6 @@ async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
     import struct
     import base64
     from ipaddress import IPv4Address
-    from telethon.sessions import StringSession
 
     try:
         data = _json.loads(json_str)
@@ -282,7 +317,10 @@ async def import_from_pyrogram_json(json_str: str) -> tuple[str, dict]:
 
     return await import_from_session_string(session_string)
 
-async def import_from_session_file(session_bytes: bytes, filename: str = "") -> tuple[str, dict]:
+
+async def import_from_session_file(
+    session_bytes: bytes, filename: str = ""
+) -> tuple[str, dict]:
     """Convert a Telethon .session SQLite file to StringSession.
 
     The .session file is a SQLite database with a 'sessions' table:
@@ -294,7 +332,6 @@ async def import_from_session_file(session_bytes: bytes, filename: str = "") -> 
     import tempfile
     import os
     from ipaddress import IPv4Address
-    from telethon.sessions import StringSession
 
     # Write bytes to temp file for sqlite3 to open
     tmp = tempfile.NamedTemporaryFile(suffix=".session", delete=False)
@@ -326,11 +363,18 @@ async def import_from_session_file(session_bytes: bytes, filename: str = "") -> 
         try:
             ip_bytes = IPv4Address(server_address).packed
         except Exception:
-            DC_IPS = {1: "149.154.175.53", 2: "149.154.167.51",
-                      3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130"}
+            DC_IPS = {
+                1: "149.154.175.53",
+                2: "149.154.167.51",
+                3: "149.154.175.100",
+                4: "149.154.167.91",
+                5: "91.108.56.130",
+            }
             ip_bytes = IPv4Address(DC_IPS.get(dc_id, DC_IPS[2])).packed
 
-        packed = struct.pack(">B4sH256s", dc_id, ip_bytes, int(port or 443), bytes(auth_key_bytes))
+        packed = struct.pack(
+            ">B4sH256s", dc_id, ip_bytes, int(port or 443), bytes(auth_key_bytes)
+        )
         session_string = "1" + base64.urlsafe_b64encode(packed).decode()
 
     finally:
@@ -340,6 +384,7 @@ async def import_from_session_file(session_bytes: bytes, filename: str = "") -> 
             pass
 
     return await import_from_session_string(session_string)
+
 
 async def convert_session_file_to_string(session_bytes: bytes) -> str:
     """Convert a Telethon .session SQLite file bytes to a StringSession string.
@@ -379,15 +424,25 @@ async def convert_session_file_to_string(session_bytes: bytes) -> str:
         raise ValueError("Таблица sessions пустая — сессия не авторизована")
     dc_id, server_address, port, auth_key_bytes = row
     if not auth_key_bytes or len(auth_key_bytes) != 256:
-        raise ValueError(f"Некорректный auth_key (длина: {len(auth_key_bytes) if auth_key_bytes else 0})")
+        raise ValueError(
+            f"Некорректный auth_key (длина: {len(auth_key_bytes) if auth_key_bytes else 0})"
+        )
     try:
         ip_bytes = IPv4Address(server_address).packed
     except Exception:
-        DC_IPS = {1: "149.154.175.53", 2: "149.154.167.51",
-                  3: "149.154.175.100", 4: "149.154.167.91", 5: "91.108.56.130"}
+        DC_IPS = {
+            1: "149.154.175.53",
+            2: "149.154.167.51",
+            3: "149.154.175.100",
+            4: "149.154.167.91",
+            5: "91.108.56.130",
+        }
         ip_bytes = IPv4Address(DC_IPS.get(dc_id, DC_IPS[2])).packed
-    packed = struct.pack(">B4sH256s", dc_id, ip_bytes, int(port or 443), bytes(auth_key_bytes))
+    packed = struct.pack(
+        ">B4sH256s", dc_id, ip_bytes, int(port or 443), bytes(auth_key_bytes)
+    )
     return "1" + base64.urlsafe_b64encode(packed).decode()
+
 
 async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     """Convert a TDesktop tdata directory to Telethon StringSession.
@@ -494,6 +549,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
         except Exception:
             log_exc_swallow(log, "Сбой отключения в import_from_tdata")
 
+
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
     client = _pending.get(phone)
@@ -510,6 +566,7 @@ async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     }
     return session_str, info
 
+
 async def cleanup_pending(phone: str) -> None:
     _pending_device.pop(phone, None)
     client = _pending.pop(phone, None)
@@ -519,7 +576,9 @@ async def cleanup_pending(phone: str) -> None:
         except Exception:
             log_exc_swallow(log, "Сбой в cleanup_pending")
 
+
 # ── QR Login ──────────────────────────────────────────────────────────────────
+
 
 async def start_qr_login(user_id: int) -> bytes:
     """Start QR code login. Returns PNG image bytes.
@@ -542,6 +601,7 @@ async def start_qr_login(user_id: int) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
 
 async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict]:
     """Block until user scans QR code or timeout. Returns (session_str, info).
@@ -572,6 +632,7 @@ async def wait_qr_login(user_id: int, timeout: float = 120.0) -> tuple[str, dict
     }
     return session_str, info
 
+
 async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
     """Finish QR login that required 2FA. Returns (session_str, info)."""
     from telethon.errors import PasswordHashInvalidError
@@ -596,6 +657,7 @@ async def confirm_qr_2fa(user_id: int, password: str) -> tuple[str, dict]:
     }
     return session_str, info
 
+
 async def cleanup_qr_pending(user_id: int) -> None:
     entry = _pending_qr.pop(user_id, None)
     if entry:
@@ -604,6 +666,7 @@ async def cleanup_qr_pending(user_id: int) -> None:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в cleanup_qr_pending")
+
 
 async def get_account_info(session_string: str, _acc: dict | None = None) -> dict:
     client = _make_client(session_string, _acc)
@@ -622,13 +685,16 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
         except Exception:
             log_exc_swallow(log, "Сбой в get_account_info")
 
-async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
-                      _acc: dict | None = None) -> list[dict]:
+
+async def get_dialogs(
+    session_string: str, limit: int = 50, offset: int = 0, _acc: dict | None = None
+) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
     if not session_string:
         log.warning("get_dialogs: session_str отсутствует — аккаунт не импортирован")
         return []
     from telethon.tl.types import Channel, Chat
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -636,19 +702,26 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
         async for dialog in client.iter_dialogs(limit=limit, offset_id=offset):
             entity = dialog.entity
             if isinstance(entity, (Channel, Chat)):
-                dialogs.append({
-                    "id": entity.id,
-                    "title": entity.title,
-                    "type": (
-                        "channel" if isinstance(entity, Channel) and getattr(entity, "broadcast", False)
-                        else "megagroup" if isinstance(entity, Channel) and getattr(entity, "megagroup", False)
-                        else "supergroup" if isinstance(entity, Channel)
-                        else "group"
-                    ),
-                    "members": getattr(entity, "participants_count", 0) or 0,
-                    "username": getattr(entity, "username", "") or "",
-                    "access_hash": getattr(entity, "access_hash", 0) or 0,
-                })
+                dialogs.append(
+                    {
+                        "id": entity.id,
+                        "title": entity.title,
+                        "type": (
+                            "channel"
+                            if isinstance(entity, Channel)
+                            and getattr(entity, "broadcast", False)
+                            else "megagroup"
+                            if isinstance(entity, Channel)
+                            and getattr(entity, "megagroup", False)
+                            else "supergroup"
+                            if isinstance(entity, Channel)
+                            else "group"
+                        ),
+                        "members": getattr(entity, "participants_count", 0) or 0,
+                        "username": getattr(entity, "username", "") or "",
+                        "access_hash": getattr(entity, "access_hash", 0) or 0,
+                    }
+                )
         return dialogs
     finally:
         try:
@@ -656,15 +729,15 @@ async def get_dialogs(session_string: str, limit: int = 50, offset: int = 0,
         except Exception:
             log_exc_swallow(log, "Сбой в get_dialogs")
 
-async def scan_owned_assets(
-    session_string: str, _acc: dict | None = None
-) -> dict:
+
+async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> dict:
     """Scan account for channels/groups where it's admin or creator.
 
     Returns {'channels': [...], 'groups': [...], 'error': str|None}
     Each item: {id, title, username, members, is_creator, access_hash}
     """
-    from telethon.tl.types import Channel, Chat
+    from telethon.tl.types import Channel
+
     client = _make_client(session_string, _acc)
     channels: list[dict] = []
     groups: list[dict] = []
@@ -700,10 +773,17 @@ async def scan_owned_assets(
     except Exception as e:
         err_str = str(e)
         err_low = err_str.lower()
-        _is_session = any(x in err_low for x in (
-            "auth", "authkey", "unauthorized", "key is not registered",
-            "registered in the system", "auth_key",
-        ))
+        _is_session = any(
+            x in err_low
+            for x in (
+                "auth",
+                "authkey",
+                "unauthorized",
+                "key is not registered",
+                "registered in the system",
+                "auth_key",
+            )
+        )
         if _is_session:
             log.warning("scan_owned_assets session dead: %s", e)
         else:
@@ -715,8 +795,10 @@ async def scan_owned_assets(
         except Exception:
             log_exc_swallow(log, "Сбой в _collect")
 
-async def send_message_via_account(session_string: str, chat_id: int, text: str,
-                                   _acc: dict | None = None) -> bool:
+
+async def send_message_via_account(
+    session_string: str, chat_id: int, text: str, _acc: dict | None = None
+) -> bool:
     """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
     client = _make_client(session_string, _acc)
     try:
@@ -731,11 +813,15 @@ async def send_message_via_account(session_string: str, chat_id: int, text: str,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в send_message_via_account")
+
+
 # Псевдоним для обратной совместимости с хендлером accounts.py
 send_message = send_message_via_account
 
-async def send_dm(session_string: str, username: str, text: str,
-                  _acc: dict | None = None) -> dict:
+
+async def send_dm(
+    session_string: str, username: str, text: str, _acc: dict | None = None
+) -> dict:
     """Send a DM to a user by username or numeric ID.
 
     Returns {"ok": True} or {"error": "description", "flood_wait": seconds (optional)}.
@@ -751,6 +837,7 @@ async def send_dm(session_string: str, username: str, text: str,
         UsernameNotOccupiedError,
         UsernameInvalidError,
     )
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -763,7 +850,10 @@ async def send_dm(session_string: str, username: str, text: str,
     except FloodWaitError as e:
         return {"error": f"FloodWait: подождите {e.seconds}с", "flood_wait": e.seconds}
     except PeerFloodError as e:
-        return {"error": f"PeerFlood: аккаунт временно ограничен по рассылке: {e}", "banned": True}
+        return {
+            "error": f"PeerFlood: аккаунт временно ограничен по рассылке: {e}",
+            "banned": True,
+        }
     except UserPrivacyRestrictedError:
         return {"error": "приватность: пользователь запретил входящие"}
     except UserIsBlockedError:
@@ -782,9 +872,13 @@ async def send_dm(session_string: str, username: str, text: str,
         except Exception:
             log_exc_swallow(log, "Сбой в send_dm")
 
-async def get_account_dialogs_stats(session_string: str, _acc: dict | None = None) -> dict:
+
+async def get_account_dialogs_stats(
+    session_string: str, _acc: dict | None = None
+) -> dict:
     """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
     from telethon.tl.types import Channel, Chat, User
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -816,13 +910,17 @@ async def get_account_dialogs_stats(session_string: str, _acc: dict | None = Non
         except Exception:
             log_exc_swallow(log, "Сбой в get_account_dialogs_stats")
 
+
 async def check_account_health(session_string: str, _acc: dict | None = None) -> dict:
     """Проверяет доступность аккаунта: авторизован ли, не заблокирован ли.
 
     Возвращает {"ok": bool, "reason": str}.
     """
-    result = await check_account_status_full(session_string, _acc=_acc, check_spambot=False)
+    result = await check_account_status_full(
+        session_string, _acc=_acc, check_spambot=False
+    )
     return {"ok": result["status"] == "active", "reason": result["reason"]}
+
 
 async def check_account_status_full(
     session_string: str,
@@ -850,17 +948,28 @@ async def check_account_status_full(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
         if me is None:
-            return {"status": "session_expired", "reason": "Аккаунт не авторизован или сессия истекла.", "display_name": ""}
+            return {
+                "status": "session_expired",
+                "reason": "Аккаунт не авторизован или сессия истекла.",
+                "display_name": "",
+            }
 
-        display_name = me.first_name or (f"@{me.username}" if me.username else str(me.id))
+        display_name = me.first_name or (
+            f"@{me.username}" if me.username else str(me.id)
+        )
 
         if not check_spambot:
-            return {"status": "active", "reason": f"Аккаунт активен", "display_name": display_name}
+            return {
+                "status": "active",
+                "reason": "Аккаунт активен",
+                "display_name": display_name,
+            }
 
         # Check SpamBot for spamblock detection
         try:
-            from telethon.tl.types import User
-            spam_bot = await asyncio.wait_for(client.get_entity("@SpamBot"), timeout=8.0)
+            spam_bot = await asyncio.wait_for(
+                client.get_entity("@SpamBot"), timeout=8.0
+            )
             await asyncio.wait_for(
                 client.send_message(spam_bot, "/start"),
                 timeout=8.0,
@@ -873,23 +982,61 @@ async def check_account_status_full(
             if msgs:
                 reply_text = msgs[0].text or ""
                 reply_lower = reply_text.lower()
-                if any(kw in reply_lower for kw in ("no limits", "no complaints", "good standing",
-                                                      "нет ограничений", "нет жалоб", "не было жалоб")):
-                    return {"status": "active", "reason": "Аккаунт активен, ограничений нет", "display_name": display_name}
-                if any(kw in reply_lower for kw in ("limited", "spam", "restricted", "ограничен", "спам", "ограничения")):
-                    return {"status": "spamblock", "reason": f"SpamBot: {reply_text[:120]}", "display_name": display_name}
+                if any(
+                    kw in reply_lower
+                    for kw in (
+                        "no limits",
+                        "no complaints",
+                        "good standing",
+                        "нет ограничений",
+                        "нет жалоб",
+                        "не было жалоб",
+                    )
+                ):
+                    return {
+                        "status": "active",
+                        "reason": "Аккаунт активен, ограничений нет",
+                        "display_name": display_name,
+                    }
+                if any(
+                    kw in reply_lower
+                    for kw in (
+                        "limited",
+                        "spam",
+                        "restricted",
+                        "ограничен",
+                        "спам",
+                        "ограничения",
+                    )
+                ):
+                    return {
+                        "status": "spamblock",
+                        "reason": f"SpamBot: {reply_text[:120]}",
+                        "display_name": display_name,
+                    }
         except asyncio.TimeoutError:
-            log_exc_swallow(log, "Таймаут при проверке статуса через @SpamBot — считаем аккаунт активным")
+            log_exc_swallow(
+                log,
+                "Таймаут при проверке статуса через @SpamBot — считаем аккаунт активным",
+            )
         except Exception:
             log_exc_swallow(log, "Сбой в check_account_status_full")
-        return {"status": "active", "reason": "Аккаунт активен", "display_name": display_name}
+        return {
+            "status": "active",
+            "reason": "Аккаунт активен",
+            "display_name": display_name,
+        }
 
     except Exception as e:
         from telethon.errors import (
-            AuthKeyUnregisteredError, SessionRevokedError,
-            UserDeactivatedBanError, UserDeactivatedError,
-            FloodWaitError, PeerFloodError,
+            AuthKeyUnregisteredError,
+            SessionRevokedError,
+            UserDeactivatedBanError,
+            UserDeactivatedError,
+            FloodWaitError,
+            PeerFloodError,
         )
+
         err = str(e)
         err_low = err.lower()
         if isinstance(e, (AuthKeyUnregisteredError, SessionRevokedError)) or (
@@ -898,23 +1045,54 @@ async def check_account_status_full(
             or "registered in the system" in err_low
             or "SESSION_REVOKED" in err
         ):
-            log.warning("check_account_status_full: auth key dead — %s", type(e).__name__)
-            return {"status": "session_expired", "reason": "Ключ сессии отозван Telegram — требуется переавторизация.", "display_name": "", "auth_error": True}
+            log.warning(
+                "check_account_status_full: auth key dead — %s", type(e).__name__
+            )
+            return {
+                "status": "session_expired",
+                "reason": "Ключ сессии отозван Telegram — требуется переавторизация.",
+                "display_name": "",
+                "auth_error": True,
+            }
         if isinstance(e, UserDeactivatedBanError) or "USER_DEACTIVATED_BAN" in err:
             log.warning("check_account_status_full: account banned — %s", e)
-            return {"status": "banned", "reason": "Аккаунт заблокирован Telegram.", "display_name": "", "auth_error": True}
+            return {
+                "status": "banned",
+                "reason": "Аккаунт заблокирован Telegram.",
+                "display_name": "",
+                "auth_error": True,
+            }
         if isinstance(e, UserDeactivatedError) or "USER_DEACTIVATED" in err:
             log.warning("check_account_status_full: account deactivated — %s", e)
-            return {"status": "deactivated", "reason": "Аккаунт удалён или деактивирован.", "display_name": "", "auth_error": True}
+            return {
+                "status": "deactivated",
+                "reason": "Аккаунт удалён или деактивирован.",
+                "display_name": "",
+                "auth_error": True,
+            }
         if isinstance(e, FloodWaitError) or "FLOOD_WAIT" in err:
-            return {"status": "cooldown", "reason": f"FloodWait: {err[:80]}", "display_name": ""}
+            return {
+                "status": "cooldown",
+                "reason": f"FloodWait: {err[:80]}",
+                "display_name": "",
+            }
         if isinstance(e, PeerFloodError) or "PEER_FLOOD" in err:
-            return {"status": "spamblock", "reason": "PeerFlood — массовые ограничения.", "display_name": ""}
+            return {
+                "status": "spamblock",
+                "reason": "PeerFlood — массовые ограничения.",
+                "display_name": "",
+            }
         log.exception("check_account_status_full error: %s", e)
-        return {"status": "active", "reason": f"Нет данных: {err[:120]}", "display_name": ""}
+        return {
+            "status": "active",
+            "reason": f"Нет данных: {err[:120]}",
+            "display_name": "",
+        }
 
-async def get_channel_members_count(session_string: str, channel_username: str,
-                                    _acc: dict | None = None) -> int:
+
+async def get_channel_members_count(
+    session_string: str, channel_username: str, _acc: dict | None = None
+) -> int:
     """Возвращает количество участников канала/группы по username. При ошибке — -1."""
     client = _make_client(session_string, _acc)
     try:
@@ -924,6 +1102,7 @@ async def get_channel_members_count(session_string: str, channel_username: str,
         if count is None:
             # Для мегагрупп participants_count может быть None — запрашиваем напрямую
             from telethon.tl.functions.channels import GetFullChannelRequest
+
             full = await client(GetFullChannelRequest(entity))
             count = full.full_chat.participants_count
         return count if count is not None else -1
@@ -936,6 +1115,7 @@ async def get_channel_members_count(session_string: str, channel_username: str,
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_members_count")
 
+
 async def get_full_channel_info(
     session_string: str,
     channel_id: int | str,
@@ -943,10 +1123,13 @@ async def get_full_channel_info(
 ) -> dict | None:
     """Возвращает {'about', 'members_count', 'username', 'title'} для канала/группы."""
     from telethon.tl.functions.channels import GetFullChannelRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        entity = await client.get_entity(int(channel_id) if str(channel_id).lstrip("-").isdigit() else channel_id)
+        entity = await client.get_entity(
+            int(channel_id) if str(channel_id).lstrip("-").isdigit() else channel_id
+        )
         full = await client(GetFullChannelRequest(entity))
         about = getattr(full.full_chat, "about", "") or ""
         members = getattr(full.full_chat, "participants_count", 0) or 0
@@ -964,6 +1147,7 @@ async def get_full_channel_info(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_full_channel_info")
+
 
 async def get_recent_messages(
     session_string: str,
@@ -985,11 +1169,13 @@ async def get_recent_messages(
             if len(text) > 100:
                 text = text[:100] + "…"
             date_str = msg.date.strftime("%Y-%m-%d %H:%M") if msg.date else ""
-            messages.append({
-                "date": date_str,
-                "text": text,
-                "views": getattr(msg, "views", 0) or 0,
-            })
+            messages.append(
+                {
+                    "date": date_str,
+                    "text": text,
+                    "views": getattr(msg, "views", 0) or 0,
+                }
+            )
         return messages
     except Exception as e:
         log.exception("get_recent_messages error: %s", e)
@@ -1000,26 +1186,32 @@ async def get_recent_messages(
         except Exception:
             log_exc_swallow(log, "Сбой в get_recent_messages")
 
-async def search_in_telegram(session_string: str, query: str, limit: int = 20,
-                             _acc: dict | None = None) -> list[dict]:
+
+async def search_in_telegram(
+    session_string: str, query: str, limit: int = 20, _acc: dict | None = None
+) -> list[dict]:
     """Search Telegram contacts/global and return ordered results."""
     from telethon.tl.functions.contacts import SearchRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         result = await client(SearchRequest(q=query, limit=limit))
         items = []
         for i, user in enumerate(result.users):
-            items.append({
-                "position": i + 1,
-                "tg_user_id": user.id,
-                "username": getattr(user, "username", "") or "",
-                "first_name": getattr(user, "first_name", "") or "",
-                "is_bot": getattr(user, "bot", False),
-            })
+            items.append(
+                {
+                    "position": i + 1,
+                    "tg_user_id": user.id,
+                    "username": getattr(user, "username", "") or "",
+                    "first_name": getattr(user, "first_name", "") or "",
+                    "is_bot": getattr(user, "bot", False),
+                }
+            )
         return items
     except Exception as e:
         from telethon.errors import FloodWaitError
+
         if isinstance(e, FloodWaitError):
             raise
         log.exception("search_in_telegram error: %s", e)
@@ -1027,9 +1219,11 @@ async def search_in_telegram(session_string: str, query: str, limit: int = 20,
     finally:
         await client.disconnect()
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CHANNEL / GROUP OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 async def create_channel(
     session_string: str,
@@ -1046,15 +1240,18 @@ async def create_channel(
         return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.functions.channels import CreateChannelRequest
     from telethon.tl.functions.messages import ExportChatInviteRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        result = await client(CreateChannelRequest(
-            title=title,
-            about=about,
-            megagroup=megagroup,
-            broadcast=not megagroup,
-        ))
+        result = await client(
+            CreateChannelRequest(
+                title=title,
+                about=about,
+                megagroup=megagroup,
+                broadcast=not megagroup,
+            )
+        )
         ch = result.chats[0]
         invite_link = ""
         try:
@@ -1071,10 +1268,17 @@ async def create_channel(
         }
     except Exception as e:
         from telethon.errors import FloodWaitError, PeerFloodError
+
         if isinstance(e, FloodWaitError):
-            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
+            return {
+                "error": f"FloodWait {e.seconds}с — Telegram ограничил создание",
+                "flood_wait": e.seconds,
+            }
         if isinstance(e, PeerFloodError):
-            return {"error": f"PeerFlood: аккаунт ограничен — {e}", "flood_wait": e.seconds if hasattr(e, 'seconds') else 0}
+            return {
+                "error": f"PeerFlood: аккаунт ограничен — {e}",
+                "flood_wait": e.seconds if hasattr(e, "seconds") else 0,
+            }
         log.exception("create_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
@@ -1083,8 +1287,10 @@ async def create_channel(
         except Exception:
             log_exc_swallow(log, "Сбой в create_channel")
 
-async def join_channel(session_string: str, invite_or_username: str,
-                       _acc: dict | None = None) -> dict:
+
+async def join_channel(
+    session_string: str, invite_or_username: str, _acc: dict | None = None
+) -> dict:
     """Join a channel or group by username (@name) or invite link (https://t.me/...).
 
     Returns dict: {title, members, channel_id, error?}
@@ -1093,6 +1299,7 @@ async def join_channel(session_string: str, invite_or_username: str,
         return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.functions.messages import ImportChatInviteRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1113,15 +1320,30 @@ async def join_channel(session_string: str, invite_or_username: str,
             "members": getattr(ch, "participants_count", 0) or 0,
         }
     except Exception as e:
-        from telethon.errors import FloodWaitError, UserBannedInChannelError, ChannelPrivateError, PeerFloodError
+        from telethon.errors import (
+            FloodWaitError,
+            UserBannedInChannelError,
+            ChannelPrivateError,
+            PeerFloodError,
+        )
+
         if isinstance(e, FloodWaitError):
-            return {"error": f"FloodWait {e.seconds}с — подождите перед вступлением", "flood_wait": e.seconds}
+            return {
+                "error": f"FloodWait {e.seconds}с — подождите перед вступлением",
+                "flood_wait": e.seconds,
+            }
         if isinstance(e, UserBannedInChannelError):
             return {"error": f"Аккаунт забанен в этом канале: {e}", "banned": True}
         if isinstance(e, ChannelPrivateError):
-            return {"error": f"Канал приватный или аккаунт заблокирован: {e}", "banned": True}
+            return {
+                "error": f"Канал приватный или аккаунт заблокирован: {e}",
+                "banned": True,
+            }
         if isinstance(e, PeerFloodError):
-            return {"error": f"PeerFlood: аккаунт временно ограничен: {e}", "banned": True}
+            return {
+                "error": f"PeerFlood: аккаунт временно ограничен: {e}",
+                "banned": True,
+            }
         log.exception("join_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:
@@ -1130,13 +1352,16 @@ async def join_channel(session_string: str, invite_or_username: str,
         except Exception:
             log_exc_swallow(log, "Сбой в join_channel")
 
-async def leave_channel(session_string: str, channel_id: int | str,
-                        _acc: dict | None = None) -> bool:
+
+async def leave_channel(
+    session_string: str, channel_id: int | str, _acc: dict | None = None
+) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
     if not session_string:
         log.warning("leave_channel: session_str отсутствует — аккаунт не импортирован")
         return False
     from telethon.tl.functions.channels import LeaveChannelRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1145,6 +1370,7 @@ async def leave_channel(session_string: str, channel_id: int | str,
         return True
     except Exception as e:
         from telethon.errors import FloodWaitError
+
         if isinstance(e, FloodWaitError):
             log.warning("leave_channel FloodWait %ds", e.seconds)
             raise
@@ -1156,10 +1382,15 @@ async def leave_channel(session_string: str, channel_id: int | str,
         except Exception:
             log_exc_swallow(log, "Сбой в leave_channel")
 
+
 async def edit_channel_title(
-    session_string: str, channel_id: int, title: str, _acc: dict | None = None,
+    session_string: str,
+    channel_id: int,
+    title: str,
+    _acc: dict | None = None,
 ) -> bool:
     from telethon.tl.functions.channels import EditTitleRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1175,10 +1406,15 @@ async def edit_channel_title(
         except Exception:
             log_exc_swallow(log, "Сбой в edit_channel_title")
 
+
 async def edit_channel_about(
-    session_string: str, channel_id: int, about: str, _acc: dict | None = None,
+    session_string: str,
+    channel_id: int,
+    about: str,
+    _acc: dict | None = None,
 ) -> bool:
     from telethon.tl.functions.channels import EditAboutRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1194,17 +1430,24 @@ async def edit_channel_about(
         except Exception:
             log_exc_swallow(log, "Сбой в edit_channel_about")
 
+
 async def set_channel_username(
-    session_string: str, channel_id: int, username: str, _acc: dict | None = None,
+    session_string: str,
+    channel_id: int,
+    username: str,
+    _acc: dict | None = None,
 ) -> str:
     """Set public username for channel. Returns '' on success, error string on failure."""
     from telethon.tl.functions.channels import UpdateUsernameRequest
     from telethon.tl.types import PeerChannel
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(PeerChannel(channel_id))
-        await client(UpdateUsernameRequest(channel=entity, username=username.lstrip("@")))
+        await client(
+            UpdateUsernameRequest(channel=entity, username=username.lstrip("@"))
+        )
         return ""
     except Exception as e:
         log.exception("set_channel_username error: %s", e)
@@ -1214,6 +1457,7 @@ async def set_channel_username(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в set_channel_username")
+
 
 def _normalize_channel_id(channel_ref: int | str) -> int:
     cid = abs(int(channel_ref))
@@ -1246,10 +1490,15 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
     raise ValueError(f"Channel {channel_ref} not found in account dialogs")
 
 
-async def get_channel_invite_link(session_string: str, channel_id: int | str,
-                                  _acc: dict | None = None, access_hash: int = 0) -> str:
+async def get_channel_invite_link(
+    session_string: str,
+    channel_id: int | str,
+    _acc: dict | None = None,
+    access_hash: int = 0,
+) -> str:
     """Get (or create) an invite link for the channel. Returns link string or ''."""
     from telethon.tl.functions.messages import ExportChatInviteRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1265,10 +1514,13 @@ async def get_channel_invite_link(session_string: str, channel_id: int | str,
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_invite_link")
 
-async def delete_channel(session_string: str, channel_id: int,
-                         _acc: dict | None = None) -> bool:
+
+async def delete_channel(
+    session_string: str, channel_id: int, _acc: dict | None = None
+) -> bool:
     """Permanently delete a channel or group. Irreversible."""
     from telethon.tl.functions.channels import DeleteChannelRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1284,31 +1536,40 @@ async def delete_channel(session_string: str, channel_id: int,
         except Exception:
             log_exc_swallow(log, "Сбой в delete_channel")
 
+
 async def get_channel_members(
-    session_string: str, channel_id: int, limit: int = 50, _acc: dict | None = None,
+    session_string: str,
+    channel_id: int,
+    limit: int = 50,
+    _acc: dict | None = None,
 ) -> list[dict]:
     """Return list of channel/group members (up to limit)."""
     from telethon.tl.functions.channels import GetParticipantsRequest
     from telethon.tl.types import ChannelParticipantsRecent
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
-        result = await client(GetParticipantsRequest(
-            channel=entity,
-            filter=ChannelParticipantsRecent(),
-            offset=0,
-            limit=limit,
-            hash=0,
-        ))
+        result = await client(
+            GetParticipantsRequest(
+                channel=entity,
+                filter=ChannelParticipantsRecent(),
+                offset=0,
+                limit=limit,
+                hash=0,
+            )
+        )
         members = []
         for user in result.users:
-            members.append({
-                "user_id": user.id,
-                "username": getattr(user, "username", "") or "",
-                "first_name": getattr(user, "first_name", "") or "",
-                "is_bot": getattr(user, "bot", False),
-            })
+            members.append(
+                {
+                    "user_id": user.id,
+                    "username": getattr(user, "username", "") or "",
+                    "first_name": getattr(user, "first_name", "") or "",
+                    "is_bot": getattr(user, "bot", False),
+                }
+            )
         return members
     except Exception as e:
         log.exception("get_channel_members error: %s", e)
@@ -1318,6 +1579,7 @@ async def get_channel_members(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в get_channel_members")
+
 
 async def invite_users_to_channel(
     session_string: str,
@@ -1338,9 +1600,13 @@ async def invite_users_to_channel(
     """
     from telethon.tl.functions.channels import InviteToChannelRequest
     from telethon.errors import (
-        FloodWaitError, PeerFloodError, UserBannedInChannelError,
-        ChatAdminRequiredError, UserPrivacyRestrictedError,
-        UserNotMutualContactError, UserChannelsTooMuchError,
+        FloodWaitError,
+        PeerFloodError,
+        UserBannedInChannelError,
+        ChatAdminRequiredError,
+        UserPrivacyRestrictedError,
+        UserNotMutualContactError,
+        UserChannelsTooMuchError,
     )
     from services import session_simulator
 
@@ -1358,11 +1624,17 @@ async def invite_users_to_channel(
         try:
             channel_peer = await _resolve_channel_peer(client, channel_id, access_hash)
         except Exception:
-            return {"invited": 0, "failed": [], "batches": 0,
-                            "error": f"Канал {channel_id} не найден в диалогах аккаунта"}
+            return {
+                "invited": 0,
+                "failed": [],
+                "batches": 0,
+                "error": f"Канал {channel_id} не найден в диалогах аккаунта",
+            }
 
         # Split into batches of batch_size
-        batches = [usernames[i:i + batch_size] for i in range(0, len(usernames), batch_size)]
+        batches = [
+            usernames[i : i + batch_size] for i in range(0, len(usernames), batch_size)
+        ]
         total = len(usernames)
         done = 0
         abort = False
@@ -1374,14 +1646,23 @@ async def invite_users_to_channel(
                 continue
 
             if b_idx > 0:
-                log.info("invite batch %d/%d: cooldown %.0fs", b_idx + 1, len(batches), batch_delay)
+                log.info(
+                    "invite batch %d/%d: cooldown %.0fs",
+                    b_idx + 1,
+                    len(batches),
+                    batch_delay,
+                )
                 await asyncio.sleep(batch_delay)
 
             for idx, username in enumerate(batch):
                 uname = username.strip()
                 try:
-                    user = await asyncio.wait_for(client.get_entity(uname), timeout=10.0)
-                    await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
+                    user = await asyncio.wait_for(
+                        client.get_entity(uname), timeout=10.0
+                    )
+                    await client(
+                        InviteToChannelRequest(channel=channel_peer, users=[user])
+                    )
                     invited += 1
                     done += 1
                     if progress_cb and done % 10 == 0:
@@ -1390,19 +1671,31 @@ async def invite_users_to_channel(
                         except Exception:
                             pass
                     if idx < len(batch) - 1:
-                        await asyncio.sleep(random.uniform(35, 95) * session_simulator.chaos_factor())
+                        await asyncio.sleep(
+                            random.uniform(35, 95) * session_simulator.chaos_factor()
+                        )
                 except ChatAdminRequiredError:
-                    for u in batch[idx + 1:] + [u2 for b2 in batches[b_idx + 1:] for u2 in b2]:
+                    for u in batch[idx + 1 :] + [
+                        u2 for b2 in batches[b_idx + 1 :] for u2 in b2
+                    ]:
                         failed.append(f"{u.strip()}: нет прав администратора")
                     abort = True
-                    return {"invited": invited, "failed": failed, "batches": batches_done,
-                            "error": "Нет прав администратора. Назначьте аккаунт администратором с правом 'Добавление участников'."}
+                    return {
+                        "invited": invited,
+                        "failed": failed,
+                        "batches": batches_done,
+                        "error": "Нет прав администратора. Назначьте аккаунт администратором с правом 'Добавление участников'.",
+                    }
                 except PeerFloodError:
-                    for u in batch[idx + 1:]:
+                    for u in batch[idx + 1 :]:
                         failed.append(f"{u.strip()}: PeerFlood")
                     abort = True
-                    return {"invited": invited, "failed": failed, "batches": batches_done,
-                            "error": "PeerFlood: account stopped to avoid spamblock escalation"}
+                    return {
+                        "invited": invited,
+                        "failed": failed,
+                        "batches": batches_done,
+                        "error": "PeerFlood: account stopped to avoid spamblock escalation",
+                    }
                 except UserBannedInChannelError:
                     failed.append(f"{uname}: забанен в канале")
                 except (UserPrivacyRestrictedError, UserNotMutualContactError):
@@ -1415,12 +1708,19 @@ async def invite_users_to_channel(
                     log.warning("invite FloodWait %ds acc=%s", wait_s, acc_id or "?")
                     if acc_id:
                         from services import flood_engine
-                        await flood_engine.record_flood(None, acc_id, wait_s, action_type="invite")
+
+                        await flood_engine.record_flood(
+                            None, acc_id, wait_s, action_type="invite"
+                        )
                     await asyncio.sleep(wait_s + random.uniform(5, 15))
                     # Retry once after flood
                     try:
-                        user = await asyncio.wait_for(client.get_entity(uname), timeout=10.0)
-                        await client(InviteToChannelRequest(channel=channel_peer, users=[user]))
+                        user = await asyncio.wait_for(
+                            client.get_entity(uname), timeout=10.0
+                        )
+                        await client(
+                            InviteToChannelRequest(channel=channel_peer, users=[user])
+                        )
                         invited += 1
                     except Exception:
                         failed.append(f"{uname}: FloodWait+retry_fail")
@@ -1429,8 +1729,13 @@ async def invite_users_to_channel(
                     await asyncio.sleep(random.uniform(3, 8))
 
             batches_done += 1
-            log.info("invite batch %d/%d done: +%d invited, %d failed total",
-                     b_idx + 1, len(batches), invited, len(failed))
+            log.info(
+                "invite batch %d/%d done: +%d invited, %d failed total",
+                b_idx + 1,
+                len(batches),
+                invited,
+                len(failed),
+            )
 
         if progress_cb:
             try:
@@ -1444,12 +1749,18 @@ async def invite_users_to_channel(
         raise
     except Exception as e:
         log.exception("invite_users_to_channel error: %s", e)
-        return {"invited": invited, "failed": failed, "batches": batches_done, "error": str(e)[:150]}
+        return {
+            "invited": invited,
+            "failed": failed,
+            "batches": batches_done,
+            "error": str(e)[:150],
+        }
     finally:
         try:
             await client.disconnect()
         except Exception:
             pass
+
 
 async def join_channel_by_id(
     session_string: str,
@@ -1464,7 +1775,11 @@ async def join_channel_by_id(
     """
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.types import InputChannel
-    from telethon.errors import FloodWaitError, UserBannedInChannelError, ChannelPrivateError
+    from telethon.errors import (
+        FloodWaitError,
+        UserBannedInChannelError,
+        ChannelPrivateError,
+    )
 
     client = _make_client(session_string, _acc)
     try:
@@ -1476,8 +1791,12 @@ async def join_channel_by_id(
             if access_hash and channel_id:
                 ch_input = InputChannel(channel_id=channel_id, access_hash=access_hash)
             else:
-                ch_input = await asyncio.wait_for(client.get_entity(channel_id), timeout=10.0)
-            await asyncio.wait_for(client(JoinChannelRequest(channel=ch_input)), timeout=20.0)
+                ch_input = await asyncio.wait_for(
+                    client.get_entity(channel_id), timeout=10.0
+                )
+            await asyncio.wait_for(
+                client(JoinChannelRequest(channel=ch_input)), timeout=20.0
+            )
             await asyncio.sleep(random.uniform(1.5, 3.0))
             return {"ok": True, "tg_user_id": tg_user_id, "already_member": False}
         except Exception as e:
@@ -1485,12 +1804,24 @@ async def join_channel_by_id(
             if "ALREADY_PARTICIPANT" in err.upper() or "already" in err.lower():
                 return {"ok": True, "tg_user_id": tg_user_id, "already_member": True}
             if isinstance(e, FloodWaitError):
-                return {"ok": False, "tg_user_id": tg_user_id,
-                        "error": f"FloodWait {e.seconds}s", "flood_wait": e.seconds}
+                return {
+                    "ok": False,
+                    "tg_user_id": tg_user_id,
+                    "error": f"FloodWait {e.seconds}s",
+                    "flood_wait": e.seconds,
+                }
             if isinstance(e, UserBannedInChannelError):
-                return {"ok": False, "tg_user_id": tg_user_id, "error": "забанен в канале"}
+                return {
+                    "ok": False,
+                    "tg_user_id": tg_user_id,
+                    "error": "забанен в канале",
+                }
             if isinstance(e, ChannelPrivateError):
-                return {"ok": False, "tg_user_id": tg_user_id, "error": "канал приватный"}
+                return {
+                    "ok": False,
+                    "tg_user_id": tg_user_id,
+                    "error": "канал приватный",
+                }
             return {"ok": False, "tg_user_id": tg_user_id, "error": err[:100]}
     except asyncio.CancelledError:
         raise
@@ -1527,6 +1858,7 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
     Bots and deleted accounts are excluded.
     """
     from telethon.tl.functions.contacts import GetContactsRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1535,13 +1867,15 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
         for user in result.users:
             if getattr(user, "deleted", False) or getattr(user, "bot", False):
                 continue
-            contacts.append({
-                "user_id": user.id,
-                "username": getattr(user, "username", "") or "",
-                "phone": getattr(user, "phone", "") or "",
-                "first_name": getattr(user, "first_name", "") or "",
-                "last_name": getattr(user, "last_name", "") or "",
-            })
+            contacts.append(
+                {
+                    "user_id": user.id,
+                    "username": getattr(user, "username", "") or "",
+                    "phone": getattr(user, "phone", "") or "",
+                    "first_name": getattr(user, "first_name", "") or "",
+                    "last_name": getattr(user, "last_name", "") or "",
+                }
+            )
         return contacts
     except Exception as e:
         log.warning("get_contacts error: %s", e)
@@ -1552,12 +1886,17 @@ async def get_contacts(session_string: str, _acc: dict | None = None) -> list[di
         except Exception:
             log_exc_swallow(log, "Сбой в get_contacts")
 
+
 async def kick_from_channel(
-    session_string: str, channel_id: int, user_id: int, _acc: dict | None = None,
+    session_string: str,
+    channel_id: int,
+    user_id: int,
+    _acc: dict | None = None,
 ) -> bool:
     """Kick (ban + unban) a user from a channel/group."""
     from telethon.tl.functions.channels import EditBannedRequest
     from telethon.tl.types import ChatBannedRights
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1565,11 +1904,15 @@ async def kick_from_channel(
         user = await client.get_entity(user_id)
         # Ban
         banned = ChatBannedRights(until_date=None, view_messages=True)
-        await client(EditBannedRequest(channel=channel, participant=user, banned_rights=banned))
+        await client(
+            EditBannedRequest(channel=channel, participant=user, banned_rights=banned)
+        )
         await asyncio.sleep(1)
         # Unban (kick, not permanent ban)
         unbanned = ChatBannedRights(until_date=None)
-        await client(EditBannedRequest(channel=channel, participant=user, banned_rights=unbanned))
+        await client(
+            EditBannedRequest(channel=channel, participant=user, banned_rights=unbanned)
+        )
         return True
     except Exception as e:
         log.exception("kick_from_channel error: %s", e)
@@ -1579,6 +1922,7 @@ async def kick_from_channel(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в kick_from_channel")
+
 
 async def promote_to_admin(
     session_string: str,
@@ -1623,30 +1967,50 @@ async def promote_to_admin(
             anonymous=False,
             manage_topics=False,
         )
-        await client(EditAdminRequest(channel=channel, user_id=PeerUser(user_id=user_id),
-                                      admin_rights=rights, rank=""))
-        log.info("promote_to_admin: user %s promoted in channel %s", user_id, channel_id)
+        await client(
+            EditAdminRequest(
+                channel=channel,
+                user_id=PeerUser(user_id=user_id),
+                admin_rights=rights,
+                rank="",
+            )
+        )
+        log.info(
+            "promote_to_admin: user %s promoted in channel %s", user_id, channel_id
+        )
         return True
     except UserNotParticipantError:
-        log.warning("promote_to_admin: user %s not yet a member of %s", user_id, channel_id)
+        log.warning(
+            "promote_to_admin: user %s not yet a member of %s", user_id, channel_id
+        )
         return False
     except ChatAdminRequiredError:
-        log.warning("promote_to_admin: calling account lacks add_admins right in %s", channel_id)
+        log.warning(
+            "promote_to_admin: calling account lacks add_admins right in %s", channel_id
+        )
         return False
     except Exception as e:
-        log.warning("promote_to_admin error user=%s chan=%s: %s", user_id, channel_id, e)
+        log.warning(
+            "promote_to_admin error user=%s chan=%s: %s", user_id, channel_id, e
+        )
         return False
     finally:
         try:
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в promote_to_admin")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTENT OPERATIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 async def post_to_channel(
-    session_string: str, channel_id: int | str, text: str, access_hash: int = 0,
+    session_string: str,
+    channel_id: int | str,
+    text: str,
+    access_hash: int = 0,
     _acc: dict | None = None,
 ) -> dict:
     """Post a text message to a channel/group.
@@ -1659,7 +2023,13 @@ async def post_to_channel(
     if not session_string:
         return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.types import InputPeerChannel
-    from telethon.errors import FloodWaitError, ChatWriteForbiddenError, UserNotParticipantError, UserBannedInChannelError
+    from telethon.errors import (
+        FloodWaitError,
+        ChatWriteForbiddenError,
+        UserNotParticipantError,
+        UserBannedInChannelError,
+    )
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -1673,7 +2043,9 @@ async def post_to_channel(
         elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
             peer = channel_id  # @username — Telethon resolves via API
         else:
-            cid = abs(int(channel_id)) if isinstance(channel_id, str) else abs(channel_id)
+            cid = (
+                abs(int(channel_id)) if isinstance(channel_id, str) else abs(channel_id)
+            )
             async for _d in client.iter_dialogs(limit=500):
                 if getattr(_d.entity, "id", None) == cid:
                     peer = InputPeerChannel(
@@ -1703,22 +2075,29 @@ async def post_to_channel(
         except Exception:
             log_exc_swallow(log, "Сбой в post_to_channel")
 
+
 async def send_reaction(
-    session_string: str, channel_id: int | str, msg_id: int, emoji: str,
+    session_string: str,
+    channel_id: int | str,
+    msg_id: int,
+    emoji: str,
     _acc: dict | None = None,
 ) -> bool:
     """Send a reaction emoji to a specific message."""
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import ReactionEmoji
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
-        await client(SendReactionRequest(
-            peer=entity,
-            msg_id=msg_id,
-            reaction=[ReactionEmoji(emoticon=emoji)],
-        ))
+        await client(
+            SendReactionRequest(
+                peer=entity,
+                msg_id=msg_id,
+                reaction=[ReactionEmoji(emoticon=emoji)],
+            )
+        )
         return True
     except Exception as e:
         log.exception("send_reaction error: %s", e)
@@ -1728,6 +2107,7 @@ async def send_reaction(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в send_reaction")
+
 
 async def report_peer(
     session_string: str,
@@ -1742,10 +2122,14 @@ async def report_peer(
     """
     from telethon.tl.functions.account import ReportPeerRequest
     from telethon.tl.types import (
-        InputReportReasonSpam, InputReportReasonViolence,
-        InputReportReasonPornography, InputReportReasonChildAbuse,
-        InputReportReasonCopyright, InputReportReasonOther,
+        InputReportReasonSpam,
+        InputReportReasonViolence,
+        InputReportReasonPornography,
+        InputReportReasonChildAbuse,
+        InputReportReasonCopyright,
+        InputReportReasonOther,
     )
+
     reason_map = {
         "spam": InputReportReasonSpam(),
         "violence": InputReportReasonViolence(),
@@ -1769,6 +2153,7 @@ async def report_peer(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer")
+
 
 async def report_peer_deep(
     session_string: str,
@@ -1810,30 +2195,40 @@ async def report_peer_deep(
     from telethon.tl.functions.messages import ReportRequest as MsgReportRequest
     from telethon.tl.functions.contacts import BlockRequest
     from telethon.tl.functions.channels import (
-        JoinChannelRequest, LeaveChannelRequest, GetParticipantsRequest,
+        JoinChannelRequest,
+        LeaveChannelRequest,
+        GetParticipantsRequest,
         GetFullChannelRequest,
     )
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import (
-        InputReportReasonSpam, InputReportReasonViolence,
-        InputReportReasonPornography, InputReportReasonChildAbuse,
-        InputReportReasonCopyright, InputReportReasonOther,
-        Channel, ChannelParticipantsAdmins, ReactionEmoji,
+        InputReportReasonSpam,
+        InputReportReasonViolence,
+        InputReportReasonPornography,
+        InputReportReasonChildAbuse,
+        InputReportReasonCopyright,
+        InputReportReasonOther,
+        Channel,
+        ChannelParticipantsAdmins,
+        ReactionEmoji,
         InputMessagesFilterPinned,
     )
 
     # Optional imports — newer TL layers / Telethon versions
-    _has_photo_report = False
     try:
-        from telethon.tl.functions.account import ReportProfilePhotoRequest
-        _has_photo_report = True
-    except ImportError:
-        pass
+        import importlib.util
+
+        _has_photo_report = (
+            importlib.util.find_spec("telethon.tl.functions.account") is not None
+        )
+    except (ImportError, ValueError):
+        _has_photo_report = False
 
     _has_chan_spam = False
     ChanSpamRequest = None
     try:
         from telethon.tl.functions.channels import ReportSpamRequest as _CSR
+
         ChanSpamRequest = _CSR
         _has_chan_spam = True
     except ImportError:
@@ -1841,12 +2236,12 @@ async def report_peer_deep(
 
     # Build reason map — try to include newer TL types
     reason_map: dict = {
-        "spam":        InputReportReasonSpam(),
-        "violence":    InputReportReasonViolence(),
+        "spam": InputReportReasonSpam(),
+        "violence": InputReportReasonViolence(),
         "pornography": InputReportReasonPornography(),
-        "childabuse":  InputReportReasonChildAbuse(),
-        "copyright":   InputReportReasonCopyright(),
-        "other":       InputReportReasonOther(),
+        "childabuse": InputReportReasonChildAbuse(),
+        "copyright": InputReportReasonCopyright(),
+        "other": InputReportReasonOther(),
     }
     for _type_name, _key in [
         ("InputReportReasonIllegalDrugs", "drugs"),
@@ -1856,26 +2251,27 @@ async def report_peer_deep(
     ]:
         try:
             import telethon.tl.types as _tlt
+
             reason_map[_key] = getattr(_tlt, _type_name)()
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer_deep")
     # Escalation: primary → all applicable secondary reasons
     _escalation: dict[str, list[str]] = {
-        "childabuse":  ["pornography", "violence", "drugs", "spam", "other"],
-        "drugs":       ["childabuse", "violence", "spam", "other"],
-        "violence":    ["childabuse", "spam", "drugs", "fake", "other"],
+        "childabuse": ["pornography", "violence", "drugs", "spam", "other"],
+        "drugs": ["childabuse", "violence", "spam", "other"],
+        "violence": ["childabuse", "spam", "drugs", "fake", "other"],
         "pornography": ["childabuse", "spam", "other", "violence"],
-        "spam":        ["other", "violence", "personal", "fake"],
-        "other":       ["spam", "violence", "pornography", "drugs"],
-        "copyright":   ["spam", "other"],
+        "spam": ["other", "violence", "personal", "fake"],
+        "other": ["spam", "violence", "pornography", "drugs"],
+        "copyright": ["spam", "other"],
     }
 
     _report_bots: dict[str, str] = {
         "childabuse": "stopCA",
-        "drugs":      "stopCA",
-        "violence":   "notoscam",
-        "other":      "notoscam",
-        "spam":       "notoscam",
+        "drugs": "stopCA",
+        "violence": "notoscam",
+        "other": "notoscam",
+        "spam": "notoscam",
         "pornography": "notoscam",
     }
 
@@ -1887,19 +2283,19 @@ async def report_peer_deep(
             all_reasons_cycle.append(reason_map[sec_key])
 
     result = {
-        "peer_reported":          False,
-        "multi_reason_sent":      0,
-        "photo_reported":         False,
-        "pinned_reported":        0,
-        "msg_reported":           0,
-        "spam_signaled":          0,
-        "reactions_sent":         0,
-        "admins_reported":        0,
-        "linked_group_reported":  False,
-        "bots_reported":          0,
-        "forwarded":              0,
-        "blocked":                False,
-        "joined":                 False,
+        "peer_reported": False,
+        "multi_reason_sent": 0,
+        "photo_reported": False,
+        "pinned_reported": 0,
+        "msg_reported": 0,
+        "spam_signaled": 0,
+        "reactions_sent": 0,
+        "admins_reported": 0,
+        "linked_group_reported": False,
+        "bots_reported": 0,
+        "forwarded": 0,
+        "blocked": False,
+        "joined": False,
     }
     msg_pool = msg_messages or [message] or [""]
 
@@ -1914,11 +2310,13 @@ async def report_peer_deep(
             try:
                 if idx > 0:
                     await asyncio.sleep(0.35)
-                await client(ReportPeerRequest(
-                    peer=entity,
-                    reason=r_obj,
-                    message=msg_pool[idx % len(msg_pool)],
-                ))
+                await client(
+                    ReportPeerRequest(
+                        peer=entity,
+                        reason=r_obj,
+                        message=msg_pool[idx % len(msg_pool)],
+                    )
+                )
                 if idx == 0:
                     result["peer_reported"] = True
                 else:
@@ -1929,15 +2327,20 @@ async def report_peer_deep(
         # ── 2. Report Profile Photo ────────────────────────────────────────
         if report_photo and _has_photo_report:
             try:
-                from telethon.tl.functions.account import ReportProfilePhotoRequest as _RPP
+                from telethon.tl.functions.account import (
+                    ReportProfilePhotoRequest as _RPP,
+                )
+
                 photos = await client.get_profile_photos(entity, limit=1)
                 if photos:
-                    await client(_RPP(
-                        peer=entity,
-                        photo_id=client._get_input_photo(photos[0]),
-                        reason=tg_reason,
-                        message=msg_pool[0],
-                    ))
+                    await client(
+                        _RPP(
+                            peer=entity,
+                            photo_id=client._get_input_photo(photos[0]),
+                            reason=tg_reason,
+                            message=msg_pool[0],
+                        )
+                    )
                     result["photo_reported"] = True
             except Exception as e:
                 log.warning("report_peer_deep[2/photo]: %s", e)
@@ -1971,11 +2374,14 @@ async def report_peer_deep(
                 for idx_p, pid in enumerate(pinned_ids):
                     r_obj = all_reasons_cycle[idx_p % len(all_reasons_cycle)]
                     try:
-                        await client(MsgReportRequest(
-                            peer=entity, id=[pid],
-                            reason=r_obj,
-                            message=msg_pool[idx_p % len(msg_pool)],
-                        ))
+                        await client(
+                            MsgReportRequest(
+                                peer=entity,
+                                id=[pid],
+                                reason=r_obj,
+                                message=msg_pool[idx_p % len(msg_pool)],
+                            )
+                        )
                         result["pinned_reported"] += 1
                         await asyncio.sleep(0.4)
                     except Exception as e:
@@ -1989,18 +2395,24 @@ async def report_peer_deep(
             try:
                 msgs = await client.get_messages(entity, limit=max_msg_reports)
                 msg_ids = [m.id for m in msgs if m and m.id]
-                chunks = [msg_ids[i:i+5] for i in range(0, len(msg_ids), 5)]
+                chunks = [msg_ids[i : i + 5] for i in range(0, len(msg_ids), 5)]
                 for chunk_idx, chunk in enumerate(chunks):
                     r_obj = all_reasons_cycle[chunk_idx % len(all_reasons_cycle)]
                     chunk_msg = msg_pool[chunk_idx % len(msg_pool)]
                     try:
-                        await client(MsgReportRequest(
-                            peer=entity, id=chunk,
-                            reason=r_obj, message=chunk_msg,
-                        ))
+                        await client(
+                            MsgReportRequest(
+                                peer=entity,
+                                id=chunk,
+                                reason=r_obj,
+                                message=chunk_msg,
+                            )
+                        )
                         result["msg_reported"] += len(chunk)
                     except Exception as e:
-                        log.warning("report_peer_deep[5/msg_chunk %d]: %s", chunk_idx, e)
+                        log.warning(
+                            "report_peer_deep[5/msg_chunk %d]: %s", chunk_idx, e
+                        )
                     await asyncio.sleep(0.55)
             except Exception as e:
                 log.warning("report_peer_deep[5/get_msgs]: %s", e)
@@ -2010,11 +2422,13 @@ async def report_peer_deep(
             spam_ids = [m.id for m in msgs[:10] if m and m.id]
             if spam_ids:
                 try:
-                    await client(ChanSpamRequest(
-                        channel=entity,
-                        participant=entity,
-                        id=spam_ids,
-                    ))
+                    await client(
+                        ChanSpamRequest(
+                            channel=entity,
+                            participant=entity,
+                            id=spam_ids,
+                        )
+                    )
                     result["spam_signaled"] += len(spam_ids)
                 except Exception as e:
                     log.warning("report_peer_deep[6/chan_spam]: %s", e)
@@ -2027,11 +2441,13 @@ async def report_peer_deep(
                     continue
                 emoji = reaction_emojis[r_idx % len(reaction_emojis)]
                 try:
-                    await client(SendReactionRequest(
-                        peer=entity,
-                        msg_id=m.id,
-                        reaction=[ReactionEmoji(emoticon=emoji)],
-                    ))
+                    await client(
+                        SendReactionRequest(
+                            peer=entity,
+                            msg_id=m.id,
+                            reaction=[ReactionEmoji(emoticon=emoji)],
+                        )
+                    )
                     result["reactions_sent"] += 1
                     await asyncio.sleep(0.2)
                 except Exception as e:
@@ -2040,21 +2456,27 @@ async def report_peer_deep(
         # ── 8. Жалобы на ВСЕХ администраторов ────────────────────────────
         if report_admins and is_channel:
             try:
-                admins_result = await client(GetParticipantsRequest(
-                    channel=entity,
-                    filter=ChannelParticipantsAdmins(),
-                    offset=0, limit=50, hash=0,
-                ))
+                admins_result = await client(
+                    GetParticipantsRequest(
+                        channel=entity,
+                        filter=ChannelParticipantsAdmins(),
+                        offset=0,
+                        limit=50,
+                        hash=0,
+                    )
+                )
                 admin_users = getattr(admins_result, "users", [])
                 for a_idx, usr in enumerate(admin_users):
                     try:
                         await asyncio.sleep(0.4)
                         r_obj = all_reasons_cycle[a_idx % len(all_reasons_cycle)]
-                        await client(ReportPeerRequest(
-                            peer=usr,
-                            reason=r_obj,
-                            message=msg_pool[a_idx % len(msg_pool)],
-                        ))
+                        await client(
+                            ReportPeerRequest(
+                                peer=usr,
+                                reason=r_obj,
+                                message=msg_pool[a_idx % len(msg_pool)],
+                            )
+                        )
                         result["admins_reported"] += 1
                     except Exception as e:
                         log.warning("report_peer_deep[8/admin]: %s", e)
@@ -2070,20 +2492,24 @@ async def report_peer_deep(
                     for idx_lg, r_obj in enumerate(all_reasons_cycle[:3]):
                         try:
                             await asyncio.sleep(0.5)
-                            await client(ReportPeerRequest(
-                                peer=linked_entity,
-                                reason=r_obj,
-                                message=msg_pool[idx_lg % len(msg_pool)],
-                            ))
+                            await client(
+                                ReportPeerRequest(
+                                    peer=linked_entity,
+                                    reason=r_obj,
+                                    message=msg_pool[idx_lg % len(msg_pool)],
+                                )
+                            )
                             result["linked_group_reported"] = True
                         except Exception as e:
-                            log.warning("report_peer_deep[9/linked reason %d]: %s", idx_lg, e)
+                            log.warning(
+                                "report_peer_deep[9/linked reason %d]: %s", idx_lg, e
+                            )
                 except Exception as e:
                     log.warning("report_peer_deep[9/get_linked]: %s", e)
 
         # ── 10. Linked bots → ReportPeer ──────────────────────────────────
         if report_linked_bots and is_channel:
-            bot_re = _re.compile(r'@([A-Za-z]\w{4,31}[Bb]ot)\b')
+            bot_re = _re.compile(r"@([A-Za-z]\w{4,31}[Bb]ot)\b")
             scan_text = ""
             if full_chat:
                 scan_text += (getattr(full_chat, "about", "") or "") + " "
@@ -2095,10 +2521,13 @@ async def report_peer_deep(
                 try:
                     bot_entity = await client.get_entity(bot_uname)
                     r_obj = all_reasons_cycle[b_idx % len(all_reasons_cycle)]
-                    await client(ReportPeerRequest(
-                        peer=bot_entity, reason=r_obj,
-                        message=msg_pool[b_idx % len(msg_pool)],
-                    ))
+                    await client(
+                        ReportPeerRequest(
+                            peer=bot_entity,
+                            reason=r_obj,
+                            message=msg_pool[b_idx % len(msg_pool)],
+                        )
+                    )
                     result["bots_reported"] += 1
                     await asyncio.sleep(0.5)
                 except Exception as e:
@@ -2124,10 +2553,13 @@ async def report_peer_deep(
         try:
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
-            await client(UpdateNotifySettingsRequest(
-                peer=InputNotifyPeer(peer=entity),
-                settings=InputPeerNotifySettings(mute_until=2_147_483_647),
-            ))
+
+            await client(
+                UpdateNotifySettingsRequest(
+                    peer=InputNotifyPeer(peer=entity),
+                    settings=InputPeerNotifySettings(mute_until=2_147_483_647),
+                )
+            )
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer_deep")
         if result["joined"]:
@@ -2150,6 +2582,7 @@ async def report_peer_deep(
         except Exception:
             log_exc_swallow(log, "Сбой в report_peer_deep")
     return result
+
 
 async def report_peer_deep_v2(  # noqa: C901
     session_string: str,
@@ -2178,14 +2611,26 @@ async def report_peer_deep_v2(  # noqa: C901
     from telethon.tl.functions.messages import ReportRequest as MsgReportRequest
     from telethon.tl.functions.contacts import BlockRequest
     from telethon.tl.functions.channels import (
-        JoinChannelRequest, LeaveChannelRequest, GetParticipantsRequest, GetFullChannelRequest,
+        JoinChannelRequest,
+        LeaveChannelRequest,
+        GetParticipantsRequest,
+        GetFullChannelRequest,
     )
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import (
-        InputReportReasonSpam, InputReportReasonViolence, InputReportReasonPornography,
-        InputReportReasonChildAbuse, InputReportReasonCopyright, InputReportReasonOther,
-        Channel, ChannelParticipantsAdmins, ReactionEmoji, InputMessagesFilterPinned,
-        ReportResultAddComment, ReportResultChooseOption, ReportResultReported,
+        InputReportReasonSpam,
+        InputReportReasonViolence,
+        InputReportReasonPornography,
+        InputReportReasonChildAbuse,
+        InputReportReasonCopyright,
+        InputReportReasonOther,
+        Channel,
+        ChannelParticipantsAdmins,
+        ReactionEmoji,
+        InputMessagesFilterPinned,
+        ReportResultAddComment,
+        ReportResultChooseOption,
+        ReportResultReported,
     )
 
     _RPP = None
@@ -2202,62 +2647,83 @@ async def report_peer_deep_v2(  # noqa: C901
 
     # ── Result ────────────────────────────────────────────────────────────
     R: dict = {
-        "peer_reported": False, "multi_reason_sent": 0, "photo_reported": False,
-        "pinned_reported": 0, "msg_reported": 0, "msgs_fetched": 0, "spam_signaled": 0,
-        "reactions_sent": 0, "admins_reported": 0, "linked_group_reported": False,
-        "bots_reported": 0, "forwarded": 0, "blocked": False, "joined": False,
-        "rate_limited": False, "errors": [],
+        "peer_reported": False,
+        "multi_reason_sent": 0,
+        "photo_reported": False,
+        "pinned_reported": 0,
+        "msg_reported": 0,
+        "msgs_fetched": 0,
+        "spam_signaled": 0,
+        "reactions_sent": 0,
+        "admins_reported": 0,
+        "linked_group_reported": False,
+        "bots_reported": 0,
+        "forwarded": 0,
+        "blocked": False,
+        "joined": False,
+        "rate_limited": False,
+        "errors": [],
     }
 
     # ── Reason map ────────────────────────────────────────────────────────
     _rm: dict = {
-        "spam": InputReportReasonSpam(), "violence": InputReportReasonViolence(),
-        "pornography": InputReportReasonPornography(), "childabuse": InputReportReasonChildAbuse(),
-        "copyright": InputReportReasonCopyright(), "other": InputReportReasonOther(),
+        "spam": InputReportReasonSpam(),
+        "violence": InputReportReasonViolence(),
+        "pornography": InputReportReasonPornography(),
+        "childabuse": InputReportReasonChildAbuse(),
+        "copyright": InputReportReasonCopyright(),
+        "other": InputReportReasonOther(),
     }
-    for _tn, _rk in [("InputReportReasonIllegalDrugs", "drugs"),
-                      ("InputReportReasonPersonalDetails", "personal"),
-                      ("InputReportReasonFake", "fake"),
-                      ("InputReportReasonGeoIrrelevant", "geo")]:
+    for _tn, _rk in [
+        ("InputReportReasonIllegalDrugs", "drugs"),
+        ("InputReportReasonPersonalDetails", "personal"),
+        ("InputReportReasonFake", "fake"),
+        ("InputReportReasonGeoIrrelevant", "geo"),
+    ]:
         try:
             import telethon.tl.types as _tlt
+
             _rm[_rk] = getattr(_tlt, _tn)()
         except Exception:
             pass
 
     _escalation: dict[str, list[str]] = {
         "childabuse": ["pornography", "violence", "drugs", "spam", "other"],
-        "csam":       ["pornography", "violence", "drugs", "spam", "other"],
-        "drugs":      ["childabuse", "violence", "spam", "other"],
-        "violence":   ["childabuse", "spam", "drugs", "fake", "other"],
-        "terrorism":  ["childabuse", "violence", "spam", "drugs", "other"],
+        "csam": ["pornography", "violence", "drugs", "spam", "other"],
+        "drugs": ["childabuse", "violence", "spam", "other"],
+        "violence": ["childabuse", "spam", "drugs", "fake", "other"],
+        "terrorism": ["childabuse", "violence", "spam", "drugs", "other"],
         "pornography": ["childabuse", "spam", "other", "violence"],
-        "escort":     ["pornography", "childabuse", "spam", "other"],
-        "spam":       ["other", "violence", "personal", "fake"],
-        "other":      ["spam", "violence", "pornography", "drugs"],
-        "copyright":  ["spam", "other"],
-        "fraud":      ["spam", "other", "fake", "violence"],
-        "weapons":    ["violence", "spam", "other"],
-        "darknet":    ["spam", "other", "drugs"],
+        "escort": ["pornography", "childabuse", "spam", "other"],
+        "spam": ["other", "violence", "personal", "fake"],
+        "other": ["spam", "violence", "pornography", "drugs"],
+        "copyright": ["spam", "other"],
+        "fraud": ["spam", "other", "fake", "violence"],
+        "weapons": ["violence", "spam", "other"],
+        "darknet": ["spam", "other", "drugs"],
     }
     # Несколько ботов-получателей доказательств — по типу нарушения.
     # Пересылка в несколько независимых инстанций усиливает сигнал.
     _fwd_bots_multi: dict[str, list[str]] = {
         "childabuse": ["stopCA", "notoscam"],
-        "csam":       ["stopCA", "notoscam"],
-        "drugs":      ["stopCA", "notoscam"],
-        "violence":   ["notoscam", "stopCA"],
-        "fraud":      ["notoscam"],
-        "escort":     ["stopCA", "notoscam"],
-        "spam":       ["notoscam"],
+        "csam": ["stopCA", "notoscam"],
+        "drugs": ["stopCA", "notoscam"],
+        "violence": ["notoscam", "stopCA"],
+        "fraud": ["notoscam"],
+        "escort": ["stopCA", "notoscam"],
+        "spam": ["notoscam"],
         "pornography": ["notoscam", "stopCA"],
-        "other":      ["notoscam"],
+        "other": ["notoscam"],
     }
 
     tg_reason = _rm.get(reason, InputReportReasonOther())
-    all_reasons: list = [tg_reason] + [_rm[k] for k in _escalation.get(reason, []) if k in _rm]
+    all_reasons: list = [tg_reason] + [
+        _rm[k] for k in _escalation.get(reason, []) if k in _rm
+    ]
     _raw_pool: list[str] = msg_messages or ([message] if message else [])
-    msg_pool: list[str] = [t for t in _raw_pool if t.strip()] or ["Report: inappropriate content"]
+    msg_pool: list[str] = [t for t in _raw_pool if t.strip()] or [
+        "Report: inappropriate content"
+    ]
     peer = peer_username.lstrip("@")
     acc_id = (_acc or {}).get("id", "?")
 
@@ -2268,7 +2734,7 @@ async def report_peer_deep_v2(  # noqa: C901
             R["rate_limited"] = True
 
     def _flood(err: str, default: float = 30.0) -> float:
-        m = _re.search(r'(\d+)', err)
+        m = _re.search(r"(\d+)", err)
         return min(120.0, float(m.group(1))) if m else default
 
     async def _timed(coro, timeout: float = 15.0):
@@ -2277,14 +2743,64 @@ async def report_peer_deep_v2(  # noqa: C901
     def _select_report_option(options: list) -> bytes | None:
         """Pick best-matching option by reason. Returns bytes option value or None."""
         hints = {
-            "spam": ("spam", "спам", "unwanted", "advertising", "реклам", "unsolicited"),
-            "violence": ("violence", "violent", "насил", "жест", "жестокост", "harm", "abuse", "hurt"),
-            "pornography": ("porn", "sexual", "adult", "порно", "сексу", "18+", "explicit", "nudity"),
-            "childabuse": ("child", "minor", "children", "дет", "несовершен", "csam", "underage", "abuse"),
+            "spam": (
+                "spam",
+                "спам",
+                "unwanted",
+                "advertising",
+                "реклам",
+                "unsolicited",
+            ),
+            "violence": (
+                "violence",
+                "violent",
+                "насил",
+                "жест",
+                "жестокост",
+                "harm",
+                "abuse",
+                "hurt",
+            ),
+            "pornography": (
+                "porn",
+                "sexual",
+                "adult",
+                "порно",
+                "сексу",
+                "18+",
+                "explicit",
+                "nudity",
+            ),
+            "childabuse": (
+                "child",
+                "minor",
+                "children",
+                "дет",
+                "несовершен",
+                "csam",
+                "underage",
+                "abuse",
+            ),
             "copyright": ("copyright", "автор", "dmca", "intellectual", "авторск"),
-            "drugs": ("drug", "нарко", "substance", "наркотик", "нарк", "illegal substance", "narcotic"),
+            "drugs": (
+                "drug",
+                "нарко",
+                "substance",
+                "наркотик",
+                "нарк",
+                "illegal substance",
+                "narcotic",
+            ),
             "personal": ("personal", "private", "личн", "privacy", "данн"),
-            "fake": ("fake", "scam", "fraud", "фейк", "мошен", "impersonat", "phishing"),
+            "fake": (
+                "fake",
+                "scam",
+                "fraud",
+                "фейк",
+                "мошен",
+                "impersonat",
+                "phishing",
+            ),
             "other": ("other", "другое", "else", "иное", "прочее"),
             "weapons": ("weapon", "оружи", "arms", "firearm", "explosive"),
             "terrorism": ("terror", "extremi", "террор", "экстрем", "incit"),
@@ -2292,7 +2808,7 @@ async def report_peer_deep_v2(  # noqa: C901
             "escort": ("escort", "prostit", "услуг", "сексуальн"),
             "geo": ("geo", "irrelevant", "geography", "геогр", "not relevant"),
         }.get(reason, ())
-        opt_texts = [f"'{(getattr(o,'text','') or '')}'" for o in options]
+        opt_texts = [f"'{(getattr(o, 'text', '') or '')}'" for o in options]
         log.debug("rpv2 option_select reason=%s available=%s", reason, opt_texts)
         for opt in options:
             text = (getattr(opt, "text", "") or "").lower()
@@ -2308,19 +2824,28 @@ async def report_peer_deep_v2(  # noqa: C901
         log.warning("rpv2 option_select: no option bytes in %s", opt_texts)
         return None
 
-    async def _report_message_ids(peer_obj, msg_ids: list[int], comment: str, stage: str) -> bool:
+    async def _report_message_ids(
+        peer_obj, msg_ids: list[int], comment: str, stage: str
+    ) -> bool:
         """BFS через все доступные опции жалобы. Пробует ВСЕ пути до ReportResultReported.
         В отличие от линейного перебора — не сдаётся при первом несовпадении.
         """
+
         async def _traverse(opt_bytes: bytes, depth: int) -> bool:
             if depth > 5:
                 return False
             try:
-                result = await _timed(client(MsgReportRequest(
-                    peer=peer_obj, id=msg_ids,
-                    option=opt_bytes,
-                    message=comment if depth > 0 else "",
-                )), 20.0)
+                result = await _timed(
+                    client(
+                        MsgReportRequest(
+                            peer=peer_obj,
+                            id=msg_ids,
+                            option=opt_bytes,
+                            message=comment if depth > 0 else "",
+                        )
+                    ),
+                    20.0,
+                )
             except Exception as e:
                 err = str(e)
                 _record_error(stage, e)
@@ -2331,10 +2856,17 @@ async def report_peer_deep_v2(  # noqa: C901
                 return True
             if isinstance(result, ReportResultAddComment):
                 try:
-                    final = await _timed(client(MsgReportRequest(
-                        peer=peer_obj, id=msg_ids,
-                        option=result.option, message=comment,
-                    )), 15.0)
+                    final = await _timed(
+                        client(
+                            MsgReportRequest(
+                                peer=peer_obj,
+                                id=msg_ids,
+                                option=result.option,
+                                message=comment,
+                            )
+                        ),
+                        15.0,
+                    )
                     return isinstance(final, ReportResultReported)
                 except Exception as e:
                     _record_error(stage, e)
@@ -2355,6 +2887,7 @@ async def report_peer_deep_v2(  # noqa: C901
                     if await _traverse(opt_val, depth + 1):
                         return True
             return False
+
         return await _traverse(b"", 0)
 
     client = _make_client(session_string, _acc)
@@ -2368,7 +2901,10 @@ async def report_peer_deep_v2(  # noqa: C901
             _invite_hash = peer.lstrip("+")
         try:
             if _invite_hash:
-                from telethon.tl.functions.messages import ImportChatInviteRequest as _ICIR
+                from telethon.tl.functions.messages import (
+                    ImportChatInviteRequest as _ICIR,
+                )
+
                 try:
                     _inv_result = await _timed(client(_ICIR(hash=_invite_hash)), 20.0)
                     entity = _inv_result.chats[0]
@@ -2385,7 +2921,13 @@ async def report_peer_deep_v2(  # noqa: C901
             return R
 
         is_channel = isinstance(entity, Channel)
-        log.info("rpv2 start acc=%s target=%s is_channel=%s wave=%d", acc_id, peer, is_channel, wave_num)
+        log.info(
+            "rpv2 start acc=%s target=%s is_channel=%s wave=%d",
+            acc_id,
+            peer,
+            is_channel,
+            wave_num,
+        )
 
         # ── A. Pre-fetch history (АНОНИМНО, до вступления) ──────────────
         # Публичные каналы читаемы без вступления. Получаем историю ДО join-а,
@@ -2394,24 +2936,40 @@ async def report_peer_deep_v2(  # noqa: C901
         if is_channel:
             try:
                 from telethon.tl.functions.messages import GetHistoryRequest as _GHR_PRE
-                _pre_hist = await _timed(client(_GHR_PRE(
-                    peer=entity,
-                    offset_id=0, offset_date=0, add_offset=0,
-                    limit=max_msg_reports, max_id=0, min_id=0, hash=0,
-                )), 20.0)
+
+                _pre_hist = await _timed(
+                    client(
+                        _GHR_PRE(
+                            peer=entity,
+                            offset_id=0,
+                            offset_date=0,
+                            add_offset=0,
+                            limit=max_msg_reports,
+                            max_id=0,
+                            min_id=0,
+                            hash=0,
+                        )
+                    ),
+                    20.0,
+                )
                 _prefetch_msgs = [
-                    m for m in getattr(_pre_hist, "messages", [])
+                    m
+                    for m in getattr(_pre_hist, "messages", [])
                     if m and m.id and not getattr(m, "action", None)
                 ]
                 if _prefetch_msgs:
-                    log.info("rpv2[2.5] anon_prefetch=%d acc=%s target=%s",
-                             len(_prefetch_msgs), acc_id, peer)
+                    log.info(
+                        "rpv2[2.5] anon_prefetch=%d acc=%s target=%s",
+                        len(_prefetch_msgs),
+                        acc_id,
+                        peer,
+                    )
             except Exception as _pre_e:
                 log.debug("rpv2[2.5] skipped acc=%s: %s", acc_id, str(_pre_e)[:60])
 
         # ── 3. Join channel — ОБЯЗАТЕЛЬНО до message reporting ────────
         if join_first and is_channel and not R["joined"]:
-            _need_refresh = True   # нужен ли дополнительный entity-refresh
+            _need_refresh = True  # нужен ли дополнительный entity-refresh
             try:
                 await asyncio.sleep(random.uniform(0.3, 0.8))
                 _join_resp = await _timed(client(JoinChannelRequest(entity)))
@@ -2424,26 +2982,40 @@ async def report_peer_deep_v2(  # noqa: C901
                     # Ищем наш канал по ID — в chats[1] может быть linked group
                     _matched = next(
                         (c for c in _fresh if getattr(c, "id", None) == entity.id),
-                        _fresh[0]
+                        _fresh[0],
                     )
                     entity = _matched
                     _need_refresh = False
-                    log.info("rpv2[3] entity from join_resp acc=%s ah=%s",
-                             acc_id, getattr(entity, "access_hash", "?"))
-                await asyncio.sleep(random.uniform(3.0, 7.0) if wave_num == 0 else random.uniform(1.0, 2.5))
+                    log.info(
+                        "rpv2[3] entity from join_resp acc=%s ah=%s",
+                        acc_id,
+                        getattr(entity, "access_hash", "?"),
+                    )
+                await asyncio.sleep(
+                    random.uniform(3.0, 7.0)
+                    if wave_num == 0
+                    else random.uniform(1.0, 2.5)
+                )
             except Exception as e:
                 err = str(e)
                 if "ALREADY_PARTICIPANT" in err.upper() or "already" in err.lower():
                     R["joined"] = True
-                    log.info("rpv2[3] already_participant acc=%s target=%s", acc_id, peer)
+                    log.info(
+                        "rpv2[3] already_participant acc=%s target=%s", acc_id, peer
+                    )
                 else:
-                    log.warning("rpv2[3/join] acc=%s target=%s: %s", acc_id, peer, err[:100])
+                    log.warning(
+                        "rpv2[3/join] acc=%s target=%s: %s", acc_id, peer, err[:100]
+                    )
             # FALLBACK refresh: когда join не дал свежий entity (join_resp.chats пустой,
             # ALREADY_PARTICIPANT, или join упал).
             # Используем get_input_entity — берёт access_hash из сессии (надёжнее для членов).
             if _need_refresh:
                 try:
-                    from telethon.tl.functions.channels import GetChannelsRequest as _GCR
+                    from telethon.tl.functions.channels import (
+                        GetChannelsRequest as _GCR,
+                    )
+
                     # get_input_entity для канала в котором аккаунт уже состоит
                     # возвращает InputChannel из session cache с правильным access_hash
                     _ie = None
@@ -2452,22 +3024,35 @@ async def report_peer_deep_v2(  # noqa: C901
                     except Exception as _gie:
                         log.warning("rpv2[3/gie] acc=%s: %s", acc_id, str(_gie)[:60])
                         from telethon.tl.types import InputChannel as _IC
+
                         _ie = _IC(entity.id, entity.access_hash)
                     _gcr = await _timed(client(_GCR([_ie])), 10.0)
                     if _gcr and _gcr.chats:
                         entity = _gcr.chats[0]
-                        log.info("rpv2[3/gcr] entity refreshed acc=%s ah=%s",
-                                 acc_id, getattr(entity, "access_hash", "?"))
+                        log.info(
+                            "rpv2[3/gcr] entity refreshed acc=%s ah=%s",
+                            acc_id,
+                            getattr(entity, "access_hash", "?"),
+                        )
                     else:
                         raise ValueError("gcr empty")
                 except Exception as _gcr_e:
-                    log.warning("rpv2[3/gcr] acc=%s: %s — fallback get_entity", acc_id, str(_gcr_e)[:80])
+                    log.warning(
+                        "rpv2[3/gcr] acc=%s: %s — fallback get_entity",
+                        acc_id,
+                        str(_gcr_e)[:80],
+                    )
                     try:
                         entity = await _timed(client.get_entity(peer), 8.0)
-                        log.info("rpv2[3/get_entity] acc=%s ah=%s",
-                                 acc_id, getattr(entity, "access_hash", "?"))
+                        log.info(
+                            "rpv2[3/get_entity] acc=%s ah=%s",
+                            acc_id,
+                            getattr(entity, "access_hash", "?"),
+                        )
                     except Exception as e2:
-                        log.warning("rpv2[3/get_entity] acc=%s: %s", acc_id, str(e2)[:80])
+                        log.warning(
+                            "rpv2[3/get_entity] acc=%s: %s", acc_id, str(e2)[:80]
+                        )
 
         # ── 4. Full channel info ───────────────────────────────────────
         full_chat = None
@@ -2480,11 +3065,14 @@ async def report_peer_deep_v2(  # noqa: C901
                 if _fc_chats:
                     _fc_match = next(
                         (c for c in _fc_chats if getattr(c, "id", None) == entity.id),
-                        _fc_chats[0]
+                        _fc_chats[0],
                     )
                     entity = _fc_match
-                    log.info("rpv2[4] entity from GetFullChannel acc=%s ah=%s",
-                             acc_id, getattr(entity, "access_hash", "?"))
+                    log.info(
+                        "rpv2[4] entity from GetFullChannel acc=%s ah=%s",
+                        acc_id,
+                        getattr(entity, "access_hash", "?"),
+                    )
             except Exception as e:
                 log.warning("rpv2[4/full] acc=%s: %s", acc_id, str(e)[:80])
 
@@ -2497,39 +3085,83 @@ async def report_peer_deep_v2(  # noqa: C901
         if is_channel:
             from telethon.tl.functions.messages import GetHistoryRequest as _GHR
             from telethon.tl.types import InputPeerChannel as _IPC6
+
             _ah6 = getattr(entity, "access_hash", 0)
             _ipeer6 = _IPC6(channel_id=entity.id, access_hash=_ah6)
-            log.info("rpv2[5/fetch] InputPeerChannel id=%s ah=%s joined=%s acc=%s",
-                     entity.id, _ah6, R["joined"], acc_id)
+            log.info(
+                "rpv2[5/fetch] InputPeerChannel id=%s ah=%s joined=%s acc=%s",
+                entity.id,
+                _ah6,
+                R["joined"],
+                acc_id,
+            )
             try:
-                _hist = await _timed(client(_GHR(
-                    peer=_ipeer6,
-                    offset_id=0, offset_date=0, add_offset=0,
-                    limit=max_msg_reports, max_id=0, min_id=0, hash=0,
-                )), 25.0)
-                msgs = [m for m in getattr(_hist, "messages", [])
-                        if m and m.id and not getattr(m, "action", None)]
-                log.info("rpv2[5/GetHistory] fetched=%d target=%s acc=%s joined=%s",
-                         len(msgs), peer, acc_id, R["joined"])
+                _hist = await _timed(
+                    client(
+                        _GHR(
+                            peer=_ipeer6,
+                            offset_id=0,
+                            offset_date=0,
+                            add_offset=0,
+                            limit=max_msg_reports,
+                            max_id=0,
+                            min_id=0,
+                            hash=0,
+                        )
+                    ),
+                    25.0,
+                )
+                msgs = [
+                    m
+                    for m in getattr(_hist, "messages", [])
+                    if m and m.id and not getattr(m, "action", None)
+                ]
+                log.info(
+                    "rpv2[5/GetHistory] fetched=%d target=%s acc=%s joined=%s",
+                    len(msgs),
+                    peer,
+                    acc_id,
+                    R["joined"],
+                )
             except Exception as _gh_e:
-                log.warning("rpv2[5/GetHistory] acc=%s: %s — fallback", acc_id, str(_gh_e)[:80])
+                log.warning(
+                    "rpv2[5/GetHistory] acc=%s: %s — fallback", acc_id, str(_gh_e)[:80]
+                )
                 try:
-                    raw = await _timed(client.get_messages(_ipeer6, limit=max_msg_reports), 20.0)
-                    msgs = [m for m in (raw or []) if m and m.id and not getattr(m, "action", None)]
+                    raw = await _timed(
+                        client.get_messages(_ipeer6, limit=max_msg_reports), 20.0
+                    )
+                    msgs = [
+                        m
+                        for m in (raw or [])
+                        if m and m.id and not getattr(m, "action", None)
+                    ]
                 except Exception:
                     pass
             if not msgs:
                 try:
-                    raw2 = await _timed(client.get_messages(entity, limit=max_msg_reports), 20.0)
-                    msgs = [m for m in (raw2 or []) if m and not getattr(m, "action", None)]
+                    raw2 = await _timed(
+                        client.get_messages(entity, limit=max_msg_reports), 20.0
+                    )
+                    msgs = [
+                        m for m in (raw2 or []) if m and not getattr(m, "action", None)
+                    ]
                 except Exception:
                     pass
             if not msgs and _prefetch_msgs:
                 msgs = _prefetch_msgs
-                log.info("rpv2[5/pre_fallback] using anon pre-join msgs=%d acc=%s", len(msgs), acc_id)
+                log.info(
+                    "rpv2[5/pre_fallback] using anon pre-join msgs=%d acc=%s",
+                    len(msgs),
+                    acc_id,
+                )
             R["msgs_fetched"] = len(msgs)
             if not msgs:
-                log.warning("rpv2[5] 0 msgs target=%s acc=%s — channel may restrict history", peer, acc_id)
+                log.warning(
+                    "rpv2[5] 0 msgs target=%s acc=%s — channel may restrict history",
+                    peer,
+                    acc_id,
+                )
 
         # ── 6. BROWSE PHASE: scroll → view → react ────────────────────
         # Правильный порядок действий реального пользователя:
@@ -2542,13 +3174,18 @@ async def report_peer_deep_v2(  # noqa: C901
         if msgs and is_channel:
             _GMV = None
             try:
-                from telethon.tl.functions.messages import GetMessagesViewsRequest as _GMV
+                from telethon.tl.functions.messages import (
+                    GetMessagesViewsRequest as _GMV,
+                )
             except ImportError:
                 pass
 
             _react_pools = [
-                ["👎", "💩", "🤮"], ["👎", "🤬", "💩"],
-                ["👎", "🤮"], ["💩", "🤬"], ["👎"],
+                ["👎", "💩", "🤮"],
+                ["👎", "🤬", "💩"],
+                ["👎", "🤮"],
+                ["💩", "🤬"],
+                ["👎"],
             ]
             _rpool = _react_pools[wave_num % len(_react_pools)]
             _react_every = random.randint(2, 4)  # реагируем на каждый 2-4й пост
@@ -2562,7 +3199,9 @@ async def report_peer_deep_v2(  # noqa: C901
                 # 1. View increment — один пост, как в реальном клиенте при прокрутке
                 if _GMV is not None:
                     try:
-                        await _timed(client(_GMV(peer=entity, id=[_bm.id], increment=True)), 10.0)
+                        await _timed(
+                            client(_GMV(peer=entity, id=[_bm.id], increment=True)), 10.0
+                        )
                     except Exception as _ve:
                         if "FLOOD_WAIT" in str(_ve).upper():
                             await asyncio.sleep(_flood(str(_ve), 5))
@@ -2573,10 +3212,17 @@ async def report_peer_deep_v2(  # noqa: C901
                 # 3. Негативная реакция на каждый N-й пост (после "прочтения")
                 if negative_react and (_bi % _react_every == 0) and _react_count < 12:
                     try:
-                        await client(SendReactionRequest(
-                            peer=entity, msg_id=_bm.id,
-                            reaction=[ReactionEmoji(emoticon=_rpool[_react_count % len(_rpool)])],
-                        ))
+                        await client(
+                            SendReactionRequest(
+                                peer=entity,
+                                msg_id=_bm.id,
+                                reaction=[
+                                    ReactionEmoji(
+                                        emoticon=_rpool[_react_count % len(_rpool)]
+                                    )
+                                ],
+                            )
+                        )
                         R["reactions_sent"] += 1
                         _react_count += 1
                         await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -2584,7 +3230,9 @@ async def report_peer_deep_v2(  # noqa: C901
                         log.debug("rpv2[6/react] acc=%s: %s", acc_id, str(_re)[:60])
 
             # Сохранить 1-2 поста в "Избранное" (поведение пользователя, собирающего доказательства)
-            _save_cands = [m for m in msgs[:6] if m and not getattr(m, "service", False)][:2]
+            _save_cands = [
+                m for m in msgs[:6] if m and not getattr(m, "service", False)
+            ][:2]
             for _sv in _save_cands:
                 try:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -2592,8 +3240,13 @@ async def report_peer_deep_v2(  # noqa: C901
                 except Exception:
                     pass
 
-            log.info("rpv2[6/browse] viewed=%d reacted=%d saved=%d acc=%s",
-                     min(_max_browse, len(msgs)), R["reactions_sent"], len(_save_cands), acc_id)
+            log.info(
+                "rpv2[6/browse] viewed=%d reacted=%d saved=%d acc=%s",
+                min(_max_browse, len(msgs)),
+                R["reactions_sent"],
+                len(_save_cands),
+                acc_id,
+            )
 
         # ── 7. ReportPeer (все причины) — ПОСЛЕ просмотра контента ───
         # Только теперь пользователь "видел" канал и нажимает "Пожаловаться".
@@ -2603,10 +3256,13 @@ async def report_peer_deep_v2(  # noqa: C901
             if idx > 0:
                 await asyncio.sleep(random.betavariate(2, 5) * 2.0 + 0.5)
             try:
-                await client(ReportPeerRequest(
-                    peer=entity, reason=r_obj,
-                    message=msg_pool[idx % len(msg_pool)],
-                ))
+                await client(
+                    ReportPeerRequest(
+                        peer=entity,
+                        reason=r_obj,
+                        message=msg_pool[idx % len(msg_pool)],
+                    )
+                )
                 if idx == 0:
                     R["peer_reported"] = True
                 else:
@@ -2616,8 +3272,13 @@ async def report_peer_deep_v2(  # noqa: C901
                 if "FLOOD_WAIT" in err.upper():
                     await asyncio.sleep(_flood(err) + random.uniform(1, 3))
                     try:
-                        await client(ReportPeerRequest(peer=entity, reason=r_obj,
-                                                       message=msg_pool[idx % len(msg_pool)]))
+                        await client(
+                            ReportPeerRequest(
+                                peer=entity,
+                                reason=r_obj,
+                                message=msg_pool[idx % len(msg_pool)],
+                            )
+                        )
                         if idx == 0:
                             R["peer_reported"] = True
                         else:
@@ -2628,8 +3289,15 @@ async def report_peer_deep_v2(  # noqa: C901
                     _record_error("peer", err)
                     break
                 else:
-                    log.warning("rpv2[7/peer idx=%d] acc=%s: %s", idx, acc_id, err[:100])
-        log.info("rpv2[7] peer=%s multi=%d acc=%s", R["peer_reported"], R["multi_reason_sent"], acc_id)
+                    log.warning(
+                        "rpv2[7/peer idx=%d] acc=%s: %s", idx, acc_id, err[:100]
+                    )
+        log.info(
+            "rpv2[7] peer=%s multi=%d acc=%s",
+            R["peer_reported"],
+            R["multi_reason_sent"],
+            acc_id,
+        )
         await asyncio.sleep(random.uniform(0.8, 2.0))
 
         # ── 8. Фото профиля ───────────────────────────────────────────
@@ -2640,15 +3308,20 @@ async def report_peer_deep_v2(  # noqa: C901
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     _p = photos[0]
                     from telethon.tl.types import InputPhoto as _InputPhoto
+
                     _photo_input = _InputPhoto(
                         id=_p.id,
                         access_hash=_p.access_hash,
                         file_reference=_p.file_reference,
                     )
-                    await client(_RPP(
-                        peer=entity, photo_id=_photo_input,
-                        reason=tg_reason, message=msg_pool[0],
-                    ))
+                    await client(
+                        _RPP(
+                            peer=entity,
+                            photo_id=_photo_input,
+                            reason=tg_reason,
+                            message=msg_pool[0],
+                        )
+                    )
                     R["photo_reported"] = True
                     log.info("rpv2[8/photo] reported acc=%s", acc_id)
             except Exception as e:
@@ -2658,9 +3331,13 @@ async def report_peer_deep_v2(  # noqa: C901
         if report_pinned and is_channel:
             try:
                 from telethon.tl.types import InputPeerChannel as _IPC5
+
                 _ipeer5 = _IPC5(channel_id=entity.id, access_hash=entity.access_hash)
                 pinned = await _timed(
-                    client.get_messages(_ipeer5, filter=InputMessagesFilterPinned(), limit=25), 15.0
+                    client.get_messages(
+                        _ipeer5, filter=InputMessagesFilterPinned(), limit=25
+                    ),
+                    15.0,
                 )
                 pinned_ids = [m.id for m in pinned if m and m.id]
                 log.info("rpv2[9/pin] pinned=%d acc=%s", len(pinned_ids), acc_id)
@@ -2679,19 +3356,23 @@ async def report_peer_deep_v2(  # noqa: C901
                         elif "REPORT_TOO_MUCH" in err.upper():
                             break
                         else:
-                            log.warning("rpv2[9/pin] acc=%s pid=%d: %s", acc_id, pid, err[:80])
+                            log.warning(
+                                "rpv2[9/pin] acc=%s pid=%d: %s", acc_id, pid, err[:80]
+                            )
             except Exception as e:
                 log.warning("rpv2[9/get_pinned] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 10. Message chunk reports (MsgReport BFS) ─────────────────
         if msgs and is_channel and _ipeer6 is not None:
             msg_ids = [m.id for m in msgs if m and m.id]
-            chunks = [msg_ids[i:i + 5] for i in range(0, len(msg_ids), 5)]
+            chunks = [msg_ids[i : i + 5] for i in range(0, len(msg_ids), 5)]
             random.shuffle(chunks)
             for ci, chunk in enumerate(chunks):
                 cmsg = msg_pool[ci % len(msg_pool)]
                 try:
-                    ok = await _report_message_ids(_ipeer6, chunk, cmsg, f"msg_chunk:{ci}")
+                    ok = await _report_message_ids(
+                        _ipeer6, chunk, cmsg, f"msg_chunk:{ci}"
+                    )
                     if ok:
                         R["msg_reported"] += len(chunk)
                 except Exception as e:
@@ -2699,7 +3380,9 @@ async def report_peer_deep_v2(  # noqa: C901
                     if "FLOOD_WAIT" in err.upper():
                         await asyncio.sleep(_flood(err, 15))
                         try:
-                            ok = await _report_message_ids(_ipeer6, chunk[:2], cmsg, f"msg_retry:{ci}")
+                            ok = await _report_message_ids(
+                                _ipeer6, chunk[:2], cmsg, f"msg_retry:{ci}"
+                            )
                             if ok:
                                 R["msg_reported"] += min(2, len(chunk))
                         except Exception:
@@ -2708,7 +3391,9 @@ async def report_peer_deep_v2(  # noqa: C901
                         log.info("rpv2[10] REPORT_TOO_MUCH ci=%d, stopping", ci)
                         break
                     else:
-                        log.warning("rpv2[10/chunk ci=%d] acc=%s: %s", ci, acc_id, err[:100])
+                        log.warning(
+                            "rpv2[10/chunk ci=%d] acc=%s: %s", ci, acc_id, err[:100]
+                        )
                 await asyncio.sleep(random.betavariate(2, 5) * 2.0 + 0.5)
             log.info("rpv2[10] msg_reported=%d acc=%s", R["msg_reported"], acc_id)
 
@@ -2726,12 +3411,21 @@ async def report_peer_deep_v2(  # noqa: C901
                         pass
             if spam_ids and _spam_participant is None:
                 try:
-                    _adm_resp = await _timed(client(GetParticipantsRequest(
-                        channel=entity, filter=ChannelParticipantsAdmins(),
-                        offset=0, limit=10, hash=0,
-                    )))
+                    _adm_resp = await _timed(
+                        client(
+                            GetParticipantsRequest(
+                                channel=entity,
+                                filter=ChannelParticipantsAdmins(),
+                                offset=0,
+                                limit=10,
+                                hash=0,
+                            )
+                        )
+                    )
                     for _au in getattr(_adm_resp, "users", []):
-                        if not getattr(_au, "bot", False) and not getattr(_au, "deleted", False):
+                        if not getattr(_au, "bot", False) and not getattr(
+                            _au, "deleted", False
+                        ):
                             _spam_participant = _au
                             break
                 except Exception:
@@ -2739,7 +3433,9 @@ async def report_peer_deep_v2(  # noqa: C901
             if spam_ids and _spam_participant:
                 try:
                     await asyncio.sleep(random.uniform(0.5, 1.5))
-                    await client(_CSR(channel=entity, participant=_spam_participant, id=spam_ids))
+                    await client(
+                        _CSR(channel=entity, participant=_spam_participant, id=spam_ids)
+                    )
                     R["spam_signaled"] += len(spam_ids)
                     log.info("rpv2[11] spam_signaled=%d acc=%s", len(spam_ids), acc_id)
                 except Exception as e:
@@ -2748,27 +3444,41 @@ async def report_peer_deep_v2(  # noqa: C901
         # ── 12. Report admins ─────────────────────────────────────────
         if report_admins and is_channel:
             try:
-                adm = await _timed(client(GetParticipantsRequest(
-                    channel=entity, filter=ChannelParticipantsAdmins(),
-                    offset=0, limit=50, hash=0,
-                )))
+                adm = await _timed(
+                    client(
+                        GetParticipantsRequest(
+                            channel=entity,
+                            filter=ChannelParticipantsAdmins(),
+                            offset=0,
+                            limit=50,
+                            hash=0,
+                        )
+                    )
+                )
                 admins = list(getattr(adm, "users", []))
                 random.shuffle(admins)
-                log.info("rpv2[12] admins=%d target=%s acc=%s", len(admins), peer, acc_id)
+                log.info(
+                    "rpv2[12] admins=%d target=%s acc=%s", len(admins), peer, acc_id
+                )
                 for ai, usr in enumerate(admins):
                     try:
                         await asyncio.sleep(random.betavariate(2, 4) * 1.5 + 0.5)
-                        await client(ReportPeerRequest(
-                            peer=usr, reason=all_reasons[ai % len(all_reasons)],
-                            message=msg_pool[ai % len(msg_pool)],
-                        ))
+                        await client(
+                            ReportPeerRequest(
+                                peer=usr,
+                                reason=all_reasons[ai % len(all_reasons)],
+                                message=msg_pool[ai % len(msg_pool)],
+                            )
+                        )
                         R["admins_reported"] += 1
                     except Exception as e:
                         err = str(e)
                         if "FLOOD_WAIT" in err.upper():
                             await asyncio.sleep(_flood(err, 10))
                         else:
-                            log.warning("rpv2[12/admin ai=%d] acc=%s: %s", ai, acc_id, err[:80])
+                            log.warning(
+                                "rpv2[12/admin ai=%d] acc=%s: %s", ai, acc_id, err[:80]
+                            )
             except Exception as e:
                 log.warning("rpv2[12/get_admins] acc=%s: %s", acc_id, str(e)[:80])
 
@@ -2781,13 +3491,21 @@ async def report_peer_deep_v2(  # noqa: C901
                     for li in range(min(4, len(all_reasons))):
                         try:
                             await asyncio.sleep(random.betavariate(2, 5) * 1.5 + 0.5)
-                            await client(ReportPeerRequest(
-                                peer=lent, reason=all_reasons[li],
-                                message=msg_pool[li % len(msg_pool)],
-                            ))
+                            await client(
+                                ReportPeerRequest(
+                                    peer=lent,
+                                    reason=all_reasons[li],
+                                    message=msg_pool[li % len(msg_pool)],
+                                )
+                            )
                             R["linked_group_reported"] = True
                         except Exception as e:
-                            log.warning("rpv2[13/linked li=%d] acc=%s: %s", li, acc_id, str(e)[:80])
+                            log.warning(
+                                "rpv2[13/linked li=%d] acc=%s: %s",
+                                li,
+                                acc_id,
+                                str(e)[:80],
+                            )
                 except Exception as e:
                     log.warning("rpv2[13/get_linked] acc=%s: %s", acc_id, str(e)[:80])
 
@@ -2795,23 +3513,30 @@ async def report_peer_deep_v2(  # noqa: C901
         # ── 14. Linked bots (report) ──────────────────────────────────
         _service_bots = {"stopca", "notoscam", "spambot", "spam_bot", "officialscambot"}
         if report_linked_bots and is_channel:
-            bot_re = _re.compile(r'@([A-Za-z]\w{4,31}[Bb]ot)\b')
+            bot_re = _re.compile(r"@([A-Za-z]\w{4,31}[Bb]ot)\b")
             scan = (getattr(full_chat, "about", "") or "") if full_chat else ""
             for m in msgs[:10]:
                 if m and m.text:
                     scan += " " + m.text
-            _bot_candidates = [b for b in set(bot_re.findall(scan)) if b.lower() not in _service_bots]
+            _bot_candidates = [
+                b for b in set(bot_re.findall(scan)) if b.lower() not in _service_bots
+            ]
             for bi, bname in enumerate(_bot_candidates[:6]):
                 try:
                     bent = await _timed(client.get_entity(bname), 8.0)
-                    await client(ReportPeerRequest(
-                        peer=bent, reason=all_reasons[bi % len(all_reasons)],
-                        message=msg_pool[bi % len(msg_pool)],
-                    ))
+                    await client(
+                        ReportPeerRequest(
+                            peer=bent,
+                            reason=all_reasons[bi % len(all_reasons)],
+                            message=msg_pool[bi % len(msg_pool)],
+                        )
+                    )
                     R["bots_reported"] += 1
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                 except Exception as e:
-                    log.warning("rpv2[14/bot %s] acc=%s: %s", bname, acc_id, str(e)[:80])
+                    log.warning(
+                        "rpv2[14/bot %s] acc=%s: %s", bname, acc_id, str(e)[:80]
+                    )
 
         # ── 15. Forward evidence → anti-abuse bots ────────────────────
         if forward_to_bot and msgs:
@@ -2831,10 +3556,17 @@ async def report_peer_deep_v2(  # noqa: C901
                             R["forwarded"] += 1
                             await asyncio.sleep(random.uniform(0.8, 1.8))
                         except Exception as e:
-                            log.warning("rpv2[15/fwd %s] acc=%s: %s", bot_uname, acc_id, str(e)[:60])
+                            log.warning(
+                                "rpv2[15/fwd %s] acc=%s: %s",
+                                bot_uname,
+                                acc_id,
+                                str(e)[:60],
+                            )
                     await asyncio.sleep(random.uniform(1.0, 2.0))
                 except Exception as e:
-                    log.warning("rpv2[15/fbot %s] acc=%s: %s", bot_uname, acc_id, str(e)[:80])
+                    log.warning(
+                        "rpv2[15/fbot %s] acc=%s: %s", bot_uname, acc_id, str(e)[:80]
+                    )
 
         # ── 16. ReadHistory + Mute + Leave + Block ────────────────────
         # ReadHistory — финальный сигнал "дочитал всё до конца".
@@ -2842,6 +3574,7 @@ async def report_peer_deep_v2(  # noqa: C901
         if R["joined"] and is_channel and msgs:
             try:
                 from telethon.tl.functions.channels import ReadHistoryRequest as _RHR
+
                 _last_id = max((m.id for m in msgs if m and m.id), default=0)
                 if _last_id:
                     await _timed(client(_RHR(channel=entity, max_id=_last_id)), 10.0)
@@ -2850,10 +3583,13 @@ async def report_peer_deep_v2(  # noqa: C901
         try:
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
-            await client(UpdateNotifySettingsRequest(
-                peer=InputNotifyPeer(peer=entity),
-                settings=InputPeerNotifySettings(mute_until=2_147_483_647),
-            ))
+
+            await client(
+                UpdateNotifySettingsRequest(
+                    peer=InputNotifyPeer(peer=entity),
+                    settings=InputPeerNotifySettings(mute_until=2_147_483_647),
+                )
+            )
         except Exception:
             pass
         if R["joined"]:
@@ -2872,10 +3608,16 @@ async def report_peer_deep_v2(  # noqa: C901
         log.info(
             "rpv2 DONE acc=%s target=%s | peer=%s msgs=%d pinned=%d admins=%d "
             "views+reacted=%d/%d spam=%d joined=%s",
-            acc_id, peer, R["peer_reported"], R["msg_reported"],
-            R["pinned_reported"], R["admins_reported"],
-            R["reactions_sent"], R["msgs_fetched"],
-            R["spam_signaled"], R["joined"],
+            acc_id,
+            peer,
+            R["peer_reported"],
+            R["msg_reported"],
+            R["pinned_reported"],
+            R["admins_reported"],
+            R["reactions_sent"],
+            R["msgs_fetched"],
+            R["spam_signaled"],
+            R["joined"],
         )
 
     except asyncio.CancelledError:
@@ -2891,7 +3633,6 @@ async def report_peer_deep_v2(  # noqa: C901
     return R
 
 
-
 async def strike_map_target(
     session_string: str,
     peer_username: str,
@@ -2905,15 +3646,29 @@ async def strike_map_target(
       mentioned_usernames[], bot_usernames[], error
     """
     import re as _re
-    from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantsRequest
-    from telethon.tl.functions.messages import GetPinnedMessagesRequest
-    from telethon.tl.types import Channel, ChannelParticipantsAdmins, InputMessagesFilterPinned
+    from telethon.tl.functions.channels import (
+        GetFullChannelRequest,
+        GetParticipantsRequest,
+    )
+    from telethon.tl.types import (
+        Channel,
+        ChannelParticipantsAdmins,
+        InputMessagesFilterPinned,
+    )
 
     intel: dict = {
-        "channel_id": 0, "title": "", "description": "", "members": 0,
-        "access_hash": 0, "admin_ids": [], "linked_group_id": None,
-        "pinned_msg_ids": [], "latest_msg_ids": [],
-        "mentioned_usernames": [], "bot_usernames": [], "error": None,
+        "channel_id": 0,
+        "title": "",
+        "description": "",
+        "members": 0,
+        "access_hash": 0,
+        "admin_ids": [],
+        "linked_group_id": None,
+        "pinned_msg_ids": [],
+        "latest_msg_ids": [],
+        "mentioned_usernames": [],
+        "bot_usernames": [],
+        "error": None,
     }
 
     client = _make_client(session_string, _acc)
@@ -2924,21 +3679,25 @@ async def strike_map_target(
             intel["error"] = "not_a_channel"
             return intel
 
-        intel["channel_id"]  = entity.id
-        intel["title"]       = getattr(entity, "title", "") or ""
+        intel["channel_id"] = entity.id
+        intel["title"] = getattr(entity, "title", "") or ""
         intel["access_hash"] = getattr(entity, "access_hash", 0) or 0
-        intel["members"]     = getattr(entity, "participants_count", 0) or 0
+        intel["members"] = getattr(entity, "participants_count", 0) or 0
 
         # Полная инфо о канале (описание, linked_chat_id) + refresh entity
         try:
             full = await client(GetFullChannelRequest(entity))
             fc = full.full_chat
-            intel["description"]    = (getattr(fc, "about", "") or "")[:500]
+            intel["description"] = (getattr(fc, "about", "") or "")[:500]
             intel["linked_group_id"] = getattr(fc, "linked_chat_id", None)
             # Refresh entity из ответа (более актуальный access_hash)
             _fc = next(
-                (c for c in getattr(full, "chats", []) if getattr(c, "id", None) == entity.id),
-                None
+                (
+                    c
+                    for c in getattr(full, "chats", [])
+                    if getattr(c, "id", None) == entity.id
+                ),
+                None,
             )
             if _fc:
                 entity = _fc
@@ -2947,17 +3706,23 @@ async def strike_map_target(
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Все администраторы (до 200)
         try:
-            adm = await client(GetParticipantsRequest(
-                channel=entity,
-                filter=ChannelParticipantsAdmins(),
-                offset=0, limit=200, hash=0,
-            ))
+            adm = await client(
+                GetParticipantsRequest(
+                    channel=entity,
+                    filter=ChannelParticipantsAdmins(),
+                    offset=0,
+                    limit=200,
+                    hash=0,
+                )
+            )
             intel["admin_ids"] = [u.id for u in getattr(adm, "users", [])]
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
         # Закреплённые сообщения
         try:
-            pinned = await client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=20)
+            pinned = await client.get_messages(
+                entity, filter=InputMessagesFilterPinned(), limit=20
+            )
             intel["pinned_msg_ids"] = [m.id for m in pinned if m and m.id]
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
@@ -2976,17 +3741,21 @@ async def strike_map_target(
                     scan_text += " " + m.text
         except Exception:
             log_exc_swallow(log, "Сбой в strike_map_target")
-        _bot_re    = _re.compile(r'@([A-Za-z]\w{3,31}[Bb]ot)\b')
-        _chan_re   = _re.compile(r't\.me/([A-Za-z][A-Za-z0-9_]{3,31})\b')
-        _at_re    = _re.compile(r'@([A-Za-z][A-Za-z0-9_]{3,31})\b')
-        intel["bot_usernames"]        = list(set(_bot_re.findall(scan_text)))[:8]
-        intel["mentioned_usernames"]  = list({
-            m for m in _at_re.findall(scan_text)
-            if m.lower() not in {"stopca", "notoscam", "spambot"}
-        })[:10]
+        _bot_re = _re.compile(r"@([A-Za-z]\w{3,31}[Bb]ot)\b")
+        _chan_re = _re.compile(r"t\.me/([A-Za-z][A-Za-z0-9_]{3,31})\b")
+        _at_re = _re.compile(r"@([A-Za-z][A-Za-z0-9_]{3,31})\b")
+        intel["bot_usernames"] = list(set(_bot_re.findall(scan_text)))[:8]
+        intel["mentioned_usernames"] = list(
+            {
+                m
+                for m in _at_re.findall(scan_text)
+                if m.lower() not in {"stopca", "notoscam", "spambot"}
+            }
+        )[:10]
         # t.me/... ссылки
         intel["mentioned_usernames"] += [
-            u for u in _chan_re.findall(scan_text)
+            u
+            for u in _chan_re.findall(scan_text)
             if u not in intel["mentioned_usernames"]
         ][:5]
 
@@ -3000,9 +3769,11 @@ async def strike_map_target(
             log_exc_swallow(log, "Сбой в strike_map_target")
     return intel
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ACCOUNT PROFILE
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 async def update_profile(
     session_string: str,
@@ -3013,6 +3784,7 @@ async def update_profile(
 ) -> bool:
     """Update the connected account's profile. Pass None to leave a field unchanged."""
     from telethon.tl.functions.account import UpdateProfileRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -3030,6 +3802,7 @@ async def update_profile(
         return True
     except Exception as e:
         from telethon.errors import FloodWaitError
+
         if isinstance(e, FloodWaitError):
             raise
         log.exception("update_profile error: %s", e)
@@ -3040,10 +3813,13 @@ async def update_profile(
         except Exception:
             log_exc_swallow(log, "Сбой в update_profile")
 
-async def update_account_username(session_string: str, username: str,
-                                  _acc: dict | None = None) -> str:
+
+async def update_account_username(
+    session_string: str, username: str, _acc: dict | None = None
+) -> str:
     """Update account username. Returns '' on success, error string on failure."""
     from telethon.tl.functions.account import UpdateUsernameRequest
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -3051,6 +3827,7 @@ async def update_account_username(session_string: str, username: str,
         return ""
     except Exception as e:
         from telethon.errors import FloodWaitError
+
         if isinstance(e, FloodWaitError):
             return f"FloodWait {e.seconds}с — подождите перед изменением username"
         log.exception("update_account_username error: %s", e)
@@ -3060,11 +3837,14 @@ async def update_account_username(session_string: str, username: str,
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в update_account_username")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # BOTFATHER BOT CREATION
 # ══════════════════════════════════════════════════════════════════════════════
 
 _BOTFATHER_USERNAME = "BotFather"
+
 
 async def create_bot_via_botfather(
     session_string: str,
@@ -3078,6 +3858,7 @@ async def create_bot_via_botfather(
     or 'error' key with message on failure.
     """
     import re
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
@@ -3107,7 +3888,12 @@ async def create_bot_via_botfather(
                 # Rate limited — wait exactly as BotFather says + random buffer
                 jitter = random.randint(10, 30)
                 total_wait = wait + jitter
-                log.info("BotFather rate limit: waiting %ds (asked %ds + %ds buffer)", total_wait, wait, jitter)
+                log.info(
+                    "BotFather rate limit: waiting %ds (asked %ds + %ds buffer)",
+                    total_wait,
+                    wait,
+                    jitter,
+                )
                 if attempt == max_retries:
                     return resp  # Return the error response to caller
                 await asyncio.sleep(total_wait)
@@ -3119,16 +3905,26 @@ async def create_bot_via_botfather(
         # Check for rate limit in initial response
         wait = _parse_flood_wait(resp)
         if wait is not None:
-            return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
+            return {
+                "error": f"BotFather: слишком много попыток, подождите {wait}с",
+                "flood_wait": wait,
+            }
 
-        if "name" not in resp.lower() and "alright" not in resp.lower() and "good name" not in resp.lower():
+        if (
+            "name" not in resp.lower()
+            and "alright" not in resp.lower()
+            and "good name" not in resp.lower()
+        ):
             # Previous incomplete flow — cancel it, then retry once
             await _bf_send("/cancel")
             await asyncio.sleep(random.uniform(3.0, 6.0))
             resp = await _bf_send_with_retry("/newbot")
             wait = _parse_flood_wait(resp)
             if wait is not None:
-                return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
+                return {
+                    "error": f"BotFather: слишком много попыток, подождите {wait}с",
+                    "flood_wait": wait,
+                }
 
         if "name" not in resp.lower() and "alright" not in resp.lower():
             return {"error": f"Неожиданный ответ BotFather: {resp[:200]}"}
@@ -3138,7 +3934,10 @@ async def create_bot_via_botfather(
         if "username" not in resp.lower():
             wait = _parse_flood_wait(resp)
             if wait is not None:
-                return {"error": f"BotFather rate limit после имени: {wait}с", "flood_wait": wait}
+                return {
+                    "error": f"BotFather rate limit после имени: {wait}с",
+                    "flood_wait": wait,
+                }
             return {"error": f"Неожиданный ответ после имени бота: {resp[:200]}"}
 
         # Step 3: send username
@@ -3152,8 +3951,13 @@ async def create_bot_via_botfather(
         if not token_match:
             wait = _parse_flood_wait(resp)
             if wait is not None:
-                return {"error": f"BotFather rate limit при создании: {wait}с", "flood_wait": wait}
-            if "username" in resp.lower() and ("already" in resp.lower() or "taken" in resp.lower()):
+                return {
+                    "error": f"BotFather rate limit при создании: {wait}с",
+                    "flood_wait": wait,
+                }
+            if "username" in resp.lower() and (
+                "already" in resp.lower() or "taken" in resp.lower()
+            ):
                 return {"error": f"Username @{uname} уже занят — выберите другой"}
             return {"error": f"Токен не найден в ответе BotFather: {resp[:300]}"}
 
@@ -3165,8 +3969,12 @@ async def create_bot_via_botfather(
         }
     except Exception as e:
         from telethon.errors import FloodWaitError
+
         if isinstance(e, FloodWaitError):
-            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
+            return {
+                "error": f"FloodWait {e.seconds}с — Telegram ограничил создание",
+                "flood_wait": e.seconds,
+            }
         log.exception("create_bot_via_botfather error: %s", e)
         return {"error": str(e)[:200]}
     finally:

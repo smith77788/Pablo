@@ -32,20 +32,35 @@ log = logging.getLogger(__name__)
 
 _REACTIONS = ["👍", "❤️", "🔥", "🎉", "👏", "😍", "💯", "🤩", "😂", "🏆"]
 _COMMENT_TEXTS = [
-    "👍", "Спасибо!", "Интересно", "Согласен",
-    "Хорошая тема", "Полезная информация", "Да, именно",
-    "Отличный материал!", "Актуально", "👏",
-    "Интересная точка зрения", "Благодарю за пост",
-    "Продолжайте", "Поддерживаю", "Спасибо за контент",
-    "Очень полезно", "🔥", "Хороший контент", "Важная тема",
+    "👍",
+    "Спасибо!",
+    "Интересно",
+    "Согласен",
+    "Хорошая тема",
+    "Полезная информация",
+    "Да, именно",
+    "Отличный материал!",
+    "Актуально",
+    "👏",
+    "Интересная точка зрения",
+    "Благодарю за пост",
+    "Продолжайте",
+    "Поддерживаю",
+    "Спасибо за контент",
+    "Очень полезно",
+    "🔥",
+    "Хороший контент",
+    "Важная тема",
 ]
 
-_FATAL_ERRORS = frozenset({
-    "UserDeactivatedBanError",
-    "AuthKeyUnregisteredError",
-    "PhoneNumberBannedError",
-    "SessionRevokedError",
-})
+_FATAL_ERRORS = frozenset(
+    {
+        "UserDeactivatedBanError",
+        "AuthKeyUnregisteredError",
+        "PhoneNumberBannedError",
+        "SessionRevokedError",
+    }
+)
 
 # Веса действий по профилям (action, weight)
 _PROFILE_ACTIONS: dict[str, list[tuple[str, int]]] = {
@@ -75,20 +90,20 @@ _PROFILE_ACTIONS: dict[str, list[tuple[str, int]]] = {
 }
 
 _PROFILE_LABELS = {
-    "reader":    "📖 Reader — чтение и просмотр (низкий риск)",
+    "reader": "📖 Reader — чтение и просмотр (низкий риск)",
     "commenter": "💬 Commenter — акцент на комментарии",
-    "reactor":   "❤️ Reactor — акцент на реакции",
-    "mixed":     "🔀 Mixed — все типы действий",
+    "reactor": "❤️ Reactor — акцент на реакции",
+    "mixed": "🔀 Mixed — все типы действий",
 }
 
 _ACTION_LABELS = {
-    "read_resource":   "📖 Читал ресурс",
-    "mark_read":       "✅ Отметил прочитанным",
-    "view_profile":    "👁 Просматривал инфо",
-    "send_reaction":   "❤️ Поставил реакцию",
-    "send_comment":    "💬 Оставил комментарий",
-    "forward_to_saved":"📌 Сохранил пост",
-    "vote_poll":       "📊 Проголосовал",
+    "read_resource": "📖 Читал ресурс",
+    "mark_read": "✅ Отметил прочитанным",
+    "view_profile": "👁 Просматривал инфо",
+    "send_reaction": "❤️ Поставил реакцию",
+    "send_comment": "💬 Оставил комментарий",
+    "forward_to_saved": "📌 Сохранил пост",
+    "vote_poll": "📊 Проголосовал",
 }
 
 
@@ -105,8 +120,9 @@ def _pick_action(profile: str) -> str:
     return options[0][0]
 
 
-async def get_own_resources(pool: asyncpg.Pool, owner_id: int,
-                            refs: Optional[list[str]] = None) -> list[dict]:
+async def get_own_resources(
+    pool: asyncpg.Pool, owner_id: int, refs: Optional[list[str]] = None
+) -> list[dict]:
     """Загружает собственные ресурсы пользователя как цели активности."""
     resources: list[dict] = []
     try:
@@ -163,6 +179,7 @@ async def _act_read(client, ref: str) -> bool:
 async def _act_mark_read(client, ref: str) -> bool:
     try:
         from telethon.tl.functions.messages import ReadHistoryRequest
+
         entity = await client.get_entity(ref)
         msgs = await client.get_messages(entity, limit=5)
         if msgs:
@@ -180,16 +197,20 @@ async def _act_react(client, ref: str) -> bool:
     try:
         from telethon.tl.functions.messages import SendReactionRequest
         from telethon.tl.types import ReactionEmoji
+
         entity = await client.get_entity(ref)
         msgs = await client.get_messages(entity, limit=10)
         if not msgs:
             return False
         msg = random.choice(list(msgs))
         emoticon = random.choice(_REACTIONS)
-        await client(SendReactionRequest(
-            peer=entity, msg_id=msg.id,
-            reaction=[ReactionEmoji(emoticon=emoticon)],
-        ))
+        await client(
+            SendReactionRequest(
+                peer=entity,
+                msg_id=msg.id,
+                reaction=[ReactionEmoji(emoticon=emoticon)],
+            )
+        )
         await asyncio.sleep(random.uniform(1, 4))
         return True
     except Exception as e:
@@ -202,6 +223,7 @@ async def _act_react(client, ref: str) -> bool:
 async def _act_comment(client, ref: str) -> bool:
     try:
         from telethon.tl.functions.channels import GetFullChannelRequest
+
         entity = await client.get_entity(ref)
         if not getattr(entity, "broadcast", False):
             return False
@@ -248,10 +270,14 @@ async def _act_vote(client, ref: str) -> bool:
     try:
         from telethon.tl.functions.messages import SendVoteRequest
         from telethon.tl.types import MessageMediaPoll
+
         entity = await client.get_entity(ref)
         msgs = await client.get_messages(entity, limit=25)
-        polls = [m for m in msgs
-                 if isinstance(m.media, MessageMediaPoll) and not m.media.poll.closed]
+        polls = [
+            m
+            for m in msgs
+            if isinstance(m.media, MessageMediaPoll) and not m.media.poll.closed
+        ]
         if not polls:
             return False
         msg = random.choice(polls)
@@ -259,7 +285,9 @@ async def _act_vote(client, ref: str) -> bool:
         if not options:
             return False
         chosen = random.choice(options)
-        await client(SendVoteRequest(peer=entity, msg_id=msg.id, options=[chosen.option]))
+        await client(
+            SendVoteRequest(peer=entity, msg_id=msg.id, options=[chosen.option])
+        )
         await asyncio.sleep(random.uniform(2, 5))
         return True
     except Exception as e:
@@ -272,6 +300,7 @@ async def _act_vote(client, ref: str) -> bool:
 async def _act_view_profile(client, ref: str) -> bool:
     try:
         from telethon.tl.functions.channels import GetFullChannelRequest
+
         entity = await client.get_entity(ref)
         await client(GetFullChannelRequest(entity))
         await asyncio.sleep(random.uniform(3, 7))
@@ -290,23 +319,35 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
     """
     from services import account_manager
 
-    sess_id   = session["id"]
-    owner_id  = session["owner_id"]
-    acc_ids: list   = session.get("account_ids") or []
-    res_refs: list  = session.get("resource_refs") or []
-    profile   = session.get("profile_type", "mixed")
-    daily     = session.get("daily_actions", 8)
-    target_d  = session.get("target_days", 14)
+    sess_id = session["id"]
+    owner_id = session["owner_id"]
+    acc_ids: list = session.get("account_ids") or []
+    res_refs: list = session.get("resource_refs") or []
+    profile = session.get("profile_type", "mixed")
+    daily = session.get("daily_actions", 8)
+    target_d = session.get("target_days", 14)
     current_d = session.get("current_day", 0)
 
     if not acc_ids:
         log.warning("activity_session %d: no accounts", sess_id)
-        return {"actions_done": 0, "actions_ok": 0, "actions_fail": 0, "completed": False}
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+        }
 
     resources = await get_own_resources(pool, owner_id, res_refs if res_refs else None)
     if not resources:
-        log.warning("activity_session %d: no resources found for owner=%d", sess_id, owner_id)
-        return {"actions_done": 0, "actions_ok": 0, "actions_fail": 0, "completed": False}
+        log.warning(
+            "activity_session %d: no resources found for owner=%d", sess_id, owner_id
+        )
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+        }
 
     actions_per_acc = max(1, daily // len(acc_ids))
     total_ok = 0
@@ -333,28 +374,42 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
             await asyncio.wait_for(client.connect(), timeout=15)
 
             for i in range(actions_per_acc):
-                action   = _pick_action(profile)
+                action = _pick_action(profile)
                 resource = resources[i % len(resources)]
-                ref      = resource["ref"]
-                success  = False
+                ref = resource["ref"]
+                success = False
                 error_str: Optional[str] = None
                 t0 = time.monotonic()
 
                 try:
                     if action == "read_resource":
-                        success = await asyncio.wait_for(_act_read(client, ref), timeout=60)
+                        success = await asyncio.wait_for(
+                            _act_read(client, ref), timeout=60
+                        )
                     elif action == "mark_read":
-                        success = await asyncio.wait_for(_act_mark_read(client, ref), timeout=30)
+                        success = await asyncio.wait_for(
+                            _act_mark_read(client, ref), timeout=30
+                        )
                     elif action == "send_reaction":
-                        success = await asyncio.wait_for(_act_react(client, ref), timeout=30)
+                        success = await asyncio.wait_for(
+                            _act_react(client, ref), timeout=30
+                        )
                     elif action == "send_comment":
-                        success = await asyncio.wait_for(_act_comment(client, ref), timeout=90)
+                        success = await asyncio.wait_for(
+                            _act_comment(client, ref), timeout=90
+                        )
                     elif action == "forward_to_saved":
-                        success = await asyncio.wait_for(_act_forward(client, ref), timeout=60)
+                        success = await asyncio.wait_for(
+                            _act_forward(client, ref), timeout=60
+                        )
                     elif action == "vote_poll":
-                        success = await asyncio.wait_for(_act_vote(client, ref), timeout=30)
+                        success = await asyncio.wait_for(
+                            _act_vote(client, ref), timeout=30
+                        )
                     elif action == "view_profile":
-                        success = await asyncio.wait_for(_act_view_profile(client, ref), timeout=30)
+                        success = await asyncio.wait_for(
+                            _act_view_profile(client, ref), timeout=30
+                        )
                     else:
                         success = True
 
@@ -371,7 +426,9 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                         flood_multiplier = min(flood_multiplier * 2, 8.0)
                         log.warning(
                             "activity_session %d FloodWait %ds, multiplier=%.1f",
-                            sess_id, seconds, flood_multiplier,
+                            sess_id,
+                            seconds,
+                            flood_multiplier,
                         )
                         await asyncio.sleep(min(seconds, 300))
                     success = False
@@ -383,14 +440,22 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
                         """INSERT INTO resource_activity_log
                            (session_id, account_id, action_type, resource_ref, success, error)
                            VALUES ($1,$2,$3,$4,$5,$6)""",
-                        sess_id, acc_id, action, ref, success, error_str,
+                        sess_id,
+                        acc_id,
+                        action,
+                        ref,
+                        success,
+                        error_str,
                     )
                 except Exception:
                     pass
 
                 try:
                     from services import infra_memory
-                    infra_memory.record_account_op(acc_id, "resource_activity", success, duration_s=dur_s)
+
+                    infra_memory.record_account_op(
+                        acc_id, "resource_activity", success, duration_s=dur_s
+                    )
                 except Exception:
                     pass
 
@@ -423,26 +488,33 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
 
         await asyncio.sleep(random.uniform(20, 60))
 
-    new_day    = current_d + 1
-    completed  = new_day >= target_d
+    new_day = current_d + 1
+    completed = new_day >= target_d
     new_status = "completed" if completed else "active"
 
     await pool.execute(
         """UPDATE resource_activity_sessions
            SET current_day=$1, last_run_at=NOW(), status=$2
            WHERE id=$3""",
-        new_day, new_status, sess_id,
+        new_day,
+        new_status,
+        sess_id,
     )
 
     log.info(
         "activity_session %d day=%d/%d ok=%d fail=%d completed=%s",
-        sess_id, new_day, target_d, total_ok, total_fail, completed,
+        sess_id,
+        new_day,
+        target_d,
+        total_ok,
+        total_fail,
+        completed,
     )
     return {
         "actions_done": total_ok + total_fail,
-        "actions_ok":   total_ok,
+        "actions_ok": total_ok,
         "actions_fail": total_fail,
-        "completed":    completed,
+        "completed": completed,
     }
 
 

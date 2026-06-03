@@ -34,7 +34,9 @@ async def cb_dl_menu(
         await callback.message.edit_text(
             locked_text("Диплинки и рефералы", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="main")
+            ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -140,10 +142,16 @@ async def msg_dl_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip()
     if not name:
         data = await state.get_data()
-        await message.answer("⚠️ Название не может быть пустым. Введите снова:", reply_markup=_dl_cancel_kb(data.get("bot_id", 0)))
+        await message.answer(
+            "⚠️ Название не может быть пустым. Введите снова:",
+            reply_markup=_dl_cancel_kb(data.get("bot_id", 0)),
+        )
         return
     if len(name) > 200:
-        await message.answer("⚠️ Слишком длинное название (макс. 200 символов). Введите снова:", reply_markup=_dl_cancel_kb((await state.get_data()).get("bot_id", 0)))
+        await message.answer(
+            "⚠️ Слишком длинное название (макс. 200 символов). Введите снова:",
+            reply_markup=_dl_cancel_kb((await state.get_data()).get("bot_id", 0)),
+        )
         return
     await state.update_data(link_name=name)
     await state.set_state(CreateDeepLink.waiting_param)

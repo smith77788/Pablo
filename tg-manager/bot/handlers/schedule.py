@@ -6,7 +6,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.callbacks import ScheduleCb, BmCb
+from bot.callbacks import ScheduleCb
 from bot.keyboards import schedule_menu, back_to_bot, schedule_template_list
 from bot.states import ScheduleBroadcast
 from database import db
@@ -87,7 +87,10 @@ async def msg_schedule_message(message: Message, state: FSMContext) -> None:
     text = message.text or message.caption or ""
     if not text or not text.strip():
         data = await state.get_data()
-        await message.answer("❌ Текст не может быть пустым. Попробуйте ещё раз:", reply_markup=_sch_cancel_kb(data.get("bot_id", 0)))
+        await message.answer(
+            "❌ Текст не может быть пустым. Попробуйте ещё раз:",
+            reply_markup=_sch_cancel_kb(data.get("bot_id", 0)),
+        )
         return
     await state.update_data(text=text)
     await state.set_state(ScheduleBroadcast.waiting_datetime)

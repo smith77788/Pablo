@@ -815,7 +815,10 @@ async def execute_action(
         # Enqueue in operation_queue instead of immediate execution
         count = int(action_data.get("count", 5))
         op_id = await operation_bus.submit(
-            pool, user_id, "bulk_create_channels", action_data,
+            pool,
+            user_id,
+            "bulk_create_channels",
+            action_data,
             total_items=count,
         )
         return (
@@ -830,9 +833,9 @@ async def execute_action(
         bot_id = action_data["bot_id"]
         text = action_data["text"]
         when_minutes = int(action_data.get("when_minutes", 60))
-        scheduled_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
-            minutes=when_minutes
-        )
+        scheduled_at = datetime.datetime.now(
+            datetime.timezone.utc
+        ) + datetime.timedelta(minutes=when_minutes)
         row = await pool.fetchrow(
             "SELECT bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id,

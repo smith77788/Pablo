@@ -157,7 +157,9 @@ async def cb_relay_session(
     try:
         templates = await db.get_templates(pool, callback.from_user.id)
     except Exception:
-        log.exception("relay: failed to fetch templates for user %d", callback.from_user.id)
+        log.exception(
+            "relay: failed to fetch templates for user %d", callback.from_user.id
+        )
         templates = []
     await callback.message.edit_text(
         text,

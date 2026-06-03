@@ -1,10 +1,11 @@
 """Admin user management: list, grant/revoke plans, ban/unban."""
+
 import logging
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 import asyncpg
 from bot.callbacks import CallbackData
 from bot.utils.subscription import is_platform_admin
@@ -16,10 +17,12 @@ def _is_admin(uid: int) -> bool:
     """Check admin status using both env ADMIN_IDS and session admins."""
     try:
         from bot.handlers.admin import is_admin
+
         return is_admin(uid)
     except Exception:
         log_exc_swallow(log, "Ошибка проверки is_admin через admin.py")
         return is_platform_admin(uid)
+
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -42,10 +45,14 @@ def _format_plan_emoji(plan: str) -> str:
     return emojis.get(plan, "❓")
 
 
-async def _users_list_text(pool: asyncpg.Pool, page: int = 0, items_per_page: int = 5) -> tuple[str, int]:
+async def _users_list_text(
+    pool: asyncpg.Pool, page: int = 0, items_per_page: int = 5
+) -> tuple[str, int]:
     """Вернуть текст списка пользователей и общее количество."""
     total = await db.count_platform_users(pool)
-    users = await db.get_all_platform_users(pool, limit=items_per_page, offset=page * items_per_page)
+    users = await db.get_all_platform_users(
+        pool, limit=items_per_page, offset=page * items_per_page
+    )
 
     text = f"👥 <b>Все пользователи</b> (всего: {total})\n\n"
 
@@ -57,9 +64,11 @@ async def _users_list_text(pool: asyncpg.Pool, page: int = 0, items_per_page: in
         expires = ""
         if u["plan_expires_at"]:
             from datetime import timezone
+
             exp = u["plan_expires_at"]
             # asyncpg returns timezone-aware datetimes from TIMESTAMPTZ columns
             from datetime import datetime
+
             now = datetime.now(timezone.utc)
             exp_aware = exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)
             days_left = (exp_aware - now).days
@@ -78,7 +87,9 @@ async def _users_list_text(pool: asyncpg.Pool, page: int = 0, items_per_page: in
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "list"))
-async def cb_users_list(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_users_list(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Показать список пользователей."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Только администратор", show_alert=True)
@@ -91,14 +102,22 @@ async def cb_users_list(callback: CallbackQuery, callback_data: AdminUserCb, poo
     max_page = (total - 1) // 5
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
 
     # Навигация
     if page > 0:
-        kb.button(text="⬅️ Назад", callback_data=AdminUserCb(action="list", page=page - 1))
-    kb.button(text=f"📄 {page + 1}/{max_page + 1}", callback_data=AdminUserCb(action="list", page=page))
+        kb.button(
+            text="⬅️ Назад", callback_data=AdminUserCb(action="list", page=page - 1)
+        )
+    kb.button(
+        text=f"📄 {page + 1}/{max_page + 1}",
+        callback_data=AdminUserCb(action="list", page=page),
+    )
     if page < max_page:
-        kb.button(text="➡️ Вперёд", callback_data=AdminUserCb(action="list", page=page + 1))
+        kb.button(
+            text="➡️ Вперёд", callback_data=AdminUserCb(action="list", page=page + 1)
+        )
 
     kb.adjust(1)
     kb.button(text="🔍 Поиск по плану", callback_data=AdminUserCb(action="filter_plan"))
@@ -106,7 +125,9 @@ async def cb_users_list(callback: CallbackQuery, callback_data: AdminUserCb, poo
     kb.button(text="◀️ В админ-меню", callback_data=AdminUserCb(action="main_menu"))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "filter_plan"))
@@ -118,11 +139,19 @@ async def cb_filter_plan(callback: CallbackQuery) -> None:
 
     await callback.answer()
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
 
-    plans = [("🆓 Free", "free"), ("⭐ Starter", "starter"), ("🚀 Pro", "pro"), ("👑 Enterprise", "enterprise")]
+    plans = [
+        ("🆓 Free", "free"),
+        ("⭐ Starter", "starter"),
+        ("🚀 Pro", "pro"),
+        ("👑 Enterprise", "enterprise"),
+    ]
     for label, plan in plans:
-        kb.button(text=label, callback_data=AdminUserCb(action="plan_list", plan=plan, page=0))
+        kb.button(
+            text=label, callback_data=AdminUserCb(action="plan_list", plan=plan, page=0)
+        )
 
     kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
     kb.adjust(1)
@@ -133,7 +162,9 @@ async def cb_filter_plan(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "plan_list"))
-async def cb_plan_list(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_plan_list(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Показать пользователей с конкретным планом."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -155,20 +186,32 @@ async def cb_plan_list(callback: CallbackQuery, callback_data: AdminUserCb, pool
             text += f"@{username} (<code>{u['user_id']}</code>)\n"
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
 
     if page > 0:
-        kb.button(text="⬅️", callback_data=AdminUserCb(action="plan_list", plan=plan, page=page - 1))
-    kb.button(text=f"{page + 1}", callback_data=AdminUserCb(action="plan_list", plan=plan, page=page))
+        kb.button(
+            text="⬅️",
+            callback_data=AdminUserCb(action="plan_list", plan=plan, page=page - 1),
+        )
+    kb.button(
+        text=f"{page + 1}",
+        callback_data=AdminUserCb(action="plan_list", plan=plan, page=page),
+    )
     max_page = (total - 1) // 5
     if page < max_page:
-        kb.button(text="➡️", callback_data=AdminUserCb(action="plan_list", plan=plan, page=page + 1))
+        kb.button(
+            text="➡️",
+            callback_data=AdminUserCb(action="plan_list", plan=plan, page=page + 1),
+        )
 
     kb.adjust(3)
     kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="filter_plan"))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "banned_list"))
@@ -190,15 +233,20 @@ async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text += f"🚫 <b>@{username}</b>\n  ID: <code>{u['user_id']}</code>\n\n"
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "user_actions"))
-async def cb_user_actions(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_user_actions(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Показать действия над пользователем."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -225,26 +273,48 @@ async def cb_user_actions(callback: CallbackQuery, callback_data: AdminUserCb, p
     )
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
 
-    kb.button(text="💳 Выдать подписку", callback_data=AdminUserCb(action="grant_plan", user_id=user_id))
-    kb.button(text="❌ Забрать подписку", callback_data=AdminUserCb(action="revoke_plan", user_id=user_id))
-    kb.button(text="⚔️ Выдать Strike", callback_data=AdminUserCb(action="grant_strike", user_id=user_id))
-    kb.button(text="⚔️ Забрать Strike", callback_data=AdminUserCb(action="revoke_strike", user_id=user_id))
+    kb.button(
+        text="💳 Выдать подписку",
+        callback_data=AdminUserCb(action="grant_plan", user_id=user_id),
+    )
+    kb.button(
+        text="❌ Забрать подписку",
+        callback_data=AdminUserCb(action="revoke_plan", user_id=user_id),
+    )
+    kb.button(
+        text="⚔️ Выдать Strike",
+        callback_data=AdminUserCb(action="grant_strike", user_id=user_id),
+    )
+    kb.button(
+        text="⚔️ Забрать Strike",
+        callback_data=AdminUserCb(action="revoke_strike", user_id=user_id),
+    )
 
     if user["is_banned"]:
-        kb.button(text="✅ Разбанить", callback_data=AdminUserCb(action="unban", user_id=user_id))
+        kb.button(
+            text="✅ Разбанить",
+            callback_data=AdminUserCb(action="unban", user_id=user_id),
+        )
     else:
-        kb.button(text="🚫 Забанить", callback_data=AdminUserCb(action="ban", user_id=user_id))
+        kb.button(
+            text="🚫 Забанить", callback_data=AdminUserCb(action="ban", user_id=user_id)
+        )
 
     kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "grant_plan"))
-async def cb_grant_plan(callback: CallbackQuery, callback_data: AdminUserCb, state: FSMContext) -> None:
+async def cb_grant_plan(
+    callback: CallbackQuery, callback_data: AdminUserCb, state: FSMContext
+) -> None:
     """Меню выбора плана для выдачи."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -255,13 +325,27 @@ async def cb_grant_plan(callback: CallbackQuery, callback_data: AdminUserCb, sta
     await state.update_data(user_id=callback_data.user_id)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
 
-    plans = [("🆓 Free", "free"), ("⭐ Starter", "starter"), ("🚀 Pro", "pro"), ("👑 Enterprise", "enterprise")]
+    plans = [
+        ("🆓 Free", "free"),
+        ("⭐ Starter", "starter"),
+        ("🚀 Pro", "pro"),
+        ("👑 Enterprise", "enterprise"),
+    ]
     for label, plan in plans:
-        kb.button(text=label, callback_data=AdminUserCb(action="plan_months", user_id=callback_data.user_id, plan=plan))
+        kb.button(
+            text=label,
+            callback_data=AdminUserCb(
+                action="plan_months", user_id=callback_data.user_id, plan=plan
+            ),
+        )
 
-    kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="user_actions", user_id=callback_data.user_id))
+    kb.button(
+        text="◀️ Назад",
+        callback_data=AdminUserCb(action="user_actions", user_id=callback_data.user_id),
+    )
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -271,7 +355,9 @@ async def cb_grant_plan(callback: CallbackQuery, callback_data: AdminUserCb, sta
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "plan_months"))
-async def cb_plan_months(callback: CallbackQuery, callback_data: AdminUserCb, state: FSMContext) -> None:
+async def cb_plan_months(
+    callback: CallbackQuery, callback_data: AdminUserCb, state: FSMContext
+) -> None:
     """Меню выбора срока подписки."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -281,13 +367,30 @@ async def cb_plan_months(callback: CallbackQuery, callback_data: AdminUserCb, st
     await state.update_data(plan=callback_data.plan)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
 
-    months_options = [(1, "1 месяц"), (3, "3 месяца"), (6, "6 месяцев"), (12, "12 месяцев")]
+    months_options = [
+        (1, "1 месяц"),
+        (3, "3 месяца"),
+        (6, "6 месяцев"),
+        (12, "12 месяцев"),
+    ]
     for months, label in months_options:
-        kb.button(text=label, callback_data=AdminUserCb(action="confirm_grant", user_id=callback_data.user_id, plan=callback_data.plan, months=months))
+        kb.button(
+            text=label,
+            callback_data=AdminUserCb(
+                action="confirm_grant",
+                user_id=callback_data.user_id,
+                plan=callback_data.plan,
+                months=months,
+            ),
+        )
 
-    kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="grant_plan", user_id=callback_data.user_id))
+    kb.button(
+        text="◀️ Назад",
+        callback_data=AdminUserCb(action="grant_plan", user_id=callback_data.user_id),
+    )
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -297,7 +400,12 @@ async def cb_plan_months(callback: CallbackQuery, callback_data: AdminUserCb, st
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "confirm_grant"))
-async def cb_confirm_grant(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_confirm_grant(
+    callback: CallbackQuery,
+    callback_data: AdminUserCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
     """Подтвердить выдачу плана."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -319,7 +427,9 @@ async def cb_confirm_grant(callback: CallbackQuery, callback_data: AdminUserCb, 
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "revoke_plan"))
-async def cb_revoke_plan(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_revoke_plan(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Забрать подписку у пользователя."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -327,7 +437,9 @@ async def cb_revoke_plan(callback: CallbackQuery, callback_data: AdminUserCb, po
 
     user_id = callback_data.user_id
     await db.revoke_plan_from_user(pool, user_id, callback.from_user.id)
-    await callback.answer(f"✅ Подписка отменена. Пользователь вернулся на free.", show_alert=True)
+    await callback.answer(
+        "✅ Подписка отменена. Пользователь вернулся на free.", show_alert=True
+    )
 
     # Вернуться к меню пользователя
     await callback.message.edit_text(
@@ -337,7 +449,9 @@ async def cb_revoke_plan(callback: CallbackQuery, callback_data: AdminUserCb, po
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "grant_strike"))
-async def cb_grant_strike(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_grant_strike(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Выдать Strike доступ пользователю."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -345,13 +459,15 @@ async def cb_grant_strike(callback: CallbackQuery, callback_data: AdminUserCb, p
 
     user_id = callback_data.user_id
     from bot.handlers.strike import _ensure_table
+
     await _ensure_table(pool)
     await pool.execute(
         "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
         "ON CONFLICT (user_id) DO NOTHING",
-        user_id, callback.from_user.id,
+        user_id,
+        callback.from_user.id,
     )
-    await callback.answer(f"✅ Strike доступ выдан.", show_alert=True)
+    await callback.answer("✅ Strike доступ выдан.", show_alert=True)
 
     await callback.message.edit_text(
         f"⚔️ Strike доступ выдан пользователю #{user_id}.",
@@ -370,7 +486,9 @@ async def cb_grant_strike(callback: CallbackQuery, callback_data: AdminUserCb, p
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "revoke_strike"))
-async def cb_revoke_strike(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_revoke_strike(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Забрать Strike доступ у пользователя."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -378,7 +496,7 @@ async def cb_revoke_strike(callback: CallbackQuery, callback_data: AdminUserCb, 
 
     user_id = callback_data.user_id
     await db.revoke_strike_access(pool, user_id, callback.from_user.id)
-    await callback.answer(f"✅ Strike доступ отозван.", show_alert=True)
+    await callback.answer("✅ Strike доступ отозван.", show_alert=True)
 
     await callback.message.edit_text(
         f"⚔️ Strike доступ отозван у пользователя #{user_id}.",
@@ -396,7 +514,9 @@ async def cb_revoke_strike(callback: CallbackQuery, callback_data: AdminUserCb, 
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "ban"))
-async def cb_ban(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_ban(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Забанить пользователя."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -408,7 +528,9 @@ async def cb_ban(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyn
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "unban"))
-async def cb_unban(callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool) -> None:
+async def cb_unban(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
     """Разбанить пользователя."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
@@ -441,18 +563,33 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["user_id", "username", "first_name", "current_plan",
-                     "is_banned", "registered_at", "plan_expires_at"])
+    writer.writerow(
+        [
+            "user_id",
+            "username",
+            "first_name",
+            "current_plan",
+            "is_banned",
+            "registered_at",
+            "plan_expires_at",
+        ]
+    )
     for u in users:
-        writer.writerow([
-            u["user_id"],
-            u["username"] or "",
-            u["first_name"] or "",
-            u["current_plan"] or "free",
-            "да" if u["is_banned"] else "нет",
-            u["registered_at"].strftime("%Y-%m-%d %H:%M") if u.get("registered_at") else "",
-            u["plan_expires_at"].strftime("%Y-%m-%d %H:%M") if u.get("plan_expires_at") else "",
-        ])
+        writer.writerow(
+            [
+                u["user_id"],
+                u["username"] or "",
+                u["first_name"] or "",
+                u["current_plan"] or "free",
+                "да" if u["is_banned"] else "нет",
+                u["registered_at"].strftime("%Y-%m-%d %H:%M")
+                if u.get("registered_at")
+                else "",
+                u["plan_expires_at"].strftime("%Y-%m-%d %H:%M")
+                if u.get("plan_expires_at")
+                else "",
+            ]
+        )
 
     data = buf.getvalue().encode("utf-8-sig")
     file = BufferedInputFile(data, filename="platform_users.csv")
@@ -473,6 +610,7 @@ async def cb_main_menu(callback: CallbackQuery) -> None:
     await callback.answer()
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
     kb.button(text="👥 Пользователи", callback_data=AdminUserCb(action="list"))
     kb.button(text="🔐 Аудит логи", callback_data="adm:audit_log")

@@ -39,10 +39,13 @@ async def cb_engage_menu(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         from bot.callbacks import BotCb as _BotCb
+
         await callback.message.edit_text(
             locked_text("Активность и реактивация", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=_BotCb(action="list")),
+            reply_markup=subscription_locked_markup(
+                "enterprise", back_callback=_BotCb(action="list")
+            ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -90,7 +93,10 @@ async def cb_reactivate_cold(
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="cold")
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=EngageCb(action="cancel_fsm", bot_id=callback_data.bot_id))
+    kb.button(
+        text="❌ Отмена",
+        callback_data=EngageCb(action="cancel_fsm", bot_id=callback_data.bot_id),
+    )
     await callback.message.edit_text(
         "❄️ <b>Реактивация холодных (7–30 дн)</b>\n\n"
         "Пользователи не заходили от 7 до 30 дней.\n\n"
@@ -111,7 +117,10 @@ async def cb_reactivate_lost(
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="lost")
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=EngageCb(action="cancel_fsm", bot_id=callback_data.bot_id))
+    kb.button(
+        text="❌ Отмена",
+        callback_data=EngageCb(action="cancel_fsm", bot_id=callback_data.bot_id),
+    )
     await callback.message.edit_text(
         "💀 <b>Реактивация потерянных (30+ дн)</b>\n\n"
         "Пользователи не заходили более месяца.\n\n"

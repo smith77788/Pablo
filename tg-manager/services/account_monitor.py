@@ -1,4 +1,5 @@
 """Background service: monitor active account count per owner, alert on low count."""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,11 +13,11 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
-_INTERVAL = 3600        # check every hour
-_MIN_ACCOUNTS = 2       # alert threshold
-_LOW_TRUST_THRESHOLD = 0.3   # trust_score below this triggers alert
-_STALE_RUNNING_HOURS = 3     # running ops older than this are considered stuck
-_ALERT_COOLDOWN = 86400      # 24h between repeated low-account alerts per owner
+_INTERVAL = 3600  # check every hour
+_MIN_ACCOUNTS = 2  # alert threshold
+_LOW_TRUST_THRESHOLD = 0.3  # trust_score below this triggers alert
+_STALE_RUNNING_HOURS = 3  # running ops older than this are considered stuck
+_ALERT_COOLDOWN = 86400  # 24h between repeated low-account alerts per owner
 
 # In-memory cooldown: owner_id → last_alert_ts
 _low_account_alerted: dict[int, float] = {}
@@ -46,14 +47,19 @@ async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
             continue
         _low_account_alerted[owner_id] = now
         await db.notify_if_enabled(
-            pool, bot, owner_id, "flood_warning",
+            pool,
+            bot,
+            owner_id,
+            "flood_warning",
             f"⚠️ <b>Внимание: мало активных аккаунтов</b>\n\n"
             f"У вас осталось активных TG-аккаунтов: <b>{active_count}</b>\n"
             f"Рекомендуется иметь минимум {_MIN_ACCOUNTS} активных аккаунта "
             f"для корректной работы сервиса.\n\n"
             f"Добавьте аккаунты в разделе <b>Аккаунты</b>.",
         )
-        log.info("account_monitor: alerted owner=%s (active=%s)", owner_id, active_count)
+        log.info(
+            "account_monitor: alerted owner=%s (active=%s)", owner_id, active_count
+        )
 
 
 async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -80,9 +86,12 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
         by_owner.setdefault(r["owner_id"], []).append(r)
 
     for owner_id, accs in by_owner.items():
-        names = [r["username"] or r["first_name"] or r["phone"] or f"id?" for r in accs]
+        names = [r["username"] or r["first_name"] or r["phone"] or "id?" for r in accs]
         await db.notify_if_enabled(
-            pool, bot, owner_id, "restriction",
+            pool,
+            bot,
+            owner_id,
+            "restriction",
             f"🔴 <b>Критически низкий trust_score</b>\n\n"
             f"Аккаунты: <b>{', '.join(names[:5])}</b>\n"
             f"Trust score ниже {_LOW_TRUST_THRESHOLD:.1f} — высокий риск бана.\n\n"
@@ -96,11 +105,18 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
             await pool.execute(
                 "UPDATE tg_accounts SET last_low_trust_alert=NOW() "
                 "WHERE owner_id=$1 AND trust_score < $2 AND is_active=true",
-                owner_id, _LOW_TRUST_THRESHOLD,
+                owner_id,
+                _LOW_TRUST_THRESHOLD,
             )
         except Exception:
-            log_exc_swallow(log, "сбой алерта low trust — не удалось обновить last_low_trust_alert")
-        log.info("account_monitor: low trust alert for owner=%s (%d accounts)", owner_id, len(accs))
+            log_exc_swallow(
+                log, "сбой алерта low trust — не удалось обновить last_low_trust_alert"
+            )
+        log.info(
+            "account_monitor: low trust alert for owner=%s (%d accounts)",
+            owner_id,
+            len(accs),
+        )
 
 
 async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -123,7 +139,10 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
                 row["id"],
             )
             await db.notify_if_enabled(
-                pool, bot, row["owner_id"], "op_complete",
+                pool,
+                bot,
+                row["owner_id"],
+                "op_complete",
                 f"⚠️ <b>Операция #{row['id']} зависла</b>\n\n"
                 f"Тип: {row['op_type']}\n"
                 f"Операция выполнялась более {_STALE_RUNNING_HOURS}ч без завершения.\n"
@@ -143,7 +162,10 @@ async def check_owner_now(pool: asyncpg.Pool, bot: Bot, owner_id: int) -> None:
     cnt = row["cnt"] if row else 0
     if cnt < _MIN_ACCOUNTS:
         await db.notify_if_enabled(
-            pool, bot, owner_id, "restriction",
+            pool,
+            bot,
+            owner_id,
+            "restriction",
             f"⚠️ <b>Аккаунт деактивирован</b>\n\n"
             f"Один из ваших TG-аккаунтов был автоматически деактивирован "
             f"(получен PeerFlood или бан).\n"

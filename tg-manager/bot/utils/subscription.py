@@ -18,6 +18,7 @@ def set_free_mode(enabled: bool) -> None:
     global _FREE_MODE
     _FREE_MODE = enabled
 
+
 PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
 BOT_LIMITS: dict[str, int] = {"free": 3, "starter": 10, "pro": 30, "enterprise": 9999}
 PLAN_PRICES = {"starter": "$9", "pro": "$25", "enterprise": "$69"}

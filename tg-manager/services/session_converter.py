@@ -9,7 +9,6 @@ Session Converter — конвертация форматов сессий.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 
 from services.logger import log_exc_swallow
@@ -17,8 +16,6 @@ import json
 import logging
 import os
 import struct
-import tempfile
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +73,7 @@ async def pyrogram_json_to_telethon(json_str: str) -> tuple[str, dict]:
     port = 443
 
     # Pack: version(1) + dc_id(1) + ip(4) + port(2) + auth_key(256)
-    session_bytes = struct.pack(">BBHH", 1, dc_id, 0, port)  # simplified packing
+    struct.pack(">BBHH", 1, dc_id, 0, port)  # simplified packing
     # Correct Telethon format
     data_bytes = (
         struct.pack(">B", dc_id) + ip_bytes + struct.pack(">H", port) + auth_key
@@ -176,6 +173,7 @@ def detect_tdata(path: str) -> dict:
 
     if len(found) >= 1:
         from services.tdata_converter import check_pycryptodome
+
         can_convert = check_pycryptodome()
         if can_convert:
             msg = f"tdata обнаружен ({', '.join(found)}). Конвертация доступна."
@@ -217,7 +215,9 @@ async def convert_auto(content: str | bytes, hint: str = "") -> tuple[str, dict]
                     "dc_id": decoded[0] if decoded else 0,
                 }
         except Exception:
-            log_exc_swallow(log, "Не удалось определить формат сессии — автоопределение провалено")
+            log_exc_swallow(
+                log, "Не удалось определить формат сессии — автоопределение провалено"
+            )
 
     raise ConversionError(
         "Не удалось определить формат сессии. Поддерживаются: Pyrogram JSON, Telethon StringSession"

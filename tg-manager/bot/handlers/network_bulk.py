@@ -43,7 +43,9 @@ async def _apply_all(
     ok = 0
     for b, r in zip(bots, results):
         if isinstance(r, Exception):
-            label = f"@{b['username']}" if b.get("username") else str(b.get("bot_id", "?"))
+            label = (
+                f"@{b['username']}" if b.get("username") else str(b.get("bot_id", "?"))
+            )
             log.warning("network_bulk: %s failed for %s: %s", method.__name__, label, r)
         elif r is True:
             ok += 1
@@ -90,14 +92,18 @@ async def cb_bulk_check(
         return
     await callback.answer()
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
-    log.info("network_bulk: bulk_check user=%s bots=%d", callback.from_user.id, len(bots))
+    log.info(
+        "network_bulk: bulk_check user=%s bots=%d", callback.from_user.id, len(bots)
+    )
     try:
         tokens = [b["token"] for b in bots]
         results = await bot_api.batch_get_me(http, tokens)
     except Exception:
         log_exc_swallow(log, "cb_bulk_check: batch_get_me failed")
-        await callback.message.edit_text("❌ Ошибка проверки токенов. Попробуйте позже.",
-                                         reply_markup=network_ops_menu())
+        await callback.message.edit_text(
+            "❌ Ошибка проверки токенов. Попробуйте позже.",
+            reply_markup=network_ops_menu(),
+        )
         return
     ok_labels, fail_labels = [], []
     for b in bots:
@@ -145,7 +151,9 @@ async def msg_bulk_name(
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     log.info("network_bulk: set_name user=%s", message.from_user.id)
-    ok, fail, total = await _apply_all(pool, message.from_user.id, http, bot_api.set_name, name)
+    ok, fail, total = await _apply_all(
+        pool, message.from_user.id, http, bot_api.set_name, name
+    )
     log.info("network_bulk: set_name done ok=%d fail=%d total=%d", ok, fail, total)
     await msg.edit_text(
         _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
@@ -505,7 +513,9 @@ async def msg_import_tokens(
         )
         return
     progress = await message.answer(f"⏳ Проверяю {len(lines)} токенов…")
-    log.info("network_bulk: import_tokens user=%s count=%d", message.from_user.id, len(lines))
+    log.info(
+        "network_bulk: import_tokens user=%s count=%d", message.from_user.id, len(lines)
+    )
     try:
         results = await asyncio.gather(
             *(bot_api.get_me(http, t) for t in lines), return_exceptions=True
@@ -534,8 +544,12 @@ async def msg_import_tokens(
             ok = False
         label = f"@{info.get('username') or info.get('first_name', str(info['id']))}"
         (added if ok else skipped).append(f"{'✅' if ok else '⚠️'} {label}")
-    log.info("network_bulk: import done added=%d skipped=%d failed=%d",
-             len(added), len(skipped), len(failed))
+    log.info(
+        "network_bulk: import done added=%d skipped=%d failed=%d",
+        len(added),
+        len(skipped),
+        len(failed),
+    )
     parts = []
     if added:
         parts.append(f"✅ Добавлено: <b>{len(added)}</b>")

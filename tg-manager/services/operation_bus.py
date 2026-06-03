@@ -122,7 +122,9 @@ async def submit(
       ValueError — если op_type не зарегистрирован в OP_REGISTRY
     """
     if op_type not in OP_REGISTRY:
-        raise ValueError(f"operation_bus: unknown op_type={op_type!r}. Register in OP_REGISTRY first.")
+        raise ValueError(
+            f"operation_bus: unknown op_type={op_type!r}. Register in OP_REGISTRY first."
+        )
 
     meta = OP_REGISTRY[op_type]
     retries = max_retries if max_retries is not None else meta.get("max_retries", 3)
@@ -149,7 +151,10 @@ async def submit(
     op_id: int = row["id"]
     log.info(
         "operation_bus: submitted op_id=%d op_type=%s owner=%d total_items=%d",
-        op_id, op_type, owner_id, total_items,
+        op_id,
+        op_type,
+        owner_id,
+        total_items,
     )
     return op_id
 
@@ -221,11 +226,13 @@ async def list_active(
     result = []
     for row in rows:
         meta = OP_REGISTRY.get(row["op_type"], {})
-        result.append({
-            **dict(row),
-            "description": meta.get("description", row["op_type"]),
-            "icon": meta.get("icon", "⚙️"),
-        })
+        result.append(
+            {
+                **dict(row),
+                "description": meta.get("description", row["op_type"]),
+                "icon": meta.get("icon", "⚙️"),
+            }
+        )
     return result
 
 
@@ -250,11 +257,13 @@ async def list_recent(
     result = []
     for row in rows:
         meta = OP_REGISTRY.get(row["op_type"], {})
-        result.append({
-            **dict(row),
-            "description": meta.get("description", row["op_type"]),
-            "icon": meta.get("icon", "⚙️"),
-        })
+        result.append(
+            {
+                **dict(row),
+                "description": meta.get("description", row["op_type"]),
+                "icon": meta.get("icon", "⚙️"),
+            }
+        )
     return result
 
 

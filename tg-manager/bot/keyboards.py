@@ -26,12 +26,8 @@ from bot.callbacks import (
     NetworkCb,
     ClusterCb,
     SubCb,
-    AiCb,
     NetBcCb,
-    AccCb,
     RankCb,
-    ChanCb,
-    RefCb,
     BmCb,
     TaskCb,
 )
@@ -54,10 +50,10 @@ LANGUAGES = [
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 BotMother OS",    callback_data=BmCb(action="main"))
-    kb.button(text="➕ Добавить бота",   callback_data=BotCb(action="add"))
+    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
     kb.button(text="⚡ Активные задачи", callback_data=TaskCb(action="list"))
-    kb.button(text="❓ Справка",         callback_data=BotCb(action="help"))
+    kb.button(text="❓ Справка", callback_data=BotCb(action="help"))
     if is_admin:
         kb.button(text="⚙️ Админка", callback_data="adm:main")
     kb.adjust(1, 2, 2, 1 if not is_admin else 2)
@@ -307,7 +303,8 @@ def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
         text="📤 Экспорт CSV", callback_data=AudCb(action="export", bot_id=bot_id)
     )
     kb.button(
-        text="📊 Экспорт Excel", callback_data=AudCb(action="export_xlsx", bot_id=bot_id)
+        text="📊 Экспорт Excel",
+        callback_data=AudCb(action="export_xlsx", bot_id=bot_id),
     )
     kb.button(text="⚖️ Сравнить", callback_data=AudCb(action="compare", bot_id=bot_id))
     kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=bot_id))
@@ -796,14 +793,18 @@ def auto_reply_view(
     )
     kb.button(
         text="🗑 Удалить",
-        callback_data=AutoReplyCb(action="delete_confirm", bot_id=bot_id, reply_id=reply_id),
+        callback_data=AutoReplyCb(
+            action="delete_confirm", bot_id=bot_id, reply_id=reply_id
+        ),
     )
     kb.button(text="◀️ Назад", callback_data=AutoReplyCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
 
 
-def funnels_list(bot_id: int, funnels: list, subscriber_counts: dict | None = None) -> InlineKeyboardMarkup:
+def funnels_list(
+    bot_id: int, funnels: list, subscriber_counts: dict | None = None
+) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for f in funnels[:8]:
         icon = "✅" if f["is_active"] else "❌"
@@ -869,7 +870,9 @@ def funnel_view(
     if step_count > 0:
         kb.button(
             text="📝 Управление шагами",
-            callback_data=FunnelCb(action="steps_manage", bot_id=bot_id, funnel_id=funnel_id),
+            callback_data=FunnelCb(
+                action="steps_manage", bot_id=bot_id, funnel_id=funnel_id
+            ),
         )
     kb.button(
         text="📢 Написать подписчикам",
@@ -877,7 +880,9 @@ def funnel_view(
     )
     kb.button(
         text="📋 Копировать воронку",
-        callback_data=FunnelCb(action="copy_single", bot_id=bot_id, funnel_id=funnel_id),
+        callback_data=FunnelCb(
+            action="copy_single", bot_id=bot_id, funnel_id=funnel_id
+        ),
     )
     kb.button(
         text="🗑 Удалить",

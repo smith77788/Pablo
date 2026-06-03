@@ -4,6 +4,7 @@ DM Campaigns — управление прямыми рассылками под
 Аудитория: только собственные подписчики ботов и CRM-контакты.
 Entry: DmCb(action="menu")
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import DmCb, BotCb, BmCb
+from bot.callbacks import DmCb, BmCb
 from bot.states import DmCampaignFSM
 from services import task_registry as _treg, intelligence_engine
 from services.logger import log_exc_swallow
@@ -44,22 +45,27 @@ _STATUS_LABELS = {
 
 async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
     try:
-        await callback.message.edit_text(
-            text, parse_mode="HTML", reply_markup=markup
-        )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     except Exception:
         await callback.message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
 # ── Menu ──────────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(DmCb.filter(F.action == "menu"))
-async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cb_dm_menu(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
     # Clear any lingering FSM state (e.g. user pressed "cancel" mid-wizard)
     await state.clear()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
-        await _edit(callback, locked_text("DM-кампании", "enterprise"), subscription_locked_markup("enterprise", back_callback=BmCb(action="main")))
+        await _edit(
+            callback,
+            locked_text("DM-кампании", "enterprise"),
+            subscription_locked_markup("enterprise", back_callback=BmCb(action="main")),
+        )
         return
     await callback.answer()
 
@@ -87,13 +93,20 @@ async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
             f"   📤 {sent}/{total} ({pct}%) | ❌ {fail}"
         )
         # Row: detail + quick action
-        kb.button(text=f"{icon} {c['name'][:20]}", callback_data=DmCb(action="detail", campaign_id=c["id"]))
+        kb.button(
+            text=f"{icon} {c['name'][:20]}",
+            callback_data=DmCb(action="detail", campaign_id=c["id"]),
+        )
         if c["status"] == "running":
             kb.button(text="⏸", callback_data=DmCb(action="pause", campaign_id=c["id"]))
         elif c["status"] in ("paused", "draft"):
-            kb.button(text="▶️", callback_data=DmCb(action="resume", campaign_id=c["id"]))
+            kb.button(
+                text="▶️", callback_data=DmCb(action="resume", campaign_id=c["id"])
+            )
         else:
-            kb.button(text="🗑", callback_data=DmCb(action="delete", campaign_id=c["id"]))
+            kb.button(
+                text="🗑", callback_data=DmCb(action="delete", campaign_id=c["id"])
+            )
 
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     # Adjust: [new], then [detail, action] pairs, then [back]
@@ -125,6 +138,7 @@ async def cb_dm_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
 
 # ── Create — Step 1: name ─────────────────────────────────────────────────────
 
+
 @router.callback_query(DmCb.filter(F.action == "new"))
 async def cb_dm_new(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -132,8 +146,7 @@ async def cb_dm_new(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
     await callback.message.answer(
-        "📨 <b>Новая DM-кампания</b>\n\n"
-        "Введите <b>название</b> кампании:",
+        "📨 <b>Новая DM-кампания</b>\n\nВведите <b>название</b> кампании:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -167,16 +180,24 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
     if not text.strip():
         _cancel_kb = InlineKeyboardBuilder()
         _cancel_kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
-        await message.answer("⚠️ Текст не может быть пустым:", reply_markup=_cancel_kb.as_markup())
+        await message.answer(
+            "⚠️ Текст не может быть пустым:", reply_markup=_cancel_kb.as_markup()
+        )
         return
     await state.update_data(dm_text=text.strip())
     await state.set_state(DmCampaignFSM.choosing_target)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Все подписчики бота", callback_data=DmCb(action="target_type", campaign_id=0))
-    kb.button(text="🎯 По когорте (активность)", callback_data=DmCb(action="target_cohort_bot"))
-    kb.button(text="👥 CRM-контакты",           callback_data=DmCb(action="target_crm"))
-    kb.button(text="❌ Отмена",                 callback_data=DmCb(action="menu"))
+    kb.button(
+        text="🤖 Все подписчики бота",
+        callback_data=DmCb(action="target_type", campaign_id=0),
+    )
+    kb.button(
+        text="🎯 По когорте (активность)",
+        callback_data=DmCb(action="target_cohort_bot"),
+    )
+    kb.button(text="👥 CRM-контакты", callback_data=DmCb(action="target_crm"))
+    kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
     kb.adjust(1)
     await message.answer(
         "👥 <b>Выберите аудиторию</b>:\n\n"
@@ -191,6 +212,7 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
 
 
 # ── Create — Step 3a: choose bot for bot_users ────────────────────────────────
+
 
 @router.callback_query(DmCb.filter(F.action == "target_type"))
 async def cb_dm_target_bot(
@@ -211,7 +233,10 @@ async def cb_dm_target_bot(
     kb = InlineKeyboardBuilder()
     for b in bots:
         label = b.get("first_name") or b.get("username") or f"bot_{b['bot_id']}"
-        kb.button(text=f"🤖 {label[:28]}", callback_data=DmCb(action="target_bot_id", campaign_id=b["bot_id"]))
+        kb.button(
+            text=f"🤖 {label[:28]}",
+            callback_data=DmCb(action="target_bot_id", campaign_id=b["bot_id"]),
+        )
     kb.button(text="◀️ Назад", callback_data=DmCb(action="new"))
     kb.adjust(1)
 
@@ -235,6 +260,7 @@ async def cb_dm_target_bot_selected(
 
 
 # ── Create — Step 3c: Cohort targeting ───────────────────────────────────────
+
 
 @router.callback_query(DmCb.filter(F.action == "target_cohort_bot"))
 async def cb_dm_target_cohort_bot(
@@ -290,6 +316,7 @@ async def cb_dm_target_cohort_pick(
     # Count each cohort size
     try:
         from database import db as _db
+
         cohort_stats = await _db.get_activity_segments(pool, bot_id)
     except Exception:
         log_exc_swallow(log, "Ошибка получения статистики когорт для DM-кампании")
@@ -318,7 +345,11 @@ async def cb_dm_target_cohort_pick(
     bot_row = await pool.fetchrow(
         "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", bot_id
     )
-    bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(bot_id)) if bot_row else str(bot_id)
+    bot_label = (
+        (bot_row.get("first_name") or bot_row.get("username") or str(bot_id))
+        if bot_row
+        else str(bot_id)
+    )
 
     await callback.message.edit_text(
         f"🎯 <b>Выберите когорту</b> для бота @{html.escape(bot_label)}:",
@@ -328,7 +359,12 @@ async def cb_dm_target_cohort_pick(
 
 
 _COHORT_TYPES = {0: "hot", 1: "warm", 2: "cold", 3: "lost"}
-_COHORT_LABELS = {"hot": "🔥 Hot", "warm": "🟡 Warm", "cold": "🧊 Cold", "lost": "💀 Lost"}
+_COHORT_LABELS = {
+    "hot": "🔥 Hot",
+    "warm": "🟡 Warm",
+    "cold": "🧊 Cold",
+    "lost": "💀 Lost",
+}
 
 
 @router.callback_query(DmCb.filter(F.action == "target_cohort_set"))
@@ -347,6 +383,7 @@ async def cb_dm_target_cohort_set(
 
 # ── Create — Step 3b: CRM ─────────────────────────────────────────────────────
 
+
 @router.callback_query(DmCb.filter(F.action == "target_crm"))
 async def cb_dm_target_crm(
     callback: CallbackQuery,
@@ -359,6 +396,7 @@ async def cb_dm_target_crm(
 
 
 # ── Preview & Confirm ─────────────────────────────────────────────────────────
+
 
 async def _show_dm_preview(
     callback: CallbackQuery,
@@ -384,28 +422,39 @@ async def _show_dm_preview(
             "SELECT first_name, username FROM managed_bots WHERE bot_id=$1",
             target_id,
         )
-        bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(target_id)) if bot_row else str(target_id)
+        bot_label = (
+            (bot_row.get("first_name") or bot_row.get("username") or str(target_id))
+            if bot_row
+            else str(target_id)
+        )
         recipients_count = int(count_row["cnt"] or 0)
         audience_str = f"Все подписчики @{bot_label}: <b>{recipients_count}</b>"
     elif target_type == "cohort" and target_id:
         cohort_sql = {
-            "hot":  "last_seen >= now() - INTERVAL '1 day'",
+            "hot": "last_seen >= now() - INTERVAL '1 day'",
             "warm": "last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
             "cold": "last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
             "lost": "last_seen < now() - INTERVAL '30 days'",
         }.get(cohort_type, "last_seen >= now() - INTERVAL '7 days'")
         try:
-            cnt = await pool.fetchval(
-                f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
-                target_id,
-            ) or 0
+            cnt = (
+                await pool.fetchval(
+                    f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
+                    target_id,
+                )
+                or 0
+            )
         except Exception:
             log_exc_swallow(log, "Ошибка подсчёта размера когорты для DM-кампании")
             cnt = 0
         bot_row = await pool.fetchrow(
             "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", target_id
         )
-        bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(target_id)) if bot_row else str(target_id)
+        bot_label = (
+            (bot_row.get("first_name") or bot_row.get("username") or str(target_id))
+            if bot_row
+            else str(target_id)
+        )
         cohort_label = _COHORT_LABELS.get(cohort_type, cohort_type)
         recipients_count = int(cnt)
         audience_str = f"{cohort_label} когорта @{bot_label}: <b>{cnt}</b>"
@@ -418,12 +467,16 @@ async def _show_dm_preview(
         audience_str = f"CRM-контакты: <b>{recipients_count}</b>"
 
     from services.dm_engine import expand_spintax
+
     preview_text = expand_spintax(text)
 
     # Intelligence block
     try:
         intel = await intelligence_engine.get_pre_launch_intelligence(
-            pool, callback.from_user.id, "dm_campaign", recipients_count,
+            pool,
+            callback.from_user.id,
+            "dm_campaign",
+            recipients_count,
         )
         intel_text = "\n\n" + intelligence_engine.format_pre_launch_block(intel)
     except Exception:
@@ -440,9 +493,9 @@ async def _show_dm_preview(
         lines.append(intel_text)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🚀 Запустить",  callback_data=DmCb(action="launch"))
+    kb.button(text="🚀 Запустить", callback_data=DmCb(action="launch"))
     kb.button(text="💾 Сохранить как черновик", callback_data=DmCb(action="save_draft"))
-    kb.button(text="❌ Отмена",     callback_data=DmCb(action="menu"))
+    kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
     kb.adjust(1)
     await _edit(callback, "\n".join(lines), kb.as_markup())
 
@@ -468,29 +521,41 @@ async def cb_dm_launch_or_draft(
         try:
             audience_cnt = 0
             if target_type == "bot_users" and target_id:
-                audience_cnt = await pool.fetchval(
-                    "SELECT COUNT(DISTINCT user_id) FROM bot_users WHERE bot_id=$1 AND user_id > 0",
-                    target_id,
-                ) or 0
+                audience_cnt = (
+                    await pool.fetchval(
+                        "SELECT COUNT(DISTINCT user_id) FROM bot_users WHERE bot_id=$1 AND user_id > 0",
+                        target_id,
+                    )
+                    or 0
+                )
             elif target_type == "cohort" and target_id:
                 cohort_sql = {
-                    "hot":  "last_seen >= now() - INTERVAL '1 day'",
+                    "hot": "last_seen >= now() - INTERVAL '1 day'",
                     "warm": "last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
                     "cold": "last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
                     "lost": "last_seen < now() - INTERVAL '30 days'",
                 }.get(cohort_type, "last_seen >= now() - INTERVAL '7 days'")
-                audience_cnt = await pool.fetchval(
-                    f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
-                    target_id,
-                ) or 0
+                audience_cnt = (
+                    await pool.fetchval(
+                        f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
+                        target_id,
+                    )
+                    or 0
+                )
             elif target_type == "crm":
-                audience_cnt = await pool.fetchval(
-                    "SELECT COUNT(DISTINCT tg_user_id) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
-                    callback.from_user.id,
-                ) or 0
+                audience_cnt = (
+                    await pool.fetchval(
+                        "SELECT COUNT(DISTINCT tg_user_id) FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
+                        callback.from_user.id,
+                    )
+                    or 0
+                )
             if audience_cnt == 0:
                 _empty_kb = InlineKeyboardBuilder()
-                _empty_kb.button(text="💾 Сохранить как черновик", callback_data=DmCb(action="save_draft"))
+                _empty_kb.button(
+                    text="💾 Сохранить как черновик",
+                    callback_data=DmCb(action="save_draft"),
+                )
                 _empty_kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
                 _empty_kb.adjust(1)
                 await _edit(
@@ -505,6 +570,7 @@ async def cb_dm_launch_or_draft(
             log_exc_swallow(log, "Ошибка проверки аудитории перед запуском DM-кампании")
 
     import json as _json
+
     params_dict = {}
     if cohort_type:
         params_dict["cohort_type"] = cohort_type
@@ -513,17 +579,31 @@ async def cb_dm_launch_or_draft(
     campaign_id = await pool.fetchval(
         "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, params) "
         "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id",
-        callback.from_user.id, name, text, target_type, target_id, initial_status,
+        callback.from_user.id,
+        name,
+        text,
+        target_type,
+        target_id,
+        initial_status,
         _json.dumps(params_dict) if params_dict else "{}",
     )
     await state.clear()
 
     if status == "running":
         from services import infra_orchestrator
-        ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+
+        ready, reason = await infra_orchestrator.is_ready_for_op(
+            pool, callback.from_user.id
+        )
         if not ready:
             await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
-            await _edit(callback, f"⚠️ {reason}\n\nКампания не запущена.", InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=DmCb(action="menu")).as_markup())
+            await _edit(
+                callback,
+                f"⚠️ {reason}\n\nКампания не запущена.",
+                InlineKeyboardBuilder()
+                .button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+                .as_markup(),
+            )
             return
         await pool.execute(
             "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
@@ -531,9 +611,14 @@ async def cb_dm_launch_or_draft(
         )
         # Запустить асинхронно уже после установки статуса
         _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
-        _treg.register(callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t)
+        _treg.register(
+            callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t
+        )
         _launch_kb = InlineKeyboardBuilder()
-        _launch_kb.button(text="📋 Детали кампании", callback_data=DmCb(action="detail", campaign_id=campaign_id))
+        _launch_kb.button(
+            text="📋 Детали кампании",
+            callback_data=DmCb(action="detail", campaign_id=campaign_id),
+        )
         _launch_kb.button(text="◀️ К кампаниям", callback_data=DmCb(action="menu"))
         _launch_kb.adjust(1)
         await _edit(
@@ -546,7 +631,10 @@ async def cb_dm_launch_or_draft(
         )
     else:
         _draft_kb = InlineKeyboardBuilder()
-        _draft_kb.button(text="📋 Детали кампании", callback_data=DmCb(action="detail", campaign_id=campaign_id))
+        _draft_kb.button(
+            text="📋 Детали кампании",
+            callback_data=DmCb(action="detail", campaign_id=campaign_id),
+        )
         _draft_kb.button(text="◀️ К кампаниям", callback_data=DmCb(action="menu"))
         _draft_kb.adjust(1)
         await _edit(
@@ -560,6 +648,7 @@ async def cb_dm_launch_or_draft(
 
 async def _launch_campaign(pool: asyncpg.Pool, bot, campaign_id: int) -> None:
     from services.dm_engine import run_campaign
+
     try:
         await run_campaign(pool, bot, campaign_id)
     except asyncio.CancelledError:
@@ -576,6 +665,7 @@ async def _launch_campaign(pool: asyncpg.Pool, bot, campaign_id: int) -> None:
 
 # ── Detail ────────────────────────────────────────────────────────────────────
 
+
 @router.callback_query(DmCb.filter(F.action == "detail"))
 async def cb_dm_detail(
     callback: CallbackQuery,
@@ -584,7 +674,8 @@ async def cb_dm_detail(
 ) -> None:
     c = await pool.fetchrow(
         "SELECT * FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
-        callback_data.campaign_id, callback.from_user.id,
+        callback_data.campaign_id,
+        callback.from_user.id,
     )
     if not c:
         await callback.answer("Кампания не найдена", show_alert=True)
@@ -606,7 +697,7 @@ async def cb_dm_detail(
         f"<b>📨 {html.escape(c['name'])}</b>\n",
         f"Статус: {icon} {status_label}",
         f"Аудитория: <b>{c['target_type']}</b>",
-        f"\n📊 Прогресс:",
+        "\n📊 Прогресс:",
         f"• Отправлено: <b>{sent}</b> / {total} ({pct}%)",
         f"• Ошибок: <b>{failed}</b>",
         f"\n🕐 Старт: {started}",
@@ -622,12 +713,22 @@ async def cb_dm_detail(
 
     kb = InlineKeyboardBuilder()
     if status == "running":
-        kb.button(text="🔄 Обновить", callback_data=DmCb(action="detail", campaign_id=c["id"]))
-        kb.button(text="⏸️ Поставить на паузу", callback_data=DmCb(action="pause", campaign_id=c["id"]))
+        kb.button(
+            text="🔄 Обновить", callback_data=DmCb(action="detail", campaign_id=c["id"])
+        )
+        kb.button(
+            text="⏸️ Поставить на паузу",
+            callback_data=DmCb(action="pause", campaign_id=c["id"]),
+        )
     elif status in ("paused", "draft"):
-        kb.button(text="▶️ Запустить/продолжить", callback_data=DmCb(action="resume", campaign_id=c["id"]))
+        kb.button(
+            text="▶️ Запустить/продолжить",
+            callback_data=DmCb(action="resume", campaign_id=c["id"]),
+        )
     if status in ("done", "failed"):
-        kb.button(text="🗑️ Удалить", callback_data=DmCb(action="delete", campaign_id=c["id"]))
+        kb.button(
+            text="🗑️ Удалить", callback_data=DmCb(action="delete", campaign_id=c["id"])
+        )
     kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
     kb.adjust(1)
     await _edit(callback, "\n".join(lines), kb.as_markup())
@@ -650,7 +751,8 @@ async def cb_dm_pause(
             break
     await pool.execute(
         "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
-        campaign_id, callback.from_user.id,
+        campaign_id,
+        callback.from_user.id,
     )
     await cb_dm_detail(callback, callback_data, pool)
 
@@ -666,10 +768,13 @@ async def cb_dm_resume(
     # Update DB status before creating task (same ordering as initial launch)
     await pool.execute(
         "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
-        campaign_id, callback.from_user.id,
+        campaign_id,
+        callback.from_user.id,
     )
     _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
-    _treg.register(callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t)
+    _treg.register(
+        callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t
+    )
     await cb_dm_detail(callback, callback_data, pool)
 
 
@@ -683,6 +788,7 @@ async def cb_dm_delete(
     await callback.answer("🗑️ Удалено")
     await pool.execute(
         "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
-        callback_data.campaign_id, callback.from_user.id,
+        callback_data.campaign_id,
+        callback.from_user.id,
     )
     await cb_dm_menu(callback, pool, state)

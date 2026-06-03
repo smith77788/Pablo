@@ -11,12 +11,10 @@ import logging
 
 import asyncpg
 from aiogram import F, Router
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import CleanerCb, BmCb
-from bot.states import CleanerFSM
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -206,9 +204,12 @@ async def cb_confirm_leave(
 
     # Guard: check for managed assets associated with this account
     try:
-        asset_count = await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels WHERE acc_id=$1", acc_id
-        ) or 0
+        asset_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE acc_id=$1", acc_id
+            )
+            or 0
+        )
     except Exception:
         asset_count = 0
 
@@ -233,11 +234,14 @@ async def cb_confirm_leave(
 
     # Guard: check for active operations in queue
     try:
-        active_ops = await pool.fetchval(
-            """SELECT COUNT(*) FROM operation_queue
+        active_ops = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM operation_queue
                WHERE owner_id=$1 AND status IN ('pending', 'running')""",
-            callback.from_user.id,
-        ) or 0
+                callback.from_user.id,
+            )
+            or 0
+        )
     except Exception:
         active_ops = 0
 

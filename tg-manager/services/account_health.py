@@ -19,7 +19,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 import asyncpg
 
@@ -271,20 +270,23 @@ async def _persist_health_snapshots(pool: asyncpg.Pool) -> int:
         return 0
 
     import json as _json
+
     batch = []
     for acc_id, health in _health_cache.items():
-        batch.append((
-            acc_id,
-            0,  # owner_id будет заполнен из БД через ON CONFLICT или отдельным запросом
-            round(health.health_score, 2),
-            round(health.load_score, 2),
-            0.0,  # trust_score — заполнится ниже
-            health.flood_events_7d,
-            health.success_ops,
-            health.fail_ops,
-            health.warmup_state.value,
-            _json.dumps(health.suitability),
-        ))
+        batch.append(
+            (
+                acc_id,
+                0,  # owner_id будет заполнен из БД через ON CONFLICT или отдельным запросом
+                round(health.health_score, 2),
+                round(health.load_score, 2),
+                0.0,  # trust_score — заполнится ниже
+                health.flood_events_7d,
+                health.success_ops,
+                health.fail_ops,
+                health.warmup_state.value,
+                _json.dumps(health.suitability),
+            )
+        )
 
     if not batch:
         return 0
@@ -311,12 +313,24 @@ async def _persist_health_snapshots(pool: asyncpg.Pool) -> int:
                        (account_id, owner_id, health_score, load_score, trust_score,
                         flood_events_7d, success_ops, fail_ops, warmup_state, suitability)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)""",
-                acc_id, owner_id, item[2], item[3], trust_score,
-                item[5], item[6], item[7], item[8], item[9],
+                acc_id,
+                owner_id,
+                item[2],
+                item[3],
+                trust_score,
+                item[5],
+                item[6],
+                item[7],
+                item[8],
+                item[9],
             )
             written += 1
         except Exception:
-            log_exc_swallow(log, "Сбой записи health-снапшота — таблица может ещё не существовать", account_id=acc_id)
+            log_exc_swallow(
+                log,
+                "Сбой записи health-снапшота — таблица может ещё не существовать",
+                account_id=acc_id,
+            )
 
     return written
 
@@ -358,12 +372,16 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
     if not accounts:
         return
 
-    log.info("account_health: spambot check cycle — %d accounts to check", len(accounts))
+    log.info(
+        "account_health: spambot check cycle — %d accounts to check", len(accounts)
+    )
 
     for acc in accounts:
         try:
             result = await asyncio.wait_for(
-                check_account_status_full(acc["session_str"], dict(acc), check_spambot=True),
+                check_account_status_full(
+                    acc["session_str"], dict(acc), check_spambot=True
+                ),
                 timeout=30.0,
             )
             status = result.get("status", "active")
@@ -377,17 +395,20 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
             if status in ("active", "spamblock", "cooldown"):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
-                    status, acc["id"],
+                    status,
+                    acc["id"],
                 )
             elif status in ("banned", "deactivated") and auth_error:
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
-                    status, acc["id"],
+                    status,
+                    acc["id"],
                 )
             elif status == "session_expired" and auth_error:
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
-                    status, acc["id"],
+                    status,
+                    acc["id"],
                 )
             else:
                 # Любой спорный статус — только обновляем время проверки, не меняем acc_status
@@ -407,11 +428,17 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
                 await pool.execute(
                     "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
                 )
-                log.warning("account_health: acc=%d deactivated status=%s (auth_error)", acc["id"], status)
+                log.warning(
+                    "account_health: acc=%d deactivated status=%s (auth_error)",
+                    acc["id"],
+                    status,
+                )
         except asyncio.TimeoutError:
             log.debug("account_health: spambot check timeout acc=%d", acc["id"])
         except Exception as e:
-            log_exc_swallow(log, "account_health spambot check acc=%d: %s", acc["id"], e)
+            log_exc_swallow(
+                log, "account_health spambot check acc=%d: %s", acc["id"], e
+            )
 
         await asyncio.sleep(3)  # небольшая пауза между аккаунтами
 

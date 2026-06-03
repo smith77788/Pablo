@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
@@ -22,16 +22,20 @@ router = Router()
 async def _record_reentry_safe(pool, uid: int, days_absent: float) -> None:
     try:
         from services import behavioral_engine
+
         await behavioral_engine.record_reentry(pool, uid, "platform", uid, days_absent)
     except Exception as e:
         log.debug("record_reentry failed: %s", e)
+
 
 BUILD_VERSION = "2026.06.03-r33"
 
 
 @router.message(Command("version"))
 async def cmd_version(message: Message) -> None:
-    await message.answer(f"🔖 <b>BotMother OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML")
+    await message.answer(
+        f"🔖 <b>BotMother OS</b> build <code>{BUILD_VERSION}</code>", parse_mode="HTML"
+    )
 
 
 @router.message(Command("cancel"))
@@ -56,7 +60,9 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
     uid = message.from_user.id
     admin = is_platform_admin(uid)
     try:
-        blocked = await pool.fetchval("SELECT 1 FROM blocked_users WHERE user_id=$1", uid)
+        blocked = await pool.fetchval(
+            "SELECT 1 FROM blocked_users WHERE user_id=$1", uid
+        )
         if blocked:
             await message.answer("⛔️ Ваш аккаунт заблокирован. Обратитесь в поддержку.")
             return
@@ -75,7 +81,9 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
         )
         if is_new:
             await notify_new_platform_user(
-                message.bot, pool, uid,
+                message.bot,
+                pool,
+                uid,
                 message.from_user.username,
                 message.from_user.first_name or "",
             )
@@ -86,9 +94,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
                 last = last.replace(tzinfo=timezone.utc)
             days_absent = (datetime.now(timezone.utc) - last).total_seconds() / 86400
             if days_absent >= 7:
-                asyncio.create_task(
-                    _record_reentry_safe(pool, uid, days_absent)
-                )
+                asyncio.create_task(_record_reentry_safe(pool, uid, days_absent))
     except Exception:
         log_exc_swallow(log, "Не удалось зарегистрировать или обновить пользователя")
 
@@ -139,10 +145,13 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
     active_broadcasts = 0
     try:
         bot_ids = [b["bot_id"] for b in bots]
-        active_broadcasts = await pool.fetchval(
-            "SELECT COUNT(*) FROM broadcasts WHERE bot_id = ANY($1::bigint[]) AND status IN ('pending', 'running')",
-            bot_ids,
-        ) or 0
+        active_broadcasts = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM broadcasts WHERE bot_id = ANY($1::bigint[]) AND status IN ('pending', 'running')",
+                bot_ids,
+            )
+            or 0
+        )
     except Exception:
         log_exc_swallow(log, "Не удалось получить количество активных рассылок")
         active_broadcasts = 0
@@ -178,6 +187,7 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     emoji = PLAN_EMOJIS.get(plan, "🆓")
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
 
@@ -203,7 +213,9 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"<b>🌐 Сеть &amp; операции</b> — управление всеми ботами сразу\n"
         f"<b>📡 Операции с аккаунтами</b> — через личный Telegram-аккаунт"
     )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.message(Command("help"))
@@ -237,4 +249,6 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
         f"<b>📡 Операции с аккаунтами</b> — через личный Telegram-аккаунт\n\n"
         f"💡 Все функции с замком 🔒 открываются через /subscription"
     )
-    await message.answer(text, parse_mode="HTML", reply_markup=main_menu(is_admin=admin))
+    await message.answer(
+        text, parse_mode="HTML", reply_markup=main_menu(is_admin=admin)
+    )

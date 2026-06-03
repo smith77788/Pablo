@@ -38,13 +38,15 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             (r.get("first_name") or r.get("phone") or f"id{r['id']}")
             for r in cooling_long[:3]
         )
-        recs.append({
-            "severity": "warning",
-            "icon": "⏳",
-            "title": f"Долгий кулдаун: {len(cooling_long)} аккаунт(ов)",
-            "text": f"Аккаунты {names} и другие заблокированы флудом на >6 часов. Снизьте интенсивность операций.",
-            "action": "accounts",
-        })
+        recs.append(
+            {
+                "severity": "warning",
+                "icon": "⏳",
+                "title": f"Долгий кулдаун: {len(cooling_long)} аккаунт(ов)",
+                "text": f"Аккаунты {names} и другие заблокированы флудом на >6 часов. Снизьте интенсивность операций.",
+                "action": "accounts",
+            }
+        )
 
     # 2. Accounts with many flood events (last 7d > 10)
     flood_heavy = await pool.fetch(
@@ -57,13 +59,15 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     if flood_heavy:
         worst = flood_heavy[0]
         name = worst.get("first_name") or worst.get("phone") or f"id{worst['id']}"
-        recs.append({
-            "severity": "warning",
-            "icon": "🌊",
-            "title": f"Высокая флуд-активность: {len(flood_heavy)} аккаунт(ов)",
-            "text": f"Аккаунт {name} получил {worst['flood_count_7d']} флудов за 7 дней. Аккаунт перегружен — дайте ему отдохнуть.",
-            "action": "accounts",
-        })
+        recs.append(
+            {
+                "severity": "warning",
+                "icon": "🌊",
+                "title": f"Высокая флуд-активность: {len(flood_heavy)} аккаунт(ов)",
+                "text": f"Аккаунт {name} получил {worst['flood_count_7d']} флудов за 7 дней. Аккаунт перегружен — дайте ему отдохнуть.",
+                "action": "accounts",
+            }
+        )
 
     # 3. Low trust accounts still in rotation
     low_trust = await pool.fetch(
@@ -78,13 +82,15 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             (r.get("first_name") or r.get("phone") or f"id{r['id']}")
             for r in low_trust[:3]
         )
-        recs.append({
-            "severity": "critical",
-            "icon": "🚨",
-            "title": f"Низкое доверие: {len(low_trust)} аккаунт(ов)",
-            "text": f"Аккаунты {names} имеют trust_score < 0.3. Используйте их для некритичных операций или разогрейте.",
-            "action": "warmup",
-        })
+        recs.append(
+            {
+                "severity": "critical",
+                "icon": "🚨",
+                "title": f"Низкое доверие: {len(low_trust)} аккаунт(ов)",
+                "text": f"Аккаунты {names} имеют trust_score < 0.3. Используйте их для некритичных операций или разогрейте.",
+                "action": "warmup",
+            }
+        )
 
     # 4. Restricted/banned accounts not cleaned up
     restricted = await pool.fetch(
@@ -96,13 +102,15 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         owner_id,
     )
     if restricted:
-        recs.append({
-            "severity": "critical",
-            "icon": "🚫",
-            "title": f"Проблемные аккаунты: {len(restricted)} шт",
-            "text": f"Есть аккаунты со статусом spamblock/banned/deactivated, которые всё ещё числятся активными. Очистите их.",
-            "action": "cleaner",
-        })
+        recs.append(
+            {
+                "severity": "critical",
+                "icon": "🚫",
+                "title": f"Проблемные аккаунты: {len(restricted)} шт",
+                "text": "Есть аккаунты со статусом spamblock/banned/deactivated, которые всё ещё числятся активными. Очистите их.",
+                "action": "cleaner",
+            }
+        )
 
     # 5. All accounts in one pool / no pool diversity
     pool_stats = await pool.fetch(
@@ -112,13 +120,15 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     null_pool_count = sum(r["cnt"] for r in pool_stats if r["pool"] is None)
     total_acc = sum(r["cnt"] for r in pool_stats)
     if total_acc >= 3 and null_pool_count == total_acc:
-        recs.append({
-            "severity": "info",
-            "icon": "🏊",
-            "title": "Аккаунты не распределены по пулам",
-            "text": "Назначьте аккаунтам пулы (strike, warmup, publish и т.д.) для умного распределения нагрузки.",
-            "action": "accounts",
-        })
+        recs.append(
+            {
+                "severity": "info",
+                "icon": "🏊",
+                "title": "Аккаунты не распределены по пулам",
+                "text": "Назначьте аккаунтам пулы (strike, warmup, publish и т.д.) для умного распределения нагрузки.",
+                "action": "accounts",
+            }
+        )
 
     # 6. Proxy failure rate high
     proxy_stats = await pool.fetch(
@@ -134,13 +144,15 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     )
     if proxy_stats:
         names = ", ".join(r["label"] or f"proxy#{r['id']}" for r in proxy_stats[:3])
-        recs.append({
-            "severity": "warning",
-            "icon": "🌐",
-            "title": f"Нестабильные прокси: {len(proxy_stats)} шт",
-            "text": f"Прокси {names} имеют >30% ошибок за последние 7 дней. Замените или проверьте их.",
-            "action": "proxies",
-        })
+        recs.append(
+            {
+                "severity": "warning",
+                "icon": "🌐",
+                "title": f"Нестабильные прокси: {len(proxy_stats)} шт",
+                "text": f"Прокси {names} имеют >30% ошибок за последние 7 дней. Замените или проверьте их.",
+                "action": "proxies",
+            }
+        )
 
     # 7. Operation queue stale (stuck running for > 2h)
     stale_ops = await pool.fetch(
@@ -151,26 +163,31 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     )
     stale_cnt = (stale_ops[0]["cnt"] if stale_ops else 0) or 0
     if stale_cnt > 0:
-        recs.append({
-            "severity": "warning",
-            "icon": "🔄",
-            "title": f"Зависшие операции: {stale_cnt} шт",
-            "text": "Есть операции в статусе 'running' более 2 часов. Возможно, они зависли — проверьте очередь.",
-            "action": "tasks",
-        })
+        recs.append(
+            {
+                "severity": "warning",
+                "icon": "🔄",
+                "title": f"Зависшие операции: {stale_cnt} шт",
+                "text": "Есть операции в статусе 'running' более 2 часов. Возможно, они зависли — проверьте очередь.",
+                "action": "tasks",
+            }
+        )
 
     # 8. No active accounts at all
     active_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", owner_id
+        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+        owner_id,
     )
     if (active_count or 0) == 0:
-        recs.append({
-            "severity": "critical",
-            "icon": "📱",
-            "title": "Нет активных аккаунтов",
-            "text": "Добавьте хотя бы один аккаунт Telegram для использования операционных функций.",
-            "action": "accounts",
-        })
+        recs.append(
+            {
+                "severity": "critical",
+                "icon": "📱",
+                "title": "Нет активных аккаунтов",
+                "text": "Добавьте хотя бы один аккаунт Telegram для использования операционных функций.",
+                "action": "accounts",
+            }
+        )
 
     # 9. Accounts with poor memory performance (persistent failures from infra_memory_accounts)
     try:
@@ -190,35 +207,41 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         if poor_memory:
             names = ", ".join(r["label"] for r in poor_memory[:3])
             worst_rate = int((poor_memory[0]["success_rate"] or 0) * 100)
-            recs.append({
-                "severity": "warning",
-                "icon": "📉",
-                "title": f"Хроническая низкая эффективность: {len(poor_memory)} акк",
-                "text": (
-                    f"Аккаунты {names} успешно выполняют <{worst_rate}% операций на основе "
-                    f"исторических данных. Рекомендуется разогрев или исключение из активных операций."
-                ),
-                "action": "warmup",
-            })
+            recs.append(
+                {
+                    "severity": "warning",
+                    "icon": "📉",
+                    "title": f"Хроническая низкая эффективность: {len(poor_memory)} акк",
+                    "text": (
+                        f"Аккаунты {names} успешно выполняют <{worst_rate}% операций на основе "
+                        f"исторических данных. Рекомендуется разогрев или исключение из активных операций."
+                    ),
+                    "action": "warmup",
+                }
+            )
     except Exception:
         pass
 
     # 10. Pool concentration — one named pool has >80% of all accounts (uneven distribution)
     try:
         if total_acc >= 4:
-            named_pools = [(r["pool"], r["cnt"]) for r in pool_stats if r["pool"] is not None]
+            named_pools = [
+                (r["pool"], r["cnt"]) for r in pool_stats if r["pool"] is not None
+            ]
             for pool_name, cnt in named_pools:
                 if cnt / total_acc > 0.80:
-                    recs.append({
-                        "severity": "info",
-                        "icon": "⚖️",
-                        "title": f"Дисбаланс пулов: {pool_name!r} перегружен",
-                        "text": (
-                            f"{cnt} из {total_acc} активных аккаунтов в пуле «{pool_name}». "
-                            f"Распределите аккаунты по нескольким пулам для снижения точки отказа."
-                        ),
-                        "action": "accounts",
-                    })
+                    recs.append(
+                        {
+                            "severity": "info",
+                            "icon": "⚖️",
+                            "title": f"Дисбаланс пулов: {pool_name!r} перегружен",
+                            "text": (
+                                f"{cnt} из {total_acc} активных аккаунтов в пуле «{pool_name}». "
+                                f"Распределите аккаунты по нескольким пулам для снижения точки отказа."
+                            ),
+                            "action": "accounts",
+                        }
+                    )
                     break
     except Exception:
         pass
@@ -237,16 +260,18 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         failed_recent = op_totals.get("failed", 0) + op_totals.get("error", 0)
         if total_recent >= 10 and failed_recent / total_recent > 0.45:
             fail_pct = int(failed_recent / total_recent * 100)
-            recs.append({
-                "severity": "warning",
-                "icon": "📛",
-                "title": f"Всплеск ошибок операций: {fail_pct}% за 48ч",
-                "text": (
-                    f"{failed_recent} из {total_recent} последних операций завершились неудачей. "
-                    f"Возможна перегрузка аккаунтов или проблемы с прокси."
-                ),
-                "action": "tasks",
-            })
+            recs.append(
+                {
+                    "severity": "warning",
+                    "icon": "📛",
+                    "title": f"Всплеск ошибок операций: {fail_pct}% за 48ч",
+                    "text": (
+                        f"{failed_recent} из {total_recent} последних операций завершились неудачей. "
+                        f"Возможна перегрузка аккаунтов или проблемы с прокси."
+                    ),
+                    "action": "tasks",
+                }
+            )
     except Exception:
         pass
 
@@ -263,16 +288,18 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                 owner_id,
             )
             if (no_proxy_accs or 0) > 0:
-                recs.append({
-                    "severity": "info",
-                    "icon": "🔌",
-                    "title": f"Аккаунты без прокси: {no_proxy_accs} шт",
-                    "text": (
-                        f"У вас настроены прокси, но {no_proxy_accs} аккаунт(ов) работают без них. "
-                        f"Назначьте прокси для защиты реального IP."
-                    ),
-                    "action": "proxies",
-                })
+                recs.append(
+                    {
+                        "severity": "info",
+                        "icon": "🔌",
+                        "title": f"Аккаунты без прокси: {no_proxy_accs} шт",
+                        "text": (
+                            f"У вас настроены прокси, но {no_proxy_accs} аккаунт(ов) работают без них. "
+                            f"Назначьте прокси для защиты реального IP."
+                        ),
+                        "action": "proxies",
+                    }
+                )
     except Exception:
         pass
 
@@ -291,16 +318,18 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         )
         if idle_high_trust:
             names = ", ".join(r["label"] for r in idle_high_trust[:3])
-            recs.append({
-                "severity": "info",
-                "icon": "💤",
-                "title": f"Неиспользуемые надёжные аккаунты: {len(idle_high_trust)} шт",
-                "text": (
-                    f"Аккаунты {names} имеют высокий trust_score, но не использовались >7 дней. "
-                    f"Включите их в операции для максимальной эффективности."
-                ),
-                "action": "accounts",
-            })
+            recs.append(
+                {
+                    "severity": "info",
+                    "icon": "💤",
+                    "title": f"Неиспользуемые надёжные аккаунты: {len(idle_high_trust)} шт",
+                    "text": (
+                        f"Аккаунты {names} имеют высокий trust_score, но не использовались >7 дней. "
+                        f"Включите их в операции для максимальной эффективности."
+                    ),
+                    "action": "accounts",
+                }
+            )
     except Exception:
         pass
 
@@ -312,6 +341,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
 
 def format_recommendations(recs: list[dict]) -> str:
     import html as _html
+
     if not recs:
         return "✅ <b>Рекомендаций нет</b> — инфраструктура в норме."
     lines = ["🎯 <b>Рекомендации инфраструктуры</b>\n"]

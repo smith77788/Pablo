@@ -37,13 +37,16 @@ async def _send_via_management(
             if retry_after:
                 log.warning(
                     "relay: FloodWait %ds forwarding to operator %d (attempt %d)",
-                    retry_after, operator_id, attempt + 1,
+                    retry_after,
+                    operator_id,
+                    attempt + 1,
                 )
                 await asyncio.sleep(retry_after + 5)
                 continue
             log.warning(
                 "relay: sendMessage not ok for operator %d: %s",
-                operator_id, data.get("description"),
+                operator_id,
+                data.get("description"),
             )
             return None
         except Exception:
@@ -89,7 +92,8 @@ async def _process_bot(
                 _offsets.pop(evict_id, None)
                 log.warning(
                     "relay: _offsets hit cap %d — evicted bot_id=%d",
-                    _MAX_RELAY_SESSIONS, evict_id,
+                    _MAX_RELAY_SESSIONS,
+                    evict_id,
                 )
 
         bot_row = await pool.fetchrow(
@@ -150,10 +154,16 @@ async def _process_bot(
                 try:
                     await pool.execute(
                         "UPDATE bot_users SET phone=$1 WHERE bot_id=$2 AND user_id=$3",
-                        phone, bot_id, user_id,
+                        phone,
+                        bot_id,
+                        user_id,
                     )
                 except Exception:
-                    log.exception("relay: failed to save phone for user %d bot %d", user_id, bot_id)
+                    log.exception(
+                        "relay: failed to save phone for user %d bot %d",
+                        user_id,
+                        bot_id,
+                    )
 
             display_text = text or f"📱 Поделился телефоном: {phone}"
 
@@ -166,7 +176,9 @@ async def _process_bot(
                 f"<i>← Reply здесь чтобы ответить пользователю</i>"
             )
             fwd_msg_id = await _send_via_management(http, operator_id, fwd_text)
-            await db.save_relay_message(pool, session_id, "in", display_text, fwd_msg_id)
+            await db.save_relay_message(
+                pool, session_id, "in", display_text, fwd_msg_id
+            )
 
     except Exception:
         log.exception("Relay error for bot %d", bot_id)
@@ -188,7 +200,11 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     for stale_id in stale:
                         _offsets.pop(stale_id, None)
                     if stale:
-                        log.info("relay: evicted %d stale offset entries: %s", len(stale), stale)
+                        log.info(
+                            "relay: evicted %d stale offset entries: %s",
+                            len(stale),
+                            stale,
+                        )
 
                 await asyncio.gather(
                     *(

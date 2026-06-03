@@ -1,4 +1,5 @@
 """Async Telegram Bot API wrapper for managed (target) bots."""
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -23,8 +24,9 @@ def _sem() -> asyncio.Semaphore:
     return _semaphore
 
 
-async def _call(session: aiohttp.ClientSession, token: str, method: str,
-                **params) -> dict:
+async def _call(
+    session: aiohttp.ClientSession, token: str, method: str, **params
+) -> dict:
     """Call Bot API with automatic retry on network errors and 429/5xx.
 
     Retries up to 3 times with exponential backoff for transient errors.
@@ -37,22 +39,34 @@ async def _call(session: aiohttp.ClientSession, token: str, method: str,
     for attempt in range(_MAX_RETRIES):
         try:
             async with _sem():
-                async with session.post(url, json=payload,
-                                        timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                async with session.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
                     data = await resp.json()
 
             status = data.get("error_code", 0) or resp.status
             if status in _RETRYABLE_STATUSES or not data.get("ok"):
                 if status == 429:
                     retry_after = data.get("parameters", {}).get("retry_after", 5)
-                    log.debug("bot_api %s rate-limited, sleeping %ds (attempt %d/%d)",
-                              method, retry_after, attempt + 1, _MAX_RETRIES)
+                    log.debug(
+                        "bot_api %s rate-limited, sleeping %ds (attempt %d/%d)",
+                        method,
+                        retry_after,
+                        attempt + 1,
+                        _MAX_RETRIES,
+                    )
                     await asyncio.sleep(retry_after)
                     continue
                 if status in (500, 502, 503, 504) and attempt < _MAX_RETRIES - 1:
-                    backoff = _BASE_BACKOFF * (2 ** attempt)
-                    log.debug("bot_api %s HTTP %d, retrying in %.1fs (attempt %d/%d)",
-                              method, status, backoff, attempt + 1, _MAX_RETRIES)
+                    backoff = _BASE_BACKOFF * (2**attempt)
+                    log.debug(
+                        "bot_api %s HTTP %d, retrying in %.1fs (attempt %d/%d)",
+                        method,
+                        status,
+                        backoff,
+                        attempt + 1,
+                        _MAX_RETRIES,
+                    )
                     await asyncio.sleep(backoff)
                     continue
                 # Non-retryable error — return as-is
@@ -62,19 +76,29 @@ async def _call(session: aiohttp.ClientSession, token: str, method: str,
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
             last_error = e
             if attempt < _MAX_RETRIES - 1:
-                backoff = _BASE_BACKOFF * (2 ** attempt)
-                log.debug("bot_api %s network error, retrying in %.1fs: %s",
-                          method, backoff, e)
+                backoff = _BASE_BACKOFF * (2**attempt)
+                log.debug(
+                    "bot_api %s network error, retrying in %.1fs: %s",
+                    method,
+                    backoff,
+                    e,
+                )
                 await asyncio.sleep(backoff)
                 continue
-            log.warning("bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, e)
+            log.warning(
+                "bot_api %s failed after %d retries: %s", method, _MAX_RETRIES, e
+            )
 
     # All retries exhausted
-    return {"ok": False, "error_code": 0,
-            "description": f"Network error after {_MAX_RETRIES} retries: {last_error}"}
+    return {
+        "ok": False,
+        "error_code": 0,
+        "description": f"Network error after {_MAX_RETRIES} retries: {last_error}",
+    }
 
 
 # ── Bot info ──────────────────────────────────────────────────────────────
+
 
 async def get_me(session: aiohttp.ClientSession, token: str) -> dict | None:
     data = await _call(session, token, "getMe")
@@ -83,57 +107,87 @@ async def get_me(session: aiohttp.ClientSession, token: str) -> dict | None:
 
 # ── Profile editing ───────────────────────────────────────────────────────
 
-async def set_name(session: aiohttp.ClientSession, token: str, name: str,
-                   language_code: str = "") -> bool:
-    data = await _call(session, token, "setMyName",
-                       name=name, language_code=language_code or None)
+
+async def set_name(
+    session: aiohttp.ClientSession, token: str, name: str, language_code: str = ""
+) -> bool:
+    data = await _call(
+        session, token, "setMyName", name=name, language_code=language_code or None
+    )
     return data.get("ok", False)
 
 
-async def set_description(session: aiohttp.ClientSession, token: str, description: str,
-                           language_code: str = "") -> bool:
-    data = await _call(session, token, "setMyDescription",
-                       description=description, language_code=language_code or None)
+async def set_description(
+    session: aiohttp.ClientSession,
+    token: str,
+    description: str,
+    language_code: str = "",
+) -> bool:
+    data = await _call(
+        session,
+        token,
+        "setMyDescription",
+        description=description,
+        language_code=language_code or None,
+    )
     return data.get("ok", False)
 
 
-async def set_short_description(session: aiohttp.ClientSession, token: str,
-                                 short_description: str, language_code: str = "") -> bool:
-    data = await _call(session, token, "setMyShortDescription",
-                       short_description=short_description,
-                       language_code=language_code or None)
+async def set_short_description(
+    session: aiohttp.ClientSession,
+    token: str,
+    short_description: str,
+    language_code: str = "",
+) -> bool:
+    data = await _call(
+        session,
+        token,
+        "setMyShortDescription",
+        short_description=short_description,
+        language_code=language_code or None,
+    )
     return data.get("ok", False)
 
 
-async def get_my_name(session: aiohttp.ClientSession, token: str,
-                      language_code: str = "") -> str:
-    data = await _call(session, token, "getMyName",
-                       language_code=language_code or None)
+async def get_my_name(
+    session: aiohttp.ClientSession, token: str, language_code: str = ""
+) -> str:
+    data = await _call(session, token, "getMyName", language_code=language_code or None)
     return data.get("result", {}).get("name", "") if data.get("ok") else ""
 
 
-async def get_my_description(session: aiohttp.ClientSession, token: str,
-                              language_code: str = "") -> str:
-    data = await _call(session, token, "getMyDescription",
-                       language_code=language_code or None)
+async def get_my_description(
+    session: aiohttp.ClientSession, token: str, language_code: str = ""
+) -> str:
+    data = await _call(
+        session, token, "getMyDescription", language_code=language_code or None
+    )
     return data.get("result", {}).get("description", "") if data.get("ok") else ""
 
 
-async def get_my_short_description(session: aiohttp.ClientSession, token: str,
-                                    language_code: str = "") -> str:
-    data = await _call(session, token, "getMyShortDescription",
-                       language_code=language_code or None)
+async def get_my_short_description(
+    session: aiohttp.ClientSession, token: str, language_code: str = ""
+) -> str:
+    data = await _call(
+        session, token, "getMyShortDescription", language_code=language_code or None
+    )
     return data.get("result", {}).get("short_description", "") if data.get("ok") else ""
 
 
-async def set_photo(session: aiohttp.ClientSession, token: str,
-                    photo_bytes: bytes, filename: str = "photo.jpg") -> bool:
+async def set_photo(
+    session: aiohttp.ClientSession,
+    token: str,
+    photo_bytes: bytes,
+    filename: str = "photo.jpg",
+) -> bool:
     """Upload raw photo bytes to the managed bot via multipart form."""
     url = TG.format(token=token, method="setMyPhoto")
     form = aiohttp.FormData()
     form.add_field("photo", photo_bytes, filename=filename, content_type="image/jpeg")
     async with _sem():
-        async with session.post(url, data=form, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        async with session.post(
+            url, data=form, timeout=aiohttp.ClientTimeout(total=30)
+        ) as resp:
             data = await resp.json()
     return data.get("ok", False)
 
@@ -145,9 +199,15 @@ async def delete_my_photo(session: aiohttp.ClientSession, token: str) -> bool:
 
 # ── Webhooks ──────────────────────────────────────────────────────────────
 
+
 async def set_webhook(session: aiohttp.ClientSession, token: str, url: str) -> dict:
-    return await _call(session, token, "setWebhook", url=url,
-                       allowed_updates=["message", "callback_query", "chat_member"])
+    return await _call(
+        session,
+        token,
+        "setWebhook",
+        url=url,
+        allowed_updates=["message", "callback_query", "chat_member"],
+    )
 
 
 async def delete_webhook(session: aiohttp.ClientSession, token: str) -> dict:
@@ -161,14 +221,19 @@ async def get_webhook_info(session: aiohttp.ClientSession, token: str) -> dict:
 
 # ── Audience collection ───────────────────────────────────────────────────
 
+
 async def fetch_updates(session: aiohttp.ClientSession, token: str) -> list[dict]:
     """Pull up to 100 pending updates."""
     data = await _call(session, token, "getUpdates", offset=0, limit=100, timeout=0)
     return data.get("result", []) if data.get("ok") else []
 
 
-async def scan_all_users(session: aiohttp.ClientSession, token: str,
-                          start_offset: int = 0, max_batches: int = 50) -> tuple[list[dict], int]:
+async def scan_all_users(
+    session: aiohttp.ClientSession,
+    token: str,
+    start_offset: int = 0,
+    max_batches: int = 50,
+) -> tuple[list[dict], int]:
     """Scan all available updates and return (users_list, last_update_id).
     Pages through batches of 100. Does advance offset (confirms updates).
     Returns deduplicated user list and the highest update_id seen.
@@ -179,8 +244,14 @@ async def scan_all_users(session: aiohttp.ClientSession, token: str,
     last_id = start_offset
 
     for _ in range(max_batches):
-        data = await _call(session, token, "getUpdates",
-                           offset=offset + 1 if offset else 0, limit=100, timeout=0)
+        data = await _call(
+            session,
+            token,
+            "getUpdates",
+            offset=offset + 1 if offset else 0,
+            limit=100,
+            timeout=0,
+        )
         batch = data.get("result", []) if data.get("ok") else []
         if not batch:
             break
@@ -188,7 +259,11 @@ async def scan_all_users(session: aiohttp.ClientSession, token: str,
             uid_update = upd.get("update_id", 0)
             if uid_update > last_id:
                 last_id = uid_update
-            msg = upd.get("message") or upd.get("edited_message") or upd.get("callback_query")
+            msg = (
+                upd.get("message")
+                or upd.get("edited_message")
+                or upd.get("callback_query")
+            )
             if not msg:
                 continue
             from_user = msg.get("from") or {}
@@ -196,13 +271,15 @@ async def scan_all_users(session: aiohttp.ClientSession, token: str,
             if not uid or uid in seen or from_user.get("is_bot"):
                 continue
             seen.add(uid)
-            users.append({
-                "user_id": uid,
-                "username": from_user.get("username"),
-                "first_name": from_user.get("first_name"),
-                "last_name": from_user.get("last_name"),
-                "language_code": from_user.get("language_code"),
-            })
+            users.append(
+                {
+                    "user_id": uid,
+                    "username": from_user.get("username"),
+                    "first_name": from_user.get("first_name"),
+                    "last_name": from_user.get("last_name"),
+                    "language_code": from_user.get("language_code"),
+                }
+            )
         offset = last_id
         if len(batch) < 100:
             break
@@ -215,7 +292,9 @@ def extract_users_from_updates(updates: list[dict]) -> list[dict]:
     seen: set[int] = set()
     users: list[dict] = []
     for upd in updates:
-        msg = upd.get("message") or upd.get("edited_message") or upd.get("callback_query")
+        msg = (
+            upd.get("message") or upd.get("edited_message") or upd.get("callback_query")
+        )
         if not msg:
             continue
         from_user = msg.get("from") or {}
@@ -223,28 +302,37 @@ def extract_users_from_updates(updates: list[dict]) -> list[dict]:
         if not uid or uid in seen or from_user.get("is_bot"):
             continue
         seen.add(uid)
-        users.append({
-            "user_id": uid,
-            "username": from_user.get("username"),
-            "first_name": from_user.get("first_name"),
-            "last_name": from_user.get("last_name"),
-            "language_code": from_user.get("language_code"),
-        })
+        users.append(
+            {
+                "user_id": uid,
+                "username": from_user.get("username"),
+                "first_name": from_user.get("first_name"),
+                "last_name": from_user.get("last_name"),
+                "language_code": from_user.get("language_code"),
+            }
+        )
     return users
 
 
 # ── Sending ───────────────────────────────────────────────────────────────
 
+
 def _build_inline_keyboard(buttons: list[dict] | None) -> dict | None:
     """Build Telegram inline_keyboard from list of {text, url} dicts."""
     if not buttons:
         return None
-    return {"inline_keyboard": [[{"text": b["text"], "url": b["url"]}] for b in buttons]}
+    return {
+        "inline_keyboard": [[{"text": b["text"], "url": b["url"]}] for b in buttons]
+    }
 
 
-async def send_message(session: aiohttp.ClientSession, token: str,
-                        chat_id: int, text: str,
-                        buttons: list[dict] | None = None) -> tuple[bool, int | None]:
+async def send_message(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+    text: str,
+    buttons: list[dict] | None = None,
+) -> tuple[bool, int | None]:
     """Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     kb = _build_inline_keyboard(buttons)
@@ -260,10 +348,14 @@ async def send_message(session: aiohttp.ClientSession, token: str,
     return False, None
 
 
-async def send_photo(session: aiohttp.ClientSession, token: str,
-                     chat_id: int, photo: str,
-                     caption: str = "",
-                     buttons: list[dict] | None = None) -> tuple[bool, int | None]:
+async def send_photo(
+    session: aiohttp.ClientSession,
+    token: str,
+    chat_id: int,
+    photo: str,
+    caption: str = "",
+    buttons: list[dict] | None = None,
+) -> tuple[bool, int | None]:
     """Send a photo by file_id. Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "photo": photo}
     if caption:
@@ -284,8 +376,10 @@ async def send_photo(session: aiohttp.ClientSession, token: str,
 
 # ── Batch operations ──────────────────────────────────────────────────────
 
-async def batch_get_me(session: aiohttp.ClientSession,
-                        tokens: list[str]) -> dict[str, dict | None]:
+
+async def batch_get_me(
+    session: aiohttp.ClientSession, tokens: list[str]
+) -> dict[str, dict | None]:
     """Call getMe on many bots concurrently. Returns {token: result}."""
     results = await asyncio.gather(
         *(get_me(session, t) for t in tokens), return_exceptions=True
@@ -298,29 +392,47 @@ async def batch_get_me(session: aiohttp.ClientSession,
 
 # ── Commands ──────────────────────────────────────────────────────────────
 
-async def get_my_commands(session: aiohttp.ClientSession, token: str,
-                           language_code: str = "") -> list[dict]:
-    data = await _call(session, token, "getMyCommands",
-                       language_code=language_code or None)
+
+async def get_my_commands(
+    session: aiohttp.ClientSession, token: str, language_code: str = ""
+) -> list[dict]:
+    data = await _call(
+        session, token, "getMyCommands", language_code=language_code or None
+    )
     return data.get("result", []) if data.get("ok") else []
 
 
-async def set_my_commands(session: aiohttp.ClientSession, token: str,
-                           commands: list[dict], language_code: str = "") -> bool:
-    data = await _call(session, token, "setMyCommands",
-                       commands=commands, language_code=language_code or None)
+async def set_my_commands(
+    session: aiohttp.ClientSession,
+    token: str,
+    commands: list[dict],
+    language_code: str = "",
+) -> bool:
+    data = await _call(
+        session,
+        token,
+        "setMyCommands",
+        commands=commands,
+        language_code=language_code or None,
+    )
     return data.get("ok", False)
 
 
-async def delete_my_commands(session: aiohttp.ClientSession, token: str,
-                              language_code: str = "") -> bool:
-    data = await _call(session, token, "deleteMyCommands",
-                       language_code=language_code or None)
+async def delete_my_commands(
+    session: aiohttp.ClientSession, token: str, language_code: str = ""
+) -> bool:
+    data = await _call(
+        session, token, "deleteMyCommands", language_code=language_code or None
+    )
     return data.get("ok", False)
 
 
-async def batch_set_commands(session: aiohttp.ClientSession, tokens: list[str],
-                              commands: list[dict], language_code: str = "") -> tuple[int, int]:
+async def batch_set_commands(
+    session: aiohttp.ClientSession,
+    tokens: list[str],
+    commands: list[dict],
+    language_code: str = "",
+) -> tuple[int, int]:
     """Apply commands to many bots concurrently. Returns (success, failed)."""
     results = await asyncio.gather(
         *(set_my_commands(session, t, commands, language_code) for t in tokens),

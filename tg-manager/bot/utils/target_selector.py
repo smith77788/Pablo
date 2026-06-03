@@ -42,20 +42,23 @@ MAX_PAGE_SIZE = 20
 
 # ── Target data class ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Target:
     """Uniform representation of a selectable entity."""
+
     id: int
-    label: str          # primary display name
+    label: str  # primary display name
     subtitle: str = ""  # secondary line (e.g. audience count, phone, cluster)
     meta: dict = field(default_factory=dict)  # arbitrary extra data (e.g. bot username)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────────
 
+
 def _chunk(items: list, size: int) -> list[list]:
     """Split items into pages of `size`."""
-    return [items[i:i + size] for i in range(0, len(items), size)]
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def _acc_label(acc: dict) -> str:
@@ -68,6 +71,7 @@ def _acc_label(acc: dict) -> str:
 
 
 # ── Main selector class ───────────────────────────────────────────────────────────
+
 
 class TargetSelector:
     """Reusable target selection for bots, accounts, channels, groups."""
@@ -83,8 +87,10 @@ class TargetSelector:
         if active_only:
             rows = [r for r in (rows or []) if r.get("is_active", True)]
         targets = []
-        for bot in (rows or []):
-            label = bot.get("username") or bot.get("first_name") or f"bot_{bot['bot_id']}"
+        for bot in rows or []:
+            label = (
+                bot.get("username") or bot.get("first_name") or f"bot_{bot['bot_id']}"
+            )
             if bot.get("username"):
                 label = f"@{label}"
             subtitle_parts = []
@@ -94,12 +100,17 @@ class TargetSelector:
             audience = bot.get("audience_count", 0)
             if audience:
                 subtitle_parts.append(f"{audience} подп.")
-            targets.append(Target(
-                id=bot["bot_id"],
-                label=label,
-                subtitle=" | ".join(subtitle_parts),
-                meta={"username": bot.get("username", ""), "first_name": bot.get("first_name", "")},
-            ))
+            targets.append(
+                Target(
+                    id=bot["bot_id"],
+                    label=label,
+                    subtitle=" | ".join(subtitle_parts),
+                    meta={
+                        "username": bot.get("username", ""),
+                        "first_name": bot.get("first_name", ""),
+                    },
+                )
+            )
         return targets
 
     @staticmethod
@@ -108,23 +119,28 @@ class TargetSelector:
     ) -> list[Target]:
         """Fetch owner's Telegram accounts as Target list."""
         from bot.utils.op_helpers import _get_active_accounts
+
         rows = await _get_active_accounts(pool, owner_id)
         if active_only:
             rows = [r for r in (rows or []) if r.get("is_active", True)]
         targets = []
-        for acc in (rows or []):
+        for acc in rows or []:
             label = _acc_label(acc)
-            targets.append(Target(
-                id=acc["id"],
-                label=label,
-                subtitle=f"Trust: {acc.get('trust_score', '?')}" if acc.get("trust_score") else "",
-                meta={
-                    "phone": acc.get("phone", ""),
-                    "session_str": acc.get("session_str", ""),
-                    "cluster": acc.get("cluster", ""),
-                    "is_active": acc.get("is_active", False),
-                },
-            ))
+            targets.append(
+                Target(
+                    id=acc["id"],
+                    label=label,
+                    subtitle=f"Trust: {acc.get('trust_score', '?')}"
+                    if acc.get("trust_score")
+                    else "",
+                    meta={
+                        "phone": acc.get("phone", ""),
+                        "session_str": acc.get("session_str", ""),
+                        "cluster": acc.get("cluster", ""),
+                        "is_active": acc.get("is_active", False),
+                    },
+                )
+            )
         return targets
 
     @staticmethod
@@ -133,19 +149,25 @@ class TargetSelector:
     ) -> list[Target]:
         """Fetch managed channels as Target list (excludes megagroups)."""
         rows = await _db.get_managed_channels(pool, owner_id, acc_id=acc_id)
-        rows = [r for r in (rows or []) if r.get("type") not in ("group", "megagroup", "supergroup")]
+        rows = [
+            r
+            for r in (rows or [])
+            if r.get("type") not in ("group", "megagroup", "supergroup")
+        ]
         targets = []
-        for ch in (rows or []):
+        for ch in rows or []:
             label = ch.get("title") or f"channel_{ch['channel_id']}"
             username = ch.get("username", "")
             if username:
                 label = f"{label} (@{username})"
-            targets.append(Target(
-                id=ch["channel_id"],
-                label=label,
-                subtitle=f"Аккаунт #{ch.get('acc_id', '?')}",
-                meta={"username": username, "acc_id": ch.get("acc_id", 0)},
-            ))
+            targets.append(
+                Target(
+                    id=ch["channel_id"],
+                    label=label,
+                    subtitle=f"Аккаунт #{ch.get('acc_id', '?')}",
+                    meta={"username": username, "acc_id": ch.get("acc_id", 0)},
+                )
+            )
         return targets
 
     @staticmethod
@@ -154,19 +176,25 @@ class TargetSelector:
     ) -> list[Target]:
         """Fetch managed groups (megagroups) as Target list."""
         rows = await _db.get_managed_channels(pool, owner_id, acc_id=acc_id)
-        rows = [r for r in (rows or []) if r.get("type") in ("group", "megagroup", "supergroup")]
+        rows = [
+            r
+            for r in (rows or [])
+            if r.get("type") in ("group", "megagroup", "supergroup")
+        ]
         targets = []
-        for gr in (rows or []):
+        for gr in rows or []:
             label = gr.get("title") or f"group_{gr['channel_id']}"
             username = gr.get("username", "")
             if username:
                 label = f"{label} (@{username})"
-            targets.append(Target(
-                id=gr["channel_id"],
-                label=label,
-                subtitle=f"Аккаунт #{gr.get('acc_id', '?')}",
-                meta={"username": username, "acc_id": gr.get("acc_id", 0)},
-            ))
+            targets.append(
+                Target(
+                    id=gr["channel_id"],
+                    label=label,
+                    subtitle=f"Аккаунт #{gr.get('acc_id', '?')}",
+                    meta={"username": username, "acc_id": gr.get("acc_id", 0)},
+                )
+            )
         return targets
 
     # ── Keyboard builders ──────────────────────────────────────────────────────────
@@ -211,18 +239,24 @@ class TargetSelector:
         if current_page > 0:
             nav_builder.button(
                 text=f"◀️ Стр. {current_page}/{total_pages}",
-                callback_data=callback_factory(Target(
-                    id=current_page - 1, label="__page__",
-                    meta={"__nav__": "prev", "__page__": current_page - 1},
-                )),
+                callback_data=callback_factory(
+                    Target(
+                        id=current_page - 1,
+                        label="__page__",
+                        meta={"__nav__": "prev", "__page__": current_page - 1},
+                    )
+                ),
             )
         if current_page < total_pages - 1:
             nav_builder.button(
                 text=f"Стр. {current_page + 2}/{total_pages} ▶️",
-                callback_data=callback_factory(Target(
-                    id=current_page + 1, label="__page__",
-                    meta={"__nav__": "next", "__page__": current_page + 1},
-                )),
+                callback_data=callback_factory(
+                    Target(
+                        id=current_page + 1,
+                        label="__page__",
+                        meta={"__nav__": "next", "__page__": current_page + 1},
+                    )
+                ),
             )
         if total_pages > 1:
             nav_row = InlineKeyboardBuilder()
@@ -297,10 +331,18 @@ class TargetSelector:
         if total_pages > 1:
             nav_builder = InlineKeyboardBuilder()
             if current_page > 0:
-                nav_builder.button(text=f"◀️ Стр. {current_page}/{total_pages}", callback_data=toggle_callback_factory(-(current_page - 1) - 1))
-            nav_builder.button(text=f"📄 {current_page + 1}/{total_pages}", callback_data="bm:noop")
+                nav_builder.button(
+                    text=f"◀️ Стр. {current_page}/{total_pages}",
+                    callback_data=toggle_callback_factory(-(current_page - 1) - 1),
+                )
+            nav_builder.button(
+                text=f"📄 {current_page + 1}/{total_pages}", callback_data="bm:noop"
+            )
             if current_page < total_pages - 1:
-                nav_builder.button(text=f"Стр. {current_page + 2}/{total_pages} ▶️", callback_data=toggle_callback_factory(-(current_page + 1) - 1))
+                nav_builder.button(
+                    text=f"Стр. {current_page + 2}/{total_pages} ▶️",
+                    callback_data=toggle_callback_factory(-(current_page + 1) - 1),
+                )
             builder.row(*nav_builder.buttons)
 
         # Back
@@ -322,8 +364,11 @@ class TargetSelector:
         """
         if len(targets) > max_buttons:
             return TargetSelector.single_pick_kb(
-                targets, callback_factory, back_callback,
-                page=0, page_size=DEFAULT_PAGE_SIZE,
+                targets,
+                callback_factory,
+                back_callback,
+                page=0,
+                page_size=DEFAULT_PAGE_SIZE,
             )
 
         builder = InlineKeyboardBuilder()
@@ -340,6 +385,7 @@ class TargetSelector:
 
 
 # ── Convenience factory for simple cases ──────────────────────────────────────────
+
 
 async def show_bot_picker(
     pool: asyncpg.Pool,
@@ -359,8 +405,12 @@ async def show_bot_picker(
         targets = [t for t in targets if t.id not in exclude_ids]
 
     if not targets:
-        return ("⚠️ У вас нет ботов. Добавьте бота через 📱 Активы → 🤖 Мои боты.",
-                InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=back_callback).as_markup())
+        return (
+            "⚠️ У вас нет ботов. Добавьте бота через 📱 Активы → 🤖 Мои боты.",
+            InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=back_callback)
+            .as_markup(),
+        )
 
     kb = TargetSelector.quick_pick_kb(targets, callback_factory, back_callback)
     return (title, kb)
@@ -379,13 +429,19 @@ async def show_account_picker(
 
     Returns (message_text, keyboard) ready for message.answer().
     """
-    targets = await TargetSelector.fetch_accounts(pool, owner_id, active_only=active_only)
+    targets = await TargetSelector.fetch_accounts(
+        pool, owner_id, active_only=active_only
+    )
     if not targets:
-        tail = "" if active_only else ""
         msg = "⚠️ Нет активных аккаунтов. Добавьте аккаунт через ⚙️ Мониторинг → 📱 Аккаунты."
         if not active_only:
             msg = "⚠️ У вас нет аккаунтов."
-        return (msg, InlineKeyboardBuilder().button(text="◀️ Назад", callback_data=back_callback).as_markup())
+        return (
+            msg,
+            InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=back_callback)
+            .as_markup(),
+        )
 
     kb = TargetSelector.quick_pick_kb(targets, callback_factory, back_callback)
     return (title, kb)

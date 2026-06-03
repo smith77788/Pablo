@@ -13,6 +13,7 @@ Webhook Server — HTTP endpoint для входящих webhook-уведомл�
 
 Каждый webhook проходит проверку подписи (HMAC-SHA256) если задан WEBHOOK_SECRET.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,9 +51,7 @@ def _verify_signature(body: bytes, signature: str) -> bool:
     """Проверить HMAC-SHA256 подпись хука."""
     if not _WEBHOOK_SECRET:
         return True
-    expected = hmac.new(
-        _WEBHOOK_SECRET.encode(), body, hashlib.sha256
-    ).hexdigest()
+    expected = hmac.new(_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature.removeprefix("sha256="))
 
 
@@ -69,7 +68,9 @@ async def _activate_subscription(
     """Активировать подписку после успешного платежа."""
     _VALID_PLANS = {"starter", "pro", "enterprise"}
     if plan not in _VALID_PLANS:
-        log.warning("payment_webhook: unknown plan %r for user=%d, skipping", plan, user_id)
+        log.warning(
+            "payment_webhook: unknown plan %r for user=%d, skipping", plan, user_id
+        )
         return
 
     # Записать платёж ПЕРВЫМ — если запись упадёт, подписка не активируется и вебхук можно переповторить.
@@ -82,7 +83,12 @@ async def _activate_subscription(
            VALUES($1,$2,$2,$3,$4,$5,$6,'confirmed','webhook',$4)
            ON CONFLICT (reference) DO UPDATE
            SET status='confirmed', tx_hash=EXCLUDED.tx_hash""",
-        user_id, amount, currency, safe_ref, plan, months,
+        user_id,
+        amount,
+        currency,
+        safe_ref,
+        plan,
+        months,
     )
     await pool.execute(
         """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
@@ -99,7 +105,9 @@ async def _activate_subscription(
                    WHEN subscriptions.expires_at > now() THEN subscriptions.started_at
                    ELSE now()
                END""",
-        user_id, plan, str(months),
+        user_id,
+        plan,
+        str(months),
     )
     expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
@@ -113,8 +121,15 @@ async def _activate_subscription(
             parse_mode="HTML",
         )
     except Exception:
-        log_exc_swallow(log, "Сбой уведомления пользователя об активации подписки", user_id=user_id, plan=plan)
-    log.info("payment_webhook: activated %s %s/%dm user=%d", currency, plan, months, user_id)
+        log_exc_swallow(
+            log,
+            "Сбой уведомления пользователя об активации подписки",
+            user_id=user_id,
+            plan=plan,
+        )
+    log.info(
+        "payment_webhook: activated %s %s/%dm user=%d", currency, plan, months, user_id
+    )
 
 
 def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
@@ -140,7 +155,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         user_id = data.get("user_id") or data.get("payload", {}).get("user_id")
         amount = float(data.get("amount", 0))
         currency = (data.get("currency") or data.get("asset", "TON")).upper()
-        tx_ref = data.get("hash") or data.get("tx_hash") or data.get("invoice_id") or "wh"
+        tx_ref = (
+            data.get("hash") or data.get("tx_hash") or data.get("invoice_id") or "wh"
+        )
         plan_key = data.get("plan") or data.get("description", "")
 
         if not user_id:
@@ -158,6 +175,7 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         if not plan:
             # Fallback: определить по сумме в USD
             from config import PLAN_PRICES_USD
+
             prices_sorted = sorted(PLAN_PRICES_USD.items(), key=lambda x: x[1])
             for p, price_usd in prices_sorted:
                 if amount >= price_usd * 0.9:
@@ -167,7 +185,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
             log.warning("payment_webhook: can't determine plan from %s", data)
             return web.Response(status=200, text="OK")
 
-        await _activate_subscription(pool, bot, user_id, plan, months, tx_ref, currency, amount)
+        await _activate_subscription(
+            pool, bot, user_id, plan, months, tx_ref, currency, amount
+        )
         return web.Response(status=200, text="OK")
 
     async def cryptopay_webhook(request: web.Request) -> web.Response:
@@ -210,7 +230,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         if plan not in ("starter", "pro", "enterprise"):
             return web.Response(status=200, text="OK")
 
-        await _activate_subscription(pool, bot, user_id, plan, months, tx_ref, currency, amount)
+        await _activate_subscription(
+            pool, bot, user_id, plan, months, tx_ref, currency, amount
+        )
         return web.Response(status=200, text="OK")
 
     async def deploy_webhook(request: web.Request) -> web.Response:
@@ -241,15 +263,19 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         project = deployment.get("project", {})
         creator = deployment.get("creator", {})
 
-        status_emoji = {"SUCCESS": "✅", "FAILED": "❌", "CRASHED": "💥"}.get(status, "🔄")
+        status_emoji = {"SUCCESS": "✅", "FAILED": "❌", "CRASHED": "💥"}.get(
+            status, "🔄"
+        )
         branch = commit.get("branch", "unknown")
-        sha = commit.get("message", "")  # Railway puts commit message in 'message' field
-        commit_sha = deployment.get("id", "")[:7]  # Short deployment ID as reference
+        sha = commit.get(
+            "message", ""
+        )  # Railway puts commit message in 'message' field
+        deployment.get("id", "")[:7]  # Short deployment ID as reference
 
         # Try to get actual commit sha from deployment
         commit_full = commit.get("sha", "")
         if commit_full:
-            commit_sha = commit_full[:7]
+            commit_full[:7]
 
         created_at = deployment.get("createdAt", "")
 
@@ -275,16 +301,24 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         text = "\n".join(lines)
 
         admin_ids_raw = os.getenv("ADMIN_IDS", "")
-        admin_ids = {int(x.strip()) for x in admin_ids_raw.split(",") if x.strip().isdigit()}
+        admin_ids = {
+            int(x.strip()) for x in admin_ids_raw.split(",") if x.strip().isdigit()
+        }
 
         for admin_id in admin_ids:
             try:
                 await bot.send_message(admin_id, text, parse_mode="HTML")
             except Exception:
-                log_exc_swallow(log, "Сбой отправки deploy-уведомления админу", admin_id=admin_id)
+                log_exc_swallow(
+                    log, "Сбой отправки deploy-уведомления админу", admin_id=admin_id
+                )
 
-        log.info("deploy_webhook: notified %d admins about deployment %s status=%s",
-                 len(admin_ids), deployment.get("id", "")[:8], status)
+        log.info(
+            "deploy_webhook: notified %d admins about deployment %s status=%s",
+            len(admin_ids),
+            deployment.get("id", "")[:8],
+            status,
+        )
         return web.Response(status=200, text="OK")
 
     async def deploy_health(request: web.Request) -> web.Response:
@@ -298,6 +332,7 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app.router.add_post("/webhook/deploy", deploy_webhook)
 
     from services import rest_api
+
     rest_api.add_routes(app, pool, bot)
 
     return app
@@ -319,5 +354,3 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         log.exception("Payment webhook server error: %s", e)
     finally:
         await runner.cleanup()
-
-

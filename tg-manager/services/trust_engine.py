@@ -6,6 +6,7 @@ Features:
 - Expires cooldowns, decays flood counts
 - Writes trust_score history snapshots
 """
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -17,18 +18,18 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
-_INTERVAL = 1800          # recalculate every 30 min
-_COOLDOWN_HOURS = 2       # cooldown after flood event
-_FLOOD_PENALTY = 0.15     # score penalty per flood in last 7 days
+_INTERVAL = 1800  # recalculate every 30 min
+_COOLDOWN_HOURS = 2  # cooldown after flood event
+_FLOOD_PENALTY = 0.15  # score penalty per flood in last 7 days
 _AGE_BONUS_PER_DAY = 0.005
 _AGE_BONUS_CAP = 0.30
 
 # Auto-rotation thresholds
-_ROTATE_CRITICAL_THRESHOLD = 0.3   # trust < 0.3 → 72h cooldown
-_ROTATE_LOW_THRESHOLD = 0.6        # trust 0.3–0.6 → 24h cooldown
+_ROTATE_CRITICAL_THRESHOLD = 0.3  # trust < 0.3 → 72h cooldown
+_ROTATE_LOW_THRESHOLD = 0.6  # trust 0.3–0.6 → 24h cooldown
 _ROTATE_CRITICAL_HOURS = 72
 _ROTATE_LOW_HOURS = 24
-_ROTATE_INTERVAL_CYCLES = 12       # every 12 cycles (6 hours)
+_ROTATE_INTERVAL_CYCLES = 12  # every 12 cycles (6 hours)
 
 
 async def _recalculate_scores(pool: asyncpg.Pool) -> None:
@@ -44,7 +45,9 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
     """)
     history_batch = []
     for row in rows:
-        age_bonus = min(_AGE_BONUS_CAP, float(row["age_days"] or 0) * _AGE_BONUS_PER_DAY)
+        age_bonus = min(
+            _AGE_BONUS_CAP, float(row["age_days"] or 0) * _AGE_BONUS_PER_DAY
+        )
         penalty = _FLOOD_PENALTY * (row["flood_count_7d"] or 0)
         score = max(0.1, min(1.0, 1.0 + age_bonus - penalty))
         # In cooldown → cap score at 0.2
@@ -52,7 +55,8 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
             score = min(score, 0.2)
         await pool.execute(
             "UPDATE tg_accounts SET trust_score=$1 WHERE id=$2",
-            score, row["id"],
+            score,
+            row["id"],
         )
         history_batch.append((row["id"], row["owner_id"], score))
 
@@ -177,7 +181,10 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
             if bot:
                 try:
                     await notify_if_enabled(
-                        pool, bot, owner_id, "flood_warning",
+                        pool,
+                        bot,
+                        owner_id,
+                        "flood_warning",
                         "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
                         f"🔴 Критических (trust &lt; {_ROTATE_CRITICAL_THRESHOLD}) → {_ROTATE_CRITICAL_HOURS}ч кулдаун: <b>{crit_n}</b>\n"
                         f"🟡 Низкий trust ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{low_n}</b>\n\n"
@@ -185,11 +192,15 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
                         "Trust score восстановится со временем при отсутствии операций.",
                     )
                 except Exception:
-                    log_exc_swallow(log, "Сбой notify_if_enabled в auto-rotate", owner_id=owner_id)
+                    log_exc_swallow(
+                        log, "Сбой notify_if_enabled в auto-rotate", owner_id=owner_id
+                    )
 
         log.info(
             "trust_engine auto-rotate: %d critical (72h), %d low (24h), notified %d owners",
-            crit_n, low_n, len(result["notified_owners"]),
+            crit_n,
+            low_n,
+            len(result["notified_owners"]),
         )
 
     return result

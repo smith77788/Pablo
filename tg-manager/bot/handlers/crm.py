@@ -44,14 +44,18 @@ async def cb_crm_menu(
         await callback.message.edit_text(
             locked_text("CRM & автоматизация", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="main")
+            ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-        await callback.message.edit_text("❌ Бот не найден.", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            "❌ Бот не найден.", reply_markup=kb.as_markup()
+        )
         return
     tags = await db.get_tag_names(pool, callback_data.bot_id)
     label = (
@@ -92,7 +96,10 @@ async def cb_add_tag_global(
     await state.set_state(AddGlobalTag.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=CrmCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(
+        text="❌ Отмена",
+        callback_data=CrmCb(action="menu", bot_id=callback_data.bot_id),
+    )
     await callback.message.edit_text(
         "🏷 <b>Создать тег</b>\n\n"
         "Введите название тега (латиница, кириллица, цифры, _ допустимы).\n"
@@ -110,7 +117,10 @@ async def msg_global_tag_name(
     tag = (message.text or "").strip()
     if not tag or len(tag) > 50:
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=CrmCb(action="menu", bot_id=data.get("bot_id", 0)))
+        kb.button(
+            text="❌ Отмена",
+            callback_data=CrmCb(action="menu", bot_id=data.get("bot_id", 0)),
+        )
         await message.answer(
             "⚠️ Название тега должно быть от 1 до 50 символов. Введите снова:",
             reply_markup=kb.as_markup(),
@@ -153,7 +163,9 @@ async def cb_delete_tag_confirm(
     kb = InlineKeyboardBuilder()
     kb.button(
         text="✅ Да, удалить",
-        callback_data=CrmCb(action="delete_tag_all", bot_id=callback_data.bot_id, tag=tag),
+        callback_data=CrmCb(
+            action="delete_tag_all", bot_id=callback_data.bot_id, tag=tag
+        ),
     )
     kb.button(
         text="◀️ Отмена",
@@ -206,14 +218,18 @@ async def cb_auto_menu(
         await callback.message.edit_text(
             locked_text("Автоматизация", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="main")
+            ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-        await callback.message.edit_text("❌ Бот не найден.", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            "❌ Бот не найден.", reply_markup=kb.as_markup()
+        )
         return
     rules = await db.get_automation_rules(pool, callback_data.bot_id)
     label = (
@@ -250,8 +266,13 @@ async def cb_auto_view(
     rule = next((r for r in rules if r["id"] == callback_data.rule_id), None)
     if not rule:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=AutoCb(action="menu", bot_id=callback_data.bot_id))
-        await callback.message.edit_text("❌ Правило не найдено.", reply_markup=kb.as_markup())
+        kb.button(
+            text="◀️ Назад",
+            callback_data=AutoCb(action="menu", bot_id=callback_data.bot_id),
+        )
+        await callback.message.edit_text(
+            "❌ Правило не найдено.", reply_markup=kb.as_markup()
+        )
         return
     kb = InlineKeyboardBuilder()
     toggle_text = "❌ Отключить" if rule["is_active"] else "✅ Включить"
@@ -324,11 +345,15 @@ async def cb_auto_delete_confirm(
     kb = InlineKeyboardBuilder()
     kb.button(
         text="✅ Да, удалить",
-        callback_data=AutoCb(action="delete", bot_id=callback_data.bot_id, rule_id=callback_data.rule_id),
+        callback_data=AutoCb(
+            action="delete", bot_id=callback_data.bot_id, rule_id=callback_data.rule_id
+        ),
     )
     kb.button(
         text="◀️ Отмена",
-        callback_data=AutoCb(action="view", bot_id=callback_data.bot_id, rule_id=callback_data.rule_id),
+        callback_data=AutoCb(
+            action="view", bot_id=callback_data.bot_id, rule_id=callback_data.rule_id
+        ),
     )
     kb.adjust(2)
     await callback.message.edit_text(
@@ -583,7 +608,10 @@ async def msg_rule_name(
     rule_name = (message.text or "").strip()
     if not rule_name or len(rule_name) > 100:
         kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=data.get("bot_id", 0)))
+        kb.button(
+            text="❌ Отмена",
+            callback_data=AutoCb(action="menu", bot_id=data.get("bot_id", 0)),
+        )
         await message.answer(
             "⚠️ Название правила должно быть от 1 до 100 символов. Введите снова:",
             reply_markup=kb.as_markup(),

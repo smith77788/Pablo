@@ -33,7 +33,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ParserCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
-from database import db
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -82,7 +81,9 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Парсер аудитории", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="main")),
+            reply_markup=subscription_locked_markup(
+                "pro", back_callback=BmCb(action="main")
+            ),
         )
         return
 
@@ -160,7 +161,9 @@ async def fsm_parser_source(
     if not source:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
-        await message.answer("⚠️ Введите username или ссылку:", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Введите username или ссылку:", reply_markup=kb.as_markup()
+        )
         return
 
     # Нормализуем — убираем https://t.me/
@@ -170,14 +173,14 @@ async def fsm_parser_source(
         source = "@" + source
 
     data = await state.get_data()
-    parse_type = data.get("parse_type", "members")
+    data.get("parse_type", "members")
     await state.update_data(parse_source=source)
     await state.set_state(ParserFSM.waiting_limit)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="500", callback_data=f"prs:limit:500")
-    kb.button(text="1000", callback_data=f"prs:limit:1000")
-    kb.button(text="5000", callback_data=f"prs:limit:5000")
+    kb.button(text="500", callback_data="prs:limit:500")
+    kb.button(text="1000", callback_data="prs:limit:1000")
+    kb.button(text="5000", callback_data="prs:limit:5000")
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
     kb.adjust(3, 1)
 
@@ -210,7 +213,9 @@ async def fsm_parser_limit(
     except ValueError:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
-        await message.answer("⚠️ Введите число (от 10 до 10000):", reply_markup=kb.as_markup())
+        await message.answer(
+            "⚠️ Введите число (от 10 до 10000):", reply_markup=kb.as_markup()
+        )
         return
     await _start_parse(message, state, pool, message.from_user.id, limit)
 
@@ -282,9 +287,13 @@ async def _start_parse(
 
     try:
         if parse_type == "members":
-            coro = parse_members(pool, owner_id, source, limit=limit, progress_cb=progress_cb)
+            coro = parse_members(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
         else:
-            coro = parse_active_users(pool, owner_id, source, limit=limit, progress_cb=progress_cb)
+            coro = parse_active_users(
+                pool, owner_id, source, limit=limit, progress_cb=progress_cb
+            )
         result = await asyncio.wait_for(coro, timeout=_PARSE_TIMEOUT)
     except asyncio.TimeoutError:
         await progress_msg.edit_text(

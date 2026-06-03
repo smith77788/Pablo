@@ -409,6 +409,7 @@ async def _has_oscillation(
 async def _send_alert(pool: asyncpg.Pool, bot: Bot, event: asyncpg.Record) -> None:
     """Send Telegram notification for a confirmed change event via notify_if_enabled."""
     from database import db
+
     entity = f"@{event['entity_id']}"
     keyword = event["keyword"]
     event_type = event["event_type"]

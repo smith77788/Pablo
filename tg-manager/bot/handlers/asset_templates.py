@@ -8,6 +8,7 @@ Manages reusable templates for Telegram assets:
 
 Callback prefix: atpl
 """
+
 from __future__ import annotations
 
 import html
@@ -20,8 +21,22 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 
-from bot.callbacks import AssetTplCb, ChanFactCb, GroupFCb, MassPubCb, MassOpCb, LibCb, TplBotApplyCb
-from bot.states import AssetTemplateFSM, ChannelFactoryFSM, CreateGroupFSM, BulkJoinFSM, BulkLeaveFSM
+from bot.callbacks import (
+    AssetTplCb,
+    ChanFactCb,
+    GroupFCb,
+    MassPubCb,
+    MassOpCb,
+    LibCb,
+    TplBotApplyCb,
+)
+from bot.states import (
+    AssetTemplateFSM,
+    ChannelFactoryFSM,
+    CreateGroupFSM,
+    BulkJoinFSM,
+    BulkLeaveFSM,
+)
 from bot.utils.op_helpers import _get_active_accounts
 from bot.utils.template_validator import validate_asset_template
 from database import db
@@ -32,10 +47,10 @@ router = Router()
 # ── Asset type metadata ────────────────────────────────────────────────────────
 
 _TYPE_LABELS = {
-    "bot":       "🤖 Бот",
-    "channel":   "📡 Канал",
-    "group":     "👥 Группа",
-    "post":      "📝 Пост",
+    "bot": "🤖 Бот",
+    "channel": "📡 Канал",
+    "group": "👥 Группа",
+    "post": "📝 Пост",
     "operation": "⚙️ Операция",
 }
 
@@ -95,16 +110,30 @@ _TYPE_PROMPTS = {
 
 # ── Keyboard helpers ───────────────────────────────────────────────────────────
 
+
 def _menu_kb() -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="📚 Библиотека готовых",  callback_data=LibCb(action="menu"))
-    kb.button(text="🤖 Мои боты",            callback_data=AssetTplCb(action="list", asset_type="bot"))
-    kb.button(text="📡 Мои каналы",          callback_data=AssetTplCb(action="list", asset_type="channel"))
-    kb.button(text="👥 Мои группы",          callback_data=AssetTplCb(action="list", asset_type="group"))
-    kb.button(text="📝 Мои посты",           callback_data=AssetTplCb(action="list", asset_type="post"))
-    kb.button(text="⚙️ Мои операции",        callback_data=AssetTplCb(action="list", asset_type="operation"))
-    kb.button(text="➕ Создать свой",         callback_data=AssetTplCb(action="create"))
-    kb.button(text="◀️ Назад",               callback_data=AssetTplCb(action="back"))
+    kb.button(text="📚 Библиотека готовых", callback_data=LibCb(action="menu"))
+    kb.button(
+        text="🤖 Мои боты", callback_data=AssetTplCb(action="list", asset_type="bot")
+    )
+    kb.button(
+        text="📡 Мои каналы",
+        callback_data=AssetTplCb(action="list", asset_type="channel"),
+    )
+    kb.button(
+        text="👥 Мои группы",
+        callback_data=AssetTplCb(action="list", asset_type="group"),
+    )
+    kb.button(
+        text="📝 Мои посты", callback_data=AssetTplCb(action="list", asset_type="post")
+    )
+    kb.button(
+        text="⚙️ Мои операции",
+        callback_data=AssetTplCb(action="list", asset_type="operation"),
+    )
+    kb.button(text="➕ Создать свой", callback_data=AssetTplCb(action="create"))
+    kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="back"))
     kb.adjust(1, 2, 2, 2, 1)
     return kb.as_markup()
 
@@ -114,15 +143,21 @@ def _list_kb(templates: list, asset_type: str) -> object:
     for tpl in templates:
         kb.button(
             text=f"📄 {tpl['name']}",
-            callback_data=AssetTplCb(action="view", tpl_id=tpl["id"], asset_type=asset_type),
+            callback_data=AssetTplCb(
+                action="view", tpl_id=tpl["id"], asset_type=asset_type
+            ),
         )
         kb.button(
             text="👁️ Просмотр",
-            callback_data=AssetTplCb(action="view", tpl_id=tpl["id"], asset_type=asset_type),
+            callback_data=AssetTplCb(
+                action="view", tpl_id=tpl["id"], asset_type=asset_type
+            ),
         )
         kb.button(
             text="🗑️ Удалить",
-            callback_data=AssetTplCb(action="delete_confirm", tpl_id=tpl["id"], asset_type=asset_type),
+            callback_data=AssetTplCb(
+                action="delete_confirm", tpl_id=tpl["id"], asset_type=asset_type
+            ),
         )
     kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
     kb.adjust(1, *([3] * len(templates)), 1)
@@ -131,20 +166,37 @@ def _list_kb(templates: list, asset_type: str) -> object:
 
 def _type_choice_kb() -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Бот",         callback_data=AssetTplCb(action="choose_type", asset_type="bot"))
-    kb.button(text="📡 Канал",       callback_data=AssetTplCb(action="choose_type", asset_type="channel"))
-    kb.button(text="👥 Группа",      callback_data=AssetTplCb(action="choose_type", asset_type="group"))
-    kb.button(text="📝 Пост",        callback_data=AssetTplCb(action="choose_type", asset_type="post"))
-    kb.button(text="⚙️ Операция",   callback_data=AssetTplCb(action="choose_type", asset_type="operation"))
-    kb.button(text="◀️ Отмена",     callback_data=AssetTplCb(action="menu"))
+    kb.button(
+        text="🤖 Бот", callback_data=AssetTplCb(action="choose_type", asset_type="bot")
+    )
+    kb.button(
+        text="📡 Канал",
+        callback_data=AssetTplCb(action="choose_type", asset_type="channel"),
+    )
+    kb.button(
+        text="👥 Группа",
+        callback_data=AssetTplCb(action="choose_type", asset_type="group"),
+    )
+    kb.button(
+        text="📝 Пост",
+        callback_data=AssetTplCb(action="choose_type", asset_type="post"),
+    )
+    kb.button(
+        text="⚙️ Операция",
+        callback_data=AssetTplCb(action="choose_type", asset_type="operation"),
+    )
+    kb.button(text="◀️ Отмена", callback_data=AssetTplCb(action="menu"))
     kb.adjust(2, 2, 1, 1)
     return kb.as_markup()
 
 
 def _confirm_kb(asset_type: str) -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Сохранить", callback_data=AssetTplCb(action="save", asset_type=asset_type))
-    kb.button(text="❌ Отмена",    callback_data=AssetTplCb(action="menu"))
+    kb.button(
+        text="✅ Сохранить",
+        callback_data=AssetTplCb(action="save", asset_type=asset_type),
+    )
+    kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
     kb.adjust(2)
     return kb.as_markup()
 
@@ -171,7 +223,9 @@ def _view_kb(tpl_id: int, asset_type: str) -> object:
     )
     kb.button(
         text="🗑️ Удалить",
-        callback_data=AssetTplCb(action="delete_confirm", tpl_id=tpl_id, asset_type=asset_type),
+        callback_data=AssetTplCb(
+            action="delete_confirm", tpl_id=tpl_id, asset_type=asset_type
+        ),
     )
     kb.button(
         text="◀️ Назад",
@@ -183,19 +237,22 @@ def _view_kb(tpl_id: int, asset_type: str) -> object:
 
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 
+
 async def _get_templates(pool: asyncpg.Pool, owner_id: int, asset_type: str) -> list:
     return await pool.fetch(
         """SELECT id, name, template, created_at FROM asset_templates
            WHERE owner_id=$1 AND asset_type=$2
            ORDER BY created_at DESC LIMIT 10""",
-        owner_id, asset_type,
+        owner_id,
+        asset_type,
     )
 
 
 async def _get_template(pool: asyncpg.Pool, tpl_id: int, owner_id: int):
     return await pool.fetchrow(
         "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2",
-        tpl_id, owner_id,
+        tpl_id,
+        owner_id,
     )
 
 
@@ -210,7 +267,10 @@ async def _save_template(
         """INSERT INTO asset_templates (owner_id, asset_type, name, template)
            VALUES ($1, $2, $3, $4)
            RETURNING id""",
-        owner_id, asset_type, name, json.dumps(template),
+        owner_id,
+        asset_type,
+        name,
+        json.dumps(template),
     )
     return row["id"]
 
@@ -218,12 +278,14 @@ async def _save_template(
 async def _delete_template(pool: asyncpg.Pool, tpl_id: int, owner_id: int) -> bool:
     result = await pool.execute(
         "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2",
-        tpl_id, owner_id,
+        tpl_id,
+        owner_id,
     )
     return result != "DELETE 0"
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
+
 
 @router.callback_query(AssetTplCb.filter(F.action == "menu"))
 async def cb_menu(callback: CallbackQuery, callback_data: AssetTplCb) -> None:
@@ -252,10 +314,7 @@ async def cb_list(
         text = f"📄 <b>Шаблоны: {label}</b>\n\nНайдено: {len(templates)} шт."
         markup = _list_kb(templates, asset_type)
     else:
-        text = (
-            f"📄 <b>Шаблоны: {label}</b>\n\n"
-            "Шаблонов пока нет."
-        )
+        text = f"📄 <b>Шаблоны: {label}</b>\n\nШаблонов пока нет."
         kb = InlineKeyboardBuilder()
         kb.button(text="➕ Создать шаблон", callback_data=AssetTplCb(action="create"))
         kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
@@ -286,17 +345,25 @@ async def cb_view(
         return
 
     try:
-        data = json.loads(tpl["template"]) if isinstance(tpl["template"], str) else tpl["template"]
+        data = (
+            json.loads(tpl["template"])
+            if isinstance(tpl["template"], str)
+            else tpl["template"]
+        )
     except Exception as e:
         log.warning("Failed to parse template JSON for tpl_id=%s: %s", tpl.get("id"), e)
         data = {}
 
-    lines = [f"📄 <b>{tpl['name']}</b>", f"Тип: {_TYPE_LABELS.get(tpl['asset_type'], tpl['asset_type'])}"]
+    lines = [
+        f"📄 <b>{tpl['name']}</b>",
+        f"Тип: {_TYPE_LABELS.get(tpl['asset_type'], tpl['asset_type'])}",
+    ]
     for k, v in data.items():
         lines.append(f"<b>{k}:</b> {v}")
 
     # Detect placeholders in template text
     from bot.utils.template_validator import list_placeholders
+
     all_text = " ".join(str(v) for v in data.values() if isinstance(v, str))
     placeholders = list_placeholders(all_text)
     if placeholders:
@@ -314,6 +381,7 @@ async def cb_view(
 
 # ── Create wizard ──────────────────────────────────────────────────────────────
 
+
 @router.callback_query(AssetTplCb.filter(F.action == "create"))
 async def cb_create(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -325,8 +393,12 @@ async def cb_create(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(AssetTplCb.filter(F.action == "choose_type"), AssetTemplateFSM.choosing_type)
-async def cb_choose_type(callback: CallbackQuery, callback_data: AssetTplCb, state: FSMContext) -> None:
+@router.callback_query(
+    AssetTplCb.filter(F.action == "choose_type"), AssetTemplateFSM.choosing_type
+)
+async def cb_choose_type(
+    callback: CallbackQuery, callback_data: AssetTplCb, state: FSMContext
+) -> None:
     await callback.answer()
     asset_type = callback_data.asset_type or ""
     await state.update_data(asset_type=asset_type)
@@ -348,7 +420,9 @@ async def msg_waiting_name(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Название не может быть пустым. Попробуйте ещё раз:")
         return
     if len(name) > 64:
-        await message.answer("❌ Название слишком длинное (максимум 64 символа). Попробуйте ещё раз:")
+        await message.answer(
+            "❌ Название слишком длинное (максимум 64 символа). Попробуйте ещё раз:"
+        )
         return
 
     await state.update_data(name=name)
@@ -384,10 +458,18 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
         if op_type == "mass_publish":
             template = {"op_type": op_type, "text": parts[1] if len(parts) > 1 else ""}
         elif op_type == "bulk_join":
-            links = [ln.strip() for ln in (parts[1] if len(parts) > 1 else "").splitlines() if ln.strip()]
+            links = [
+                ln.strip()
+                for ln in (parts[1] if len(parts) > 1 else "").splitlines()
+                if ln.strip()
+            ]
             template = {"op_type": op_type, "links": links}
         elif op_type == "bulk_leave":
-            channels = [ln.strip() for ln in (parts[1] if len(parts) > 1 else "").splitlines() if ln.strip()]
+            channels = [
+                ln.strip()
+                for ln in (parts[1] if len(parts) > 1 else "").splitlines()
+                if ln.strip()
+            ]
             template = {"op_type": op_type, "channels": channels}
         elif op_type == "bulk_bot_edit":
             template = {
@@ -397,7 +479,12 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
             }
         else:
             template = {"op_type": op_type}
-        if not op_type or op_type not in ("mass_publish", "bulk_join", "bulk_leave", "bulk_bot_edit"):
+        if not op_type or op_type not in (
+            "mass_publish",
+            "bulk_join",
+            "bulk_leave",
+            "bulk_bot_edit",
+        ):
             await message.answer(
                 "❌ Неверный тип операции. Используйте: "
                 "<code>mass_publish</code>, <code>bulk_join</code>, "
@@ -409,15 +496,15 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
         parts = [p.strip() for p in raw.split(";;;")]
         if asset_type == "bot":
             template = {
-                "name":              parts[0] if len(parts) > 0 else "",
-                "description":       parts[1] if len(parts) > 1 else "",
+                "name": parts[0] if len(parts) > 0 else "",
+                "description": parts[1] if len(parts) > 1 else "",
                 "short_description": parts[2] if len(parts) > 2 else "",
             }
         else:  # channel or group
             template = {
-                "title":       parts[0] if len(parts) > 0 else "",
+                "title": parts[0] if len(parts) > 0 else "",
                 "description": parts[1] if len(parts) > 1 else "",
-                "username":    parts[2] if len(parts) > 2 else "",
+                "username": parts[2] if len(parts) > 2 else "",
             }
 
     # Validate the parsed template
@@ -434,7 +521,7 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
     await state.set_state(AssetTemplateFSM.confirming)
 
     label = _TYPE_LABELS.get(asset_type, asset_type)
-    lines = [f"✅ <b>Проверьте шаблон</b>", f"Тип: {label}", f"Название: <b>{name}</b>"]
+    lines = ["✅ <b>Проверьте шаблон</b>", f"Тип: {label}", f"Название: <b>{name}</b>"]
     for k, v in template.items():
         if v:
             lines.append(f"<b>{k}:</b> {v}")
@@ -450,7 +537,9 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(AssetTplCb.filter(F.action == "save"), AssetTemplateFSM.confirming)
+@router.callback_query(
+    AssetTplCb.filter(F.action == "save"), AssetTemplateFSM.confirming
+)
 async def cb_save(
     callback: CallbackQuery,
     callback_data: AssetTplCb,
@@ -479,11 +568,13 @@ async def cb_save(
     await state.clear()
 
     try:
-        tpl_id = await _save_template(pool, callback.from_user.id, asset_type, name, template)
+        await _save_template(pool, callback.from_user.id, asset_type, name, template)
         label = _TYPE_LABELS.get(asset_type, asset_type)
         msg = f"✅ Шаблон <b>«{name}»</b> ({label}) сохранён!"
         if validation.warnings:
-            msg += "\n\n⚠️ <b>Замечания:</b>\n" + "\n".join(f"• {w}" for w in validation.warnings)
+            msg += "\n\n⚠️ <b>Замечания:</b>\n" + "\n".join(
+                f"• {w}" for w in validation.warnings
+            )
         await callback.message.edit_text(
             msg,
             parse_mode="HTML",
@@ -499,6 +590,7 @@ async def cb_save(
 
 
 # ── Apply template ─────────────────────────────────────────────────────────────
+
 
 @router.callback_query(AssetTplCb.filter(F.action == "apply"))
 async def cb_apply(
@@ -546,12 +638,20 @@ async def cb_apply(
         kb = InlineKeyboardBuilder()
         for acc in accounts:
             name = (acc["first_name"] or "").strip()
-            uname = f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
+            uname = (
+                f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
+            )
             label = f"{name} ({uname})" if name else uname
             if asset_type == "channel":
-                kb.button(text=f"👤 {label}", callback_data=ChanFactCb(action=action, acc_id=acc["id"]))
+                kb.button(
+                    text=f"👤 {label}",
+                    callback_data=ChanFactCb(action=action, acc_id=acc["id"]),
+                )
             else:
-                kb.button(text=f"👤 {label}", callback_data=GroupFCb(action=action, acc_id=acc["id"]))
+                kb.button(
+                    text=f"👤 {label}",
+                    callback_data=GroupFCb(action=action, acc_id=acc["id"]),
+                )
         kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
         kb.adjust(1)
 
@@ -561,7 +661,9 @@ async def cb_apply(
             f"Описание: <b>{html.escape(about_val or '—')}</b>\n\n"
             "Выберите аккаунт для создания:"
         )
-        await callback.message.edit_text(preview, parse_mode="HTML", reply_markup=kb.as_markup())
+        await callback.message.edit_text(
+            preview, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
 
     elif asset_type == "post":
         text_val = data.get("text", "")
@@ -589,13 +691,18 @@ async def cb_apply(
         }
         op_label = _OP_LABELS.get(op_type, op_type)
 
-        lines = [f"⚙️ <b>Шаблон операции «{html.escape(tpl_name)}»</b>\n", f"Тип: {op_label}"]
+        lines = [
+            f"⚙️ <b>Шаблон операции «{html.escape(tpl_name)}»</b>\n",
+            f"Тип: {op_label}",
+        ]
         if op_type == "mass_publish":
             text_val = data.get("text", "")
             lines.append(f"Текст: <i>{html.escape(text_val[:200])}</i>")
             await state.update_data(tpl_prefill=data)
             kb = InlineKeyboardBuilder()
-            kb.button(text="📤 Запустить публикацию", callback_data=MassPubCb(action="start"))
+            kb.button(
+                text="📤 Запустить публикацию", callback_data=MassPubCb(action="start")
+            )
             kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
             kb.adjust(1)
         elif op_type == "bulk_join":
@@ -607,10 +714,17 @@ async def cb_apply(
             await state.set_state(BulkJoinFSM.choosing_accounts)
             accounts = await _get_active_accounts(pool, callback.from_user.id)
             kb = InlineKeyboardBuilder()
-            kb.button(text="👥 Все аккаунты", callback_data=MassOpCb(action="bj_accs", op_type="all"))
+            kb.button(
+                text="👥 Все аккаунты",
+                callback_data=MassOpCb(action="bj_accs", op_type="all"),
+            )
             for acc in accounts[:8]:
                 from bot.utils.op_helpers import _acc_label
-                kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]))
+
+                kb.button(
+                    text=f"👤 {_acc_label(acc)}",
+                    callback_data=MassOpCb(action="bj_accs", op_id=acc["id"]),
+                )
             kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
             kb.adjust(1)
         elif op_type == "bulk_leave":
@@ -622,10 +736,17 @@ async def cb_apply(
             await state.set_state(BulkLeaveFSM.choosing_accounts)
             accounts = await _get_active_accounts(pool, callback.from_user.id)
             kb = InlineKeyboardBuilder()
-            kb.button(text="👥 Все аккаунты", callback_data=MassOpCb(action="bl_accs", op_type="all"))
+            kb.button(
+                text="👥 Все аккаунты",
+                callback_data=MassOpCb(action="bl_accs", op_type="all"),
+            )
             for acc in accounts[:8]:
                 from bot.utils.op_helpers import _acc_label
-                kb.button(text=f"👤 {_acc_label(acc)}", callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]))
+
+                kb.button(
+                    text=f"👤 {_acc_label(acc)}",
+                    callback_data=MassOpCb(action="bl_accs", op_id=acc["id"]),
+                )
             kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
             kb.adjust(1)
         else:  # bulk_bot_edit
@@ -634,7 +755,10 @@ async def cb_apply(
             lines.append(f"Поле: <code>{html.escape(field)}</code>")
             lines.append(f"Значение: <i>{html.escape(value[:200])}</i>")
             kb = InlineKeyboardBuilder()
-            kb.button(text="✏️ Перейти к редактированию", callback_data=MassOpCb(action="bulk_bot_edit"))
+            kb.button(
+                text="✏️ Перейти к редактированию",
+                callback_data=MassOpCb(action="bulk_bot_edit"),
+            )
             kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
             kb.adjust(1)
 
@@ -651,28 +775,41 @@ async def cb_apply(
         )
         if not bots:
             kb = InlineKeyboardBuilder()
-            kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
+            kb.button(
+                text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu")
+            )
             await callback.message.edit_text(
                 "⚠️ У вас нет управляемых ботов.\nДобавьте бота через /start → Добавить бота.",
-                parse_mode="HTML", reply_markup=kb.as_markup(),
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
             )
             return
 
         tpl_preview = []
-        if data.get("name"):       tpl_preview.append(f"📛 Имя: <b>{html.escape(data['name'])}</b>")
-        if data.get("description"):tpl_preview.append(f"📄 Описание: {len(data['description'])} симв.")
-        if data.get("short_description"): tpl_preview.append(f"📃 Краткое: {len(data['short_description'])} симв.")
+        if data.get("name"):
+            tpl_preview.append(f"📛 Имя: <b>{html.escape(data['name'])}</b>")
+        if data.get("description"):
+            tpl_preview.append(f"📄 Описание: {len(data['description'])} симв.")
+        if data.get("short_description"):
+            tpl_preview.append(f"📃 Краткое: {len(data['short_description'])} симв.")
         cmds = data.get("commands") or []
-        if cmds: tpl_preview.append(f"🤖 Команд: {len(cmds)}")
+        if cmds:
+            tpl_preview.append(f"🤖 Команд: {len(cmds)}")
 
         kb = InlineKeyboardBuilder()
         for bot_row in bots:
             name = bot_row["first_name"] or ""
-            uname = f"@{bot_row['username']}" if bot_row.get("username") else f"id{bot_row['bot_id']}"
+            uname = (
+                f"@{bot_row['username']}"
+                if bot_row.get("username")
+                else f"id{bot_row['bot_id']}"
+            )
             label = f"{name} ({uname})" if name else uname
             kb.button(
                 text=f"🤖 {label[:40]}",
-                callback_data=TplBotApplyCb(tpl_id=callback_data.tpl_id, bot_id=bot_row["bot_id"]),
+                callback_data=TplBotApplyCb(
+                    tpl_id=callback_data.tpl_id, bot_id=bot_row["bot_id"]
+                ),
             )
         kb.adjust(1)
         kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
@@ -682,11 +819,13 @@ async def cb_apply(
             f"🤖 <b>Применить шаблон «{html.escape(tpl_name)}»</b>\n\n"
             f"Будет применено к боту:\n{preview_text}\n\n"
             "Выберите бота для применения:",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
 
 
 # ── Delete flow ────────────────────────────────────────────────────────────────
+
 
 @router.callback_query(AssetTplCb.filter(F.action == "delete_confirm"))
 async def cb_delete_confirm(
@@ -706,7 +845,9 @@ async def cb_delete_confirm(
     await callback.message.edit_text(
         f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{tpl['name']}»</b>?",
         parse_mode="HTML",
-        reply_markup=_delete_confirm_kb(callback_data.tpl_id, callback_data.asset_type or ""),
+        reply_markup=_delete_confirm_kb(
+            callback_data.tpl_id, callback_data.asset_type or ""
+        ),
     )
 
 
@@ -728,8 +869,8 @@ async def cb_delete(
     count = len(templates)
     text = (
         f"✅ Шаблон удалён. Осталось: {count}"
-        if count else
-        f"✅ Шаблон удалён. Шаблонов {label} больше нет."
+        if count
+        else f"✅ Шаблон удалён. Шаблонов {label} больше нет."
     )
     await callback.message.edit_text(
         f"📄 <b>Шаблоны: {label}</b>\n\n{text}",
@@ -739,6 +880,7 @@ async def cb_delete(
 
 
 # ── Bot template execution ──────────────────────────────────────────────────────
+
 
 @router.callback_query(TplBotApplyCb.filter())
 async def cb_apply_bot_exec(
@@ -756,7 +898,8 @@ async def cb_apply_bot_exec(
     # Load template data
     if preset_key:
         from services.preset_templates import get_preset_by_key
-        parts = preset_key.split("__", 1)
+
+        preset_key.split("__", 1)
         preset = get_preset_by_key(preset_key)
         data = preset["template"] if preset else {}
         tpl_name = preset["name"] if preset else "preset"
@@ -776,7 +919,8 @@ async def cb_apply_bot_exec(
     # Load bot token
     bot_row = await pool.fetchrow(
         "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     if not bot_row:
         await callback.message.edit_text(
@@ -787,6 +931,7 @@ async def cb_apply_bot_exec(
         return
 
     from services import bot_api
+
     token = bot_row["token"]
     results = []
 
@@ -817,24 +962,32 @@ async def cb_apply_bot_exec(
         ok_count = 0
         for ar in ar_list:
             try:
-                await db.add_auto_reply(pool, bot_id, "keyword", ar["keyword"], ar["response"])
+                await db.add_auto_reply(
+                    pool, bot_id, "keyword", ar["keyword"], ar["response"]
+                )
                 ok_count += 1
             except Exception as e:
                 log.warning("Failed to create auto_reply %s: %s", ar.get("keyword"), e)
-        results.append(f"💬 Авто-ответы на команды ({ok_count}/{len(ar_list)} шт.): {'✅' if ok_count == len(ar_list) else '⚠️'}")
+        results.append(
+            f"💬 Авто-ответы на команды ({ok_count}/{len(ar_list)} шт.): {'✅' if ok_count == len(ar_list) else '⚠️'}"
+        )
 
     # Create funnel if template has funnel_steps
     if data.get("funnel_steps"):
         steps = data["funnel_steps"]
         try:
             funnel_id = await db.create_funnel(
-                pool, bot_id,
+                pool,
+                bot_id,
                 f"{tpl_name} — Автоворонка",
-                "join", None,
+                "join",
+                None,
             )
             for i, step in enumerate(steps):
                 delay_minutes = int(step.get("delay_hours", 0) * 60)
-                await db.add_funnel_step(pool, funnel_id, i, step["message"], delay_minutes)
+                await db.add_funnel_step(
+                    pool, funnel_id, i, step["message"], delay_minutes
+                )
             results.append(f"🔄 Воронка: ✅ ({len(steps)} шагов)")
         except Exception as e:
             log.warning("Failed to create funnel from template: %s", e)
@@ -843,18 +996,26 @@ async def cb_apply_bot_exec(
     # Generate admin access token for this bot
     from services.presence_setup import generate_admin_token
     from bot.callbacks import BotAdminCb
+
     admin_token = generate_admin_token()
     try:
         await db.upsert_bot_admin_session(pool, bot_id, user_id, admin_token)
-        results.append(f"🔑 Токен управления: создан")
+        results.append("🔑 Токен управления: создан")
     except Exception as e:
         log.warning("Failed to create admin token for bot %s: %s", bot_id, e)
         admin_token = None
 
-    bot_display = f"@{bot_row['username']}" if bot_row.get("username") else bot_row.get("first_name") or f"id{bot_id}"
+    bot_display = (
+        f"@{bot_row['username']}"
+        if bot_row.get("username")
+        else bot_row.get("first_name") or f"id{bot_id}"
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔧 Admin панель бота", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
+    kb.button(
+        text="🔧 Admin панель бота",
+        callback_data=BotAdminCb(action="panel", bot_id=bot_id),
+    )
     kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
     kb.adjust(1)
 
@@ -879,10 +1040,10 @@ async def cb_apply_bot_exec(
 # ══════════════════════════════════════════════════════════════════
 
 _LIB_TYPE_LABELS = {
-    "channel":   "📡 Каналы",
-    "group":     "👥 Группы",
-    "bot":       "🤖 Боты",
-    "post":      "📝 Посты",
+    "channel": "📡 Каналы",
+    "group": "👥 Группы",
+    "bot": "🤖 Боты",
+    "post": "📝 Посты",
 }
 _LIB_PAGE_SIZE = 5
 
@@ -909,6 +1070,7 @@ async def cb_lib_menu(callback: CallbackQuery) -> None:
 async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
     await callback.answer()
     from services.preset_templates import get_presets
+
     atype = callback_data.asset_type or "channel"
     presets = get_presets(atype)
     label = _LIB_TYPE_LABELS.get(atype, atype)
@@ -917,32 +1079,36 @@ async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
     for p in presets:
         kb.button(
             text=p["name"],
-            callback_data=LibCb(action="preview", asset_type=atype, preset_key=f"{atype}__{p['id']}"),
+            callback_data=LibCb(
+                action="preview", asset_type=atype, preset_key=f"{atype}__{p['id']}"
+            ),
         )
     kb.adjust(1)
     kb.button(text="◀️ Библиотека", callback_data=LibCb(action="menu"))
 
     await callback.message.edit_text(
-        f"📚 <b>Библиотека — {label}</b>\n\n"
-        f"Выберите шаблон для просмотра:",
+        f"📚 <b>Библиотека — {label}</b>\n\nВыберите шаблон для просмотра:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
 @router.callback_query(LibCb.filter(F.action == "preview"))
-async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool) -> None:
+async def cb_lib_preview(
+    callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     from services.preset_templates import get_preset_by_key
+
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
         await callback.message.edit_text(
             "❌ Шаблон не найден.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ Библиотека", callback_data=LibCb(action="menu")
-            ).as_markup(),
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Библиотека", callback_data=LibCb(action="menu"))
+            .as_markup(),
         )
         return
 
@@ -952,19 +1118,25 @@ async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: as
     lines = [f"📄 <b>{preset['name']}</b>", f"<i>{preset['description']}</i>\n"]
 
     if atype in ("channel", "group"):
-        if tdata.get("title"):   lines.append(f"📛 Название: <b>{html.escape(tdata['title'])}</b>")
+        if tdata.get("title"):
+            lines.append(f"📛 Название: <b>{html.escape(tdata['title'])}</b>")
         if tdata.get("description"):
             desc_preview = html.escape(tdata["description"][:200])
             lines.append(f"📄 Описание:\n<i>{desc_preview}</i>")
     elif atype == "bot":
-        if tdata.get("name"):   lines.append(f"📛 Имя бота: <b>{html.escape(tdata['name'])}</b>")
+        if tdata.get("name"):
+            lines.append(f"📛 Имя бота: <b>{html.escape(tdata['name'])}</b>")
         if tdata.get("short_description"):
-            lines.append(f"📃 Краткое: <i>{html.escape(tdata['short_description'])}</i>")
+            lines.append(
+                f"📃 Краткое: <i>{html.escape(tdata['short_description'])}</i>"
+            )
         if tdata.get("description"):
             lines.append(f"📄 Описание ({len(tdata['description'])} симв.)")
         cmds = tdata.get("commands") or []
         if cmds:
-            cmd_lines = "\n".join(f"  /{c['command']} — {c.get('description', '')}" for c in cmds[:5])
+            cmd_lines = "\n".join(
+                f"  /{c['command']} — {c.get('description', '')}" for c in cmds[:5]
+            )
             lines.append(f"🤖 Команды ({len(cmds)}):\n{cmd_lines}")
         if tdata.get("welcome_message"):
             wm = html.escape(tdata["welcome_message"][:200])
@@ -974,12 +1146,15 @@ async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: as
         lines.append(f"📝 Текст:\n<i>{txt}</i>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Клонировать в мои",
-              callback_data=LibCb(action="clone", asset_type=atype, preset_key=key))
-    kb.button(text="🚀 Применить сейчас",
-              callback_data=LibCb(action="apply", asset_type=atype, preset_key=key))
-    kb.button(text="◀️ Назад",
-              callback_data=LibCb(action="type", asset_type=atype))
+    kb.button(
+        text="📋 Клонировать в мои",
+        callback_data=LibCb(action="clone", asset_type=atype, preset_key=key),
+    )
+    kb.button(
+        text="🚀 Применить сейчас",
+        callback_data=LibCb(action="apply", asset_type=atype, preset_key=key),
+    )
+    kb.button(text="◀️ Назад", callback_data=LibCb(action="type", asset_type=atype))
     kb.adjust(2, 1)
     await callback.message.edit_text(
         "\n".join(lines),
@@ -989,31 +1164,39 @@ async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: as
 
 
 @router.callback_query(LibCb.filter(F.action == "clone"))
-async def cb_lib_clone(callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool) -> None:
+async def cb_lib_clone(
+    callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     from services.preset_templates import get_preset_by_key
+
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
         await callback.message.edit_text(
             "❌ Шаблон не найден.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ Библиотека", callback_data=LibCb(action="menu")
-            ).as_markup(),
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Библиотека", callback_data=LibCb(action="menu"))
+            .as_markup(),
         )
         return
     atype = callback_data.asset_type or key.split("__")[0]
 
-    tpl_id = await _save_template(pool, callback.from_user.id, atype, preset["name"], preset["template"])
+    tpl_id = await _save_template(
+        pool, callback.from_user.id, atype, preset["name"], preset["template"]
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📄 Открыть шаблон",
-              callback_data=AssetTplCb(action="view", tpl_id=tpl_id, asset_type=atype))
-    kb.button(text="🚀 Применить",
-              callback_data=AssetTplCb(action="apply", tpl_id=tpl_id, asset_type=atype))
-    kb.button(text="📚 Библиотека",
-              callback_data=LibCb(action="menu"))
+    kb.button(
+        text="📄 Открыть шаблон",
+        callback_data=AssetTplCb(action="view", tpl_id=tpl_id, asset_type=atype),
+    )
+    kb.button(
+        text="🚀 Применить",
+        callback_data=AssetTplCb(action="apply", tpl_id=tpl_id, asset_type=atype),
+    )
+    kb.button(text="📚 Библиотека", callback_data=LibCb(action="menu"))
     kb.adjust(2, 1)
     await callback.message.edit_text(
         f"✅ <b>Шаблон «{html.escape(preset['name'])}» скопирован в ваши шаблоны!</b>\n\n"
@@ -1025,20 +1208,23 @@ async def cb_lib_clone(callback: CallbackQuery, callback_data: LibCb, pool: asyn
 
 @router.callback_query(LibCb.filter(F.action == "apply"))
 async def cb_lib_apply(
-    callback: CallbackQuery, callback_data: LibCb,
-    pool: asyncpg.Pool, state: FSMContext,
+    callback: CallbackQuery,
+    callback_data: LibCb,
+    pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
     await callback.answer()
     from services.preset_templates import get_preset_by_key
+
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
         await callback.message.edit_text(
             "❌ Шаблон не найден.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ Библиотека", callback_data=LibCb(action="menu")
-            ).as_markup(),
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Библиотека", callback_data=LibCb(action="menu"))
+            .as_markup(),
         )
         return
     atype = callback_data.asset_type or key.split("__")[0]
@@ -1052,7 +1238,8 @@ async def cb_lib_apply(
             kb.button(text="◀️ Назад", callback_data=LibCb(action="menu"))
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов. Добавьте аккаунт.",
-                parse_mode="HTML", reply_markup=kb.as_markup(),
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
             )
             return
         await state.update_data(tpl_prefill=data)
@@ -1062,18 +1249,27 @@ async def cb_lib_apply(
             icon = "📡"
         else:
             from bot.states import CreateGroupFSM
+
             await state.set_state(CreateGroupFSM.choosing_account)
             action_key = "create_acc"
             icon = "👥"
         kb = InlineKeyboardBuilder()
         for acc in accounts:
             name = (acc["first_name"] or "").strip()
-            uname = f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
+            uname = (
+                f"@{acc['username']}" if acc.get("username") else acc.get("phone", "")
+            )
             label = f"{name} ({uname})" if name else uname
             if atype == "channel":
-                kb.button(text=f"👤 {label}", callback_data=ChanFactCb(action=action_key, acc_id=acc["id"]))
+                kb.button(
+                    text=f"👤 {label}",
+                    callback_data=ChanFactCb(action=action_key, acc_id=acc["id"]),
+                )
             else:
-                kb.button(text=f"👤 {label}", callback_data=GroupFCb(action=action_key, acc_id=acc["id"]))
+                kb.button(
+                    text=f"👤 {label}",
+                    callback_data=GroupFCb(action=action_key, acc_id=acc["id"]),
+                )
         kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
         kb.adjust(1)
         title_val = data.get("title", "")
@@ -1081,7 +1277,8 @@ async def cb_lib_apply(
             f"{icon} <b>Создать по шаблону «{html.escape(tpl_name)}»</b>\n\n"
             f"Название: <b>{html.escape(title_val or '—')}</b>\n\n"
             "Выберите аккаунт для создания:",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
 
     elif atype == "post":
@@ -1095,7 +1292,8 @@ async def cb_lib_apply(
             f"📝 <b>Шаблон поста «{html.escape(tpl_name)}»</b>\n\n"
             f"<i>{preview}</i>\n\n"
             "Нажмите «Создать рассылку» — текст подставится автоматически.",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
 
     elif atype == "bot":
@@ -1109,28 +1307,36 @@ async def cb_lib_apply(
             kb.button(text="◀️ Назад", callback_data=LibCb(action="menu"))
             await callback.message.edit_text(
                 "⚠️ У вас нет управляемых ботов.",
-                parse_mode="HTML", reply_markup=kb.as_markup(),
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
             )
             return
         kb = InlineKeyboardBuilder()
         for bot_row in bots:
             name = bot_row["first_name"] or ""
-            uname = f"@{bot_row['username']}" if bot_row.get("username") else f"id{bot_row['bot_id']}"
+            uname = (
+                f"@{bot_row['username']}"
+                if bot_row.get("username")
+                else f"id{bot_row['bot_id']}"
+            )
             label = f"{name} ({uname})" if name else uname
             kb.button(
                 text=f"🤖 {label[:40]}",
-                callback_data=TplBotApplyCb(tpl_id=0, bot_id=bot_row["bot_id"], preset_key=key),
+                callback_data=TplBotApplyCb(
+                    tpl_id=0, bot_id=bot_row["bot_id"], preset_key=key
+                ),
             )
         kb.adjust(1)
         kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
         await callback.message.edit_text(
-            f"🤖 <b>Применить шаблон «{html.escape(tpl_name)}»</b>\n\n"
-            "Выберите бота:",
-            parse_mode="HTML", reply_markup=kb.as_markup(),
+            f"🤖 <b>Применить шаблон «{html.escape(tpl_name)}»</b>\n\nВыберите бота:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
 
 
 # ── Back / cancel ──────────────────────────────────────────────────────────────
+
 
 @router.callback_query(AssetTplCb.filter(F.action == "back"))
 async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:

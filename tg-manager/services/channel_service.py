@@ -1,4 +1,5 @@
 """Channel service — вспомогательные функции для статистики каналов."""
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,8 @@ async def get_channel_stats(
     row = await pool.fetchrow(
         "SELECT title, username, added_at FROM managed_channels "
         "WHERE owner_id=$1 AND channel_id=$2",
-        owner_id, channel_id,
+        owner_id,
+        channel_id,
     )
 
     title: Optional[str] = None
@@ -48,7 +50,8 @@ async def get_channel_stats(
             "SELECT COUNT(*) AS cnt FROM operation_log ol "
             "JOIN operation_queue oq ON oq.id = ol.op_id "
             "WHERE oq.owner_id=$1 AND ol.target=$2 AND ol.status='ok'",
-            owner_id, str(channel_id),
+            owner_id,
+            str(channel_id),
         )
         if count_row:
             posts_published = int(count_row["cnt"] or 0)
@@ -56,7 +59,7 @@ async def get_channel_stats(
         log.warning("get_channel_stats: не удалось получить posts_published: %s", e)
 
     return {
-        "members": None,          # берётся из Telethon при необходимости
+        "members": None,  # берётся из Telethon при необходимости
         "posts_published": posts_published,
         "joined_at": joined_at,
         "title": title,

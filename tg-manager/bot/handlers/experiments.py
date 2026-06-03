@@ -1,4 +1,5 @@
 """A/B experiment management."""
+
 import math
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -7,7 +8,13 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 from bot.callbacks import ExperimentCb, BmCb
-from bot.keyboards import experiments_menu, experiment_view_menu, experiment_type_menu, variant_pick_menu, subscription_locked_markup
+from bot.keyboards import (
+    experiments_menu,
+    experiment_view_menu,
+    experiment_type_menu,
+    variant_pick_menu,
+    subscription_locked_markup,
+)
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 
@@ -24,7 +31,9 @@ def _html_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _z_test_two_proportions(n_a: int, c_a: int, n_b: int, c_b: int) -> tuple[float, str]:
+def _z_test_two_proportions(
+    n_a: int, c_a: int, n_b: int, c_b: int
+) -> tuple[float, str]:
     """
     Z-test for two proportions. Returns (z_score, confidence_label).
     Uses pooled proportion. Requires n >= 5 and at least some conversions.
@@ -50,18 +59,30 @@ def _z_test_two_proportions(n_a: int, c_a: int, n_b: int, c_b: int) -> tuple[flo
 
 
 async def _owns_experiment(pool: asyncpg.Pool, exp_id: int, user_id: int) -> bool:
-    return bool(await pool.fetchval(
-        """SELECT 1 FROM experiments e
+    return bool(
+        await pool.fetchval(
+            """SELECT 1 FROM experiments e
            JOIN managed_bots b ON b.bot_id = e.bot_id
            WHERE e.id=$1 AND b.added_by=$2""",
-        exp_id, user_id,
-    ))
+            exp_id,
+            user_id,
+        )
+    )
 
 
 async def _exp_text(exp, variants: list) -> str:
-    status_label = {"draft": "📝 Черновик", "active": "🟢 Активен", "paused": "⏸ Пауза", "completed": "✅ Завершён"}
-    type_label = {"start_message": "/start сообщение", "auto_reply": "Авто-ответ", "funnel": "Воронка"}
-    safe_name = _html_escape(exp['name'])
+    status_label = {
+        "draft": "📝 Черновик",
+        "active": "🟢 Активен",
+        "paused": "⏸ Пауза",
+        "completed": "✅ Завершён",
+    }
+    type_label = {
+        "start_message": "/start сообщение",
+        "auto_reply": "Авто-ответ",
+        "funnel": "Воронка",
+    }
+    safe_name = _html_escape(exp["name"])
     lines = [
         f"🧪 <b>Эксперимент: {safe_name}</b>",
         f"Тип: {type_label.get(exp['experiment_type'], _html_escape(exp['experiment_type']))}",
@@ -72,7 +93,11 @@ async def _exp_text(exp, variants: list) -> str:
     ]
     ctrs = []
     for v in variants:
-        ctr = round(v["conversions"] / v["impressions"] * 100, 1) if v["impressions"] else 0
+        ctr = (
+            round(v["conversions"] / v["impressions"] * 100, 1)
+            if v["impressions"]
+            else 0
+        )
         ctrs.append((v, ctr))
 
     # Find best variant by CTR
@@ -84,7 +109,7 @@ async def _exp_text(exp, variants: list) -> str:
     for v, ctr in ctrs:
         winner_mark = " 🏆" if exp.get("winner_variant_id") == v["id"] else ""
         best_mark = " ⭐" if ctr == best_ctr and ctr > 0 and not winner_mark else ""
-        safe_vname = _html_escape(v['name'])
+        safe_vname = _html_escape(v["name"])
         lines.append(
             f"  • <b>{safe_vname}{winner_mark}{best_mark}</b>: "
             f"{v['impressions']} показов, {v['conversions']} конв. ({ctr}%)"
@@ -109,13 +134,17 @@ async def _exp_text(exp, variants: list) -> str:
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "list"))
-async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
-                       pool: asyncpg.Pool) -> None:
+async def cb_exp_list(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
-            locked_text("A/B тесты", "pro"), parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="main")),
+            locked_text("A/B тесты", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "pro", back_callback=BmCb(action="main")
+            ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -147,8 +176,9 @@ async def cb_exp_list(callback: CallbackQuery, callback_data: ExperimentCb,
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "view"))
-async def cb_exp_view(callback: CallbackQuery, callback_data: ExperimentCb,
-                       pool: asyncpg.Pool) -> None:
+async def cb_exp_view(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
@@ -157,14 +187,18 @@ async def cb_exp_view(callback: CallbackQuery, callback_data: ExperimentCb,
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
     await callback.message.edit_text(
-        text, parse_mode="HTML",
-        reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, exp["status"]),
+        text,
+        parse_mode="HTML",
+        reply_markup=experiment_view_menu(
+            callback_data.bot_id, callback_data.exp_id, exp["status"]
+        ),
     )
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "create"))
-async def cb_exp_create(callback: CallbackQuery, callback_data: ExperimentCb,
-                         state: FSMContext) -> None:
+async def cb_exp_create(
+    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
+) -> None:
     await callback.answer()
     await state.set_state(CreateExperiment.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -176,15 +210,18 @@ async def cb_exp_create(callback: CallbackQuery, callback_data: ExperimentCb,
 
 
 @router.callback_query(ExperimentCb.filter(F.action.in_({"type_start", "type_reply"})))
-async def cb_exp_type(callback: CallbackQuery, callback_data: ExperimentCb,
-                       state: FSMContext) -> None:
+async def cb_exp_type(
+    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
+) -> None:
     await callback.answer()
     exp_type = "start_message" if callback_data.action == "type_start" else "auto_reply"
     await state.update_data(exp_type=exp_type)
     await state.set_state(CreateExperiment.waiting_name)
     bot_id = callback_data.bot_id
     cancel_kb = InlineKeyboardBuilder()
-    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=bot_id))
+    cancel_kb.button(
+        text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=bot_id)
+    )
     await callback.message.edit_text(
         "🧪 <b>Новый эксперимент</b>\n\nВведите название эксперимента:",
         parse_mode="HTML",
@@ -196,12 +233,17 @@ async def cb_exp_type(callback: CallbackQuery, callback_data: ExperimentCb,
 async def msg_exp_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     name = message.text.strip()
-    exp_id = await db.create_experiment(pool, data["bot_id"], name, data.get("exp_type", "start_message"))
+    exp_id = await db.create_experiment(
+        pool, data["bot_id"], name, data.get("exp_type", "start_message")
+    )
     await state.update_data(exp_id=exp_id)
     await state.set_state(CreateExperiment.waiting_variant_name)
     safe_name = _html_escape(name)
     cancel_kb = InlineKeyboardBuilder()
-    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=data["bot_id"]))
+    cancel_kb.button(
+        text="❌ Отмена",
+        callback_data=ExperimentCb(action="list", bot_id=data["bot_id"]),
+    )
     await message.answer(
         f"✅ Эксперимент «{safe_name}» создан!\n\n"
         "Добавьте первый вариант.\n"
@@ -219,7 +261,10 @@ async def msg_variant_name(message: Message, state: FSMContext) -> None:
     await state.set_state(CreateExperiment.waiting_variant_content)
     safe_vname = _html_escape(variant_name)
     cancel_kb = InlineKeyboardBuilder()
-    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=data.get("bot_id", 0)))
+    cancel_kb.button(
+        text="❌ Отмена",
+        callback_data=ExperimentCb(action="list", bot_id=data.get("bot_id", 0)),
+    )
     await message.answer(
         f"Вариант: <b>{safe_vname}</b>\n\n"
         "Введите содержимое (текст /start сообщения или авто-ответа):",
@@ -229,18 +274,31 @@ async def msg_variant_name(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CreateExperiment.waiting_variant_content, F.text)
-async def msg_variant_content(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def msg_variant_content(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     data = await state.get_data()
-    await db.add_experiment_variant(pool, data["exp_id"], data["variant_name"], message.text)
+    await db.add_experiment_variant(
+        pool, data["exp_id"], data["variant_name"], message.text
+    )
     variants = await db.get_experiment_variants(pool, data["exp_id"])
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import ExperimentCb as EC
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Ещё вариант", callback_data=EC(action="add_variant", bot_id=data["bot_id"], exp_id=data["exp_id"]))
-    kb.button(text="▶️ Запустить эксперимент", callback_data=EC(action="start", bot_id=data["bot_id"], exp_id=data["exp_id"]))
+    kb.button(
+        text="➕ Ещё вариант",
+        callback_data=EC(
+            action="add_variant", bot_id=data["bot_id"], exp_id=data["exp_id"]
+        ),
+    )
+    kb.button(
+        text="▶️ Запустить эксперимент",
+        callback_data=EC(action="start", bot_id=data["bot_id"], exp_id=data["exp_id"]),
+    )
     kb.adjust(1)
     await state.clear()
-    safe_vname = _html_escape(data['variant_name'])
+    safe_vname = _html_escape(data["variant_name"])
     await message.answer(
         f"✅ Вариант «{safe_vname}» добавлен!\n"
         f"Всего вариантов: {len(variants)}\n\n"
@@ -251,13 +309,17 @@ async def msg_variant_content(message: Message, state: FSMContext, pool: asyncpg
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "add_variant"))
-async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
-                          state: FSMContext) -> None:
+async def cb_add_variant(
+    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
+) -> None:
     await callback.answer()
     await state.set_state(CreateExperiment.waiting_variant_name)
     await state.update_data(bot_id=callback_data.bot_id, exp_id=callback_data.exp_id)
     cancel_kb = InlineKeyboardBuilder()
-    cancel_kb.button(text="❌ Отмена", callback_data=ExperimentCb(action="list", bot_id=callback_data.bot_id))
+    cancel_kb.button(
+        text="❌ Отмена",
+        callback_data=ExperimentCb(action="list", bot_id=callback_data.bot_id),
+    )
     await callback.message.edit_text(
         "➕ <b>Добавить вариант</b>\n\nВведите название варианта:",
         parse_mode="HTML",
@@ -266,8 +328,9 @@ async def cb_add_variant(callback: CallbackQuery, callback_data: ExperimentCb,
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "start"))
-async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
-                        pool: asyncpg.Pool) -> None:
+async def cb_exp_start(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
@@ -281,7 +344,9 @@ async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
         await callback.message.edit_text(
             "⚠️ Этот эксперимент уже активен.",
             parse_mode="HTML",
-            reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "active"),
+            reply_markup=experiment_view_menu(
+                callback_data.bot_id, callback_data.exp_id, "active"
+            ),
         )
         return
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
@@ -289,21 +354,27 @@ async def cb_exp_start(callback: CallbackQuery, callback_data: ExperimentCb,
         await callback.message.edit_text(
             "❌ Нужно минимум 2 варианта для запуска эксперимента.",
             parse_mode="HTML",
-            reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, exp["status"]),
+            reply_markup=experiment_view_menu(
+                callback_data.bot_id, callback_data.exp_id, exp["status"]
+            ),
         )
         return
     await db.set_experiment_status(pool, callback_data.exp_id, "active")
     exp = await db.get_experiment(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
     await callback.message.edit_text(
-        text, parse_mode="HTML",
-        reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "active"),
+        text,
+        parse_mode="HTML",
+        reply_markup=experiment_view_menu(
+            callback_data.bot_id, callback_data.exp_id, "active"
+        ),
     )
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "pause"))
-async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
-                        pool: asyncpg.Pool) -> None:
+async def cb_exp_pause(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
@@ -313,14 +384,18 @@ async def cb_exp_pause(callback: CallbackQuery, callback_data: ExperimentCb,
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
     await callback.message.edit_text(
-        text, parse_mode="HTML",
-        reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "paused"),
+        text,
+        parse_mode="HTML",
+        reply_markup=experiment_view_menu(
+            callback_data.bot_id, callback_data.exp_id, "paused"
+        ),
     )
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "resume"))
-async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_exp_resume(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
@@ -330,50 +405,65 @@ async def cb_exp_resume(callback: CallbackQuery, callback_data: ExperimentCb,
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
     await callback.message.edit_text(
-        text, parse_mode="HTML",
-        reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "active"),
+        text,
+        parse_mode="HTML",
+        reply_markup=experiment_view_menu(
+            callback_data.bot_id, callback_data.exp_id, "active"
+        ),
     )
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "pick_winner"))
-async def cb_pick_winner(callback: CallbackQuery, callback_data: ExperimentCb,
-                          pool: asyncpg.Pool) -> None:
+async def cb_pick_winner(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if not variants:
         await callback.message.edit_text("❌ Нет вариантов.", parse_mode="HTML")
         return
     exp = await db.get_experiment(pool, callback_data.exp_id)
-    safe_name = _html_escape(exp['name'])
+    safe_name = _html_escape(exp["name"])
     await callback.message.edit_text(
         f"🏆 Выберите победителя эксперимента «{safe_name}»:",
         parse_mode="HTML",
-        reply_markup=variant_pick_menu(callback_data.bot_id, callback_data.exp_id, variants),
+        reply_markup=variant_pick_menu(
+            callback_data.bot_id, callback_data.exp_id, variants
+        ),
     )
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "set_winner"))
-async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_set_winner(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
-    await callback.answer("🏆 Победитель выбран! Эксперимент завершён.", show_alert=True)
+    await callback.answer(
+        "🏆 Победитель выбран! Эксперимент завершён.", show_alert=True
+    )
     await pool.execute(
         "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
-        callback_data.exp_id, callback_data.variant_id,
+        callback_data.exp_id,
+        callback_data.variant_id,
     )
     exp = await db.get_experiment(pool, callback_data.exp_id)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     text = await _exp_text(exp, variants)
     await callback.message.edit_text(
-        text, parse_mode="HTML",
-        reply_markup=experiment_view_menu(callback_data.bot_id, callback_data.exp_id, "completed"),
+        text,
+        parse_mode="HTML",
+        reply_markup=experiment_view_menu(
+            callback_data.bot_id, callback_data.exp_id, "completed"
+        ),
     )
     # Notify the bot owner about experiment completion
     owner_id = await db.get_bot_owner(pool, callback_data.bot_id)
     if owner_id and owner_id != callback.from_user.id:
-        winner_variant = next((v for v in variants if v["id"] == callback_data.variant_id), None)
+        winner_variant = next(
+            (v for v in variants if v["id"] == callback_data.variant_id), None
+        )
         winner_name = _html_escape(winner_variant["name"]) if winner_variant else "—"
         safe_exp_name = _html_escape(exp["name"])
         try:
@@ -390,8 +480,9 @@ async def cb_set_winner(callback: CallbackQuery, callback_data: ExperimentCb,
 
 
 @router.callback_query(ExperimentCb.filter(F.action == "delete"))
-async def cb_exp_delete(callback: CallbackQuery, callback_data: ExperimentCb,
-                         pool: asyncpg.Pool) -> None:
+async def cb_exp_delete(
+    callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer("🗑 Эксперимент удалён.")
     await db.delete_experiment(pool, callback_data.exp_id, callback_data.bot_id)
     exps = await db.get_experiments(pool, callback_data.bot_id)

@@ -31,7 +31,9 @@ async def _get_token(pool: asyncpg.Pool, bot_id: int, user_id: int) -> str | Non
 
 @router.callback_query(EditCb.filter(F.action == "menu"))
 async def cb_edit_menu(
-    callback: CallbackQuery, callback_data: EditCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: EditCb,
+    pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
     await state.clear()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """TG Manager — Telegram bot management platform."""
+
 import asyncio
 import logging
 import os
@@ -118,7 +119,12 @@ async def _global_error_handler(event: ErrorEvent) -> None:
             except Exception:
                 log_exc_swallow(log, "Failed to answer callback_query on error handler")
             try:
-                exc_text = str(exc)[:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                exc_text = (
+                    str(exc)[:200]
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
                 await cb.message.answer(
                     f"⚠️ <b>Внутренняя ошибка</b>\n\n"
                     f"<code>{type(exc).__name__}: {exc_text}</code>",
@@ -128,7 +134,12 @@ async def _global_error_handler(event: ErrorEvent) -> None:
                 log_exc_swallow(log, "Failed to send error message via callback_query")
         elif update.message:
             try:
-                exc_text = str(exc)[:200].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                exc_text = (
+                    str(exc)[:200]
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
                 await update.message.answer(
                     f"⚠️ <b>Внутренняя ошибка</b>\n\n"
                     f"<code>{type(exc).__name__}: {exc_text}</code>",
@@ -222,6 +233,7 @@ async def main() -> None:
     # Load persistent platform settings
     from database import db as _db
     from bot.utils.subscription import set_free_mode
+
     _fm = await _db.get_platform_setting(pool, "free_mode", "false")
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
@@ -241,27 +253,31 @@ async def main() -> None:
 
     # Register bot commands (shows in Telegram "/" menu)
     from aiogram.types import BotCommand
-    await bot.set_my_commands([
-        BotCommand(command="start",        description="Главное меню"),
-        BotCommand(command="menu",         description="🏠 BotMother OS"),
-        BotCommand(command="ai",           description="AI-ассистент"),
-        BotCommand(command="remember",     description="Запомнить факт для AI"),
-        BotCommand(command="memory",       description="Показать память AI"),
-        BotCommand(command="forget",       description="Удалить запись памяти"),
-        BotCommand(command="accounts",     description="Мои аккаунты"),
-        BotCommand(command="ops",          description="Операции с аккаунтами"),
-        BotCommand(command="subscription", description="Подписка и оплата"),
-        BotCommand(command="ranking",      description="Трекер позиций в поиске"),
-        BotCommand(command="tasks",         description="Активные задачи (отмена)"),
-        BotCommand(command="topology",     description="🗺️ Топология активов"),
-        BotCommand(command="post",         description="✍️ Создать пост в каналы"),
-        BotCommand(command="cancel",       description="Отменить текущее действие"),
-    ])
+
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Главное меню"),
+            BotCommand(command="menu", description="🏠 BotMother OS"),
+            BotCommand(command="ai", description="AI-ассистент"),
+            BotCommand(command="remember", description="Запомнить факт для AI"),
+            BotCommand(command="memory", description="Показать память AI"),
+            BotCommand(command="forget", description="Удалить запись памяти"),
+            BotCommand(command="accounts", description="Мои аккаунты"),
+            BotCommand(command="ops", description="Операции с аккаунтами"),
+            BotCommand(command="subscription", description="Подписка и оплата"),
+            BotCommand(command="ranking", description="Трекер позиций в поиске"),
+            BotCommand(command="tasks", description="Активные задачи (отмена)"),
+            BotCommand(command="topology", description="🗺️ Топология активов"),
+            BotCommand(command="post", description="✍️ Создать пост в каналы"),
+            BotCommand(command="cancel", description="Отменить текущее действие"),
+        ]
+    )
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
     http = aiohttp.ClientSession(connector=connector)
+
     async def _resilient(name: str, fn, *args):
         """Wrap a background service factory with auto-restart on crash.
         fn(*args) is called fresh each restart so the coroutine is never reused.
@@ -272,31 +288,68 @@ async def main() -> None:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                log.error("Service %s crashed: %s — restarting in 30s", name, e, exc_info=True)
+                log.error(
+                    "Service %s crashed: %s — restarting in 30s", name, e, exc_info=True
+                )
                 await asyncio.sleep(30)
 
     try:
-        asyncio.create_task(_resilient("scheduler",        scheduler.run, pool, http))
-        asyncio.create_task(_resilient("auto_responder",   auto_responder.run, pool, http, bot))
-        asyncio.create_task(_resilient("relay",            relay_service.run, pool, http))
-        asyncio.create_task(_resilient("funnel_runner",    funnel_runner.run, pool, http))
-        asyncio.create_task(_resilient("payment_checker",  payment_checker.run, pool, http, bot))
-        asyncio.create_task(_resilient("ranking_checker",  ranking_checker.run, pool, bot))
-        asyncio.create_task(_resilient("search_observer",  search_observer.run_confirmation_loop, pool, bot))
-        asyncio.create_task(_resilient("account_monitor",  account_monitor.run, pool, bot))
-        asyncio.create_task(_resilient("trust_engine",     trust_engine.run, pool, bot))
-        asyncio.create_task(_resilient("shadowban_monitor",shadowban_monitor.run, pool, bot))
-        asyncio.create_task(_resilient("op_worker",        op_worker.run, pool, bot))
-        asyncio.create_task(_resilient("behavioral_engine",behavioral_engine.run, pool, bot))
-        asyncio.create_task(_resilient("account_warmer",   account_warmer.run_warmup_loop, pool))
-        asyncio.create_task(_resilient("account_health",   account_health.run_health_check_loop, pool))
-        asyncio.create_task(_resilient("activity_engine",  activity_engine.run_activity_loop, pool))
-        asyncio.create_task(_resilient("payment_webhook",  payment_webhook.run, pool, bot))
-        asyncio.create_task(_resilient("task_registry",  task_registry.run_cleanup_loop))
-        asyncio.create_task(_resilient("drift_detector",  drift_detector.run, pool, bot))
-        asyncio.create_task(_resilient("infra_memory",    infra_memory.run_flush_loop, pool))
-        asyncio.create_task(_resilient("infra_copilot",       infra_copilot.run_copilot_loop, pool, bot))
-        asyncio.create_task(_resilient("ecosystem_copilot",   ecosystem_copilot.run_ecosystem_copilot_loop, pool, bot))
+        asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
+        asyncio.create_task(
+            _resilient("auto_responder", auto_responder.run, pool, http, bot)
+        )
+        asyncio.create_task(_resilient("relay", relay_service.run, pool, http))
+        asyncio.create_task(_resilient("funnel_runner", funnel_runner.run, pool, http))
+        asyncio.create_task(
+            _resilient("payment_checker", payment_checker.run, pool, http, bot)
+        )
+        asyncio.create_task(
+            _resilient("ranking_checker", ranking_checker.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient(
+                "search_observer", search_observer.run_confirmation_loop, pool, bot
+            )
+        )
+        asyncio.create_task(
+            _resilient("account_monitor", account_monitor.run, pool, bot)
+        )
+        asyncio.create_task(_resilient("trust_engine", trust_engine.run, pool, bot))
+        asyncio.create_task(
+            _resilient("shadowban_monitor", shadowban_monitor.run, pool, bot)
+        )
+        asyncio.create_task(_resilient("op_worker", op_worker.run, pool, bot))
+        asyncio.create_task(
+            _resilient("behavioral_engine", behavioral_engine.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("account_warmer", account_warmer.run_warmup_loop, pool)
+        )
+        asyncio.create_task(
+            _resilient("account_health", account_health.run_health_check_loop, pool)
+        )
+        asyncio.create_task(
+            _resilient("activity_engine", activity_engine.run_activity_loop, pool)
+        )
+        asyncio.create_task(
+            _resilient("payment_webhook", payment_webhook.run, pool, bot)
+        )
+        asyncio.create_task(_resilient("task_registry", task_registry.run_cleanup_loop))
+        asyncio.create_task(_resilient("drift_detector", drift_detector.run, pool, bot))
+        asyncio.create_task(
+            _resilient("infra_memory", infra_memory.run_flush_loop, pool)
+        )
+        asyncio.create_task(
+            _resilient("infra_copilot", infra_copilot.run_copilot_loop, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient(
+                "ecosystem_copilot",
+                ecosystem_copilot.run_ecosystem_copilot_loop,
+                pool,
+                bot,
+            )
+        )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:

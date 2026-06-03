@@ -40,7 +40,9 @@ async def cb_swarm_menu(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        log_exc_swallow(log, "cb_swarm_menu: get_bot failed bot=%s", callback_data.bot_id)
+        log_exc_swallow(
+            log, "cb_swarm_menu: get_bot failed bot=%s", callback_data.bot_id
+        )
         await callback.answer("Ошибка загрузки бота.", show_alert=True)
         return
     if not row:
@@ -88,8 +90,12 @@ async def cb_swarm_toggle(
     new_state = not row.get("swarm_enabled", False)
     try:
         await db.toggle_swarm(pool, callback_data.bot_id, new_state)
-        log.info("swarm toggle: bot=%s new_state=%s user=%s",
-                 callback_data.bot_id, new_state, callback.from_user.id)
+        log.info(
+            "swarm toggle: bot=%s new_state=%s user=%s",
+            callback_data.bot_id,
+            new_state,
+            callback.from_user.id,
+        )
     except Exception:
         log_exc_swallow(log, "cb_swarm_toggle: toggle_swarm failed")
         await callback.answer("Ошибка сохранения.", show_alert=True)
@@ -192,7 +198,9 @@ async def cb_swarm_role(
         return
     try:
         # Check current role before updating
-        current_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+        current_row = await db.get_bot(
+            pool, callback_data.bot_id, callback.from_user.id
+        )
         current_role = current_row.get("bot_role", "general") if current_row else None
         if current_role == role:
             role_label = ROLE_LABELS.get(role, role)
@@ -201,8 +209,12 @@ async def cb_swarm_role(
             )
             return
         await db.set_bot_role(pool, callback_data.bot_id, role)
-        log.info("swarm role: bot=%s role=%s user=%s",
-                 callback_data.bot_id, role, callback.from_user.id)
+        log.info(
+            "swarm role: bot=%s role=%s user=%s",
+            callback_data.bot_id,
+            role,
+            callback.from_user.id,
+        )
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_swarm_role: DB failed")

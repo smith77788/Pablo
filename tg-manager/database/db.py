@@ -16,10 +16,10 @@ async def create_pool() -> asyncpg.Pool:
         # Run all schema migration files in order — search both root and database/ subdir
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         db_dir = os.path.join(base_dir, "database")
-        all_paths = (
-            glob.glob(os.path.join(base_dir, "schema*.sql")) +
-            glob.glob(os.path.join(db_dir, "schema*.sql"))
+        all_paths = glob.glob(os.path.join(base_dir, "schema*.sql")) + glob.glob(
+            os.path.join(db_dir, "schema*.sql")
         )
+
         # Sort by version number, deduplicate by basename
         def _version_key(p: str) -> int:
             name = os.path.basename(p)
@@ -27,6 +27,7 @@ async def create_pool() -> asyncpg.Pool:
                 return 0
             digits = "".join(filter(str.isdigit, name))
             return int(digits) if digits else 0
+
         all_paths.sort(key=_version_key)
         seen: set[str] = set()
         schema_files = []
@@ -42,27 +43,46 @@ async def create_pool() -> asyncpg.Pool:
                 try:
                     await conn.execute(sql)
                 except Exception as exc:
-                    log.warning("Schema %s failed (may already exist): %s", os.path.basename(path), exc)
+                    log.warning(
+                        "Schema %s failed (may already exist): %s",
+                        os.path.basename(path),
+                        exc,
+                    )
     return pool
 
 
 # ── Managed bots ───────────────────────────────────────────────────────────
 
-async def add_bot(pool: asyncpg.Pool, token: str, bot_id: int, username: str,
-                  first_name: str, added_by: int) -> bool:
+
+async def add_bot(
+    pool: asyncpg.Pool,
+    token: str,
+    bot_id: int,
+    username: str,
+    first_name: str,
+    added_by: int,
+) -> bool:
     """Return True if inserted, False if token already exists."""
     try:
         await pool.execute(
             """INSERT INTO managed_bots (token, bot_id, username, first_name, added_by)
                VALUES ($1, $2, $3, $4, $5)""",
-            token, bot_id, username, first_name, added_by,
+            token,
+            bot_id,
+            username,
+            first_name,
+            added_by,
         )
     except asyncpg.UniqueViolationError:
         return False
     # Referral activation: first bot creation counts as "active"
-    existing_bots = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", added_by
-    ) or 0
+    existing_bots = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+            added_by,
+        )
+        or 0
+    )
     if existing_bots == 1:  # this was the first bot
         await mark_referral_activated(pool, added_by)
     return True
@@ -88,29 +108,38 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
     )
 
 
-async def get_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> asyncpg.Record | None:
+async def get_bot(
+    pool: asyncpg.Pool, bot_id: int, added_by: int
+) -> asyncpg.Record | None:
     return await pool.fetchrow(
         "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
-        bot_id, added_by,
+        bot_id,
+        added_by,
     )
 
 
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
     result = await pool.execute(
         "DELETE FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id, added_by,
+        bot_id,
+        added_by,
     )
     return result == "DELETE 1"
 
 
-async def save_bot_note(pool: asyncpg.Pool, bot_id: int, added_by: int, note: str) -> None:
+async def save_bot_note(
+    pool: asyncpg.Pool, bot_id: int, added_by: int, note: str
+) -> None:
     await pool.execute(
         "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
-        bot_id, added_by, note,
+        bot_id,
+        added_by,
+        note,
     )
 
 
 # ── Audience ───────────────────────────────────────────────────────────────
+
 
 async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> int:
     """Insert or refresh last_seen for each user. Returns count of new rows."""
@@ -162,7 +191,8 @@ async def compare_audiences(pool: asyncpg.Pool, bot_id_a: int, bot_id_b: int) ->
         """SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE
            INTERSECT
            SELECT user_id FROM bot_users WHERE bot_id=$2 AND is_active=TRUE""",
-        bot_id_a, bot_id_b,
+        bot_id_a,
+        bot_id_b,
     )
     count_a = await get_audience_count(pool, bot_id_a)
     count_b = await get_audience_count(pool, bot_id_b)
@@ -176,46 +206,67 @@ async def compare_audiences(pool: asyncpg.Pool, bot_id_a: int, bot_id_b: int) ->
     }
 
 
-async def get_user_by_id(pool: asyncpg.Pool, bot_id: int, user_id: int) -> asyncpg.Record | None:
+async def get_user_by_id(
+    pool: asyncpg.Pool, bot_id: int, user_id: int
+) -> asyncpg.Record | None:
     return await pool.fetchrow(
         "SELECT * FROM bot_users WHERE bot_id=$1 AND user_id=$2", bot_id, user_id
     )
 
 
-async def block_user(pool: asyncpg.Pool, bot_id: int, user_id: int, blocked: bool) -> None:
+async def block_user(
+    pool: asyncpg.Pool, bot_id: int, user_id: int, blocked: bool
+) -> None:
     await pool.execute(
         "UPDATE bot_users SET is_blocked=$3 WHERE bot_id=$1 AND user_id=$2",
-        bot_id, user_id, blocked,
+        bot_id,
+        user_id,
+        blocked,
     )
 
 
 async def mark_user_inactive(pool: asyncpg.Pool, bot_id: int, user_id: int) -> None:
     await pool.execute(
         "UPDATE bot_users SET is_active=FALSE WHERE bot_id=$1 AND user_id=$2",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
 
 
 # ── Broadcasts ────────────────────────────────────────────────────────────
 
-async def create_broadcast(pool: asyncpg.Pool, bot_id: int, message_text: str,
-                            total: int, created_by: int,
-                            photo_file_id: str | None = None) -> int:
+
+async def create_broadcast(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    message_text: str,
+    total: int,
+    created_by: int,
+    photo_file_id: str | None = None,
+) -> int:
     return await pool.fetchval(
         """INSERT INTO broadcasts (bot_id, message_text, total_users, status, created_by, photo_file_id)
            VALUES ($1, $2, $3, 'pending', $4, $5) RETURNING id""",
-        bot_id, message_text, total, created_by, photo_file_id,
+        bot_id,
+        message_text,
+        total,
+        created_by,
+        photo_file_id,
     )
 
 
-async def update_broadcast(pool: asyncpg.Pool, broadcast_id: int,
-                            sent: int, failed: int, status: str) -> None:
+async def update_broadcast(
+    pool: asyncpg.Pool, broadcast_id: int, sent: int, failed: int, status: str
+) -> None:
     await pool.execute(
         """UPDATE broadcasts
            SET sent_count=$2, failed_count=$3, status=$4,
                finished_at=CASE WHEN $4 IN ('done','cancelled','failed','partial') THEN NOW() ELSE NULL END
            WHERE id=$1""",
-        broadcast_id, sent, failed, status,
+        broadcast_id,
+        sent,
+        failed,
+        status,
     )
 
 
@@ -223,22 +274,29 @@ async def get_broadcast(pool: asyncpg.Pool, broadcast_id: int) -> asyncpg.Record
     return await pool.fetchrow("SELECT * FROM broadcasts WHERE id=$1", broadcast_id)
 
 
-async def get_recent_broadcasts(pool: asyncpg.Pool, bot_id: int, limit: int = 10) -> list[asyncpg.Record]:
+async def get_recent_broadcasts(
+    pool: asyncpg.Pool, bot_id: int, limit: int = 10
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         "SELECT * FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
 
 
-async def get_broadcast_history(pool: asyncpg.Pool, bot_id: int, limit: int = 5) -> list[asyncpg.Record]:
+async def get_broadcast_history(
+    pool: asyncpg.Pool, bot_id: int, limit: int = 5
+) -> list[asyncpg.Record]:
     """Return last N broadcasts with stats for summary view."""
     return await pool.fetch(
         "SELECT * FROM broadcasts WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
 
 
 # ── Audience stats ────────────────────────────────────────────────────────
+
 
 async def get_audience_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     total = await pool.fetchval(
@@ -286,11 +344,16 @@ async def get_audience_full(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Rec
 
 # ── Message templates ─────────────────────────────────────────────────────
 
-async def save_template(pool: asyncpg.Pool, owner_id: int, name: str, text: str) -> bool:
+
+async def save_template(
+    pool: asyncpg.Pool, owner_id: int, name: str, text: str
+) -> bool:
     try:
         await pool.execute(
             "INSERT INTO message_templates (owner_id, name, text) VALUES ($1,$2,$3)",
-            owner_id, name, text,
+            owner_id,
+            name,
+            text,
         )
         return True
     except asyncpg.UniqueViolationError:
@@ -304,29 +367,38 @@ async def get_templates(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Recor
     )
 
 
-async def get_template(pool: asyncpg.Pool, template_id: int, owner_id: int) -> asyncpg.Record | None:
+async def get_template(
+    pool: asyncpg.Pool, template_id: int, owner_id: int
+) -> asyncpg.Record | None:
     return await pool.fetchrow(
         "SELECT * FROM message_templates WHERE id=$1 AND owner_id=$2",
-        template_id, owner_id,
+        template_id,
+        owner_id,
     )
 
 
 async def delete_template(pool: asyncpg.Pool, template_id: int, owner_id: int) -> bool:
     result = await pool.execute(
         "DELETE FROM message_templates WHERE id=$1 AND owner_id=$2",
-        template_id, owner_id,
+        template_id,
+        owner_id,
     )
     return result == "DELETE 1"
 
 
 # ── Scheduled broadcasts ──────────────────────────────────────────────────
 
-async def create_scheduled(pool: asyncpg.Pool, bot_id: int, text: str,
-                             execute_at, created_by: int) -> int:
+
+async def create_scheduled(
+    pool: asyncpg.Pool, bot_id: int, text: str, execute_at, created_by: int
+) -> int:
     return await pool.fetchval(
         """INSERT INTO scheduled_broadcasts (bot_id, message_text, execute_at, created_by)
            VALUES ($1,$2,$3,$4) RETURNING id""",
-        bot_id, text, execute_at, created_by,
+        bot_id,
+        text,
+        execute_at,
+        created_by,
     )
 
 
@@ -349,50 +421,72 @@ async def cancel_scheduled(pool: asyncpg.Pool, schedule_id: int, owner_id: int) 
     result = await pool.execute(
         """UPDATE scheduled_broadcasts SET status='cancelled'
            WHERE id=$1 AND created_by=$2 AND status='pending'""",
-        schedule_id, owner_id,
+        schedule_id,
+        owner_id,
     )
     return result == "UPDATE 1"
 
 
-async def get_bot_schedules(pool: asyncpg.Pool, bot_id: int, limit: int = 10) -> list[asyncpg.Record]:
+async def get_bot_schedules(
+    pool: asyncpg.Pool, bot_id: int, limit: int = 10
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         "SELECT * FROM scheduled_broadcasts WHERE bot_id=$1 ORDER BY execute_at DESC LIMIT $2",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
 
 
 # ── Auto-replies ──────────────────────────────────────────────────────────
 
+
 async def get_auto_replies(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch("SELECT * FROM auto_replies WHERE bot_id=$1 ORDER BY id", bot_id)
-
-
-async def get_active_auto_replies(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT * FROM auto_replies WHERE bot_id=$1 AND is_active=true ORDER BY id", bot_id
+        "SELECT * FROM auto_replies WHERE bot_id=$1 ORDER BY id", bot_id
     )
 
 
-async def add_auto_reply(pool: asyncpg.Pool, bot_id: int, trigger_type: str,
-                          keyword: str | None, response_text: str) -> asyncpg.Record:
+async def get_active_auto_replies(
+    pool: asyncpg.Pool, bot_id: int
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM auto_replies WHERE bot_id=$1 AND is_active=true ORDER BY id",
+        bot_id,
+    )
+
+
+async def add_auto_reply(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    trigger_type: str,
+    keyword: str | None,
+    response_text: str,
+) -> asyncpg.Record:
     return await pool.fetchrow(
         "INSERT INTO auto_replies(bot_id,trigger_type,keyword,response_text) VALUES($1,$2,$3,$4) RETURNING id",
-        bot_id, trigger_type, keyword, response_text,
+        bot_id,
+        trigger_type,
+        keyword,
+        response_text,
     )
 
 
 async def toggle_auto_reply(pool: asyncpg.Pool, reply_id: int, bot_id: int) -> str:
     return await pool.execute(
         "UPDATE auto_replies SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2",
-        reply_id, bot_id,
+        reply_id,
+        bot_id,
     )
 
 
 async def delete_auto_reply(pool: asyncpg.Pool, reply_id: int, bot_id: int) -> str:
-    return await pool.execute("DELETE FROM auto_replies WHERE id=$1 AND bot_id=$2", reply_id, bot_id)
+    return await pool.execute(
+        "DELETE FROM auto_replies WHERE id=$1 AND bot_id=$2", reply_id, bot_id
+    )
 
 
 # ── Update offsets ────────────────────────────────────────────────────────
+
 
 async def get_update_offset(pool: asyncpg.Pool, bot_id: int) -> int:
     row = await pool.fetchrow(
@@ -405,7 +499,8 @@ async def set_update_offset(pool: asyncpg.Pool, bot_id: int, offset: int) -> Non
     await pool.execute(
         "INSERT INTO bot_update_offsets(bot_id,last_update_id) VALUES($1,$2) "
         "ON CONFLICT(bot_id) DO UPDATE SET last_update_id=$2",
-        bot_id, offset,
+        bot_id,
+        offset,
     )
 
 
@@ -425,6 +520,7 @@ async def get_bots_for_polling(pool: asyncpg.Pool) -> list[asyncpg.Record]:
 
 # ── Hermes Relay ───────────────────────────────────────────────────────────
 
+
 async def enable_relay(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
     await pool.execute(
         "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2", enabled, bot_id
@@ -438,8 +534,13 @@ async def get_bots_with_relay(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     )
 
 
-async def get_or_create_relay_session(pool: asyncpg.Pool, bot_id: int, user_id: int,
-                                       username: str | None, first_name: str | None) -> int:
+async def get_or_create_relay_session(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    user_id: int,
+    username: str | None,
+    first_name: str | None,
+) -> int:
     row = await pool.fetchrow(
         "SELECT id FROM relay_sessions WHERE bot_id=$1 AND user_id=$2", bot_id, user_id
     )
@@ -447,28 +548,43 @@ async def get_or_create_relay_session(pool: asyncpg.Pool, bot_id: int, user_id: 
         await pool.execute(
             "UPDATE relay_sessions SET last_activity=now(), username=$3, first_name=$4, "
             "messages_count=messages_count+1 WHERE bot_id=$1 AND user_id=$2",
-            bot_id, user_id, username, first_name,
+            bot_id,
+            user_id,
+            username,
+            first_name,
         )
         return row["id"]
     row = await pool.fetchrow(
         "INSERT INTO relay_sessions(bot_id,user_id,username,first_name) "
         "VALUES($1,$2,$3,$4) RETURNING id",
-        bot_id, user_id, username, first_name,
+        bot_id,
+        user_id,
+        username,
+        first_name,
     )
     return row["id"]
 
 
-async def save_relay_message(pool: asyncpg.Pool, session_id: int, direction: str,
-                              text: str, forwarded_msg_id: int | None = None) -> None:
+async def save_relay_message(
+    pool: asyncpg.Pool,
+    session_id: int,
+    direction: str,
+    text: str,
+    forwarded_msg_id: int | None = None,
+) -> None:
     await pool.execute(
         "INSERT INTO relay_messages(session_id,direction,text,forwarded_msg_id) "
         "VALUES($1,$2,$3,$4)",
-        session_id, direction, text, forwarded_msg_id,
+        session_id,
+        direction,
+        text,
+        forwarded_msg_id,
     )
 
 
-async def find_session_by_forwarded_msg(pool: asyncpg.Pool,
-                                         forwarded_msg_id: int) -> asyncpg.Record | None:
+async def find_session_by_forwarded_msg(
+    pool: asyncpg.Pool, forwarded_msg_id: int
+) -> asyncpg.Record | None:
     return await pool.fetchrow(
         """SELECT rs.bot_id, rs.user_id, mb.token
            FROM relay_messages rm
@@ -479,25 +595,29 @@ async def find_session_by_forwarded_msg(pool: asyncpg.Pool,
     )
 
 
-async def get_relay_sessions(pool: asyncpg.Pool, bot_id: int,
-                              limit: int = 5) -> list[asyncpg.Record]:
+async def get_relay_sessions(
+    pool: asyncpg.Pool, bot_id: int, limit: int = 5
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT rs.id, rs.user_id, rs.username, rs.first_name, rs.last_activity, rs.messages_count,
                   (SELECT text FROM relay_messages WHERE session_id=rs.id
                    ORDER BY created_at DESC LIMIT 1) as last_text
            FROM relay_sessions rs WHERE rs.bot_id=$1
            ORDER BY rs.last_activity DESC LIMIT $2""",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
 
 
-async def get_relay_session_messages(pool: asyncpg.Pool, session_id: int,
-                                      limit: int = 20) -> list[asyncpg.Record]:
+async def get_relay_session_messages(
+    pool: asyncpg.Pool, session_id: int, limit: int = 20
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT direction, text AS message_text, created_at
            FROM relay_messages WHERE session_id=$1
            ORDER BY created_at DESC LIMIT $2""",
-        session_id, limit,
+        session_id,
+        limit,
     )
 
 
@@ -507,44 +627,68 @@ async def close_relay_session(pool: asyncpg.Pool, session_id: int) -> None:
 
 # ── Funnels ────────────────────────────────────────────────────────────────
 
+
 async def get_funnels(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
     return await pool.fetch("SELECT * FROM funnels WHERE bot_id=$1 ORDER BY id", bot_id)
 
 
 async def get_active_funnels(pool: asyncpg.Pool, bot_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch("SELECT * FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id)
+    return await pool.fetch(
+        "SELECT * FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+    )
 
 
-async def create_funnel(pool: asyncpg.Pool, bot_id: int, name: str,
-                        trigger_type: str, keyword: str | None = None) -> asyncpg.Record:
+async def create_funnel(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    name: str,
+    trigger_type: str,
+    keyword: str | None = None,
+) -> asyncpg.Record:
     return await pool.fetchrow(
         "INSERT INTO funnels(bot_id,name,trigger_type,keyword) VALUES($1,$2,$3,$4) RETURNING id",
-        bot_id, name, trigger_type, keyword,
+        bot_id,
+        name,
+        trigger_type,
+        keyword,
     )
 
 
 async def delete_funnel(pool: asyncpg.Pool, funnel_id: int, bot_id: int) -> None:
-    await pool.execute("DELETE FROM funnels WHERE id=$1 AND bot_id=$2", funnel_id, bot_id)
+    await pool.execute(
+        "DELETE FROM funnels WHERE id=$1 AND bot_id=$2", funnel_id, bot_id
+    )
 
 
 async def toggle_funnel(pool: asyncpg.Pool, funnel_id: int, bot_id: int) -> None:
     await pool.execute(
-        "UPDATE funnels SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2", funnel_id, bot_id,
+        "UPDATE funnels SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2",
+        funnel_id,
+        bot_id,
     )
 
 
 async def get_funnel_steps(pool: asyncpg.Pool, funnel_id: int) -> list[asyncpg.Record]:
     return await pool.fetch(
-        "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order", funnel_id,
+        "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order",
+        funnel_id,
     )
 
 
-async def add_funnel_step(pool: asyncpg.Pool, funnel_id: int, step_order: int,
-                          message_text: str, delay_minutes: int) -> None:
+async def add_funnel_step(
+    pool: asyncpg.Pool,
+    funnel_id: int,
+    step_order: int,
+    message_text: str,
+    delay_minutes: int,
+) -> None:
     await pool.execute(
         "INSERT INTO funnel_steps(funnel_id,step_order,message_text,delay_minutes) VALUES($1,$2,$3,$4)"
         " ON CONFLICT(funnel_id,step_order) DO UPDATE SET message_text=$3,delay_minutes=$4",
-        funnel_id, step_order, message_text, delay_minutes,
+        funnel_id,
+        step_order,
+        message_text,
+        delay_minutes,
     )
 
 
@@ -555,7 +699,10 @@ async def copy_funnels(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> 
     for f in funnels:
         new_funnel = await pool.fetchrow(
             "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
-            to_bot_id, f["name"], f["trigger_type"], f["keyword"],
+            to_bot_id,
+            f["name"],
+            f["trigger_type"],
+            f["keyword"],
         )
         steps = await pool.fetch(
             "SELECT * FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order", f["id"]
@@ -563,7 +710,10 @@ async def copy_funnels(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> 
         for s in steps:
             await pool.execute(
                 "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,$2,$3,$4)",
-                new_funnel["id"], s["step_order"], s["message_text"], s["delay_minutes"],
+                new_funnel["id"],
+                s["step_order"],
+                s["message_text"],
+                s["delay_minutes"],
             )
         count += 1
     return count
@@ -581,7 +731,8 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
     await pool.execute(
         "INSERT INTO funnel_subscriptions(funnel_id,user_id) VALUES($1,$2)"
         " ON CONFLICT(funnel_id,user_id) DO UPDATE SET current_step=0,completed=false,next_send_at=now()",
-        funnel_id, user_id,
+        funnel_id,
+        user_id,
     )
 
 
@@ -600,18 +751,27 @@ async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     )
 
 
-async def advance_funnel_step(pool: asyncpg.Pool, sub_id: int, next_step: int,
-                               total_steps: int, delay_minutes: int) -> None:
+async def advance_funnel_step(
+    pool: asyncpg.Pool,
+    sub_id: int,
+    next_step: int,
+    total_steps: int,
+    delay_minutes: int,
+) -> None:
     if next_step >= total_steps:
         await pool.execute(
-            "UPDATE funnel_subscriptions SET completed=true WHERE id=$1", sub_id,
+            "UPDATE funnel_subscriptions SET completed=true WHERE id=$1",
+            sub_id,
         )
     else:
         from datetime import datetime, timedelta, timezone
+
         next_at = datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
         await pool.execute(
             "UPDATE funnel_subscriptions SET current_step=$2, next_send_at=$3 WHERE id=$1",
-            sub_id, next_step, next_at,
+            sub_id,
+            next_step,
+            next_at,
         )
 
 
@@ -620,18 +780,20 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     with timed(log, "get_bot_stats", extra={"bot_id": bot_id}):
         # Count relay sessions (users who contacted bot via relay)
         relay_sessions = await pool.fetchval(
-        "SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1", bot_id
-    )
+            "SELECT COUNT(*) FROM relay_sessions WHERE bot_id=$1", bot_id
+        )
     # Count relay messages in/out
     msg_in = await pool.fetchval(
         """SELECT COUNT(*) FROM relay_messages rm
            JOIN relay_sessions rs ON rs.id=rm.session_id
-           WHERE rs.bot_id=$1 AND rm.direction='in'""", bot_id
+           WHERE rs.bot_id=$1 AND rm.direction='in'""",
+        bot_id,
     )
     msg_out = await pool.fetchval(
         """SELECT COUNT(*) FROM relay_messages rm
            JOIN relay_sessions rs ON rs.id=rm.session_id
-           WHERE rs.bot_id=$1 AND rm.direction='out'""", bot_id
+           WHERE rs.bot_id=$1 AND rm.direction='out'""",
+        bot_id,
     )
     # Count active auto-replies
     active_replies = await pool.fetchval(
@@ -645,23 +807,27 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     funnel_users = await pool.fetchval(
         """SELECT COUNT(DISTINCT fs.user_id) FROM funnel_subscriptions fs
            JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1""", bot_id
+           WHERE f.bot_id=$1""",
+        bot_id,
     )
     # Funnel completion rate
     funnel_completed = await pool.fetchval(
         """SELECT COUNT(*) FROM funnel_subscriptions fs
            JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1 AND fs.completed=true""", bot_id
+           WHERE f.bot_id=$1 AND fs.completed=true""",
+        bot_id,
     )
     funnel_total_subs = await pool.fetchval(
         """SELECT COUNT(*) FROM funnel_subscriptions fs
            JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.bot_id=$1""", bot_id
+           WHERE f.bot_id=$1""",
+        bot_id,
     )
     # Relay sessions today (used last_activity since relay_sessions has no created_at)
     relay_today = await pool.fetchval(
         """SELECT COUNT(*) FROM relay_sessions
-           WHERE bot_id=$1 AND last_activity >= NOW() - INTERVAL '24 hours'""", bot_id
+           WHERE bot_id=$1 AND last_activity >= NOW() - INTERVAL '24 hours'""",
+        bot_id,
     )
     # Audience growth
     aud_total = await pool.fetchval(
@@ -707,46 +873,65 @@ async def get_bots_with_funnels(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     )
 
 
-async def update_bot_token(pool: asyncpg.Pool, bot_id: int, added_by: int,
-                            new_token: str, new_bot_id: int,
-                            username: str, first_name: str) -> None:
+async def update_bot_token(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    added_by: int,
+    new_token: str,
+    new_bot_id: int,
+    username: str,
+    first_name: str,
+) -> None:
     await pool.execute(
         """UPDATE managed_bots
            SET token=$3, bot_id=$4, username=$5, first_name=$6
            WHERE bot_id=$1 AND added_by=$2""",
-        bot_id, added_by, new_token, new_bot_id, username, first_name,
+        bot_id,
+        added_by,
+        new_token,
+        new_bot_id,
+        username,
+        first_name,
     )
 
 
-async def get_audience_daily_growth(pool: asyncpg.Pool, bot_id: int, days: int = 7) -> list[dict]:
+async def get_audience_daily_growth(
+    pool: asyncpg.Pool, bot_id: int, days: int = 7
+) -> list[dict]:
     """Returns list of {date, new_users} for the last N days."""
     rows = await pool.fetch(
         """SELECT DATE(first_seen AT TIME ZONE 'UTC') AS d, COUNT(*) AS cnt
            FROM bot_users
            WHERE bot_id=$1 AND first_seen >= NOW() - ($2 || ' days')::INTERVAL
            GROUP BY d ORDER BY d""",
-        bot_id, str(days),
+        bot_id,
+        str(days),
     )
     return [{"date": r["d"], "count": r["cnt"]} for r in rows]
 
 
-async def get_audience_new_users(pool: asyncpg.Pool, bot_id: int, days: int) -> list[int]:
+async def get_audience_new_users(
+    pool: asyncpg.Pool, bot_id: int, days: int
+) -> list[int]:
     """Return user_ids of active users who joined within the last N days."""
     rows = await pool.fetch(
         """SELECT user_id FROM bot_users
            WHERE bot_id=$1 AND is_active=TRUE
              AND first_seen >= NOW() - ($2 || ' days')::INTERVAL""",
-        bot_id, str(days),
+        bot_id,
+        str(days),
     )
     return [r["user_id"] for r in rows]
 
 
-async def get_audience_by_language(pool: asyncpg.Pool, bot_id: int,
-                                    lang_code: str) -> list[int]:
+async def get_audience_by_language(
+    pool: asyncpg.Pool, bot_id: int, lang_code: str
+) -> list[int]:
     """Return user_ids filtered by language_code."""
     rows = await pool.fetch(
         "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE AND language_code=$2",
-        bot_id, lang_code,
+        bot_id,
+        lang_code,
     )
     return [r["user_id"] for r in rows]
 
@@ -762,7 +947,9 @@ async def get_audience_languages(pool: asyncpg.Pool, bot_id: int) -> list[dict]:
     return [{"lang": r["lang"], "count": r["cnt"]} for r in rows]
 
 
-async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> int:
+async def copy_auto_replies(
+    pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int
+) -> int:
     """Copy all auto-replies from one bot to another. Returns count of copied rules."""
     rules = await pool.fetch(
         "SELECT trigger_type, keyword, response_text FROM auto_replies WHERE bot_id=$1",
@@ -774,7 +961,10 @@ async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int
             await pool.execute(
                 """INSERT INTO auto_replies (bot_id, trigger_type, keyword, response_text)
                    VALUES ($1, $2, $3, $4)""",
-                to_bot_id, r["trigger_type"], r["keyword"], r["response_text"],
+                to_bot_id,
+                r["trigger_type"],
+                r["keyword"],
+                r["response_text"],
             )
             count += 1
         except Exception as e:
@@ -784,26 +974,34 @@ async def copy_auto_replies(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int
 
 # ── Swarm / Mode System ─────────────────────────────────────────────────
 
+
 async def get_system_mode(pool: asyncpg.Pool) -> str:
     row = await pool.fetchrow("SELECT mode FROM system_mode WHERE id=1")
     return row["mode"] if row else "manual"
+
 
 async def set_system_mode(pool: asyncpg.Pool, mode: str) -> None:
     await pool.execute(
         "UPDATE system_mode SET mode=$1, updated_at=now() WHERE id=1", mode
     )
 
-async def set_bot_role(pool: asyncpg.Pool, bot_id: int, role: str,
-                        cluster: str = "default") -> None:
+
+async def set_bot_role(
+    pool: asyncpg.Pool, bot_id: int, role: str, cluster: str = "default"
+) -> None:
     await pool.execute(
         "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1",
-        bot_id, role, cluster,
+        bot_id,
+        role,
+        cluster,
     )
+
 
 async def toggle_swarm(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
     await pool.execute(
         "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1", bot_id, enabled
     )
+
 
 async def get_swarm_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
     return await pool.fetch(
@@ -815,9 +1013,15 @@ async def get_swarm_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Reco
         added_by,
     )
 
-async def update_bot_metrics(pool: asyncpg.Pool, bot_id: int,
-                              ctr: float, conversion: float,
-                              retention_d1: float, retention_d7: float) -> None:
+
+async def update_bot_metrics(
+    pool: asyncpg.Pool,
+    bot_id: int,
+    ctr: float,
+    conversion: float,
+    retention_d1: float,
+    retention_d7: float,
+) -> None:
     score = ctr * 0.3 + conversion * 0.4 + retention_d1 * 0.2 + retention_d7 * 0.1
     await pool.execute(
         """INSERT INTO bot_metrics (bot_id, ctr, conversion_rate, retention_d1, retention_d7, score)
@@ -825,36 +1029,56 @@ async def update_bot_metrics(pool: asyncpg.Pool, bot_id: int,
            ON CONFLICT (bot_id) DO UPDATE SET
                ctr=$2, conversion_rate=$3, retention_d1=$4,
                retention_d7=$5, score=$6, updated_at=now()""",
-        bot_id, ctr, conversion, retention_d1, retention_d7, score,
+        bot_id,
+        ctr,
+        conversion,
+        retention_d1,
+        retention_d7,
+        score,
     )
 
 
 # ── CRM Tags ──────────────────────────────────────────────────────────────
+
 
 async def add_user_tag(pool, bot_id: int, user_id: int, tag: str) -> bool:
     """Returns True if tag was new."""
     try:
         await pool.execute(
             "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3)",
-            bot_id, user_id, tag,
+            bot_id,
+            user_id,
+            tag,
         )
         return True
     except Exception:
-        log.debug("add_user_tag: error for bot_id=%s user_id=%s tag=%s", bot_id, user_id, tag, exc_info=True)
+        log.debug(
+            "add_user_tag: error for bot_id=%s user_id=%s tag=%s",
+            bot_id,
+            user_id,
+            tag,
+            exc_info=True,
+        )
         return False
+
 
 async def remove_user_tag(pool, bot_id: int, user_id: int, tag: str) -> None:
     await pool.execute(
         "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag=$3",
-        bot_id, user_id, tag,
+        bot_id,
+        user_id,
+        tag,
     )
+
 
 async def get_user_tags(pool, bot_id: int, user_id: int) -> list[str]:
     rows = await pool.fetch(
         "SELECT tag FROM user_tags WHERE bot_id=$1 AND user_id=$2 ORDER BY tag",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     return [r["tag"] for r in rows]
+
 
 async def get_tag_names(pool, bot_id: int) -> list[dict]:
     """All unique tags for this bot with counts."""
@@ -866,14 +1090,18 @@ async def get_tag_names(pool, bot_id: int) -> list[dict]:
     )
     return [{"tag": r["tag"], "count": r["cnt"]} for r in rows]
 
+
 async def get_users_by_tag(pool, bot_id: int, tag: str) -> list[int]:
     rows = await pool.fetch(
         "SELECT user_id FROM user_tags WHERE bot_id=$1 AND tag=$2",
-        bot_id, tag,
+        bot_id,
+        tag,
     )
     return [r["user_id"] for r in rows]
 
+
 # ── Automation Rules ───────────────────────────────────────────────────────
+
 
 async def get_automation_rules(pool, bot_id: int) -> list:
     return await pool.fetch(
@@ -881,83 +1109,120 @@ async def get_automation_rules(pool, bot_id: int) -> list:
         bot_id,
     )
 
+
 async def get_active_automation_rules(pool, bot_id: int) -> list:
     return await pool.fetch(
         "SELECT * FROM automation_rules WHERE bot_id=$1 AND is_active=TRUE",
         bot_id,
     )
 
-async def add_automation_rule(pool, bot_id: int, name: str, trigger_type: str,
-                               trigger_value, action_type: str, action_value: str) -> int:
+
+async def add_automation_rule(
+    pool,
+    bot_id: int,
+    name: str,
+    trigger_type: str,
+    trigger_value,
+    action_type: str,
+    action_value: str,
+) -> int:
     row = await pool.fetchrow(
         """INSERT INTO automation_rules(bot_id,name,trigger_type,trigger_value,action_type,action_value)
            VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
-        bot_id, name, trigger_type, trigger_value, action_type, action_value,
+        bot_id,
+        name,
+        trigger_type,
+        trigger_value,
+        action_type,
+        action_value,
     )
     return row["id"]
+
 
 async def toggle_automation_rule(pool, rule_id: int, bot_id: int) -> None:
     await pool.execute(
         "UPDATE automation_rules SET is_active=NOT is_active WHERE id=$1 AND bot_id=$2",
-        rule_id, bot_id,
+        rule_id,
+        bot_id,
     )
+
 
 async def delete_automation_rule(pool, rule_id: int, bot_id: int) -> None:
     await pool.execute(
-        "DELETE FROM automation_rules WHERE id=$1 AND bot_id=$2", rule_id, bot_id,
+        "DELETE FROM automation_rules WHERE id=$1 AND bot_id=$2",
+        rule_id,
+        bot_id,
     )
 
 
 # ── A/B Experiments ────────────────────────────────────────────────────────
+
 
 async def get_experiments(pool, bot_id: int) -> list:
     return await pool.fetch(
         "SELECT * FROM experiments WHERE bot_id=$1 ORDER BY id DESC", bot_id
     )
 
+
 async def get_experiment(pool, exp_id: int) -> asyncpg.Record | None:
     return await pool.fetchrow("SELECT * FROM experiments WHERE id=$1", exp_id)
+
 
 async def get_experiment_variants(pool, exp_id: int) -> list:
     return await pool.fetch(
         "SELECT * FROM experiment_variants WHERE experiment_id=$1 ORDER BY id", exp_id
     )
 
+
 async def create_experiment(pool, bot_id: int, name: str, exp_type: str) -> int:
     row = await pool.fetchrow(
         "INSERT INTO experiments(bot_id,name,experiment_type) VALUES($1,$2,$3) RETURNING id",
-        bot_id, name, exp_type,
+        bot_id,
+        name,
+        exp_type,
     )
     return row["id"]
 
-async def add_experiment_variant(pool, exp_id: int, name: str, content: str, weight: int = 50) -> int:
+
+async def add_experiment_variant(
+    pool, exp_id: int, name: str, content: str, weight: int = 50
+) -> int:
     row = await pool.fetchrow(
         "INSERT INTO experiment_variants(experiment_id,name,content,weight) VALUES($1,$2,$3,$4) RETURNING id",
-        exp_id, name, content, weight,
+        exp_id,
+        name,
+        content,
+        weight,
     )
     return row["id"]
 
-async def set_experiment_status(pool, exp_id: int, status: str) -> None:
-    await pool.execute(
-        "UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status
-    )
 
-async def get_active_experiment(pool, bot_id: int, exp_type: str = 'start_message'):
+async def set_experiment_status(pool, exp_id: int, status: str) -> None:
+    await pool.execute("UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status)
+
+
+async def get_active_experiment(pool, bot_id: int, exp_type: str = "start_message"):
     return await pool.fetchrow(
         "SELECT * FROM experiments WHERE bot_id=$1 AND experiment_type=$2 AND status='active' LIMIT 1",
-        bot_id, exp_type,
+        bot_id,
+        exp_type,
     )
 
-async def assign_experiment_variant(pool, bot_id: int, user_id: int,
-                                     exp_id: int) -> asyncpg.Record | None:
+
+async def assign_experiment_variant(
+    pool, bot_id: int, user_id: int, exp_id: int
+) -> asyncpg.Record | None:
     """Assign user to variant using weighted random. Returns variant record."""
     import random
+
     existing = await pool.fetchrow(
         """SELECT ea.*, ev.content, ev.name as variant_name
            FROM experiment_assignments ea
            JOIN experiment_variants ev ON ev.id=ea.variant_id
            WHERE ea.bot_id=$1 AND ea.user_id=$2 AND ea.experiment_id=$3""",
-        bot_id, user_id, exp_id,
+        bot_id,
+        user_id,
+        exp_id,
     )
     if existing:
         return existing
@@ -982,28 +1247,41 @@ async def assign_experiment_variant(pool, bot_id: int, user_id: int,
     try:
         await pool.execute(
             "INSERT INTO experiment_assignments(bot_id,user_id,experiment_id,variant_id) VALUES($1,$2,$3,$4)",
-            bot_id, user_id, exp_id, chosen["id"],
+            bot_id,
+            user_id,
+            exp_id,
+            chosen["id"],
         )
         await pool.execute(
-            "UPDATE experiment_variants SET impressions=impressions+1 WHERE id=$1", chosen["id"]
+            "UPDATE experiment_variants SET impressions=impressions+1 WHERE id=$1",
+            chosen["id"],
         )
     except Exception as e:
-        log.debug("assign_experiment_variant: skip (likely duplicate assignment): %s", e)
+        log.debug(
+            "assign_experiment_variant: skip (likely duplicate assignment): %s", e
+        )
     return chosen
 
-async def record_experiment_conversion(pool, bot_id: int, user_id: int, exp_id: int) -> None:
+
+async def record_experiment_conversion(
+    pool, bot_id: int, user_id: int, exp_id: int
+) -> None:
     assignment = await pool.fetchrow(
         "SELECT * FROM experiment_assignments WHERE bot_id=$1 AND user_id=$2 AND experiment_id=$3 AND converted=FALSE",
-        bot_id, user_id, exp_id,
+        bot_id,
+        user_id,
+        exp_id,
     )
     if assignment:
         await pool.execute(
-            "UPDATE experiment_assignments SET converted=TRUE WHERE id=$1", assignment["id"]
+            "UPDATE experiment_assignments SET converted=TRUE WHERE id=$1",
+            assignment["id"],
         )
         await pool.execute(
             "UPDATE experiment_variants SET conversions=conversions+1 WHERE id=$1",
             assignment["variant_id"],
         )
+
 
 async def check_experiment_winner(pool, exp_id: int) -> int | None:
     """If any variant has >= min_sample_size and highest CTR, return its id. Else None."""
@@ -1016,23 +1294,33 @@ async def check_experiment_winner(pool, exp_id: int) -> int | None:
     candidates = [v for v in variants if v["impressions"] >= exp["min_sample_size"]]
     if not candidates:
         return None
-    best = max(candidates, key=lambda v: v["conversions"] / v["impressions"] if v["impressions"] else 0)
+    best = max(
+        candidates,
+        key=lambda v: v["conversions"] / v["impressions"] if v["impressions"] else 0,
+    )
     ctr = best["conversions"] / best["impressions"] if best["impressions"] else 0
     if ctr > 0:
         await pool.execute(
             "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
-            exp_id, best["id"],
+            exp_id,
+            best["id"],
         )
         return best["id"]
     return None
 
+
 async def delete_experiment(pool, exp_id: int, bot_id: int) -> None:
-    await pool.execute("DELETE FROM experiments WHERE id=$1 AND bot_id=$2", exp_id, bot_id)
+    await pool.execute(
+        "DELETE FROM experiments WHERE id=$1 AND bot_id=$2", exp_id, bot_id
+    )
 
 
 # ── Routing Engine ─────────────────────────────────────────────────────────
 
-async def get_best_conversion_bot(pool, cluster: str, exclude_bot_id: int) -> asyncpg.Record | None:
+
+async def get_best_conversion_bot(
+    pool, cluster: str, exclude_bot_id: int
+) -> asyncpg.Record | None:
     """Get highest-scoring conversion/retention bot in the same cluster."""
     return await pool.fetchrow(
         """SELECT m.bot_id, m.token, m.username, m.first_name,
@@ -1046,50 +1334,101 @@ async def get_best_conversion_bot(pool, cluster: str, exclude_bot_id: int) -> as
              AND m.bot_id != $2
            ORDER BY COALESCE(bm.score, 0) DESC
            LIMIT 1""",
-        cluster, exclude_bot_id,
+        cluster,
+        exclude_bot_id,
     )
 
-async def log_routing_decision(pool, from_bot_id: int, to_bot_id, user_id: int,
-                                 decision: str, mode: str,
-                                 score_from: float = 0, score_to: float = 0) -> None:
+
+async def log_routing_decision(
+    pool,
+    from_bot_id: int,
+    to_bot_id,
+    user_id: int,
+    decision: str,
+    mode: str,
+    score_from: float = 0,
+    score_to: float = 0,
+) -> None:
     await pool.execute(
         """INSERT INTO routing_log(from_bot_id,to_bot_id,user_id,decision,system_mode,score_from,score_to)
            VALUES($1,$2,$3,$4,$5,$6,$7)""",
-        from_bot_id, to_bot_id, user_id, decision, mode, score_from, score_to,
+        from_bot_id,
+        to_bot_id,
+        user_id,
+        decision,
+        mode,
+        score_from,
+        score_to,
     )
+
 
 async def get_routing_stats(pool, bot_id: int, days: int = 7) -> dict:
     total = await pool.fetchval(
         "SELECT COUNT(*) FROM routing_log WHERE from_bot_id=$1 AND created_at >= NOW()-($2||' days')::INTERVAL",
-        bot_id, str(days),
+        bot_id,
+        str(days),
     )
     routed = await pool.fetchval(
         "SELECT COUNT(*) FROM routing_log WHERE from_bot_id=$1 AND decision='routed' AND created_at >= NOW()-($2||' days')::INTERVAL",
-        bot_id, str(days),
+        bot_id,
+        str(days),
     )
-    return {"total": total or 0, "routed": routed or 0, "kept": (total or 0) - (routed or 0)}
+    return {
+        "total": total or 0,
+        "routed": routed or 0,
+        "kept": (total or 0) - (routed or 0),
+    }
+
 
 async def get_mode_routing_config(mode: str) -> dict:
     """Returns routing config based on system mode."""
     configs = {
-        "manual": {"routing_enabled": False, "min_score_threshold": 0.0, "routing_probability": 0.0},
-        "assisted": {"routing_enabled": False, "min_score_threshold": 0.3, "routing_probability": 0.0},
-        "autopilot": {"routing_enabled": True, "min_score_threshold": 0.3, "routing_probability": 0.5},
-        "growth": {"routing_enabled": True, "min_score_threshold": 0.2, "routing_probability": 0.8},
-        "experiment": {"routing_enabled": True, "min_score_threshold": 0.1, "routing_probability": 1.0},
-        "stability": {"routing_enabled": False, "min_score_threshold": 0.5, "routing_probability": 0.0},
+        "manual": {
+            "routing_enabled": False,
+            "min_score_threshold": 0.0,
+            "routing_probability": 0.0,
+        },
+        "assisted": {
+            "routing_enabled": False,
+            "min_score_threshold": 0.3,
+            "routing_probability": 0.0,
+        },
+        "autopilot": {
+            "routing_enabled": True,
+            "min_score_threshold": 0.3,
+            "routing_probability": 0.5,
+        },
+        "growth": {
+            "routing_enabled": True,
+            "min_score_threshold": 0.2,
+            "routing_probability": 0.8,
+        },
+        "experiment": {
+            "routing_enabled": True,
+            "min_score_threshold": 0.1,
+            "routing_probability": 1.0,
+        },
+        "stability": {
+            "routing_enabled": False,
+            "min_score_threshold": 0.5,
+            "routing_probability": 0.0,
+        },
     }
     return configs.get(mode, configs["manual"])
 
 
 # ── Deep Links ──────────────────────────────────────────────────────────────
 
+
 async def create_deep_link(pool, bot_id: int, name: str, start_param: str) -> int:
     row = await pool.fetchrow(
         "INSERT INTO bot_deep_links(bot_id,name,start_param) VALUES($1,$2,$3) RETURNING id",
-        bot_id, name, start_param,
+        bot_id,
+        name,
+        start_param,
     )
     return row["id"]
+
 
 async def get_deep_links(pool, bot_id: int) -> list:
     return await pool.fetch(
@@ -1097,16 +1436,23 @@ async def get_deep_links(pool, bot_id: int) -> list:
         bot_id,
     )
 
+
 async def get_deep_link_by_param(pool, bot_id: int, param: str):
     return await pool.fetchrow(
         "SELECT * FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2",
-        bot_id, param,
+        bot_id,
+        param,
     )
 
-async def record_deep_link_visit(pool, bot_id: int, param: str, user_id: int) -> int | None:
+
+async def record_deep_link_visit(
+    pool, bot_id: int, param: str, user_id: int
+) -> int | None:
     """Increments click_count, increments unique_users if first visit. Returns link_id or None."""
     link = await pool.fetchrow(
-        "SELECT id FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2", bot_id, param
+        "SELECT id FROM bot_deep_links WHERE bot_id=$1 AND start_param=$2",
+        bot_id,
+        param,
     )
     if not link:
         return None
@@ -1119,51 +1465,71 @@ async def record_deep_link_visit(pool, bot_id: int, param: str, user_id: int) ->
     try:
         result = await pool.execute(
             "INSERT INTO deep_link_visits(link_id, user_id) VALUES($1, $2)",
-            link_id, user_id,
+            link_id,
+            user_id,
         )
         if result == "INSERT 0 1":
             # New unique visit
             await pool.execute(
-                "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1", link_id
+                "UPDATE bot_deep_links SET unique_users=unique_users+1 WHERE id=$1",
+                link_id,
             )
     except Exception as e:
         log.debug("record_deep_link_visit: skip duplicate visit: %s", e)
     return link_id
+
 
 async def delete_deep_link(pool, link_id: int, bot_id: int) -> None:
     await pool.execute(
         "DELETE FROM bot_deep_links WHERE id=$1 AND bot_id=$2", link_id, bot_id
     )
 
-async def record_referral(pool, bot_id: int, referrer_user_id: int,
-                           referred_user_id: int, deep_link_id: int | None = None) -> bool:
+
+async def record_referral(
+    pool,
+    bot_id: int,
+    referrer_user_id: int,
+    referred_user_id: int,
+    deep_link_id: int | None = None,
+) -> bool:
     """Returns True if referral was new."""
     try:
         await pool.execute(
             """INSERT INTO referrals(bot_id,referrer_user_id,referred_user_id,deep_link_id)
                VALUES($1,$2,$3,$4) ON CONFLICT (bot_id, referred_user_id) DO NOTHING""",
-            bot_id, referrer_user_id, referred_user_id, deep_link_id,
+            bot_id,
+            referrer_user_id,
+            referred_user_id,
+            deep_link_id,
         )
         return True
     except Exception as e:
         log.debug("record_referral: skip (likely duplicate): %s", e)
         return False
 
+
 async def get_referral_leaderboard(pool, bot_id: int, limit: int = 10) -> list:
     return await pool.fetch(
         """SELECT referrer_user_id, COUNT(*) as referral_count
            FROM referrals WHERE bot_id=$1
            GROUP BY referrer_user_id ORDER BY referral_count DESC LIMIT $2""",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
 
+
 async def get_referral_total(pool, bot_id: int) -> int:
-    return await pool.fetchval(
-        "SELECT COUNT(DISTINCT referred_user_id) FROM referrals WHERE bot_id=$1", bot_id
-    ) or 0
+    return (
+        await pool.fetchval(
+            "SELECT COUNT(DISTINCT referred_user_id) FROM referrals WHERE bot_id=$1",
+            bot_id,
+        )
+        or 0
+    )
 
 
 # ── User Activity ──────────────────────────────────────────────────────────
+
 
 async def upsert_user_activity(pool, bot_id: int, user_id: int) -> bool:
     """Returns True if this is the user's first message (new user)."""
@@ -1173,9 +1539,11 @@ async def upsert_user_activity(pool, bot_id: int, user_id: int) -> bool:
            ON CONFLICT (bot_id, user_id) DO UPDATE
            SET message_count = user_activity.message_count + 1,
                last_seen = now()""",
-        bot_id, user_id,
+        bot_id,
+        user_id,
     )
     return result == "INSERT 0 1"
+
 
 async def get_activity_segments(pool, bot_id: int) -> dict:
     """Returns counts: hot(<1d), warm(1-7d), cold(7-30d), lost(30d+)."""
@@ -1193,21 +1561,24 @@ async def get_activity_segments(pool, bot_id: int) -> dict:
     )
     row = rows[0] if rows else {}
     return {
-        "hot":   int(row.get("hot",  0) or 0),
-        "warm":  int(row.get("warm", 0) or 0),
-        "cold":  int(row.get("cold", 0) or 0),
-        "lost":  int(row.get("lost", 0) or 0),
-        "total": int(row.get("total",0) or 0),
+        "hot": int(row.get("hot", 0) or 0),
+        "warm": int(row.get("warm", 0) or 0),
+        "cold": int(row.get("cold", 0) or 0),
+        "lost": int(row.get("lost", 0) or 0),
+        "total": int(row.get("total", 0) or 0),
     }
 
-async def get_inactive_user_ids(pool, bot_id: int, min_days: int,
-                                  max_days: int | None = None) -> list[int]:
+
+async def get_inactive_user_ids(
+    pool, bot_id: int, min_days: int, max_days: int | None = None
+) -> list[int]:
     """Users not seen for min_days to max_days (None = no upper limit)."""
     if max_days is None:
         rows = await pool.fetch(
             """SELECT user_id FROM user_activity
                WHERE bot_id=$1 AND last_seen < now() - ($2 || ' days')::INTERVAL""",
-            bot_id, str(min_days),
+            bot_id,
+            str(min_days),
         )
     else:
         rows = await pool.fetch(
@@ -1215,9 +1586,12 @@ async def get_inactive_user_ids(pool, bot_id: int, min_days: int,
                WHERE bot_id=$1
                  AND last_seen < now() - ($2 || ' days')::INTERVAL
                  AND last_seen >= now() - ($3 || ' days')::INTERVAL""",
-            bot_id, str(min_days), str(max_days),
+            bot_id,
+            str(min_days),
+            str(max_days),
         )
     return [r["user_id"] for r in rows]
+
 
 async def get_activity_heatmap(pool, bot_id: int, days: int = 7) -> list[dict]:
     """Message count per hour-of-day over last N days."""
@@ -1226,17 +1600,21 @@ async def get_activity_heatmap(pool, bot_id: int, days: int = 7) -> list[dict]:
            FROM user_activity
            WHERE bot_id=$1 AND last_seen >= now() - ($2 || ' days')::INTERVAL
            GROUP BY hour ORDER BY hour""",
-        bot_id, str(days),
+        bot_id,
+        str(days),
     )
     return [{"hour": r["hour"], "count": int(r["cnt"])} for r in rows]
+
 
 async def get_top_active_users(pool, bot_id: int, limit: int = 10) -> list:
     return await pool.fetch(
         """SELECT user_id, message_count, last_seen
            FROM user_activity WHERE bot_id=$1
            ORDER BY message_count DESC LIMIT $2""",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
+
 
 async def autotag_by_activity(pool, bot_id: int) -> dict:
     """Auto-tags users as activity:hot/warm/cold/lost. Returns counts."""
@@ -1247,26 +1625,33 @@ async def autotag_by_activity(pool, bot_id: int) -> dict:
             try:
                 await pool.execute(
                     "DELETE FROM user_tags WHERE bot_id=$1 AND user_id=$2 AND tag LIKE 'activity:%'",
-                    bot_id, uid,
+                    bot_id,
+                    uid,
                 )
                 await pool.execute(
                     "INSERT INTO user_tags(bot_id,user_id,tag) VALUES($1,$2,$3) ON CONFLICT (bot_id,user_id,tag) DO NOTHING",
-                    bot_id, uid, tag,
+                    bot_id,
+                    uid,
+                    tag,
                 )
             except Exception as e:
                 log.debug("autotag_by_activity: skip duplicate tag: %s", e)
 
     hot_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '1 day'", bot_id
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '1 day'",
+        bot_id,
     )
     warm_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'", bot_id
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
+        bot_id,
     )
     cold_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'", bot_id
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
+        bot_id,
     )
     lost_ids = await pool.fetch(
-        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen < now() - INTERVAL '30 days'", bot_id
+        "SELECT user_id FROM user_activity WHERE bot_id=$1 AND last_seen < now() - INTERVAL '30 days'",
+        bot_id,
     )
     await _tag_segment([r["user_id"] for r in hot_ids], "activity:hot")
     await _tag_segment([r["user_id"] for r in warm_ids], "activity:warm")
@@ -1274,11 +1659,14 @@ async def autotag_by_activity(pool, bot_id: int) -> dict:
     await _tag_segment([r["user_id"] for r in lost_ids], "activity:lost")
     return segs
 
+
 # ── Keyword Analytics ──────────────────────────────────────────────────────
+
 
 async def record_message_keywords(pool, bot_id: int, text: str) -> None:
     import re
-    words = list(set(re.findall(r'[а-яёА-ЯЁa-zA-Z]{3,}', text.lower())))[:10]
+
+    words = list(set(re.findall(r"[а-яёА-ЯЁa-zA-Z]{3,}", text.lower())))[:10]
     for word in words:
         try:
             await pool.execute(
@@ -1286,28 +1674,47 @@ async def record_message_keywords(pool, bot_id: int, text: str) -> None:
                    VALUES($1, $2, 1, now())
                    ON CONFLICT (bot_id, keyword) DO UPDATE
                    SET count = keyword_stats.count + 1, last_seen = now()""",
-                bot_id, word,
+                bot_id,
+                word,
             )
         except Exception:
-            log.debug("record_message_keywords: error recording keyword=%s bot_id=%s", word, bot_id, exc_info=True)
+            log.debug(
+                "record_message_keywords: error recording keyword=%s bot_id=%s",
+                word,
+                bot_id,
+                exc_info=True,
+            )
+
 
 async def get_top_keywords(pool, bot_id: int, limit: int = 20) -> list:
     return await pool.fetch(
         "SELECT keyword, count FROM keyword_stats WHERE bot_id=$1 ORDER BY count DESC LIMIT $2",
-        bot_id, limit,
+        bot_id,
+        limit,
     )
 
+
 async def get_keyword_stats_summary(pool, bot_id: int) -> dict:
-    total_keywords = await pool.fetchval(
-        "SELECT COUNT(*) FROM keyword_stats WHERE bot_id=$1", bot_id
-    ) or 0
-    total_messages = await pool.fetchval(
-        "SELECT SUM(count) FROM keyword_stats WHERE bot_id=$1", bot_id
-    ) or 0
-    return {"total_keywords": int(total_keywords), "total_messages": int(total_messages)}
+    total_keywords = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM keyword_stats WHERE bot_id=$1", bot_id
+        )
+        or 0
+    )
+    total_messages = (
+        await pool.fetchval(
+            "SELECT SUM(count) FROM keyword_stats WHERE bot_id=$1", bot_id
+        )
+        or 0
+    )
+    return {
+        "total_keywords": int(total_keywords),
+        "total_messages": int(total_messages),
+    }
 
 
 # ── Network Management ──────────────────────────────────────────────────────
+
 
 async def get_network_overview(pool: asyncpg.Pool, added_by: int) -> dict:
     """Aggregate stats across all active bots for a user."""
@@ -1318,25 +1725,41 @@ async def get_network_overview(pool: asyncpg.Pool, added_by: int) -> dict:
            FROM managed_bots WHERE added_by=$1 AND is_active=TRUE""",
         added_by,
     )
-    total_users = await pool.fetchval(
-        """SELECT COUNT(*) FROM bot_users bu
+    total_users = (
+        await pool.fetchval(
+            """SELECT COUNT(*) FROM bot_users bu
            JOIN managed_bots m ON m.bot_id=bu.bot_id
-           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
-    ) or 0
-    unique_users = await pool.fetchval(
-        """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""",
+            added_by,
+        )
+        or 0
+    )
+    unique_users = (
+        await pool.fetchval(
+            """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
            JOIN managed_bots m ON m.bot_id=bu.bot_id
-           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
-    ) or 0
-    total_sent = await pool.fetchval(
-        """SELECT COALESCE(SUM(bc.sent_count),0) FROM broadcasts bc
-           JOIN managed_bots m ON m.bot_id=bc.bot_id WHERE m.added_by=$1""", added_by,
-    ) or 0
-    avg_score = await pool.fetchval(
-        """SELECT AVG(bm.score) FROM bot_metrics bm
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""",
+            added_by,
+        )
+        or 0
+    )
+    total_sent = (
+        await pool.fetchval(
+            """SELECT COALESCE(SUM(bc.sent_count),0) FROM broadcasts bc
+           JOIN managed_bots m ON m.bot_id=bc.bot_id WHERE m.added_by=$1""",
+            added_by,
+        )
+        or 0
+    )
+    avg_score = (
+        await pool.fetchval(
+            """SELECT AVG(bm.score) FROM bot_metrics bm
            JOIN managed_bots m ON m.bot_id=bm.bot_id
-           WHERE m.added_by=$1 AND m.is_active=TRUE""", added_by,
-    ) or 0
+           WHERE m.added_by=$1 AND m.is_active=TRUE""",
+            added_by,
+        )
+        or 0
+    )
     return {
         "total_bots": int(meta["total_bots"] or 0),
         "swarm_bots": int(meta["swarm_bots"] or 0),
@@ -1368,7 +1791,9 @@ async def get_cluster_list(pool: asyncpg.Pool, added_by: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-async def get_bots_in_cluster(pool: asyncpg.Pool, added_by: int, cluster: str) -> list[asyncpg.Record]:
+async def get_bots_in_cluster(
+    pool: asyncpg.Pool, added_by: int, cluster: str
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT m.*, COALESCE(aud.cnt,0) as audience_count, COALESCE(bm.score,0) as score
            FROM managed_bots m
@@ -1378,36 +1803,51 @@ async def get_bots_in_cluster(pool: asyncpg.Pool, added_by: int, cluster: str) -
            LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
            WHERE m.added_by=$1 AND m.is_active=TRUE AND COALESCE(m.cluster,'default')=$2
            ORDER BY COALESCE(bm.score,0) DESC""",
-        added_by, cluster,
+        added_by,
+        cluster,
     )
 
 
-async def set_bot_cluster_name(pool: asyncpg.Pool, bot_id: int, added_by: int, cluster: str) -> None:
+async def set_bot_cluster_name(
+    pool: asyncpg.Pool, bot_id: int, added_by: int, cluster: str
+) -> None:
     await pool.execute(
         "UPDATE managed_bots SET cluster=$3 WHERE bot_id=$1 AND added_by=$2",
-        bot_id, added_by, cluster,
+        bot_id,
+        added_by,
+        cluster,
     )
 
 
-async def bulk_set_swarm(pool: asyncpg.Pool, added_by: int, cluster: str, enabled: bool) -> int:
+async def bulk_set_swarm(
+    pool: asyncpg.Pool, added_by: int, cluster: str, enabled: bool
+) -> int:
     result = await pool.execute(
         """UPDATE managed_bots SET swarm_enabled=$3
            WHERE added_by=$1 AND COALESCE(cluster,'default')=$2 AND is_active=TRUE""",
-        added_by, cluster, enabled,
+        added_by,
+        cluster,
+        enabled,
     )
     return int(result.split()[-1])
 
 
-async def bulk_set_role(pool: asyncpg.Pool, added_by: int, cluster: str, role: str) -> int:
+async def bulk_set_role(
+    pool: asyncpg.Pool, added_by: int, cluster: str, role: str
+) -> int:
     result = await pool.execute(
         """UPDATE managed_bots SET bot_role=$3
            WHERE added_by=$1 AND COALESCE(cluster,'default')=$2 AND is_active=TRUE""",
-        added_by, cluster, role,
+        added_by,
+        cluster,
+        role,
     )
     return int(result.split()[-1])
 
 
-async def get_routing_weights_for_user(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
+async def get_routing_weights_for_user(
+    pool: asyncpg.Pool, added_by: int
+) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT m.bot_id, m.username, m.first_name, m.cluster,
                   m.bot_role, COALESCE(rw.weight, 1.0) as weight,
@@ -1425,7 +1865,8 @@ async def set_routing_weight(pool: asyncpg.Pool, bot_id: int, weight: float) -> 
     await pool.execute(
         """INSERT INTO bot_routing_weights(bot_id, weight)
            VALUES($1,$2) ON CONFLICT(bot_id) DO UPDATE SET weight=$2, updated_at=NOW()""",
-        bot_id, weight,
+        bot_id,
+        weight,
     )
 
 
@@ -1490,29 +1931,43 @@ async def get_unique_network_users(pool: asyncpg.Pool, added_by: int) -> list[di
 
 
 async def get_bot_overlap_stats(pool: asyncpg.Pool, added_by: int) -> dict:
-    total_entries = await pool.fetchval(
-        """SELECT COUNT(*) FROM bot_users bu
+    total_entries = (
+        await pool.fetchval(
+            """SELECT COUNT(*) FROM bot_users bu
            JOIN managed_bots m ON m.bot_id=bu.bot_id
-           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
-    ) or 0
-    unique_users = await pool.fetchval(
-        """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""",
+            added_by,
+        )
+        or 0
+    )
+    unique_users = (
+        await pool.fetchval(
+            """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
            JOIN managed_bots m ON m.bot_id=bu.bot_id
-           WHERE m.added_by=$1 AND bu.is_active=TRUE""", added_by,
-    ) or 0
-    multi_bot = await pool.fetchval(
-        """SELECT COUNT(*) FROM (
+           WHERE m.added_by=$1 AND bu.is_active=TRUE""",
+            added_by,
+        )
+        or 0
+    )
+    multi_bot = (
+        await pool.fetchval(
+            """SELECT COUNT(*) FROM (
                SELECT bu.user_id FROM bot_users bu
                JOIN managed_bots m ON m.bot_id=bu.bot_id
                WHERE m.added_by=$1 AND bu.is_active=TRUE
                GROUP BY bu.user_id HAVING COUNT(DISTINCT bu.bot_id) > 1
-           ) sub""", added_by,
-    ) or 0
+           ) sub""",
+            added_by,
+        )
+        or 0
+    )
     return {
         "total_entries": int(total_entries),
         "unique_users": int(unique_users),
         "multi_bot_users": int(multi_bot),
-        "overlap_pct": round(int(multi_bot) / int(unique_users) * 100, 1) if unique_users else 0,
+        "overlap_pct": round(int(multi_bot) / int(unique_users) * 100, 1)
+        if unique_users
+        else 0,
     }
 
 
@@ -1520,25 +1975,37 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
     """Clone auto-replies, funnels (+steps), automation rules from src to dst."""
     counts = {"auto_replies": 0, "funnels": 0, "automation_rules": 0}
     replies = await pool.fetch(
-        "SELECT trigger_type,keyword,response_text FROM auto_replies WHERE bot_id=$1", src_id,
+        "SELECT trigger_type,keyword,response_text FROM auto_replies WHERE bot_id=$1",
+        src_id,
     )
     for r in replies:
         try:
             await pool.execute(
                 "INSERT INTO auto_replies(bot_id,trigger_type,keyword,response_text) VALUES($1,$2,$3,$4)",
-                dst_id, r["trigger_type"], r["keyword"], r["response_text"],
+                dst_id,
+                r["trigger_type"],
+                r["keyword"],
+                r["response_text"],
             )
             counts["auto_replies"] += 1
         except Exception:
-            log.debug("clone_bot_settings: error copying auto_reply for dst_id=%s", dst_id, exc_info=True)
+            log.debug(
+                "clone_bot_settings: error copying auto_reply for dst_id=%s",
+                dst_id,
+                exc_info=True,
+            )
     funnels_src = await pool.fetch(
-        "SELECT id,name,trigger_type,keyword FROM funnels WHERE bot_id=$1", src_id,
+        "SELECT id,name,trigger_type,keyword FROM funnels WHERE bot_id=$1",
+        src_id,
     )
     for fn in funnels_src:
         try:
             new_fn = await pool.fetchrow(
                 "INSERT INTO funnels(bot_id,name,trigger_type,keyword) VALUES($1,$2,$3,$4) RETURNING id",
-                dst_id, fn["name"], fn["trigger_type"], fn["keyword"],
+                dst_id,
+                fn["name"],
+                fn["trigger_type"],
+                fn["keyword"],
             )
             if new_fn:
                 steps = await pool.fetch(
@@ -1548,11 +2015,19 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
                 for s in steps:
                     await pool.execute(
                         "INSERT INTO funnel_steps(funnel_id,step_order,message_text,delay_minutes) VALUES($1,$2,$3,$4)",
-                        new_fn["id"], s["step_order"], s["message_text"], s["delay_minutes"],
+                        new_fn["id"],
+                        s["step_order"],
+                        s["message_text"],
+                        s["delay_minutes"],
                     )
                 counts["funnels"] += 1
         except Exception:
-            log.debug("clone_bot_settings: error copying funnel src=%s dst=%s", fn["id"], dst_id, exc_info=True)
+            log.debug(
+                "clone_bot_settings: error copying funnel src=%s dst=%s",
+                fn["id"],
+                dst_id,
+                exc_info=True,
+            )
     rules = await pool.fetch(
         "SELECT name,trigger_type,trigger_value,action_type,action_value FROM automation_rules WHERE bot_id=$1",
         src_id,
@@ -1562,19 +2037,29 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
             await pool.execute(
                 """INSERT INTO automation_rules(bot_id,name,trigger_type,trigger_value,action_type,action_value)
                    VALUES($1,$2,$3,$4,$5,$6)""",
-                dst_id, r["name"], r["trigger_type"], r["trigger_value"],
-                r["action_type"], r["action_value"],
+                dst_id,
+                r["name"],
+                r["trigger_type"],
+                r["trigger_value"],
+                r["action_type"],
+                r["action_value"],
             )
             counts["automation_rules"] += 1
         except Exception:
-            log.debug("clone_bot_settings: error copying automation_rule dst=%s", dst_id, exc_info=True)
+            log.debug(
+                "clone_bot_settings: error copying automation_rule dst=%s",
+                dst_id,
+                exc_info=True,
+            )
     return counts
 
 
-async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
-                                       exclude_bot_id: int) -> asyncpg.Record | None:
+async def get_weighted_routing_target(
+    pool: asyncpg.Pool, cluster: str, exclude_bot_id: int
+) -> asyncpg.Record | None:
     """Weighted random selection of routing target bot."""
     import random as _random
+
     candidates = await pool.fetch(
         """SELECT m.bot_id, m.token, m.username, m.first_name,
                   COALESCE(bm.score,0) as score,
@@ -1585,7 +2070,8 @@ async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
            WHERE m.swarm_enabled=TRUE AND m.is_active=TRUE
              AND m.bot_role IN ('conversion','retention','general')
              AND m.cluster=$1 AND m.bot_id!=$2""",
-        cluster, exclude_bot_id,
+        cluster,
+        exclude_bot_id,
     )
     if not candidates:
         return None
@@ -1603,7 +2089,10 @@ async def get_weighted_routing_target(pool: asyncpg.Pool, cluster: str,
 
 # ── Telegram user accounts ──────────────────────────────────────────────────
 
-async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int, status_filter: str | None = None) -> list:
+
+async def get_tg_accounts(
+    pool: asyncpg.Pool, owner_id: int, status_filter: str | None = None
+) -> list:
     base = (
         "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active, "
         "COALESCE(acc_status, 'active') AS acc_status, status_checked_at, status_reason, "
@@ -1611,14 +2100,22 @@ async def get_tg_accounts(pool: asyncpg.Pool, owner_id: int, status_filter: str 
         "FROM tg_accounts WHERE owner_id=$1"
     )
     if status_filter and status_filter != "all":
-        return await pool.fetch(base + " AND COALESCE(acc_status,'active')=$2 ORDER BY added_at DESC", owner_id, status_filter)
+        return await pool.fetch(
+            base + " AND COALESCE(acc_status,'active')=$2 ORDER BY added_at DESC",
+            owner_id,
+            status_filter,
+        )
     return await pool.fetch(base + " ORDER BY added_at DESC", owner_id)
 
 
-async def update_acc_status(pool: asyncpg.Pool, acc_id: int, status: str, reason: str = "") -> None:
+async def update_acc_status(
+    pool: asyncpg.Pool, acc_id: int, status: str, reason: str = ""
+) -> None:
     await pool.execute(
         "UPDATE tg_accounts SET acc_status=$1, status_reason=$2, status_checked_at=now() WHERE id=$3",
-        status, reason, acc_id,
+        status,
+        reason,
+        acc_id,
     )
 
 
@@ -1628,7 +2125,8 @@ async def get_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int):
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
            WHERE a.id=$1 AND a.owner_id=$2""",
-        acc_id, owner_id,
+        acc_id,
+        owner_id,
     )
 
 
@@ -1642,7 +2140,8 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
                FROM tg_accounts a
                LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
                WHERE a.id=$1 AND a.owner_id=$2""",
-            acc_id, owner_id,
+            acc_id,
+            owner_id,
         )
     return await pool.fetchrow(
         """SELECT a.id, a.session_str, a.phone, a.first_name,
@@ -1655,12 +2154,18 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
     )
 
 
-async def add_tg_account(pool: asyncpg.Pool, owner_id: int, phone: str,
-                         session_str: str, tg_user_id: int,
-                         first_name: str, username: str,
-                         device_model: str | None = None,
-                         system_version: str | None = None,
-                         app_version: str | None = None) -> int:
+async def add_tg_account(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    phone: str,
+    session_str: str,
+    tg_user_id: int,
+    first_name: str,
+    username: str,
+    device_model: str | None = None,
+    system_version: str | None = None,
+    app_version: str | None = None,
+) -> int:
     row = await pool.fetchrow(
         """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
                first_name, username, device_model, system_version, app_version)
@@ -1672,8 +2177,15 @@ async def add_tg_account(pool: asyncpg.Pool, owner_id: int, phone: str,
                app_version=COALESCE($9, tg_accounts.app_version),
                is_active=true, last_used=now()
            RETURNING id""",
-        owner_id, phone, session_str, tg_user_id, first_name, username,
-        device_model, system_version, app_version,
+        owner_id,
+        phone,
+        session_str,
+        tg_user_id,
+        first_name,
+        username,
+        device_model,
+        system_version,
+        app_version,
     )
     return row["id"]
 
@@ -1681,14 +2193,16 @@ async def add_tg_account(pool: asyncpg.Pool, owner_id: int, phone: str,
 async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> bool:
     result = await pool.execute(
         "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, owner_id,
+        acc_id,
+        owner_id,
     )
     return result != "DELETE 0"
 
 
 async def update_tg_account_used(pool: asyncpg.Pool, acc_id: int) -> None:
     await pool.execute(
-        "UPDATE tg_accounts SET last_used=now() WHERE id=$1", acc_id,
+        "UPDATE tg_accounts SET last_used=now() WHERE id=$1",
+        acc_id,
     )
 
 
@@ -1701,12 +2215,16 @@ async def update_tg_account_status(
     """Обновляет статус активности аккаунта. Возвращает True если запись найдена и обновлена."""
     result = await pool.execute(
         "UPDATE tg_accounts SET is_active=$3 WHERE id=$1 AND owner_id=$2",
-        acc_id, owner_id, is_active,
+        acc_id,
+        owner_id,
+        is_active,
     )
     return result != "UPDATE 0"
 
 
-async def get_active_account_for_owner(pool: asyncpg.Pool, owner_id: int) -> dict | None:
+async def get_active_account_for_owner(
+    pool: asyncpg.Pool, owner_id: int
+) -> dict | None:
     """Возвращает первый активный аккаунт пользователя (используется ranking_checker'ом).
 
     Всегда фильтруется по owner_id — пользователь видит только свои аккаунты.
@@ -1723,6 +2241,7 @@ async def get_active_account_for_owner(pool: asyncpg.Pool, owner_id: int) -> dic
 
 # ── Search rankings ─────────────────────────────────────────────────────────
 
+
 async def get_tracked_keywords(pool: asyncpg.Pool, bot_id: int) -> list:
     return await pool.fetch(
         "SELECT id, keyword, is_active, created_at FROM tracked_keywords "
@@ -1731,33 +2250,40 @@ async def get_tracked_keywords(pool: asyncpg.Pool, bot_id: int) -> list:
     )
 
 
-async def add_tracked_keyword(pool: asyncpg.Pool, bot_id: int,
-                               owner_id: int, keyword: str) -> bool:
+async def add_tracked_keyword(
+    pool: asyncpg.Pool, bot_id: int, owner_id: int, keyword: str
+) -> bool:
     try:
         await pool.execute(
             "INSERT INTO tracked_keywords(bot_id, owner_id, keyword) VALUES($1,$2,$3)",
-            bot_id, owner_id, keyword,
+            bot_id,
+            owner_id,
+            keyword,
         )
         return True
     except Exception:
         return False
 
 
-async def remove_tracked_keyword(pool: asyncpg.Pool, keyword_id: int,
-                                  owner_id: int) -> bool:
+async def remove_tracked_keyword(
+    pool: asyncpg.Pool, keyword_id: int, owner_id: int
+) -> bool:
     result = await pool.execute(
         "DELETE FROM tracked_keywords WHERE id=$1 AND owner_id=$2",
-        keyword_id, owner_id,
+        keyword_id,
+        owner_id,
     )
     return result != "DELETE 0"
 
 
-async def get_keyword_rankings(pool: asyncpg.Pool, keyword_id: int,
-                                limit: int = 10) -> list:
+async def get_keyword_rankings(
+    pool: asyncpg.Pool, keyword_id: int, limit: int = 10
+) -> list:
     return await pool.fetch(
         "SELECT position, checked_at FROM search_rankings "
         "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
-        keyword_id, limit,
+        keyword_id,
+        limit,
     )
 
 
@@ -1769,25 +2295,32 @@ async def get_latest_ranking(pool: asyncpg.Pool, keyword_id: int):
     )
 
 
-async def save_ranking(pool: asyncpg.Pool, keyword_id: int,
-                        bot_id: int, position) -> None:
+async def save_ranking(
+    pool: asyncpg.Pool, keyword_id: int, bot_id: int, position
+) -> None:
     await pool.execute(
         "INSERT INTO search_rankings(keyword_id, bot_id, position) VALUES($1,$2,$3)",
-        keyword_id, bot_id, position,
+        keyword_id,
+        bot_id,
+        position,
     )
 
 
-async def get_ranking_history(pool: asyncpg.Pool, keyword_id: int,
-                               limit: int = 7) -> list:
+async def get_ranking_history(
+    pool: asyncpg.Pool, keyword_id: int, limit: int = 7
+) -> list:
     """Return last N ranking records for a keyword: [(position, checked_at)]."""
     return await pool.fetch(
         "SELECT position, checked_at FROM search_rankings "
         "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
-        keyword_id, limit,
+        keyword_id,
+        limit,
     )
 
 
-async def get_all_keywords_with_latest_ranking(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+async def get_all_keywords_with_latest_ranking(
+    pool: asyncpg.Pool, owner_id: int
+) -> list[dict]:
     """Возвращает все ключевые слова пользователя с последней позицией и username бота.
 
     Формат: [{"keyword_id", "keyword", "bot_id", "bot_username", "position", "checked_at"}]
@@ -1834,19 +2367,24 @@ async def get_bot_owner(pool: asyncpg.Pool, bot_id: int) -> int | None:
     )
 
 
-async def toggle_keyword_active(pool: asyncpg.Pool, keyword_id: int, owner_id: int) -> bool | None:
+async def toggle_keyword_active(
+    pool: asyncpg.Pool, keyword_id: int, owner_id: int
+) -> bool | None:
     """Переключает is_active ключевого слова. Возвращает новое значение или None если не найдено."""
     row = await pool.fetchrow(
         """UPDATE tracked_keywords
            SET is_active = NOT is_active
            WHERE id = $1 AND owner_id = $2
            RETURNING is_active""",
-        keyword_id, owner_id,
+        keyword_id,
+        owner_id,
     )
     return row["is_active"] if row else None
 
 
-async def toggle_keyword_notify(pool: asyncpg.Pool, bot_id: int, owner_id: int) -> bool | None:
+async def toggle_keyword_notify(
+    pool: asyncpg.Pool, bot_id: int, owner_id: int
+) -> bool | None:
     """Переключает notify_enabled для всех ключевых слов бота.
 
     Если хотя бы одно включено — выключает все; иначе — включает все.
@@ -1854,23 +2392,29 @@ async def toggle_keyword_notify(pool: asyncpg.Pool, bot_id: int, owner_id: int) 
     """
     current = await pool.fetchval(
         "SELECT bool_or(notify_enabled) FROM tracked_keywords WHERE bot_id=$1 AND owner_id=$2",
-        bot_id, owner_id,
+        bot_id,
+        owner_id,
     )
     if current is None:
         return None
     new_value = not current
     await pool.execute(
         "UPDATE tracked_keywords SET notify_enabled=$3 WHERE bot_id=$1 AND owner_id=$2",
-        bot_id, owner_id, new_value,
+        bot_id,
+        owner_id,
+        new_value,
     )
     return new_value
 
 
-async def get_keyword_notify_enabled(pool: asyncpg.Pool, bot_id: int, owner_id: int) -> bool:
+async def get_keyword_notify_enabled(
+    pool: asyncpg.Pool, bot_id: int, owner_id: int
+) -> bool:
     """Возвращает True если хотя бы одно ключевое слово бота имеет notify_enabled=TRUE."""
     val = await pool.fetchval(
         "SELECT bool_or(notify_enabled) FROM tracked_keywords WHERE bot_id=$1 AND owner_id=$2",
-        bot_id, owner_id,
+        bot_id,
+        owner_id,
     )
     return bool(val)
 
@@ -1885,7 +2429,8 @@ async def upsert_managed_channels(
         async with conn.transaction():
             await conn.execute(
                 "DELETE FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
-                owner_id, acc_id,
+                owner_id,
+                acc_id,
             )
             await conn.executemany(
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash, type)
@@ -1895,7 +2440,15 @@ async def upsert_managed_channels(
                        acc_id=EXCLUDED.acc_id, access_hash=EXCLUDED.access_hash,
                        type=EXCLUDED.type""",
                 [
-                    (owner_id, acc_id, ch["id"], ch.get("title", ""), ch.get("username", ""), ch.get("access_hash", 0), ch.get("type", "channel"))
+                    (
+                        owner_id,
+                        acc_id,
+                        ch["id"],
+                        ch.get("title", ""),
+                        ch.get("username", ""),
+                        ch.get("access_hash", 0),
+                        ch.get("type", "channel"),
+                    )
                     for ch in channels
                 ],
             )
@@ -1908,7 +2461,8 @@ async def get_managed_channels(
     if acc_id is not None:
         return await pool.fetch(
             "SELECT * FROM managed_channels WHERE owner_id=$1 AND acc_id=$2 ORDER BY title",
-            owner_id, acc_id,
+            owner_id,
+            acc_id,
         )
     return await pool.fetch(
         "SELECT * FROM managed_channels WHERE owner_id=$1 ORDER BY acc_id, title",
@@ -1941,7 +2495,8 @@ async def get_or_create_referral_code(pool: asyncpg.Pool, user_id: int) -> str:
         try:
             await pool.execute(
                 "INSERT INTO platform_referral_codes(user_id, code) VALUES($1,$2)",
-                user_id, code,
+                user_id,
+                code,
             )
             return code
         except Exception:
@@ -1963,17 +2518,21 @@ async def record_platform_referral(
     if referrer_id == referred_id:
         return False
     # Anti-fraud: max 100 referrals per month
-    monthly = await pool.fetchval(
-        """SELECT COUNT(*) FROM platform_referrals
+    monthly = (
+        await pool.fetchval(
+            """SELECT COUNT(*) FROM platform_referrals
            WHERE referrer_id=$1 AND created_at >= now() - INTERVAL '30 days'""",
-        referrer_id,
-    ) or 0
+            referrer_id,
+        )
+        or 0
+    )
     if monthly >= 100:
         return False
     try:
         await pool.execute(
             "INSERT INTO platform_referrals(referrer_id, referred_id) VALUES($1,$2)",
-            referrer_id, referred_id,
+            referrer_id,
+            referred_id,
         )
         await pool.execute(
             "UPDATE platform_referral_codes SET total_clicks=total_clicks+1 WHERE user_id=$1",
@@ -2011,17 +2570,26 @@ async def mark_referral_paid(pool: asyncpg.Pool, referred_id: int) -> int | None
 async def get_referral_stats(pool: asyncpg.Pool, user_id: int) -> dict:
     """Return referral dashboard data for a user."""
     code = await get_or_create_referral_code(pool, user_id)
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1", user_id
-    ) or 0
-    active = await pool.fetchval(
-        "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1 AND activated_at IS NOT NULL",
-        user_id,
-    ) or 0
-    paid = await pool.fetchval(
-        "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1 AND paid_at IS NOT NULL",
-        user_id,
-    ) or 0
+    total = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1", user_id
+        )
+        or 0
+    )
+    active = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1 AND activated_at IS NOT NULL",
+            user_id,
+        )
+        or 0
+    )
+    paid = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1 AND paid_at IS NOT NULL",
+            user_id,
+        )
+        or 0
+    )
     rewards = await pool.fetch(
         "SELECT level, plan, days, given_at FROM referral_rewards WHERE user_id=$1 ORDER BY given_at",
         user_id,
@@ -2035,7 +2603,9 @@ async def get_referral_stats(pool: asyncpg.Pool, user_id: int) -> dict:
     }
 
 
-async def get_referral_leaderboard_platform(pool: asyncpg.Pool, limit: int = 10) -> list[dict]:
+async def get_referral_leaderboard_platform(
+    pool: asyncpg.Pool, limit: int = 10
+) -> list[dict]:
     """Top referrers by number of paying referrals."""
     rows = await pool.fetch(
         """SELECT pr.referrer_id, pu.first_name, pu.username,
@@ -2054,10 +2624,10 @@ async def get_referral_leaderboard_platform(pool: asyncpg.Pool, limit: int = 10)
 
 # Reward tier definitions
 _REWARD_TIERS = [
-    ("basic",    "active", 5,  "starter", 14),
-    ("silver",   "paid",   3,  "starter", 30),
-    ("gold",     "paid",   10, "pro",     30),
-    ("platinum", "paid",   25, "enterprise", 30),
+    ("basic", "active", 5, "starter", 14),
+    ("silver", "paid", 3, "starter", 30),
+    ("gold", "paid", 10, "pro", 30),
+    ("platinum", "paid", 25, "enterprise", 30),
 ]
 
 
@@ -2078,7 +2648,10 @@ async def check_and_grant_rewards(
         try:
             await pool.execute(
                 "INSERT INTO referral_rewards(user_id, level, plan, days) VALUES($1,$2,$3,$4)",
-                referrer_id, level, plan, days,
+                referrer_id,
+                level,
+                plan,
+                days,
             )
         except Exception:
             continue
@@ -2094,13 +2667,17 @@ async def check_and_grant_rewards(
                    is_active  = true,
                    expires_at = GREATEST(subscriptions.expires_at, now())
                               + ($3 || ' days')::INTERVAL""",
-            referrer_id, plan, str(days),
+            referrer_id,
+            plan,
+            str(days),
         )
         granted.append(level)
         # Notify referrer
         level_names = {
-            "basic": "🥉 Базовый", "silver": "🥈 Серебро",
-            "gold": "🥇 Золото", "platinum": "💎 Платина",
+            "basic": "🥉 Базовый",
+            "silver": "🥈 Серебро",
+            "gold": "🥇 Золото",
+            "platinum": "💎 Платина",
         }
         plan_names = {"starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}
         try:
@@ -2114,7 +2691,12 @@ async def check_and_grant_rewards(
                 parse_mode="HTML",
             )
         except Exception:
-            log_exc_swallow(log, "Сбой уведомления о реферальной награде", referrer_id=referrer_id, level=level)
+            log_exc_swallow(
+                log,
+                "Сбой уведомления о реферальной награде",
+                referrer_id=referrer_id,
+                level=level,
+            )
 
     return granted
 
@@ -2149,11 +2731,15 @@ async def give_welcome_bonus(pool: asyncpg.Pool, referred_id: int, bot) -> bool:
             parse_mode="HTML",
         )
     except Exception:
-        log_exc_swallow(log, "Сбой уведомления о реферальном подарке", referred_id=referred_id)
+        log_exc_swallow(
+            log, "Сбой уведомления о реферальном подарке", referred_id=referred_id
+        )
     return True
 
 
-async def deactivate_account(pool: asyncpg.Pool, account_id: int, reason: str = "") -> None:
+async def deactivate_account(
+    pool: asyncpg.Pool, account_id: int, reason: str = ""
+) -> None:
     """Mark account as inactive (banned / PeerFlood). Called by operation handlers."""
     await pool.execute(
         "UPDATE tg_accounts SET is_active=false WHERE id=$1",
@@ -2164,6 +2750,7 @@ async def deactivate_account(pool: asyncpg.Pool, account_id: int, reason: str = 
 
 
 # ── Trust Engine ───────────────────────────────────────────────────────────
+
 
 async def get_trusted_accounts(
     pool: asyncpg.Pool,
@@ -2197,12 +2784,15 @@ async def record_flood_event(
                last_flood_at  = NOW(),
                cooldown_until = NOW() + ($1 * INTERVAL '1 hour')
            WHERE id = $2""",
-        cooldown_hours, account_id,
+        cooldown_hours,
+        account_id,
     )
     await pool.execute(
         """INSERT INTO account_flood_log(account_id, operation, flood_seconds)
            VALUES($1, $2, $3)""",
-        account_id, operation, flood_seconds,
+        account_id,
+        operation,
+        flood_seconds,
     )
 
 
@@ -2240,12 +2830,15 @@ async def notify_if_enabled(
         settings = await get_notification_settings(pool, user_id)
         if not settings.get(pref, True):
             return
-        await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=reply_markup)
+        await bot.send_message(
+            user_id, text, parse_mode="HTML", reply_markup=reply_markup
+        )
     except Exception:
         log_exc_swallow(log, "Сбой notify_if_enabled", user_id=user_id, pref=pref)
 
 
 # ── Global Presence Factory ────────────────────────────────────────────────
+
 
 async def create_global_presence_plan(
     pool: asyncpg.Pool,
@@ -2259,14 +2852,20 @@ async def create_global_presence_plan(
 ) -> int:
     """Create a plan and return its id."""
     import json
+
     return await pool.fetchval(
         """INSERT INTO global_presence_plans
                (owner_id, asset_type, name_pattern, username_pattern,
                 geo_selection, account_selection, template_id, status)
            VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,'queued')
            RETURNING id""",
-        owner_id, asset_type, name_pattern, username_pattern,
-        json.dumps(geo_selection), json.dumps(account_selection), template_id,
+        owner_id,
+        asset_type,
+        name_pattern,
+        username_pattern,
+        json.dumps(geo_selection),
+        json.dumps(account_selection),
+        template_id,
     )
 
 
@@ -2286,10 +2885,16 @@ async def create_global_presence_targets(
             [
                 (
                     plan_id,
-                    t.get("country"), t.get("country_code"), t.get("region"),
-                    t.get("city"), t.get("city_slug"), t.get("language"), t.get("timezone"),
+                    t.get("country"),
+                    t.get("country_code"),
+                    t.get("region"),
+                    t.get("city"),
+                    t.get("city_slug"),
+                    t.get("language"),
+                    t.get("timezone"),
                     t.get("asset_type", "channel"),
-                    t.get("planned_name"), t.get("planned_username"),
+                    t.get("planned_name"),
+                    t.get("planned_username"),
                     t.get("selected_account_id"),
                 )
                 for t in targets
@@ -2303,7 +2908,8 @@ async def get_global_presence_plan(
 ) -> asyncpg.Record | None:
     return await pool.fetchrow(
         "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
-        plan_id, owner_id,
+        plan_id,
+        owner_id,
     )
 
 
@@ -2312,7 +2918,9 @@ async def get_global_presence_plans(
 ) -> list[asyncpg.Record]:
     return await pool.fetch(
         "SELECT * FROM global_presence_plans WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-        owner_id, limit, offset,
+        owner_id,
+        limit,
+        offset,
     )
 
 
@@ -2327,7 +2935,11 @@ async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
            FROM global_presence_targets WHERE plan_id=$1""",
         plan_id,
     )
-    return dict(row) if row else {"pending": 0, "done": 0, "failed": 0, "running": 0, "total": 0}
+    return (
+        dict(row)
+        if row
+        else {"pending": 0, "done": 0, "failed": 0, "running": 0, "total": 0}
+    )
 
 
 async def reset_failed_targets(pool: asyncpg.Pool, plan_id: int) -> int:
@@ -2343,7 +2955,8 @@ async def reset_failed_targets(pool: asyncpg.Pool, plan_id: int) -> int:
 async def link_plan_to_operation(pool: asyncpg.Pool, plan_id: int, op_id: int) -> None:
     await pool.execute(
         "UPDATE global_presence_plans SET op_id=$1, status='queued', updated_at=now() WHERE id=$2",
-        op_id, plan_id,
+        op_id,
+        plan_id,
     )
 
 
@@ -2355,7 +2968,8 @@ async def cancel_global_presence_plan(
         async with conn.transaction():
             plan = await conn.fetchrow(
                 "SELECT op_id FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
-                plan_id, owner_id,
+                plan_id,
+                owner_id,
             )
             if not plan:
                 return False
@@ -2394,7 +3008,8 @@ async def sync_plan_status_from_op(pool: asyncpg.Pool, plan_id: int) -> str | No
         new_status = op_status
         await pool.execute(
             "UPDATE global_presence_plans SET status=$1, updated_at=now() WHERE id=$2",
-            new_status, plan_id,
+            new_status,
+            plan_id,
         )
         return new_status
     return None
@@ -2402,12 +3017,14 @@ async def sync_plan_status_from_op(pool: asyncpg.Pool, plan_id: int) -> str | No
 
 # ── Operation Reports and Statistics ──────────────────────────────────────
 
+
 async def get_operation_stats(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     """Получить полную статистику выполненной операции."""
     op = await pool.fetchrow(
         "SELECT id, op_type, status, total_items, done_items, params, created_at, updated_at "
         "FROM operation_queue WHERE id=$1 AND owner_id=$2",
-        op_id, owner_id,
+        op_id,
+        owner_id,
     )
     if not op:
         return {}
@@ -2431,7 +3048,9 @@ async def get_operation_stats(pool: asyncpg.Pool, owner_id: int, op_id: int) -> 
         "errors": len(errors),
         "created_at": op["created_at"],
         "updated_at": op["updated_at"],
-        "duration_seconds": (op["updated_at"] - op["created_at"]).total_seconds() if op["updated_at"] else 0,
+        "duration_seconds": (op["updated_at"] - op["created_at"]).total_seconds()
+        if op["updated_at"]
+        else 0,
         "error_details": errors[:10],  # top 10 errors
     }
 
@@ -2444,7 +3063,8 @@ async def get_user_operation_history(
         "SELECT id, op_type, status, total_items, done_items, created_at "
         "FROM operation_queue WHERE owner_id=$1 "
         "ORDER BY created_at DESC LIMIT $2",
-        owner_id, limit,
+        owner_id,
+        limit,
     )
     return [dict(r) for r in rows]
 
@@ -2460,6 +3080,7 @@ async def count_operation_errors(pool: asyncpg.Pool, op_id: int) -> int:
 
 # ── Platform Users Management (v39) ──────────────────────────────────────────
 
+
 async def register_or_update_user(
     pool: asyncpg.Pool, user_id: int, username: str = None, first_name: str = None
 ) -> None:
@@ -2472,7 +3093,9 @@ async def register_or_update_user(
                SET username = COALESCE($2, platform_users.username),
                    first_name = COALESCE($3, platform_users.first_name),
                    last_seen = now()""",
-            user_id, username, first_name,
+            user_id,
+            username,
+            first_name,
         )
     except asyncpg.UndefinedColumnError:
         # Совместимость: старая схема v14 использует last_active
@@ -2483,12 +3106,18 @@ async def register_or_update_user(
                SET username = COALESCE($2, platform_users.username),
                    first_name = COALESCE($3, platform_users.first_name),
                    last_active = now()""",
-            user_id, username, first_name,
+            user_id,
+            username,
+            first_name,
         )
 
 
 async def get_all_platform_users(
-    pool: asyncpg.Pool, limit: int = 50, offset: int = 0, plan: str = None, is_banned: bool = None
+    pool: asyncpg.Pool,
+    limit: int = 50,
+    offset: int = 0,
+    plan: str = None,
+    is_banned: bool = None,
 ) -> list[dict]:
     """Получить список всех пользователей с фильтрацией."""
     query = (
@@ -2509,7 +3138,12 @@ async def get_all_platform_users(
         query += " AND COALESCE(is_banned,false)=$" + str(len(params) + 1)
         params.append(is_banned)
 
-    query += " ORDER BY COALESCE(registered_at, first_seen) DESC NULLS LAST LIMIT $" + str(len(params) + 1) + " OFFSET $" + str(len(params) + 2)
+    query += (
+        " ORDER BY COALESCE(registered_at, first_seen) DESC NULLS LAST LIMIT $"
+        + str(len(params) + 1)
+        + " OFFSET $"
+        + str(len(params) + 2)
+    )
     params.extend([limit, offset])
 
     rows = await pool.fetch(query, *params)
@@ -2533,7 +3167,9 @@ async def grant_plan_to_user(
                    ELSE now() + ($2 || ' months')::INTERVAL
                END
            WHERE user_id=$3""",
-        plan, str(months), user_id,
+        plan,
+        str(months),
+        user_id,
     )
     expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
@@ -2554,7 +3190,9 @@ async def grant_plan_to_user(
                            THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
                        ELSE now() + ($3 || ' months')::INTERVAL
                    END""",
-            user_id, plan, str(months),
+            user_id,
+            plan,
+            str(months),
         )
         # Refresh expires for audit log
         row = await pool.fetchrow(
@@ -2568,14 +3206,21 @@ async def grant_plan_to_user(
         await pool.execute(
             """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
                VALUES ($1, 'grant_plan', $2, $3)""",
-            admin_id, user_id,
-            json.dumps({"plan": plan, "months": months, "expires_at": expires.isoformat()}),
+            admin_id,
+            user_id,
+            json.dumps(
+                {"plan": plan, "months": months, "expires_at": expires.isoformat()}
+            ),
         )
     except Exception:
-        log_exc_swallow(log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id)
+        log_exc_swallow(
+            log, "Сбой записи admin_audit_log", admin_id=admin_id, user_id=user_id
+        )
 
 
-async def revoke_plan_from_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
+async def revoke_plan_from_user(
+    pool: asyncpg.Pool, user_id: int, admin_id: int
+) -> None:
     """Забрать подписку у пользователя (вернуть на free)."""
     await pool.execute(
         "UPDATE platform_users SET current_plan='free', plan_expires_at=NULL WHERE user_id=$1",
@@ -2590,38 +3235,42 @@ async def revoke_plan_from_user(pool: asyncpg.Pool, user_id: int, admin_id: int)
     await pool.execute(
         """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
            VALUES ($1, 'revoke_plan', $2, '{}')""",
-        admin_id, user_id,
+        admin_id,
+        user_id,
     )
 
 
 async def revoke_strike_access(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
     """Забрать Strike доступ у пользователя."""
-    await pool.execute(
-        "DELETE FROM strike_access WHERE user_id=$1", user_id
-    )
+    await pool.execute("DELETE FROM strike_access WHERE user_id=$1", user_id)
 
     # Логировать действие
     await pool.execute(
         """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
            VALUES ($1, 'revoke_strike', $2, '{}')""",
-        admin_id, user_id,
+        admin_id,
+        user_id,
     )
 
 
-async def ban_user(pool: asyncpg.Pool, user_id: int, admin_id: int, reason: str = None) -> None:
+async def ban_user(
+    pool: asyncpg.Pool, user_id: int, admin_id: int, reason: str = None
+) -> None:
     """Забанить пользователя."""
     await pool.execute(
         """UPDATE platform_users
            SET is_banned=true, ban_reason=$1, banned_at=now()
            WHERE user_id=$2""",
-        reason, user_id,
+        reason,
+        user_id,
     )
 
     # Логировать действие
     await pool.execute(
         """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
            VALUES ($1, 'ban_user', $2, $3)""",
-        admin_id, user_id,
+        admin_id,
+        user_id,
         '{"reason":"' + (reason or "") + '"}',
     )
 
@@ -2639,7 +3288,8 @@ async def unban_user(pool: asyncpg.Pool, user_id: int, admin_id: int) -> None:
     await pool.execute(
         """INSERT INTO admin_audit_log (admin_id, action, target_user_id, details)
            VALUES ($1, 'unban_user', $2, '{}')""",
-        admin_id, user_id,
+        admin_id,
+        user_id,
     )
 
 
@@ -2653,17 +3303,26 @@ async def get_user_info(pool: asyncpg.Pool, user_id: int) -> dict:
 
 
 async def log_security_violation(
-    pool: asyncpg.Pool, user_id: int, attempt_type: str, details: dict = None, ip_address: str = None
+    pool: asyncpg.Pool,
+    user_id: int,
+    attempt_type: str,
+    details: dict = None,
+    ip_address: str = None,
 ) -> None:
     """Логировать попытку несанкционированного доступа или подозрительную активность."""
     await pool.execute(
         """INSERT INTO security_violations (user_id, attempt_type, details, ip_address)
            VALUES ($1, $2, $3, $4)""",
-        user_id, attempt_type, str(details or {}), ip_address,
+        user_id,
+        attempt_type,
+        str(details or {}),
+        ip_address,
     )
 
 
-async def count_platform_users(pool: asyncpg.Pool, plan: str = None, is_banned: bool = None) -> int:
+async def count_platform_users(
+    pool: asyncpg.Pool, plan: str = None, is_banned: bool = None
+) -> int:
     """Подсчитать количество пользователей с фильтрацией."""
     query = "SELECT COUNT(*) FROM platform_users WHERE 1=1"
     params = []
@@ -2690,14 +3349,17 @@ async def get_admin_audit_log(
                FROM admin_audit_log
                WHERE admin_id=$1
                ORDER BY created_at DESC LIMIT $2 OFFSET $3""",
-            admin_id, limit, offset,
+            admin_id,
+            limit,
+            offset,
         )
     else:
         rows = await pool.fetch(
             """SELECT id, admin_id, action, target_user_id, details, created_at
                FROM admin_audit_log
                ORDER BY created_at DESC LIMIT $1 OFFSET $2""",
-            limit, offset,
+            limit,
+            offset,
         )
     return [dict(r) for r in rows]
 
@@ -2706,11 +3368,16 @@ async def get_admin_audit_log(
 # BOT ADMIN SESSIONS
 # ══════════════════════════════════════════════════════════════════
 
-async def upsert_bot_admin_session(pool: asyncpg.Pool, bot_id: int, owner_id: int, token: str) -> None:
+
+async def upsert_bot_admin_session(
+    pool: asyncpg.Pool, bot_id: int, owner_id: int, token: str
+) -> None:
     await pool.execute(
         "INSERT INTO bot_admin_sessions(bot_id,owner_id,token) VALUES($1,$2,$3) "
         "ON CONFLICT(bot_id) DO UPDATE SET token=$3, owner_id=$2",
-        bot_id, owner_id, token,
+        bot_id,
+        owner_id,
+        token,
     )
 
 
@@ -2721,7 +3388,9 @@ async def get_bot_admin_session_by_token(pool: asyncpg.Pool, token: str):
 
 
 async def get_bot_admin_token(pool: asyncpg.Pool, bot_id: int) -> str | None:
-    row = await pool.fetchrow("SELECT token FROM bot_admin_sessions WHERE bot_id=$1", bot_id)
+    row = await pool.fetchrow(
+        "SELECT token FROM bot_admin_sessions WHERE bot_id=$1", bot_id
+    )
     return row["token"] if row else None
 
 
@@ -2729,16 +3398,27 @@ async def get_bot_admin_token(pool: asyncpg.Pool, bot_id: int) -> str | None:
 # PRESENCE PACKS
 # ══════════════════════════════════════════════════════════════════
 
+
 async def create_presence_pack(
-    pool: asyncpg.Pool, owner_id: int, name: str,
-    description: str | None = None, target_url: str | None = None,
-    target_label: str | None = None, bot_id: int | None = None,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    name: str,
+    description: str | None = None,
+    target_url: str | None = None,
+    target_label: str | None = None,
+    bot_id: int | None = None,
     bot_username: str | None = None,
 ) -> int:
     return await pool.fetchval(
         "INSERT INTO presence_packs(owner_id,name,description,target_url,target_label,bot_id,bot_username) "
         "VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",
-        owner_id, name, description, target_url, target_label, bot_id, bot_username,
+        owner_id,
+        name,
+        description,
+        target_url,
+        target_label,
+        bot_id,
+        bot_username,
     )
 
 
@@ -2751,32 +3431,46 @@ async def get_presence_pack(pool: asyncpg.Pool, pack_id: int, owner_id: int):
 async def get_presence_packs(pool: asyncpg.Pool, owner_id: int, limit: int = 15):
     return await pool.fetch(
         "SELECT * FROM presence_packs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-        owner_id, limit,
+        owner_id,
+        limit,
     )
 
 
 async def update_presence_pack_channels(
-    pool: asyncpg.Pool, pack_id: int, owner_id: int,
-    channel_ids: list[int], group_ids: list[int],
+    pool: asyncpg.Pool,
+    pack_id: int,
+    owner_id: int,
+    channel_ids: list[int],
+    group_ids: list[int],
 ) -> None:
     import json
+
     await pool.execute(
         "UPDATE presence_packs SET channel_ids=$3, group_ids=$4 WHERE id=$1 AND owner_id=$2",
-        pack_id, owner_id, json.dumps(channel_ids), json.dumps(group_ids),
+        pack_id,
+        owner_id,
+        json.dumps(channel_ids),
+        json.dumps(group_ids),
     )
 
 
-async def mark_presence_pack_seeded(pool: asyncpg.Pool, pack_id: int, owner_id: int) -> None:
+async def mark_presence_pack_seeded(
+    pool: asyncpg.Pool, pack_id: int, owner_id: int
+) -> None:
     await pool.execute(
         "UPDATE presence_packs SET seed_posted=TRUE WHERE id=$1 AND owner_id=$2",
-        pack_id, owner_id,
+        pack_id,
+        owner_id,
     )
 
 
-async def mark_presence_pack_promoted(pool: asyncpg.Pool, pack_id: int, owner_id: int) -> None:
+async def mark_presence_pack_promoted(
+    pool: asyncpg.Pool, pack_id: int, owner_id: int
+) -> None:
     await pool.execute(
         "UPDATE presence_packs SET bot_promoted=TRUE WHERE id=$1 AND owner_id=$2",
-        pack_id, owner_id,
+        pack_id,
+        owner_id,
     )
 
 
@@ -2796,15 +3490,19 @@ async def enqueue_op_with_approval(
 ) -> int:
     """Enqueue operation. If total_items > threshold, set requires_approval=TRUE."""
     import json as _json
+
     needs_approval = total_items > threshold
     status = "waiting_approval" if needs_approval else "pending"
     row = await pool.fetchrow(
         """INSERT INTO operation_queue
            (owner_id, op_type, params, total_items, status, requires_approval, created_at)
            VALUES ($1,$2,$3,$4,$5,$6,now()) RETURNING id""",
-        owner_id, op_type,
+        owner_id,
+        op_type,
         _json.dumps(params) if isinstance(params, dict) else params,
-        total_items, status, needs_approval,
+        total_items,
+        status,
+        needs_approval,
     )
     return row["id"]
 
@@ -2821,16 +3519,21 @@ async def get_pending_approvals(pool: asyncpg.Pool, owner_id: int) -> list:
 
 # ── Workspaces ────────────────────────────────────────────────────────────────
 
-async def create_workspace(pool: asyncpg.Pool, owner_id: int, name: str, description: str = "") -> int:
-    import secrets as _sec
+
+async def create_workspace(
+    pool: asyncpg.Pool, owner_id: int, name: str, description: str = ""
+) -> int:
     row = await pool.fetchrow(
         "INSERT INTO workspaces (owner_id, name, description) VALUES ($1,$2,$3) RETURNING id",
-        owner_id, name[:64], description[:256],
+        owner_id,
+        name[:64],
+        description[:256],
     )
     ws_id = row["id"]
     await pool.execute(
         "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'owner',$2)",
-        ws_id, owner_id,
+        ws_id,
+        owner_id,
     )
     return ws_id
 
@@ -2848,7 +3551,9 @@ async def get_user_workspaces(pool: asyncpg.Pool, user_id: int) -> list:
 
 
 async def get_workspace(pool: asyncpg.Pool, ws_id: int) -> dict | None:
-    row = await pool.fetchrow("SELECT * FROM workspaces WHERE id=$1 AND is_active=TRUE", ws_id)
+    row = await pool.fetchrow(
+        "SELECT * FROM workspaces WHERE id=$1 AND is_active=TRUE", ws_id
+    )
     return dict(row) if row else None
 
 
@@ -2862,17 +3567,24 @@ async def get_workspace_members(pool: asyncpg.Pool, ws_id: int) -> list:
     )
 
 
-async def create_workspace_invite(pool: asyncpg.Pool, ws_id: int, created_by: int) -> str:
+async def create_workspace_invite(
+    pool: asyncpg.Pool, ws_id: int, created_by: int
+) -> str:
     import secrets as _sec
+
     code = _sec.token_urlsafe(12)
     await pool.execute(
         "INSERT INTO workspace_invites (workspace_id, invite_code, created_by, uses_left) VALUES ($1,$2,$3,5)",
-        ws_id, code, created_by,
+        ws_id,
+        code,
+        created_by,
     )
     return code
 
 
-async def use_workspace_invite(pool: asyncpg.Pool, code: str, user_id: int) -> int | None:
+async def use_workspace_invite(
+    pool: asyncpg.Pool, code: str, user_id: int
+) -> int | None:
     """Use invite code. Returns workspace_id on success, None if invalid/expired."""
     invite = await pool.fetchrow(
         "SELECT * FROM workspace_invites WHERE invite_code=$1 AND uses_left>0",
@@ -2882,29 +3594,34 @@ async def use_workspace_invite(pool: asyncpg.Pool, code: str, user_id: int) -> i
         return None
     ws_id = invite["workspace_id"]
     existing = await pool.fetchval(
-        "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, user_id
+        "SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+        ws_id,
+        user_id,
     )
     if not existing:
         await pool.execute(
             "INSERT INTO workspace_members (workspace_id, user_id, role, invited_by) VALUES ($1,$2,'member',$3)",
-            ws_id, user_id, invite["created_by"],
+            ws_id,
+            user_id,
+            invite["created_by"],
         )
         await pool.execute(
-            "UPDATE workspace_invites SET uses_left=uses_left-1 WHERE invite_code=$1", code
+            "UPDATE workspace_invites SET uses_left=uses_left-1 WHERE invite_code=$1",
+            code,
         )
     return ws_id
 
 
 async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) -> None:
     await pool.execute(
-        "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, user_id
+        "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+        ws_id,
+        user_id,
     )
 
 
 async def get_platform_setting(pool: asyncpg.Pool, key: str, default: str = "") -> str:
-    row = await pool.fetchrow(
-        "SELECT value FROM platform_settings WHERE key=$1", key
-    )
+    row = await pool.fetchrow("SELECT value FROM platform_settings WHERE key=$1", key)
     return row["value"] if row else default
 
 
@@ -2913,48 +3630,72 @@ async def set_platform_setting(pool: asyncpg.Pool, key: str, value: str) -> None
         """INSERT INTO platform_settings (key, value, updated_at)
            VALUES ($1, $2, NOW())
            ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=NOW()""",
-        key, value,
+        key,
+        value,
     )
 
 
 # ── Account Infrastructure (v60) ─────────────────────────────────────────────
 
-async def update_account_tags(pool: asyncpg.Pool, acc_id: int, owner_id: int, tags: list[str]) -> None:
+
+async def update_account_tags(
+    pool: asyncpg.Pool, acc_id: int, owner_id: int, tags: list[str]
+) -> None:
     await pool.execute(
         "UPDATE tg_accounts SET tags=$1 WHERE id=$2 AND owner_id=$3",
-        tags, acc_id, owner_id,
+        tags,
+        acc_id,
+        owner_id,
     )
 
 
-async def update_account_pool(pool: asyncpg.Pool, acc_id: int, owner_id: int, pool_name: str | None) -> None:
+async def update_account_pool(
+    pool: asyncpg.Pool, acc_id: int, owner_id: int, pool_name: str | None
+) -> None:
     await pool.execute(
         "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
-        pool_name, acc_id, owner_id,
+        pool_name,
+        acc_id,
+        owner_id,
     )
 
 
-async def update_account_labels(pool: asyncpg.Pool, acc_id: int, owner_id: int, labels: list[str]) -> None:
+async def update_account_labels(
+    pool: asyncpg.Pool, acc_id: int, owner_id: int, labels: list[str]
+) -> None:
     await pool.execute(
         "UPDATE tg_accounts SET labels=$1 WHERE id=$2 AND owner_id=$3",
-        labels, acc_id, owner_id,
+        labels,
+        acc_id,
+        owner_id,
     )
 
 
-async def update_account_warnings(pool: asyncpg.Pool, acc_id: int, owner_id: int, warnings: list[str]) -> None:
+async def update_account_warnings(
+    pool: asyncpg.Pool, acc_id: int, owner_id: int, warnings: list[str]
+) -> None:
     await pool.execute(
         "UPDATE tg_accounts SET warnings=$1 WHERE id=$2 AND owner_id=$3",
-        warnings, acc_id, owner_id,
+        warnings,
+        acc_id,
+        owner_id,
     )
 
 
-async def update_account_project(pool: asyncpg.Pool, acc_id: int, owner_id: int, project: str | None) -> None:
+async def update_account_project(
+    pool: asyncpg.Pool, acc_id: int, owner_id: int, project: str | None
+) -> None:
     await pool.execute(
         "UPDATE tg_accounts SET project=$1 WHERE id=$2 AND owner_id=$3",
-        project, acc_id, owner_id,
+        project,
+        acc_id,
+        owner_id,
     )
 
 
-async def get_accounts_by_pool(pool: asyncpg.Pool, owner_id: int, pool_name: str) -> list:
+async def get_accounts_by_pool(
+    pool: asyncpg.Pool, owner_id: int, pool_name: str
+) -> list:
     return await pool.fetch(
         """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
                   a.trust_score, a.cooldown_until, a.tags, a.pool, a.labels, a.warnings, a.project,
@@ -2963,11 +3704,14 @@ async def get_accounts_by_pool(pool: asyncpg.Pool, owner_id: int, pool_name: str
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
            WHERE a.owner_id=$1 AND a.pool=$2 AND a.is_active=TRUE
            ORDER BY a.trust_score DESC NULLS LAST""",
-        owner_id, pool_name,
+        owner_id,
+        pool_name,
     )
 
 
-async def get_accounts_by_tags(pool: asyncpg.Pool, owner_id: int, tags: list[str]) -> list:
+async def get_accounts_by_tags(
+    pool: asyncpg.Pool, owner_id: int, tags: list[str]
+) -> list:
     """Return accounts that have ALL of the specified tags."""
     return await pool.fetch(
         """SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
@@ -2977,7 +3721,8 @@ async def get_accounts_by_tags(pool: asyncpg.Pool, owner_id: int, tags: list[str
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
            WHERE a.owner_id=$1 AND a.tags @> $2::text[] AND a.is_active=TRUE
            ORDER BY a.trust_score DESC NULLS LAST""",
-        owner_id, tags,
+        owner_id,
+        tags,
     )
 
 
@@ -3001,7 +3746,8 @@ async def get_account_assets(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> 
     """Return all assets associated with an account (for disaster recovery)."""
     channels = await pool.fetch(
         "SELECT channel_id, title, username FROM managed_channels WHERE acc_id=$1 AND owner_id=$2 ORDER BY title",
-        acc_id, owner_id,
+        acc_id,
+        owner_id,
     )
     active_ops = await pool.fetch(
         """SELECT id, op_type, status, total_items, done_items, created_at
@@ -3009,19 +3755,28 @@ async def get_account_assets(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> 
            WHERE owner_id=$1 AND status IN ('pending','running')
              AND params::text LIKE $2
            ORDER BY created_at DESC LIMIT 20""",
-        owner_id, f'%"acc_id": {acc_id}%',
+        owner_id,
+        f'%"acc_id": {acc_id}%',
     )
     return {"channels": list(channels), "ops": list(active_ops)}
 
 
 # ── Proxy Intelligence (v60) ──────────────────────────────────────────────────
 
+
 async def log_proxy_quality(
-    pool: asyncpg.Pool, proxy_id: int, latency_ms: int | None, success: bool, error_msg: str | None = None
+    pool: asyncpg.Pool,
+    proxy_id: int,
+    latency_ms: int | None,
+    success: bool,
+    error_msg: str | None = None,
 ) -> None:
     await pool.execute(
         "INSERT INTO proxy_quality_log (proxy_id, latency_ms, success, error_msg) VALUES ($1,$2,$3,$4)",
-        proxy_id, latency_ms, success, error_msg,
+        proxy_id,
+        latency_ms,
+        success,
+        error_msg,
     )
 
 
@@ -3038,7 +3793,12 @@ async def get_proxy_quality_stats(pool: asyncpg.Pool, proxy_id: int) -> dict:
         proxy_id,
     )
     if not row or row["total"] == 0:
-        return {"success_rate": None, "avg_latency": None, "total": 0, "last_checked": None}
+        return {
+            "success_rate": None,
+            "avg_latency": None,
+            "total": 0,
+            "last_checked": None,
+        }
     total = row["total"] or 1
     return {
         "success_rate": round((row["successes"] or 0) / total * 100, 1),
@@ -3069,27 +3829,37 @@ async def get_all_proxy_quality_stats(pool: asyncpg.Pool, owner_id: int) -> list
     result = []
     for r in rows:
         total = r["total"] or 0
-        result.append({
-            "id": r["id"],
-            "label": r["label"],
-            "proxy_url": r["proxy_url"],
-            "success_rate": round((r["successes"] or 0) / total * 100, 1) if total > 0 else None,
-            "avg_latency": round(r["avg_latency"]) if r["avg_latency"] else None,
-            "total": total,
-        })
+        result.append(
+            {
+                "id": r["id"],
+                "label": r["label"],
+                "proxy_url": r["proxy_url"],
+                "success_rate": round((r["successes"] or 0) / total * 100, 1)
+                if total > 0
+                else None,
+                "avg_latency": round(r["avg_latency"]) if r["avg_latency"] else None,
+                "total": total,
+            }
+        )
     return result
 
 
 # ── Infrastructure Pressure Score cache ──────────────────────────────────────
 
-async def save_pressure_cache(pool: asyncpg.Pool, owner_id: int, score: int, breakdown: dict) -> None:
+
+async def save_pressure_cache(
+    pool: asyncpg.Pool, owner_id: int, score: int, breakdown: dict
+) -> None:
     import json
+
     await pool.execute(
         """INSERT INTO infra_pressure_cache (owner_id, pressure_score, breakdown, computed_at)
            VALUES ($1, $2, $3, NOW())
            ON CONFLICT (owner_id) DO UPDATE
            SET pressure_score=$2, breakdown=$3, computed_at=NOW()""",
-        owner_id, score, json.dumps(breakdown),
+        owner_id,
+        score,
+        json.dumps(breakdown),
     )
 
 
@@ -3101,6 +3871,7 @@ async def get_pressure_cache(pool: asyncpg.Pool, owner_id: int) -> dict | None:
     if not row:
         return None
     import json
+
     breakdown = row["breakdown"]
     if isinstance(breakdown, str):
         breakdown = json.loads(breakdown)
@@ -3113,7 +3884,10 @@ async def get_pressure_cache(pool: asyncpg.Pool, owner_id: int) -> dict | None:
 
 # ── Strike Email Accounts ─────────────────────────────────────────────────────
 
-async def get_strike_email_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
+
+async def get_strike_email_accounts(
+    pool: asyncpg.Pool, owner_id: int
+) -> list[asyncpg.Record]:
     """Получить все email-аккаунты пользователя для Strike-репортов."""
     return await pool.fetch(
         """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at, added_at
@@ -3141,7 +3915,11 @@ async def add_strike_email_account(
            DO UPDATE SET smtp_host=$3, smtp_port=$4, smtp_pass=$5,
                          is_active=TRUE, fail_count=0
            RETURNING id""",
-        owner_id, email, smtp_host, smtp_port, smtp_pass,
+        owner_id,
+        email,
+        smtp_host,
+        smtp_port,
+        smtp_pass,
     )
     return row["id"]
 
@@ -3152,7 +3930,8 @@ async def delete_strike_email_account(
     """Удалить email-аккаунт. Возвращает True если запись была найдена и удалена."""
     result = await pool.execute(
         "DELETE FROM strike_email_accounts WHERE id=$1 AND owner_id=$2",
-        email_id, owner_id,
+        email_id,
+        owner_id,
     )
     return result != "DELETE 0"
 
@@ -3166,11 +3945,13 @@ async def update_strike_email_fail_count(
            SET fail_count = fail_count + $2,
                last_used_at = NOW()
            WHERE id=$1""",
-        email_id, increment,
+        email_id,
+        increment,
     )
 
 
 # ── Error Reports ─────────────────────────────────────────────────────────────
+
 
 async def get_error_reports(
     pool: asyncpg.Pool,
@@ -3191,7 +3972,8 @@ async def get_error_reports(
                LEFT JOIN platform_users pu ON pu.user_id = er.user_id
                ORDER BY er.created_at DESC
                LIMIT $1 OFFSET $2""",
-            limit, offset,
+            limit,
+            offset,
         )
     else:
         rows = await pool.fetch(
@@ -3203,7 +3985,9 @@ async def get_error_reports(
                WHERE er.status = $1
                ORDER BY er.created_at DESC
                LIMIT $2 OFFSET $3""",
-            status, limit, offset,
+            status,
+            limit,
+            offset,
         )
     return rows
 
@@ -3234,12 +4018,15 @@ async def update_error_report_status(
                notes=COALESCE($3, notes),
                updated_at=NOW()
            WHERE id=$1""",
-        report_id, status, notes,
+        report_id,
+        status,
+        notes,
     )
     return result != "UPDATE 0"
 
 
 # ── BotMother Memory (convenience wrappers over services/ai_memory) ───────────
+
 
 async def add_memory(
     pool: asyncpg.Pool,
@@ -3288,7 +4075,10 @@ async def get_memories(
             ORDER BY pinned DESC, updated_at DESC
             LIMIT $3 OFFSET $4
             """,
-            owner_id, kind, limit, offset,
+            owner_id,
+            kind,
+            limit,
+            offset,
         )
     else:
         rows = await pool.fetch(
@@ -3299,7 +4089,9 @@ async def get_memories(
             ORDER BY pinned DESC, updated_at DESC
             LIMIT $2 OFFSET $3
             """,
-            owner_id, limit, offset,
+            owner_id,
+            limit,
+            offset,
         )
     return list(rows)
 
@@ -3312,19 +4104,24 @@ async def delete_memory(
     """Удалить запись памяти. Возвращает True если запись была найдена и удалена."""
     result = await pool.execute(
         "DELETE FROM botmother_memory WHERE owner_id=$1 AND id=$2",
-        owner_id, memory_id,
+        owner_id,
+        memory_id,
     )
     return result == "DELETE 1"
 
 
 # ── Ecosystem helpers ──────────────────────────────────────────────────────────
 
+
 async def get_user_ecosystem_count(pool: asyncpg.Pool, owner_id: int) -> int:
     """Количество активных экосистем пользователя."""
-    return await pool.fetchval(
-        "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1 AND status='active'",
-        owner_id,
-    ) or 0
+    return (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1 AND status='active'",
+            owner_id,
+        )
+        or 0
+    )
 
 
 async def find_object_ecosystems(
@@ -3338,11 +4135,14 @@ async def find_object_ecosystems(
            WHERE m.owner_id=$1 AND m.object_type=$2 AND m.object_id=$3
              AND e.status='active'
            ORDER BY e.name""",
-        owner_id, object_type, object_id,
+        owner_id,
+        object_type,
+        object_id,
     )
 
 
 # ── Intent Engine (v71) ──────────────────────────────────────────────────────
+
 
 async def create_intent(
     pool: asyncpg.Pool,
@@ -3354,20 +4154,27 @@ async def create_intent(
     forecast: dict,
 ) -> int:
     import json
+
     return await pool.fetchval(
         """INSERT INTO intents (owner_id, intent_type, description, plan, strategy, forecast)
            VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb)
            RETURNING id""",
-        owner_id, intent_type, description,
-        json.dumps(plan, ensure_ascii=False), strategy,
+        owner_id,
+        intent_type,
+        description,
+        json.dumps(plan, ensure_ascii=False),
+        strategy,
         json.dumps(forecast, ensure_ascii=False),
     )
 
 
-async def get_intent(pool: asyncpg.Pool, intent_id: int, owner_id: int) -> asyncpg.Record | None:
+async def get_intent(
+    pool: asyncpg.Pool, intent_id: int, owner_id: int
+) -> asyncpg.Record | None:
     return await pool.fetchrow(
         "SELECT * FROM intents WHERE id=$1 AND owner_id=$2",
-        intent_id, owner_id,
+        intent_id,
+        owner_id,
     )
 
 
@@ -3376,7 +4183,8 @@ async def list_intents(
 ) -> list[asyncpg.Record]:
     return await pool.fetch(
         "SELECT * FROM intents WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
-        owner_id, limit,
+        owner_id,
+        limit,
     )
 
 
@@ -3384,9 +4192,13 @@ async def update_intent_strategy(
     pool: asyncpg.Pool, intent_id: int, owner_id: int, strategy: str, forecast: dict
 ) -> None:
     import json
+
     await pool.execute(
         "UPDATE intents SET strategy=$1, forecast=$2::jsonb WHERE id=$3 AND owner_id=$4",
-        strategy, json.dumps(forecast, ensure_ascii=False), intent_id, owner_id,
+        strategy,
+        json.dumps(forecast, ensure_ascii=False),
+        intent_id,
+        owner_id,
     )
 
 
@@ -3400,7 +4212,9 @@ async def update_intent_status(
         ts_col = ", completed_at=NOW()"
     await pool.execute(
         f"UPDATE intents SET status=$1{ts_col} WHERE id=$2 AND owner_id=$3",
-        status, intent_id, owner_id,
+        status,
+        intent_id,
+        owner_id,
     )
 
 
@@ -3408,8 +4222,11 @@ async def save_intent_feedback(
     pool: asyncpg.Pool, intent_id: int, owner_id: int, feedback: dict
 ) -> None:
     import json
+
     await pool.execute(
         "UPDATE intents SET feedback=$1::jsonb, status='completed', completed_at=NOW() "
         "WHERE id=$2 AND owner_id=$3",
-        json.dumps(feedback, ensure_ascii=False), intent_id, owner_id,
+        json.dumps(feedback, ensure_ascii=False),
+        intent_id,
+        owner_id,
     )

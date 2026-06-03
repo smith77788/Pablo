@@ -1,10 +1,9 @@
 """Presence Pack Setup Service — seed posts, bot promotion, cross-linking."""
+
 from __future__ import annotations
 
-import asyncio
 import logging
 import secrets
-from typing import Any
 
 import aiohttp
 import asyncpg
@@ -87,6 +86,7 @@ async def seed_channel_post(
 ) -> bool:
     """Post a message to a channel via Bot API. Bot must be admin in the channel."""
     from services import bot_api
+
     try:
         ok, _ = await bot_api.send_message(http, bot_token, channel_id, text)
         return ok
@@ -105,13 +105,17 @@ async def seed_channel_via_account(
     """Post via userbot account when bot is not yet admin in channel."""
     from services import account_manager
     from services.flood_engine import get_best_account
+
     acc = await get_best_account(pool, owner_id, action_type="post")
     if not acc:
         return False
     try:
         result = await account_manager.post_to_channel(
-            acc["session_str"], channel_id,
-            text, access_hash=access_hash or 0, _acc=acc,
+            acc["session_str"],
+            channel_id,
+            text,
+            access_hash=access_hash or 0,
+            _acc=acc,
         )
         return bool(result.get("msg_id")) if isinstance(result, dict) else bool(result)
     except Exception as e:
@@ -129,6 +133,7 @@ async def promote_bot_in_channel(
     """Add a bot as admin (post_messages, invite_users) in a channel via userbot."""
     from services import account_manager
     from services.flood_engine import get_best_account
+
     acc = await get_best_account(pool, owner_id, action_type="admin_action")
     if not acc:
         log.warning("promote_bot_in_channel: no active account for owner %s", owner_id)
@@ -146,7 +151,9 @@ async def promote_bot_in_channel(
         )
         return ok
     except Exception as e:
-        log.warning("promote_bot_in_channel error chan=%s bot=%s: %s", channel_id, bot_tg_id, e)
+        log.warning(
+            "promote_bot_in_channel error chan=%s bot=%s: %s", channel_id, bot_tg_id, e
+        )
         return False
 
 
@@ -160,10 +167,12 @@ async def mirror_sync_auto_replies(
     Returns (synced_count, total_mirrors).
     """
     from database import db
+
     # Get source bot cluster
     source_bot = await pool.fetchrow(
         "SELECT cluster FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        source_bot_id, owner_id,
+        source_bot_id,
+        owner_id,
     )
     if not source_bot or not source_bot["cluster"]:
         return 0, 0
@@ -173,7 +182,9 @@ async def mirror_sync_auto_replies(
     # Get all bots in same cluster (excluding source)
     mirrors = await pool.fetch(
         "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND bot_id!=$3 AND is_active=TRUE",
-        owner_id, cluster, source_bot_id,
+        owner_id,
+        cluster,
+        source_bot_id,
     )
     if not mirrors:
         return 0, 0
@@ -186,6 +197,8 @@ async def mirror_sync_auto_replies(
             if copied >= 0:
                 synced += 1
         except Exception as e:
-            log.warning("mirror_sync_auto_replies: failed for bot %s: %s", m["bot_id"], e)
+            log.warning(
+                "mirror_sync_auto_replies: failed for bot %s: %s", m["bot_id"], e
+            )
 
     return synced, total

@@ -14,6 +14,7 @@ Endpoints:
   Header: X-Api-Key: <ADMIN_SECRET>
   или:    Authorization: Bearer <ADMIN_SECRET>
 """
+
 from __future__ import annotations
 
 import logging
@@ -66,7 +67,9 @@ async def _click_inline_button(
             GetBotCallbackAnswerRequest(
                 peer=peer,
                 msg_id=message_id,
-                data=button_data.encode() if isinstance(button_data, str) else button_data,
+                data=button_data.encode()
+                if isinstance(button_data, str)
+                else button_data,
             )
         )
         return {"ok": True, "alert": result.alert, "message": result.message or ""}
@@ -98,11 +101,17 @@ async def _get_chat_messages(
                 entry["from_id"] = m.sender_id
             if m.reply_markup:
                 buttons = []
-                for row in (m.reply_markup.rows if hasattr(m.reply_markup, "rows") else []):
+                for row in (
+                    m.reply_markup.rows if hasattr(m.reply_markup, "rows") else []
+                ):
                     for btn in row.buttons:
                         b: dict = {"text": btn.text}
                         if hasattr(btn, "data") and btn.data:
-                            b["data"] = btn.data.decode() if isinstance(btn.data, bytes) else btn.data
+                            b["data"] = (
+                                btn.data.decode()
+                                if isinstance(btn.data, bytes)
+                                else btn.data
+                            )
                         buttons.append(b)
                 if buttons:
                     entry["buttons"] = buttons
@@ -127,16 +136,18 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
             return _bad("owner_id required")
         try:
             rows = await db.get_tg_accounts(pool, owner_id)
-            return web.json_response([
-                {
-                    "id": r["id"],
-                    "phone": r["phone"],
-                    "first_name": r.get("first_name", ""),
-                    "username": r.get("username") or "",
-                    "is_active": r.get("is_active", True),
-                }
-                for r in rows
-            ])
+            return web.json_response(
+                [
+                    {
+                        "id": r["id"],
+                        "phone": r["phone"],
+                        "first_name": r.get("first_name", ""),
+                        "username": r.get("username") or "",
+                        "is_active": r.get("is_active", True),
+                    }
+                    for r in rows
+                ]
+            )
         except Exception:
             log_exc_swallow(log, "rest_api: api_accounts error")
             return web.json_response({"error": "internal error"}, status=500)
@@ -155,7 +166,9 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
         if not all([owner_id, account_id, chat_id, text]):
             return _bad("owner_id, account_id, chat_id, text are required")
         try:
-            acc = await db.get_account_for_telethon(pool, int(account_id), int(owner_id))
+            acc = await db.get_account_for_telethon(
+                pool, int(account_id), int(owner_id)
+            )
             if not acc:
                 return web.json_response({"error": "account not found"}, status=404)
             ok = await account_manager.send_message_via_account(
@@ -179,13 +192,21 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
         message_id = data.get("message_id")
         button_data = data.get("button_data", "")
         if not all([owner_id, account_id, chat_id, message_id, button_data]):
-            return _bad("owner_id, account_id, chat_id, message_id, button_data are required")
+            return _bad(
+                "owner_id, account_id, chat_id, message_id, button_data are required"
+            )
         try:
-            acc = await db.get_account_for_telethon(pool, int(account_id), int(owner_id))
+            acc = await db.get_account_for_telethon(
+                pool, int(account_id), int(owner_id)
+            )
             if not acc:
                 return web.json_response({"error": "account not found"}, status=404)
             result = await _click_inline_button(
-                acc["session_str"], int(chat_id), int(message_id), button_data, _acc=dict(acc)
+                acc["session_str"],
+                int(chat_id),
+                int(message_id),
+                button_data,
+                _acc=dict(acc),
             )
             return web.json_response(result)
         except Exception:
@@ -220,4 +241,6 @@ def add_routes(app: web.Application, pool: asyncpg.Pool, bot: Bot) -> None:
     app.router.add_post("/api/v1/click_button", api_click_button)
     app.router.add_get("/api/v1/get_messages", api_get_messages)
 
-    log.info("REST API routes registered: /api/v1/{health,accounts,send_message,click_button,get_messages}")
+    log.info(
+        "REST API routes registered: /api/v1/{health,accounts,send_message,click_button,get_messages}"
+    )

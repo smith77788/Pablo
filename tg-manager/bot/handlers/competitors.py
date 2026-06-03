@@ -105,7 +105,9 @@ async def comp_cancel_fsm(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer("Отменено")
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К списку конкурентов", callback_data=CompCb(action="menu"))
-    await safe_edit(cb, "❌ Добавление конкурента отменено.", reply_markup=kb.as_markup())
+    await safe_edit(
+        cb, "❌ Добавление конкурента отменено.", reply_markup=kb.as_markup()
+    )
 
 
 @router.message(AddCompetitorFSM.waiting_username, F.text)

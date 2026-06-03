@@ -30,60 +30,64 @@ log = logging.getLogger(__name__)
 
 # ── Константы времён операций (секунд на 1 элемент, нижняя/верхняя) ──────────
 _OP_TIMINGS: dict[str, tuple[float, float]] = {
-    "bulk_join":            (15.0,  35.0),
-    "bulk_leave":           (8.0,   20.0),
-    "mass_publish":         (5.0,   15.0),
-    "strike":               (20.0,  60.0),
-    "dm_campaign":          (10.0,  28.0),
-    "global_presence":      (30.0,  90.0),
-    "invite_users":         (12.0,  30.0),
+    "bulk_join": (15.0, 35.0),
+    "bulk_leave": (8.0, 20.0),
+    "mass_publish": (5.0, 15.0),
+    "strike": (20.0, 60.0),
+    "dm_campaign": (10.0, 28.0),
+    "global_presence": (30.0, 90.0),
+    "invite_users": (12.0, 30.0),
     "bulk_create_channels": (60.0, 180.0),
-    "parse":                (2.0,    8.0),
-    "default":              (10.0,  30.0),
+    "parse": (2.0, 8.0),
+    "default": (10.0, 30.0),
 }
 
 # Успешность операции по историческим данным (базовые prior-значения)
 _BASE_SUCCESS_RATES: dict[str, float] = {
-    "bulk_join":            0.82,
-    "bulk_leave":           0.91,
-    "mass_publish":         0.88,
-    "strike":               0.75,
-    "dm_campaign":          0.78,
-    "global_presence":      0.70,
-    "invite_users":         0.80,
+    "bulk_join": 0.82,
+    "bulk_leave": 0.91,
+    "mass_publish": 0.88,
+    "strike": 0.75,
+    "dm_campaign": 0.78,
+    "global_presence": 0.70,
+    "invite_users": 0.80,
     "bulk_create_channels": 0.72,
-    "parse":                0.90,
-    "default":              0.80,
+    "parse": 0.90,
+    "default": 0.80,
 }
 
 # Максимальное число элементов на аккаунт за один прогон
 _MAX_ITEMS_PER_ACCOUNT: dict[str, int] = {
-    "bulk_join":            50,
-    "bulk_leave":           100,
-    "mass_publish":         200,
-    "strike":               30,
-    "dm_campaign":          80,
-    "global_presence":      40,
-    "invite_users":         60,
+    "bulk_join": 50,
+    "bulk_leave": 100,
+    "mass_publish": 200,
+    "strike": 30,
+    "dm_campaign": 80,
+    "global_presence": 40,
+    "invite_users": 60,
     "bulk_create_channels": 10,
-    "parse":                500,
-    "default":              100,
+    "parse": 500,
+    "default": 100,
 }
 
 
 # ── Датаклассы ────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class AccountIntelligence:
     """Оценка одного аккаунта для операции."""
+
     account_id: int
     phone: str = ""
     first_name: str = ""
 
     # Composite scores (0.0–1.0)
-    suitability_score: float = 0.5   # насколько аккаунт подходит для op_type
-    risk_score: float = 0.5          # насколько рискованно использование (0=безопасно, 1=опасно)
-    reliability_score: float = 0.5   # историческая надёжность из infra_memory
+    suitability_score: float = 0.5  # насколько аккаунт подходит для op_type
+    risk_score: float = (
+        0.5  # насколько рискованно использование (0=безопасно, 1=опасно)
+    )
+    reliability_score: float = 0.5  # историческая надёжность из infra_memory
 
     # Raw data
     trust_score: float = 1.0
@@ -97,7 +101,7 @@ class AccountIntelligence:
 
     # Решение
     recommended: bool = False
-    skip_reason: str = ""            # почему не рекомендуется (если recommended=False)
+    skip_reason: str = ""  # почему не рекомендуется (если recommended=False)
 
     def label(self) -> str:
         return self.first_name or self.phone or f"acc:{self.account_id}"
@@ -106,12 +110,13 @@ class AccountIntelligence:
 @dataclass
 class ProxyIntelligence:
     """Оценка одного прокси."""
+
     proxy_id: int
     label: str = ""
     proxy_type: str = "socks5"
 
-    quality_score: float = 0.5       # 0=плохой, 1=отличный
-    risk_score: float = 0.5          # 0=безопасный, 1=рискованный
+    quality_score: float = 0.5  # 0=плохой, 1=отличный
+    risk_score: float = 0.5  # 0=безопасный, 1=рискованный
     success_rate: float = 0.5
     avg_latency_ms: float = 0.0
     total_checks: int = 0
@@ -123,9 +128,10 @@ class ProxyIntelligence:
 @dataclass
 class RiskAssessment:
     """Оценка риска операции."""
-    level: str = "low"               # "low" | "medium" | "high" | "critical"
+
+    level: str = "low"  # "low" | "medium" | "high" | "critical"
     level_emoji: str = "🟢"
-    score: int = 0                   # 0–100
+    score: int = 0  # 0–100
     reasons: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)  # причины почему запустить нельзя
     recommendations: list[str] = field(default_factory=list)
@@ -139,6 +145,7 @@ class RiskAssessment:
 @dataclass
 class OperationPrediction:
     """Прогноз выполнения операции."""
+
     op_type: str
     item_count: int
     account_count: int
@@ -151,7 +158,7 @@ class OperationPrediction:
     expected_failed_items: int = 0
     items_per_account: float = 0.0
 
-    confidence: str = "low"          # "low" | "medium" | "high" — насколько точен прогноз
+    confidence: str = "low"  # "low" | "medium" | "high" — насколько точен прогноз
 
     def format(self) -> str:
         pct = int(self.success_probability * 100)
@@ -168,12 +175,15 @@ class OperationPrediction:
 @dataclass
 class PreLaunchIntelligence:
     """Комплексная оценка перед запуском операции."""
+
     op_type: str
     item_count: int
     owner_id: int
 
     risk: RiskAssessment = field(default_factory=RiskAssessment)
-    prediction: OperationPrediction = field(default_factory=lambda: OperationPrediction("default", 0, 0))
+    prediction: OperationPrediction = field(
+        default_factory=lambda: OperationPrediction("default", 0, 0)
+    )
     recommended_accounts: list[AccountIntelligence] = field(default_factory=list)
     all_accounts: list[AccountIntelligence] = field(default_factory=list)
     pressure_score: int = 0
@@ -185,9 +195,9 @@ class PreLaunchIntelligence:
     all_proxies: list["ProxyIntelligence"] = field(default_factory=list)
 
     # Итоговое решение системы
-    go_decision: bool = True         # True = запускать, False = блокировать
-    go_reason: str = ""              # почему заблокировано
-    warning_text: str = ""           # предупреждение (если go=True но есть риски)
+    go_decision: bool = True  # True = запускать, False = блокировать
+    go_reason: str = ""  # почему заблокировано
+    warning_text: str = ""  # предупреждение (если go=True но есть риски)
 
     def format_header(self) -> str:
         icon = "🚀" if self.go_decision else "🚫"
@@ -195,6 +205,7 @@ class PreLaunchIntelligence:
 
 
 # ── Главные точки входа ───────────────────────────────────────────────────────
+
 
 async def analyze_accounts(
     pool: asyncpg.Pool,
@@ -210,7 +221,13 @@ async def analyze_accounts(
     try:
         return await _analyze_accounts_impl(pool, owner_id, action_type, account_ids)
     except Exception as e:
-        log_exc_swallow(log, "intelligence_engine.analyze_accounts owner=%d op=%s: %s", owner_id, action_type, e)
+        log_exc_swallow(
+            log,
+            "intelligence_engine.analyze_accounts owner=%d op=%s: %s",
+            owner_id,
+            action_type,
+            e,
+        )
         return []
 
 
@@ -222,7 +239,9 @@ async def analyze_proxies(
     try:
         return await _analyze_proxies_impl(pool, owner_id)
     except Exception as e:
-        log_exc_swallow(log, "intelligence_engine.analyze_proxies owner=%d: %s", owner_id, e)
+        log_exc_swallow(
+            log, "intelligence_engine.analyze_proxies owner=%d: %s", owner_id, e
+        )
         return []
 
 
@@ -236,8 +255,16 @@ async def assess_risk(
     try:
         return await _assess_risk_impl(pool, owner_id, op_type, item_count)
     except Exception as e:
-        log_exc_swallow(log, "intelligence_engine.assess_risk owner=%d op=%s: %s", owner_id, op_type, e)
-        return RiskAssessment(level="medium", level_emoji="🟡", score=50, safe_to_proceed=True)
+        log_exc_swallow(
+            log,
+            "intelligence_engine.assess_risk owner=%d op=%s: %s",
+            owner_id,
+            op_type,
+            e,
+        )
+        return RiskAssessment(
+            level="medium", level_emoji="🟡", score=50, safe_to_proceed=True
+        )
 
 
 async def predict_operation(
@@ -251,7 +278,13 @@ async def predict_operation(
     try:
         return await _predict_impl(pool, owner_id, op_type, item_count, account_count)
     except Exception as e:
-        log_exc_swallow(log, "intelligence_engine.predict_operation owner=%d op=%s: %s", owner_id, op_type, e)
+        log_exc_swallow(
+            log,
+            "intelligence_engine.predict_operation owner=%d op=%s: %s",
+            owner_id,
+            op_type,
+            e,
+        )
         return _fallback_prediction(op_type, item_count, account_count or 1)
 
 
@@ -269,14 +302,23 @@ async def get_pre_launch_intelligence(
     try:
         return await _pre_launch_impl(pool, owner_id, op_type, item_count, account_ids)
     except Exception as e:
-        log_exc_swallow(log, "intelligence_engine.get_pre_launch_intelligence owner=%d op=%s: %s", owner_id, op_type, e)
-        result = PreLaunchIntelligence(op_type=op_type, item_count=item_count, owner_id=owner_id)
+        log_exc_swallow(
+            log,
+            "intelligence_engine.get_pre_launch_intelligence owner=%d op=%s: %s",
+            owner_id,
+            op_type,
+            e,
+        )
+        result = PreLaunchIntelligence(
+            op_type=op_type, item_count=item_count, owner_id=owner_id
+        )
         result.go_decision = True
         result.warning_text = "⚠️ Оценка недоступна — продолжите вручную"
         return result
 
 
 # ── Форматирование для Telegram ───────────────────────────────────────────────
+
 
 def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
     """Форматировать блок pre-launch intelligence для вставки в confirm-экран."""
@@ -290,7 +332,9 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
     # Аккаунты — доступные, кулдаун и прочие исключённые (без двойного счёта)
     available = [a for a in intel.all_accounts if a.recommended]
     cooling = [a for a in intel.all_accounts if a.is_cooling]
-    excluded_other = [a for a in intel.all_accounts if not a.recommended and not a.is_cooling]
+    excluded_other = [
+        a for a in intel.all_accounts if not a.recommended and not a.is_cooling
+    ]
     accs_line = f"📱 <b>Аккаунты:</b> ✅ {len(available)} доступно"
     if cooling:
         accs_line += f" · ⏳ {len(cooling)} кулдаун"
@@ -333,7 +377,9 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
 
     # Блокировка
     if not intel.go_decision:
-        lines.append(f"\n🚫 <b>Операция заблокирована:</b> {html.escape(intel.go_reason)}")
+        lines.append(
+            f"\n🚫 <b>Операция заблокирована:</b> {html.escape(intel.go_reason)}"
+        )
 
     return "\n".join(lines)
 
@@ -347,7 +393,9 @@ def format_account_intelligence_list(
         return "📱 Нет доступных аккаунтов"
     lines = ["📱 <b>Аккаунты для операции:</b>"]
     for acc in accounts[:max_items]:
-        suit_bar = "█" * round(acc.suitability_score * 5) + "░" * (5 - round(acc.suitability_score * 5))
+        suit_bar = "█" * round(acc.suitability_score * 5) + "░" * (
+            5 - round(acc.suitability_score * 5)
+        )
         status = "✅" if acc.recommended else ("⏳" if acc.is_cooling else "⚠️")
         label = acc.label()
         lines.append(
@@ -378,6 +426,7 @@ def format_risk_assessment(risk: RiskAssessment) -> str:
 
 # ── Реализация analyze_accounts ───────────────────────────────────────────────
 
+
 async def _analyze_accounts_impl(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -396,7 +445,8 @@ async def _analyze_accounts_impl(
                FROM tg_accounts
                WHERE owner_id=$1 AND is_active=TRUE AND id=ANY($2)
                ORDER BY COALESCE(trust_score, 1.0) DESC""",
-            owner_id, account_ids,
+            owner_id,
+            account_ids,
         )
     else:
         rows = await pool.fetch(
@@ -423,7 +473,9 @@ async def _analyze_accounts_impl(
         health = float(row["health_score"])
 
         is_cooling = cooldown is not None and cooldown.timestamp() > now
-        cooldown_minutes = max(0, int((cooldown.timestamp() - now) / 60)) if is_cooling else 0
+        cooldown_minutes = (
+            max(0, int((cooldown.timestamp() - now) / 60)) if is_cooling else 0
+        )
 
         # In-memory риск из flood_engine
         try:
@@ -489,30 +541,33 @@ async def _analyze_accounts_impl(
 
         recommended = not skip_reason
 
-        result.append(AccountIntelligence(
-            account_id=acc_id,
-            phone=row["phone"] or "",
-            first_name=row["first_name"] or "",
-            suitability_score=round(suitability, 3),
-            risk_score=round(risk_score, 3),
-            reliability_score=round(reliability_score, 3),
-            trust_score=trust,
-            flood_count_7d=flood_7d,
-            is_cooling=is_cooling,
-            cooldown_minutes=cooldown_minutes,
-            pool=pool_name,
-            tags=tags,
-            memory_successes=mem_successes,
-            memory_failures=mem_failures,
-            recommended=recommended,
-            skip_reason=skip_reason,
-        ))
+        result.append(
+            AccountIntelligence(
+                account_id=acc_id,
+                phone=row["phone"] or "",
+                first_name=row["first_name"] or "",
+                suitability_score=round(suitability, 3),
+                risk_score=round(risk_score, 3),
+                reliability_score=round(reliability_score, 3),
+                trust_score=trust,
+                flood_count_7d=flood_7d,
+                is_cooling=is_cooling,
+                cooldown_minutes=cooldown_minutes,
+                pool=pool_name,
+                tags=tags,
+                memory_successes=mem_successes,
+                memory_failures=mem_failures,
+                recommended=recommended,
+                skip_reason=skip_reason,
+            )
+        )
 
     result.sort(key=lambda a: a.suitability_score, reverse=True)
     return result
 
 
 # ── Реализация analyze_proxies ────────────────────────────────────────────────
+
 
 async def _analyze_proxies_impl(
     pool: asyncpg.Pool,
@@ -563,24 +618,27 @@ async def _analyze_proxies_impl(
 
         recommended = quality >= 0.5 and risk < 0.6
 
-        result.append(ProxyIntelligence(
-            proxy_id=row["id"],
-            label=row["label"] or f"proxy#{row['id']}",
-            proxy_type=row["proxy_type"] or "socks5",
-            quality_score=round(quality, 3),
-            risk_score=round(risk, 3),
-            success_rate=round(success_rate, 3),
-            avg_latency_ms=round(latency, 1),
-            total_checks=total,
-            recent_failures=recent_fails,
-            recommended=recommended,
-        ))
+        result.append(
+            ProxyIntelligence(
+                proxy_id=row["id"],
+                label=row["label"] or f"proxy#{row['id']}",
+                proxy_type=row["proxy_type"] or "socks5",
+                quality_score=round(quality, 3),
+                risk_score=round(risk, 3),
+                success_rate=round(success_rate, 3),
+                avg_latency_ms=round(latency, 1),
+                total_checks=total,
+                recent_failures=recent_fails,
+                recommended=recommended,
+            )
+        )
 
     result.sort(key=lambda p: p.quality_score, reverse=True)
     return result
 
 
 # ── Реализация assess_risk ────────────────────────────────────────────────────
+
 
 async def _assess_risk_impl(
     pool: asyncpg.Pool,
@@ -592,7 +650,7 @@ async def _assess_risk_impl(
 
     pressure_data = await infra_pressure.compute_pressure(pool, owner_id)
     pressure = pressure_data.get("score", 0)
-    breakdown = pressure_data.get("breakdown", {})
+    pressure_data.get("breakdown", {})
 
     # Данные об аккаунтах
     acc_row = await pool.fetchrow(
@@ -652,7 +710,9 @@ async def _assess_risk_impl(
             )
         elif overflow_factor > 1.5:
             risk_score += 15
-            reasons.append(f"Объём {item_count} превышает комфортную ёмкость {max_capacity}")
+            reasons.append(
+                f"Объём {item_count} превышает комфортную ёмкость {max_capacity}"
+            )
 
     # 3. Низкое доверие
     if total_accs > 0 and low_trust_accs / total_accs > 0.5:
@@ -722,6 +782,7 @@ async def _assess_risk_impl(
 
 # ── Реализация predict_operation ─────────────────────────────────────────────
 
+
 async def _predict_impl(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -754,7 +815,9 @@ async def _predict_impl(
     if acc_ids:
         ranked = infra_memory.rank_accounts_by_memory(acc_ids, op_type)
         ranked_slice = ranked[:account_count]
-        avg_memory_score = sum(s for _, s in ranked_slice) / len(ranked_slice) if ranked_slice else 0.5
+        avg_memory_score = (
+            sum(s for _, s in ranked_slice) / len(ranked_slice) if ranked_slice else 0.5
+        )
     else:
         avg_memory_score = 0.5
 
@@ -795,7 +858,9 @@ async def _predict_impl(
     expected_fail = item_count - expected_ok
 
     # Уверенность прогноза
-    total_history = sum(1 for _, s in (ranked[:account_count] if acc_ids else []) if s != 0.5)
+    total_history = sum(
+        1 for _, s in (ranked[:account_count] if acc_ids else []) if s != 0.5
+    )
     if total_history >= account_count * 5:
         confidence = "high"
     elif total_history >= account_count:
@@ -818,7 +883,9 @@ async def _predict_impl(
     )
 
 
-def _fallback_prediction(op_type: str, item_count: int, account_count: int) -> OperationPrediction:
+def _fallback_prediction(
+    op_type: str, item_count: int, account_count: int
+) -> OperationPrediction:
     t_min, t_max = _OP_TIMINGS.get(op_type, _OP_TIMINGS["default"])
     effective_items = max(1, item_count / max(account_count, 1))
     t_avg = int(effective_items * (t_min + t_max) / 2 / 60)
@@ -840,6 +907,7 @@ def _fallback_prediction(op_type: str, item_count: int, account_count: int) -> O
 
 # ── Реализация get_pre_launch_intelligence ────────────────────────────────────
 
+
 async def _pre_launch_impl(
     pool: asyncpg.Pool,
     owner_id: int,
@@ -850,10 +918,12 @@ async def _pre_launch_impl(
     from services import infra_pressure
 
     # Параллельный сбор данных (включая анализ прокси)
-    accs_task     = asyncio.create_task(analyze_accounts(pool, owner_id, op_type, account_ids))
-    risk_task     = asyncio.create_task(assess_risk(pool, owner_id, op_type, item_count))
+    accs_task = asyncio.create_task(
+        analyze_accounts(pool, owner_id, op_type, account_ids)
+    )
+    risk_task = asyncio.create_task(assess_risk(pool, owner_id, op_type, item_count))
     pressure_task = asyncio.create_task(infra_pressure.compute_pressure(pool, owner_id))
-    proxies_task  = asyncio.create_task(analyze_proxies(pool, owner_id))
+    proxies_task = asyncio.create_task(analyze_proxies(pool, owner_id))
 
     accs_list, risk, pressure_data, proxies_list = await asyncio.gather(
         accs_task, risk_task, pressure_task, proxies_task
@@ -897,18 +967,23 @@ async def _pre_launch_impl(
         intel.warning_text = f"Повышенное давление ({pressure_score}/100) — операция выполнится, но медленнее обычного"
     elif risk.level in ("high", "critical") and risk.safe_to_proceed:
         intel.go_decision = True
-        intel.warning_text = f"Высокий риск операции: {risk.reasons[0]}" if risk.reasons else "Высокий риск"
+        intel.warning_text = (
+            f"Высокий риск операции: {risk.reasons[0]}"
+            if risk.reasons
+            else "Высокий риск"
+        )
 
     # Ecosystem context: проверяем критические экосистемы владельца
     try:
         from services import ecosystem_brain as _eb
+
         _ecosystems = await _eb.list_ecosystems(pool, owner_id)
         for _eco in _ecosystems:
-            _h = (_eco.get("health_score") or 1.0)
-            _p = (_eco.get("pressure_score") or 0)
-            _risk_level = (_eco.get("risk_level") or "low")
+            _h = _eco.get("health_score") or 1.0
+            _p = _eco.get("pressure_score") or 0
+            _risk_level = _eco.get("risk_level") or "low"
             if _h < 0.35:
-                _eco_warn = f"Экосистема «{_eco['name']}»: здоровье критическое ({int(_h*100)}%)"
+                _eco_warn = f"Экосистема «{_eco['name']}»: здоровье критическое ({int(_h * 100)}%)"
                 if not intel.warning_text:
                     intel.warning_text = _eco_warn
                 break
@@ -930,10 +1005,12 @@ async def _pre_launch_impl(
 
 # ── Вспомогательная функция для flood_engine.get_account_state ───────────────
 
+
 def get_account_state(account_id: int):
     """Безопасный wrapper для flood_engine.get_account_state."""
     try:
         from services.flood_engine import get_account_state as _gas
+
         return _gas(account_id)
     except Exception:
         return None

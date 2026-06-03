@@ -1,7 +1,7 @@
 """Global Presence Factory — guided FSM wizard for worldwide Telegram channel creation."""
+
 from __future__ import annotations
 
-import json
 import logging
 
 import asyncpg
@@ -16,7 +16,11 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
 from services.geo_data import GEO_PRESETS, parse_custom_geo_list
-from services.presence_planner import render_pattern, build_targets, estimate_duration_minutes
+from services.presence_planner import (
+    render_pattern,
+    build_targets,
+    estimate_duration_minutes,
+)
 from services.username_engine import slugify
 from services.logger import log_exc_swallow
 from services import operation_bus, infra_orchestrator, intelligence_engine
@@ -30,6 +34,7 @@ _ACC_PAGE_SIZE = 8
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+
 def _back_cancel_row() -> list:
     """Deprecated stub — use _back_cancel_kb() instead."""
     return []
@@ -39,7 +44,9 @@ async def _edit(cb: CallbackQuery, text: str, markup=None) -> None:
     try:
         await cb.answer()
     except Exception:
-        log.debug("global_presence: callback answer already sent or expired", exc_info=True)
+        log.debug(
+            "global_presence: callback answer already sent or expired", exc_info=True
+        )
     try:
         await cb.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     except Exception:
@@ -58,7 +65,9 @@ def _cancel_kb() -> object:
 
 def _back_cancel_kb(back_action: str, plan_id: int = 0) -> object:
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action=back_action, plan_id=plan_id))
+    kb.button(
+        text="◀️ Назад", callback_data=GeoPresenceCb(action=back_action, plan_id=plan_id)
+    )
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2)
     return kb.as_markup()
@@ -66,10 +75,13 @@ def _back_cancel_kb(back_action: str, plan_id: int = 0) -> object:
 
 # ── Step 1: Entry / Asset Type ─────────────────────────────────────────────
 
+
 @router.callback_query(GeoPresenceCb.filter(F.action == "menu"))
 async def cb_gp_menu(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
@@ -83,7 +95,9 @@ async def cb_gp_menu(
 
     # Show active/recent plans count
     try:
-        recent_plans = await db.get_global_presence_plans(pool, callback.from_user.id, limit=3)
+        recent_plans = await db.get_global_presence_plans(
+            pool, callback.from_user.id, limit=3
+        )
     except Exception:
         log_exc_swallow(log, "cb_gp_menu: get_global_presence_plans failed")
         recent_plans = []
@@ -93,17 +107,35 @@ async def cb_gp_menu(
         plans_hint = f"\n⚡ <b>Активных операций: {running_count}</b> — <a href='tg://callback'>Мои планы ↓</a>\n"
     elif recent_plans:
         last = recent_plans[0]
-        status_map = {"done": "✅ завершён", "failed": "❌ ошибка", "cancelled": "🚫 отменён", "queued": "⏳ в очереди"}
+        status_map = {
+            "done": "✅ завершён",
+            "failed": "❌ ошибка",
+            "cancelled": "🚫 отменён",
+            "queued": "⏳ в очереди",
+        }
         last_status = status_map.get(last["status"], last["status"])
         plans_hint = f"\n📋 Последний план #{last['id']}: {last_status}\n"
 
     await state.set_state(GlobalPresenceFSM.choosing_asset_type)
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Каналы",               callback_data=GeoPresenceCb(action="asset", item="channel"))
-    kb.button(text="👥 Группы",               callback_data=GeoPresenceCb(action="asset", item="group"))
-    kb.button(text="🤖 Боты (BotFather)",     callback_data=GeoPresenceCb(action="asset", item="bot"))
-    kb.button(text="📦 Пакет (Канал+Группа)", callback_data=GeoPresenceCb(action="asset", item="package"))
-    kb.button(text="🌐 Полный пакет (К+Г+Б)", callback_data=GeoPresenceCb(action="asset", item="full_package"))
+    kb.button(
+        text="📡 Каналы", callback_data=GeoPresenceCb(action="asset", item="channel")
+    )
+    kb.button(
+        text="👥 Группы", callback_data=GeoPresenceCb(action="asset", item="group")
+    )
+    kb.button(
+        text="🤖 Боты (BotFather)",
+        callback_data=GeoPresenceCb(action="asset", item="bot"),
+    )
+    kb.button(
+        text="📦 Пакет (Канал+Группа)",
+        callback_data=GeoPresenceCb(action="asset", item="package"),
+    )
+    kb.button(
+        text="🌐 Полный пакет (К+Г+Б)",
+        callback_data=GeoPresenceCb(action="asset", item="full_package"),
+    )
     if recent_plans:
         kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
@@ -125,10 +157,14 @@ async def cb_gp_menu(
     )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "asset"), GlobalPresenceFSM.choosing_asset_type)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "asset"), GlobalPresenceFSM.choosing_asset_type
+)
 async def cb_gp_asset(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     asset = callback_data.item or "channel"
     if asset not in ("channel", "group", "bot", "package", "full_package"):
@@ -142,17 +178,25 @@ async def cb_gp_asset(
 
 # ── Step 2: Template ────────────────────────────────────────────────────────
 
+
 async def _show_template_step(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
-    asset_type: str = "channel", page: int = 0,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    asset_type: str = "channel",
+    page: int = 0,
 ) -> None:
     from services.preset_templates import get_presets
+
     user_id = callback.from_user.id
     offset = page * _TPL_PAGE_SIZE
     templates = await pool.fetch(
         "SELECT id, name FROM asset_templates WHERE owner_id=$1 AND asset_type=$2 "
         "ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-        user_id, asset_type, _TPL_PAGE_SIZE + 1, offset,
+        user_id,
+        asset_type,
+        _TPL_PAGE_SIZE + 1,
+        offset,
     )
     has_more = len(templates) > _TPL_PAGE_SIZE
     templates = templates[:_TPL_PAGE_SIZE]
@@ -162,12 +206,16 @@ async def _show_template_step(
     # Library presets on first page (top-3)
     lib_count = 0
     if page == 0:
-        lib_atype = asset_type if asset_type not in ("package", "full_package") else "channel"
+        lib_atype = (
+            asset_type if asset_type not in ("package", "full_package") else "channel"
+        )
         lib_presets = get_presets(lib_atype)[:3]
         for p in lib_presets:
             kb.button(
                 text=f"📚 {p['name'][:28]}",
-                callback_data=GeoPresenceCb(action="sel_tpl", item=f"lib__{lib_atype}__{p['id']}"),
+                callback_data=GeoPresenceCb(
+                    action="sel_tpl", item=f"lib__{lib_atype}__{p['id']}"
+                ),
             )
         lib_count = len(lib_presets)
 
@@ -180,9 +228,13 @@ async def _show_template_step(
 
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="◀️", callback_data=GeoPresenceCb(action="tpl_page", page=page - 1))
+        nav.button(
+            text="◀️", callback_data=GeoPresenceCb(action="tpl_page", page=page - 1)
+        )
     if has_more:
-        nav.button(text="▶️", callback_data=GeoPresenceCb(action="tpl_page", page=page + 1))
+        nav.button(
+            text="▶️", callback_data=GeoPresenceCb(action="tpl_page", page=page + 1)
+        )
     if page > 0 or has_more:
         nav.adjust(2)
         kb.attach(nav)
@@ -197,12 +249,26 @@ async def _show_template_step(
     if lib_count and page == 0:
         header_parts.append(f"📚 Готовых в библиотеке: {lib_count}")
     if user_tpl_count > 0:
-        header_parts.append(f"📋 Ваших шаблонов: {user_tpl_count}{'+'  if has_more else ''}")
+        header_parts.append(
+            f"📋 Ваших шаблонов: {user_tpl_count}{'+' if has_more else ''}"
+        )
     elif page == 0 and not lib_count:
-        header_parts.append("📋 Ваших шаблонов: 0 (создайте в /menu → ⚙️ Настройки → 📄 Шаблоны)")
-    header = "\n".join(header_parts) if header_parts else "📚 Доступны готовые шаблоны из библиотеки"
+        header_parts.append(
+            "📋 Ваших шаблонов: 0 (создайте в /menu → ⚙️ Настройки → 📄 Шаблоны)"
+        )
+    header = (
+        "\n".join(header_parts)
+        if header_parts
+        else "📚 Доступны готовые шаблоны из библиотеки"
+    )
 
-    _asset_label_map = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы", "full_package": "канала/группы/бота"}
+    _asset_label_map = {
+        "channel": "канала",
+        "group": "группы",
+        "bot": "бота",
+        "package": "канала/группы",
+        "full_package": "канала/группы/бота",
+    }
     asset_label = _asset_label_map.get(asset_type, "актива")
     await _edit(
         callback,
@@ -214,27 +280,38 @@ async def _show_template_step(
     )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "tpl_page"), GlobalPresenceFSM.choosing_template)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "tpl_page"), GlobalPresenceFSM.choosing_template
+)
 async def cb_gp_tpl_page(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
-    await _show_template_step(callback, state, pool, asset_type=asset_type, page=callback_data.page)
+    await _show_template_step(
+        callback, state, pool, asset_type=asset_type, page=callback_data.page
+    )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "sel_tpl"), GlobalPresenceFSM.choosing_template)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "sel_tpl"), GlobalPresenceFSM.choosing_template
+)
 async def cb_gp_sel_tpl(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     item = callback_data.item or ""
 
     if item.startswith("lib__"):
         # Library preset: item = "lib__<atype>__<preset_id>"
         from services.preset_templates import get_preset
+
         parts = item.split("__", 2)
         if len(parts) != 3:
             await callback.answer("Шаблон не найден", show_alert=True)
@@ -246,6 +323,7 @@ async def cb_gp_sel_tpl(
             return
         await callback.answer()
         import json as _json
+
         await state.update_data(
             template_id=None,
             template_name=preset["name"],
@@ -255,7 +333,8 @@ async def cb_gp_sel_tpl(
         tpl_id = int(item) if item.isdigit() else 0
         tpl = await pool.fetchrow(
             "SELECT id, name, template FROM asset_templates WHERE id=$1 AND owner_id=$2",
-            tpl_id, callback.from_user.id,
+            tpl_id,
+            callback.from_user.id,
         )
         if not tpl:
             await callback.answer("Шаблон не найден", show_alert=True)
@@ -267,10 +346,14 @@ async def cb_gp_sel_tpl(
     await _show_name_pattern_step(callback, state, prefill=None)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "skip_tpl"), GlobalPresenceFSM.choosing_template)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "skip_tpl"), GlobalPresenceFSM.choosing_template
+)
 async def cb_gp_skip_tpl(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await state.update_data(template_id=None, template_name=None)
@@ -280,12 +363,19 @@ async def cb_gp_skip_tpl(
 
 # ── Step 3: Name Pattern ───────────────────────────────────────────────────
 
+
 async def _show_name_pattern_step(
     callback: CallbackQuery, state: FSMContext, prefill: str | None
 ) -> None:
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
-    _asset_noun = {"channel": "канала", "group": "группы", "bot": "бота", "package": "канала/группы", "full_package": "канала/группы/бота"}
+    _asset_noun = {
+        "channel": "канала",
+        "group": "группы",
+        "bot": "бота",
+        "package": "канала/группы",
+        "full_package": "канала/группы/бота",
+    }
     asset_noun = _asset_noun.get(asset_type, "актива")
     examples = [
         "Crypto News {{CITY}}",
@@ -294,7 +384,11 @@ async def _show_name_pattern_step(
         "Trading {{COUNTRY_CODE}} {{CITY}}",
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
-    bot_note = ("\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>" if asset_type in ("bot", "full_package") else "")
+    bot_note = (
+        "\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>"
+        if asset_type in ("bot", "full_package")
+        else ""
+    )
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_tpl"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
@@ -321,24 +415,49 @@ async def _show_name_pattern_step(
 
 
 @router.message(GlobalPresenceFSM.entering_name_pattern)
-async def msg_gp_name_pattern(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def msg_gp_name_pattern(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     pattern = (message.text or "").strip()
     if not pattern:
-        await _reply(message, "⚠️ Паттерн не может быть пустым. Введите снова:", _cancel_kb())
+        await _reply(
+            message, "⚠️ Паттерн не может быть пустым. Введите снова:", _cancel_kb()
+        )
         return
     if len(pattern) > 200:
-        await _reply(message, "⚠️ Слишком длинный паттерн (макс. 200 символов). Попробуйте короче:", _cancel_kb())
+        await _reply(
+            message,
+            "⚠️ Слишком длинный паттерн (макс. 200 символов). Попробуйте короче:",
+            _cancel_kb(),
+        )
         return
 
     # Show examples before confirming
     sample_geos = [
-        {"city": "Berlin", "city_slug": "berlin", "country": "Germany", "country_code": "de", "index": 1},
-        {"city": "Paris", "city_slug": "paris", "country": "France", "country_code": "fr", "index": 2},
-        {"city": "Madrid", "city_slug": "madrid", "country": "Spain", "country_code": "es", "index": 3},
+        {
+            "city": "Berlin",
+            "city_slug": "berlin",
+            "country": "Germany",
+            "country_code": "de",
+            "index": 1,
+        },
+        {
+            "city": "Paris",
+            "city_slug": "paris",
+            "country": "France",
+            "country_code": "fr",
+            "index": 2,
+        },
+        {
+            "city": "Madrid",
+            "city_slug": "madrid",
+            "country": "Spain",
+            "country_code": "es",
+            "index": 3,
+        },
     ]
     examples_text = "\n".join(
-        f"  📡 <b>{render_pattern(pattern, g)}</b>"
-        for g in sample_geos
+        f"  📡 <b>{render_pattern(pattern, g)}</b>" for g in sample_geos
     )
 
     kb = InlineKeyboardBuilder()
@@ -358,29 +477,43 @@ async def msg_gp_name_pattern(message: Message, state: FSMContext, pool: asyncpg
     )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "accept_name"), GlobalPresenceFSM.entering_name_pattern)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "accept_name"),
+    GlobalPresenceFSM.entering_name_pattern,
+)
 async def cb_gp_accept_name(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
-    await state.update_data(name_pattern=sd.get("name_pattern_pending", ""), name_pattern_pending=None)
+    await state.update_data(
+        name_pattern=sd.get("name_pattern_pending", ""), name_pattern_pending=None
+    )
     await state.set_state(GlobalPresenceFSM.entering_username_pattern)
     await _show_username_pattern_step(callback, state, prefill=None)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "retry_name"), GlobalPresenceFSM.entering_name_pattern)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "retry_name"),
+    GlobalPresenceFSM.entering_name_pattern,
+)
 async def cb_gp_retry_name(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
     state: FSMContext,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
-    await _show_name_pattern_step(callback, state, prefill=sd.get("name_pattern_pending"))
+    await _show_name_pattern_step(
+        callback, state, prefill=sd.get("name_pattern_pending")
+    )
 
 
 # ── Step 4: Username Pattern ────────────────────────────────────────────────
+
 
 async def _show_username_pattern_step(
     callback: CallbackQuery, state: FSMContext, prefill: str | None
@@ -414,17 +547,36 @@ async def _show_username_pattern_step(
 async def msg_gp_username_pattern(message: Message, state: FSMContext) -> None:
     pattern = (message.text or "").strip()
     if not pattern:
-        await _reply(message, "⚠️ Введите паттерн или нажмите «Без username».", _cancel_kb())
+        await _reply(
+            message, "⚠️ Введите паттерн или нажмите «Без username».", _cancel_kb()
+        )
         return
 
     sample_geos = [
-        {"city": "Berlin", "city_slug": "berlin", "country": "Germany", "country_code": "de", "index": 1},
-        {"city": "Paris", "city_slug": "paris", "country": "France", "country_code": "fr", "index": 2},
-        {"city": "Madrid", "city_slug": "madrid", "country": "Spain", "country_code": "es", "index": 3},
+        {
+            "city": "Berlin",
+            "city_slug": "berlin",
+            "country": "Germany",
+            "country_code": "de",
+            "index": 1,
+        },
+        {
+            "city": "Paris",
+            "city_slug": "paris",
+            "country": "France",
+            "country_code": "fr",
+            "index": 2,
+        },
+        {
+            "city": "Madrid",
+            "city_slug": "madrid",
+            "country": "Spain",
+            "country_code": "es",
+            "index": 3,
+        },
     ]
     examples_text = "\n".join(
-        f"  @<b>{slugify(render_pattern(pattern, g))[:32]}</b>"
-        for g in sample_geos
+        f"  @<b>{slugify(render_pattern(pattern, g))[:32]}</b>" for g in sample_geos
     )
 
     kb = InlineKeyboardBuilder()
@@ -447,22 +599,37 @@ async def msg_gp_username_pattern(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "accept_uname"), GlobalPresenceFSM.entering_username_pattern)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "accept_uname"),
+    GlobalPresenceFSM.entering_username_pattern,
+)
 async def cb_gp_accept_uname(
-    callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
 ) -> None:
     await callback.answer()
     sd = await state.get_data()
-    await state.update_data(username_pattern=sd.get("username_pattern_pending", ""), username_pattern_pending=None)
+    await state.update_data(
+        username_pattern=sd.get("username_pattern_pending", ""),
+        username_pattern_pending=None,
+    )
     await state.set_state(GlobalPresenceFSM.choosing_geo)
     await _show_geo_step(callback, state)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "retry_uname"), GlobalPresenceFSM.entering_username_pattern)
-async def cb_gp_retry_uname(callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext) -> None:
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "retry_uname"),
+    GlobalPresenceFSM.entering_username_pattern,
+)
+async def cb_gp_retry_uname(
+    callback: CallbackQuery, callback_data: GeoPresenceCb, state: FSMContext
+) -> None:
     await callback.answer()
     sd = await state.get_data()
-    await _show_username_pattern_step(callback, state, prefill=sd.get("username_pattern_pending"))
+    await _show_username_pattern_step(
+        callback, state, prefill=sd.get("username_pattern_pending")
+    )
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "skip_uname"))
@@ -475,6 +642,7 @@ async def cb_gp_skip_uname(callback: CallbackQuery, state: FSMContext) -> None:
 
 # ── Step 5: Geo Selection ──────────────────────────────────────────────────
 
+
 async def _show_geo_step(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     for key, preset in GEO_PRESETS.items():
@@ -482,7 +650,9 @@ async def _show_geo_step(callback: CallbackQuery, state: FSMContext) -> None:
             text=f"{preset['label']} ({preset['count']})",
             callback_data=GeoPresenceCb(action="geo", item=key),
         )
-    kb.button(text="✏️ Ввести города вручную", callback_data=GeoPresenceCb(action="geo_custom"))
+    kb.button(
+        text="✏️ Ввести города вручную", callback_data=GeoPresenceCb(action="geo_custom")
+    )
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_uname"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
@@ -495,10 +665,14 @@ async def _show_geo_step(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "geo"), GlobalPresenceFSM.choosing_geo)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "geo"), GlobalPresenceFSM.choosing_geo
+)
 async def cb_gp_geo_preset(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     preset_key = callback_data.item or ""
     preset = GEO_PRESETS.get(preset_key)
@@ -511,7 +685,9 @@ async def cb_gp_geo_preset(
     await _show_accounts_step(callback, state, pool, page=0)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "geo_custom"), GlobalPresenceFSM.choosing_geo)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "geo_custom"), GlobalPresenceFSM.choosing_geo
+)
 async def cb_gp_geo_custom(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.entering_custom_geo)
@@ -542,6 +718,7 @@ async def _parse_geo_csv_bytes(raw: bytes) -> list[dict] | None:
     """Parse CSV bytes → list of geo dicts. Returns None on decode error."""
     import csv
     import io
+
     for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
         try:
             text = raw.decode(enc)
@@ -570,7 +747,9 @@ async def _parse_geo_csv_bytes(raw: bytes) -> list[dict] | None:
 
 @router.message(GlobalPresenceFSM.entering_custom_geo, F.document)
 async def msg_gp_custom_geo_file(
-    message: Message, state: FSMContext, pool: asyncpg.Pool,
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     """Handle CSV / TXT file upload for city list."""
     doc = message.document
@@ -579,7 +758,9 @@ async def msg_gp_custom_geo_file(
         return
     filename = (doc.file_name or "").lower()
     if not (filename.endswith(".csv") or filename.endswith(".txt")):
-        await _reply(message, "⚠️ Поддерживаются только .csv и .txt файлы.", _cancel_kb())
+        await _reply(
+            message, "⚠️ Поддерживаются только .csv и .txt файлы.", _cancel_kb()
+        )
         return
     if doc.file_size and doc.file_size > 512_000:
         await _reply(message, "⚠️ Файл слишком большой (максимум 512 КБ).", _cancel_kb())
@@ -626,17 +807,24 @@ async def msg_gp_custom_geo_file(
     )
 
     _msg = message
+
     class FakeCallback:
         from_user = _msg.from_user
         message = _msg
-        async def answer(self, *a, **kw): pass
 
-    await _show_accounts_step(FakeCallback(), state, pool, page=0, send_new=True, original_message=message)
+        async def answer(self, *a, **kw):
+            pass
+
+    await _show_accounts_step(
+        FakeCallback(), state, pool, page=0, send_new=True, original_message=message
+    )
 
 
 @router.message(GlobalPresenceFSM.entering_custom_geo)
 async def msg_gp_custom_geo(
-    message: Message, state: FSMContext, pool: asyncpg.Pool,
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     text = (message.text or "").strip()
     if not text:
@@ -644,25 +832,39 @@ async def msg_gp_custom_geo(
         return
     geo_list = parse_custom_geo_list(text)
     if not geo_list:
-        await _reply(message, "⚠️ Не удалось распознать ни одного города. Введите снова.", _cancel_kb())
+        await _reply(
+            message,
+            "⚠️ Не удалось распознать ни одного города. Введите снова.",
+            _cancel_kb(),
+        )
         return
     await state.update_data(geo_preset="custom", geo_list=geo_list)
     await state.set_state(GlobalPresenceFSM.choosing_accounts)
 
     _msg = message
+
     class FakeCallback:
         from_user = _msg.from_user
         message = _msg
-        async def answer(self, *a, **kw): pass
 
-    await _show_accounts_step(FakeCallback(), state, pool, page=0, send_new=True, original_message=message)
+        async def answer(self, *a, **kw):
+            pass
+
+    await _show_accounts_step(
+        FakeCallback(), state, pool, page=0, send_new=True, original_message=message
+    )
 
 
 # ── Step 6: Account Selection ──────────────────────────────────────────────
 
+
 async def _show_accounts_step(
-    callback, state: FSMContext, pool: asyncpg.Pool,
-    page: int = 0, send_new: bool = False, original_message: Message | None = None,
+    callback,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    page: int = 0,
+    send_new: bool = False,
+    original_message: Message | None = None,
 ) -> None:
     user_id = callback.from_user.id
     sd = await state.get_data()
@@ -673,7 +875,9 @@ async def _show_accounts_step(
         accounts = await pool.fetch(
             "SELECT id, phone, trust_score, is_active FROM tg_accounts "
             "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST LIMIT $2 OFFSET $3",
-            user_id, _ACC_PAGE_SIZE + 1, offset,
+            user_id,
+            _ACC_PAGE_SIZE + 1,
+            offset,
         )
     except Exception:
         log_exc_swallow(log, "_show_accounts_step: pool.fetch failed")
@@ -689,7 +893,9 @@ async def _show_accounts_step(
     # No accounts — show a clear message with instructions
     if not accounts and page == 0:
         no_acc_kb = InlineKeyboardBuilder()
-        no_acc_kb.button(text="◀️ Назад к гео", callback_data=GeoPresenceCb(action="back_to_geo"))
+        no_acc_kb.button(
+            text="◀️ Назад к гео", callback_data=GeoPresenceCb(action="back_to_geo")
+        )
         no_acc_kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
         no_acc_kb.adjust(1)
         no_acc_text = (
@@ -702,18 +908,28 @@ async def _show_accounts_step(
             f"Добавьте аккаунт и вернитесь сюда."
         )
         if send_new and original_message:
-            await original_message.answer(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")
+            await original_message.answer(
+                no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
+            )
         elif hasattr(callback, "message") and callback.message:
             try:
-                await callback.message.edit_text(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")
+                await callback.message.edit_text(
+                    no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
+                )
             except Exception:
-                await callback.message.answer(no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML")
+                await callback.message.answer(
+                    no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
+                )
         return
 
     kb = InlineKeyboardBuilder()
     for acc in accounts:
         check = "✅" if acc["id"] in selected_ids else "⬜"
-        trust = f" ({acc['trust_score']:.0f}%)" if acc.get("trust_score") is not None else ""
+        trust = (
+            f" ({acc['trust_score']:.0f}%)"
+            if acc.get("trust_score") is not None
+            else ""
+        )
         kb.button(
             text=f"{check} {acc['phone']}{trust}",
             callback_data=GeoPresenceCb(action="acc_tog", item=str(acc["id"])),
@@ -722,16 +938,22 @@ async def _show_accounts_step(
 
     nav = InlineKeyboardBuilder()
     if page > 0:
-        nav.button(text="◀️", callback_data=GeoPresenceCb(action="acc_page", page=page - 1))
+        nav.button(
+            text="◀️", callback_data=GeoPresenceCb(action="acc_page", page=page - 1)
+        )
     if has_more:
-        nav.button(text="▶️", callback_data=GeoPresenceCb(action="acc_page", page=page + 1))
+        nav.button(
+            text="▶️", callback_data=GeoPresenceCb(action="acc_page", page=page + 1)
+        )
     if page > 0 or has_more:
         nav.adjust(2)
         kb.attach(nav)
 
     action_row = InlineKeyboardBuilder()
     action_row.button(text="✅ Все", callback_data=GeoPresenceCb(action="acc_all"))
-    action_row.button(text="🗑️ Сбросить", callback_data=GeoPresenceCb(action="acc_clear"))
+    action_row.button(
+        text="🗑️ Сбросить", callback_data=GeoPresenceCb(action="acc_clear")
+    )
     action_row.adjust(2)
     kb.attach(action_row)
 
@@ -755,27 +977,41 @@ async def _show_accounts_step(
     )
 
     if send_new and original_message:
-        await original_message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+        await original_message.answer(
+            text, reply_markup=kb.as_markup(), parse_mode="HTML"
+        )
     elif hasattr(callback, "message") and callback.message:
         try:
-            await callback.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+            await callback.message.edit_text(
+                text, reply_markup=kb.as_markup(), parse_mode="HTML"
+            )
         except Exception:
-            await callback.message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+            await callback.message.answer(
+                text, reply_markup=kb.as_markup(), parse_mode="HTML"
+            )
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "acc_page"), GlobalPresenceFSM.choosing_accounts)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "acc_page"), GlobalPresenceFSM.choosing_accounts
+)
 async def cb_gp_acc_page(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await _show_accounts_step(callback, state, pool, page=callback_data.page)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "acc_tog"), GlobalPresenceFSM.choosing_accounts)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "acc_tog"), GlobalPresenceFSM.choosing_accounts
+)
 async def cb_gp_acc_toggle(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
-    state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     acc_id = int(callback_data.item or 0)
@@ -789,9 +1025,13 @@ async def cb_gp_acc_toggle(
     await _show_accounts_step(callback, state, pool)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "acc_all"), GlobalPresenceFSM.choosing_accounts)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "acc_all"), GlobalPresenceFSM.choosing_accounts
+)
 async def cb_gp_acc_all(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     try:
@@ -806,18 +1046,26 @@ async def cb_gp_acc_all(
     await _show_accounts_step(callback, state, pool)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "acc_clear"), GlobalPresenceFSM.choosing_accounts)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "acc_clear"), GlobalPresenceFSM.choosing_accounts
+)
 async def cb_gp_acc_clear(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await state.update_data(selected_acc_ids=[])
     await _show_accounts_step(callback, state, pool)
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "acc_done"), GlobalPresenceFSM.choosing_accounts)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "acc_done"), GlobalPresenceFSM.choosing_accounts
+)
 async def cb_gp_acc_done(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     sd = await state.get_data()
     selected_ids: list[int] = sd.get("selected_acc_ids") or []
@@ -831,7 +1079,10 @@ async def cb_gp_acc_done(
 
 # ── Step 7: Preview ────────────────────────────────────────────────────────
 
-async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+
+async def _show_preview(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
     name_pattern = sd.get("name_pattern", "")
@@ -854,9 +1105,13 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
     else:
         acc_phones = []
 
-    geo_label = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset or "Кастомный список")
+    geo_label = GEO_PRESETS.get(geo_preset, {}).get(
+        "label", geo_preset or "Кастомный список"
+    )
     n_cities = len(geo_list)
-    n_countries = len({g.get("country_code") for g in geo_list if g.get("country_code")})
+    n_countries = len(
+        {g.get("country_code") for g in geo_list if g.get("country_code")}
+    )
     estimated = estimate_duration_minutes(n_cities)
 
     # Sample preview (first 3 cities)
@@ -865,7 +1120,12 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
     for i, geo in enumerate(sample):
         name = render_pattern(name_pattern, {**geo, "index": i + 1})
         if username_pattern:
-            uname = "@" + slugify(render_pattern(username_pattern, {**geo, "index": i + 1}))[:32]
+            uname = (
+                "@"
+                + slugify(render_pattern(username_pattern, {**geo, "index": i + 1}))[
+                    :32
+                ]
+            )
         else:
             uname = "(без username)"
         preview_lines.append(f"  📡 {name} → <code>{uname}</code>")
@@ -877,17 +1137,47 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
     if len(acc_phones) > 5:
         accs_text += f" (+{len(acc_phones) - 5})"
 
-    asset_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦", "full_package": "📦"}.get(asset_type, "📦")
-    _asset_label = {"channel": "Каналы", "group": "Группы", "bot": "Боты (BotFather)", "package": "Пакет (Канал+Группа)", "full_package": "Полный пакет (Канал+Группа+Бот)"}
-    _asset_count_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов (×2 актива)", "full_package": "пакетов (×3 актива)"}
+    asset_emoji = {
+        "channel": "📡",
+        "group": "👥",
+        "bot": "🤖",
+        "package": "📦",
+        "full_package": "📦",
+    }.get(asset_type, "📦")
+    _asset_label = {
+        "channel": "Каналы",
+        "group": "Группы",
+        "bot": "Боты (BotFather)",
+        "package": "Пакет (Канал+Группа)",
+        "full_package": "Полный пакет (Канал+Группа+Бот)",
+    }
+    _asset_count_label = {
+        "channel": "каналов",
+        "group": "групп",
+        "bot": "ботов",
+        "package": "пакетов (×2 актива)",
+        "full_package": "пакетов (×3 актива)",
+    }
     asset_type_label = _asset_label.get(asset_type, asset_type.capitalize())
     count_label = _asset_count_label.get(asset_type, "активов")
     hours = estimated // 60
     mins = estimated % 60
     duration_str = f"{hours}ч {mins}м" if hours else f"{mins}м"
-    bot_note = "\n💡 <i>Username ботов должен заканчиваться на _bot</i>" if asset_type in ("bot", "full_package") else ""
-    pkg_note = "\n📦 <i>Пакет создаст канал И группу для каждого города</i>" if asset_type == "package" else ""
-    fullpkg_note = "\n📦 <i>Полный пакет создаст канал, группу И бота для каждого города</i>" if asset_type == "full_package" else ""
+    bot_note = (
+        "\n💡 <i>Username ботов должен заканчиваться на _bot</i>"
+        if asset_type in ("bot", "full_package")
+        else ""
+    )
+    pkg_note = (
+        "\n📦 <i>Пакет создаст канал И группу для каждого города</i>"
+        if asset_type == "package"
+        else ""
+    )
+    fullpkg_note = (
+        "\n📦 <i>Полный пакет создаст канал, группу И бота для каждого города</i>"
+        if asset_type == "full_package"
+        else ""
+    )
 
     text = (
         f"🌍 <b>Global Presence Plan — Предпросмотр</b>\n"
@@ -910,17 +1200,25 @@ async def _show_preview(callback: CallbackQuery, state: FSMContext, pool: asyncp
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Подтвердить", callback_data=GeoPresenceCb(action="confirm"))
     kb.button(text="✏️ Изменить гео", callback_data=GeoPresenceCb(action="back_to_geo"))
-    kb.button(text="📋 Изменить шаблон", callback_data=GeoPresenceCb(action="back_to_tpl"))
-    kb.button(text="👤 Изменить аккаунты", callback_data=GeoPresenceCb(action="back_to_acc"))
+    kb.button(
+        text="📋 Изменить шаблон", callback_data=GeoPresenceCb(action="back_to_tpl")
+    )
+    kb.button(
+        text="👤 Изменить аккаунты", callback_data=GeoPresenceCb(action="back_to_acc")
+    )
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
     await _edit(callback, text, markup=kb.as_markup())
 
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "confirm"), GlobalPresenceFSM.previewing)
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "confirm"), GlobalPresenceFSM.previewing
+)
 async def cb_gp_confirm_preview(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.confirming)
@@ -936,15 +1234,23 @@ async def cb_gp_confirm_preview(
 
     n_cities = len(geo_list)
     n_accs = len(selected_acc_ids)
-    geo_label = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset or "Кастомный список")
+    geo_label = GEO_PRESETS.get(geo_preset, {}).get(
+        "label", geo_preset or "Кастомный список"
+    )
 
     _asset_label = {
-        "channel": "Каналы", "group": "Группы", "bot": "Боты (BotFather)",
-        "package": "Пакет (Канал+Группа)", "full_package": "Полный пакет (Канал+Группа+Бот)",
+        "channel": "Каналы",
+        "group": "Группы",
+        "bot": "Боты (BotFather)",
+        "package": "Пакет (Канал+Группа)",
+        "full_package": "Полный пакет (Канал+Группа+Бот)",
     }
     _asset_count_label = {
-        "channel": "каналов", "group": "групп", "bot": "ботов",
-        "package": "пакетов (×2 актива)", "full_package": "пакетов (×3 актива)",
+        "channel": "каналов",
+        "group": "групп",
+        "bot": "ботов",
+        "package": "пакетов (×2 актива)",
+        "full_package": "пакетов (×3 актива)",
     }
     asset_type_label = _asset_label.get(asset_type, asset_type)
     count_label = _asset_count_label.get(asset_type, "активов")
@@ -964,7 +1270,10 @@ async def cb_gp_confirm_preview(
     # Intelligence block
     try:
         intel = await intelligence_engine.get_pre_launch_intelligence(
-            pool, callback.from_user.id, "global_presence", n_cities,
+            pool,
+            callback.from_user.id,
+            "global_presence",
+            n_cities,
             account_ids=selected_acc_ids if selected_acc_ids else None,
         )
         intel_text = intelligence_engine.format_pre_launch_block(intel)
@@ -1004,12 +1313,19 @@ async def cb_gp_confirm_preview(
 
 # ── Step 8: Launch ─────────────────────────────────────────────────────────
 
-@router.callback_query(GeoPresenceCb.filter(F.action == "launch"), GlobalPresenceFSM.confirming)
+
+@router.callback_query(
+    GeoPresenceCb.filter(F.action == "launch"), GlobalPresenceFSM.confirming
+)
 async def cb_gp_launch(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     # Проверка давления инфраструктуры
-    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    ready, reason = await infra_orchestrator.is_ready_for_op(
+        pool, callback.from_user.id
+    )
     if not ready:
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
@@ -1052,9 +1368,13 @@ async def cb_gp_launch(
         _effective_asset = asset_type  # "channel" or "group"
 
     # Build targets (for package/full_package: channel targets first)
-    targets = build_targets(geo_list,
-                            "channel" if asset_type in ("package", "full_package") else _effective_asset,
-                            name_pattern, username_pattern, selected_acc_ids)
+    targets = build_targets(
+        geo_list,
+        "channel" if asset_type in ("package", "full_package") else _effective_asset,
+        name_pattern,
+        username_pattern,
+        selected_acc_ids,
+    )
 
     # Create plan in DB
     plan_id = await db.create_global_presence_plan(
@@ -1073,7 +1393,9 @@ async def cb_gp_launch(
 
     # Queue the primary operation
     op_id = await operation_bus.submit(
-        pool, callback.from_user.id, _op_type,
+        pool,
+        callback.from_user.id,
+        _op_type,
         {"plan_id": plan_id},
         total_items=len(targets),
     )
@@ -1094,31 +1416,56 @@ async def cb_gp_launch(
     _eco_id: int | None = None
     try:
         from services import ecosystem_brain as _eb
-        _asset_labels = {"channel": "Каналы", "group": "Группы", "bot": "Боты",
-                         "package": "Пакет", "full_package": "Полный пакет"}
+
+        _asset_labels = {
+            "channel": "Каналы",
+            "group": "Группы",
+            "bot": "Боты",
+            "package": "Пакет",
+            "full_package": "Полный пакет",
+        }
         _asset_label = _asset_labels.get(asset_type, "Активы")
-        _geo_label = geo_preset.replace("_", " ").title() if geo_preset else f"{len(geo_list)} регионов"
+        _geo_label = (
+            geo_preset.replace("_", " ").title()
+            if geo_preset
+            else f"{len(geo_list)} регионов"
+        )
         _eco_name = f"GP: {_asset_label} — {_geo_label}"
         _eco_id = await _eb.create_ecosystem(
-            pool, callback.from_user.id, _eco_name,
+            pool,
+            callback.from_user.id,
+            _eco_name,
             ecosystem_type="global_presence",
             region=geo_preset or None,
         )
         await pool.execute(
             "UPDATE global_presence_plans SET ecosystem_id=$1 WHERE id=$2",
-            _eco_id, plan_id,
+            _eco_id,
+            plan_id,
         )
-        await _eb.record_event(pool, _eco_id, callback.from_user.id,
-                               "plan_started", f"GP план #{plan_id} запущен",
-                               severity="info", details={"plan_id": plan_id, "asset_type": asset_type})
-        log.info("global_presence: created ecosystem eco_id=%d for plan_id=%d", _eco_id, plan_id)
+        await _eb.record_event(
+            pool,
+            _eco_id,
+            callback.from_user.id,
+            "plan_started",
+            f"GP план #{plan_id} запущен",
+            severity="info",
+            details={"plan_id": plan_id, "asset_type": asset_type},
+        )
+        log.info(
+            "global_presence: created ecosystem eco_id=%d for plan_id=%d",
+            _eco_id,
+            plan_id,
+        )
     except Exception as _eco_err:
         log.debug("global_presence: ecosystem auto-create failed: %s", _eco_err)
 
     # For package/full_package: also queue group (and bot for full) creation
     op_id2, op_id3 = None, None
     if asset_type in ("package", "full_package"):
-        grp_targets = build_targets(geo_list, "group", name_pattern, username_pattern, selected_acc_ids)
+        grp_targets = build_targets(
+            geo_list, "group", name_pattern, username_pattern, selected_acc_ids
+        )
         plan_id2 = await db.create_global_presence_plan(
             pool,
             owner_id=callback.from_user.id,
@@ -1131,7 +1478,9 @@ async def cb_gp_launch(
         )
         await db.create_global_presence_targets(pool, plan_id2, grp_targets)
         op_id2 = await operation_bus.submit(
-            pool, callback.from_user.id, "global_presence_group",
+            pool,
+            callback.from_user.id,
+            "global_presence_group",
             {"plan_id": plan_id2},
             total_items=len(grp_targets),
         )
@@ -1146,7 +1495,9 @@ async def cb_gp_launch(
 
     # For full_package: also queue bot creation
     if asset_type == "full_package":
-        bot_targets = build_targets(geo_list, "bot", name_pattern, username_pattern, selected_acc_ids)
+        bot_targets = build_targets(
+            geo_list, "bot", name_pattern, username_pattern, selected_acc_ids
+        )
         plan_id3 = await db.create_global_presence_plan(
             pool,
             owner_id=callback.from_user.id,
@@ -1159,7 +1510,9 @@ async def cb_gp_launch(
         )
         await db.create_global_presence_targets(pool, plan_id3, bot_targets)
         op_id3 = await operation_bus.submit(
-            pool, callback.from_user.id, "global_presence_bot",
+            pool,
+            callback.from_user.id,
+            "global_presence_bot",
             {"plan_id": plan_id3},
             total_items=len(bot_targets),
         )
@@ -1177,7 +1530,10 @@ async def cb_gp_launch(
     # Auto-create ecosystem for this Global Presence package
     try:
         from services import ecosystem_brain as _eb
-        geo_label_eco = GEO_PRESETS.get(geo_preset, {}).get("label", geo_preset or "Custom")
+
+        geo_label_eco = GEO_PRESETS.get(geo_preset, {}).get(
+            "label", geo_preset or "Custom"
+        )
         eco_name = f"Global Presence — {geo_label_eco}"
         eco_id = await _eb.create_ecosystem(
             pool,
@@ -1188,7 +1544,10 @@ async def cb_gp_launch(
             region=geo_preset if geo_preset else None,
         )
         await _eb.record_event(
-            pool, eco_id, callback.from_user.id, "operation",
+            pool,
+            eco_id,
+            callback.from_user.id,
+            "operation",
             f"Global Presence запущен: {geo_label_eco}",
             severity="info",
         )
@@ -1197,8 +1556,20 @@ async def cb_gp_launch(
         log.debug("ecosystem auto-create failed: %s", e)
 
     # Build result message
-    _type_emoji = {"channel": "📡", "group": "👥", "bot": "🤖", "package": "📦", "full_package": "📦"}
-    _type_label = {"channel": "каналов", "group": "групп", "bot": "ботов", "package": "пакетов", "full_package": "пакетов"}
+    _type_emoji = {
+        "channel": "📡",
+        "group": "👥",
+        "bot": "🤖",
+        "package": "📦",
+        "full_package": "📦",
+    }
+    _type_label = {
+        "channel": "каналов",
+        "group": "групп",
+        "bot": "ботов",
+        "package": "пакетов",
+        "full_package": "пакетов",
+    }
     emoji = _type_emoji.get(asset_type, "📦")
     label = _type_label.get(asset_type, "активов")
     pkg_lines = []
@@ -1211,7 +1582,10 @@ async def cb_gp_launch(
         pkg_line = "\n" + pkg_line
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
+    kb.button(
+        text="📊 Прогресс",
+        callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
+    )
     kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.button(text="◀️ Назад к меню", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
@@ -1229,6 +1603,7 @@ async def cb_gp_launch(
 
 # ── Progress & Report ──────────────────────────────────────────────────────
 
+
 @router.callback_query(GeoPresenceCb.filter(F.action == "launch"))
 async def cb_gp_launch_stale(callback: CallbackQuery, state: FSMContext) -> None:
     current_state = await state.get_state()
@@ -1240,9 +1615,13 @@ async def cb_gp_launch_stale(callback: CallbackQuery, state: FSMContext) -> None
     )
     await state.clear()
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌍 Открыть Global Presence", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(
+        text="🌍 Открыть Global Presence", callback_data=GeoPresenceCb(action="menu")
+    )
     kb.adjust(1)
-    await callback.answer("Сессия мастера устарела. Начните запуск заново.", show_alert=True)
+    await callback.answer(
+        "Сессия мастера устарела. Начните запуск заново.", show_alert=True
+    )
     await callback.message.edit_text(
         "⚠️ <b>Запуск не принят</b>\n\n"
         "Сессия мастера устарела или бот перезапускался между шагами. "
@@ -1254,7 +1633,8 @@ async def cb_gp_launch_stale(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "progress"))
 async def cb_gp_progress(
-    callback: CallbackQuery, callback_data: GeoPresenceCb,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
     pool: asyncpg.Pool,
 ) -> None:
     plan_id = callback_data.plan_id
@@ -1278,7 +1658,10 @@ async def cb_gp_progress(
         op_id = plan.get("op_id")
         op_status = "—"
         if op_id:
-            op_row = await pool.fetchrow("SELECT status, done_items, total_items FROM operation_queue WHERE id=$1", op_id)
+            op_row = await pool.fetchrow(
+                "SELECT status, done_items, total_items FROM operation_queue WHERE id=$1",
+                op_id,
+            )
             if op_row:
                 op_status = op_row["status"]
         current_row = await pool.fetchrow(
@@ -1309,8 +1692,14 @@ async def cb_gp_progress(
     mins = estimated_remaining % 60
     remaining_str = f"~{hours}ч {mins}м" if hours else f"~{mins}м"
 
-    status_map = {"queued": "В очереди", "running": "Выполняется", "done": "Завершён",
-                  "failed": "Ошибка", "cancelled": "Отменён", "draft": "Черновик"}
+    status_map = {
+        "queued": "В очереди",
+        "running": "Выполняется",
+        "done": "Завершён",
+        "failed": "Ошибка",
+        "cancelled": "Отменён",
+        "draft": "Черновик",
+    }
 
     text = (
         f"🌍 <b>Global Presence Plan #{plan_id}</b>\n"
@@ -1328,26 +1717,50 @@ async def cb_gp_progress(
 
     # Auto-sync plan status if operation finished but plan stuck
     synced_status = None
-    if plan["status"] in ("running", "queued") and op_status in ("done", "failed", "cancelled"):
+    if plan["status"] in ("running", "queued") and op_status in (
+        "done",
+        "failed",
+        "cancelled",
+    ):
         try:
             synced_status = await db.sync_plan_status_from_op(pool, plan_id)
             if synced_status:
-                plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
+                plan = await db.get_global_presence_plan(
+                    pool, plan_id, callback.from_user.id
+                )
         except Exception:
-            log_exc_swallow(log, f"global_presence: sync_plan_status_from_op failed plan_id={plan_id}")
+            log_exc_swallow(
+                log,
+                f"global_presence: sync_plan_status_from_op failed plan_id={plan_id}",
+            )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
+    kb.button(
+        text="🔄 Обновить",
+        callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
+    )
     if plan["status"] in ("running", "queued"):
-        kb.button(text="🚫 Отменить план", callback_data=GeoPresenceCb(action="cancel_plan", plan_id=plan_id))
+        kb.button(
+            text="🚫 Отменить план",
+            callback_data=GeoPresenceCb(action="cancel_plan", plan_id=plan_id),
+        )
     if failed > 0:
-        kb.button(text="🔁 Повторить ошибки", callback_data=GeoPresenceCb(action="retry", plan_id=plan_id))
-    kb.button(text="📋 Отчёт", callback_data=GeoPresenceCb(action="report", plan_id=plan_id))
+        kb.button(
+            text="🔁 Повторить ошибки",
+            callback_data=GeoPresenceCb(action="retry", plan_id=plan_id),
+        )
+    kb.button(
+        text="📋 Отчёт", callback_data=GeoPresenceCb(action="report", plan_id=plan_id)
+    )
     kb.button(text="◀️ Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.adjust(2)
 
     if synced_status:
-        sync_note = {"done": "✅ завершён", "failed": "❌ ошибка", "cancelled": "🚫 отменён"}.get(synced_status, synced_status)
+        sync_note = {
+            "done": "✅ завершён",
+            "failed": "❌ ошибка",
+            "cancelled": "🚫 отменён",
+        }.get(synced_status, synced_status)
         text += f"\n\n<i>Статус синхронизирован: операция {sync_note}</i>"
 
     await _edit(callback, text, markup=kb.as_markup())
@@ -1355,7 +1768,9 @@ async def cb_gp_progress(
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "retry"))
 async def cb_gp_retry(
-    callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
 ) -> None:
     plan_id = callback_data.plan_id
     try:
@@ -1391,22 +1806,35 @@ async def cb_gp_retry(
 
     try:
         op_id = await operation_bus.submit(
-            pool, callback.from_user.id, _retry_op_type,
+            pool,
+            callback.from_user.id,
+            _retry_op_type,
             {"plan_id": plan_id},
             total_items=reset_count,
         )
         await db.link_plan_to_operation(pool, plan_id, op_id)
-        log.info("cb_gp_retry: plan=%d reset=%d op=%d user=%s", plan_id, reset_count, op_id, callback.from_user.id)
+        log.info(
+            "cb_gp_retry: plan=%d reset=%d op=%d user=%s",
+            plan_id,
+            reset_count,
+            op_id,
+            callback.from_user.id,
+        )
     except Exception:
         log_exc_swallow(log, "cb_gp_retry: operation_queue insert failed")
         await callback.answer("Ошибка постановки в очереди", show_alert=True)
         return
-    await callback.answer(f"✅ {reset_count} целей поставлено в очередь на повтор (op #{op_id})", show_alert=True)
+    await callback.answer(
+        f"✅ {reset_count} целей поставлено в очередь на повтор (op #{op_id})",
+        show_alert=True,
+    )
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "report"))
 async def cb_gp_report(
-    callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
 ) -> None:
     plan_id = callback_data.plan_id
     try:
@@ -1465,14 +1893,19 @@ async def cb_gp_report(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
+    kb.button(
+        text="◀️ Прогресс",
+        callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
+    )
     kb.adjust(1)
     await _edit(callback, text, markup=kb.as_markup())
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "cancel_plan"))
 async def cb_gp_cancel_plan(
-    callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
 ) -> None:
     """Cancel a running or queued global presence plan."""
     plan_id = callback_data.plan_id
@@ -1508,7 +1941,10 @@ async def cb_gp_cancel_plan(
     await callback.answer("🚫 План отменён")
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
-    kb.button(text="📊 Прогресс", callback_data=GeoPresenceCb(action="progress", plan_id=plan_id))
+    kb.button(
+        text="📊 Прогресс",
+        callback_data=GeoPresenceCb(action="progress", plan_id=plan_id),
+    )
     kb.adjust(2)
     await _edit(
         callback,
@@ -1521,9 +1957,12 @@ async def cb_gp_cancel_plan(
 
 # ── Plans List ─────────────────────────────────────────────────────────────
 
+
 @router.callback_query(GeoPresenceCb.filter(F.action == "plans_list"))
 async def cb_gp_plans_list(
-    callback: CallbackQuery, callback_data: GeoPresenceCb, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    callback_data: GeoPresenceCb,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     try:
@@ -1548,17 +1987,32 @@ async def cb_gp_plans_list(
     import re as _re
     import json as _json
 
-    status_emoji = {"queued": "⏳", "running": "⚡", "done": "✅", "failed": "❌",
-                    "cancelled": "🚫", "draft": "📝"}
+    status_emoji = {
+        "queued": "⏳",
+        "running": "⚡",
+        "done": "✅",
+        "failed": "❌",
+        "cancelled": "🚫",
+        "draft": "📝",
+    }
     kb = InlineKeyboardBuilder()
     for plan in plans:
         emoji = status_emoji.get(plan["status"], "❓")
-        geo_sel = plan["geo_selection"] if isinstance(plan["geo_selection"], dict) else _json.loads(plan["geo_selection"] or "{}")
+        geo_sel = (
+            plan["geo_selection"]
+            if isinstance(plan["geo_selection"], dict)
+            else _json.loads(plan["geo_selection"] or "{}")
+        )
         count = geo_sel.get("count", "?")
         # Strip {{PLACEHOLDER}} syntax from name_pattern for cleaner display
-        display_name = _re.sub(r"\{\{[^}]+\}\}", "[город]", plan["name_pattern"] or "").strip()[:24]
+        display_name = _re.sub(
+            r"\{\{[^}]+\}\}", "[город]", plan["name_pattern"] or ""
+        ).strip()[:24]
         label = f"{emoji} #{plan['id']} — {display_name} ({count} городов)"
-        kb.button(text=label, callback_data=GeoPresenceCb(action="progress", plan_id=plan["id"]))
+        kb.button(
+            text=label,
+            callback_data=GeoPresenceCb(action="progress", plan_id=plan["id"]),
+        )
     kb.button(text="➕ Новый план", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
@@ -1573,9 +2027,11 @@ async def cb_gp_plans_list(
 
 # ── Navigation ─────────────────────────────────────────────────────────────
 
+
 @router.callback_query(GeoPresenceCb.filter(F.action == "back_to_geo"))
 async def cb_gp_back_geo(
-    callback: CallbackQuery, state: FSMContext,
+    callback: CallbackQuery,
+    state: FSMContext,
 ) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.choosing_geo)
@@ -1584,17 +2040,22 @@ async def cb_gp_back_geo(
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "back_to_uname"))
 async def cb_gp_back_uname(
-    callback: CallbackQuery, state: FSMContext,
+    callback: CallbackQuery,
+    state: FSMContext,
 ) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.entering_username_pattern)
     sd = await state.get_data()
-    await _show_username_pattern_step(callback, state, prefill=sd.get("username_pattern"))
+    await _show_username_pattern_step(
+        callback, state, prefill=sd.get("username_pattern")
+    )
 
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "back_to_tpl"))
 async def cb_gp_back_tpl(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.choosing_template)
@@ -1603,7 +2064,9 @@ async def cb_gp_back_tpl(
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "back_to_acc"))
 async def cb_gp_back_acc(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.choosing_accounts)
@@ -1612,7 +2075,9 @@ async def cb_gp_back_acc(
 
 @router.callback_query(GeoPresenceCb.filter(F.action == "back_to_preview"))
 async def cb_gp_back_preview(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
     await state.set_state(GlobalPresenceFSM.previewing)
@@ -1624,8 +2089,11 @@ async def cb_gp_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
     from bot.callbacks import BmCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
     kb.button(text="🌍 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))
     kb.adjust(2)
-    await _edit(callback, "❌ <b>Global Presence Factory</b> — отменено.", markup=kb.as_markup())
+    await _edit(
+        callback, "❌ <b>Global Presence Factory</b> — отменено.", markup=kb.as_markup()
+    )

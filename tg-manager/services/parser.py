@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> dict | None:
     from services.flood_engine import get_best_account
+
     return await get_best_account(pool, owner_id, action_type="parse")
 
 
@@ -156,7 +157,13 @@ async def parse_members(
             await _update_run(
                 pool, run_id, "failed", error=f"Не удалось получить сущность: {e}"
             )
-            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100], duration_s=time.monotonic() - t0_parse)
+            infra_memory.record_account_op(
+                acc["id"],
+                "parse",
+                False,
+                str(e)[:100],
+                duration_s=time.monotonic() - t0_parse,
+            )
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         offset = 0
@@ -242,7 +249,9 @@ async def parse_members(
     if total_found > 0:
         infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
     else:
-        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found", duration_s=_parse_dur)
+        infra_memory.record_account_op(
+            acc["id"], "parse", False, "no_users_found", duration_s=_parse_dur
+        )
     return {
         "run_id": run_id,
         "status": status,
@@ -287,7 +296,13 @@ async def parse_active_users(
             source_title = getattr(entity, "title", source_ref)
         except Exception as e:
             await _update_run(pool, run_id, "failed", error=str(e))
-            infra_memory.record_account_op(acc["id"], "parse", False, str(e)[:100], duration_s=time.monotonic() - t0_parse)
+            infra_memory.record_account_op(
+                acc["id"],
+                "parse",
+                False,
+                str(e)[:100],
+                duration_s=time.monotonic() - t0_parse,
+            )
             return {"status": "error", "error": str(e), "run_id": run_id}
 
         seen_ids: set[int] = set()
@@ -306,7 +321,9 @@ async def parse_active_users(
             try:
                 user = await client.get_entity(msg.sender_id)
             except Exception:
-                log_exc_swallow(log, "Сбой get_entity в parser", sender_id=msg.sender_id)
+                log_exc_swallow(
+                    log, "Сбой get_entity в parser", sender_id=msg.sender_id
+                )
 
             if user:
                 users_batch = [
@@ -355,7 +372,9 @@ async def parse_active_users(
     if total_found > 0:
         infra_memory.record_account_op(acc["id"], "parse", True, duration_s=_parse_dur)
     else:
-        infra_memory.record_account_op(acc["id"], "parse", False, "no_users_found", duration_s=_parse_dur)
+        infra_memory.record_account_op(
+            acc["id"], "parse", False, "no_users_found", duration_s=_parse_dur
+        )
     return {
         "run_id": run_id,
         "status": status,
@@ -443,5 +462,7 @@ async def delete_audience(
     try:
         return int(str(result).split()[-1])
     except Exception:
-        log_exc_swallow(log, "Не удалось распарсить количество удалённых строк аудитории")
+        log_exc_swallow(
+            log, "Не удалось распарсить количество удалённых строк аудитории"
+        )
         return 0

@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -26,9 +25,11 @@ log = logging.getLogger(__name__)
 
 # ── In-memory хранилище ───────────────────────────────────────────────────────
 
+
 @dataclass
 class _AccountActionRecord:
     """История операций одного аккаунта по одному типу действия."""
+
     account_id: int
     action_type: str
     successes: int = 0
@@ -37,8 +38,10 @@ class _AccountActionRecord:
     last_failure_at: float = 0.0
     last_errors: list[str] = field(default_factory=list)  # последние 5 ошибок
     hour_successes: dict[int, int] = field(default_factory=dict)  # час → число успехов
-    avg_duration_s: float = 0.0    # скользящее среднее времени выполнения (сек на элемент)
-    duration_samples: int = 0      # количество измерений duration
+    avg_duration_s: float = (
+        0.0  # скользящее среднее времени выполнения (сек на элемент)
+    )
+    duration_samples: int = 0  # количество измерений duration
 
     @property
     def total(self) -> int:
@@ -63,6 +66,7 @@ class _AccountActionRecord:
 @dataclass
 class _ProxyRecord:
     """История качества прокси по типам операций."""
+
     proxy_url: str
     action_type: str
     successes: int = 0
@@ -94,6 +98,7 @@ _FLUSH_INTERVAL = 60  # секунд между записью в БД
 
 
 # ── Запись событий ────────────────────────────────────────────────────────────
+
 
 def record_account_op(
     account_id: int,
@@ -166,6 +171,7 @@ def record_proxy_op(
 
 
 # ── Запросы памяти ────────────────────────────────────────────────────────────
+
 
 def get_account_score(account_id: int, action_type: str) -> float:
     """Получить memory_score аккаунта для данного типа действия.
@@ -255,8 +261,7 @@ def rank_accounts_by_memory(
     Возвращает list of (account_id, memory_score), убывающий порядок.
     """
     scored = [
-        (acc_id, get_account_score(acc_id, action_type))
-        for acc_id in account_ids
+        (acc_id, get_account_score(acc_id, action_type)) for acc_id in account_ids
     ]
     return sorted(scored, key=lambda x: x[1], reverse=True)
 
@@ -271,6 +276,7 @@ def get_error_patterns(account_id: int) -> dict[str, list[str]]:
 
 
 # ── Персистентность в БД ──────────────────────────────────────────────────────
+
 
 async def flush_to_db(pool: asyncpg.Pool) -> None:
     """Записать dirty-записи в БД. Вызывается фоновой задачей каждые 60 секунд."""
@@ -303,8 +309,10 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                            ELSE infra_memory_accounts.avg_duration_s
                        END,
                        updated_at = NOW()""",
-                rec.account_id, rec.action_type,
-                rec.successes, rec.failures,
+                rec.account_id,
+                rec.action_type,
+                rec.successes,
+                rec.failures,
                 rec.last_success_at if rec.last_success_at > 0 else None,
                 rec.last_failure_at if rec.last_failure_at > 0 else None,
                 rec.last_errors,
@@ -337,8 +345,10 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        last_success_at = GREATEST(infra_memory_proxies.last_success_at, EXCLUDED.last_success_at),
                        last_failure_at = GREATEST(infra_memory_proxies.last_failure_at, EXCLUDED.last_failure_at),
                        updated_at = NOW()""",
-                rec.proxy_url, rec.action_type,
-                rec.successes, rec.failures,
+                rec.proxy_url,
+                rec.action_type,
+                rec.successes,
+                rec.failures,
                 rec.avg_latency_ms,
                 rec.last_success_at if rec.last_success_at > 0 else None,
                 rec.last_failure_at if rec.last_failure_at > 0 else None,
@@ -350,7 +360,8 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
     if dirty_accounts or dirty_proxies:
         log.debug(
             "infra_memory flush: %d account records, %d proxy records",
-            len(dirty_accounts), len(dirty_proxies),
+            len(dirty_accounts),
+            len(dirty_proxies),
         )
 
 
@@ -397,7 +408,9 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> None:
             _account_memory[key] = rec
             loaded += 1
 
-        log.info("infra_memory: loaded %d account records for owner=%d", loaded, owner_id)
+        log.info(
+            "infra_memory: loaded %d account records for owner=%d", loaded, owner_id
+        )
     except Exception as e:
         log.warning("infra_memory load_from_db failed for owner=%d: %s", owner_id, e)
 
@@ -469,6 +482,7 @@ async def run_flush_loop(pool: asyncpg.Pool) -> None:
 
 # ── Отчёты ────────────────────────────────────────────────────────────────────
 
+
 def format_account_report(account_ids: list[int], action_type: str) -> str:
     """Форматированный отчёт о памяти аккаунтов для Telegram."""
     if not account_ids:
@@ -483,8 +497,7 @@ def format_account_report(account_ids: list[int], action_type: str) -> str:
             rec = _account_memory[key]
             bar = "█" * round(score * 5) + "░" * (5 - round(score * 5))
             lines.append(
-                f"acc:{acc_id} [{bar}] {score:.0%} "
-                f"({rec.successes}✅/{rec.failures}❌)"
+                f"acc:{acc_id} [{bar}] {score:.0%} ({rec.successes}✅/{rec.failures}❌)"
             )
         else:
             lines.append(f"acc:{acc_id} [░░░░░] нет данных")

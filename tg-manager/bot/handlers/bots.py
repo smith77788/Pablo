@@ -57,7 +57,7 @@ async def cb_list(
     await callback.answer()
     from bot.utils.subscription import is_platform_admin
 
-    admin = is_platform_admin(callback.from_user.id)
+    is_platform_admin(callback.from_user.id)
     bots = await db.get_bots(pool, callback.from_user.id)
     hint = (
         "\n\n📌 <b>Что это?</b>\n"
@@ -69,6 +69,7 @@ async def cb_list(
     )
     if not bots:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
+
         empty_kb = InlineKeyboardBuilder()
         empty_kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
         empty_kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
@@ -76,8 +77,7 @@ async def cb_list(
         await callback.message.edit_text(
             "🤖 <b>Мои боты</b>\n\n"
             "У вас пока нет добавленных ботов.\n\n"
-            "💡 Нажмите <b>➕ Добавить бота</b> и вставьте токен от @BotFather."
-            + hint,
+            "💡 Нажмите <b>➕ Добавить бота</b> и вставьте токен от @BotFather." + hint,
             parse_mode="HTML",
             reply_markup=empty_kb.as_markup(),
         )
@@ -155,6 +155,7 @@ async def cb_add(
         return
     await state.set_state(AddBot.waiting_token)
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     _cancel_kb = InlineKeyboardBuilder()
     _cancel_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
     await callback.message.edit_text(
@@ -179,6 +180,7 @@ async def msg_token(
     # Validate token format before hitting Telegram API
     if not _TOKEN_RE.match(token):
         from aiogram.utils.keyboard import InlineKeyboardBuilder
+
         _fmt_kb = InlineKeyboardBuilder()
         _fmt_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
         await message.answer(
@@ -196,6 +198,7 @@ async def msg_token(
     bot_info = await bot_api.get_me(http, token)
     if not bot_info:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
+
         _retry_kb = InlineKeyboardBuilder()
         _retry_kb.button(text="❌ Отмена", callback_data=BotCb(action="list", page=0))
         await info_msg.edit_text(
@@ -307,7 +310,9 @@ async def cb_confirm_delete(
     await callback.answer()
     deleted = await db.delete_bot(pool, callback_data.bot_id, callback.from_user.id)
     if deleted:
-        await callback.message.edit_text("✅ <b>Бот удалён.</b>", parse_mode="HTML", reply_markup=main_menu())
+        await callback.message.edit_text(
+            "✅ <b>Бот удалён.</b>", parse_mode="HTML", reply_markup=main_menu()
+        )
     else:
         await callback.message.edit_text(
             "❌ <b>Не удалось удалить бота.</b>\n\nВозможно, бот уже был удалён.",
