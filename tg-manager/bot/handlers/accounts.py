@@ -1779,6 +1779,10 @@ async def cb_check_all_accounts(
             result = await check_account_status_full(session_str, _acc=dict(acc_dict) if acc_dict else None, check_spambot=True)
             status = result["status"]
             reason = result.get("reason", "")
+            if result.get("auth_error"):
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
+                )
         except Exception as exc:
             status = "active"
             reason = f"Ошибка: {str(exc)[:80]}"

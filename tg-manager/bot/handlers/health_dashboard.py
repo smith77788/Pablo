@@ -442,6 +442,7 @@ async def cb_health_real_check(
     results = []
     for acc in accounts:
         name = acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}"
+        res: dict = {}
         try:
             res = await asyncio.wait_for(
                 check_account_status_full(acc["session_str"], dict(acc), check_spambot=True),
@@ -463,6 +464,11 @@ async def cb_health_real_check(
                 "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
                 status, acc["id"],
             )
+            if status in ("session_expired", "banned", "deactivated") and res.get("auth_error"):
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
+                    acc["id"],
+                )
             if status == "spamblock":
                 await pool.execute(
                     "UPDATE tg_accounts SET trust_score=LEAST(trust_score, 0.3) WHERE id=$1",

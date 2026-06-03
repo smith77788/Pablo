@@ -62,7 +62,7 @@ def recommended_delay(account_id: int, action_type: str = "default") -> float:
 
 
 async def record_flood(
-    pool: asyncpg.Pool,
+    pool: Optional[asyncpg.Pool],
     account_id: int,
     wait_seconds: int,
     action_type: str = "default",
@@ -98,26 +98,27 @@ async def record_flood(
         state.risk_score,
     )
 
-    # Persist to DB (non-blocking)
-    try:
-        await pool.execute(
-            """INSERT INTO account_flood_log(account_id, flood_seconds, action_type)
-               VALUES ($1, $2, $3)""",
-            account_id,
-            wait_seconds,
-            action_type,
-        )
-        # Update cooldown_until in tg_accounts
-        await pool.execute(
-            """UPDATE tg_accounts
-               SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'),
-                   last_flood_at = NOW()
-               WHERE id = $2""",
-            actual_wait,
-            account_id,
-        )
-    except Exception as e:
-        log.warning("flood_engine DB write failed: %s", e)
+    # Persist to DB (non-blocking; skipped when pool is None, e.g. from account_manager)
+    if pool is not None:
+        try:
+            await pool.execute(
+                """INSERT INTO account_flood_log(account_id, flood_seconds, action_type)
+                   VALUES ($1, $2, $3)""",
+                account_id,
+                wait_seconds,
+                action_type,
+            )
+            # Update cooldown_until in tg_accounts
+            await pool.execute(
+                """UPDATE tg_accounts
+                   SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'),
+                       last_flood_at = NOW()
+                   WHERE id = $2""",
+                actual_wait,
+                account_id,
+            )
+        except Exception as e:
+            log.warning("flood_engine DB write failed: %s", e)
 
     return actual_wait
 

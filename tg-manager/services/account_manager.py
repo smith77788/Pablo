@@ -816,19 +816,30 @@ async def check_account_status_full(
         return {"status": "active", "reason": "Аккаунт активен", "display_name": display_name}
 
     except Exception as e:
+        from telethon.errors import (
+            AuthKeyUnregisteredError, SessionRevokedError,
+            UserDeactivatedBanError, UserDeactivatedError,
+            FloodWaitError, PeerFloodError,
+        )
         err = str(e)
-        etype = type(e).__name__
         err_low = err.lower()
-        if ("AuthKeyUnregisteredError" in etype or "AUTH_KEY_UNREGISTERED" in err
-                or "key is not registered" in err_low or "registered in the system" in err_low):
-            return {"status": "session_expired", "reason": "Ключ сессии отозван Telegram — требуется переавторизация.", "display_name": ""}
-        if "UserDeactivatedBanError" in etype or "USER_DEACTIVATED_BAN" in err:
-            return {"status": "banned", "reason": "Аккаунт заблокирован Telegram.", "display_name": ""}
-        if "UserDeactivatedError" in etype or "USER_DEACTIVATED" in err:
-            return {"status": "deactivated", "reason": "Аккаунт удалён или деактивирован.", "display_name": ""}
-        if "FloodWaitError" in etype or "FLOOD_WAIT" in err:
+        if isinstance(e, (AuthKeyUnregisteredError, SessionRevokedError)) or (
+            "AUTH_KEY_UNREGISTERED" in err
+            or "key is not registered" in err_low
+            or "registered in the system" in err_low
+            or "SESSION_REVOKED" in err
+        ):
+            log.warning("check_account_status_full: auth key dead — %s", type(e).__name__)
+            return {"status": "session_expired", "reason": "Ключ сессии отозван Telegram — требуется переавторизация.", "display_name": "", "auth_error": True}
+        if isinstance(e, UserDeactivatedBanError) or "USER_DEACTIVATED_BAN" in err:
+            log.warning("check_account_status_full: account banned — %s", e)
+            return {"status": "banned", "reason": "Аккаунт заблокирован Telegram.", "display_name": "", "auth_error": True}
+        if isinstance(e, UserDeactivatedError) or "USER_DEACTIVATED" in err:
+            log.warning("check_account_status_full: account deactivated — %s", e)
+            return {"status": "deactivated", "reason": "Аккаунт удалён или деактивирован.", "display_name": "", "auth_error": True}
+        if isinstance(e, FloodWaitError) or "FLOOD_WAIT" in err:
             return {"status": "cooldown", "reason": f"FloodWait: {err[:80]}", "display_name": ""}
-        if "PeerFloodError" in etype or "PEER_FLOOD" in err:
+        if isinstance(e, PeerFloodError) or "PEER_FLOOD" in err:
             return {"status": "spamblock", "reason": "PeerFlood — массовые ограничения.", "display_name": ""}
         log.exception("check_account_status_full error: %s", e)
         return {"status": "active", "reason": f"Нет данных: {err[:120]}", "display_name": ""}
@@ -1331,7 +1342,11 @@ async def invite_users_to_channel(
                     failed.append(f"{uname}: слишком много каналов")
                 except FloodWaitError as e:
                     wait_s = min(int(e.seconds), 600)
-                    log.warning("invite FloodWait %ds acc=%s", wait_s, (_acc or {}).get("id", "?"))
+                    acc_id = (_acc or {}).get("id")
+                    log.warning("invite FloodWait %ds acc=%s", wait_s, acc_id or "?")
+                    if acc_id:
+                        from services import flood_engine
+                        await flood_engine.record_flood(None, acc_id, wait_s, action_type="invite")
                     await asyncio.sleep(wait_s + random.uniform(5, 15))
                     # Retry once after flood
                     try:
