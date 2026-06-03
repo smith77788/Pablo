@@ -876,18 +876,28 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **format_pre_launch_block proxy line** — показывает "🌐 Прокси: ✅ N пригодны · ⚠️ M плохих" если есть прокси
 - ✅ **flush/load avg_duration_s** — персистируется в БД через infra_memory flush loop, загружается при рестарте
 
-### ✅ ЗАКРЫТО (r24) — EPOCH II: MEMORY FEEDBACK LOOP ПОЛНОЕ ЗАМЫКАНИЕ
+### ✅ ЗАКРЫТО (r24) — EPOCH II: MEMORY FEEDBACK LOOP + BUG HUNTER
 
-- ✅ **duration_s в op_worker join/leave** — dur_ms уже был доступен, теперь передаётся в record_account_op
-- ✅ **duration_s в op_worker publish** — t0_pub перед post_to_channel, pub_dur_s после успеха
-- ✅ **duration_s в op_worker global_presence_channel** — t0_gp перед create_channel
-- ✅ **duration_s в op_worker global_presence_bot** — t0_gp_bot перед create_bot_via_botfather
-- ✅ **duration_s в op_worker top-level success** — использует уже вычисленный duration_seconds
-- ✅ **duration_s в parser.py** — import time, t0_parse для обоих parse_members + parse_active_users
-- ✅ **duration_s в dm_engine.py** — import time, t0_dm перед send_dm, duration_s на "sent"
-- ✅ **duration_s в strike_engine.py** — t0_strike перед report_peer_deep_v2, duration_s на успехе
-- ✅ **duration_s в account_warmer.py** — import time, t0_action на каждое warmup-действие
-- ✅ **Все 8 типов операций** покрыты: join, leave, publish, parse, dm_campaign, strike, warmup, global_presence_*
+**Замыкание Memory Feedback Loop (duration_s):**
+- ✅ **op_worker join/leave** — dur_ms уже был доступен, теперь передаётся в record_account_op
+- ✅ **op_worker publish** — t0_pub перед post_to_channel, pub_dur_s после успеха
+- ✅ **op_worker global_presence_channel** — t0_gp перед create_channel
+- ✅ **op_worker global_presence_bot** — t0_gp_bot перед create_bot_via_botfather
+- ✅ **op_worker top-level success** — использует уже вычисленный duration_seconds
+- ✅ **parser.py** — import time, t0_parse для обоих parse_members + parse_active_users
+- ✅ **dm_engine.py** — import time, t0_dm перед send_dm, duration_s на "sent"
+- ✅ **strike_engine.py** — t0_strike перед report_peer_deep_v2, duration_s на успехе
+- ✅ **account_warmer.py** — import time, t0_action на каждое warmup-действие
+
+**BUG HUNTER MODE — найдено и исправлено 4 бага:**
+- ✅ **КРИТИЧЕСКИЙ: flush_to_db double-counting** — `successes + EXCLUDED.successes` → `EXCLUDED.successes`
+  (каждый flush после первого удваивал исторические счётчики; то же для proxies)
+- ✅ **format_pre_launch_block: двойной счёт кулдаун-аккаунтов** — cooling ⊆ excluded
+  → разделено на `cooling` + `excluded_other` (непересекающиеся множества)
+- ✅ **_pre_launch_impl: мёртвая ветка** — `elif pressure_score >= 85` недостижима
+  (уже поймана выше через `risk.safe_to_proceed=False`), удалена
+- ✅ **_predict_impl: avg_memory_score неточный знаменатель** — делил на `account_count`
+  вместо `len(ranked_slice)`, занижало среднее при малом числе аккаунтов
 
 *Последнее обновление: 2026-06-03 (r24)* *Следующий build-номер: r25*
 
