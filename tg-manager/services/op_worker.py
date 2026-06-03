@@ -903,12 +903,8 @@ async def _exec_global_presence_channel(
     if not acc_ids:
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
-    accounts_rows = await pool.fetch(
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, a.trust_score, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.id = ANY($1) AND a.is_active=true "
-        "ORDER BY a.trust_score DESC NULLS LAST",
-        acc_ids,
+    accounts_rows = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=acc_ids, respect_cooldown=False
     )
     acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
@@ -1121,13 +1117,11 @@ async def _exec_global_presence_bot(
             account_selection = {}
     selected_acc_ids = account_selection.get("account_ids") or []
 
-    accounts = []
-    if selected_acc_ids:
-        accounts = await pool.fetch(
-            "SELECT id, session_str, phone, first_name, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id = ANY($1) AND is_active=TRUE",
-            selected_acc_ids,
-        )
+    accounts = await resource_selector.select_all_active(
+        pool, owner_id,
+        include_ids=selected_acc_ids or None,
+        respect_cooldown=False,
+    )
 
     if not accounts:
         await pool.execute(
@@ -1264,26 +1258,18 @@ async def _exec_bulk_create_channels(
     username_pattern = params.get("username_pattern", "")
     acc_id = params.get("acc_id", 0)
 
-    # Get the account
+    # Get the account via resource_selector (flood-aware)
     if acc_id:
-        acc_row = await pool.fetchrow(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
-            acc_id, owner_id,
+        candidates = await resource_selector.select_all_active(
+            pool, owner_id, include_ids=[acc_id], respect_cooldown=False
         )
+        acc_row = candidates[0] if candidates else None
+        acc = dict(acc_row) if acc_row else None
     else:
-        acc_row = await pool.fetchrow(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-            "AND (cooldown_until IS NULL OR cooldown_until < now()) "
-            "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-            owner_id,
-        )
+        acc = await resource_selector.select_account(pool, owner_id, "create_channel")
 
-    if not acc_row:
+    if not acc:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
-
-    acc = dict(acc_row)
     created_count = 0
     failed_count = 0
 
