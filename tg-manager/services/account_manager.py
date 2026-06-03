@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from config import TG_API_ID, TG_API_HASH, TG_PROXY
 
 from services.logger import log_exc_swallow
@@ -54,6 +55,40 @@ _pending_qr: dict[int, tuple] = {}
 _CONNECT_TIMEOUT = 30
 # Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
 _OP_TIMEOUT = 45
+
+_TG_INVITE_RE = re.compile(
+    r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:joinchat/|\+)([\w-]+)",
+    re.IGNORECASE,
+)
+_TG_JOIN_URI_RE = re.compile(r"^tg://join\?invite=([\w-]+)", re.IGNORECASE)
+_TG_PUBLIC_RE = re.compile(
+    r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:s/)?([A-Za-z0-9_]{5,32})(?:[/?#].*)?$",
+    re.IGNORECASE,
+)
+
+
+def normalize_telegram_join_ref(value: str) -> tuple[str, str]:
+    """Normalize Telegram join targets to official invite/public URL shapes."""
+    raw = value.strip()
+    if not raw:
+        return ("public", "")
+
+    raw_no_fragment = raw.split("#", 1)[0].strip()
+    invite_match = _TG_INVITE_RE.match(raw_no_fragment) or _TG_JOIN_URI_RE.match(
+        raw_no_fragment
+    )
+    if invite_match:
+        return ("invite", invite_match.group(1))
+    if raw_no_fragment.startswith("+") and len(raw_no_fragment) > 1:
+        return ("invite", raw_no_fragment[1:].split("?", 1)[0])
+
+    public_match = _TG_PUBLIC_RE.match(raw_no_fragment)
+    if public_match:
+        return ("public", public_match.group(1))
+    if raw_no_fragment.startswith("@"):
+        return ("public", raw_no_fragment[1:].split("?", 1)[0])
+    return ("public", raw_no_fragment.split("?", 1)[0])
+
 
 # Pool of realistic Android device fingerprints
 _ANDROID_DEVICES: list[tuple[str, str]] = [
@@ -1303,17 +1338,18 @@ async def join_channel(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        invite = invite_or_username.strip()
-        if "t.me/+" in invite or "t.me/joinchat" in invite:
-            # Private invite link
-            hash_part = invite.split("/")[-1].lstrip("+")
-            result = await client(ImportChatInviteRequest(hash=hash_part))
-            ch = result.chats[0]
+        ref_kind, ref_value = normalize_telegram_join_ref(invite_or_username)
+        if not ref_value:
+            return {"error": "Telegram target is empty"}
+        if ref_kind == "invite":
+            result = await client(ImportChatInviteRequest(hash=ref_value))
         else:
-            username = invite.lstrip("@").lstrip("https://t.me/")
-            entity = await client.get_entity(username)
+            entity = await client.get_entity(ref_value)
             result = await client(JoinChannelRequest(channel=entity))
-            ch = result.chats[0]
+        chats = getattr(result, "chats", None) or []
+        if not chats:
+            return {"error": "Telegram did not return joined chat"}
+        ch = chats[0]
         return {
             "channel_id": ch.id,
             "title": ch.title,
