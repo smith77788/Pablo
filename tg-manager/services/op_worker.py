@@ -1420,29 +1420,12 @@ async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, 
     if not target:
         return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
 
-    # ── Загрузить аккаунты ─────────────────────────────────────────────────────
-    if account_ids:
-        raw_accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
-            "a.device_model, a.system_version, a.app_version, "
-            "a.trust_score, a.cooldown_until, a.tags, a.pool, p.proxy_url "
-            "FROM tg_accounts a "
-            "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.id = ANY($1) AND a.owner_id=$2 "
-            "ORDER BY a.trust_score DESC NULLS LAST",
-            account_ids, owner_id,
-        )
-    else:
-        raw_accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
-            "a.device_model, a.system_version, a.app_version, "
-            "a.trust_score, a.cooldown_until, a.tags, a.pool, p.proxy_url "
-            "FROM tg_accounts a "
-            "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 "
-            "ORDER BY a.trust_score DESC NULLS LAST",
-            owner_id,
-        )
+    # ── Загрузить аккаунты через resource_selector (flood-aware + cooldown) ───
+    raw_accounts = await resource_selector.select_all_active(
+        pool, owner_id,
+        include_ids=account_ids or None,
+        respect_cooldown=False,  # preflight_accounts делает свою cooldown проверку
+    )
 
     if not raw_accounts:
         return {"status": "failed", "summary": "⚠️ Strike: нет аккаунтов"}
