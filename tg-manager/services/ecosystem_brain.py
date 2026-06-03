@@ -934,3 +934,237 @@ def format_risk_reasons(risk: EcosystemRisk) -> str:
     if not risk.reasons:
         return "Критических проблем нет"
     return "\n".join(f"• {html.escape(r)}" for r in risk.reasons[:5])
+
+
+# ── DNA Templates ─────────────────────────────────────────────────────────────
+
+async def create_dna(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    name: str,
+    dna_type: str,
+    description: str = "",
+    template_data: Optional[dict] = None,
+    is_public: bool = False,
+) -> int:
+    """Создаёт DNA-шаблон. Возвращает id."""
+    import json as _json
+    row = await pool.fetchrow(
+        """INSERT INTO ecosystem_dna (owner_id, name, dna_type, description, template_data, is_public)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING id""",
+        owner_id, name, dna_type, description,
+        _json.dumps(template_data or {}), is_public,
+    )
+    return row["id"]
+
+
+async def list_dna(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+    """Список DNA-шаблонов владельца (+ публичные)."""
+    rows = await pool.fetch(
+        """SELECT * FROM ecosystem_dna
+           WHERE owner_id=$1 OR is_public=TRUE
+           ORDER BY created_at DESC""",
+        owner_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_dna(pool: asyncpg.Pool, dna_id: int, owner_id: int) -> Optional[dict]:
+    row = await pool.fetchrow(
+        "SELECT * FROM ecosystem_dna WHERE id=$1 AND (owner_id=$2 OR is_public=TRUE)",
+        dna_id, owner_id,
+    )
+    return dict(row) if row else None
+
+
+async def delete_dna(pool: asyncpg.Pool, dna_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM ecosystem_dna WHERE id=$1 AND owner_id=$2",
+        dna_id, owner_id,
+    )
+
+
+async def capture_dna_from_ecosystem(
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int, name: str
+) -> int:
+    """Снимает DNA-слепок с текущего состояния экосистемы. Возвращает dna_id."""
+    eco = await get_ecosystem(pool, ecosystem_id, owner_id)
+    if not eco:
+        raise ValueError(f"Ecosystem {ecosystem_id} not found")
+
+    # Member counts by type
+    counts_rows = await pool.fetch(
+        """SELECT object_type, COUNT(*) AS cnt
+           FROM ecosystem_members WHERE ecosystem_id=$1 GROUP BY object_type""",
+        ecosystem_id,
+    )
+    member_counts = {r["object_type"]: r["cnt"] for r in counts_rows}
+
+    import json as _json
+    meta = eco.get("meta") or {}
+    if isinstance(meta, str):
+        try:
+            meta = _json.loads(meta)
+        except Exception:
+            meta = {}
+
+    template_data = {
+        "ecosystem_type": eco["ecosystem_type"],
+        "description": eco.get("description", ""),
+        "region": eco.get("region"),
+        "member_counts": member_counts,
+        "meta": meta,
+        "source_ecosystem_id": ecosystem_id,
+    }
+    return await create_dna(
+        pool, owner_id, name, eco["ecosystem_type"],
+        description=f"Снято с экосистемы: {eco['name']}",
+        template_data=template_data,
+    )
+
+
+async def apply_dna_to_ecosystem(
+    pool: asyncpg.Pool, dna_id: int, ecosystem_id: int, owner_id: int,
+) -> dict:
+    """Применяет DNA-шаблон к экосистеме (тип, регион, описание).
+    Возвращает словарь с тем что было изменено."""
+    dna = await get_dna(pool, dna_id, owner_id)
+    if not dna:
+        raise ValueError(f"DNA {dna_id} not found")
+
+    import json as _json
+    td = dna.get("template_data") or {}
+    if isinstance(td, str):
+        try:
+            td = _json.loads(td)
+        except Exception:
+            td = {}
+
+    changes: dict[str, str] = {}
+
+    eco_type = td.get("ecosystem_type")
+    region   = td.get("region")
+
+    if eco_type:
+        await pool.execute(
+            "UPDATE ecosystems SET ecosystem_type=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+            eco_type, ecosystem_id, owner_id,
+        )
+        changes["ecosystem_type"] = eco_type
+
+    if region:
+        await pool.execute(
+            "UPDATE ecosystems SET region=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+            region, ecosystem_id, owner_id,
+        )
+        changes["region"] = region
+
+    # Link dna_id to ecosystem
+    await pool.execute(
+        "UPDATE ecosystems SET dna_id=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+        dna_id, ecosystem_id, owner_id,
+    )
+    changes["dna_id"] = str(dna_id)
+
+    await record_event(
+        pool, ecosystem_id, owner_id,
+        "dna_applied", f"Применена DNA: {dna['name']}",
+        severity="info", details={"dna_id": dna_id, "changes": changes},
+    )
+    return changes
+
+
+# ── Clone ─────────────────────────────────────────────────────────────────────
+
+async def clone_ecosystem(
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int, new_name: str
+) -> int:
+    """Клонирует экосистему: создаёт новую с теми же настройками и составом.
+    Возвращает id новой экосистемы."""
+    eco = await get_ecosystem(pool, ecosystem_id, owner_id)
+    if not eco:
+        raise ValueError(f"Ecosystem {ecosystem_id} not found")
+
+    new_id = await create_ecosystem(
+        pool, owner_id, new_name,
+        description=f"Клон: {eco.get('description', '')}",
+        ecosystem_type=eco["ecosystem_type"],
+        region=eco.get("region"),
+    )
+
+    # Copy all members
+    members = await get_members(pool, ecosystem_id, owner_id)
+    for m in members:
+        try:
+            await add_member(pool, new_id, owner_id, m["object_type"], m["object_id"], m.get("role", "member"))
+        except Exception:
+            pass
+
+    await record_event(
+        pool, new_id, owner_id,
+        "cloned", f"Клонирована из экосистемы #{ecosystem_id}: {eco['name']}",
+        severity="info", details={"source_ecosystem_id": ecosystem_id},
+    )
+    return new_id
+
+
+# ── Sync scores ───────────────────────────────────────────────────────────────
+
+async def sync_ecosystem_scores(
+    pool: asyncpg.Pool, ecosystem_id: int, owner_id: int,
+) -> dict:
+    """Пересчитывает и сохраняет health/pressure/risk/growth в строке экосистемы.
+    Возвращает обновлённые значения."""
+    health, pressure, risk = await asyncio.gather(
+        compute_health(pool, ecosystem_id, owner_id),
+        compute_pressure(pool, ecosystem_id, owner_id),
+        compute_risk(pool, ecosystem_id, owner_id),
+        return_exceptions=True,
+    )
+
+    if isinstance(health, Exception):
+        health = EcosystemHealth()
+    if isinstance(pressure, Exception):
+        pressure = EcosystemPressure()
+    if isinstance(risk, Exception):
+        risk = EcosystemRisk()
+
+    await pool.execute(
+        """UPDATE ecosystems SET
+               health_score      = $1,
+               stability_score   = $2,
+               reliability_score = $3,
+               recovery_score    = $4,
+               growth_score      = $5,
+               pressure_score    = $6,
+               risk_level        = $7,
+               updated_at        = now()
+           WHERE id=$8 AND owner_id=$9""",
+        health.health_score,
+        health.stability_score,
+        health.reliability_score,
+        health.recovery_score,
+        health.growth_score,
+        pressure.score,
+        risk.level,
+        ecosystem_id, owner_id,
+    )
+
+    await record_event(
+        pool, ecosystem_id, owner_id,
+        "scores_synced", "Метрики экосистемы синхронизированы",
+        severity="info",
+        details={
+            "health": round(health.overall, 3),
+            "pressure": pressure.score,
+            "risk": risk.level,
+        },
+    )
+
+    return {
+        "health": round(health.overall, 3),
+        "pressure": pressure.score,
+        "risk_level": risk.level,
+        "stability": round(health.stability_score, 3),
+        "reliability": round(health.reliability_score, 3),
+    }

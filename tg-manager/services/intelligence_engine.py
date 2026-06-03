@@ -899,6 +899,32 @@ async def _pre_launch_impl(
         intel.go_decision = True
         intel.warning_text = f"Высокий риск операции: {risk.reasons[0]}" if risk.reasons else "Высокий риск"
 
+    # Ecosystem context: проверяем критические экосистемы владельца
+    try:
+        from services import ecosystem_brain as _eb
+        _ecosystems = await _eb.list_ecosystems(pool, owner_id)
+        for _eco in _ecosystems:
+            _h = (_eco.get("health_score") or 1.0)
+            _p = (_eco.get("pressure_score") or 0)
+            _risk_level = (_eco.get("risk_level") or "low")
+            if _h < 0.35:
+                _eco_warn = f"Экосистема «{_eco['name']}»: здоровье критическое ({int(_h*100)}%)"
+                if not intel.warning_text:
+                    intel.warning_text = _eco_warn
+                break
+            if _p >= 80:
+                _eco_warn = f"Экосистема «{_eco['name']}»: давление {_p}/100"
+                if not intel.warning_text:
+                    intel.warning_text = _eco_warn
+                break
+            if _risk_level == "critical":
+                _eco_warn = f"Экосистема «{_eco['name']}»: критический риск"
+                if not intel.warning_text:
+                    intel.warning_text = _eco_warn
+                break
+    except Exception:
+        pass
+
     return intel
 
 

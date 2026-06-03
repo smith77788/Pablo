@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r25
+- **Текущая build:** 2026.06.03-r26
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -920,4 +920,28 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ Правило 7: нет каналов/групп/ботов в экосистеме с аккаунтами
 
 *Последнее обновление: 2026-06-03 (r25)* *Следующий build-номер: r26*
+
+### ✅ ЗАКРЫТО (r26) — EPOCH III: DNA + Clone + Sync + Intelligence
+
+**Ecosystem DNA Templates:**
+- ✅ `ecosystem_brain.create_dna / list_dna / get_dna / delete_dna`
+- ✅ `capture_dna_from_ecosystem` — снимает слепок структуры (тип, регион, состав) в DNA-таблицу
+- ✅ `apply_dna_to_ecosystem` — применяет шаблон (тип/регион/dna_id) к любой экосистеме
+- ✅ UI: кнопка 🧬 DNA в eco_view → список шаблонов → просмотр → применить/удалить
+- ✅ FSM `EcosystemDnaFSM` для ввода имени шаблона
+
+**Ecosystem Cloning:**
+- ✅ `clone_ecosystem` — создаёт копию с теми же настройками и участниками
+- ✅ UI: кнопка ♻️ Клон в eco_view → FSM ввода имени
+- ✅ FSM `EcosystemCloneFSM`
+
+**Ecosystem Sync:**
+- ✅ `sync_ecosystem_scores` — пересчитывает health/pressure/risk и сохраняет в строку БД
+- ✅ UI: кнопка 🔃 Синхр. в eco_view
+
+**Ecosystem Intelligence (intelligence_engine):**
+- ✅ `_pre_launch_impl` теперь проверяет все экосистемы владельца
+- ✅ Если health < 35%, pressure >= 80 или risk=critical → добавляет предупреждение в pre-launch блок
+
+*Последнее обновление: 2026-06-03 (r26)* *Следующий build-номер: r27*
 

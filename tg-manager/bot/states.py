@@ -456,3 +456,11 @@ class EcosystemAddMemberFSM(StatesGroup):
     choose_type = State()
     choose_object = State()
     awaiting_screenshot = State()   # скриншот для доказательства
+
+
+class EcosystemDnaFSM(StatesGroup):
+    naming = State()  # ввод имени DNA-шаблона
+
+
+class EcosystemCloneFSM(StatesGroup):
+    naming = State()  # ввод имени клона
