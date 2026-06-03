@@ -993,6 +993,10 @@ async def _exec_global_presence_channel(
                 str(result["error"])[:500], target["id"],
             )
             failed_count += 1
+            _infra_mem.record_account_op(
+                acc["id"], "global_presence_channel", success=False,
+                error=str(result["error"])[:100],
+            )
             await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             await asyncio.sleep(random.uniform(10, 25) * session_simulator.chaos_factor())
             continue
@@ -1039,6 +1043,7 @@ async def _exec_global_presence_channel(
             "UPDATE global_presence_targets SET status='done', result_asset_id=$1 WHERE id=$2",
             channel_id, target["id"],
         )
+        _infra_mem.record_account_op(acc["id"], "global_presence_channel", success=True)
         created_count += 1
 
         await pool.execute(
@@ -1186,6 +1191,10 @@ async def _exec_global_presence_bot(
                 str(result["error"])[:500], target["id"],
             )
             failed_count += 1
+            _infra_mem.record_account_op(
+                acc["id"], "global_presence_bot", success=False,
+                error=str(result["error"])[:100],
+            )
             await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
             await asyncio.sleep(random.uniform(30, 60))
             continue
@@ -1205,6 +1214,7 @@ async def _exec_global_presence_bot(
         await pool.execute(
             "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
         )
+        _infra_mem.record_account_op(acc["id"], "global_presence_bot", success=True)
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
             op_id, created_count + failed_count + 1,

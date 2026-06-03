@@ -792,15 +792,35 @@ async def cb_mini_strike_category(
     from config import SMTP_HOST, SMTP_USER
     smtp_status = "✅ настроен" if (SMTP_HOST and SMTP_USER) else "⚠️ не настроен (email-репорты недоступны)"
 
-    # Intelligence pre-launch анализ (параллельно)
-    from services import infra_orchestrator as _orch
+    # Full pre-launch intelligence (intelligence_engine)
+    intel_block = ""
     try:
-        _state_task = _orch.get_state(pool, callback.from_user.id)
-        _cap_task   = _orch.estimate_capacity(pool, callback.from_user.id, "strike", 1)
-        _intel_state, _intel_cap = await asyncio.gather(_state_task, _cap_task)
-        intel_block = _build_strike_intelligence_text(_intel_state.to_dict(), _intel_cap)
+        from services import intelligence_engine as _ie
+        intel = await _ie.get_pre_launch_intelligence(
+            pool, callback.from_user.id, "strike", 1
+        )
+        intel_block = _ie.format_pre_launch_block(intel)
+        # Append excluded accounts section if any
+        excluded = [a for a in intel.all_accounts if not a.recommended and a.skip_reason]
+        if excluded:
+            ex_lines = ["\n⛔ <b>Исключены из операции:</b>"]
+            for a in excluded[:4]:
+                import html as _html
+                ex_lines.append(
+                    f"  • {_html.escape(a.label())} — {_html.escape(a.skip_reason or '?')}"
+                )
+            intel_block += "\n".join(ex_lines)
     except Exception:
-        intel_block = ""
+        # Fallback to simple state-based block
+        try:
+            from services import infra_orchestrator as _orch
+            _intel_state, _intel_cap = await asyncio.gather(
+                _orch.get_state(pool, callback.from_user.id),
+                _orch.estimate_capacity(pool, callback.from_user.id, "strike", 1),
+            )
+            intel_block = _build_strike_intelligence_text(_intel_state.to_dict(), _intel_cap)
+        except Exception:
+            pass
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить страйк", callback_data=StrikeCb(action="mini_run"))
