@@ -78,6 +78,47 @@ async def _capacity_line(pool: asyncpg.Pool, owner_id: int, op_type: str, total_
         return ""
 
 
+async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list) -> str:
+    """Intelligence-блок для экрана подтверждения массовых операций (макс. 8 строк).
+
+    Запрашивает state + capacity параллельно. При любой ошибке возвращает ''.
+    """
+    try:
+        state_res, cap_res = await asyncio.gather(
+            infra_orchestrator.get_state(pool, owner_id),
+            infra_orchestrator.estimate_capacity(pool, owner_id, op_type, total_items, account_ids=acc_ids or None),
+        )
+        pressure  = state_res.pressure_emoji
+        p_label   = state_res.pressure_label
+        p_score   = state_res.pressure_score
+        available = state_res.account_available
+        cooling   = state_res.account_cooling
+        total_acc = state_res.account_total
+        est_min   = cap_res.get("estimated_minutes", 0)
+
+        lines = [
+            "📊 <b>Анализ операции</b>",
+            f"{pressure} Инфраструктура: {p_label} ({p_score}/100)",
+            f"👥 Аккаунты: ✅ {available}  ⏳ {cooling}  📱 {total_acc}",
+        ]
+        if est_min and est_min > 0:
+            lines.append(f"⏱ Прогноз выполнения: ~{est_min:.0f} мин")
+
+        # Предупреждения (max 2, только critical/warning)
+        recs = state_res.recommendations or []
+        shown = 0
+        for rec in recs:
+            if shown >= 2:
+                break
+            if rec.get("severity") in ("critical", "warning"):
+                lines.append(f"⚠️ {rec.get('text', rec.get('message', ''))[:80]}")
+                shown += 1
+
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 # ── Main menu ────────────────────────────────────────────────────────────────
 
 @router.callback_query(MassOpCb.filter(F.action == "menu"))
@@ -1543,7 +1584,10 @@ async def cb_bulk_join_delay(
 
     icon, delay_str, time_est = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
     n = len(links) * len(acc_ids)
-    cap_line = await _capacity_line(pool, callback.from_user.id, "join", n, acc_ids)
+    cap_line, intel = await asyncio.gather(
+        _capacity_line(pool, callback.from_user.id, "join", n, acc_ids),
+        _intel_block(pool, callback.from_user.id, "join", n, acc_ids),
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить join", callback_data=MassOpCb(action="bj_confirm"))
@@ -1558,6 +1602,7 @@ async def cb_bulk_join_delay(
         f"Задержка: <b>{icon} {delay_str}</b>\n"
         f"Операций: <b>{n}</b> (~{time_est})\n"
         + (f"{cap_line}\n" if cap_line else "")
+        + (f"\n{intel}\n" if intel else "")
         + f"\n<b>Список:</b>\n{link_preview}",
         reply_markup=kb.as_markup(),
     )
@@ -1848,7 +1893,10 @@ async def cb_bulk_leave_delay(
 
     icon, delay_str, time_est = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", "переменно"))
     n = len(channels) * len(acc_ids)
-    cap_line = await _capacity_line(pool, callback.from_user.id, "leave", n, acc_ids)
+    cap_line, intel = await asyncio.gather(
+        _capacity_line(pool, callback.from_user.id, "leave", n, acc_ids),
+        _intel_block(pool, callback.from_user.id, "leave", n, acc_ids),
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Запустить leave", callback_data=MassOpCb(action="bl_confirm"))
@@ -1863,6 +1911,7 @@ async def cb_bulk_leave_delay(
         f"Задержка: <b>{icon} {delay_str}</b>\n"
         f"Операций: <b>{n}</b> (~{time_est})\n"
         + (f"{cap_line}\n" if cap_line else "")
+        + (f"\n{intel}\n" if intel else "")
         + f"\n<b>Список:</b>\n{ch_preview}",
         reply_markup=kb.as_markup(),
     )

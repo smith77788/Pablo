@@ -618,6 +618,45 @@ async def cb_strike_admin_grant(
 # Поток: /mini → ввод @channel → выбор категории → подтверждение → выполнение
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _build_strike_intelligence_text(state_dict: dict, capacity_dict: dict) -> str:
+    """Компактный intelligence-блок для экрана подтверждения STRIKE (макс. 8 строк)."""
+    pressure = state_dict.get("pressure", {})
+    accounts = state_dict.get("accounts", {})
+    score    = pressure.get("score", 0)
+    emoji    = pressure.get("emoji", "🟢")
+    label    = pressure.get("label", "Норма")
+    available = accounts.get("available", 0)
+    cooling   = accounts.get("cooling", 0)
+    total     = accounts.get("total", 0)
+
+    est_min  = capacity_dict.get("estimated_minutes", 0)
+    # Упрощённая вероятность успеха на основе давления и доступных аккаунтов
+    success_pct = max(10, 100 - score) if available > 0 else 0
+
+    lines = [
+        "🎯 <b>Анализ операции STRIKE</b>",
+        f"📊 Инфраструктура: {emoji} {label} ({score}/100)",
+        f"👥 Аккаунты: ✅ {available}  ⏳ {cooling}  📱 {total}",
+    ]
+    if est_min and est_min > 0:
+        lines.append(f"⚡ Прогноз: ⏱ ~{est_min:.0f} мин · 📈 {success_pct}%")
+    else:
+        lines.append(f"⚡ Вероятность успеха: 📈 {success_pct}%")
+
+    # Рекомендации (максимум 2, только важные)
+    recs = state_dict.get("recommendations", [])
+    shown = 0
+    for rec in recs:
+        if shown >= 2:
+            break
+        severity = rec.get("severity", "")
+        if severity in ("critical", "warning"):
+            lines.append(f"⚠️ {rec.get('text', rec.get('message', ''))[:80]}")
+            shown += 1
+
+    return "\n".join(lines)
+
+
 def _category_kb(target: str) -> InlineKeyboardBuilder:
     from services.strike_engine import MINI_CATEGORIES
     kb = InlineKeyboardBuilder()
@@ -753,6 +792,16 @@ async def cb_mini_strike_category(
     from config import SMTP_HOST, SMTP_USER
     smtp_status = "✅ настроен" if (SMTP_HOST and SMTP_USER) else "⚠️ не настроен (email-репорты недоступны)"
 
+    # Intelligence pre-launch анализ (параллельно)
+    from services import infra_orchestrator as _orch
+    try:
+        _state_task = _orch.get_state(pool, callback.from_user.id)
+        _cap_task   = _orch.estimate_capacity(pool, callback.from_user.id, "strike", 1)
+        _intel_state, _intel_cap = await asyncio.gather(_state_task, _cap_task)
+        intel_block = _build_strike_intelligence_text(_intel_state.to_dict(), _intel_cap)
+    except Exception:
+        intel_block = ""
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить страйк", callback_data=StrikeCb(action="mini_run"))
     kb.button(text="❌ Отмена",           callback_data=StrikeCb(action="menu"))
@@ -769,7 +818,8 @@ async def cb_mini_strike_category(
         f"• Email abuse@telegram.org: {smtp_status}\n"
         f"{'• Email NCMEC CyberTipline: ' + smtp_status + chr(10) if cat.get('ncmec') else ''}"
         f"• Форма telegram.org/support\n\n"
-        f"⏱ Ориентировочно: 2–5 минут",
+        f"⏱ Ориентировочно: 2–5 минут"
+        + (f"\n\n{intel_block}" if intel_block else ""),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
