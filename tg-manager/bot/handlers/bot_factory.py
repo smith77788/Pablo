@@ -205,6 +205,22 @@ async def cb_import_save(callback: CallbackQuery, state: FSMContext,
             skipped += 1
 
     await state.clear()
+
+    # EPOCH III: add saved bots to most recent active ecosystem
+    eco_added = 0
+    if saved > 0:
+        try:
+            from services import ecosystem_brain as _eb
+            ecos = await _eb.list_ecosystems(pool, user_id)
+            if ecos:
+                eco_id = ecos[0]["id"]
+                for bot_info in valid_bots:
+                    ok = await _eb.add_member(pool, eco_id, user_id, "bot", bot_info["id"])
+                    if ok:
+                        eco_added += 1
+        except Exception:
+            pass
+
     kb = InlineKeyboardBuilder()
     # If at least one bot was saved, offer to add to ecosystem
     first_saved_id = 0
@@ -223,7 +239,8 @@ async def cb_import_save(callback: CallbackQuery, state: FSMContext,
     await callback.message.edit_text(
         f"✅ <b>Импорт завершён</b>\n\n"
         f"Сохранено: <b>{saved}</b>\n"
-        f"Пропущено (уже существуют): <b>{skipped}</b>",
+        f"Пропущено (уже существуют): <b>{skipped}</b>"
+        + eco_note,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

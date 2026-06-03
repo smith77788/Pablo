@@ -247,7 +247,6 @@ async def cb_eco_view(
     kb.button(text="🔄 Обновить",     callback_data=EcoCb(action="view",     eco_id=eco_id))
     kb.button(text="◀️ Назад",        callback_data=EcoCb(action="menu"))
     kb.adjust(3, 2, 2, 2, 3)
-
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -634,6 +633,254 @@ async def cb_eco_archive(
         "📦 <b>Экосистема архивирована</b>",
         parse_mode="HTML", reply_markup=kb.as_markup(),
     )
+
+
+# ── Ecosystem Sync Engine ─────────────────────────────────────────────────────
+
+@router.callback_query(EcoCb.filter(F.action == "sync_preview"))
+async def cb_eco_sync_preview(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
+    from services import ecosystem_brain as _eb
+    eco_id = callback_data.eco_id
+    eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
+    if not eco:
+        await callback.answer("Экосистема не найдена", show_alert=True)
+        return
+    await callback.answer("⏳ Анализирую...")
+
+    owner_id = callback.from_user.id
+
+    new_accounts = await pool.fetchval(
+        """SELECT COUNT(*) FROM tg_accounts
+           WHERE owner_id=$1 AND is_active=TRUE
+             AND NOT EXISTS (
+                 SELECT 1 FROM ecosystem_members em
+                 WHERE em.ecosystem_id=$2 AND em.object_type='account' AND em.object_id=tg_accounts.id
+             )""",
+        owner_id, eco_id,
+    ) or 0
+
+    new_channels = await pool.fetchval(
+        """SELECT COUNT(*) FROM managed_channels mc
+           WHERE mc.owner_id=$1
+             AND NOT EXISTS (
+                 SELECT 1 FROM ecosystem_members em
+                 WHERE em.ecosystem_id=$2 AND em.object_type='channel' AND em.object_id=mc.channel_id
+             )""",
+        owner_id, eco_id,
+    ) or 0
+
+    stale_ids = await pool.fetch(
+        """SELECT em.id FROM ecosystem_members em
+           LEFT JOIN tg_accounts a ON a.id=em.object_id AND a.is_active=TRUE AND a.owner_id=$2
+           WHERE em.ecosystem_id=$1 AND em.object_type='account' AND a.id IS NULL""",
+        eco_id, owner_id,
+    )
+    stale_count = len(stale_ids)
+
+    current_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM ecosystem_members WHERE ecosystem_id=$1", eco_id,
+    ) or 0
+
+    lines = [
+        f"🔁 <b>Синхронизация: {html.escape(eco['name'])}</b>\n",
+        f"📦 Текущих объектов: <b>{current_count}</b>\n",
+    ]
+    if new_accounts or new_channels:
+        lines.append("➕ <b>Доступно для добавления:</b>")
+        if new_accounts:
+            lines.append(f"  📱 Аккаунтов: {new_accounts}")
+        if new_channels:
+            lines.append(f"  📡 Каналов: {new_channels}")
+        lines.append("")
+    if stale_count:
+        lines.append(f"🗑 Устаревших записей: {stale_count} (аккаунты отключены)")
+        lines.append("")
+    if not new_accounts and not new_channels and not stale_count:
+        lines.append("✅ Экосистема синхронизирована. Изменений не найдено.")
+
+    kb = InlineKeyboardBuilder()
+    if new_accounts or new_channels or stale_count:
+        kb.button(text="⚡ Выполнить синхронизацию",
+                  callback_data=EcoCb(action="sync_execute", eco_id=eco_id))
+    kb.button(text="◀️ Назад", callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(EcoCb.filter(F.action == "sync_execute"))
+async def cb_eco_sync_execute(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
+    from services import ecosystem_brain as _eb
+    eco_id = callback_data.eco_id
+    owner_id = callback.from_user.id
+    eco = await _eb.get_ecosystem(pool, eco_id, owner_id)
+    if not eco:
+        await callback.answer("Экосистема не найдена", show_alert=True)
+        return
+    await callback.answer("⏳ Синхронизирую...")
+
+    # Remove stale account members (account disabled/deleted)
+    stale_ids = await pool.fetch(
+        """SELECT em.id FROM ecosystem_members em
+           LEFT JOIN tg_accounts a ON a.id=em.object_id AND a.is_active=TRUE AND a.owner_id=$2
+           WHERE em.ecosystem_id=$1 AND em.object_type='account' AND a.id IS NULL""",
+        eco_id, owner_id,
+    )
+    if stale_ids:
+        await pool.execute(
+            "DELETE FROM ecosystem_members WHERE id=ANY($1::bigint[])",
+            [r["id"] for r in stale_ids],
+        )
+
+    # Add new members via auto-discover
+    added = await _eb.auto_discover_members(pool, eco_id, owner_id)
+    added_total = sum(added.values())
+
+    await _eb.record_event(
+        pool, eco_id, owner_id,
+        event_type="sync",
+        title=f"Синхронизация: +{added_total} добавлено, {len(stale_ids)} удалено",
+        severity="info",
+        details={"added": added, "stale_removed": len(stale_ids)},
+    )
+
+    lines = ["✅ <b>Синхронизация выполнена</b>\n"]
+    if added:
+        parts = []
+        for t, (icon, _) in _MEMBER_TYPES.items():
+            if t in added:
+                parts.append(f"{icon} +{added[t]}")
+        lines.append(f"➕ Добавлено: {' | '.join(parts)}")
+    if stale_ids:
+        lines.append(f"🗑 Удалено устаревших: {len(stale_ids)}")
+    if not added and not stale_ids:
+        lines.append("Изменений не было.")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔁 Повторить проверку", callback_data=EcoCb(action="sync_preview", eco_id=eco_id))
+    kb.button(text="◀️ Экосистема",        callback_data=EcoCb(action="view",         eco_id=eco_id))
+    kb.adjust(2)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ── DNA Templates ─────────────────────────────────────────────────────────────
+
+@router.callback_query(EcoCb.filter(F.action == "dna_save"))
+async def cb_eco_dna_save(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
+    import json as _json
+    from services import ecosystem_brain as _eb
+    eco_id = callback_data.eco_id
+    owner_id = callback.from_user.id
+    eco = await _eb.get_ecosystem(pool, eco_id, owner_id)
+    if not eco:
+        await callback.answer("Экосистема не найдена", show_alert=True)
+        return
+    await callback.answer("⏳ Сохраняю ДНК...")
+
+    counts_rows = await pool.fetch(
+        "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members WHERE ecosystem_id=$1 GROUP BY object_type",
+        eco_id,
+    )
+    member_counts = {r["object_type"]: r["cnt"] for r in counts_rows}
+
+    template_data = {
+        "member_counts": member_counts,
+        "ecosystem_type": eco["ecosystem_type"],
+        "health_threshold": 0.65,
+        "pressure_threshold": 70,
+        "region": eco["region"],
+    }
+
+    dna_id = await pool.fetchval(
+        """INSERT INTO ecosystem_dna (owner_id, name, dna_type, description, template_data)
+           VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id""",
+        owner_id,
+        eco["name"] + " — ДНК",
+        eco["ecosystem_type"],
+        f"Шаблон из экосистемы {eco['name']}",
+        _json.dumps(member_counts and template_data or {}),
+    )
+
+    await pool.execute(
+        "UPDATE ecosystems SET dna_id=$1 WHERE id=$2 AND owner_id=$3",
+        dna_id, eco_id, owner_id,
+    )
+
+    await _eb.record_event(
+        pool, eco_id, owner_id,
+        event_type="dna_saved",
+        title=f"ДНК-шаблон сохранён (id={dna_id})",
+        severity="info",
+        details={"dna_id": dna_id, "member_counts": member_counts},
+    )
+
+    counts_str = "\n".join(
+        f"  {_MEMBER_TYPES.get(t, ('•', t))[0]} {t}: {c}"
+        for t, c in member_counts.items()
+    ) or "  (участников нет)"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Все ДНК-шаблоны", callback_data=EcoCb(action="dna_list"))
+    kb.button(text="◀️ Назад",           callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(2)
+    await callback.message.edit_text(
+        f"🧬 <b>ДНК-шаблон сохранён</b>\n\n"
+        f"<b>{html.escape(eco['name'])}</b>\n\n"
+        f"Состав:\n{counts_str}\n\n"
+        f"<i>Шаблон можно применить при создании новой экосистемы.</i>",
+        parse_mode="HTML", reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(EcoCb.filter(F.action == "dna_list"))
+async def cb_eco_dna_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    import json as _json
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    templates = await pool.fetch(
+        """SELECT id, name, dna_type, template_data, created_at
+           FROM ecosystem_dna WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 10""",
+        owner_id,
+    )
+
+    if not templates:
+        text = (
+            "🧬 <b>ДНК-шаблоны экосистем</b>\n\n"
+            "Сохранённых шаблонов нет.\n"
+            "Откройте экосистему → 🧬 ДНК-шаблон, чтобы создать первый."
+        )
+    else:
+        lines = ["🧬 <b>ДНК-шаблоны экосистем</b>\n"]
+        for t in templates:
+            raw = t["template_data"]
+            td = _json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+            counts = td.get("member_counts", {})
+            parts = []
+            for k, v in counts.items():
+                if v:
+                    icon = _MEMBER_TYPES.get(k, ("•", k))[0]
+                    parts.append(f"{icon}{v}")
+            eco_icon = _ECO_TYPES.get(t["dna_type"], ("🌐", ""))[0]
+            counts_str = " ".join(parts) if parts else "пусто"
+            lines.append(f"{eco_icon} <b>{html.escape(t['name'])}</b>  <i>{counts_str}</i>")
+        text = "\n".join(lines)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Назад", callback_data=EcoCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Ecosystem Copilot snooze ──────────────────────────────────────────────────

@@ -630,6 +630,15 @@ async def cb_chanf_do_create(
     if uname and "не установлен" not in uname_result:
         tme_link = f"\nt.me: <a href=\"https://t.me/{html.escape(uname)}\">t.me/{html.escape(uname)}</a>"
 
+    # EPOCH III: auto-add channel to most recent active ecosystem
+    try:
+        from services import ecosystem_brain as _eb
+        ecos = await _eb.list_ecosystems(pool, callback.from_user.id)
+        if ecos:
+            await _eb.add_member(pool, ecos[0]["id"], callback.from_user.id, "channel", channel_id)
+    except Exception:
+        pass
+
     kb = InlineKeyboardBuilder()
     if uname and "не установлен" not in uname_result:
         kb.button(text=f"🔗 Открыть t.me/{html.escape(uname)}", url=f"https://t.me/{uname}")
