@@ -32,6 +32,40 @@ _FATAL_ERRORS = {
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 
 
+def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
+    """Обеспечить единый формат результата операции для хранения и отчётов.
+
+    Канонические поля: status, ok, failed, total, summary, duration_s.
+    Существующие алиасы (sent, created) нормализуются в ok.
+    """
+    if not isinstance(result, dict):
+        result = {"status": "done", "summary": str(result)}
+
+    # Нормализация ok: разные exec-функции используют sent/ok/created
+    if "ok" not in result:
+        for alias in ("sent", "created", "waves_completed"):
+            if alias in result:
+                result["ok"] = result[alias]
+                break
+        else:
+            result["ok"] = 0
+
+    if "failed" not in result:
+        result["failed"] = 0
+
+    if "total" not in result:
+        result["total"] = result.get("ok", 0) + result.get("failed", 0)
+
+    if "summary" not in result or not result["summary"]:
+        ok = result.get("ok", 0)
+        failed = result.get("failed", 0)
+        result["summary"] = f"✅ {ok} успешно, ❌ {failed} ошибок"
+
+    result["duration_s"] = round(duration_s, 1)
+    result["op_type"] = op_type
+    return result
+
+
 def _classify_op_error(exc: Exception) -> str:
     """Классифицирует ошибку операции: 'retry' | 'flood' | 'fatal' | 'skip'."""
     name = type(exc).__name__
@@ -352,6 +386,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             elapsed = time.monotonic() - _t_start
             duration_seconds = round(elapsed, 1)
+            result = _normalize_result(result, op_type, duration_seconds)
             log.info(
                 "op_worker: op_id=%d op_type=%s done in %.1fs (duration_seconds=%.1f) — %s",
                 op_id, op_type, elapsed, duration_seconds, result.get("summary", ""),
