@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncpg
 import json
 import logging
+from services import operation_bus
 
 log = logging.getLogger(__name__)
 
@@ -813,13 +814,9 @@ async def execute_action(
     elif name == "bulk_create_channels":
         # Enqueue in operation_queue instead of immediate execution
         count = int(action_data.get("count", 5))
-        op_id = await pool.fetchval(
-            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, done_items)
-               VALUES($1, 'bulk_create_channels', 'pending', $2::jsonb, $3, 0)
-               RETURNING id""",
-            user_id,
-            json.dumps(action_data),
-            count,
+        op_id = await operation_bus.submit(
+            pool, user_id, "bulk_create_channels", action_data,
+            total_items=count,
         )
         return (
             f"✅ Операция #{op_id} поставлена в очередь.\n"
