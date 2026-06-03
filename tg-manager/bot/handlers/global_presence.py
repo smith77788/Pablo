@@ -19,7 +19,7 @@ from services.geo_data import GEO_PRESETS, parse_custom_geo_list
 from services.presence_planner import render_pattern, build_targets, estimate_duration_minutes
 from services.username_engine import slugify
 from services.logger import log_exc_swallow
-from services import operation_bus
+from services import operation_bus, infra_orchestrator
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -992,7 +992,14 @@ async def cb_gp_confirm_preview(
 async def cb_gp_launch(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("⏳ Создаём план…")
+    # Проверка давления инфраструктуры
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+    warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
+    await callback.answer(warn or "⏳ Создаём план…", show_alert=bool(warn))
+
     sd = await state.get_data()
 
     asset_type = sd.get("asset_type", "channel")
