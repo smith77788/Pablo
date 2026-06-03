@@ -782,7 +782,15 @@ async def cb_mini_strike_run(
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    await callback.answer()
+
+    # Проверка давления инфраструктуры
+    from services import infra_orchestrator
+    ready, reason = await infra_orchestrator.is_ready_for_op(pool, callback.from_user.id)
+    if not ready:
+        await callback.answer(f"🚫 {reason}", show_alert=True)
+        return
+    warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
+    await callback.answer(warn or "", show_alert=bool(warn))
 
     sd = await state.get_data()
     target = sd.get("target", "")
