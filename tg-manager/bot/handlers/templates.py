@@ -202,12 +202,17 @@ async def msg_template_text(
 async def cb_template_view(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
 ) -> None:
-
+    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id))
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
-    await callback.answer()
     preview = tpl["text"][:900] + ("…" if len(tpl["text"]) > 900 else "")
     await callback.message.edit_text(
         f"📝 <b>{_html.escape(tpl['name'])}</b>\n\n{preview}",
@@ -220,14 +225,19 @@ async def cb_template_view(
 async def cb_template_delete(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool
 ) -> None:
-
+    await callback.answer()
     deleted = await db.delete_template(
         pool, callback_data.template_id, callback.from_user.id
     )
     if not deleted:
-        await callback.answer("Не удалось удалить шаблон.", show_alert=True)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id))
+        await callback.message.edit_text(
+            "❌ Не удалось удалить шаблон.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
-    await callback.answer()
     templates = await db.get_templates(pool, callback.from_user.id)
     bot_id = callback_data.bot_id
     count = len(templates)
@@ -250,12 +260,17 @@ async def cb_template_use(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-
+    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=callback_data.bot_id))
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
-    await callback.answer()
     bot_id = callback_data.bot_id
     template_text = tpl["text"]
 
@@ -428,12 +443,12 @@ async def msg_ai_template_prompt(
 async def cb_template_ai_regen(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
+    await callback.answer("⏳ Генерирую…")
     data = await state.get_data()
     prompt = data.get("prompt", "")
     bot_id = callback_data.bot_id
 
     if not prompt:
-        await callback.answer()
         await state.set_state(AiTemplateGenFSM.waiting_prompt)
         await state.update_data(bot_id=bot_id)
         kb = InlineKeyboardBuilder()
@@ -444,8 +459,6 @@ async def cb_template_ai_regen(
             reply_markup=kb.as_markup(),
         )
         return
-
-    await callback.answer("⏳ Генерирую…")
     generated = await _call_ai(f"Создай шаблон сообщения для Telegram-бота: {prompt}")
 
     if not generated:
@@ -473,16 +486,21 @@ async def cb_template_ai_regen(
 async def cb_template_ai_save(
     callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
 ) -> None:
+    await callback.answer()
     data = await state.get_data()
     generated_text = data.get("generated_text", "")
     bot_id = callback_data.bot_id
 
     if not generated_text:
-        await callback.answer("Нет сгенерированного текста.", show_alert=True)
         await state.clear()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=TemplateCb(action="list", bot_id=bot_id))
+        await callback.message.edit_text(
+            "❌ Нет сгенерированного текста. Попробуйте сгенерировать заново.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
         return
-
-    await callback.answer()
     await state.set_state(AiTemplateGenFSM.waiting_name)
     await state.update_data(bot_id=bot_id, generated_text=generated_text)
     kb = InlineKeyboardBuilder()

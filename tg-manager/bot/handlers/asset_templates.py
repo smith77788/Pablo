@@ -250,16 +250,22 @@ async def cb_list(
 
     if templates:
         text = f"📄 <b>Шаблоны: {label}</b>\n\nНайдено: {len(templates)} шт."
+        markup = _list_kb(templates, asset_type)
     else:
         text = (
             f"📄 <b>Шаблоны: {label}</b>\n\n"
-            "Шаблонов пока нет. Нажмите <b>➕ Создать</b> в главном меню."
+            "Шаблонов пока нет."
         )
+        kb = InlineKeyboardBuilder()
+        kb.button(text="➕ Создать шаблон", callback_data=AssetTplCb(action="create"))
+        kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
+        kb.adjust(1)
+        markup = kb.as_markup()
 
     await callback.message.edit_text(
         text,
         parse_mode="HTML",
-        reply_markup=_list_kb(templates, asset_type),
+        reply_markup=markup,
     )
 
 
@@ -269,15 +275,20 @@ async def cb_view(
     callback_data: AssetTplCb,
     pool: asyncpg.Pool,
 ) -> None:
+    await callback.answer()
     tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not tpl:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=_menu_kb(),
+        )
         return
-    await callback.answer()
 
     try:
         data = json.loads(tpl["template"]) if isinstance(tpl["template"], str) else tpl["template"]
-    except Exception:
+    except Exception as e:
+        log.warning("Failed to parse template JSON for tpl_id=%s: %s", tpl.get("id"), e)
         data = {}
 
     lines = [f"📄 <b>{tpl['name']}</b>", f"Тип: {_TYPE_LABELS.get(tpl['asset_type'], tpl['asset_type'])}"]
@@ -321,9 +332,12 @@ async def cb_choose_type(callback: CallbackQuery, callback_data: AssetTplCb, sta
     await state.update_data(asset_type=asset_type)
     await state.set_state(AssetTemplateFSM.waiting_name)
     label = _TYPE_LABELS.get(asset_type, asset_type)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AssetTplCb(action="menu"))
     await callback.message.edit_text(
         f"➕ <b>Шаблон {label} — шаг 1/2</b>\n\nВведите название шаблона:",
         parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -493,11 +507,15 @@ async def cb_apply(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
+    await callback.answer()
     tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not tpl:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=_menu_kb(),
+        )
         return
-    await callback.answer()
 
     raw = tpl["template"]
     data: dict = json.loads(raw) if isinstance(raw, str) else (raw or {})
@@ -676,11 +694,15 @@ async def cb_delete_confirm(
     callback_data: AssetTplCb,
     pool: asyncpg.Pool,
 ) -> None:
+    await callback.answer()
     tpl = await _get_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not tpl:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=_menu_kb(),
+        )
         return
-    await callback.answer()
     await callback.message.edit_text(
         f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{tpl['name']}»</b>?",
         parse_mode="HTML",
@@ -725,6 +747,7 @@ async def cb_apply_bot_exec(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    await callback.answer("⏳ Применяю шаблон...")
     user_id = callback.from_user.id
     bot_id = callback_data.bot_id
     tpl_id = callback_data.tpl_id
@@ -740,7 +763,11 @@ async def cb_apply_bot_exec(
     else:
         tpl = await _get_template(pool, tpl_id, user_id)
         if not tpl:
-            await callback.answer("Шаблон не найден.", show_alert=True)
+            await callback.message.edit_text(
+                "❌ Шаблон не найден.",
+                parse_mode="HTML",
+                reply_markup=_menu_kb(),
+            )
             return
         raw = tpl["template"]
         data = json.loads(raw) if isinstance(raw, str) else (raw or {})
@@ -752,9 +779,12 @@ async def cb_apply_bot_exec(
         bot_id, user_id,
     )
     if not bot_row:
-        await callback.answer("Бот не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Бот не найден.",
+            parse_mode="HTML",
+            reply_markup=_menu_kb(),
+        )
         return
-    await callback.answer("⏳ Применяю шаблон...")
 
     from services import bot_api
     token = bot_row["token"]
@@ -776,7 +806,8 @@ async def cb_apply_bot_exec(
         cmds = data["commands"]
         try:
             ok = await bot_api.set_my_commands(http, token, cmds)
-        except Exception:
+        except Exception as e:
+            log.warning("Failed to set_my_commands for bot_id=%s: %s", bot_id, e)
             ok = False
         results.append(f"🤖 Команды ({len(cmds)} шт.): {'✅' if ok else '❌'}")
 
@@ -901,13 +932,19 @@ async def cb_lib_type(callback: CallbackQuery, callback_data: LibCb) -> None:
 
 @router.callback_query(LibCb.filter(F.action == "preview"))
 async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool) -> None:
+    await callback.answer()
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Библиотека", callback_data=LibCb(action="menu")
+            ).as_markup(),
+        )
         return
-    await callback.answer()
 
     atype = callback_data.asset_type or key.split("__")[0]
     tdata = preset["template"]
@@ -953,13 +990,19 @@ async def cb_lib_preview(callback: CallbackQuery, callback_data: LibCb, pool: as
 
 @router.callback_query(LibCb.filter(F.action == "clone"))
 async def cb_lib_clone(callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool) -> None:
+    await callback.answer()
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Библиотека", callback_data=LibCb(action="menu")
+            ).as_markup(),
+        )
         return
-    await callback.answer()
     atype = callback_data.asset_type or key.split("__")[0]
 
     tpl_id = await _save_template(pool, callback.from_user.id, atype, preset["name"], preset["template"])
@@ -985,13 +1028,19 @@ async def cb_lib_apply(
     callback: CallbackQuery, callback_data: LibCb,
     pool: asyncpg.Pool, state: FSMContext,
 ) -> None:
+    await callback.answer()
     from services.preset_templates import get_preset_by_key
     key = callback_data.preset_key or ""
     preset = get_preset_by_key(key)
     if not preset:
-        await callback.answer("Шаблон не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Шаблон не найден.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="◀️ Библиотека", callback_data=LibCb(action="menu")
+            ).as_markup(),
+        )
         return
-    await callback.answer()
     atype = callback_data.asset_type or key.split("__")[0]
     data = preset["template"]
     tpl_name = preset["name"]
