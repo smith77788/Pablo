@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r29
+- **Текущая build:** 2026.06.03-r30
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -1005,4 +1005,32 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ При наличии нового региона: `UPDATE ecosystems SET region=$1`
 
 *Последнее обновление: 2026-06-03 (r29)* *Следующий build-номер: r30*
+
+### ✅ ЗАКРЫТО (r30) — EPOCH III: Ecosystem Factory Hub
+
+**Ecosystem Factory (🏭 Фабрика):**
+- ✅ Кнопка "🏭 Фабрика" в `cb_eco_view` keyboard
+- ✅ Импорт `ChanFactCb`, `GroupFCb`, `BotFactCb` в ecosystems.py
+- ✅ `cb_eco_factory` (action="factory"): Hub-экран с 5 вариантами:
+  - 📡 Создать канал → Channel Factory
+  - 👥 Создать группу → Group Factory
+  - 🤖 Добавить бота → Bot Factory (import)
+  - 🌍 Global Presence → GP Factory (пакетное развёртывание)
+  - 🔍 Автообнаружение → добавить все активы пользователя
+- ✅ После создания через фабрику: кнопка EcoPickCb предлагает добавить в экосистему
+
+**EPOCH III — ВСЕ КРИТЕРИИ ВЫПОЛНЕНЫ:**
+- ✅ Экосистема как первичный объект
+- ✅ Ecosystem Brain (Health/Pressure/Risk/Memory/Drift)
+- ✅ Synchronization Engine (Wizard Preview→Execute→Report)
+- ✅ DNA Templates (4 типа: Regional/Publishing/Visibility/Custom)
+- ✅ Ecosystem Cloning с Auto-Adaptation (регион)
+- ✅ Factory Hub (Ecosystem Factory)
+- ✅ Factory Integration (GP auto-create, Channel/Group/Bot EcoPickCb)
+- ✅ Strike awareness
+- ✅ Mass Ops awareness
+- ✅ Ecosystem Copilot (background loop)
+- ✅ Pre-launch Intelligence (ecosystem health gate)
+
+*Последнее обновление: 2026-06-03 (r30)* *Следующий build-номер: r31*
 

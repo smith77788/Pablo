@@ -16,7 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import asyncpg
 
-from bot.callbacks import EcoCb, BmCb, EcoPickCb, GeoPresenceCb
+from bot.callbacks import EcoCb, BmCb, EcoPickCb, GeoPresenceCb, ChanFactCb, GroupFCb, BotFactCb
 from bot.states import EcosystemCreateFSM, EcosystemAddMemberFSM, EcosystemDnaFSM, EcosystemCloneFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -265,11 +265,58 @@ async def cb_eco_view(
     kb.button(text="🔃 Синхр.",       callback_data=EcoCb(action="sync",     eco_id=eco_id))
     kb.button(text="🧬 DNA",          callback_data=EcoCb(action="dna_menu", eco_id=eco_id))
     kb.button(text="♻️ Клон",         callback_data=EcoCb(action="clone_start", eco_id=eco_id))
+    kb.button(text="🏭 Фабрика",       callback_data=EcoCb(action="factory",  eco_id=eco_id))
     kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="🔄 Обновить",     callback_data=EcoCb(action="view",     eco_id=eco_id))
     kb.button(text="◀️ Назад",        callback_data=EcoCb(action="menu"))
-    kb.adjust(3, 2, 2, 2, 2, 2)
+    kb.adjust(3, 2, 2, 2, 2, 1, 2)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── Ecosystem Factory Hub ────────────────────────────────────────────────────
+
+@router.callback_query(EcoCb.filter(F.action == "factory"))
+async def cb_eco_factory(
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+) -> None:
+    """Экосистема-Фабрика: создать активы и автоматически добавить в экосистему."""
+    from services import ecosystem_brain as _eb
+    eco_id = callback_data.eco_id
+    eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
+    if not eco:
+        await callback.answer("Экосистема не найдена", show_alert=True)
+        return
+    await callback.answer()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📡 Создать канал",
+              callback_data=ChanFactCb(action="create_start"))
+    kb.button(text="👥 Создать группу",
+              callback_data=GroupFCb(action="create_start"))
+    kb.button(text="🤖 Добавить бота",
+              callback_data=BotFactCb(action="import_start"))
+    kb.button(text="🌍 Global Presence",
+              callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="🔍 Автообнаружение",
+              callback_data=EcoCb(action="autodiscover", eco_id=eco_id))
+    kb.button(text="◀️ Назад к экосистеме",
+              callback_data=EcoCb(action="view", eco_id=eco_id))
+    kb.adjust(2, 2, 1, 1)
+
+    text = (
+        f"🏭 <b>Ecosystem Factory: {html.escape(eco['name'])}</b>\n\n"
+        f"Создайте активы и добавьте их в эту экосистему.\n\n"
+        f"<b>📡 Каналы</b> — создать новый канал → после создания нажмите "
+        f"«🌐 Добавить в экосистему»\n"
+        f"<b>👥 Группы</b> — создать группу/сообщество\n"
+        f"<b>🤖 Боты</b> — импортировать токен бота\n"
+        f"<b>🌍 Global Presence</b> — пакетное развёртывание по гео\n"
+        f"<b>🔍 Автообнаружение</b> — добавить все ваши активы автоматически"
+    )
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Health detail ─────────────────────────────────────────────────────────────
