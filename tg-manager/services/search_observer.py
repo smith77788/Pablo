@@ -406,8 +406,9 @@ async def _has_oscillation(
     return row is not None
 
 
-async def _send_alert(bot: Bot, event: asyncpg.Record) -> None:
-    """Send Telegram notification for a confirmed change event."""
+async def _send_alert(pool: asyncpg.Pool, bot: Bot, event: asyncpg.Record) -> None:
+    """Send Telegram notification for a confirmed change event via notify_if_enabled."""
+    from database import db
     entity = f"@{event['entity_id']}"
     keyword = event["keyword"]
     event_type = event["event_type"]
@@ -441,7 +442,7 @@ async def _send_alert(bot: Bot, event: asyncpg.Record) -> None:
         return
 
     try:
-        await bot.send_message(owner_id, text, parse_mode="HTML")
+        await db.notify_if_enabled(pool, bot, owner_id, "position_change", text)
         log.info(
             "search_observer alert=%s owner=%s kw=%r entity=%s",
             event_type,
@@ -542,7 +543,7 @@ async def _try_confirm_and_alert(
         return
 
     # Send alert
-    await _send_alert(bot, event)
+    await _send_alert(pool, bot, event)
     await pool.execute(
         "UPDATE search_change_events SET alerted=TRUE, alerted_at=now() WHERE id=$1",
         event["id"],

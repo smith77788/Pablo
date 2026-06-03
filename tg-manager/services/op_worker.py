@@ -201,12 +201,11 @@ async def _progress_monitor(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: 
                 from bot.callbacks import BmCb
                 kb = InlineKeyboardBuilder()
                 kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
-                await bot.send_message(
-                    owner_id,
+                await db.notify_if_enabled(
+                    pool, bot, owner_id, "op_complete",
                     f"⏳ <b>Операция #{op_id}</b> — {milestone}%\n"
                     f"[{bar}] {done}/{total}\n"
                     f"<code>{op_type}</code>",
-                    parse_mode="HTML",
                     reply_markup=kb.as_markup(),
                 )
             except asyncio.CancelledError:
@@ -334,10 +333,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 from bot.callbacks import BmCb
                 start_kb = InlineKeyboardBuilder()
                 start_kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
-                await bot.send_message(
-                    owner_id,
+                await db.notify_if_enabled(
+                    pool, bot, owner_id, "op_complete",
                     f"⚙️ <b>Операция #{op_id}</b> запущена: <code>{op_type}</code>",
-                    parse_mode="HTML",
                     reply_markup=start_kb.as_markup(),
                 )
             except Exception:
@@ -1053,11 +1051,10 @@ async def _exec_global_presence_channel(
 
         if created_count > 0 and created_count % 10 == 0:
             try:
-                await bot.send_message(
-                    owner_id,
+                await db.notify_if_enabled(
+                    pool, bot, owner_id, "op_complete",
                     f"🌍 <b>Создание каналов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                     f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
-                    parse_mode="HTML",
                 )
             except Exception:
                 log_exc_swallow(log, f"Сбой отправки прогресса создания каналов плана #{plan_id} владельцу {owner_id}")
@@ -1219,11 +1216,10 @@ async def _exec_global_presence_bot(
 
         if created_count % 5 == 0:
             try:
-                await bot.send_message(
-                    owner_id,
+                await db.notify_if_enabled(
+                    pool, bot, owner_id, "op_complete",
                     f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                     f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
-                    parse_mode="HTML",
                 )
             except Exception:
                 log_exc_swallow(log, f"Сбой отправки прогресса создания ботов плана #{plan_id} владельцу {owner_id}")
@@ -1366,11 +1362,10 @@ async def _exec_bulk_create_channels(
         # Progress update every 5 channels
         if created_count > 0 and created_count % 5 == 0:
             try:
-                await bot.send_message(
-                    owner_id,
+                await db.notify_if_enabled(
+                    pool, bot, owner_id, "op_complete",
                     f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
                     f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
-                    parse_mode="HTML",
                 )
             except Exception:
                 log_exc_swallow(log, f"Сбой отправки прогресса массового создания каналов #{op_id} владельцу {owner_id}")

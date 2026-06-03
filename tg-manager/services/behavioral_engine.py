@@ -608,13 +608,13 @@ async def _auto_conclude_experiments(pool: asyncpg.Pool, bot=None) -> None:
                         "SELECT added_by FROM managed_bots WHERE bot_id=$1", exp["bot_id"]
                     )
                     if owner:
-                        await bot.send_message(
-                            owner,
+                        from database import db as _db
+                        await _db.notify_if_enabled(
+                            pool, bot, owner, "op_complete",
                             f"🧪 <b>A/B эксперимент #{exp['id']} завершён</b>\n\n"
                             f"🏆 Победитель: вариант #{winner_id}\n"
                             f"📊 Z-score: {z:.2f} (95% значимость)\n"
                             f"📈 Показов: {total}",
-                            parse_mode="HTML",
                         )
                 except Exception:
                     log_exc_swallow(log, "Сбой уведомления о завершении A/B-эксперимента", exp_id=exp["id"])

@@ -324,11 +324,11 @@ async def run_campaign(
                 if _pct >= _milestone and _milestone not in _notified_milestones:
                     _notified_milestones.add(_milestone)
                     try:
-                        await bot.send_message(
-                            owner_id,
+                        from database import db as _db
+                        await _db.notify_if_enabled(
+                            pool, bot, owner_id, "op_complete",
                             f"📨 <b>DM «{campaign['name']}»</b> — {_milestone}%\n"
                             f"✅ {sent} отправлено · ❌ {failed} ошибок · 📊 {total} всего",
-                            parse_mode="HTML",
                         )
                     except Exception:
                         log_exc_swallow(log, f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}")
@@ -355,13 +355,13 @@ async def run_campaign(
     )
 
     try:
-        await bot.send_message(
-            owner_id,
+        from database import db as _db
+        await _db.notify_if_enabled(
+            pool, bot, owner_id, "op_complete",
             f"📨 <b>DM-кампания «{campaign['name']}» завершена</b>\n\n"
             f"✅ Отправлено: <b>{sent}</b>\n"
             f"❌ Ошибок: <b>{failed}</b>\n"
             f"📊 Всего целей: <b>{total}</b>",
-            parse_mode="HTML",
         )
     except Exception:
         log_exc_swallow(log, "Сбой уведомления о завершении DM-кампании", campaign_id=campaign_id)
