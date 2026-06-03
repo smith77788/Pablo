@@ -3340,3 +3340,76 @@ async def find_object_ecosystems(
            ORDER BY e.name""",
         owner_id, object_type, object_id,
     )
+
+
+# ── Intent Engine (v71) ──────────────────────────────────────────────────────
+
+async def create_intent(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    intent_type: str,
+    description: str,
+    plan: dict,
+    strategy: str,
+    forecast: dict,
+) -> int:
+    import json
+    return await pool.fetchval(
+        """INSERT INTO intents (owner_id, intent_type, description, plan, strategy, forecast)
+           VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb)
+           RETURNING id""",
+        owner_id, intent_type, description,
+        json.dumps(plan, ensure_ascii=False), strategy,
+        json.dumps(forecast, ensure_ascii=False),
+    )
+
+
+async def get_intent(pool: asyncpg.Pool, intent_id: int, owner_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM intents WHERE id=$1 AND owner_id=$2",
+        intent_id, owner_id,
+    )
+
+
+async def list_intents(
+    pool: asyncpg.Pool, owner_id: int, limit: int = 10
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM intents WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2",
+        owner_id, limit,
+    )
+
+
+async def update_intent_strategy(
+    pool: asyncpg.Pool, intent_id: int, owner_id: int, strategy: str, forecast: dict
+) -> None:
+    import json
+    await pool.execute(
+        "UPDATE intents SET strategy=$1, forecast=$2::jsonb WHERE id=$3 AND owner_id=$4",
+        strategy, json.dumps(forecast, ensure_ascii=False), intent_id, owner_id,
+    )
+
+
+async def update_intent_status(
+    pool: asyncpg.Pool, intent_id: int, owner_id: int, status: str
+) -> None:
+    ts_col = ""
+    if status == "executing":
+        ts_col = ", executed_at=NOW()"
+    elif status in ("completed", "failed", "cancelled"):
+        ts_col = ", completed_at=NOW()"
+    await pool.execute(
+        f"UPDATE intents SET status=$1{ts_col} WHERE id=$2 AND owner_id=$3",
+        status, intent_id, owner_id,
+    )
+
+
+async def save_intent_feedback(
+    pool: asyncpg.Pool, intent_id: int, owner_id: int, feedback: dict
+) -> None:
+    import json
+    await pool.execute(
+        "UPDATE intents SET feedback=$1::jsonb, status='completed', completed_at=NOW() "
+        "WHERE id=$2 AND owner_id=$3",
+        json.dumps(feedback, ensure_ascii=False), intent_id, owner_id,
+    )

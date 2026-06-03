@@ -481,3 +481,8 @@ class ResourceActivityFSM(StatesGroup):
     choosing_accounts = State()  # multi-select аккаунтов для активности
     choosing_profile  = State()  # reader | commenter | reactor | mixed
     confirming        = State()  # подтверждение перед запуском
+
+
+class IntentFSM(StatesGroup):
+    describing = State()  # ввод произвольного описания цели
+    refining   = State()  # уточнение параметров (geo, asset_type, pattern)

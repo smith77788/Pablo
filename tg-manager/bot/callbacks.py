@@ -397,3 +397,10 @@ class ResourceActCb(CallbackData, prefix="ract"):
     page: int = 0
 
 
+class IntentCb(CallbackData, prefix="intent"):
+    """Intent Engine — управление намерениями (Epoch IV)."""
+    action: str         # menu | new | preset | plan | strategy | confirm | manual | history | detail | cancel
+    intent_id: int = 0
+    value: str = ""     # intent_type for preset, strategy name for strategy
+
+

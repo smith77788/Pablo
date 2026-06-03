@@ -31,6 +31,7 @@ from bot.callbacks import (
     GroupFCb,
     HealthCb,
     InfraCb,
+    IntentCb,
     MassOpCb,
     MassPubCb,
     NetBcCb,
@@ -86,6 +87,7 @@ async def _fire_cross_nav(
 
 def _main_menu_kb():
     kb = InlineKeyboardBuilder()
+    kb.button(text="🎯 Intent Engine",    callback_data=IntentCb(action="menu"))
     kb.button(text="📱 Активы",           callback_data=BmCb(action="assets"))
     kb.button(text="⚡ Операции",         callback_data=BmCb(action="operations"))
     kb.button(text="📢 Рассылки & Связь", callback_data=BmCb(action="comms"))
@@ -93,7 +95,7 @@ def _main_menu_kb():
     kb.button(text="🛡️ Мониторинг",       callback_data=BmCb(action="monitoring"))
     kb.button(text="🌐 Экосистемы",       callback_data=EcoCb(action="menu"))
     kb.button(text="⚙️ Настройки",        callback_data=BmCb(action="settings"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(1, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -215,7 +217,8 @@ def _wip_kb(back_action: str = "main"):
 
 
 _MAIN_MENU_TEXT = (
-    "🏠 <b>BotMother OS</b>\n\n"
+    "🏠 <b>BotMother OS</b>  <i>Эпоха IV</i>\n\n"
+    "🎯 <b>Intent Engine</b> — управляйте результатами, а не модулями\n"
     "📱 <b>Активы</b> — аккаунты, боты, каналы, группы, кластеры\n"
     "⚡ <b>Операции</b> — атаки, присутствие, публикация, очередь\n"
     "📢 <b>Рассылки & Связь</b> — рассылки, личные сообщения, диалоги\n"
