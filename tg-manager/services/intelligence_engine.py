@@ -287,26 +287,25 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
         f"{intel.pressure_emoji} <b>Инфраструктура:</b> {intel.pressure_label} ({intel.pressure_score}/100)"
     )
 
-    # Аккаунты — доступные и исключённые
+    # Аккаунты — доступные, кулдаун и прочие исключённые (без двойного счёта)
     available = [a for a in intel.all_accounts if a.recommended]
-    excluded = [a for a in intel.all_accounts if not a.recommended]
     cooling = [a for a in intel.all_accounts if a.is_cooling]
+    excluded_other = [a for a in intel.all_accounts if not a.recommended and not a.is_cooling]
     accs_line = f"📱 <b>Аккаунты:</b> ✅ {len(available)} доступно"
     if cooling:
         accs_line += f" · ⏳ {len(cooling)} кулдаун"
-    if excluded:
-        accs_line += f" · 🚫 {len(excluded)} исключено"
+    if excluded_other:
+        accs_line += f" · 🚫 {len(excluded_other)} исключено"
     lines.append(accs_line)
 
-    # Исключённые аккаунты с причинами (макс. 3)
-    if excluded:
-        shown_excluded = excluded[:3]
-        for acc in shown_excluded:
+    # Исключённые (не на кулдауне) с причинами — макс. 3
+    if excluded_other:
+        for acc in excluded_other[:3]:
             lbl = html.escape(acc.label())
             reason = html.escape(acc.skip_reason)
             lines.append(f"   ↳ {lbl}: {reason}")
-        if len(excluded) > 3:
-            lines.append(f"   … и ещё {len(excluded) - 3}")
+        if len(excluded_other) > 3:
+            lines.append(f"   … и ещё {len(excluded_other) - 3}")
 
     # Прокси (только если есть)
     if intel.all_proxies:
@@ -754,7 +753,8 @@ async def _predict_impl(
     acc_ids = [r["id"] for r in all_acc_rows]
     if acc_ids:
         ranked = infra_memory.rank_accounts_by_memory(acc_ids, op_type)
-        avg_memory_score = sum(s for _, s in ranked[:account_count]) / account_count if ranked else 0.5
+        ranked_slice = ranked[:account_count]
+        avg_memory_score = sum(s for _, s in ranked_slice) / len(ranked_slice) if ranked_slice else 0.5
     else:
         avg_memory_score = 0.5
 
@@ -888,9 +888,6 @@ async def _pre_launch_impl(
     if not risk.safe_to_proceed:
         intel.go_decision = False
         intel.go_reason = risk.blockers[0] if risk.blockers else "Критический риск"
-    elif pressure_score >= 85:
-        intel.go_decision = False
-        intel.go_reason = f"Критическое давление инфраструктуры ({pressure_score}/100)"
     elif len(recommended_accs) == 0 and accs_list:
         # Аккаунты есть, но все неподходящие
         intel.go_decision = True

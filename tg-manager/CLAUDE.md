@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r22
+- **Текущая build:** 2026.06.03-r24
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -876,5 +876,18 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **format_pre_launch_block proxy line** — показывает "🌐 Прокси: ✅ N пригодны · ⚠️ M плохих" если есть прокси
 - ✅ **flush/load avg_duration_s** — персистируется в БД через infra_memory flush loop, загружается при рестарте
 
-*Последнее обновление: 2026-06-03 (r23)* *Следующий build-номер: r24*
+### ✅ ЗАКРЫТО (r24) — EPOCH II: MEMORY FEEDBACK LOOP ПОЛНОЕ ЗАМЫКАНИЕ
+
+- ✅ **duration_s в op_worker join/leave** — dur_ms уже был доступен, теперь передаётся в record_account_op
+- ✅ **duration_s в op_worker publish** — t0_pub перед post_to_channel, pub_dur_s после успеха
+- ✅ **duration_s в op_worker global_presence_channel** — t0_gp перед create_channel
+- ✅ **duration_s в op_worker global_presence_bot** — t0_gp_bot перед create_bot_via_botfather
+- ✅ **duration_s в op_worker top-level success** — использует уже вычисленный duration_seconds
+- ✅ **duration_s в parser.py** — import time, t0_parse для обоих parse_members + parse_active_users
+- ✅ **duration_s в dm_engine.py** — import time, t0_dm перед send_dm, duration_s на "sent"
+- ✅ **duration_s в strike_engine.py** — t0_strike перед report_peer_deep_v2, duration_s на успехе
+- ✅ **duration_s в account_warmer.py** — import time, t0_action на каждое warmup-действие
+- ✅ **Все 8 типов операций** покрыты: join, leave, publish, parse, dm_campaign, strike, warmup, global_presence_*
+
+*Последнее обновление: 2026-06-03 (r24)* *Следующий build-номер: r25*
 
