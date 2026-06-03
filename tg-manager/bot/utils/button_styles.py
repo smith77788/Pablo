@@ -99,6 +99,16 @@ def infer_button_style(button: InlineKeyboardButton) -> ButtonStyle | None:
         return "success"
     if any(word in payload for word in _PRIMARY_WORDS):
         return "primary"
+    if (
+        button.callback_data
+        or button.switch_inline_query
+        or button.switch_inline_query_current_chat
+        or button.switch_inline_query_chosen_chat
+        or button.copy_text
+        or button.callback_game
+        or button.pay
+    ):
+        return "primary"
     return None
 
 

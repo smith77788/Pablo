@@ -44,3 +44,15 @@ def test_installed_patch_styles_builder_markup_dump() -> None:
 
     assert dumped["inline_keyboard"][0][0]["style"] == "success"
     assert dumped["inline_keyboard"][0][1]["style"] == "danger"
+
+
+def test_neutral_interactive_buttons_fallback_to_primary() -> None:
+    assert (
+        infer_button_style(
+            InlineKeyboardButton(
+                text="🗂️ Реестр активов",
+                callback_data="infra:asset_registry",
+            )
+        )
+        == "primary"
+    )
