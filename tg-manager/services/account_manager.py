@@ -48,8 +48,6 @@ _pending_qr: dict[int, tuple] = {}
 _CONNECT_TIMEOUT = 30
 # Таймаут на отдельные Telethon операции (get_entity, send_message и т.д.)
 _OP_TIMEOUT = 45
-# Кап для FloodWait backoff
-_FLOOD_CAP = 65.0
 
 # Pool of realistic Android device fingerprints
 _ANDROID_DEVICES: list[tuple[str, str]] = [
