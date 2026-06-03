@@ -293,8 +293,8 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        $7, $8, NOW())
                    ON CONFLICT (account_id, action_type)
                    DO UPDATE SET
-                       successes = infra_memory_accounts.successes + EXCLUDED.successes,
-                       failures = infra_memory_accounts.failures + EXCLUDED.failures,
+                       successes = EXCLUDED.successes,
+                       failures = EXCLUDED.failures,
                        last_success_at = GREATEST(infra_memory_accounts.last_success_at, EXCLUDED.last_success_at),
                        last_failure_at = GREATEST(infra_memory_accounts.last_failure_at, EXCLUDED.last_failure_at),
                        last_errors = EXCLUDED.last_errors,
@@ -331,8 +331,8 @@ async def flush_to_db(pool: asyncpg.Pool) -> None:
                        to_timestamp($6), to_timestamp($7), NOW())
                    ON CONFLICT (proxy_url, action_type)
                    DO UPDATE SET
-                       successes = infra_memory_proxies.successes + EXCLUDED.successes,
-                       failures = infra_memory_proxies.failures + EXCLUDED.failures,
+                       successes = EXCLUDED.successes,
+                       failures = EXCLUDED.failures,
                        avg_latency_ms = EXCLUDED.avg_latency_ms,
                        last_success_at = GREATEST(infra_memory_proxies.last_success_at, EXCLUDED.last_success_at),
                        last_failure_at = GREATEST(infra_memory_proxies.last_failure_at, EXCLUDED.last_failure_at),
