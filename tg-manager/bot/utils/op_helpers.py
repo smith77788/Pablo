@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import random
 import re
 import asyncpg
 
 _FLOOD_RE = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
+
+
+def backoff(attempt: int, base: float = 2.0, cap: float = 120.0, *, jitter: bool = True) -> float:
+    """Exponential backoff: base^attempt capped at cap, with optional ±20% jitter."""
+    raw = min(base ** attempt, cap)
+    return raw * random.uniform(0.8, 1.2) if jitter else raw
 
 
 def extract_flood_wait(exc: Exception, err_str: str) -> int:

@@ -1,7 +1,7 @@
 """Scheduled broadcasts: create, list, cancel."""
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -112,7 +112,7 @@ async def msg_schedule_datetime(
         try:
             dt = datetime.strptime(raw, fmt)
             if fmt == "%d.%m %H:%M":
-                dt = dt.replace(year=datetime.utcnow().year)
+                dt = dt.replace(year=datetime.now(timezone.utc).year)
             execute_at = dt
             break
         except ValueError:
@@ -126,7 +126,7 @@ async def msg_schedule_datetime(
         )
         return
 
-    if execute_at <= datetime.utcnow():
+    if execute_at <= datetime.now(timezone.utc).replace(tzinfo=None):
         await message.answer(
             "❌ Время запуска должно быть в будущем. Введите снова:",
             reply_markup=_sch_cancel_kb(bot_id),

@@ -21,6 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
+from services import operation_bus
 from bot.states import MassPublishFSM, BulkBotEditFSM, BulkJoinFSM, BulkLeaveFSM, OpBuilderFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts, _progress_bar, safe_edit, extract_flood_wait
 
@@ -500,6 +501,8 @@ async def cb_mp_confirm(
                 step_status = "error"
                 err_str = str(result.get("error", ""))
                 flood_wait = extract_flood_wait(Exception(err_str), err_str)
+                from services.infra_memory import record_account_op as _rim_rec
+                _rim_rec(acc["id"], "publish", success=False, error=err_str[:100])
                 if flood_wait:
                     from services.flood_engine import record_flood
                     try:
@@ -510,6 +513,8 @@ async def cb_mp_confirm(
             else:
                 ok_count += 1
                 step_status = "ok"
+                from services.infra_memory import record_account_op as _rim_rec
+                _rim_rec(acc["id"], "publish", success=True)
                 from services.flood_engine import record_success
                 try:
                     await record_success(acc["id"], "publish")
@@ -1543,13 +1548,9 @@ async def cb_bulk_join_confirm(
 
     params = {"links": links, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
-        op_id = await pool.fetchval(
-            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
-               VALUES($1, 'bulk_join', 'pending', $2::jsonb, $3)
-               RETURNING id""",
-            callback.from_user.id,
-            json.dumps(params),
-            len(links) * len(acc_ids),
+        op_id = await operation_bus.submit(
+            pool, callback.from_user.id, "bulk_join", params,
+            total_items=len(links) * len(acc_ids),
         )
     except Exception as e:
         log.error("bulk_join confirm error: %s", e)
@@ -1839,13 +1840,9 @@ async def cb_bulk_leave_confirm(
 
     params = {"channels": channels, "account_ids": acc_ids, "delay_mode": delay_mode}
     try:
-        op_id = await pool.fetchval(
-            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
-               VALUES($1, 'bulk_leave', 'pending', $2::jsonb, $3)
-               RETURNING id""",
-            callback.from_user.id,
-            json.dumps(params),
-            len(channels) * len(acc_ids),
+        op_id = await operation_bus.submit(
+            pool, callback.from_user.id, "bulk_leave", params,
+            total_items=len(channels) * len(acc_ids),
         )
     except Exception as e:
         log.error("bulk_leave confirm error: %s", e)
@@ -2229,14 +2226,9 @@ async def cb_ob_confirm(
         return
 
     try:
-        op_id = await pool.fetchval(
-            """INSERT INTO operation_queue(owner_id, op_type, status, params, total_items)
-               VALUES($1, $2, 'pending', $3::jsonb, $4)
-               RETURNING id""",
-            uid,
-            op_type,
-            json.dumps(params),
-            total_items,
+        op_id = await operation_bus.submit(
+            pool, uid, op_type, params,
+            total_items=total_items,
         )
     except Exception as e:
         log.error("ob_confirm insert error: %s", e)

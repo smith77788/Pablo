@@ -56,6 +56,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
 from services.logger import log_exc_swallow
+from services import operation_bus
 
 log = logging.getLogger(__name__)
 
@@ -402,29 +403,27 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
     import asyncio
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
 
-    # Live operations counter
-    ops_line = ""
+    # Unified infrastructure state via orchestrator
+    infra_line = ""
     try:
-        stats = await pool.fetchrow(
-            """SELECT
-                COUNT(*) FILTER (WHERE status='running')  AS running,
-                COUNT(*) FILTER (WHERE status='pending')  AS pending,
-                COUNT(*) FILTER (WHERE status='done' AND finished_at >= CURRENT_DATE) AS done_today
-               FROM operation_queue WHERE owner_id=$1""",
-            callback.from_user.id,
-        )
-        if stats:
-            parts = []
-            if stats["running"]:
-                parts.append(f"🔄 {stats['running']} выполняется")
-            if stats["pending"]:
-                parts.append(f"⏳ {stats['pending']} в очереди")
-            if stats["done_today"]:
-                parts.append(f"✅ {stats['done_today']} завершено сегодня")
-            if parts:
-                ops_line = "\n\n<i>" + " · ".join(parts) + "</i>"
+        from services import infra_orchestrator
+        state = await infra_orchestrator.get_state(pool, callback.from_user.id)
+        parts = []
+        if state.queue_running:
+            parts.append(f"🔄 {state.queue_running} выполняется")
+        if state.queue_pending:
+            parts.append(f"⏳ {state.queue_pending} в очереди")
+        accs_ready = state.account_available
+        if accs_ready is not None:
+            parts.append(f"📱 {accs_ready} акк. готовы")
+        p_emoji = state.pressure_emoji
+        p_score = state.pressure_score
+        if p_score > 0:
+            parts.append(f"Давление: {p_emoji} {p_score}")
+        if parts:
+            infra_line = "\n\n<i>" + " · ".join(parts) + "</i>"
     except Exception:
-        log_exc_swallow(log, "botmother_menu: ops status line fetch failed")
+        log_exc_swallow(log, "botmother_menu: infra_orchestrator state fetch failed")
 
     await _edit(
         callback,
@@ -437,7 +436,7 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
         "🛠️ <b>Построитель</b> — собрать операцию из блоков\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
         "⏱️ <b>Планировщик</b> — запустить операцию по расписанию"
-        + ops_line,
+        + infra_line,
         _operations_kb(),
     )
 
@@ -1205,14 +1204,9 @@ async def cb_plan_confirm(
         params["channels"] = links  # used by bulk_leave executor
 
     try:
-        op_id = await pool.fetchval(
-            """INSERT INTO operation_queue(owner_id, op_type, status, params, scheduled_for)
-               VALUES($1, $2, 'pending', $3::jsonb, $4)
-               RETURNING id""",
-            callback.from_user.id,
-            op_type,
-            json.dumps(params),
-            scheduled_for,
+        op_id = await operation_bus.submit(
+            pool, callback.from_user.id, op_type, params,
+            scheduled_for=scheduled_for.isoformat(),
         )
     except Exception as e:
         log.error("plan_confirm insert error: %s", e)

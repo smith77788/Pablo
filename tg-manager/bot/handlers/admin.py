@@ -6,7 +6,7 @@ import html as _html
 import io
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import aiohttp
@@ -210,7 +210,7 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         f"💳 Активных подписок: <b>{total_subs}</b>\n"
         f"✅ Оплат подтверждено: <b>{total_payments}</b>\n"
         f"💰 Выручка (USD): <b>${float(revenue):.2f}</b>\n\n"
-        f"📅 {datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC"
+        f"📅 {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M')} UTC"
     )
     kb = _admin_main_kb(new_error_reports=int(new_error_reports))
     if edit and hasattr(msg_or_cb, "message"):
@@ -659,7 +659,7 @@ async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> 
             f"{b['added_by']}\t{b['added_at'].strftime('%Y-%m-%d')}\t{b['token']}"
         )
     content = "\n".join(lines).encode("utf-8")
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     file = BufferedInputFile(content, filename=f"tokens_{ts}.tsv")
     await callback.message.answer_document(
         file,
@@ -688,7 +688,7 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
             r["expires_at"].strftime("%Y-%m-%d") if r["expires_at"] else "",
         ])
     content = buf.getvalue().encode("utf-8")
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     file = BufferedInputFile(content, filename=f"users_{ts}.csv")
     await callback.message.answer_document(
         file,
@@ -852,14 +852,23 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
             months = max(1, min(months, 1200))  # cap: 1–1200 месяцев (100 лет)
             if plan not in ("starter", "pro", "enterprise"):
                 raise ValueError("bad plan")
-            expires = datetime.utcnow() + timedelta(days=30 * months)
             await pool.execute(
                 """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-                   VALUES($1,$2,$3,true)
+                   VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
                    ON CONFLICT(user_id) DO UPDATE
-                   SET plan=$2, expires_at=$3, is_active=true""",
-                uid, plan, expires,
+                   SET plan      = EXCLUDED.plan,
+                       is_active = true,
+                       expires_at = CASE
+                           WHEN subscriptions.expires_at > now()
+                               THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                           ELSE now() + ($3 || ' months')::INTERVAL
+                       END""",
+                uid, plan, str(months),
             )
+            row = await pool.fetchrow(
+                "SELECT expires_at FROM subscriptions WHERE user_id=$1", uid
+            )
+            expires = row["expires_at"]
             await message.answer(
                 f"✅ Подписка <b>{plan.upper()}</b> выдана пользователю "
                 f"<code>{uid}</code> на {months} мес.",
@@ -927,13 +936,18 @@ async def handle_admin_message(message: Message, pool: asyncpg.Pool,
                 months = max(1, min(months, 1200))
                 if plan not in ("starter", "pro", "enterprise"):
                     raise ValueError("bad plan")
-                expires = datetime.utcnow() + timedelta(days=30 * months)
                 await pool.execute(
                     """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-                       VALUES($1,$2,$3,true)
+                       VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
                        ON CONFLICT(user_id) DO UPDATE
-                       SET plan=$2, expires_at=$3, is_active=true""",
-                    uid, plan, expires,
+                       SET plan      = EXCLUDED.plan,
+                           is_active = true,
+                           expires_at = CASE
+                               WHEN subscriptions.expires_at > now()
+                                   THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                               ELSE now() + ($3 || ' months')::INTERVAL
+                           END""",
+                    uid, plan, str(months),
                 )
                 ok_list.append(f"✅ {uid} → {plan.upper()} {months}м.")
                 try:

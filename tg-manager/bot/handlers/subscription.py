@@ -575,17 +575,25 @@ async def cb_admin_grant(
         return
     await callback.answer()
     plan, months = callback_data.plan or "", max(1, callback_data.months)
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    expires = datetime.utcnow() + timedelta(days=30 * months)
     await pool.execute(
         """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-           VALUES($1,$2,$3,true)
-           ON CONFLICT(user_id) DO UPDATE SET plan=$2, expires_at=$3, is_active=true""",
-        callback.from_user.id,
-        plan,
-        expires,
+           VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+           ON CONFLICT(user_id) DO UPDATE
+           SET plan      = EXCLUDED.plan,
+               is_active = true,
+               expires_at = CASE
+                   WHEN subscriptions.expires_at > now()
+                       THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                   ELSE now() + ($3 || ' months')::INTERVAL
+               END""",
+        callback.from_user.id, plan, str(months),
     )
+    row = await pool.fetchrow(
+        "SELECT expires_at FROM subscriptions WHERE user_id=$1", callback.from_user.id
+    )
+    expires = row["expires_at"] if row else (datetime.now(timezone.utc) + timedelta(days=30 * months))
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Готово", callback_data=SubCb(action="menu"))
     await callback.message.edit_text(

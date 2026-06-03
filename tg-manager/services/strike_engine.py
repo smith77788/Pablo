@@ -36,11 +36,14 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 # ── Константы ──────────────────────────────────────────────────────────────────
-_CONCURRENCY = 6          # макс параллельных аккаунтов в одной волне
-_WAVE_COOLDOWN = (8, 25)  # секунд между волнами атаки (рандомный диапазон)
+_CONCURRENCY = 3          # макс параллельных аккаунтов в тяжёлой фазе (GetHistory+MsgReport)
+_WAVE_COOLDOWN = (120, 300)  # секунд между волнами — Telegram должен успеть принять жалобы
 _VERIFY_WAIT = (30, 120)  # секунд ожидания перед верификацией
 _MAX_RETRIES = 2          # макс ретраев при FloodWait на аккаунт
 _FLOOD_CAP = 65.0         # кап exponential backoff
+# Минимальный интервал между аккаунтами внутри волны (в секундах).
+# Telegram rate-limit работает per-peer: >2 GetHistory на один канал за 60с = FLOOD_WAIT.
+_STAGGER_BASE = (25, 45)
 
 
 # ── Уникальные тексты жалоб ───────────────────────────────────────────────────
@@ -323,6 +326,7 @@ class StrikePlan:
     started_at: float = 0.0
     phase: str = "init"
     mode: str = "normal"   # fast | normal | maximum
+    owner_id: int = 0       # для email-эскалации (загрузка ящиков из DB)
 
 
 @dataclass
@@ -349,6 +353,8 @@ class StrikeResult:
     abuse_form_ok: bool = False
     verified_down: bool | None = None   # None = не проверено
     spambot_escalation: str = "skipped"   # sent | skipped | error
+    emails_sent: int = 0                  # кол-во успешно отправленных email
+    email_escalation: dict = field(default_factory=dict)  # детали email-фазы
     errors: list[str] = field(default_factory=list)
     duration_s: float = 0.0
     phase_results: dict[str, Any] = field(default_factory=dict)
@@ -358,43 +364,61 @@ class StrikeResult:
 
 
 def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dict]:
-    """
-    Предполётная проверка аккаунтов:
-      - Отсев аккаунтов в кулдауне (cooldown_until > now)
-      - Отсев неактивных (is_active = False)
-      - Сортировка по trust_score (высокие первыми — лучшие аккаунты в первой волне)
-      - Отсев с trust_score ниже min_trust
+    """Предполётная проверка аккаунтов.
 
-    Возвращает отсортированный список годных аккаунтов.
+    Фильтры:
+      - is_active = False → отсев
+      - cooldown_until (DB) > now → отсев
+      - flood_engine in-memory cooldown → отсев
+      - trust_score < min_trust → отсев
+
+    Сортировка: composite score = trust_score + memory_score − risk_score
+    (лучшие аккаунты по всем трём метрикам — в первую волну).
     """
     now = time.time()
     viable: list[dict] = []
 
+    try:
+        from services import flood_engine as _fe
+        fe_available = True
+    except Exception:
+        fe_available = False
+
+    try:
+        from services.infra_memory import get_account_score as _mem_score
+        mem_available = True
+    except Exception:
+        mem_available = False
+
     for acc in accounts:
         if not acc.get("is_active", False):
             continue
-        # Проверка кулдауна
+        # Проверка кулдауна из БД
         cooldown = acc.get("cooldown_until")
         if cooldown:
             try:
                 cd_ts = cooldown.timestamp() if hasattr(cooldown, "timestamp") else float(cooldown)
                 if cd_ts > now:
-                    continue  # аккаунт в кулдауне — пропускаем
+                    continue
             except (TypeError, ValueError, OSError):
                 log_exc_swallow(log, "Не удалось распарсить cooldown_until аккаунта в preflight")
+        # Проверка in-memory cooldown в flood_engine
+        if fe_available and acc.get("id") and _fe.is_account_cooling(acc["id"]):
+            continue
         # Проверка trust_score
         ts = acc.get("trust_score") or 0
         if ts < min_trust:
             continue
         viable.append(acc)
 
-    # Сортировка: trust_score DESC, flood_count_7d ASC
-    viable.sort(
-        key=lambda a: (
-            -(a.get("trust_score") or 0),
-            a.get("flood_count_7d") or 0,
-        )
-    )
+    # Composite sort: trust + memory_score − risk (все в диапазоне [0,1])
+    def _sort_key(a: dict) -> float:
+        trust = (a.get("trust_score") or 0) / 100.0  # нормализуем 0-100 → 0-1
+        risk = _fe.get_account_state(a["id"]).risk_score if fe_available and a.get("id") else 0.0
+        mem = _mem_score(a["id"], "strike") if mem_available and a.get("id") else 0.5
+        return -(trust + mem - risk)  # minus = DESC order
+
+    viable.sort(key=_sort_key)
     return viable
 
 
@@ -456,8 +480,11 @@ async def _one_account_strike(
     """
     from services import account_manager
 
-    # Staggered start внутри волны — каждый следующий аккаунт ждёт чуть дольше
-    stagger_delay = random.uniform(1.5, 5.0) * (acc_index + 1)
+    # Staggered start: каждый аккаунт ждёт acc_index * 25-45с.
+    # acc_0 стартует сразу, acc_1 через ~35с, acc_2 через ~70с и т.д.
+    # Это предотвращает одновременный GetHistory на один канал от нескольких аккаунтов
+    # и защищает от FLOOD_WAIT, который иначе убивает всю волну за раз.
+    stagger_delay = random.uniform(*_STAGGER_BASE) * acc_index if acc_index > 0 else random.uniform(1.5, 4.0)
     await asyncio.sleep(stagger_delay)
 
     text = texts[acc_index % len(texts)]
@@ -504,6 +531,12 @@ async def _one_account_strike(
                 result["_acc_id"] = acc.get("id")
                 result["_acc_trust"] = acc.get("trust_score", 0)
                 result["_wave"] = wave_num
+                # Фиксируем успех в Infrastructure Memory
+                try:
+                    from services.infra_memory import record_account_op
+                    record_account_op(acc["id"], "strike", success=True)
+                except Exception:
+                    pass
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
@@ -534,6 +567,12 @@ async def _one_account_strike(
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
                 log.warning("strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str)
+                # Фиксируем ошибку в Infrastructure Memory
+                try:
+                    from services.infra_memory import record_account_op
+                    record_account_op(acc["id"], "strike", success=False, error=err_str)
+                except Exception:
+                    pass
                 return {
                     "peer_reported": False, "error": err_str,
                     "_acc_id": acc.get("id"), "_wave": wave_num,
@@ -558,6 +597,163 @@ def _safe_gather_results(raw: list) -> list[dict]:
         else:
             out.append(r)
     return out
+
+
+def _reason_to_email_cat(reason: str, preset: str | None) -> dict:
+    """Возвращает cat-dict для email по reason/preset из основного Strike."""
+    key = (preset or reason or "").lower()
+    _map: dict[str, dict] = {
+        "csam": {"tg_reason": "childabuse", "severity": "CRITICAL", "ncmec": True,
+                 "email_subject": "URGENT: CSAM on Telegram"},
+        "childabuse": {"tg_reason": "childabuse", "severity": "CRITICAL", "ncmec": True,
+                       "email_subject": "URGENT: CSAM on Telegram"},
+        "drugs": {"tg_reason": "drugs", "severity": "HIGH", "ncmec": False,
+                  "email_subject": "Report: Illegal Drug Sales on Telegram"},
+        "terrorism": {"tg_reason": "violence", "severity": "CRITICAL", "ncmec": False,
+                      "email_subject": "Report: Terrorism/Extremism on Telegram"},
+        "violence": {"tg_reason": "violence", "severity": "HIGH", "ncmec": False,
+                     "email_subject": "Report: Violent Content on Telegram"},
+        "weapons": {"tg_reason": "violence", "severity": "HIGH", "ncmec": False,
+                    "email_subject": "Report: Illegal Weapons on Telegram"},
+        "fraud": {"tg_reason": "spam", "severity": "MEDIUM", "ncmec": False,
+                  "email_subject": "Report: Fraud/Scam on Telegram"},
+        "spam": {"tg_reason": "spam", "severity": "MEDIUM", "ncmec": False,
+                 "email_subject": "Report: Spam/Scam on Telegram"},
+        "prostitution": {"tg_reason": "pornography", "severity": "HIGH", "ncmec": False,
+                         "email_subject": "Report: Sex Trafficking on Telegram"},
+        "pornography": {"tg_reason": "pornography", "severity": "HIGH", "ncmec": False,
+                        "email_subject": "Report: Illegal Pornography on Telegram"},
+        "darknet": {"tg_reason": "other", "severity": "HIGH", "ncmec": False,
+                    "email_subject": "Report: Darknet Services on Telegram"},
+    }
+    return _map.get(key, {
+        "tg_reason": reason or "other", "severity": "MEDIUM", "ncmec": False,
+        "email_subject": f"Report: ToS Violation on Telegram ({key})",
+    })
+
+
+async def _run_email_escalation(
+    pool,
+    owner_id: int,
+    target: str,
+    reason: str,
+    preset: str | None,
+    progress_cb=None,
+) -> dict:
+    """
+    Email-эскалация для основного Strike.
+    Отправляет письма с каждого настроенного SMTP-ящика на:
+      abuse@telegram.org, dmca@telegram.org, dpo@telegram.org, security@telegram.org
+    + NCMEC (только для CSAM).
+    Возвращает dict с total_sent, emails list, ncmec bool.
+    """
+    from datetime import datetime, timezone
+
+    if not pool or not owner_id:
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "no pool/owner"}
+
+    cat = _reason_to_email_cat(reason, preset)
+    target_clean = target.lstrip("@")
+    report_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    result: dict = {"total_sent": 0, "emails": [], "ncmec": False}
+
+    # Загружаем email-аккаунты из БД
+    db_emails: list[dict] = []
+    try:
+        rows = await pool.fetch(
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass
+               FROM strike_email_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY last_used_at ASC NULLS FIRST""",
+            owner_id,
+        )
+        db_emails = [dict(r) for r in rows]
+    except Exception as e:
+        log.debug("staggered_strike: email accounts fetch skipped: %s", e)
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": str(e)[:80]}
+
+    if not db_emails:
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "no email accounts configured"}
+
+    # Resolve helpers defined later in this file via module globals (safe at call-time)
+    import sys as _sys
+    _mod = _sys.modules[__name__]
+    _STRIKE_EMAIL_TARGETS = getattr(_mod, "_STRIKE_EMAIL_TARGETS", [])
+    _build_abuse_tg_email = getattr(_mod, "_build_abuse_tg_email", None)
+    _build_dmca_gdpr_email = getattr(_mod, "_build_dmca_gdpr_email", None)
+    _build_ncmec_email = getattr(_mod, "_build_ncmec_email", None)
+    _send_email = getattr(_mod, "_send_email", None)
+
+    if not _STRIKE_EMAIL_TARGETS or not _send_email:
+        return {"total_sent": 0, "emails": [], "ncmec": False, "skip_reason": "email helpers not loaded"}
+
+    for ea in db_emails:
+        any_ok = False
+        for tgt in _STRIKE_EMAIL_TARGETS:
+            if tgt["email_type"] == "abuse":
+                body = _build_abuse_tg_email(target_clean, cat, report_time)
+            else:
+                body = _build_dmca_gdpr_email(target_clean, cat, report_time, tgt["email_type"])
+
+            subject = f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
+            ok, err = await _send_email(
+                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                ea["email"], tgt["addr"],
+                subject, body,
+            )
+            result["emails"].append({
+                "from": ea["email"], "to": tgt["addr"],
+                "label": tgt["label"], "ok": ok, "err": err,
+            })
+            if ok:
+                result["total_sent"] += 1
+                any_ok = True
+                log.info("staggered_strike: email sent %s → %s", ea["email"], tgt["addr"])
+            else:
+                log.warning("staggered_strike: email failed %s → %s: %s", ea["email"], tgt["addr"], err)
+
+        if any_ok:
+            try:
+                await pool.execute(
+                    "UPDATE strike_email_accounts SET last_used_at=now(), fail_count=0 WHERE id=$1",
+                    ea["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, f"staggered_strike: email success update id={ea.get('id')}")
+        else:
+            try:
+                await pool.execute(
+                    """UPDATE strike_email_accounts
+                       SET fail_count = fail_count + 1,
+                           is_active = CASE WHEN fail_count + 1 >= 3 THEN FALSE ELSE is_active END
+                       WHERE id=$1""",
+                    ea["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, f"staggered_strike: email fail_count update id={ea.get('id')}")
+
+    # NCMEC только для CSAM
+    if cat.get("ncmec") and db_emails:
+        ncmec_addr = "cybertipline@ncmec.org"
+        body_ncmec = _build_ncmec_email(target_clean, report_time)
+        for ea in db_emails:
+            ok_n, err_n = await _send_email(
+                ea["smtp_host"], ea["smtp_port"], ea["email"], ea["smtp_pass"],
+                ea["email"], ncmec_addr,
+                f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
+                body_ncmec,
+            )
+            result["emails"].append({
+                "from": ea["email"], "to": ncmec_addr,
+                "label": "ncmec", "ok": ok_n, "err": err_n,
+            })
+            if ok_n:
+                result["total_sent"] += 1
+                result["ncmec"] = True
+                break
+
+    return result
 
 
 async def staggered_strike(
@@ -698,29 +894,41 @@ async def staggered_strike(
                                             title=intel.get("title", ""),
                                             members=intel.get("members", 0))
         result.abuse_form_ok = abuse_res.get("ok", False)
-        if result.abuse_form_ok:
-            log.info("strike_engine: abuse form submitted OK for target=%s", target)
-        else:
-            log.warning(
-                "strike_engine: abuse form failed for target=%s: %s",
-                target, abuse_res.get("error", "unknown"),
-            )
+        log.info("strike_engine: abuse_forms target=%s submitted=%d/%d ok=%s",
+                 target, abuse_res.get("submitted", 0), abuse_res.get("total", 0), result.abuse_form_ok)
 
-        # ═══ Фаза: SpamBot escalation ═══
+        # ═══ Фаза: SpamBot + anti-scam боты ═══
+        # Используем лучший аккаунт (первый по trust_score после pre-flight сортировки)
         spambot_result = await _escalate_to_spambot(plan.accounts[0] if plan.accounts else None, target)
-        if isinstance(spambot_result, dict):
-            result.spambot_escalation = spambot_result.get("status", "unknown")
-        elif spambot_result is True:
-            result.spambot_escalation = "sent"
-        else:
-            result.spambot_escalation = "skipped"
+        result.spambot_escalation = spambot_result.get("status", "unknown") if isinstance(spambot_result, dict) else "skipped"
+        log.info("strike_engine: spambot_escalation target=%s status=%s bots=%s",
+                 target, result.spambot_escalation,
+                 spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {})
+
+        # ═══ Фаза: Email-эскалация ═══
+        if pool and plan.owner_id:
+            if progress_cb:
+                await progress_cb("strike_email", f"📧 {target}: Email-эскалация (abuse/dmca/dpo/security)...")
+            try:
+                email_res = await _run_email_escalation(
+                    pool, plan.owner_id, target, plan.reason, plan.preset
+                )
+                result.emails_sent = email_res.get("total_sent", 0)
+                result.email_escalation = email_res
+                log.info(
+                    "strike_engine: email_escalation target=%s sent=%d ncmec=%s",
+                    target, result.emails_sent, email_res.get("ncmec", False),
+                )
+            except Exception:
+                log_exc_swallow(log, f"staggered_strike: email_escalation failed target={target}")
 
         result.duration_s = time.time() - t_start
         log.info(
             "strike_engine: staggered_strike done target=%s duration=%.1fs "
-            "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s",
+            "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d",
             target, result.duration_s, result.peer_reported, result.msgs_reported,
             result.network_nodes, result.abuse_form_ok, result.spambot_escalation,
+            result.emails_sent,
         )
         all_results.append(result)
 
@@ -819,82 +1027,152 @@ async def submit_abuse_form(
     title: str = "",
     members: int = 0,
 ) -> dict[str, Any]:
-    """Отправляет официальную форму жалобы через telegram.org/support."""
+    """Отправляет жалобы сразу в несколько официальных каналов Telegram."""
     clean = target_username.lstrip("@")
-    reason_text = {
-        "drugs": "illegal drug sales and drug trafficking",
-        "terrorism": "terrorism, extremism and incitement to violence",
-        "childabuse": "child sexual abuse material (CSAM)",
-        "csam": "child sexual abuse material (CSAM)",
-        "fraud": "financial fraud and scam operation",
-        "weapons": "illegal weapons trafficking and arms dealing",
-        "darknet": "darknet criminal services and illegal marketplace",
-        "violence": "promotion of violence and terrorism",
-        "spam": "mass spam and platform abuse",
-        "pornography": "illegal pornographic content and adult material without age verification",
-        "escort": "prostitution, illegal escort services and sexual exploitation",
-        "other": "Terms of Service violation and harmful illegal content",
-    }.get(reason, "Terms of Service violation and harmful illegal content")
+    reason_map = {
+        "drugs":      ("illegal drug sales and drug trafficking",
+                       "Незаконная торговля наркотиками и психоактивными веществами"),
+        "terrorism":  ("terrorism, extremism and incitement to violence",
+                       "Террористический контент, экстремизм, призывы к насилию"),
+        "childabuse": ("child sexual abuse material (CSAM) — urgent",
+                       "Материалы сексуальной эксплуатации детей (CSAM) — срочно"),
+        "csam":       ("child sexual abuse material (CSAM) — urgent",
+                       "Материалы сексуальной эксплуатации детей — требует немедленных действий"),
+        "fraud":      ("financial fraud, scam and money theft",
+                       "Финансовое мошенничество, скам, кража денег"),
+        "weapons":    ("illegal weapons trafficking",
+                       "Незаконный оборот оружия и взрывчатых веществ"),
+        "darknet":    ("darknet criminal marketplace distributing illegal goods",
+                       "Даркнет-маркетплейс — незаконная торговля запрещёнными товарами"),
+        "violence":   ("graphic violence and promotion of violent acts",
+                       "Пропаганда насилия и жестокости"),
+        "spam":       ("coordinated spam and platform manipulation",
+                       "Координированный спам и манипуляции с платформой"),
+        "pornography": ("illegal pornographic content distributed without age verification",
+                        "Незаконный порнографический контент без проверки возраста"),
+        "escort":     ("prostitution and sexual exploitation services",
+                       "Проституция, эскорт и сексуальная эксплуатация"),
+        "other":      ("systematic Terms of Service violation",
+                       "Систематическое нарушение Условий использования"),
+    }
+    en_text, ru_text = reason_map.get(reason, reason_map["other"])
 
-    body = (
-        f"I am reporting a Telegram channel for {reason_text}.\n\n"
-        f"Channel: @{clean}\n"
-        f"Title: {title}\n"
-        f"Subscribers: {members}\n\n"
-        f"This channel actively violates Telegram's Terms of Service by openly distributing "
-        f"illegal content related to {reason_text}. The content is systematic, ongoing and "
-        f"openly visible. Multiple independent users have reported this channel. "
-        f"Immediate removal is urgently required."
-    )
-    try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=25),
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-        ) as sess:
-            async with sess.post(
-                "https://telegram.org/support",
-                data={"message": body, "technical_info": f"@{clean}", "question_type": "report"},
-                allow_redirects=True,
-            ) as resp:
-                return {"ok": resp.status in (200, 201, 302), "status": resp.status}
-    except Exception as e:
-        log.warning("submit_abuse_form: %s", e)
-        return {"ok": False, "error": str(e)[:100]}
+    bodies = [
+        # Версия 1 — официальный английский запрос
+        (
+            f"ABUSE REPORT — {en_text.upper()}\n\n"
+            f"Channel: https://t.me/{clean}\n"
+            f"Username: @{clean}\n"
+            f"Title: {title}\n"
+            f"Subscribers: {members:,}\n\n"
+            f"This Telegram channel systematically violates Telegram ToS through {en_text}. "
+            f"The violations are active, ongoing and publicly accessible to all users including minors. "
+            f"The channel is not merely borderline — it explicitly and openly engages in {en_text}. "
+            f"Multiple independent users have already reported this channel. "
+            f"We request immediate review and removal of this channel."
+        ),
+        # Версия 2 — русский технический запрос
+        (
+            f"ЖАЛОБА НА НАРУШЕНИЕ — {ru_text}\n\n"
+            f"Канал: https://t.me/{clean}\n"
+            f"Юзернейм: @{clean}\n"
+            f"Название: {title}\n"
+            f"Подписчиков: {members:,}\n\n"
+            f"Данный Telegram-канал систематически нарушает Условия использования: {ru_text}. "
+            f"Нарушение носит публичный, постоянный характер и доступно всем пользователям. "
+            f"Требуем немедленного рассмотрения и удаления."
+        ),
+    ]
+
+    _ua_pool = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    ]
+
+    results = []
+    for idx, body in enumerate(bodies):
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=25),
+                headers={
+                    "User-Agent": _ua_pool[idx % len(_ua_pool)],
+                    "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+                },
+            ) as sess:
+                await asyncio.sleep(random.uniform(2.0, 5.0))  # между отправками
+                async with sess.post(
+                    "https://telegram.org/support",
+                    data={"message": body, "technical_info": f"@{clean}", "question_type": "report"},
+                    allow_redirects=True,
+                ) as resp:
+                    ok = resp.status in (200, 201, 302)
+                    results.append(ok)
+                    log.info("abuse_form[%d] status=%d ok=%s target=%s", idx, resp.status, ok, clean)
+        except Exception as e:
+            log.warning("submit_abuse_form[%d]: %s", idx, e)
+            results.append(False)
+
+    return {"ok": any(results), "submitted": sum(results), "total": len(results)}
 
 
-async def _escalate_to_spambot(acc: dict | None, target_username: str) -> bool:
-    """
-    Отправляет жалобу через @SpamBot — официальный механизм Telegram.
-    SpamBot принимает пересланные сообщения и реагирует на /report.
+async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
+    """Эскалация через официальные Telegram-боты: @SpamBot, @notoscam, @stopCA.
+    Пересылает несколько последних сообщений канала в каждый бот.
+    Возвращает dict со статусом по каждому боту.
     """
     if not acc:
-        return False
+        return {"status": "no_account"}
     from services import account_manager
+    clean = target_username.lstrip("@")
+    # Официальные боты приёма жалоб: SpamBot + anti-scam инстанции
+    escalation_bots = ["SpamBot", "notoscam", "stopCA"]
+    results: dict[str, str] = {}
+    client = account_manager._make_client(acc["session_str"], acc)
     try:
-        # Пересылаем сообщение от цели в @SpamBot если есть доступ
-        clean = target_username.lstrip("@")
-        client = account_manager._make_client(acc["session_str"], acc)
+        await asyncio.wait_for(client.connect(), timeout=15)
+        msgs = []
         try:
-            await asyncio.wait_for(client.connect(), timeout=15)
-            # Пробуем получить и переслать одно сообщение в SpamBot
-            msgs = await client.get_messages(clean, limit=1)
-            forwarded = False
-            if msgs:
-                spam_bot = await client.get_entity("SpamBot")
-                await client.forward_messages(spam_bot, msgs[0])
-                forwarded = True
-            await client.disconnect()
-            return forwarded
+            msgs = await asyncio.wait_for(client.get_messages(clean, limit=5), timeout=15)
+            msgs = [m for m in (msgs or []) if m and not m.service]
         except Exception:
-            log_exc_swallow(log, "Сбой операции в _escalate_to_spambot")
+            pass
+        for bot_name in escalation_bots:
             try:
-                await client.disconnect()
-            except Exception:
-                log_exc_swallow(log, "Сбой disconnect клиента в _escalate_to_spambot")
-            return False
+                bot_entity = await asyncio.wait_for(client.get_entity(bot_name), timeout=8)
+                await client.send_message(bot_entity, "/start")
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+                fwd_count = 0
+                for m in msgs[:3]:
+                    try:
+                        await client.forward_messages(bot_entity, m)
+                        fwd_count += 1
+                        await asyncio.sleep(random.uniform(0.8, 1.8))
+                    except Exception:
+                        pass
+                # SpamBot принимает /report после пересылки
+                if bot_name == "SpamBot" and fwd_count > 0:
+                    try:
+                        await asyncio.sleep(1.5)
+                        await client.send_message(bot_entity, "/report")
+                    except Exception:
+                        pass
+                results[bot_name] = "sent" if fwd_count > 0 else "no_msgs"
+                log.info("escalate_spambot: %s → %s fwd=%d target=%s", bot_name, results[bot_name], fwd_count, clean)
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+            except Exception as e:
+                results[bot_name] = f"err:{str(e)[:40]}"
+                log.warning("escalate_spambot[%s] acc=%s: %s", bot_name, acc.get("id"), str(e)[:80])
     except Exception as e:
-        log.warning("_escalate_to_spambot: %s", e)
-        return False
+        log.warning("_escalate_to_spambot connect: %s", e)
+        results["connect"] = f"err:{str(e)[:40]}"
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    sent = sum(1 for v in results.values() if v == "sent")
+    return {"status": "sent" if sent > 0 else "failed", "bots": results, "sent_count": sent}
 
 
 # ── Verification loop ──────────────────────────────────────────────────────────
@@ -1058,6 +1336,10 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"  ├ Abuse форма: <b>{'✅' if r.abuse_form_ok else '❌'}</b> · "
             f"SpamBot: <b>{'✅' if r.spambot_escalation == 'sent' else '❌'}</b> · "
             f"Заблокирован: <b>{r.blocked}</b>\n"
+            f"  ├ 📧 Email: <b>{r.emails_sent}</b> отправлено"
+            + (f" · NCMEC: ✅" if r.email_escalation.get("ncmec") else "")
+            + (f" (<i>{r.email_escalation.get('skip_reason', 'не настроен')}</i>" if r.emails_sent == 0 and r.email_escalation.get("skip_reason") not in (None, "no pool/owner") else "")
+            + "\n"
             f"  └ Длительность: <b>{r.duration_s:.0f}с</b> · "
             f"Аккаунтов: <b>{r.unique_accounts}</b>"
         )

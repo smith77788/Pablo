@@ -19,6 +19,7 @@ from services.geo_data import GEO_PRESETS, parse_custom_geo_list
 from services.presence_planner import render_pattern, build_targets, estimate_duration_minutes
 from services.username_engine import slugify
 from services.logger import log_exc_swallow
+from services import operation_bus
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1048,13 +1049,10 @@ async def cb_gp_launch(
     await db.create_global_presence_targets(pool, plan_id, targets)
 
     # Queue the primary operation
-    op_id = await pool.fetchval(
-        "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-        "VALUES($1,$2,'pending',$3::jsonb,$4) RETURNING id",
-        callback.from_user.id,
-        _op_type,
-        json.dumps({"plan_id": plan_id}),
-        len(targets),
+    op_id = await operation_bus.submit(
+        pool, callback.from_user.id, _op_type,
+        {"plan_id": plan_id},
+        total_items=len(targets),
     )
 
     # Link operation to plan
@@ -1084,12 +1082,10 @@ async def cb_gp_launch(
             template_id=template_id,
         )
         await db.create_global_presence_targets(pool, plan_id2, grp_targets)
-        op_id2 = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-            "VALUES($1,'global_presence_group','pending',$2::jsonb,$3) RETURNING id",
-            callback.from_user.id,
-            json.dumps({"plan_id": plan_id2}),
-            len(grp_targets),
+        op_id2 = await operation_bus.submit(
+            pool, callback.from_user.id, "global_presence_group",
+            {"plan_id": plan_id2},
+            total_items=len(grp_targets),
         )
         await db.link_plan_to_operation(pool, plan_id2, op_id2)
         log.info(
@@ -1114,12 +1110,10 @@ async def cb_gp_launch(
             template_id=template_id,
         )
         await db.create_global_presence_targets(pool, plan_id3, bot_targets)
-        op_id3 = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-            "VALUES($1,'global_presence_bot','pending',$2::jsonb,$3) RETURNING id",
-            callback.from_user.id,
-            json.dumps({"plan_id": plan_id3}),
-            len(bot_targets),
+        op_id3 = await operation_bus.submit(
+            pool, callback.from_user.id, "global_presence_bot",
+            {"plan_id": plan_id3},
+            total_items=len(bot_targets),
         )
         await db.link_plan_to_operation(pool, plan_id3, op_id3)
         log.info(
@@ -1326,19 +1320,16 @@ async def cb_gp_retry(
         _retry_op_type = "global_presence_channel"
 
     try:
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items) "
-            "VALUES($1,$4,'pending',$2::jsonb,$3) RETURNING id",
-            callback.from_user.id,
-            json.dumps({"plan_id": plan_id}),
-            reset_count,
-            _retry_op_type,
+        op_id = await operation_bus.submit(
+            pool, callback.from_user.id, _retry_op_type,
+            {"plan_id": plan_id},
+            total_items=reset_count,
         )
         await db.link_plan_to_operation(pool, plan_id, op_id)
         log.info("cb_gp_retry: plan=%d reset=%d op=%d user=%s", plan_id, reset_count, op_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_retry: operation_queue insert failed")
-        await callback.answer("Ошибка постановки в очередь", show_alert=True)
+        await callback.answer("Ошибка постановки в очереди", show_alert=True)
         return
     await callback.answer(f"✅ {reset_count} целей поставлено в очередь на повтор (op #{op_id})", show_alert=True)
 

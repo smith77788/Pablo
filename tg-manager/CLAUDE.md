@@ -212,10 +212,15 @@ tg-manager/\
 `    `├── search\_observer.py         # наблюдение за поисковыми паттернами\
 `    `├── broadcaster.py             # рассылки\
 `    `├── routing\_engine.py          # маршрутизация между ботами\
+`    `├── resource\_selector.py       # UNIFIED: единый выбор аккаунтов/прокси (r19)\
+`    `├── operation\_bus.py           # UNIFIED: универсальная постановка в очередь (r19)\
+`    `├── infra\_memory.py            # UNIFIED: Infrastructure Memory — паттерны успехов (r19, schema\_v65)\
+`    `├── infra\_orchestrator.py      # BRAIN: центральный мозг инфраструктуры (r20)\
+`    `├── proxy\_selector.py          # UNIFIED: выбор и оценка прокси по infra\_memory (r20)\
 `    `├── bot\_api.py                 # Bot API wrapper\
 `    `└── railway\_api.py             # Railway API интеграция
 ### 3\.3 Авто-миграция БД
-create\_pool() автоматически выполняет все schema\_v\*.sql в порядке версии. Текущая последняя версия: **v61**
+create\_pool() автоматически выполняет все schema\_v\*.sql в порядке версии. Текущая последняя версия: **v65**
 
 Правило: новая схема → новый файл schema\_v{N+1}.sql в корне tg-manager/.
 
@@ -607,6 +612,17 @@ if not await require\_plan(pool, callback.from\_user.id, "starter"):\
 - **Pool filter в Mass Ops** — выполнение операций только по пулу аккаунтов
 - **Health Dashboard обновлён** — пулы, теги в списке аккаунтов + Pressure Score
 - **Free Mode** — глобальный бесплатный доступ + toggle в /admin (schema\_v59)
+### ✅ AI, память и провайдеры — ГОТОВО (r18)
+- **AI Memory System** — /remember, /memory, /forget команды + auto-save [MEMORY:] тегов (schema\_v63)
+- **AI Provider Failover** — OpenRouter, Groq, Gemini failover (services/ai\_providers.py)
+- **AI 📚 Память кнопка** — просмотр/удаление записей памяти из чата
+- **Broadcast Stats** — детальная статистика рассылки (delivery%, failed, pending) + 📊 кнопка
+- **Quick Post Save Template** — кнопка 💾 на шаге подтверждения сохраняет пост в шаблоны
+- **Op Queue Retry/Clear** — 🔁 повтор и 🗑 очистка завершённых операций в очереди
+- **Warmup Level** — отслеживание уровня прогрева (light/medium/deep) в БД (schema\_v64)
+- **Per-owner Semaphore** — max 3 параллельных операции на владельца (op\_worker.py)
+- **Scheduler Missed Fix** — рассылки с опозданием >1ч помечаются 'missed', не запускаются
+- **Admin Error Counter** — кнопка 🐛 показывает число новых отчётов об ошибках
 ### ✅ UX и надёжность — ГОТОВО (r17)
 - Кнопки ◀️ Назад добавлены во все оставшиеся dead-end экраны (30+ файлов)
 - ❌ Отмена во всех FSM prompt'ах (bulk, network\_bulk, crm, schedule, templates и др.)
@@ -770,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.05.30-r15
+- **Текущая build:** 2026.06.03-r20
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -798,5 +814,32 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **FSM state bug fix** — OpBuilderFSM.confirming, дублирующие State()
 - ✅ **account\_warmer crash fix** — None session\_str early return
 
-*Последнее обновление: 2026-06-02 (r17)* *Следующий build-номер: r18*
+### ✅ ЗАКРЫТО (r19) — BOTMOTHER ЕДИНЫЙ ОРГАНИЗМ
+- ✅ **resource\_selector.py** — единый выбор аккаунтов: select\_account/select\_accounts/select\_for\_wave, обёртка flood\_engine
+- ✅ **operation\_bus.py** — OP\_REGISTRY (10 op\_type) + submit/cancel/get\_status/list\_active/list\_recent API
+- ✅ **infra\_memory.py** — Infrastructure Memory: паттерны успехов/ошибок, memory\_score, proxy\_score, best\_hour, flush loop
+- ✅ **schema\_v65** — infra\_memory\_accounts + infra\_memory\_proxies таблицы
+- ✅ **Strike в op\_worker** — op\_type="strike" → _exec_strike() → staggered\_strike() + progress callback
+- ✅ **preflight\_accounts** — composite sort: trust + memory\_score − risk\_score, flood\_engine in-memory cooldown
+- ✅ **infra\_memory wiring** — strike\_engine и op\_worker записывают success/fail в память после операций
+- ✅ **Security hardening** — try-except для int() конвертаций params, timestamp > 0 check, done\_items=0 explicit
+
+### ✅ ЗАКРЫТО (r20) — BOTMOTHER EPOCH I: ФУНДАМЕНТ
+
+- ✅ **backoff() консолидация** — 4 дублирующих _backoff() → один канонический backoff() в op_helpers.py
+- ✅ **extract_flood_wait консолидация** — дубль в op_worker удалён, использует op_helpers.extract_flood_wait
+- ✅ **Мёртвый код account_manager** — _backoff() и _extract_flood_wait() (never called) удалены
+- ✅ **resource_selector.include_ids** — select_all_active() получил параметр для фильтрации по ID
+- ✅ **resource_selector в op_worker** — _exec_mass_publish, _exec_bulk_join, _exec_bulk_leave → resource_selector.select_all_active()
+- ✅ **infra_memory per-item** — record_account_op() добавлен в publish/join/leave на каждое действие
+- ✅ **infra_orchestrator.py** — центральный мозг: get_state(), recommend_accounts(), estimate_capacity(), is_ready_for_op()
+- ✅ **global_presence_package в OP_REGISTRY** — отсутствующий тип добавлен
+- ✅ **global_presence operation_bus** — 4 прямых INSERT → operation_bus.submit()
+- ✅ **botmother_menu operation_bus** — 1 прямой INSERT → operation_bus.submit()
+- ✅ **mass_ops operation_bus** — 3 прямых INSERT → operation_bus.submit()
+- ✅ **ai_tools operation_bus** — 1 прямой INSERT → operation_bus.submit()
+- ✅ **proxy_selector.py** — Phase 6: get_proxy_score, record_proxy_result, rank_accounts_by_proxy_quality
+- ✅ **_normalize_result()** — унифицированный формат результата операций: ok/failed/total/summary/duration_s/op_type
+
+*Последнее обновление: 2026-06-03 (r20)* *Следующий build-номер: r21*
 

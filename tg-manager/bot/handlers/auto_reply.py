@@ -221,10 +221,13 @@ async def cb_ar_view(callback: CallbackQuery, callback_data: AutoReplyCb,
 @router.callback_query(AutoReplyCb.filter(F.action == "toggle"))
 async def cb_ar_toggle(callback: CallbackQuery, callback_data: AutoReplyCb,
                        pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
     await callback.answer("✅ Статус изменён.")
     await db.toggle_auto_reply(pool, callback_data.reply_id, callback_data.bot_id)
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
     await callback.message.edit_text(
         f"🤖 <b>Авто-ответы {label}</b>\n\n"
@@ -270,10 +273,13 @@ async def cb_ar_delete_confirm(callback: CallbackQuery, callback_data: AutoReply
 @router.callback_query(AutoReplyCb.filter(F.action == "delete"))
 async def cb_ar_delete(callback: CallbackQuery, callback_data: AutoReplyCb,
                        pool: asyncpg.Pool) -> None:
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
     await callback.answer("🗑 Правило удалено.")
     await db.delete_auto_reply(pool, callback_data.reply_id, callback_data.bot_id)
     replies = await db.get_auto_replies(pool, callback_data.bot_id)
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     label = f"@{row['username']}" if row and row["username"] else (row["first_name"] if row else "")
     await callback.message.edit_text(
         f"🤖 <b>Авто-ответы {label}</b>\n\n"

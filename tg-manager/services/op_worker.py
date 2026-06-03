@@ -9,6 +9,9 @@ import asyncpg
 from aiogram import Bot
 from database import db
 from services.logger import log_exc_swallow
+from bot.utils.op_helpers import extract_flood_wait
+from services import resource_selector
+from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10   # секунд между проверками очереди
@@ -29,27 +32,38 @@ _FATAL_ERRORS = {
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 
 
-def _extract_flood_wait(exc: Exception, err_str: str) -> int:
-    """Извлекает количество секунд из FloodWaitError или строки ошибки.
+def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
+    """Обеспечить единый формат результата операции для хранения и отчётов.
 
-    Возвращает 0 если ошибка не является flood-ошибкой.
-    Поддерживает как Telethon FloodWaitError (с атрибутом .seconds),
-    так и строковые представления 'A wait of X seconds is required'.
+    Канонические поля: status, ok, failed, total, summary, duration_s.
+    Существующие алиасы (sent, created) нормализуются в ok.
     """
-    # Telethon FloodWaitError имеет атрибут .seconds
-    if hasattr(exc, "seconds"):
-        return int(exc.seconds)
-    if not _FLOOD_PATTERNS.search(err_str) and "A wait of" not in err_str:
-        return 0
-    # Парсинг числа из строки: ищем первое число после ключевого слова
-    import re as _re
-    m = _re.search(r"(\d+)", err_str)
-    if m:
-        try:
-            return int(m.group(1))
-        except (ValueError, IndexError):
-            pass
-    return 60  # fallback если flood, но число не найдено
+    if not isinstance(result, dict):
+        result = {"status": "done", "summary": str(result)}
+
+    # Нормализация ok: разные exec-функции используют sent/ok/created
+    if "ok" not in result:
+        for alias in ("sent", "created", "waves_completed"):
+            if alias in result:
+                result["ok"] = result[alias]
+                break
+        else:
+            result["ok"] = 0
+
+    if "failed" not in result:
+        result["failed"] = 0
+
+    if "total" not in result:
+        result["total"] = result.get("ok", 0) + result.get("failed", 0)
+
+    if "summary" not in result or not result["summary"]:
+        ok = result.get("ok", 0)
+        failed = result.get("failed", 0)
+        result["summary"] = f"✅ {ok} успешно, ❌ {failed} ошибок"
+
+    result["duration_s"] = round(duration_s, 1)
+    result["op_type"] = op_type
+    return result
 
 
 def _classify_op_error(exc: Exception) -> str:
@@ -352,6 +366,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, params)
             elif op_type in ("global_presence_full_package", "global_presence_package"):
                 result = await _exec_global_presence_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "strike":
+                result = await _exec_strike(pool, bot, op_id, owner_id, params)
             else:
                 log.warning("op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped", op_type, op_id, owner_id)
                 result = {
@@ -370,6 +386,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             elapsed = time.monotonic() - _t_start
             duration_seconds = round(elapsed, 1)
+            result = _normalize_result(result, op_type, duration_seconds)
             log.info(
                 "op_worker: op_id=%d op_type=%s done in %.1fs (duration_seconds=%.1f) — %s",
                 op_id, op_type, elapsed, duration_seconds, result.get("summary", ""),
@@ -388,9 +405,23 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n{summary}",
                 reply_markup=kb.as_markup(),
             )
+            # Фиксируем успех в Infrastructure Memory для всех аккаунтов из params
+            try:
+                from services.infra_memory import record_account_op
+                for _acc_id in (params.get("account_ids") or []):
+                    record_account_op(int(_acc_id), op_type, success=True)
+            except Exception:
+                pass
 
         except Exception as e:
             log.exception("op_worker: op %d failed: %s", op_id, e)
+            # Фиксируем ошибку в Infrastructure Memory
+            try:
+                from services.infra_memory import record_account_op
+                for _acc_id in (params.get("account_ids") or []):
+                    record_account_op(int(_acc_id), op_type, success=False, error=str(e)[:100])
+            except Exception:
+                pass
             # Попытаться поставить на повтор перед тем как помечать как failed
             requeued = await _maybe_requeue(pool, op_id, e)
             if not requeued:
@@ -435,12 +466,11 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     text = params.get("text", "")
     # Accept both "delay_seconds" (canonical) and legacy "delay" key from OpBuilder
     delay = params.get("delay_seconds") or params.get("delay") or 30
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    from services.flood_engine import get_active_accounts
-    accounts = await get_active_accounts(
+    accounts = await resource_selector.select_all_active(
         pool, owner_id,
-        account_ids=[int(i) for i in account_ids] if account_ids else None,
+        include_ids=account_ids or None,
     )
 
     if not accounts:
@@ -499,10 +529,12 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
                         await record_success(acc_dict["id"], "publish")
                     except Exception:
                         log_exc_swallow(log, f"Сбой записи успешной публикации в flood_engine аккаунта {acc_dict.get('id')}")
+                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=True)
                 except Exception as e:
                     total_failed += 1
                     err_str = str(e)[:200]
-                    flood_wait = _extract_flood_wait(e, err_str)
+                    flood_wait = extract_flood_wait(e, err_str)
+                    _infra_mem.record_account_op(acc_dict["id"], "publish", success=False, error=err_str[:100])
                     if flood_wait:
                         try:
                             from services.flood_engine import record_flood
@@ -634,12 +666,11 @@ async def _exec_bulk_join(
     import random
 
     links = params.get("links", [])
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    from services.flood_engine import get_active_accounts
-    accounts = await get_active_accounts(
+    accounts = await resource_selector.select_all_active(
         pool, owner_id,
-        account_ids=[int(i) for i in account_ids] if account_ids else None,
+        include_ids=account_ids or None,
     )
 
     ok_count = 0
@@ -676,10 +707,12 @@ async def _exec_bulk_join(
                     await record_success(acc["id"], "join")
                 except Exception:
                     log_exc_swallow(log, f"Сбой записи успешного join в flood_engine для аккаунта {acc['id']}")
+                _infra_mem.record_account_op(acc["id"], "join", success=True)
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
-                flood_wait = _extract_flood_wait(e, err_str)
+                flood_wait = extract_flood_wait(e, err_str)
+                _infra_mem.record_account_op(acc["id"], "join", success=False, error=err_str[:100])
                 if flood_wait:
                     try:
                         from services.flood_engine import record_flood
@@ -736,12 +769,11 @@ async def _exec_bulk_leave(
     import random
 
     channels = params.get("channels", [])
-    account_ids = params.get("account_ids") or []
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    from services.flood_engine import get_active_accounts
-    accounts = await get_active_accounts(
+    accounts = await resource_selector.select_all_active(
         pool, owner_id,
-        account_ids=[int(i) for i in account_ids] if account_ids else None,
+        include_ids=account_ids or None,
     )
 
     ok_count = 0
@@ -779,10 +811,12 @@ async def _exec_bulk_leave(
                     await record_success(acc["id"], "leave")
                 except Exception:
                     log_exc_swallow(log, f"Сбой записи успешного leave в flood_engine для аккаунта {acc['id']}")
+                _infra_mem.record_account_op(acc["id"], "leave", success=True)
             except Exception as e:
                 fail_count += 1
                 err_str = str(e)[:200]
-                flood_wait = _extract_flood_wait(e, err_str)
+                flood_wait = extract_flood_wait(e, err_str)
+                _infra_mem.record_account_op(acc["id"], "leave", success=False, error=err_str[:100])
                 if flood_wait:
                     try:
                         from services.flood_engine import record_flood
@@ -840,7 +874,10 @@ async def _exec_global_presence_channel(
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
 
-    plan = await pool.fetchrow("SELECT asset_type FROM global_presence_plans WHERE id=$1", plan_id)
+    plan = await pool.fetchrow(
+        "SELECT asset_type FROM global_presence_plans WHERE id=$1 AND owner_id=$2",
+        plan_id, owner_id,
+    )
     if not plan:
         return {"status": "failed", "reason": "План не найден"}
 
@@ -848,8 +885,8 @@ async def _exec_global_presence_channel(
     is_group = asset_type == "group"
 
     await pool.execute(
-        "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1",
-        plan_id,
+        "UPDATE global_presence_plans SET status='running', updated_at=now() WHERE id=$1 AND owner_id=$2",
+        plan_id, owner_id,
     )
 
     targets = await pool.fetch(
@@ -866,9 +903,10 @@ async def _exec_global_presence_channel(
     if not acc_ids:
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
-    from services.flood_engine import get_active_accounts
-    accounts_rows = await get_active_accounts(pool, owner_id, account_ids=[int(i) for i in acc_ids])
-    acc_by_id = {a["id"]: a for a in accounts_rows}
+    accounts_rows = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=acc_ids, respect_cooldown=False
+    )
+    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
 
     created_count = 0
     failed_count = 0
@@ -1079,10 +1117,10 @@ async def _exec_global_presence_bot(
             account_selection = {}
     selected_acc_ids = account_selection.get("account_ids") or []
 
-    from services.flood_engine import get_active_accounts
-    accounts = await get_active_accounts(
+    accounts = await resource_selector.select_all_active(
         pool, owner_id,
-        account_ids=[int(i) for i in selected_acc_ids] if selected_acc_ids else None,
+        include_ids=selected_acc_ids or None,
+        respect_cooldown=False,
     )
 
     if not accounts:
@@ -1220,21 +1258,18 @@ async def _exec_bulk_create_channels(
     username_pattern = params.get("username_pattern", "")
     acc_id = params.get("acc_id", 0)
 
-    from services.flood_engine import get_best_account
+    # Get the account via resource_selector (flood-aware)
     if acc_id:
-        acc_row = await pool.fetchrow(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
-            acc_id, owner_id,
+        candidates = await resource_selector.select_all_active(
+            pool, owner_id, include_ids=[acc_id], respect_cooldown=False
         )
-        acc_row = dict(acc_row) if acc_row else None
+        acc_row = candidates[0] if candidates else None
+        acc = dict(acc_row) if acc_row else None
     else:
-        acc_row = await get_best_account(pool, owner_id, action_type="create_channel")
+        acc = await resource_selector.select_account(pool, owner_id, "create_channel")
 
-    if not acc_row:
+    if not acc:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
-
-    acc = dict(acc_row)
     created_count = 0
     failed_count = 0
 
@@ -1345,4 +1380,131 @@ async def _exec_bulk_create_channels(
         "created": created_count,
         "failed": failed_count,
         "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+    }
+
+
+async def _exec_strike(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict) -> dict:
+    """Выполнить Strike-операцию через staggered_strike() из strike_engine.
+
+    Параметры params:
+      target        — username или ссылка (@channel или t.me/channel)
+      reason        — причина жалобы (spam/violence/fraud/csam/...)
+      preset        — пресет (content_spam/threat_real/fake_docs/...)
+      num_waves     — количество волн для plan_waves() (default 3)
+      account_ids   — конкретные id аккаунтов (опционально, если не указаны — авто)
+      label         — метка операции (опционально)
+    """
+    from services.strike_engine import (
+        StrikePlan, staggered_strike, format_strike_summary,
+        preflight_accounts, plan_waves,
+    )
+    import time as _time
+
+    target = params.get("target", "").strip()
+    reason = params.get("reason", "spam")
+    preset = params.get("preset") or None
+    label = params.get("label") or f"queued_strike_{op_id}"
+
+    try:
+        num_waves = max(1, int(params.get("num_waves", 3)))
+    except (ValueError, TypeError):
+        num_waves = 3
+
+    account_ids: list[int] = []
+    for _x in (params.get("account_ids") or []):
+        try:
+            account_ids.append(int(_x))
+        except (ValueError, TypeError):
+            log.warning("_exec_strike op=%d: invalid account_id=%r, skipped", op_id, _x)
+
+    if not target:
+        return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
+
+    # ── Загрузить аккаунты через resource_selector (flood-aware + cooldown) ───
+    raw_accounts = await resource_selector.select_all_active(
+        pool, owner_id,
+        include_ids=account_ids or None,
+        respect_cooldown=False,  # preflight_accounts делает свою cooldown проверку
+    )
+
+    if not raw_accounts:
+        return {"status": "failed", "summary": "⚠️ Strike: нет аккаунтов"}
+
+    accounts_dicts = [dict(a) for a in raw_accounts]
+
+    # ── Pre-flight: фильтр cooldown + flood-state + сортировка ────────────────
+    viable = preflight_accounts(accounts_dicts)
+    if not viable:
+        return {
+            "status": "failed",
+            "summary": "⚠️ Strike: все аккаунты в cooldown или неактивны",
+        }
+
+    # ── Волны ─────────────────────────────────────────────────────────────────
+    waves = plan_waves(viable, num_waves=num_waves)
+
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        len(viable), op_id,
+    )
+
+    plan = StrikePlan(
+        targets=[target],
+        accounts=viable,
+        reason=reason,
+        preset=preset,
+        label=label,
+        # intel пустой: queued Strike не делает pre-recon.
+        # staggered_strike безопасно обрабатывает intel={} — каждый аккаунт
+        # самостоятельно вызывает GetFullChannel/GetHistory при выполнении.
+        intel={},
+        waves=waves,
+        started_at=_time.time(),
+        phase="recon",   # начальная фаза: strike_engine начнёт со сбора данных
+        mode="normal",
+        owner_id=owner_id,
+    )
+
+    # Progress callback: обновляет done_items в БД при переходе между волнами
+    # чтобы _progress_monitor мог отправлять уведомления 25/50/75%
+    _wave_done = 0
+
+    async def _strike_progress(phase: str, detail: str) -> None:
+        nonlocal _wave_done
+        if "wave" in phase.lower():
+            _wave_done += 1
+            pct_items = min(_wave_done * len(viable) // max(1, num_waves), len(viable))
+            try:
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                    pct_items, op_id,
+                )
+            except Exception:
+                pass
+
+    try:
+        results = await staggered_strike(plan, progress_cb=_strike_progress, pool=pool)
+    except Exception as e:
+        log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
+        return {
+            "status": "failed",
+            "summary": f"❌ Strike завершился с ошибкой: {str(e)[:200]}",
+        }
+
+    await pool.execute(
+        "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+        len(viable), op_id,
+    )
+
+    summary_text = format_strike_summary(results)
+    total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
+
+    return {
+        "status": "done",
+        "target": target,
+        "waves_planned": num_waves,
+        "accounts_used": len(viable),
+        "total_reported": total_reported,
+        "summary": (summary_text[:500] if summary_text
+                    else f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}"),
     }
