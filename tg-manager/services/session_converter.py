@@ -175,16 +175,12 @@ def detect_tdata(path: str) -> dict:
             found.append(ind)
 
     if len(found) >= 1:
-        # Проверяем наличие opentele
-        try:
-            import opentele  # type: ignore
-
-            can_convert = True
-            msg = f"tdata обнаружен ({', '.join(found)}). opentele доступен — конвертация возможна."
-        except ImportError:
-            can_convert = False
-            msg = f"tdata обнаружен ({', '.join(found)}). Установите opentele для конвертации: pip install opentele"
-
+        from services.tdata_converter import check_pycryptodome
+        can_convert = check_pycryptodome()
+        if can_convert:
+            msg = f"tdata обнаружен ({', '.join(found)}). Конвертация доступна."
+        else:
+            msg = f"tdata обнаружен ({', '.join(found)}). Установите pycryptodome: pip install pycryptodome"
         return {"is_tdata": True, "can_convert": can_convert, "message": msg}
 
     return {"is_tdata": False, "can_convert": False, "message": "tdata не обнаружен"}

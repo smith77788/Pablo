@@ -361,6 +361,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
                a.pool, a.tags,
                COALESCE(a.acc_status, 'active') AS acc_status,
                a.last_real_check_at,
+               (a.session_str IS NOT NULL AND a.session_str != '') AS has_session,
                (SELECT ROUND(h.health_score::numeric, 1)
                 FROM account_health_history h
                 WHERE h.account_id = a.id
@@ -396,15 +397,20 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
         # Группируем по статусу
         grp_restricted: list = []
+        grp_no_session: list = []
         grp_cooldown: list = []
         grp_low_trust: list = []
         grp_ok: list = []
 
         for acc in rows:
             acc_status = acc["acc_status"] or "active"
+            has_session = acc.get("has_session", True)
             flood_until = acc["cooldown_until"]
             trust = float(acc["trust_score"] or 1.0)
-            if acc_status in ("spamblock", "banned", "deactivated", "session_expired"):
+            # session_expired у аккаунта без session_str — не истекшая сессия, а не импортированный аккаунт
+            if acc_status == "session_expired" and not has_session:
+                grp_no_session.append(acc)
+            elif acc_status in ("spamblock", "banned", "deactivated", "session_expired"):
                 grp_restricted.append(acc)
             elif flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
                 grp_cooldown.append(acc)
@@ -423,8 +429,21 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             summary_parts.append(f"⏸ {len(grp_cooldown)} на паузе")
         if grp_low_trust:
             summary_parts.append(f"⚠️ {len(grp_low_trust)} низкий trust")
+        if grp_no_session:
+            summary_parts.append(f"📵 {len(grp_no_session)} без сессии")
         lines.append("  ".join(summary_parts) if summary_parts else "Нет данных")
         lines.append("")
+
+        # Аккаунты без session_str — отдельная группа
+        if grp_no_session:
+            lines.append("<b>📵 Не импортированы (нет сессии):</b>")
+            for acc in grp_no_session:
+                name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
+                phone = acc["phone"] or ""
+                lines.append(
+                    f"  📵 <b>{name}</b> ({phone}) | <i>добавьте сессию через «Добавить аккаунт»</i>"
+                )
+            lines.append("")
 
         # Ограниченные аккаунты — полный список
         if grp_restricted:
@@ -527,37 +546,55 @@ async def cb_health_real_check(
 
     results = []
     for acc in accounts:
-        name = acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}"
+        name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
+        session_str = acc.get("session_str") or ""
+
+        # Аккаунты без session_str — не проверяем, показываем отдельно
+        if not session_str or len(session_str.strip()) < 10:
+            results.append(f"📵 <b>{name}</b> — нет сессии (аккаунт не импортирован)")
+            continue
+
         res: dict = {}
         try:
             res = await asyncio.wait_for(
-                check_account_status_full(acc["session_str"], dict(acc), check_spambot=True),
+                check_account_status_full(session_str, dict(acc), check_spambot=True),
                 timeout=30.0,
             )
             status = res.get("status", "error")
             reason = res.get("reason", "")
         except asyncio.TimeoutError:
             status = "error"
-            reason = "Таймаут"
+            reason = "Таймаут подключения"
         except Exception as e:
             log_exc_swallow(log, f"real_check failed acc={acc['id']}")
             status = "error"
             reason = str(e)[:60]
 
-        # Update acc_status in DB
+        # Update acc_status in DB — только подтверждённые статусы
         try:
-            await pool.execute(
-                "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
-                status, acc["id"],
-            )
-            if status in ("session_expired", "banned", "deactivated") and res.get("auth_error"):
+            if status in ("active", "spamblock", "cooldown"):
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
+                    status, acc["id"],
+                )
+            elif status in ("session_expired", "banned", "deactivated") and res.get("auth_error"):
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
+                    status, acc["id"],
+                )
                 await pool.execute(
                     "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
                     acc["id"],
                 )
+            elif status not in ("error",):
+                # Обновляем только время, не меняем acc_status
+                await pool.execute(
+                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1",
+                    acc["id"],
+                )
             if status == "spamblock":
                 await pool.execute(
-                    "UPDATE tg_accounts SET trust_score=LEAST(trust_score, 0.3) WHERE id=$1",
+                    "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0), 0.3) WHERE id=$1",
                     acc["id"],
                 )
         except Exception:
@@ -565,7 +602,7 @@ async def cb_health_real_check(
 
         emoji = status_emoji.get(status, "❓")
         label = status_label.get(status, status)
-        reason_part = f": {reason[:50]}" if status not in ("active",) and reason else ""
+        reason_part = f": {html.escape(reason[:50])}" if status not in ("active",) and reason else ""
         extra = f" — {label}{reason_part}" if status != "active" else ""
         results.append(f"{emoji} <b>{name}</b>{extra}")
 

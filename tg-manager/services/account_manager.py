@@ -390,36 +390,84 @@ async def convert_session_file_to_string(session_bytes: bytes) -> str:
     return "1" + base64.urlsafe_b64encode(packed).decode()
 
 async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
-    """Convert a TDesktop tdata directory to Telethon StringSession via opentele."""
+    """Convert a TDesktop tdata directory to Telethon StringSession.
+
+    Пробует opentele (если установлен), иначе использует нативный конвертер.
+    """
+    # ── Попытка 1: opentele (если доступен) ──────────────────────────────────
     try:
-        from opentele.td import TDesktop
-        from opentele.api import UseCurrentSession
+        from opentele.td import TDesktop  # type: ignore
+        from opentele.api import UseCurrentSession  # type: ignore
         from telethon.sessions import StringSession as _SS
+
+        try:
+            td = TDesktop(tdata_path)
+        except Exception as e:
+            raise ValueError(f"Не удалось загрузить tdata через opentele: {e}")
+
+        if not td.isLoaded():
+            raise ValueError("tdata не загружены (opentele). Проверьте папку tdata.")
+
+        try:
+            client = await td.ToTelethon(session=_SS(), flag=UseCurrentSession)
+        except Exception as e:
+            raise ValueError(f"Ошибка конвертации tdata → Telethon (opentele): {e}")
+
+        try:
+            await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+            if not await client.is_user_authorized():
+                raise ValueError("Сессия из tdata (opentele) не авторизована.")
+            session_str = client.session.save()
+            me = await client.get_me()
+            info = {
+                "tg_user_id": me.id,
+                "phone": getattr(me, "phone", "") or f"id:{me.id}",
+                "first_name": getattr(me, "first_name", "") or "",
+                "username": getattr(me, "username", "") or "",
+            }
+            return session_str, info
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "Сбой в import_from_tdata (opentele disconnect)")
     except ImportError:
+        pass  # opentele не установлен — используем нативный конвертер
+
+    # ── Попытка 2: нативный конвертер (pycryptodome) ──────────────────────────
+    from services.tdata_converter import convert_tdata, check_pycryptodome
+
+    if not check_pycryptodome():
         raise ImportError(
-            "Пакет opentele не установлен. Обратитесь к администратору.\n"
-            "pip install opentele"
+            "Конвертация tdata недоступна: ни opentele, ни pycryptodome не установлены.\n"
+            "Используйте String Session или .session файл."
         )
 
     try:
-        td = TDesktop(tdata_path)
+        sessions = convert_tdata(tdata_path)
     except Exception as e:
-        raise ValueError(f"Не удалось загрузить tdata: {e}")
+        raise ValueError(f"Ошибка конвертации tdata: {e}")
 
-    if not td.isLoaded():
-        raise ValueError("tdata не загружены. Проверьте архив — должна быть папка tdata с файлом key_datas.")
+    if not sessions:
+        raise ValueError(
+            "tdata конвертирован, но аккаунты не найдены. "
+            "Возможно tdata защищён паролем или использует нестандартный формат. "
+            "Попробуйте импорт через String Session."
+        )
 
-    try:
-        client = await td.ToTelethon(session=_SS(), flag=UseCurrentSession)
-    except Exception as e:
-        raise ValueError(f"Ошибка конвертации tdata → Telethon: {e}")
+    # Берём первую сессию и проверяем через Telegram
+    session_str = sessions[0]["session_str"]
 
+    client = _make_client(session_str)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        if not await client.is_user_authorized():
-            raise ValueError("Сессия из tdata не авторизована.")
+        me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        if me is None:
+            raise ValueError(
+                "Сессия из tdata не авторизована в Telegram. "
+                "Возможно, tdata устарел или аккаунт был переавторизован."
+            )
         session_str = client.session.save()
-        me = await client.get_me()
         info = {
             "tg_user_id": me.id,
             "phone": getattr(me, "phone", "") or f"id:{me.id}",
@@ -427,11 +475,24 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
             "username": getattr(me, "username", "") or "",
         }
         return session_str, info
+    except asyncio.TimeoutError:
+        raise ValueError(
+            "Таймаут подключения через tdata. "
+            "Проверьте подключение к Telegram или используйте String Session."
+        )
+    except Exception as e:
+        err = str(e)
+        if "AUTH_KEY" in err or "SESSION_REVOKED" in err:
+            raise ValueError(
+                "Ключ сессии из tdata недействителен — аккаунт был переавторизован или сессия отозвана. "
+                "Экспортируйте свежий tdata или используйте String Session."
+            )
+        raise ValueError(f"Ошибка при подключении через tdata: {err[:200]}")
     finally:
         try:
             await client.disconnect()
         except Exception:
-            log_exc_swallow(log, "Сбой в import_from_tdata")
+            log_exc_swallow(log, "Сбой отключения в import_from_tdata")
 
 async def get_client_info_and_session(phone: str) -> tuple[str, dict]:
     """Get session string + user info from a pending login. Call after confirm_code/confirm_2fa."""
@@ -776,6 +837,14 @@ async def check_account_status_full(
         "display_name": str,
     }
     """
+    if not session_string or len(session_string.strip()) < 10:
+        return {
+            "status": "no_session",
+            "reason": "Аккаунт не импортирован — session_str отсутствует.",
+            "display_name": "",
+            "auth_error": False,
+            "no_session": True,
+        }
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)

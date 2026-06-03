@@ -343,12 +343,13 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
     """
     from services.account_manager import check_account_status_full
 
-    # Аккаунты, не проверявшиеся более 6 часов
+    # Аккаунты с session_str, не проверявшиеся более 6 часов
     accounts = await pool.fetch(
         """SELECT id, session_str, phone, first_name, username,
                   device_model, system_version, app_version, proxy_id
            FROM tg_accounts
            WHERE is_active=TRUE
+             AND session_str IS NOT NULL AND session_str != ''
              AND (last_real_check_at IS NULL
                   OR last_real_check_at < NOW() - INTERVAL '6 hours')
            ORDER BY COALESCE(last_real_check_at, '2000-01-01') ASC
@@ -366,11 +367,34 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
                 timeout=30.0,
             )
             status = result.get("status", "active")
+            auth_error = result.get("auth_error", False)
 
-            await pool.execute(
-                "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
-                status, acc["id"],
-            )
+            # Не обновляем acc_status для no_session — аккаунт просто не импортирован
+            if result.get("no_session"):
+                continue
+
+            # Только подтверждённые статусы пишем в БД — session_expired без auth_error игнорируем
+            if status in ("active", "spamblock", "cooldown"):
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+                    status, acc["id"],
+                )
+            elif status in ("banned", "deactivated") and auth_error:
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+                    status, acc["id"],
+                )
+            elif status == "session_expired" and auth_error:
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+                    status, acc["id"],
+                )
+            else:
+                # Любой спорный статус — только обновляем время проверки, не меняем acc_status
+                await pool.execute(
+                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$2",
+                    acc["id"],
+                )
 
             if status == "spamblock":
                 await pool.execute(
@@ -378,11 +402,12 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
                     acc["id"],
                 )
                 log.warning("account_health: spamblock detected acc=%d", acc["id"])
-            elif status in ("banned", "deactivated", "session_expired"):
+            elif status in ("banned", "deactivated", "session_expired") and auth_error:
+                # Деактивируем только при явном auth_error от Telegram
                 await pool.execute(
                     "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
                 )
-                log.warning("account_health: acc=%d deactivated status=%s", acc["id"], status)
+                log.warning("account_health: acc=%d deactivated status=%s (auth_error)", acc["id"], status)
         except asyncio.TimeoutError:
             log.debug("account_health: spambot check timeout acc=%d", acc["id"])
         except Exception as e:

@@ -16,12 +16,11 @@ Intelligence Engine — единый аналитический слой BotMoth
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Optional
-
-import html as _html
 
 import asyncpg
 
@@ -297,20 +296,20 @@ def format_pre_launch_block(intel: PreLaunchIntelligence) -> str:
         lines.append(f"⏱ <b>Прогноз:</b> {intel.prediction.format()}")
 
     # Риск
-    lines.append(f"🎯 <b>Риск:</b> {intel.risk.summary}")
+    lines.append(f"🎯 <b>Риск:</b> {html.escape(intel.risk.summary)}")
 
     # Причины риска
     if intel.risk.reasons:
         for r in intel.risk.reasons[:2]:
-            lines.append(f"   • {_html.escape(r)}")
+            lines.append(f"   • {html.escape(r)}")
 
     # Предупреждение (если есть)
     if intel.warning_text:
-        lines.append(f"\n⚠️ {_html.escape(intel.warning_text)}")
+        lines.append(f"\n⚠️ {html.escape(intel.warning_text)}")
 
     # Блокировка
     if not intel.go_decision:
-        lines.append(f"\n🚫 <b>Операция заблокирована:</b> {_html.escape(intel.go_reason)}")
+        lines.append(f"\n🚫 <b>Операция заблокирована:</b> {html.escape(intel.go_reason)}")
 
     return "\n".join(lines)
 
