@@ -1383,9 +1383,28 @@ async def _exec_global_presence_channel(
                 )
 
         if result.get("error"):
+            err_str = str(result["error"])
+            # Немедленно деактивировать аккаунт при AUTH_KEY/SESSION ошибке
+            if "AUTH_KEY" in err_str or "SESSION_REVOKED" in err_str:
+                try:
+                    await pool.execute(
+                        """UPDATE tg_accounts
+                           SET is_active    = FALSE,
+                               acc_status   = 'session_expired',
+                               status_reason = $2
+                           WHERE id = $1 AND is_active = TRUE""",
+                        acc["id"],
+                        f"AUTH_KEY/SESSION dead (gp_channel): {err_str[:200]}",
+                    )
+                    log.warning(
+                        "op_worker gp_channel: deactivated dead session account_id=%s",
+                        acc["id"],
+                    )
+                except Exception as _dbe:
+                    log.warning("op_worker gp_channel: deactivate failed: %s", _dbe)
             await pool.execute(
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                str(result["error"])[:500],
+                err_str[:500],
                 target["id"],
             )
             failed_count += 1
@@ -1393,7 +1412,7 @@ async def _exec_global_presence_channel(
                 acc["id"],
                 "global_presence_channel",
                 success=False,
-                error=str(result["error"])[:100],
+                error=err_str[:100],
             )
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id

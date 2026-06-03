@@ -103,7 +103,7 @@ async def assess_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
         owner_id,
     )
     proxy_row = await pool.fetchrow(
-        "SELECT COUNT(*) AS cnt FROM user_proxies WHERE owner_id=$1 AND active=true",
+        "SELECT COUNT(*) AS cnt FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
         owner_id,
     )
     ops_row = await pool.fetchrow(
