@@ -786,7 +786,7 @@ asyncio.create\_task(my\_service.run(pool))
 - **Ветка:** claude/telegram-bot-services-xfAh6 → auto-deploy при пуше
 - **Build:** pip install -r requirements.txt && python main.py
 - **Проверка после деплоя:** /version или /menu в боте
-- **Текущая build:** 2026.06.03-r21
+- **Текущая build:** 2026.06.03-r22
 - **Логи:** Railway dashboard → Deployments → Latest
 -----
 ## 18\. ПРИНЦИПЫ UX (для Telegram-native интерфейса)
@@ -848,5 +848,20 @@ asyncio.create\_task(my\_service.run(pool))
 - ✅ **pressure gate в mass_publish confirm** — та же логика, infra_orchestrator влияет на UX
 - ✅ **pressure gate в ob_confirm (Operation Builder)** — первая точка где "мозг" реально управляет действиями
 
-*Последнее обновление: 2026-06-03 (r21)* *Следующий build-номер: r22*
+### ✅ ЗАКРЫТО (r22) — BOTMOTHER EPOCH II: INFRASTRUCTURE INTELLIGENCE CONTRACT
+
+- ✅ **intelligence_engine.py HTML fix** — html.escape() в format_pre_launch_block() (risk.reasons, warning_text, go_reason)
+- ✅ **Cooldown Reset UI** — кнопка "🔓 Сбросить кулдауны" в Health Dashboard; reset_one + reset_all handlers
+- ✅ **Pool Pressure Score** — compute_pool_pressure() → per-pool давление с cooldown+restriction+flood; format_pool_pressure()
+- ✅ **Pressure Panel → Pool Breakdown** — панель давления показывает breakdown по пулам (≥2 пулов)
+- ✅ **Enhanced Advisor (13 правил, было 8)** — правила 9-13: memory_performance, pool_concentration, op_failure_spike, no_proxy, idle_high_trust
+- ✅ **Copilot Memory Analyzer** — _analyze_memory_performance(): chronic underperformers + trust-memory divergence
+- ✅ **Copilot Timing Analyzer** — _analyze_timing_patterns(): best operation hour из 14d history в operation_queue
+- ✅ **Intelligence Dashboard** — InfraCb(action="intelligence"): top-3 accounts, risk for join/publish/strike, proxy quality
+- ✅ **Strike Intelligence upgrade** — format_pre_launch_block() + excluded accounts с причинами на confirm screen
+- ✅ **Mass Ops Intelligence upgrade** — _intel_block() → intelligence_engine.get_pre_launch_intelligence() primary + fallback
+- ✅ **Memory Feedback Loop completeness** — global_presence_channel + global_presence_bot теперь пишут в infra_memory per-item
+- ✅ **Free Mode** — глобальный toggle в /admin + platform_settings (из прошлой сессии, задокументировано)
+
+*Последнее обновление: 2026-06-03 (r22)* *Следующий build-номер: r23*
 

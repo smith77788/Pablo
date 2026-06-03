@@ -79,10 +79,22 @@ async def _capacity_line(pool: asyncpg.Pool, owner_id: int, op_type: str, total_
 
 
 async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_items: int, acc_ids: list) -> str:
-    """Intelligence-блок для экрана подтверждения массовых операций (макс. 8 строк).
+    """Intelligence-блок для экрана подтверждения массовых операций.
 
-    Запрашивает state + capacity параллельно. При любой ошибке возвращает ''.
+    Использует intelligence_engine.get_pre_launch_intelligence() с fallback
+    на базовый infra_orchestrator.get_state() + estimate_capacity().
     """
+    # Primary: full intelligence engine
+    try:
+        from services import intelligence_engine as _ie
+        intel = await _ie.get_pre_launch_intelligence(
+            pool, owner_id, op_type, total_items, acc_ids or None
+        )
+        return _ie.format_pre_launch_block(intel)
+    except Exception:
+        pass
+
+    # Fallback: simple state block
     try:
         state_res, cap_res = await asyncio.gather(
             infra_orchestrator.get_state(pool, owner_id),
@@ -104,7 +116,6 @@ async def _intel_block(pool: asyncpg.Pool, owner_id: int, op_type: str, total_it
         if est_min and est_min > 0:
             lines.append(f"⏱ Прогноз выполнения: ~{est_min:.0f} мин")
 
-        # Предупреждения (max 2, только critical/warning)
         recs = state_res.recommendations or []
         shown = 0
         for rec in recs:
