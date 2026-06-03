@@ -358,6 +358,8 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         SELECT a.id, a.phone, a.first_name, a.username, a.trust_score, a.cooldown_until,
                COALESCE(a.flood_count_7d, 0) AS flood_count_7d, a.is_active,
                a.pool, a.tags,
+               COALESCE(a.acc_status, 'active') AS acc_status,
+               a.last_real_check_at,
                (SELECT ROUND(h.health_score::numeric, 1)
                 FROM account_health_history h
                 WHERE h.account_id = a.id
@@ -368,6 +370,22 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         """,
         user_id,
     )
+
+    _STATUS_EMOJI = {
+        "active": "✅",
+        "spamblock": "🚫",
+        "cooldown": "⏸",
+        "banned": "⛔",
+        "deactivated": "🗑",
+        "session_expired": "🔑",
+    }
+    _STATUS_LABEL = {
+        "spamblock": "СПАМ-БЛОК",
+        "banned": "ЗАБЛОКИРОВАН",
+        "deactivated": "УДАЛЁН",
+        "session_expired": "СЕССИЯ ИСТЕКЛА",
+        "cooldown": "ПАУЗА",
+    }
 
     lines = ["📱 <b>Здоровье аккаунтов</b>\n"]
     if not rows:
@@ -381,6 +399,8 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             name = acc["username"] or acc["first_name"] or phone or f"id{acc['id']}"
             flood_until = acc["cooldown_until"]
             flood_cnt = int(acc["flood_count_7d"] or 0)
+            acc_status = acc["acc_status"] or "active"
+            last_check = acc["last_real_check_at"]
 
             hs_str = f" | health: {health:.0f}" if health is not None else ""
 
@@ -389,17 +409,27 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             tags_list = acc.get("tags") or []
             tags_str = f" | 🏷 {', '.join(tags_list[:3])}" if tags_list else ""
 
-            if flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
+            # Статус ограничений — главный приоритет
+            if acc_status in ("spamblock", "banned", "deactivated", "session_expired"):
+                status_emoji = _STATUS_EMOJI.get(acc_status, "⛔")
+                status_label = _STATUS_LABEL.get(acc_status, acc_status.upper())
+                lines.append(
+                    f"{status_emoji} @{name} ({phone}) | <b>{status_label}</b> | trust: {trust:.2f}{hs_str}{pool_str}{tags_str}"
+                )
+            elif flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
                 human_cd = _human_cooldown(flood_until, now)
                 time_str = flood_until.strftime("%d.%m %H:%M")
                 lines.append(f"⏸ @{name} ({phone}) | <b>Пауза до {time_str}</b> ({human_cd}){hs_str}{pool_str}{tags_str}")
             elif trust < 0.5:
                 lines.append(
-                    f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}{pool_str}{tags_str}"
+                    f"⚠️ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}{pool_str}{tags_str}"
                 )
             else:
+                check_hint = ""
+                if last_check is None:
+                    check_hint = " | <i>не проверен</i>"
                 lines.append(
-                    f"✅ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | блокировок: {flood_cnt}{hs_str}{pool_str}{tags_str}"
+                    f"✅ @{name} ({phone}) | надёжность: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}{pool_str}{tags_str}{check_hint}"
                 )
 
     kb = _back_kb()

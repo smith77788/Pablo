@@ -335,6 +335,62 @@ async def _cleanup_old_health_history(pool: asyncpg.Pool) -> int:
         return 0
 
 
+async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
+    """Периодическая проверка acc_status через SpamBot (раз в 6 часов на аккаунт).
+
+    Обновляет acc_status, trust_score в DB. При обнаружении spamblock — снижает trust.
+    Не уведомляет — уведомления идут из account_monitor.
+    """
+    from services.account_manager import check_account_status_full
+
+    # Аккаунты, не проверявшиеся более 6 часов
+    accounts = await pool.fetch(
+        """SELECT id, session_str, phone, first_name, username,
+                  device_model, system_version, app_version, proxy_id
+           FROM tg_accounts
+           WHERE is_active=TRUE
+             AND (last_real_check_at IS NULL
+                  OR last_real_check_at < NOW() - INTERVAL '6 hours')
+           ORDER BY COALESCE(last_real_check_at, '2000-01-01') ASC
+           LIMIT 10""",
+    )
+    if not accounts:
+        return
+
+    log.info("account_health: spambot check cycle — %d accounts to check", len(accounts))
+
+    for acc in accounts:
+        try:
+            result = await asyncio.wait_for(
+                check_account_status_full(acc["session_str"], dict(acc), check_spambot=True),
+                timeout=30.0,
+            )
+            status = result.get("status", "active")
+
+            await pool.execute(
+                "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+                status, acc["id"],
+            )
+
+            if status == "spamblock":
+                await pool.execute(
+                    "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0), 0.3) WHERE id=$1",
+                    acc["id"],
+                )
+                log.warning("account_health: spamblock detected acc=%d", acc["id"])
+            elif status in ("banned", "deactivated", "session_expired"):
+                await pool.execute(
+                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
+                )
+                log.warning("account_health: acc=%d deactivated status=%s", acc["id"], status)
+        except asyncio.TimeoutError:
+            log.debug("account_health: spambot check timeout acc=%d", acc["id"])
+        except Exception as e:
+            log_exc_swallow(log, "account_health spambot check acc=%d: %s", acc["id"], e)
+
+        await asyncio.sleep(3)  # небольшая пауза между аккаунтами
+
+
 async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> None:
     """Фоновый цикл: каждый час пересчитывает здоровье и сохраняет снапшоты.
 
@@ -363,6 +419,13 @@ async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> N
                 cleaned = await _cleanup_old_health_history(pool)
                 if cleaned:
                     log.debug("account_health: cleaned %d old snapshots", cleaned)
+
+            # SpamBot проверка: каждые 6 часов проверяем аккаунты через реальный Telegram
+            if cycle % 6 == 0:
+                try:
+                    await _run_spambot_check_cycle(pool)
+                except Exception:
+                    log_exc_swallow(log, "account_health: spambot check cycle failed")
 
             cycle += 1
         except Exception:
