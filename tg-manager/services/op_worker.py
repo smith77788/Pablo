@@ -407,7 +407,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             try:
                 from services.infra_memory import record_account_op
                 for _acc_id in (params.get("account_ids") or []):
-                    record_account_op(int(_acc_id), op_type, success=True)
+                    record_account_op(int(_acc_id), op_type, success=True, duration_s=duration_seconds)
             except Exception:
                 pass
 
@@ -972,6 +972,7 @@ async def _exec_global_presence_channel(
         # ── Умная задержка перед созданием ──
         await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
 
+        t0_gp = time.monotonic()
         result = await account_manager.create_channel(
             acc["session_str"], title, about="", megagroup=is_group, _acc=acc
         )
@@ -1045,7 +1046,7 @@ async def _exec_global_presence_channel(
             "UPDATE global_presence_targets SET status='done', result_asset_id=$1 WHERE id=$2",
             channel_id, target["id"],
         )
-        _infra_mem.record_account_op(acc["id"], "global_presence_channel", success=True)
+        _infra_mem.record_account_op(acc["id"], "global_presence_channel", success=True, duration_s=time.monotonic() - t0_gp)
         created_count += 1
 
         await pool.execute(
@@ -1168,6 +1169,7 @@ async def _exec_global_presence_bot(
         await pool.execute("UPDATE global_presence_targets SET status='running' WHERE id=$1", target["id"])
         await session_simulator.typing_delay(bot_name)
 
+        t0_gp_bot = time.monotonic()
         result = await account_manager.create_bot_via_botfather(
             acc["session_str"], bot_name, bot_username or f"geo_{i + 1}_bot", _acc=acc
         )
@@ -1216,7 +1218,7 @@ async def _exec_global_presence_bot(
         await pool.execute(
             "UPDATE global_presence_targets SET status='done' WHERE id=$1", target["id"]
         )
-        _infra_mem.record_account_op(acc["id"], "global_presence_bot", success=True)
+        _infra_mem.record_account_op(acc["id"], "global_presence_bot", success=True, duration_s=time.monotonic() - t0_gp_bot)
         await pool.execute(
             "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
             op_id, created_count + failed_count + 1,
