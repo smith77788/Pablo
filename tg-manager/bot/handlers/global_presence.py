@@ -19,7 +19,7 @@ from services.geo_data import GEO_PRESETS, parse_custom_geo_list
 from services.presence_planner import render_pattern, build_targets, estimate_duration_minutes
 from services.username_engine import slugify
 from services.logger import log_exc_swallow
-from services import operation_bus, infra_orchestrator
+from services import operation_bus, infra_orchestrator, intelligence_engine
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -960,12 +960,26 @@ async def cb_gp_confirm_preview(
             f"Это займёт значительное время. Убедитесь что у вас достаточно аккаунтов ({n_accs})."
         )
 
+    # Intelligence block
+    try:
+        intel = await intelligence_engine.get_pre_launch_intelligence(
+            pool, callback.from_user.id, "global_presence", n_cities,
+            account_ids=selected_acc_ids if selected_acc_ids else None,
+        )
+        intel_text = intelligence_engine.format_pre_launch_block(intel)
+        if not intel.go_decision:
+            await callback.answer(intel.go_reason, show_alert=True)
+            return
+    except Exception:
+        intel_text = ""
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить", callback_data=GeoPresenceCb(action="launch"))
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="back_to_preview"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
+    intel_section = f"\n\n{intel_text}" if intel_text else ""
     await _edit(
         callback,
         f"🌍 <b>Финальное подтверждение</b>\n"
@@ -980,7 +994,8 @@ async def cb_gp_confirm_preview(
         f"⏱️ ETA: {duration_str} (safe mode)\n\n"
         f"🔢 Итого: <b>{n_cities} {count_label}</b> будет создано.\n"
         f"Операция запустится через очередь — вы получите уведомление о завершении."
-        f"{warning}\n\n"
+        f"{warning}"
+        f"{intel_section}\n\n"
         f"<b>Запустить?</b>",
         markup=kb.as_markup(),
     )

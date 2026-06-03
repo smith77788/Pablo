@@ -18,7 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import DmCb, BotCb, BmCb
 from bot.states import DmCampaignFSM
-from services import task_registry as _treg
+from services import task_registry as _treg, intelligence_engine
 from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -374,6 +374,7 @@ async def _show_dm_preview(
     cohort_type = sd.get("dm_cohort_type", "")
 
     # Подсчитать аудиторию
+    recipients_count = 0
     if target_type == "bot_users" and target_id:
         count_row = await pool.fetchrow(
             "SELECT COUNT(DISTINCT user_id) AS cnt FROM bot_users WHERE bot_id=$1 AND user_id > 0",
@@ -384,7 +385,8 @@ async def _show_dm_preview(
             target_id,
         )
         bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(target_id)) if bot_row else str(target_id)
-        audience_str = f"Все подписчики @{bot_label}: <b>{count_row['cnt']}</b>"
+        recipients_count = int(count_row["cnt"] or 0)
+        audience_str = f"Все подписчики @{bot_label}: <b>{recipients_count}</b>"
     elif target_type == "cohort" and target_id:
         cohort_sql = {
             "hot":  "last_seen >= now() - INTERVAL '1 day'",
@@ -405,16 +407,27 @@ async def _show_dm_preview(
         )
         bot_label = (bot_row.get("first_name") or bot_row.get("username") or str(target_id)) if bot_row else str(target_id)
         cohort_label = _COHORT_LABELS.get(cohort_type, cohort_type)
+        recipients_count = int(cnt)
         audience_str = f"{cohort_label} когорта @{bot_label}: <b>{cnt}</b>"
     else:
         count_row = await pool.fetchrow(
             "SELECT COUNT(DISTINCT tg_user_id) AS cnt FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
             callback.from_user.id,
         )
-        audience_str = f"CRM-контакты: <b>{count_row['cnt']}</b>"
+        recipients_count = int(count_row["cnt"] or 0)
+        audience_str = f"CRM-контакты: <b>{recipients_count}</b>"
 
     from services.dm_engine import expand_spintax
     preview_text = expand_spintax(text)
+
+    # Intelligence block
+    try:
+        intel = await intelligence_engine.get_pre_launch_intelligence(
+            pool, callback.from_user.id, "dm_campaign", recipients_count,
+        )
+        intel_text = "\n\n" + intelligence_engine.format_pre_launch_block(intel)
+    except Exception:
+        intel_text = ""
 
     lines = [
         "<b>📨 Предпросмотр кампании</b>\n",
@@ -423,6 +436,8 @@ async def _show_dm_preview(
         "\n<b>Пример сообщения:</b>",
         f"<i>{html.escape(preview_text[:300])}</i>",
     ]
+    if intel_text:
+        lines.append(intel_text)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить",  callback_data=DmCb(action="launch"))
