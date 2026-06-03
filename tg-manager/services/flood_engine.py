@@ -199,6 +199,58 @@ async def get_best_account(
     return best or (dict(rows[0]) if rows else None)
 
 
+async def get_active_accounts(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    account_ids: list[int] | None = None,
+    pool_name: str | None = None,
+    tags: list[str] | None = None,
+) -> list[dict]:
+    """Return all active, non-cooling accounts ranked by combined trust/risk score.
+
+    For mass operations that need to cycle through multiple accounts.
+    Optional filters: account_ids (restrict to subset), pool_name, tags.
+    """
+    conditions = [
+        "a.owner_id = $1",
+        "a.is_active = TRUE",
+        "(a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
+    ]
+    params: list = [owner_id]
+
+    if account_ids:
+        params.append(account_ids)
+        conditions.append(f"a.id = ANY(${len(params)}::bigint[])")
+
+    if pool_name is not None:
+        params.append(pool_name)
+        conditions.append(f"a.pool = ${len(params)}")
+
+    if tags:
+        params.append(tags)
+        conditions.append(f"a.tags @> ${len(params)}::text[]")
+
+    where = " AND ".join(conditions)
+    rows = await pool.fetch(
+        f"""SELECT a.id, a.session_str, a.first_name, a.phone,
+                   a.device_model, a.system_version, a.app_version,
+                   a.trust_score, a.cooldown_until, a.tags, a.pool,
+                   p.proxy_url
+            FROM tg_accounts a
+            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+            WHERE {where}
+            ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST""",
+        *params,
+    )
+
+    # Exclude in-memory cooling accounts, then re-sort by combined score
+    result = [dict(r) for r in rows if not is_account_cooling(r["id"])]
+    result.sort(
+        key=lambda r: get_account_state(r["id"]).risk_score - (r.get("trust_score") or 0) / 100.0
+    )
+    return result
+
+
 async def wait_if_cooling(account_id: int, action_type: str = "default") -> None:
     """Async wait if account is in cooldown, then apply recommended delay."""
     cool_secs = seconds_until_ready(account_id)

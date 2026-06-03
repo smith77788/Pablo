@@ -189,26 +189,8 @@ async def run_campaign(
         campaign_id,
     )
 
-    # Получить активные аккаунты владельца (без кулдауна)
-    accounts = await pool.fetch(
-        "SELECT a.id, a.session_str, a.phone, a.first_name, "
-        "       a.device_model, a.system_version, a.app_version, a.cooldown_until "
-        "FROM tg_accounts a "
-        "WHERE a.owner_id=$1 AND a.is_active=true "
-        "  AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
-        "ORDER BY a.trust_score DESC NULLS LAST",
-        owner_id,
-    )
-    if not accounts:
-        # Попробовать любые активные без учёта кулдауна (лучше медленно, чем никак)
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.first_name, "
-            "       a.device_model, a.system_version, a.app_version, a.cooldown_until "
-            "FROM tg_accounts a "
-            "WHERE a.owner_id=$1 AND a.is_active=true "
-            "ORDER BY a.cooldown_until ASC NULLS FIRST, a.trust_score DESC NULLS LAST LIMIT 1",
-            owner_id,
-        )
+    from services.flood_engine import get_active_accounts
+    accounts = await get_active_accounts(pool, owner_id)
     if not accounts:
         log.error("dm_engine: no active accounts for campaign %d owner=%d", campaign_id, owner_id)
         await pool.execute(
@@ -247,34 +229,6 @@ async def run_campaign(
 
         acc = dict(acc_cycle[acc_idx % len(acc_cycle)])
         acc_idx += 1
-
-        # Пропустить аккаунт если ещё на кулдауне
-        import datetime as _dt
-        cooldown_until = acc.get("cooldown_until")
-        if cooldown_until is not None:
-            if hasattr(cooldown_until, "replace"):
-                # asyncpg возвращает datetime с tzinfo, сравниваем с UTC now
-                try:
-                    import datetime as _dt2
-                    now_utc = _dt2.datetime.now(_dt2.timezone.utc)
-                    if cooldown_until > now_utc:
-                        log.debug("dm_engine: acc %d on cooldown until %s, skipping", acc["id"], cooldown_until)
-                        # Попробовать следующий аккаунт для этой цели
-                        _found_acc = None
-                        for _i in range(len(acc_cycle)):
-                            _candidate = dict(acc_cycle[(acc_idx + _i) % len(acc_cycle)])
-                            _c = _candidate.get("cooldown_until")
-                            if _c is None or _c <= now_utc:
-                                _found_acc = _candidate
-                                acc_idx += _i + 1
-                                break
-                        if _found_acc:
-                            acc = _found_acc
-                        else:
-                            # Все аккаунты на кулдауне — ждём немного и продолжаем
-                            await asyncio.sleep(30)
-                except Exception:
-                    log_exc_swallow(log, f"dm_engine: cooldown check failed for campaign={campaign.get('id')} user_id={user_id}")
 
         text = expand_spintax(template)
         result = await send_dm(acc["session_str"], user_id, text, _acc=acc)

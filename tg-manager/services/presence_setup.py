@@ -104,19 +104,14 @@ async def seed_channel_via_account(
 ) -> bool:
     """Post via userbot account when bot is not yet admin in channel."""
     from services import account_manager
-    acc = await pool.fetchrow(
-        "SELECT id,session_str,device_model,system_version,app_version "
-        "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "AND (cooldown_until IS NULL OR cooldown_until < now()) "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-        owner_id,
-    )
+    from services.flood_engine import get_best_account
+    acc = await get_best_account(pool, owner_id, action_type="post")
     if not acc:
         return False
     try:
         result = await account_manager.post_to_channel(
             acc["session_str"], channel_id,
-            text, access_hash=access_hash or 0, _acc=dict(acc),
+            text, access_hash=access_hash or 0, _acc=acc,
         )
         return bool(result.get("msg_id")) if isinstance(result, dict) else bool(result)
     except Exception as e:
@@ -133,13 +128,8 @@ async def promote_bot_in_channel(
 ) -> bool:
     """Add a bot as admin (post_messages, invite_users) in a channel via userbot."""
     from services import account_manager
-    acc = await pool.fetchrow(
-        "SELECT id,session_str,device_model,system_version,app_version "
-        "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "AND (cooldown_until IS NULL OR cooldown_until < now()) "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-        owner_id,
-    )
+    from services.flood_engine import get_best_account
+    acc = await get_best_account(pool, owner_id, action_type="admin_action")
     if not acc:
         log.warning("promote_bot_in_channel: no active account for owner %s", owner_id)
         return False
@@ -148,7 +138,7 @@ async def promote_bot_in_channel(
             acc["session_str"],
             channel_id,
             bot_tg_id,
-            _acc=dict(acc),
+            _acc=acc,
             access_hash=access_hash or 0,
             post_messages=True,
             invite_users=True,

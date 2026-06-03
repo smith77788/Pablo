@@ -25,20 +25,8 @@ log = logging.getLogger(__name__)
 
 
 async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> dict | None:
-    row = await pool.fetchrow(
-        """SELECT a.id, a.session_str, a.first_name, a.phone,
-                  a.device_model, a.system_version, a.app_version, p.proxy_url
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.owner_id = $1
-             AND a.is_active = TRUE
-             AND COALESCE(a.acc_status, 'active') = 'active'
-             AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
-           ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST
-           LIMIT 1""",
-        owner_id,
-    )
-    return dict(row) if row else None
+    from services.flood_engine import get_best_account
+    return await get_best_account(pool, owner_id, action_type="parse")
 
 
 async def _create_run(

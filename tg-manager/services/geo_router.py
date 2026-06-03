@@ -80,19 +80,9 @@ async def get_best_account_for_region(
         if accounts:
             return accounts[0]
 
-    # Fallback — любой аккаунт с наивысшим trust_score
-    row = await pool.fetchrow(
-        """SELECT a.id, a.session_str, a.phone, a.first_name,
-                  a.device_model, a.system_version, a.app_version,
-                  p.proxy_url
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-           WHERE a.owner_id = $1 AND a.is_active = true
-           ORDER BY a.trust_score DESC NULLS LAST, a.flood_count_7d ASC NULLS FIRST
-           LIMIT 1""",
-        owner_id,
-    )
-    return dict(row) if row else None
+    # Fallback — любой аккаунт через flood_engine (учитывает in-memory risk scoring)
+    from services.flood_engine import get_best_account
+    return await get_best_account(pool, owner_id, action_type="geo_action")
 
 
 async def get_geo_aware_pool(

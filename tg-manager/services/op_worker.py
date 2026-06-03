@@ -437,26 +437,11 @@ async def _exec_mass_publish(pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id:
     delay = params.get("delay_seconds") or params.get("delay") or 30
     account_ids = params.get("account_ids") or []
 
-    if account_ids:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-            "a.trust_score, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.id = ANY($1) AND a.owner_id=$2 AND a.is_active=true "
-            "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-            "ORDER BY a.trust_score DESC NULLS LAST",
-            [int(i) for i in account_ids], owner_id,
-        )
-    else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-            "a.trust_score, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=true "
-            "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-            "ORDER BY a.trust_score DESC NULLS LAST",
-            owner_id,
-        )
+    from services.flood_engine import get_active_accounts
+    accounts = await get_active_accounts(
+        pool, owner_id,
+        account_ids=[int(i) for i in account_ids] if account_ids else None,
+    )
 
     if not accounts:
         log.warning("op_worker mass_publish #%d: no active accounts for owner=%d", op_id, owner_id)
@@ -651,21 +636,11 @@ async def _exec_bulk_join(
     links = params.get("links", [])
     account_ids = params.get("account_ids") or []
 
-    _acc_q = (
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-        "a.trust_score, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=true "
-        "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-        "ORDER BY a.trust_score DESC NULLS LAST"
+    from services.flood_engine import get_active_accounts
+    accounts = await get_active_accounts(
+        pool, owner_id,
+        account_ids=[int(i) for i in account_ids] if account_ids else None,
     )
-    if account_ids:
-        accounts = await pool.fetch(
-            _acc_q.replace("WHERE a.owner_id=$1", "WHERE a.id = ANY($2) AND a.owner_id=$1"),
-            owner_id, [int(i) for i in account_ids],
-        )
-    else:
-        accounts = await pool.fetch(_acc_q, owner_id)
 
     ok_count = 0
     fail_count = 0
@@ -763,21 +738,11 @@ async def _exec_bulk_leave(
     channels = params.get("channels", [])
     account_ids = params.get("account_ids") or []
 
-    _acc_q = (
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, "
-        "a.trust_score, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=true "
-        "AND (a.cooldown_until IS NULL OR a.cooldown_until < now()) "
-        "ORDER BY a.trust_score DESC NULLS LAST"
+    from services.flood_engine import get_active_accounts
+    accounts = await get_active_accounts(
+        pool, owner_id,
+        account_ids=[int(i) for i in account_ids] if account_ids else None,
     )
-    if account_ids:
-        accounts = await pool.fetch(
-            _acc_q.replace("WHERE a.owner_id=$1", "WHERE a.id = ANY($2) AND a.owner_id=$1"),
-            owner_id, [int(i) for i in account_ids],
-        )
-    else:
-        accounts = await pool.fetch(_acc_q, owner_id)
 
     ok_count = 0
     fail_count = 0
@@ -901,14 +866,9 @@ async def _exec_global_presence_channel(
     if not acc_ids:
         return {"status": "failed", "reason": "Нет аккаунтов для выполнения"}
 
-    accounts_rows = await pool.fetch(
-        "SELECT a.id, a.session_str, a.phone, a.device_model, a.system_version, a.app_version, a.trust_score, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.id = ANY($1) AND a.is_active=true "
-        "ORDER BY a.trust_score DESC NULLS LAST",
-        acc_ids,
-    )
-    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
+    from services.flood_engine import get_active_accounts
+    accounts_rows = await get_active_accounts(pool, owner_id, account_ids=[int(i) for i in acc_ids])
+    acc_by_id = {a["id"]: a for a in accounts_rows}
 
     created_count = 0
     failed_count = 0
@@ -1119,13 +1079,11 @@ async def _exec_global_presence_bot(
             account_selection = {}
     selected_acc_ids = account_selection.get("account_ids") or []
 
-    accounts = []
-    if selected_acc_ids:
-        accounts = await pool.fetch(
-            "SELECT id, session_str, phone, first_name, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id = ANY($1) AND is_active=TRUE",
-            selected_acc_ids,
-        )
+    from services.flood_engine import get_active_accounts
+    accounts = await get_active_accounts(
+        pool, owner_id,
+        account_ids=[int(i) for i in selected_acc_ids] if selected_acc_ids else None,
+    )
 
     if not accounts:
         await pool.execute(
@@ -1262,21 +1220,16 @@ async def _exec_bulk_create_channels(
     username_pattern = params.get("username_pattern", "")
     acc_id = params.get("acc_id", 0)
 
-    # Get the account
+    from services.flood_engine import get_best_account
     if acc_id:
         acc_row = await pool.fetchrow(
             "SELECT id, session_str, phone, device_model, system_version, app_version "
             "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
             acc_id, owner_id,
         )
+        acc_row = dict(acc_row) if acc_row else None
     else:
-        acc_row = await pool.fetchrow(
-            "SELECT id, session_str, phone, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
-            "AND (cooldown_until IS NULL OR cooldown_until < now()) "
-            "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
-            owner_id,
-        )
+        acc_row = await get_best_account(pool, owner_id, action_type="create_channel")
 
     if not acc_row:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
