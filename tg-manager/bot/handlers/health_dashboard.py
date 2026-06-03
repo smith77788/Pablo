@@ -1376,8 +1376,14 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 async def cb_pressure_score(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     from services import infra_pressure
-    data = await infra_pressure.compute_pressure(pool, callback.from_user.id)
+    uid = callback.from_user.id
+    data, pool_data = await asyncio.gather(
+        infra_pressure.compute_pressure(pool, uid),
+        infra_pressure.compute_pool_pressure(pool, uid),
+    )
     report = infra_pressure.format_pressure_report(data)
+    if len(pool_data) >= 2:
+        report += infra_pressure.format_pool_pressure(pool_data)
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=HealthCb(action="pressure"))
     kb.button(text="🎯 Советник", callback_data=HealthCb(action="advisor"))

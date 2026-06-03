@@ -12,6 +12,7 @@ Entry point: InfraCb(action="menu")
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from datetime import date, timedelta
@@ -96,6 +97,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🔄 Авто-балансировка пулов", callback_data=InfraCb(action="rebalance_preview"))
     kb.button(text="🎯 Советник",                callback_data=InfraCb(action="advisor"))
     kb.button(text="🧠 Copilot",                 callback_data=InfraCb(action="copilot"))
+    kb.button(text="🔬 Intelligence Report",     callback_data=InfraCb(action="intelligence"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -729,6 +731,98 @@ async def cb_infra_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Назад",   callback_data=InfraCb(action="menu"))
     kb.adjust(2)
     await callback.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(InfraCb.filter(F.action == "intelligence"))
+async def cb_intelligence_report(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Intelligence Report — сводка по сuitability, рискам и прокси для всей инфраструктуры."""
+    await callback.answer("⏳ Анализ инфраструктуры...")
+    uid = callback.from_user.id
+
+    try:
+        from services import intelligence_engine
+        import html as _html
+
+        accs, risk_join, risk_pub, risk_strike, proxies = await asyncio.gather(
+            intelligence_engine.analyze_accounts(pool, uid, "bulk_join"),
+            intelligence_engine.assess_risk(pool, uid, "bulk_join", 50),
+            intelligence_engine.assess_risk(pool, uid, "mass_publish", 10),
+            intelligence_engine.assess_risk(pool, uid, "strike", 1),
+            intelligence_engine.analyze_proxies(pool, uid),
+            return_exceptions=True,
+        )
+        if isinstance(accs, Exception):
+            accs = []
+        if isinstance(proxies, Exception):
+            proxies = []
+
+        lines = ["🔬 <b>Intelligence Report</b>\n"]
+
+        # ── Accounts
+        available_accs = [a for a in accs if a.recommended and not a.is_cooling]
+        cooling_accs = [a for a in accs if a.is_cooling]
+        problem_accs = [a for a in accs if not a.recommended and not a.is_cooling]
+
+        lines.append(f"📱 <b>Аккаунты ({len(accs)} активных):</b>")
+        lines.append(f"  ✅ Готовы: <b>{len(available_accs)}</b>")
+        if cooling_accs:
+            lines.append(f"  ⏸ Кулдаун: <b>{len(cooling_accs)}</b>")
+        if problem_accs:
+            lines.append(f"  ⚠️ Проблемные: <b>{len(problem_accs)}</b>")
+
+        if available_accs:
+            lines.append("")
+            lines.append("🏆 <b>Топ-3 лучших прямо сейчас:</b>")
+            for acc in available_accs[:3]:
+                bar = "█" * round(acc.suitability_score * 5) + "░" * (5 - round(acc.suitability_score * 5))
+                lines.append(
+                    f"  [{bar}] {_html.escape(acc.label())} — "
+                    f"fit {int(acc.suitability_score * 100)}% · "
+                    f"risk {int(acc.risk_score * 100)}%"
+                )
+
+        # ── Risk assessment
+        def _rl(label: str, risk) -> str:
+            if isinstance(risk, Exception):
+                return f"  ⚪ {label}: —"
+            return f"  {risk.level_emoji} {label}: {_html.escape(risk.summary)}"
+
+        lines.append("")
+        lines.append("⚠️ <b>Оценка рисков:</b>")
+        lines.append(_rl("Bulk Join (50)", risk_join))
+        lines.append(_rl("Публикация (10)", risk_pub))
+        lines.append(_rl("Strike", risk_strike))
+
+        # Top risk reason
+        for risk in (risk_join, risk_pub, risk_strike):
+            if not isinstance(risk, Exception) and risk.reasons:
+                lines.append(f"  💬 Главная причина: {_html.escape(risk.reasons[0])}")
+                break
+
+        # ── Proxies
+        if proxies:
+            good_prx = [p for p in proxies if p.quality_score >= 0.65]
+            bad_prx = [p for p in proxies if p.quality_score < 0.40]
+            med_prx = [p for p in proxies if 0.40 <= p.quality_score < 0.65]
+            lines.append("")
+            lines.append(f"🌐 <b>Прокси ({len(proxies)} всего):</b>")
+            lines.append(f"  🟢 Хорошие: {len(good_prx)}  🟡 Средние: {len(med_prx)}  🔴 Плохие: {len(bad_prx)}")
+            if bad_prx:
+                bad_list = ", ".join(_html.escape(p.proxy_url[:25]) for p in bad_prx[:2])
+                lines.append(f"  ⚠️ Рекомендуется замена: {bad_list}")
+
+        text = "\n".join(lines)
+
+    except Exception as e:
+        import html as _html
+        text = f"⚠️ Intelligence временно недоступен: {_html.escape(str(e)[:200])}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить",  callback_data=InfraCb(action="intelligence"))
+    kb.button(text="🎯 Советник",  callback_data=InfraCb(action="advisor"))
+    kb.button(text="◀️ Назад",     callback_data=InfraCb(action="menu"))
+    kb.adjust(2, 1)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_apply"))

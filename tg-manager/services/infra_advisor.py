@@ -172,6 +172,138 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             "action": "accounts",
         })
 
+    # 9. Accounts with poor memory performance (persistent failures from infra_memory_accounts)
+    try:
+        poor_memory = await pool.fetch(
+            """SELECT ima.account_id,
+                      COALESCE(a.first_name, a.phone, 'id'||ima.account_id::text) AS label,
+                      ima.successes, ima.failures,
+                      (ima.successes::float / NULLIF(ima.successes + ima.failures, 0)) AS success_rate
+               FROM infra_memory_accounts ima
+               JOIN tg_accounts a ON a.id = ima.account_id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+                 AND (ima.successes + ima.failures) >= 20
+                 AND (ima.successes::float / (ima.successes + ima.failures)) < 0.30
+               ORDER BY success_rate ASC LIMIT 5""",
+            owner_id,
+        )
+        if poor_memory:
+            names = ", ".join(r["label"] for r in poor_memory[:3])
+            worst_rate = int((poor_memory[0]["success_rate"] or 0) * 100)
+            recs.append({
+                "severity": "warning",
+                "icon": "📉",
+                "title": f"Хроническая низкая эффективность: {len(poor_memory)} акк",
+                "text": (
+                    f"Аккаунты {names} успешно выполняют <{worst_rate}% операций на основе "
+                    f"исторических данных. Рекомендуется разогрев или исключение из активных операций."
+                ),
+                "action": "warmup",
+            })
+    except Exception:
+        pass
+
+    # 10. Pool concentration — one named pool has >80% of all accounts (uneven distribution)
+    try:
+        if total_acc >= 4:
+            named_pools = [(r["pool"], r["cnt"]) for r in pool_stats if r["pool"] is not None]
+            for pool_name, cnt in named_pools:
+                if cnt / total_acc > 0.80:
+                    recs.append({
+                        "severity": "info",
+                        "icon": "⚖️",
+                        "title": f"Дисбаланс пулов: {pool_name!r} перегружен",
+                        "text": (
+                            f"{cnt} из {total_acc} активных аккаунтов в пуле «{pool_name}». "
+                            f"Распределите аккаунты по нескольким пулам для снижения точки отказа."
+                        ),
+                        "action": "accounts",
+                    })
+                    break
+    except Exception:
+        pass
+
+    # 11. Recent operation failure spike (last 30 ops, >45% failed/error)
+    try:
+        recent_ops = await pool.fetch(
+            """SELECT status, COUNT(*) AS cnt
+               FROM operation_queue
+               WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '48 hours'
+               GROUP BY status""",
+            owner_id,
+        )
+        op_totals = {r["status"]: int(r["cnt"]) for r in recent_ops}
+        total_recent = sum(op_totals.values())
+        failed_recent = op_totals.get("failed", 0) + op_totals.get("error", 0)
+        if total_recent >= 10 and failed_recent / total_recent > 0.45:
+            fail_pct = int(failed_recent / total_recent * 100)
+            recs.append({
+                "severity": "warning",
+                "icon": "📛",
+                "title": f"Всплеск ошибок операций: {fail_pct}% за 48ч",
+                "text": (
+                    f"{failed_recent} из {total_recent} последних операций завершились неудачей. "
+                    f"Возможна перегрузка аккаунтов или проблемы с прокси."
+                ),
+                "action": "tasks",
+            })
+    except Exception:
+        pass
+
+    # 12. Accounts without proxy when user has proxies configured
+    try:
+        user_proxy_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+            owner_id,
+        )
+        if (user_proxy_count or 0) > 0:
+            no_proxy_accs = await pool.fetchval(
+                """SELECT COUNT(*) FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=TRUE AND proxy_id IS NULL""",
+                owner_id,
+            )
+            if (no_proxy_accs or 0) > 0:
+                recs.append({
+                    "severity": "info",
+                    "icon": "🔌",
+                    "title": f"Аккаунты без прокси: {no_proxy_accs} шт",
+                    "text": (
+                        f"У вас настроены прокси, но {no_proxy_accs} аккаунт(ов) работают без них. "
+                        f"Назначьте прокси для защиты реального IP."
+                    ),
+                    "action": "proxies",
+                })
+    except Exception:
+        pass
+
+    # 13. High-trust idle accounts (trust>0.7 but not used >7 days → underutilized asset)
+    try:
+        idle_high_trust = await pool.fetch(
+            """SELECT id, COALESCE(first_name, phone, 'id'||id::text) AS label,
+                      trust_score, last_used_at
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND COALESCE(trust_score, 0) > 0.70
+                 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '7 days')
+                 AND (cooldown_until IS NULL OR cooldown_until < NOW())
+               ORDER BY trust_score DESC LIMIT 5""",
+            owner_id,
+        )
+        if idle_high_trust:
+            names = ", ".join(r["label"] for r in idle_high_trust[:3])
+            recs.append({
+                "severity": "info",
+                "icon": "💤",
+                "title": f"Неиспользуемые надёжные аккаунты: {len(idle_high_trust)} шт",
+                "text": (
+                    f"Аккаунты {names} имеют высокий trust_score, но не использовались >7 дней. "
+                    f"Включите их в операции для максимальной эффективности."
+                ),
+                "action": "accounts",
+            })
+    except Exception:
+        pass
+
     # Sort: critical first, then warning, then info
     order = {"critical": 0, "warning": 1, "info": 2}
     recs.sort(key=lambda r: order.get(r.get("severity", "info"), 2))

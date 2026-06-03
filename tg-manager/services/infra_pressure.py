@@ -244,3 +244,85 @@ def format_pressure_report(data: dict) -> str:
         lines += ["", "✅ <b>Инфраструктура в норме.</b> Продолжайте в том же духе."]
 
     return "\n".join(lines)
+
+
+# ── Pool Pressure Score ────────────────────────────────────────────────────────
+
+async def compute_pool_pressure(pool: asyncpg.Pool, owner_id: int) -> dict[str, dict]:
+    """Per-pool pressure breakdown.
+
+    Returns {pool_name: {score, pressure_emoji, pressure_label, accounts,
+                         cooling, restricted, avg_flood}}
+    Pool=NULL accounts → key "default".
+    """
+    try:
+        rows = await pool.fetch(
+            """SELECT
+                   COALESCE(pool, 'default') AS pool_name,
+                   COUNT(*) FILTER (WHERE is_active) AS total,
+                   COUNT(*) FILTER (WHERE is_active AND cooldown_until > NOW()) AS cooling,
+                   COUNT(*) FILTER (WHERE is_active
+                       AND COALESCE(acc_status,'active') NOT IN ('active','cooldown')
+                   ) AS restricted,
+                   COALESCE(AVG(COALESCE(flood_count_7d,0)) FILTER (WHERE is_active), 0) AS avg_flood
+               FROM tg_accounts
+               WHERE owner_id=$1
+               GROUP BY pool_name
+               ORDER BY pool_name""",
+            owner_id,
+        )
+        result: dict[str, dict] = {}
+        for row in rows:
+            pool_name = row["pool_name"]
+            total = max(int(row["total"] or 0), 1)
+            cooling_cnt = int(row["cooling"] or 0)
+            restricted_cnt = int(row["restricted"] or 0)
+            avg_flood = float(row["avg_flood"] or 0)
+
+            cool_ratio = cooling_cnt / total
+            restr_ratio = restricted_cnt / total
+
+            # Simplified 3-factor pressure (no queue / proxy — per-pool scope)
+            c_cool  = min(100, int(cool_ratio * 200))   # 50% → 100
+            c_restr = min(100, int(restr_ratio * 300))  # 33% → 100
+            c_flood = min(100, int(avg_flood / 5 * 100))
+
+            score = max(0, min(100, int(c_cool * 0.45 + c_restr * 0.30 + c_flood * 0.25)))
+            emoji, label = pressure_level(score)
+
+            result[pool_name] = {
+                "score": score,
+                "pressure_emoji": emoji,
+                "pressure_label": label,
+                "accounts": int(row["total"] or 0),
+                "cooling": cooling_cnt,
+                "restricted": restricted_cnt,
+                "avg_flood": round(avg_flood, 1),
+            }
+        return result
+    except Exception as e:
+        log.warning("infra_pressure pool_pressure failed owner=%d: %s", owner_id, e)
+        return {}
+
+
+def format_pool_pressure(pools: dict[str, dict]) -> str:
+    """Human-readable pool pressure breakdown для вставки в отчёты."""
+    if not pools:
+        return ""
+    lines = ["", "🏊 <b>Давление по пулам:</b>"]
+    for pool_name, data in sorted(pools.items()):
+        emoji = data["pressure_emoji"]
+        score = data["score"]
+        accs = data["accounts"]
+        cool = data["cooling"]
+        restr = data["restricted"]
+        details = []
+        if cool:
+            details.append(f"{cool} кд")
+        if restr:
+            details.append(f"{restr} огр")
+        detail_str = f" ({', '.join(details)})" if details else ""
+        lines.append(
+            f"  {emoji} <b>{pool_name}</b>: {score}/100 · {accs} акк{detail_str}"
+        )
+    return "\n".join(lines)

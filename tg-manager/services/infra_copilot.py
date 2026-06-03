@@ -56,6 +56,8 @@ async def run_full_analysis(
             _analyze_proxy_patterns(pool, owner_id),
             _analyze_operation_patterns(pool, owner_id),
             _analyze_capacity_risks(pool, owner_id),
+            _analyze_memory_performance(pool, owner_id),
+            _analyze_timing_patterns(pool, owner_id),
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -668,6 +670,161 @@ async def _analyze_capacity_risks(
                 },
                 score_impact=0.35,
             ))
+
+    return insights
+
+
+# ── Анализатор Memory Performance ─────────────────────────────────────────────
+
+async def _analyze_memory_performance(
+    pool: asyncpg.Pool,
+    owner_id: int,
+) -> list[CopilotInsight]:
+    """Анализ исторической эффективности аккаунтов через infra_memory_accounts."""
+    insights: list[CopilotInsight] = []
+
+    # 1. Аккаунты с хронически плохой эффективностью (>20 операций, <30% успеха)
+    try:
+        poor = await pool.fetch(
+            """SELECT ima.account_id,
+                      COALESCE(a.first_name, a.phone, 'id'||ima.account_id::text) AS label,
+                      ima.successes, ima.failures,
+                      (ima.successes + ima.failures) AS total,
+                      (ima.successes::float / NULLIF(ima.successes + ima.failures, 0)) AS success_rate
+               FROM infra_memory_accounts ima
+               JOIN tg_accounts a ON a.id = ima.account_id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+                 AND (ima.successes + ima.failures) >= 20
+                 AND (ima.successes::float / (ima.successes + ima.failures)) < 0.30
+               ORDER BY success_rate ASC LIMIT 5""",
+            owner_id,
+        )
+        if poor:
+            labels = ", ".join(r["label"] for r in poor[:3])
+            worst_rate = int((poor[0]["success_rate"] or 0) * 100)
+            worst_total = poor[0]["total"]
+            insights.append(CopilotInsight(
+                category="account",
+                severity="warning",
+                title=f"Хроническая низкая эффективность: {len(poor)} акк ({worst_rate}% успеха)",
+                explanation=(
+                    f"Аккаунты {labels} показывают <30% успешных операций "
+                    f"(худший: {worst_rate}% из {worst_total} операций). "
+                    f"Это не флуд-ограничения — это системная проблема эффективности."
+                ),
+                recommendation=(
+                    "Разогрейте проблемные аккаунты или переведите в пул 'warmup'. "
+                    "Не используйте их в критичных операциях."
+                ),
+                data={"count": len(poor), "worst_rate": worst_rate},
+                score_impact=0.55,
+            ))
+    except Exception as e:
+        log.debug("_analyze_memory_performance poor query failed owner=%d: %s", owner_id, e)
+
+    # 2. Trust-memory divergence — аккаунты с высоким trust но низкой памятью
+    try:
+        diverged = await pool.fetch(
+            """SELECT a.id, COALESCE(a.first_name, a.phone, 'id'||a.id::text) AS label,
+                      a.trust_score,
+                      (ima.successes::float / NULLIF(ima.successes + ima.failures, 0)) AS mem_rate,
+                      (ima.successes + ima.failures) AS total
+               FROM tg_accounts a
+               JOIN infra_memory_accounts ima ON ima.account_id = a.id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+                 AND COALESCE(a.trust_score, 0) > 0.65
+                 AND (ima.successes + ima.failures) >= 15
+                 AND (ima.successes::float / (ima.successes + ima.failures)) < 0.40
+               ORDER BY (COALESCE(a.trust_score, 0) - ima.successes::float / (ima.successes + ima.failures)) DESC
+               LIMIT 3""",
+            owner_id,
+        )
+        if diverged:
+            first = diverged[0]
+            label = first["label"]
+            trust = int((first["trust_score"] or 0) * 100)
+            mem_rate = int((first["mem_rate"] or 0) * 100)
+            insights.append(CopilotInsight(
+                category="account",
+                severity="info",
+                title=f"Расхождение: высокий trust, низкая реальная эффективность",
+                explanation=(
+                    f"Аккаунт {label}: trust {trust}%, но реальная эффективность "
+                    f"{mem_rate}% по данным памяти. Метрика trust может быть устаревшей."
+                ),
+                recommendation=(
+                    "Проверьте аккаунт реальной проверкой. "
+                    "Trust score обновляется периодически, память — в реальном времени."
+                ),
+                data={"account_label": label, "trust": trust, "mem_rate": mem_rate},
+                score_impact=0.30,
+            ))
+    except Exception as e:
+        log.debug("_analyze_memory_performance divergence query failed owner=%d: %s", owner_id, e)
+
+    return insights
+
+
+# ── Анализатор паттернов времени ──────────────────────────────────────────────
+
+async def _analyze_timing_patterns(
+    pool: asyncpg.Pool,
+    owner_id: int,
+) -> list[CopilotInsight]:
+    """Анализ паттернов времени операций из infra_memory для рекомендаций по расписанию."""
+    insights: list[CopilotInsight] = []
+
+    # Сравниваем success rate по часам суток из operation_queue
+    try:
+        hour_stats = await pool.fetch(
+            """SELECT
+                   EXTRACT(HOUR FROM created_at)::integer AS hour,
+                   COUNT(*) FILTER (WHERE status='done') AS successes,
+                   COUNT(*) AS total
+               FROM operation_queue
+               WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '14 days'
+                 AND status IN ('done', 'failed', 'error')
+               GROUP BY hour
+               HAVING COUNT(*) >= 3
+               ORDER BY hour""",
+            owner_id,
+        )
+        if len(hour_stats) >= 4:
+            # Find best and worst hours
+            rates = {
+                r["hour"]: (r["successes"] or 0) / max(r["total"], 1)
+                for r in hour_stats
+            }
+            best_hour = max(rates, key=rates.__getitem__)
+            worst_hour = min(rates, key=rates.__getitem__)
+            best_rate = int(rates[best_hour] * 100)
+            worst_rate = int(rates[worst_hour] * 100)
+            spread = best_rate - worst_rate
+
+            if spread >= 25 and best_rate >= 70:
+                insights.append(CopilotInsight(
+                    category="pattern",
+                    severity="info",
+                    title=f"Оптимальное время для операций: {best_hour:02d}:00",
+                    explanation=(
+                        f"За последние 14 дней в {best_hour:02d}:00 успех {best_rate}%, "
+                        f"а в {worst_hour:02d}:00 — только {worst_rate}%. "
+                        f"Разброс {spread}% указывает на значимые временны́е паттерны."
+                    ),
+                    recommendation=(
+                        f"Планируйте критичные операции на {best_hour:02d}:00–{(best_hour+2)%24:02d}:00. "
+                        f"Избегайте запуска в {worst_hour:02d}:00."
+                    ),
+                    data={
+                        "best_hour": best_hour,
+                        "worst_hour": worst_hour,
+                        "best_rate": best_rate,
+                        "worst_rate": worst_rate,
+                    },
+                    score_impact=0.20,
+                ))
+    except Exception as e:
+        log.debug("_analyze_timing_patterns failed owner=%d: %s", owner_id, e)
 
     return insights
 
