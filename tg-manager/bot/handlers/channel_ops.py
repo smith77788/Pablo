@@ -3333,6 +3333,103 @@ async def fsm_botfather_name(message: Message, state: FSMContext) -> None:
     )
 
 
+async def _botfather_create_bg(
+    pool: asyncpg.Pool,
+    user_id: int,
+    msg,
+    accounts: list,
+    base_username: str,
+    bot_name: str,
+    total: int,
+) -> None:
+    from services import account_manager
+    from database import db as _db
+
+    results_ok, results_err = [], []
+    done_ops = 0
+    attempt = 0
+    active_accounts = list(accounts)
+
+    try:
+        for global_i in range(total):
+            if not active_accounts:
+                results_err.append("❌ Нет доступных аккаунтов")
+                done_ops += 1
+                continue
+            acc_idx = global_i % len(active_accounts)
+            acc = active_accounts[acc_idx]
+            acc_label = html.escape(acc["first_name"] or acc["phone"])
+            suffix = str(global_i + 1) if (total > 1) else ""
+            username = (
+                (base_username.rstrip("bot") + (suffix if suffix else "") + "bot")
+                if base_username.endswith("bot")
+                else (base_username + suffix)
+            )
+
+            tried_accs: set[int] = set()
+            result = None
+            for candidate in active_accounts:
+                if candidate["id"] in tried_accs:
+                    continue
+                tried_accs.add(candidate["id"])
+                result = await account_manager.create_bot_via_botfather(
+                    candidate["session_str"],
+                    bot_name,
+                    username,
+                    _acc=dict(candidate),
+                )
+                if result.get("banned"):
+                    await _db.deactivate_account(
+                        pool, candidate["id"], "banned detected in bulk op"
+                    )
+                    active_accounts = [
+                        a for a in active_accounts if a["id"] != candidate["id"]
+                    ]
+                    continue
+                if result.get("flood_wait"):
+                    continue
+                break
+            if result is None:
+                result = {"error": "нет доступных аккаунтов"}
+
+            if "error" in result:
+                results_err.append(
+                    f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}"
+                )
+            else:
+                token = result.get("token") or "—"
+                bot_username = result.get("username") or "?"
+                results_ok.append(
+                    f"✅ {acc_label}: @{html.escape(bot_username)} — <code>{token}</code>"
+                )
+            done_ops += 1
+            try:
+                await msg.edit_text(
+                    _progress_text("Создание ботов...", done_ops, total, len(results_ok), len(results_err)),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой обновления прогресса создания ботов")
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=60.0), flood))
+    except asyncio.CancelledError:
+        log.info("_botfather_create_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_botfather_create_bg: неожиданная ошибка")
+
+    lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
+    lines += results_ok + results_err
+    try:
+        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+    except Exception:
+        log_exc_swallow(log, "_botfather_create_bg: сбой финального отчёта")
+
+
 @router.message(CreateBotFSM.waiting_username)
 async def fsm_botfather_username(
     message: Message, state: FSMContext, pool: asyncpg.Pool
@@ -3347,7 +3444,6 @@ async def fsm_botfather_username(
     selected_ids = data.get("bulk_selected", [])
     bot_count = data.get("bot_count", 1)
 
-    # Fallback to single-account mode (legacy path, shouldn't normally trigger)
     if not selected_ids and data.get("acc_id"):
         selected_ids = [data["acc_id"]]
 
@@ -3368,95 +3464,14 @@ async def fsm_botfather_username(
         _progress_text("Создание ботов...", 0, total, 0, 0),
         parse_mode="HTML",
     )
-
-    from services import account_manager
-    from database import db as _db
-
-    results_ok, results_err = [], []
-    done_ops = 0
-    attempt = 0
-    active_accounts = list(accounts)
-
-    # Round-robin: task global_i uses active_accounts[global_i % len(active_accounts)]
-    for global_i in range(total):
-        if not active_accounts:
-            results_err.append("❌ Нет доступных аккаунтов")
-            done_ops += 1
-            continue
-        acc_idx = global_i % len(active_accounts)
-        acc = active_accounts[acc_idx]
-        acc_label = html.escape(acc["first_name"] or acc["phone"])
-        # Determine suffix: overall bot index across all accounts
-        suffix = str(global_i + 1) if (total > 1) else ""
-        username = (
-            (base_username.rstrip("bot") + (suffix if suffix else "") + "bot")
-            if base_username.endswith("bot")
-            else (base_username + suffix)
-        )
-
-        # Account rotation on banned/flood_wait
-        tried_accs: set[int] = set()
-        result = None
-        for candidate in active_accounts:
-            if candidate["id"] in tried_accs:
-                continue
-            tried_accs.add(candidate["id"])
-            result = await account_manager.create_bot_via_botfather(
-                candidate["session_str"],
-                data["bot_name"],
-                username,
-                _acc=dict(candidate),
-            )
-            if result.get("banned"):
-                await _db.deactivate_account(
-                    pool, candidate["id"], "banned detected in bulk op"
-                )
-                active_accounts = [
-                    a for a in active_accounts if a["id"] != candidate["id"]
-                ]
-                continue
-            if result.get("flood_wait"):
-                continue
-            break
-        if result is None:
-            result = {"error": "нет доступных аккаунтов"}
-
-        if "error" in result:
-            results_err.append(
-                f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}"
-            )
-        else:
-            token = result.get("token") or "—"
-            bot_username = result.get("username") or "?"
-            results_ok.append(
-                f"✅ {acc_label}: @{html.escape(bot_username)} — <code>{token}</code>"
-            )
-        done_ops += 1
-        try:
-            await msg.edit_text(
-                _progress_text(
-                    "Создание ботов...",
-                    done_ops,
-                    total,
-                    len(results_ok),
-                    len(results_err),
-                ),
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Сбой обновления прогресса создания ботов")
-        # Exponential backoff; reset every 5 iterations
-        if attempt >= 4:
-            attempt = 0
-        else:
-            attempt += 1
-        flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(backoff(attempt, base=2.0, cap=60.0), flood))
-
-    lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
-    lines += results_ok + results_err
-    await msg.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+    task = asyncio.create_task(
+        _botfather_create_bg(pool, message.from_user.id, msg, list(accounts), base_username, data.get("bot_name", ""), total)
+    )
+    _treg.register(
+        message.from_user.id,
+        "botfather_create",
+        f"Создание {total} ботов через BotFather",
+        task,
     )
 
 
