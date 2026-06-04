@@ -79,6 +79,8 @@ async def _save_post_template(
         name,
         json.dumps({"text": text}),
     )
+    if not row:
+        raise RuntimeError("Failed to create post template")
     return row["id"]
 
 
