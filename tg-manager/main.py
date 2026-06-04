@@ -53,6 +53,7 @@ from bot.handlers import competitors as competitors_handler
 from bot.handlers import mass_publish as mass_pub_handler
 from bot.handlers import quick_post as quick_post_handler
 from bot.handlers import global_presence as global_presence_handler
+from bot.handlers import gift_transfer as gift_transfer_handler
 from bot.handlers import intent_engine as intent_engine_handler
 from bot.handlers import health_dashboard as health_handler
 from bot.handlers import proxy_manager as proxy_handler
@@ -166,6 +167,7 @@ async def main() -> None:
     dp.include_router(chan_factory_handler.router)
     dp.include_router(intent_engine_handler.router)
     dp.include_router(global_presence_handler.router)
+    dp.include_router(gift_transfer_handler.router)
     dp.include_router(ecosystems_handler.router)
     dp.include_router(quick_post_handler.router)
     dp.include_router(mass_pub_handler.router)

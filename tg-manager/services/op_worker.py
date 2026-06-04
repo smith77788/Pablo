@@ -474,6 +474,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
             elif op_type == "strike":
                 result = await _exec_strike(pool, bot, op_id, owner_id, params)
+            elif op_type == "gift_transfer":
+                from services.gift_operation import _exec_gift_transfer
+                result = await _exec_gift_transfer(pool, op_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",

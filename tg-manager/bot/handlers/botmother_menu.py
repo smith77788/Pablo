@@ -116,6 +116,7 @@ def _operations_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="⚔️ Strike",            callback_data=StrikeCb(action="menu"))
     kb.button(text="🌍 Присутствие",        callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text="🎁 Подарки",              callback_data=GiftTransferCb(action="main"))
     kb.button(text="🗂 Presence Packs",     callback_data=PackCb(action="menu"))
     kb.button(text="📤 Публикация",         callback_data=MassPubCb(action="menu"))
     kb.button(text="✍️ Создать пост",       callback_data=QuickPostCb(action="start"))
@@ -441,6 +442,7 @@ async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyn
         "⚡ <b>Операции — действия над аккаунтами и каналами</b>\n\n"
         "⚔️ <b>Strike</b> — целевые операции по каналам/группам\n"
         "🌍 <b>Присутствие</b> — Global Presence Factory\n"
+        "🎁 <b>Подарки</b> — перевод подарков между аккаунтами\n"
         "📤 <b>Публикация</b> — массовая публикация во все каналы\n"
         "✍️ <b>Создать пост</b> — пошаговый мастер публикации\n"
         "⚡ <b>Массовые действия</b> — join/leave, bulk-edit, инвайт\n"

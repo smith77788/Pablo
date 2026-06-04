@@ -323,6 +323,12 @@ class DmCb(CallbackData, prefix="dm"):
     page: int = 0
 
 
+class GiftTransferCb(CallbackData, prefix="gt"):
+    action: str = ""
+    id: str = ""
+    page: int = 0
+
+
 class StrikeCb(CallbackData, prefix="strk"):
     action: str
     page: int = 0

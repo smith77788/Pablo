@@ -3041,6 +3041,139 @@ async def sync_plan_status_from_op(pool: asyncpg.Pool, plan_id: int) -> str | No
 # ── Operation Reports and Statistics ──────────────────────────────────────
 
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# Gift Transfer Database Functions
+# ─────────────────────────────────────────────────────────────────────────
+
+async def create_gift_transfer_plan(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    recipient_username: str,
+    recipient_user_id: int,
+    recipient_name: str,
+    payment_source: str,
+    payment_method_id: int | None = None,
+) -> int:
+    """Create a gift transfer plan. Returns plan_id."""
+    return await pool.fetchval(
+        """INSERT INTO gift_transfer_plans
+               (owner_id, recipient_username, recipient_user_id, recipient_name,
+                payment_source, payment_method_id, status)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+           RETURNING id""",
+        owner_id, recipient_username, recipient_user_id, recipient_name,
+        payment_source, payment_method_id,
+    )
+
+
+async def get_gift_transfer_plan(pool: asyncpg.Pool, plan_id: int, owner_id: int) -> dict | None:
+    """Get a gift transfer plan."""
+    row = await pool.fetchrow(
+        "SELECT * FROM gift_transfer_plans WHERE id=$1 AND owner_id=$2",
+        plan_id, owner_id
+    )
+    return dict(row) if row else None
+
+
+async def get_gift_transfer_items(pool: asyncpg.Pool, plan_id: int) -> list[dict]:
+    """Get all items in a gift transfer plan."""
+    rows = await pool.fetch(
+        "SELECT * FROM gift_transfer_items WHERE plan_id=$1 ORDER BY id",
+        plan_id
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_gift_transfer_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
+    """Get transfer stats for a plan."""
+    row = await pool.fetchrow("""
+        SELECT 
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status='transferred') as transferred,
+            COUNT(*) FILTER (WHERE status='failed') as failed,
+            COUNT(*) FILTER (WHERE status='skipped') as skipped,
+            COUNT(*) FILTER (WHERE status='pending_confirmation') as pending,
+            COUNT(*) FILTER (WHERE status IN ('pending','queued')) as remaining,
+            SUM(stars_cost) FILTER (WHERE status='transferred') as actual_cost
+        FROM gift_transfer_items
+        WHERE plan_id=$1
+    """, plan_id)
+    return dict(row) if row else {}
+
+
+async def update_gift_transfer_plan(pool: asyncpg.Pool, plan_id: int, **kwargs) -> None:
+    """Update gift transfer plan fields."""
+    if not kwargs:
+        return
+    set_clause = ", ".join(f"{k}=${i+2}" for i, k in enumerate(kwargs.keys()))
+    await pool.execute(
+        f"UPDATE gift_transfer_plans SET {set_clause}, updated_at=now() WHERE id=$1",
+        plan_id, *kwargs.values()
+    )
+
+
+async def get_gift_recipients(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
+    """Get saved recipients for a user."""
+    rows = await pool.fetch(
+        "SELECT * FROM gift_recipients WHERE owner_id=$1 ORDER BY is_main_admin DESC, name",
+        owner_id
+    )
+    return [dict(r) for r in rows]
+
+
+async def save_gift_recipient(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    name: str,
+    username: str,
+    user_id: int | None = None,
+    is_main_admin: bool = False,
+) -> int:
+    """Save a recipient. Returns recipient_id."""
+    return await pool.fetchval(
+        """INSERT INTO gift_recipients
+               (owner_id, name, username, user_id, is_main_admin)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (owner_id, name) DO UPDATE SET
+               username = EXCLUDED.username,
+               user_id = EXCLUDED.user_id,
+               updated_at = now()
+           RETURNING id""",
+        owner_id, name, username, user_id, is_main_admin
+    )
+
+
+async def delete_gift_recipient(pool: asyncpg.Pool, owner_id: int, recipient_id: int) -> bool:
+    """Delete a saved recipient. Returns True if deleted."""
+    result = await pool.execute(
+        "DELETE FROM gift_recipients WHERE id=$1 AND owner_id=$2",
+        recipient_id, owner_id
+    )
+    return "DELETE 1" in result
+
+
+async def get_gift_transfer_reports(pool: asyncpg.Pool, owner_id: int, limit: int = 10) -> list[dict]:
+    """Get recent gift transfer reports."""
+    rows = await pool.fetch(
+        """SELECT * FROM gift_transfer_reports
+           WHERE owner_id=$1
+           ORDER BY created_at DESC
+           LIMIT $2""",
+        owner_id, limit
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_gift_transfer_report(pool: asyncpg.Pool, report_id: int, owner_id: int) -> dict | None:
+    """Get a specific report."""
+    row = await pool.fetchrow(
+        "SELECT * FROM gift_transfer_reports WHERE id=$1 AND owner_id=$2",
+        report_id, owner_id
+    )
+    return dict(row) if row else None
+
+
 async def get_operation_stats(pool: asyncpg.Pool, owner_id: int, op_id: int) -> dict:
     """Получить полную статистику выполненной операции."""
     op = await pool.fetchrow(
