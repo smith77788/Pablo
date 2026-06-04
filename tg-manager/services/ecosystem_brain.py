@@ -1182,8 +1182,9 @@ async def capture_dna_from_ecosystem(
         template_data["region_detail"] = eco.get("region") or ""
         try:
             geo_rows = await pool.fetch(
-                "SELECT DISTINCT geo_preset FROM global_presence_plans "
-                "WHERE ecosystem_id=$1 AND geo_preset IS NOT NULL LIMIT 5",
+                "SELECT DISTINCT geo_selection->>'geo_preset' AS geo_preset "
+                "FROM global_presence_plans "
+                "WHERE ecosystem_id=$1 AND geo_selection->>'geo_preset' IS NOT NULL LIMIT 5",
                 ecosystem_id,
             )
             if geo_rows:
