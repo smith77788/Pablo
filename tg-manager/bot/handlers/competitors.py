@@ -249,47 +249,52 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    await safe_edit(cb, f"🔄 Обновляю данные для {len(rows)} конкурентов...")
+    progress_msg = await safe_edit(cb, f"🔄 Обновляю данные для {len(rows)} конкурентов...")
 
-    updated = 0
-    async with aiohttp.ClientSession() as sess:
-        for r in rows:
-            try:
-                resp = await sess.get(
-                    f"https://t.me/{r['username']}",
-                    allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=8),
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                text = await resp.text()
-                m = re.search(r'"members_count":(\d+)', text)
-                if not m:
-                    m = re.search(r"([\d\s]{3,})\s*(?:subscribers|members)", text)
-                if m:
-                    count = int(m.group(1).replace(" ", "").replace("\xa0", ""))
-                    # Сохраняем предыдущее значение перед обновлением для вычисления тренда
-                    await pool.execute(
-                        "UPDATE competitors "
-                        "SET prev_members = last_members, "
-                        "    last_members = $1, "
-                        "    last_checked = now() "
-                        "WHERE id = $2",
-                        count,
-                        r["id"],
+    async def _refresh_bg() -> None:
+        updated = 0
+        async with aiohttp.ClientSession() as sess:
+            for r in rows:
+                try:
+                    resp = await sess.get(
+                        f"https://t.me/{r['username']}",
+                        allow_redirects=True,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                        headers={"User-Agent": "Mozilla/5.0"},
                     )
-                    updated += 1
-                await asyncio.sleep(1.5)
-            except Exception:
-                log_exc_swallow(log, "Не удалось обновить данные конкурента")
+                    text = await resp.text()
+                    m = re.search(r'"members_count":(\d+)', text)
+                    if not m:
+                        m = re.search(r"([\d\s]{3,})\s*(?:subscribers|members)", text)
+                    if m:
+                        count = int(m.group(1).replace(" ", "").replace("\xa0", ""))
+                        await pool.execute(
+                            "UPDATE competitors "
+                            "SET prev_members = last_members, "
+                            "    last_members = $1, "
+                            "    last_checked = now() "
+                            "WHERE id = $2",
+                            count,
+                            r["id"],
+                        )
+                        updated += 1
+                    await asyncio.sleep(1.5)
+                except Exception:
+                    log_exc_swallow(log, "Не удалось обновить данные конкурента")
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Смотреть список", callback_data=CompCb(action="menu"))
-    await safe_edit(
-        cb,
-        f"✅ Обновлено {updated} из {len(rows)} конкурентов.\n\n"
-        "Тренды подписчиков (↗️↘️) теперь видны в списке.",
-        reply_markup=kb.as_markup(),
-    )
+        try:
+            kb2 = InlineKeyboardBuilder()
+            kb2.button(text="📋 Смотреть список", callback_data=CompCb(action="menu"))
+            target = progress_msg if progress_msg else cb.message
+            await target.edit_text(
+                f"✅ Обновлено {updated} из {len(rows)} конкурентов.\n\n"
+                "Тренды подписчиков (↗️↘️) теперь видны в списке.",
+                reply_markup=kb2.as_markup(),
+            )
+        except Exception:
+            log_exc_swallow(log, "comp_refresh: не удалось обновить сообщение о результате")
+
+    asyncio.create_task(_refresh_bg())
 
 
 @router.callback_query(CompCb.filter(F.action == "delete"))

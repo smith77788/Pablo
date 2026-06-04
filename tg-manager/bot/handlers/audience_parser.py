@@ -172,8 +172,6 @@ async def fsm_parser_source(
     if not source.startswith("@") and not source.lstrip("-").isdigit():
         source = "@" + source
 
-    data = await state.get_data()
-    data.get("parse_type", "members")
     await state.update_data(parse_source=source)
     await state.set_state(ParserFSM.waiting_limit)
 

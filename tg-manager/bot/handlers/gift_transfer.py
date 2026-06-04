@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -15,6 +16,7 @@ from services.gift_inventory import GiftInventoryService
 from services.gift_transfer import GiftTransferService
 from services.gift_report import GiftTransferReportService
 from database import db
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router(name="gift_transfer")
@@ -213,28 +215,30 @@ async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
         ])
     )
     
-    # Perform scan
-    gifts = await GiftInventoryService.scan_multiple_accounts(pool, user_id, account_ids)
+    msg = callback.message
 
-    # Sync to DB
-    synced = await GiftInventoryService.sync_inventory_to_db(pool, user_id, gifts)
+    async def _scan_bg() -> None:
+        try:
+            gifts = await GiftInventoryService.scan_multiple_accounts(pool, user_id, account_ids)
+            synced = await GiftInventoryService.sync_inventory_to_db(pool, user_id, gifts)
+            kb2 = InlineKeyboardBuilder()
+            kb2.button(text="📦 Просмотр инвентаря", callback_data="gt:inventory")
+            kb2.button(text="🔄 Сканировать снова", callback_data="gt:scan")
+            kb2.button(text="◀️ Назад", callback_data="gt:main")
+            kb2.adjust(1)
+            await msg.edit_text(
+                f"✅ <b>Сканирование завершено!</b>\n\n"
+                f"📊 <b>Результаты:</b>\n"
+                f"• Аккаунтов просканировано: {len(account_ids)}\n"
+                f"• Подарков найдено: {len(gifts)}\n"
+                f"• Записей синхронизировано: {synced}\n\n"
+                f"<i>Передаваемые подарки можно отправить другому пользователю.</i>",
+                reply_markup=kb2.as_markup()
+            )
+        except Exception:
+            log_exc_swallow(log, "gift scan background task failed")
 
-    # Show results
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📦 Просмотр инвентаря", callback_data="gt:inventory")
-    kb.button(text="🔄 Сканировать снова", callback_data="gt:scan")
-    kb.button(text="◀️ Назад", callback_data="gt:main")
-    kb.adjust(1)
-
-    await callback.message.edit_text(
-        f"✅ <b>Сканирование завершено!</b>\n\n"
-        f"📊 <b>Результаты:</b>\n"
-        f"• Аккаунтов просканировано: {len(account_ids)}\n"
-        f"• Подарков найдено: {len(gifts)}\n"
-        f"• Записей синхронизировано: {synced}\n\n"
-        f"<i>Передаваемые подарки можно отправить другому пользователю.</i>",
-        reply_markup=kb.as_markup()
-    )
+    asyncio.create_task(_scan_bg())
     await state.set_state(GiftTransferFSM.scanning_gifts)
 
 
