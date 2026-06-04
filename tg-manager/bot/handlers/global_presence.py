@@ -1225,7 +1225,21 @@ async def cb_gp_confirm_preview(
     pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
+    try:
+        await _cb_gp_confirm_preview_impl(callback, state, pool)
+    except Exception as exc:
+        log.exception("cb_gp_confirm_preview failed: %s", exc)
+        try:
+            await callback.message.answer("⚠️ Внутренняя ошибка. Попробуйте ещё раз или нажмите ❌ Отмена.")
+        except Exception:
+            pass
 
+
+async def _cb_gp_confirm_preview_impl(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
     name_pattern = sd.get("name_pattern", "")
@@ -1286,11 +1300,12 @@ async def cb_gp_confirm_preview(
         )
         intel_text = intelligence_engine.format_pre_launch_block(intel)
         if not intel.go_decision:
+            # Callback already answered — can't use show_alert; edit message instead
             await state.set_state(GlobalPresenceFSM.previewing)
             kb_err = InlineKeyboardBuilder()
             kb_err.button(
-                text="◀️ Назад к аккаунтам",
-                callback_data=GeoPresenceCb(action="back_to_acc"),
+                text="◀️ Назад к предпросмотру",
+                callback_data=GeoPresenceCb(action="back_to_preview"),
             )
             kb_err.button(
                 text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel")
@@ -1318,16 +1333,22 @@ async def cb_gp_confirm_preview(
     if intel_text and len(intel_text) > 600:
         intel_text = intel_text[:597] + "…"
     intel_section = f"\n\n{intel_text}" if intel_text else ""
-    await _edit(
-        callback,
+
+    # Escape user-provided strings to prevent HTML parse errors
+    safe_geo_label = html.escape(geo_label)
+    safe_name_pattern = html.escape(name_pattern)
+    safe_username = html.escape(username_pattern or "—")
+    safe_template = html.escape(template_name)
+
+    await callback.message.edit_text(
         f"🌍 <b>Финальное подтверждение</b>\n"
         f"{'─' * 28}\n\n"
         f"<b>Что будет создано:</b>\n"
         f"📦 Тип: {asset_type_label}\n"
-        f"📍 Гео: {geo_label} ({n_cities} городов)\n"
-        f"🔤 Паттерн: <code>{name_pattern}</code>\n"
-        f"🔗 Username: <code>{username_pattern or '—'}</code>\n"
-        f"📋 Шаблон: {template_name}\n"
+        f"📍 Гео: {safe_geo_label} ({n_cities} городов)\n"
+        f"🔤 Паттерн: <code>{safe_name_pattern}</code>\n"
+        f"🔗 Username: <code>{safe_username}</code>\n"
+        f"📋 Шаблон: {safe_template}\n"
         f"👤 Аккаунтов: {n_accs} (round-robin)\n"
         f"⏱️ ETA: {duration_str} (safe mode)\n\n"
         f"🔢 Итого: <b>{n_cities} {count_label}</b> будет создано.\n"
@@ -1335,7 +1356,8 @@ async def cb_gp_confirm_preview(
         f"{warning}"
         f"{intel_section}\n\n"
         f"<b>Запустить?</b>",
-        markup=kb.as_markup(),
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
     )
 
 
