@@ -1187,8 +1187,52 @@ async def cb_do_bulk_create(
         )
         return
 
+    # ── Pre-flight: проверить возраст и trust_score аккаунтов ────────────────
+    from datetime import datetime, timezone as _tz
+    acc_ids = [a["id"] for a in accounts]
+    health_rows = await pool.fetch(
+        "SELECT id, added_at, trust_score, first_name, phone FROM tg_accounts WHERE id = ANY($1)",
+        acc_ids,
+    )
+    risk_warnings: list[str] = []
+    blocked_accs: list[str] = []
+    for row in health_rows:
+        label = html.escape(row["first_name"] or row["phone"] or str(row["id"]))
+        ts = float(row["trust_score"] or 0.5)
+        added_at = row["added_at"]
+        age_days = 0
+        if added_at:
+            age_days = (datetime.now(_tz.utc) - added_at.replace(tzinfo=_tz.utc)).days
+        if age_days < 14:
+            blocked_accs.append(f"• {label} — {age_days} дн. в системе (мин. 14)")
+        elif ts < 0.35:
+            blocked_accs.append(f"• {label} — trust_score {ts:.2f} (мин. 0.35)")
+        elif ts < 0.5 or age_days < 30:
+            risk_warnings.append(f"• {label} — возраст {age_days} дн., trust={ts:.2f}")
+
+    if blocked_accs:
+        await callback.message.edit_text(
+            "🚫 <b>Операция заблокирована — аккаунты не готовы</b>\n\n"
+            "Следующие аккаунты не прошли минимальные требования безопасности:\n"
+            + "\n".join(blocked_accs)
+            + "\n\n💡 <b>Что сделать:</b>\n"
+            "1. Запустите <b>🌱 Прогрев аккаунтов</b> на 14+ дней\n"
+            "2. Используйте аккаунты возрастом 30+ дней с trust_score ≥ 0.5\n"
+            "3. Не создавайте каналы с только что купленных/импортированных аккаунтов",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    pacing_key = data.get("bulk_pacing", _DEFAULT_PACING)
+    risk_note = ""
+    if pacing_key in ("fast", "turbo"):
+        risk_note = "\n\n⚠️ <b>Выбран быстрый темп</b> — повышен риск бана аккаунтов!"
+    if risk_warnings:
+        risk_note += "\n\n🟡 <b>Аккаунты с риском:</b>\n" + "\n".join(risk_warnings)
+
     progress_msg = await callback.message.edit_text(
-        _progress_text("Создание каналов...", 0, total_ops, 0, 0),
+        _progress_text("Создание каналов...", 0, total_ops, 0, 0) + risk_note,
         parse_mode="HTML",
     )
     task = asyncio.create_task(

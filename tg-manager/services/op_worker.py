@@ -2074,12 +2074,18 @@ async def _exec_global_presence_bot(
     }
 
 
+_MIN_ACCOUNT_AGE_DAYS = 14  # минимальный возраст аккаунта в системе для bulk-операций
+_MIN_TRUST_SCORE = 0.35      # минимальный trust_score для создания каналов
+_MAX_CHANNELS_PER_DAY = 2    # максимум каналов в сутки с одного аккаунта
+
+
 async def _exec_bulk_create_channels(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Массовое создание каналов через Telethon с умными задержками (из AI-ассистента)."""
     from services import account_manager, session_simulator
     import random
+    from datetime import datetime, timezone, timedelta
 
     prefix = params.get("prefix", "Channel")
     count = int(params.get("count", 5))
@@ -2099,6 +2105,53 @@ async def _exec_bulk_create_channels(
 
     if not acc:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    # ── Account health gate ───────────────────────────────────────────────────
+    acc_data = await pool.fetchrow(
+        "SELECT added_at, trust_score FROM tg_accounts WHERE id=$1", acc["id"]
+    )
+    if acc_data:
+        added_at = acc_data["added_at"]
+        trust_score = float(acc_data["trust_score"] or 0.5)
+        if added_at:
+            age_days = (datetime.now(timezone.utc) - added_at.replace(tzinfo=timezone.utc)).days
+            if age_days < _MIN_ACCOUNT_AGE_DAYS:
+                return {
+                    "status": "failed",
+                    "reason": (
+                        f"Аккаунт добавлен {age_days} дн. назад — требуется минимум {_MIN_ACCOUNT_AGE_DAYS} дней. "
+                        "Сначала прогрейте аккаунт через раздел 🌱 Прогрев."
+                    ),
+                }
+        if trust_score < _MIN_TRUST_SCORE:
+            return {
+                "status": "failed",
+                "reason": (
+                    f"Низкий trust_score аккаунта ({trust_score:.2f}). "
+                    "Требуется прогрев перед bulk-операциями."
+                ),
+            }
+
+    # ── Daily channel creation cap (soft warning only, не блокируем) ─────────
+    created_today = await pool.fetchval(
+        """SELECT COUNT(*) FROM managed_channels
+           WHERE acc_id=$1 AND owner_id=$2
+             AND added_at >= now() - INTERVAL '24 hours'""",
+        acc["id"], owner_id,
+    )
+    if (created_today or 0) >= _MAX_CHANNELS_PER_DAY:
+        log.warning(
+            "op_worker bulk_channels: daily cap reached acc=%s created_today=%s requested=%s",
+            acc["id"], created_today, count,
+        )
+        return {
+            "status": "failed",
+            "reason": (
+                f"Аккаунт уже создал {created_today} канал(ов) за последние 24ч. "
+                f"Безопасный лимит: {_MAX_CHANNELS_PER_DAY}/день. "
+                "Используйте другой аккаунт или подождите."
+            ),
+        }
     created_count = 0
     failed_count = 0
 
@@ -2159,8 +2212,10 @@ async def _exec_bulk_create_channels(
                 username or None,
             )
             # Set username if pattern provided — with variant fallback on collision
+            # Delay before setting public username: setting it immediately after creation
+            # is a strong spam signal. Minimum 60-120s delay reduces risk.
             if username:
-                await asyncio.sleep(random.uniform(8, 15))
+                await asyncio.sleep(random.uniform(60, 120))
                 err = await account_manager.set_channel_username(
                     acc["session_str"], ch_id, username, _acc=acc
                 )

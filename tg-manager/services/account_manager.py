@@ -1392,7 +1392,6 @@ async def create_channel(
     if not session_string:
         return {"error": "session_str отсутствует — аккаунт не импортирован"}
     from telethon.tl.functions.channels import CreateChannelRequest
-    from telethon.tl.functions.messages import ExportChatInviteRequest
 
     client = _make_client(session_string, _acc)
     try:
@@ -1406,19 +1405,13 @@ async def create_channel(
             )
         )
         ch = result.chats[0]
-        invite_link = ""
-        try:
-            inv = await client(ExportChatInviteRequest(peer=ch))
-            invite_link = getattr(inv, "link", "") or ""
-        except Exception:
-            log_exc_swallow(log, "Сбой в create_channel")
         return {
             "channel_id": ch.id,
             "access_hash": getattr(ch, "access_hash", 0) or 0,
             "title": ch.title,
             "username": getattr(ch, "username", "") or "",
             "type": "group" if megagroup else "channel",
-            "invite_link": invite_link,
+            "invite_link": "",
         }
     except Exception as e:
         from telethon.errors import FloodWaitError, PeerFloodError
