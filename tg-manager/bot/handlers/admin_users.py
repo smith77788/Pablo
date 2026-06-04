@@ -527,6 +527,24 @@ async def cb_ban(
     user_id = callback_data.user_id
     await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
     await callback.answer(f"✅ Пользователь #{user_id} забанен.", show_alert=True)
+    # Обновить экран действий, чтобы кнопки бана/разбана отразили новый статус
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💳 Выдать подписку", callback_data=AdminUserCb(action="grant_plan", user_id=user_id))
+    kb.button(text="❌ Забрать подписку", callback_data=AdminUserCb(action="revoke_plan", user_id=user_id))
+    kb.button(text="⚔️ Выдать Strike", callback_data=AdminUserCb(action="grant_strike", user_id=user_id))
+    kb.button(text="⚔️ Забрать Strike", callback_data=AdminUserCb(action="revoke_strike", user_id=user_id))
+    kb.button(text="✅ Разбанить", callback_data=AdminUserCb(action="unban", user_id=user_id))
+    kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(
+            f"🚫 <b>Пользователь #{user_id} забанен.</b>\n\nВыберите дальнейшее действие:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "unban"))
@@ -541,6 +559,24 @@ async def cb_unban(
     user_id = callback_data.user_id
     await db.unban_user(pool, user_id, callback.from_user.id)
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
+    # Обновить экран действий, чтобы кнопки бана/разбана отразили новый статус
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💳 Выдать подписку", callback_data=AdminUserCb(action="grant_plan", user_id=user_id))
+    kb.button(text="❌ Забрать подписку", callback_data=AdminUserCb(action="revoke_plan", user_id=user_id))
+    kb.button(text="⚔️ Выдать Strike", callback_data=AdminUserCb(action="grant_strike", user_id=user_id))
+    kb.button(text="⚔️ Забрать Strike", callback_data=AdminUserCb(action="revoke_strike", user_id=user_id))
+    kb.button(text="🚫 Забанить", callback_data=AdminUserCb(action="ban", user_id=user_id))
+    kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(
+            f"✅ <b>Пользователь #{user_id} разбанен.</b>\n\nВыберите дальнейшее действие:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "export_csv"))
