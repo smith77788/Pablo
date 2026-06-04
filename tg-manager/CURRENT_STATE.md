@@ -1,6 +1,32 @@
 # CURRENT STATE
 
-Обновлено: 2026-06-01 (r18 in progress)
+Обновлено: 2026-06-04 (r19)
+
+## Статус: Anti-FloodBlock защита + Gift Transfer API r19
+
+### ✅ Выполнено в r19 (2026-06-04)
+
+1. **Flood/spam block защита — bulk_join + bulk_leave** (`eb5cba5`)
+   - "fast" mode: 5-15s → 45-90s (было причиной Telegram FloodWait/spamblock)
+   - bulk_leave "normal": 15-45s → 30-75s
+   - bulk_leave "smart": был клон "normal" → адаптивный с cooldown каждые 5 (120-240s)
+   - Добавлен суточный лимит join/leave на аккаунт через operation_audit:
+     join: fast=20, normal=15, slow=8, smart=12 за 24ч
+     leave: fast=25, normal=20, slow=10, smart=15 за 24ч
+   - Добавлена межаккаунтная пауза (session_simulator.between_accounts_pause) при смене аккаунта
+   - _DELAY_LABELS обновлены — реальные задержки в UI
+
+2. **Gift Transfer система — реальные Telethon API** (предыдущий коммит)
+   - gift_inventory.py: заменён несуществующий `get_user_star_gifts()` на `GetSavedStarGiftsRequest`
+   - gift_operation.py: заменён несуществующий `transfer_star_gift()` на `TransferStarGiftRequest`
+   - Правильный паттерн: `InputSavedStarGiftUser(msg_id=int(gift_id))`
+   - Пагинация через строковый `next_offset`
+
+3. **Free Mode toggle** (schema_v59)
+   - platform_settings таблица + admin toggle
+   - Сохраняется в БД, загружается при старте
+
+---
 
 ## Статус: Strike + Contact Invite фиксы r18
 
