@@ -1451,6 +1451,67 @@ async def cb_bpchans_done(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
+async def _bulk_post_chans_bg(
+    pool: asyncpg.Pool,
+    acc_id: int,
+    progress_msg,
+    acc: dict,
+    selected_ids: list,
+    ch_map: dict,
+    text: str,
+    total: int,
+) -> None:
+    from services import account_manager
+    from database import db as _db
+
+    ok, err = 0, 0
+    attempt = 0
+    try:
+        for idx, ch_id in enumerate(selected_ids, 1):
+            access_hash = ch_map.get(ch_id, {}).get("access_hash", 0) or 0
+            result = await account_manager.post_to_channel(
+                acc["session_str"], ch_id, text, access_hash=access_hash, _acc=acc
+            )
+            if result.get("banned"):
+                await _db.deactivate_account(pool, acc_id, "banned detected in bulk op")
+                err += 1
+            elif "error" in result:
+                err += 1
+            else:
+                ok += 1
+            try:
+                await progress_msg.edit_text(
+                    _progress_text("Публикация постов...", idx, total, ok, err),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой обновления прогресса массовой публикации")
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
+    except asyncio.CancelledError:
+        log.info("_bulk_post_chans_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_bulk_post_chans_bg: неожиданная ошибка")
+
+    lines = [
+        "📤 <b>Результаты публикации</b>\n",
+        f"Каналов: {total} · ✅ {ok} · ❌ {err}\n",
+    ]
+    try:
+        await progress_msg.edit_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+    except Exception:
+        log_exc_swallow(log, "_bulk_post_chans_bg: сбой финального отчёта")
+
+
 @router.message(BulkPostChansFSM.waiting_text)
 async def fsm_bpchans_text(
     message: Message, state: FSMContext, pool: asyncpg.Pool
@@ -1471,51 +1532,19 @@ async def fsm_bpchans_text(
         return
 
     ch_map = {ch["id"]: ch for ch in channels}
-    from services import account_manager
-    from database import db as _db
-
     total = len(selected_ids)
-    ok, err = 0, 0
-    attempt = 0
     progress_msg = await message.answer(
         _progress_text("Публикация постов...", 0, total, 0, 0),
         parse_mode="HTML",
     )
-    for idx, ch_id in enumerate(selected_ids, 1):
-        access_hash = ch_map.get(ch_id, {}).get("access_hash", 0) or 0
-        result = await account_manager.post_to_channel(
-            acc["session_str"], ch_id, text, access_hash=access_hash, _acc=acc
-        )
-        if result.get("banned"):
-            await _db.deactivate_account(pool, acc_id, "banned detected in bulk op")
-            err += 1
-        elif "error" in result:
-            err += 1
-        else:
-            ok += 1
-        try:
-            await progress_msg.edit_text(
-                _progress_text("Публикация постов...", idx, total, ok, err),
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Сбой обновления прогресса массовой публикации")
-        # Exponential backoff; reset every 5 iterations
-        if attempt >= 4:
-            attempt = 0
-        else:
-            attempt += 1
-        flood = result.get("flood_wait", 0)
-        await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
-
-    lines = [
-        "📤 <b>Результаты публикации</b>\n",
-        f"Каналов: {total} · ✅ {ok} · ❌ {err}\n",
-    ]
-    await progress_msg.edit_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
+    task = asyncio.create_task(
+        _bulk_post_chans_bg(pool, acc_id, progress_msg, acc, selected_ids, ch_map, text, total)
+    )
+    _treg.register(
+        message.from_user.id,
+        "bulk_post_chans",
+        f"Публикация в {total} каналов",
+        task,
     )
 
 
@@ -5383,12 +5412,96 @@ async def _proceed_bulk_dm_usernames(
     )
 
 
+async def _bulk_dm_bg(
+    pool: asyncpg.Pool,
+    user_id: int,
+    progress_msg,
+    accounts: list,
+    usernames: list[str],
+    text_to_send: str,
+    base_delay: float,
+    total: int,
+) -> None:
+    from services import account_manager
+    from database import db as _db
+
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    flood_wait_total = 0
+    active_accounts = list(accounts)
+
+    try:
+        for i, username in enumerate(usernames):
+            if not active_accounts:
+                err_list.append(f"❌ @{html.escape(username)}: нет активных аккаунтов")
+                continue
+            n_active = len(active_accounts)
+            acc = active_accounts[i % n_active]
+            result = await account_manager.send_dm(
+                acc["session_str"], username, text_to_send, _acc=dict(acc)
+            )
+
+            u_escaped = html.escape(username)
+            if result.get("banned"):
+                await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                err_list.append(f"❌ @{u_escaped}: аккаунт забанен")
+            elif result.get("flood_wait"):
+                flood_wait_total += result.get("flood_wait", 0)
+                err_list.append(f"⏳ @{u_escaped}: flood_wait")
+            elif result.get("ok"):
+                ok_list.append(f"✅ @{u_escaped}")
+            else:
+                err = html.escape(result.get("error", "неизвестная ошибка")[:60])
+                err_list.append(f"❌ @{u_escaped}: {err}")
+                flood_wait_total += result.get("flood_wait", 0)
+
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                try:
+                    await progress_msg.edit_text(
+                        _progress_text(
+                            "Рассылка ЛС...", i + 1, total, len(ok_list), len(err_list)
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(log, "Сбой обновления прогресса рассылки ЛС")
+
+            wait = base_delay + min(flood_wait_total, 30)
+            flood_wait_total = max(0, flood_wait_total - base_delay)
+            await asyncio.sleep(wait)
+    except asyncio.CancelledError:
+        log.info("_bulk_dm_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_bulk_dm_bg: неожиданная ошибка")
+
+    sent = len(ok_list)
+    failed = len(err_list)
+    header = (
+        f"📊 <b>Рассылка завершена</b>\n\n"
+        f"Всего: <b>{total}</b> | ✅ Успешно: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>\n\n"
+    )
+    error_section = ""
+    if err_list:
+        shown_errors = err_list[:30]
+        error_section = "<b>Ошибки:</b>\n" + "\n".join(shown_errors)
+        if len(err_list) > 30:
+            error_section += f"\n<i>...и ещё {len(err_list) - 30} ошибок</i>"
+    try:
+        await progress_msg.edit_text(
+            header + error_section,
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+    except Exception:
+        log_exc_swallow(log, "_bulk_dm_bg: сбой финального отчёта")
+
+
 @router.message(BulkDmFSM.waiting_text)
 async def fsm_bulk_dm_text(
     message: Message, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    from services import account_manager
-
     text_to_send = message.text or message.caption or ""
     if not text_to_send.strip():
         await message.answer("⚠️ Текст не может быть пустым. Отправьте текст сообщения:")
@@ -5416,7 +5529,6 @@ async def fsm_bulk_dm_text(
         return
 
     n_acc = len(accounts)
-    # Delay between consecutive sends; per-account delay = n_acc × base_delay
     base_delay = 5.0 if n_acc == 1 else (3.0 if n_acc == 2 else 2.5)
     total = len(usernames)
 
@@ -5427,78 +5539,14 @@ async def fsm_bulk_dm_text(
         "⏳ 0 / " + str(total),
         parse_mode="HTML",
     )
-
-    from database import db as _db
-
-    ok_list: list[str] = []
-    err_list: list[str] = []
-    flood_wait_total = 0
-    active_accounts = list(accounts)
-
-    for i, username in enumerate(usernames):
-        if not active_accounts:
-            err_list.append(f"❌ @{html.escape(username)}: нет активных аккаунтов")
-            continue
-        n_active = len(active_accounts)
-        acc = active_accounts[i % n_active]
-        result = await account_manager.send_dm(
-            acc["session_str"], username, text_to_send, _acc=dict(acc)
-        )
-
-        u_escaped = html.escape(username)
-        if result.get("banned"):
-            await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
-            active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
-            err_list.append(f"❌ @{u_escaped}: аккаунт забанен")
-        elif result.get("flood_wait"):
-            # Skip to next account but keep in pool
-            flood_wait_total += result.get("flood_wait", 0)
-            err_list.append(f"⏳ @{u_escaped}: flood_wait")
-        elif result.get("ok"):
-            ok_list.append(f"✅ @{u_escaped}")
-        else:
-            err = html.escape(result.get("error", "неизвестная ошибка")[:60])
-            err_list.append(f"❌ @{u_escaped}: {err}")
-            # If flood wait from Telegram — add extra wait on top of base delay
-            flood_wait_total += result.get("flood_wait", 0)
-
-        if (i + 1) % 5 == 0 or i + 1 == total:
-            try:
-                await progress_msg.edit_text(
-                    _progress_text(
-                        "Рассылка ЛС...", i + 1, total, len(ok_list), len(err_list)
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Сбой обновления прогресса рассылки ЛС")
-
-        # Delay: base + any extra flood wait accumulated
-        wait = base_delay + min(flood_wait_total, 30)
-        flood_wait_total = max(0, flood_wait_total - base_delay)  # drain gradually
-        await asyncio.sleep(wait)
-
-    # Final report — split into chunks if too long (Telegram 4096 char limit)
-    sent = len(ok_list)
-    failed = len(err_list)
-    header = (
-        f"📊 <b>Рассылка завершена</b>\n\n"
-        f"Всего: <b>{total}</b> | ✅ Успешно: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>\n\n"
+    task = asyncio.create_task(
+        _bulk_dm_bg(pool, message.from_user.id, progress_msg, list(accounts), usernames, text_to_send, base_delay, total)
     )
-
-    # Show first 30 errors (most useful for debugging)
-    error_section = ""
-    if err_list:
-        shown_errors = err_list[:30]
-        error_section = "<b>Ошибки:</b>\n" + "\n".join(shown_errors)
-        if len(err_list) > 30:
-            error_section += f"\n<i>...и ещё {len(err_list) - 30} ошибок</i>"
-
-    final_text = header + error_section
-    await progress_msg.edit_text(
-        final_text,
-        parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
+    _treg.register(
+        message.from_user.id,
+        "bulk_dm",
+        f"Рассылка ЛС в {total} получателей",
+        task,
     )
 
 
@@ -5596,12 +5644,101 @@ async def fsm_bulk_chan_value(
     )
 
 
+async def _bulk_chan_exec_bg(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    progress_msg,
+    channels: list,
+    acc_by_id: dict,
+    op: str,
+    base_uname: str,
+    value: str,
+    op_label: str,
+    total: int,
+) -> None:
+    from services import account_manager
+
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    uname_counter = 1
+
+    try:
+        for idx, chan in enumerate(channels):
+            chan_title = html.escape(chan["title"] or str(chan["channel_id"]))
+            acc = acc_by_id.get(chan["acc_id"])
+            if not acc:
+                err_list.append(f"❌ {chan_title}: аккаунт не найден")
+                continue
+
+            if op == "chan_uname":
+                candidate = f"{base_uname}{uname_counter}"
+                uname_counter += 1
+                err = await account_manager.set_channel_username(
+                    acc["session_str"], chan["channel_id"], candidate, _acc=acc
+                )
+                if err:
+                    err_list.append(f"❌ {chan_title}: {html.escape(err[:60])}")
+                else:
+                    ok_list.append(f"✅ {chan_title}: @{candidate}")
+                    await pool.execute(
+                        "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
+                        candidate,
+                        owner_id,
+                        chan["channel_id"],
+                    )
+
+            elif op == "chan_about":
+                ok = await account_manager.edit_channel_about(
+                    acc["session_str"], chan["channel_id"], value, _acc=acc
+                )
+                if ok:
+                    ok_list.append(f"✅ {chan_title}")
+                else:
+                    err_list.append(f"❌ {chan_title}: ошибка обновления")
+
+            if (idx + 1) % 3 == 0 or idx + 1 == total:
+                try:
+                    await progress_msg.edit_text(
+                        _progress_text(
+                            f"{op_label} каналам...",
+                            idx + 1,
+                            total,
+                            len(ok_list),
+                            len(err_list),
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(log, "Сбой обновления прогресса bulk-операции")
+
+            await asyncio.sleep(backoff(idx % 5, base=2.0, cap=20.0))
+    except asyncio.CancelledError:
+        log.info("_bulk_chan_exec_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_bulk_chan_exec_bg: неожиданная ошибка")
+
+    header = (
+        f"📊 <b>{op_label} каналам — завершено</b>\n\n"
+        f"Всего: <b>{total}</b> | ✅ Успешно: <b>{len(ok_list)}</b> | ❌ Ошибок: <b>{len(err_list)}</b>\n\n"
+    )
+    detail = "\n".join((ok_list + err_list)[:40])
+    if len(ok_list) + len(err_list) > 40:
+        detail += f"\n<i>...и ещё {len(ok_list) + len(err_list) - 40} строк</i>"
+    try:
+        await progress_msg.edit_text(
+            header + detail,
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+    except Exception:
+        log_exc_swallow(log, "_bulk_chan_exec_bg: сбой финального отчёта")
+
+
 @router.callback_query(ChanCb.filter(F.action == "bulk_chan_exec"))
 async def cb_bulk_chan_exec(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    from services import account_manager
-
     await callback.answer()
     data = await state.get_data()
     op = data.get("bulk_op", "")
@@ -5618,7 +5755,6 @@ async def cb_bulk_chan_exec(
 
     base_uname = value.lstrip("@") if op == "chan_uname" else ""
 
-    # Fetch account sessions with acc data
     accounts = await pool.fetch(
         "SELECT a.id, a.session_str, a.first_name, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
@@ -5634,7 +5770,6 @@ async def cb_bulk_chan_exec(
         )
         return
 
-    # Fetch all channels for selected accounts from DB cache
     channels = await pool.fetch(
         "SELECT mc.channel_id, mc.title, mc.username, mc.acc_id, mc.access_hash "
         "FROM managed_channels mc "
@@ -5662,75 +5797,18 @@ async def cb_bulk_chan_exec(
         parse_mode="HTML",
     )
 
-    # Build acc_id → acc dict for fast lookup
     acc_by_id = {acc["id"]: dict(acc) for acc in accounts}
-
-    ok_list: list[str] = []
-    err_list: list[str] = []
-    uname_counter = 1
-
-    for idx, chan in enumerate(channels):
-        chan_title = html.escape(chan["title"] or str(chan["channel_id"]))
-        acc = acc_by_id.get(chan["acc_id"])
-        if not acc:
-            err_list.append(f"❌ {chan_title}: аккаунт не найден")
-            continue
-
-        if op == "chan_uname":
-            candidate = f"{base_uname}{uname_counter}"
-            uname_counter += 1
-            err = await account_manager.set_channel_username(
-                acc["session_str"], chan["channel_id"], candidate, _acc=acc
-            )
-            if err:
-                err_list.append(f"❌ {chan_title}: {html.escape(err[:60])}")
-            else:
-                ok_list.append(f"✅ {chan_title}: @{candidate}")
-                # Update DB cache
-                await pool.execute(
-                    "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
-                    candidate,
-                    callback.from_user.id,
-                    chan["channel_id"],
-                )
-
-        elif op == "chan_about":
-            ok = await account_manager.edit_channel_about(
-                acc["session_str"], chan["channel_id"], value, _acc=acc
-            )
-            if ok:
-                ok_list.append(f"✅ {chan_title}")
-            else:
-                err_list.append(f"❌ {chan_title}: ошибка обновления")
-
-        if (idx + 1) % 3 == 0 or idx + 1 == total:
-            try:
-                await progress_msg.edit_text(
-                    _progress_text(
-                        f"{op_label} каналам...",
-                        idx + 1,
-                        total,
-                        len(ok_list),
-                        len(err_list),
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Сбой обновления прогресса bulk-операции (leave)")
-
-        await asyncio.sleep(backoff(idx % 5, base=2.0, cap=20.0))
-
-    header = (
-        f"📊 <b>{op_label} каналам — завершено</b>\n\n"
-        f"Всего: <b>{total}</b> | ✅ Успешно: <b>{len(ok_list)}</b> | ❌ Ошибок: <b>{len(err_list)}</b>\n\n"
+    task = asyncio.create_task(
+        _bulk_chan_exec_bg(
+            pool, callback.from_user.id, progress_msg,
+            list(channels), acc_by_id, op, base_uname, value, op_label, total,
+        )
     )
-    detail = "\n".join((ok_list + err_list)[:40])
-    if len(ok_list) + len(err_list) > 40:
-        detail += f"\n<i>...и ещё {len(ok_list) + len(err_list) - 40} строк</i>"
-    await progress_msg.edit_text(
-        header + detail,
-        parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
+    _treg.register(
+        callback.from_user.id,
+        "bulk_chan_exec",
+        f"{op_label} {total} каналов",
+        task,
     )
 
 
