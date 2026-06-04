@@ -97,6 +97,7 @@ from services import ecosystem_copilot
 from services import db_maintenance
 from services import recovery_engine
 from services import anomaly_detector
+from services import proxy_scraper
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -301,6 +302,7 @@ async def main() -> None:
         asyncio.create_task(_resilient("activity_engine",  activity_engine.run_activity_loop, pool))
         asyncio.create_task(_resilient("payment_webhook",  payment_webhook.run, pool, bot))
         asyncio.create_task(_resilient("task_registry",  task_registry.run_cleanup_loop))
+        asyncio.create_task(_resilient("proxy_scraper",   proxy_scraper.run_scraper_loop, pool))
         asyncio.create_task(_resilient("drift_detector",  drift_detector.run, pool, bot))
         asyncio.create_task(_resilient("infra_memory",    infra_memory.run_flush_loop, pool))
         asyncio.create_task(_resilient("infra_copilot",       infra_copilot.run_copilot_loop, pool, bot))

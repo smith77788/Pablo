@@ -64,6 +64,28 @@ _TG_INVITE_RE = re.compile(
     re.IGNORECASE,
 )
 _TG_JOIN_URI_RE = re.compile(r"^tg://join\?invite=([\w-]+)", re.IGNORECASE)
+
+# ── Free proxy pool cache (populated by proxy_scraper service) ─────────────────
+# Round-robin selection — no lock needed (list writes are GIL-safe for simple ops)
+_pool_proxy_cache: list[str] = []
+_pool_proxy_idx: int = 0
+
+
+def set_pool_proxy_cache(urls: list[str]) -> None:
+    """Called by proxy_scraper after each scrape cycle to update the in-memory pool."""
+    global _pool_proxy_cache, _pool_proxy_idx
+    _pool_proxy_cache = list(urls)
+    _pool_proxy_idx = 0
+
+
+def _get_pool_proxy_url() -> str:
+    """Round-robin pick from free proxy pool. Returns '' if pool is empty."""
+    global _pool_proxy_idx
+    if not _pool_proxy_cache:
+        return ""
+    url = _pool_proxy_cache[_pool_proxy_idx % len(_pool_proxy_cache)]
+    _pool_proxy_idx = (_pool_proxy_idx + 1) % len(_pool_proxy_cache)
+    return url
 _TG_PUBLIC_RE = re.compile(
     r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:s/)?([A-Za-z0-9_]{5,32})(?:[/?#].*)?$",
     re.IGNORECASE,
@@ -252,9 +274,16 @@ def _make_client(session_string: str = "", device: dict | None = None):
     from telethon.sessions import StringSession
 
     d = device or {}
-    # Per-account proxy overrides global TG_PROXY env var
+    # Proxy priority: 1) account's personal proxy  2) global TG_PROXY  3) free pool
     acc_proxy_url = d.get("proxy_url") or ""
-    proxy = _parse_proxy(acc_proxy_url) if acc_proxy_url else _parse_proxy(TG_PROXY)
+    if acc_proxy_url:
+        proxy = _parse_proxy(acc_proxy_url)
+    elif TG_PROXY:
+        proxy = _parse_proxy(TG_PROXY)
+    else:
+        # Use round-robin proxy from the free pool (populated by proxy_scraper)
+        pool_url = _get_pool_proxy_url()
+        proxy = _parse_proxy(pool_url) if pool_url else None
     return TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),

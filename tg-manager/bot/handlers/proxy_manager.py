@@ -40,8 +40,9 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="📋 Мой список", callback_data=ProxyCb(action="list"))
     kb.button(text="✅ Проверить + пинг", callback_data=ProxyCb(action="check_all"))
     kb.button(text="🌍 Определить гео", callback_data=ProxyCb(action="detect_geo"))
+    kb.button(text="🆓 Бесплатный пул", callback_data=ProxyCb(action="free_pool"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 1, 1)
     return kb
 
 
@@ -477,3 +478,89 @@ async def cb_proxy_delete(
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
     )
+
+
+# ── Free proxy pool ─────────────────────────────────────────────────────────────
+
+
+@router.callback_query(ProxyCb.filter(F.action == "free_pool"))
+async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Show free proxy pool stats and trigger manual refresh."""
+    await callback.answer()
+    from services import proxy_scraper as _ps
+
+    stats = await _ps.get_pool_stats(pool)
+    valid = stats["valid"]
+    total = stats["total"]
+    avg_lat = stats["avg_latency"]
+    last_check = stats["last_check"]
+
+    if valid >= 50:
+        health_icon = "🟢"
+    elif valid >= 20:
+        health_icon = "🟡"
+    else:
+        health_icon = "🔴"
+
+    last_str = (
+        last_check.strftime("%d.%m %H:%M") if last_check else "никогда"
+    )
+    lat_str = f"{avg_lat} мс" if avg_lat else "нет данных"
+
+    text = (
+        f"🆓 <b>Бесплатный прокси-пул</b>\n\n"
+        f"{health_icon} Валидных прокси: <b>{valid}</b> из {total}\n"
+        f"⚡ Средняя задержка: <b>{lat_str}</b>\n"
+        f"🕐 Последнее обновление: {last_str}\n\n"
+        f"<i>Прокси автоматически применяются к аккаунтам "
+        f"без личного прокси и без глобального TG_PROXY. "
+        f"Пул обновляется каждые 6 часов из открытых источников.</i>\n\n"
+        f"Источники:\n"
+        f"• github.com/TheSpeedX/PROXY-List\n"
+        f"• github.com/ShiftyTR/Proxy-List\n"
+        f"• github.com/monosans/proxy-list\n"
+        f"• proxyscrape.com API"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить сейчас", callback_data=ProxyCb(action="free_pool_refresh"))
+    kb.button(text="◀️ Назад", callback_data=ProxyCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(ProxyCb.filter(F.action == "free_pool_refresh"))
+async def cb_free_pool_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Trigger manual proxy pool refresh."""
+    await callback.answer("🔄 Запускаю обновление пула...", show_alert=False)
+    from services import proxy_scraper as _ps
+
+    await callback.message.edit_text(
+        "⏳ <b>Обновление прокси-пула...</b>\n\nЗагружаю и проверяю прокси. Это может занять 1-2 минуты.",
+        parse_mode="HTML",
+    )
+    try:
+        result = await _ps.scrape_and_refresh(pool)
+        valid = result.get("valid", 0)
+        fetched = result.get("fetched", 0)
+        duration = result.get("duration_s", 0)
+
+        if valid >= 50:
+            icon = "🟢"
+        elif valid >= 20:
+            icon = "🟡"
+        else:
+            icon = "🔴"
+
+        text = (
+            f"{icon} <b>Пул обновлён!</b>\n\n"
+            f"📥 Получено из источников: {fetched}\n"
+            f"✅ Прошли проверку: <b>{valid}</b>\n"
+            f"⏱ Время: {duration}с"
+        )
+    except Exception as e:
+        text = f"❌ Ошибка обновления: {html.escape(str(e)[:200])}"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К пулу", callback_data=ProxyCb(action="free_pool"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
