@@ -2,118 +2,131 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional
 
 log = logging.getLogger(__name__)
 
+_CONNECT_TIMEOUT = 30
+
 
 class GiftInventoryService:
     """Service for scanning and managing gift inventory from connected accounts."""
-    
+
     @staticmethod
     async def scan_account_gifts(pool, account_id: int, owner_id: int) -> list[dict]:
-        """Scan a single account for Telegram gifts.
-        
-        Uses Telegram client to fetch user's star gifts via getUserStarGifts.
-        Returns list of gift dicts with all relevant metadata.
+        """Scan a single account for saved Telegram Star Gifts.
+
+        Uses GetSavedStarGiftsRequest (payments TL method, Telethon 1.36+).
+        Returns list of gift dicts ready for sync_inventory_to_db.
         """
+        from telethon.tl.functions.payments import GetSavedStarGiftsRequest
+        from telethon.tl.types import InputPeerSelf
         from services import account_manager
-        
-        gifts = []
-        
+
+        gifts: list[dict] = []
+
+        acc = await pool.fetchrow(
+            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            account_id, owner_id,
+        )
+        if not acc:
+            log.warning("scan_account_gifts: account %d not found", account_id)
+            return []
+
+        session = acc.get("session_str")
+        if not session:
+            log.warning("scan_account_gifts: no session for account %d", account_id)
+            return []
+
+        client = account_manager._make_client(session, dict(acc))
         try:
-            acc = await pool.fetchrow(
-                "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-                account_id, owner_id
-            )
-            if not acc:
-                log.warning("scan_account_gifts: account %d not found", account_id)
-                return []
-            
-            session = acc.get("session_str")
-            if not session:
-                log.warning("scan_account_gifts: no session for account %d", account_id)
-                return []
-            
-            # Call Telegram API to get user star gifts
-            # Using MTProto via account_manager
-            try:
-                async with account_manager.get_client(session, acc) as client:
-                    # Get user's own star gifts
-                    me = await client.get_me()
-                    user_id = me.id
-                    
-                    # Fetch star gifts
-                    gifts_result = await client.invoke(
-                        lambda: client.get_user_star_gifts(user_id)
-                    )
-                    
-                    if gifts_result:
-                        gifts_data = gifts_result.gifts or []
-                        
-                        for gift in gifts_data:
-                            gift_info = {
-                                "account_id": account_id,
-                                "gift_id": str(gift.id),
-                                "gift_type": str(gift.stars_total or 0),
-                                "slug": getattr(gift, "slug", ""),
-                                "stars_cost": getattr(gift, "stars_cost", 0) or 0,
-                                "is_transferable": getattr(gift, "can_be_transferred", False),
-                                "is_premium": getattr(gift, "is_premium", False),
-                                "is_unique": getattr(gift, "is_unique", False),
-                                "is_limited": getattr(gift, "is_limited", False),
-                                "limited_count": getattr(gift, "total_count", None),
-                                "first_owner": getattr(gift, "first_peer_id", 0) == user_id,
-                                "generation": getattr(gift, "generation", 1),
-                            }
-                            gifts.append(gift_info)
-                            
-            except Exception as e:
-                log.error("scan_account_gifts: Telegram API error for account %d: %s", 
-                         account_id, str(e)[:200])
-                # Store empty result for this account
-                
+            await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+            offset = ""
+            while True:
+                result = await asyncio.wait_for(
+                    client(GetSavedStarGiftsRequest(
+                        peer=InputPeerSelf(),
+                        offset=offset,
+                        limit=100,
+                    )),
+                    timeout=_CONNECT_TIMEOUT,
+                )
+
+                for sg in (result.gifts or []):
+                    # sg is SavedStarGift; sg.gift is StarGift (or StarGiftUnique)
+                    star_gift = sg.gift
+                    is_unique = getattr(star_gift, "CONSTRUCTOR_ID", 0) != 0x313a9547
+
+                    gifts.append({
+                        "account_id": account_id,
+                        # msg_id is used for InputSavedStarGiftUser in transfer calls
+                        "gift_id": str(sg.msg_id) if sg.msg_id else str(sg.saved_id or ""),
+                        "gift_type": getattr(star_gift, "title", "") or str(getattr(star_gift, "stars", 0)),
+                        "slug": getattr(star_gift, "auction_slug", "") or "",
+                        "stars_cost": getattr(star_gift, "stars", 0) or 0,
+                        # transferable if transfer_stars is set (even if 0)
+                        "is_transferable": sg.transfer_stars is not None,
+                        "is_premium": bool(getattr(star_gift, "require_premium", False)),
+                        "is_unique": is_unique,
+                        "is_limited": bool(getattr(star_gift, "limited", False)),
+                        "limited_count": getattr(star_gift, "availability_total", None),
+                        "first_owner": False,
+                        "generation": 1,
+                    })
+
+                next_offset = getattr(result, "next_offset", None)
+                if not next_offset:
+                    break
+                offset = next_offset
+
+        except asyncio.TimeoutError:
+            log.error("scan_account_gifts: timeout for account %d", account_id)
         except Exception as e:
-            log.error("scan_account_gifts: error for account %d: %s", account_id, str(e)[:200])
-        
+            log.error("scan_account_gifts: error for account %d: %s", account_id, str(e)[:300])
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
         return gifts
-    
+
     @staticmethod
     async def scan_multiple_accounts(pool, owner_id: int, account_ids: list[int]) -> list[dict]:
         """Scan multiple accounts for gifts concurrently."""
-        import asyncio
-        
         tasks = [
             GiftInventoryService.scan_account_gifts(pool, acc_id, owner_id)
             for acc_id in account_ids
         ]
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        all_gifts = []
+
+        all_gifts: list[dict] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 log.error("scan_accounts: failed for account %d: %s", account_ids[i], str(result)[:200])
             else:
                 all_gifts.extend(result)
-        
+
         return all_gifts
-    
+
     @staticmethod
     async def sync_inventory_to_db(pool, owner_id: int, gifts: list[dict]) -> int:
         """Sync scanned gifts to gift_inventory table.
-        
+
         Updates last_seen_at for existing gifts, adds new ones.
         Returns count of gifts synced.
         """
         synced = 0
-        now = "now()"
-        
+
         for gift in gifts:
             try:
-                await pool.execute("""
-                    INSERT INTO gift_inventory 
+                await pool.execute(
+                    """
+                    INSERT INTO gift_inventory
                     (owner_id, account_id, gift_id, gift_type, slug, stars_cost,
                      is_transferable, is_premium, is_unique, is_limited, limited_count,
                      first_owner, generation, last_seen_at)
@@ -121,8 +134,9 @@ class GiftInventoryService:
                     ON CONFLICT (account_id, gift_id) DO UPDATE SET
                         last_seen_at = now(),
                         stars_cost = EXCLUDED.stars_cost,
-                        gift_type = EXCLUDED.gift_type
-                """, 
+                        gift_type = EXCLUDED.gift_type,
+                        is_transferable = EXCLUDED.is_transferable
+                    """,
                     owner_id,
                     gift["account_id"],
                     gift["gift_id"],
@@ -140,9 +154,9 @@ class GiftInventoryService:
                 synced += 1
             except Exception as e:
                 log.error("sync_inventory: failed for gift %s: %s", gift.get("gift_id"), str(e)[:200])
-        
+
         return synced
-    
+
     @staticmethod
     async def get_inventory_summary(pool, owner_id: int) -> dict:
         """Get inventory summary: total, transferable, non-transferable, by account."""
@@ -151,14 +165,14 @@ class GiftInventoryService:
                 "SELECT COUNT(*) FROM gift_inventory WHERE owner_id=$1", owner_id
             )
             transferable = await pool.fetchval(
-                "SELECT COUNT(*) FROM gift_inventory WHERE owner_id=$1 AND is_transferable=true", 
-                owner_id
+                "SELECT COUNT(*) FROM gift_inventory WHERE owner_id=$1 AND is_transferable=true",
+                owner_id,
             )
-            non_transferable = total - transferable
-            
-            # By account
-            by_account = await pool.fetch("""
-                SELECT 
+            non_transferable = (total or 0) - (transferable or 0)
+
+            by_account = await pool.fetch(
+                """
+                SELECT
                     a.id as account_id,
                     a.phone,
                     COUNT(*) as total_gifts,
@@ -169,11 +183,13 @@ class GiftInventoryService:
                 WHERE i.owner_id=$1
                 GROUP BY a.id, a.phone
                 ORDER BY total_gifts DESC
-            """, owner_id)
-            
+                """,
+                owner_id,
+            )
+
             return {
-                "total_gifts": total,
-                "transferable_gifts": transferable,
+                "total_gifts": total or 0,
+                "transferable_gifts": transferable or 0,
                 "non_transferable_gifts": non_transferable,
                 "by_account": [
                     {
@@ -184,7 +200,7 @@ class GiftInventoryService:
                         "total_stars_cost": r["total_stars_cost"],
                     }
                     for r in by_account
-                ]
+                ],
             }
         except Exception as e:
             log.error("get_inventory_summary: error: %s", str(e)[:200])
@@ -192,33 +208,38 @@ class GiftInventoryService:
                 "total_gifts": 0,
                 "transferable_gifts": 0,
                 "non_transferable_gifts": 0,
-                "by_account": []
+                "by_account": [],
             }
-    
+
     @staticmethod
     async def get_gifts_by_account(pool, owner_id: int, account_id: int) -> list[dict]:
         """Get all gifts for a specific account."""
-        rows = await pool.fetch("""
-            SELECT * FROM gift_inventory 
+        rows = await pool.fetch(
+            """
+            SELECT * FROM gift_inventory
             WHERE owner_id=$1 AND account_id=$2
             ORDER BY stars_cost DESC
-        """, owner_id, account_id)
-        
+            """,
+            owner_id,
+            account_id,
+        )
         return [dict(r) for r in rows]
-    
+
     @staticmethod
     async def clear_stale_inventory(pool, owner_id: int, hours_old: int = 24) -> int:
         """Remove gifts not seen in specified hours (except transferred ones)."""
-        result = await pool.execute("""
-            DELETE FROM gift_inventory 
-            WHERE owner_id=$1 
+        result = await pool.execute(
+            """
+            DELETE FROM gift_inventory
+            WHERE owner_id=$1
             AND last_seen_at < now() - interval '1 hour' * $2
             AND id NOT IN (
-                SELECT inventory_id FROM gift_transfer_items 
+                SELECT inventory_id FROM gift_transfer_items
                 WHERE status = 'transferred'
             )
-        """, owner_id, hours_old)
-        
-        # Get count from result
+            """,
+            owner_id,
+            hours_old,
+        )
         parts = result.split()
         return int(parts[2]) if len(parts) >= 3 else 0
