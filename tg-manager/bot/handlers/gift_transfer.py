@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters.state import State, StatesGroup
 
+from bot.callbacks import BmCb
 from services.gift_inventory import GiftInventoryService
 from services.gift_transfer import GiftTransferService
 from services.gift_report import GiftTransferReportService
@@ -84,7 +85,7 @@ async def cb_gift_transfer_main(callback: CallbackQuery, state: FSMContext, pool
     kb.button(text="👥 Сохранённые получатели", callback_data="gt:recipients")
     kb.button(text="📊 Отчёты", callback_data="gt:reports")
     kb.button(text="❓ Помощь", callback_data="gt:help")
-    kb.button(text="◀️ Назад в BotMother", callback_data="main_menu")
+    kb.button(text="◀️ Назад в BotMother", callback_data=BmCb(action="main"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -102,7 +103,7 @@ async def cb_gift_transfer_main(callback: CallbackQuery, state: FSMContext, pool
 
 # ─── Scan Gifts ────────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("gt:scan"), GiftTransferFSM.main_menu)
+@router.callback_query(F.data == "gt:scan")
 async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
     """Show account selection for scanning."""
     await callback.answer()
@@ -239,7 +240,7 @@ async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
 
 # ─── Inventory View ────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "gt:inventory", GiftTransferFSM.main_menu)
+@router.callback_query(F.data == "gt:inventory")
 async def cb_view_inventory(callback: CallbackQuery, state: FSMContext, pool):
     """View gift inventory."""
     await callback.answer()
@@ -277,7 +278,7 @@ async def cb_view_inventory(callback: CallbackQuery, state: FSMContext, pool):
 
 # ─── Transfer Flow ─────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data == "gt:transfer", GiftTransferFSM.main_menu)
+@router.callback_query(F.data == "gt:transfer")
 async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
     """Start transfer flow - select accounts with gifts."""
     await callback.answer()
@@ -368,7 +369,7 @@ async def cb_transfer_none(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Выбор очищен")
 
 
-@router.callback_query(F.data == "gt:select_recipient", GiftTransferFSM.selecting_accounts)
+@router.callback_query(F.data == "gt:select_recipient")
 async def cb_select_recipient(callback: CallbackQuery, state: FSMContext, pool):
     """Select recipient for transfer."""
     await callback.answer()
@@ -904,7 +905,7 @@ async def cmd_gifts(message: Message, state: FSMContext) -> None:
     kb.button(text="👥 Получатели", callback_data="gt:recipients")
     kb.button(text="📊 Отчёты", callback_data="gt:reports")
     kb.button(text="❓ Помощь", callback_data="gt:help")
-    kb.button(text="◀️ Назад", callback_data="main_menu")
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await message.answer(
         "🎁 <b>Менеджер передачи подарков</b>\n\n"
