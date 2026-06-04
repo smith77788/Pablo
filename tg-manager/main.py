@@ -71,6 +71,7 @@ from bot.handlers import approval_flow as approval_flow_handler
 from bot.handlers import workspaces as workspaces_handler
 from bot.handlers import error_report as error_report_handler
 from bot.handlers import ecosystems as ecosystems_handler
+from bot.handlers import infra_health_center as infra_hc_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -94,6 +95,8 @@ from services import infra_memory
 from services import infra_copilot
 from services import ecosystem_copilot
 from services import db_maintenance
+from services import recovery_engine
+from services import anomaly_detector
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -217,6 +220,7 @@ async def main() -> None:
     dp.include_router(workspaces_handler.router)
     dp.include_router(approval_flow_handler.router)
     dp.include_router(error_report_handler.router)
+    dp.include_router(infra_hc_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
@@ -302,6 +306,8 @@ async def main() -> None:
         asyncio.create_task(_resilient("infra_copilot",       infra_copilot.run_copilot_loop, pool, bot))
         asyncio.create_task(_resilient("ecosystem_copilot",   ecosystem_copilot.run_ecosystem_copilot_loop, pool, bot))
         asyncio.create_task(_resilient("db_maintenance",      db_maintenance.run, pool))
+        asyncio.create_task(_resilient("recovery_engine",     recovery_engine.run_recovery_loop, pool, bot))
+        asyncio.create_task(_resilient("anomaly_detector",    anomaly_detector.run_anomaly_loop, pool, bot))
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:

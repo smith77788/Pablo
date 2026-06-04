@@ -25,12 +25,17 @@ log = logging.getLogger(__name__)
 
 _RETENTION: list[tuple[str, str, str]] = [
     # (table, timestamp_column, interval)
-    ("behavioral_events",  "occurred_at",  "90 days"),
-    ("operation_log",      "created_at",   "30 days"),
-    ("restriction_events", "created_at",   "90 days"),
-    ("account_flood_log",  "created_at",   "30 days"),
-    ("search_rankings",    "checked_at",   "90 days"),
-    ("search_snapshots",   "checked_at",   "14 days"),
+    ("behavioral_events",      "occurred_at",  "90 days"),
+    ("operation_log",          "created_at",   "30 days"),
+    ("restriction_events",     "created_at",   "90 days"),
+    ("account_flood_log",      "created_at",   "30 days"),
+    ("search_rankings",        "checked_at",   "90 days"),
+    ("search_snapshots",       "checked_at",   "14 days"),
+    # EPOCH VI tables
+    ("recovery_events",        "created_at",   "30 days"),
+    ("anomaly_events",         "detected_at",  "14 days"),
+    ("system_health_snapshots","snapshot_at",  "7 days"),
+    ("infrastructure_alerts",  "first_seen_at","30 days"),
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"

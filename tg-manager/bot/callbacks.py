@@ -410,3 +410,10 @@ class IntentCb(CallbackData, prefix="intent"):
     value: Optional[str] = None  # intent_type for preset, strategy name for strategy
 
 
+class InfraHCCb(CallbackData, prefix="ihc"):
+    """EPOCH VI: Infrastructure Health Center."""
+    action: str         # menu | anomalies | recoveries | run_recovery | health_trend | copilot | resolve_anomaly | back
+    item_id: int = 0   # anomaly_id, recovery_id, alert_id
+    page: int = 0
+
+
