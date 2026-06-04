@@ -234,11 +234,7 @@ async def cb_import_save(
             pass
 
     kb = InlineKeyboardBuilder()
-    eco_note = (
-        f"\nР”РѕР±Р°РІР»РµРЅРѕ РІ СЌРєРѕСЃРёСЃС‚РµРјСѓ: <b>{eco_added}</b>"
-        if eco_added
-        else ""
-    )
+    eco_note = f"\nДобавлено в экосистему: <b>{eco_added}</b>" if eco_added else ""
     # If at least one bot was saved, offer to add to ecosystem
     first_saved_id = 0
     if saved > 0:
