@@ -194,6 +194,8 @@ async def _fast_parse_action(
             }
 
     return None
+
+
 _DEFAULT_MAX_FILE_BYTES = 1_048_576
 _DEFAULT_MAX_FILE_CHARS = 60_000
 _TELEGRAM_TEXT_LIMIT = 3900
