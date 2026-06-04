@@ -700,20 +700,22 @@ def _provider_status_line(name: str, key_name: str, model_name: str) -> str:
 
 
 async def _adm_section_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    total = await _fetchval_or_zero(pool, "SELECT COUNT(*) FROM platform_users")
-    today = await _fetchval_or_zero(
-        pool,
-        "SELECT COUNT(*) FROM platform_users "
-        "WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE",
-    )
-    banned = await _fetchval_or_zero(
-        pool, "SELECT COUNT(*) FROM platform_users WHERE COALESCE(is_banned,false)=true"
-    )
-    subscribers = await _fetchval_or_zero(
-        pool,
-        "SELECT COUNT(*) FROM subscriptions "
-        "WHERE is_active=true AND expires_at > now()",
-    )
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                (SELECT COUNT(*) FROM platform_users)                                              AS total,
+                (SELECT COUNT(*) FROM platform_users
+                    WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE)                     AS today,
+                (SELECT COUNT(*) FROM platform_users WHERE COALESCE(is_banned,false)=true)        AS banned,
+                (SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now())   AS subscribers"""
+        )
+    except Exception:
+        row = None
+        log_exc_swallow(log, "_adm_section_users stats query failed")
+    total       = int(row["total"]       or 0) if row else 0
+    today       = int(row["today"]       or 0) if row else 0
+    banned      = int(row["banned"]      or 0) if row else 0
+    subscribers = int(row["subscribers"] or 0) if row else 0
     text = (
         "👥 <b>Пользователи</b>\n\n"
         f"Всего: <b>{total}</b>\n"
@@ -728,28 +730,21 @@ async def _adm_section_users(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 
 async def _adm_section_billing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    active = await _fetchval_or_zero(
-        pool,
-        "SELECT COUNT(*) FROM subscriptions "
-        "WHERE is_active=true AND expires_at > now()",
-    )
-    confirmed = await _fetchval_or_zero(
-        pool, "SELECT COUNT(*) FROM payments WHERE status='confirmed'"
-    )
-    pending = await _fetchval_or_zero(
-        pool, "SELECT COUNT(*) FROM payments WHERE status='pending'"
-    )
     try:
-        revenue = float(
-            await pool.fetchval(
-                "SELECT COALESCE(SUM(amount_usd),0) "
-                "FROM payments WHERE status='confirmed'"
-            )
-            or 0
+        row = await pool.fetchrow(
+            """SELECT
+                (SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now())  AS active,
+                (SELECT COUNT(*) FROM payments WHERE status='confirmed')                           AS confirmed,
+                (SELECT COUNT(*) FROM payments WHERE status='pending')                             AS pending,
+                (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='confirmed')       AS revenue"""
         )
     except Exception:
-        log_exc_swallow(log, "Admin billing revenue query failed")
-        revenue = 0.0
+        row = None
+        log_exc_swallow(log, "_adm_section_billing stats query failed")
+    active    = int(row["active"]    or 0)   if row else 0
+    confirmed = int(row["confirmed"] or 0)   if row else 0
+    pending   = int(row["pending"]   or 0)   if row else 0
+    revenue   = float(row["revenue"] or 0.0) if row else 0.0
     text = (
         "💳 <b>Деньги и подписки</b>\n\n"
         f"Активные подписки: <b>{active}</b>\n"
@@ -764,15 +759,21 @@ async def _adm_section_billing(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 
 async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    bots = await _fetchval_or_zero(pool, "SELECT COUNT(*) FROM managed_bots")
-    channels = await _fetchval_or_zero(pool, "SELECT COUNT(*) FROM managed_channels")
-    accounts = await _fetchval_or_zero(
-        pool, "SELECT COUNT(*) FROM tg_accounts WHERE COALESCE(is_active,true)=true"
-    )
-    strike_users = await _fetchval_or_zero(
-        pool,
-        "SELECT COUNT(*) FROM platform_users WHERE COALESCE(strike_access,false)=true",
-    )
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                (SELECT COUNT(*) FROM managed_bots)                                                   AS bots,
+                (SELECT COUNT(*) FROM managed_channels)                                               AS channels,
+                (SELECT COUNT(*) FROM tg_accounts WHERE COALESCE(is_active,true)=true)               AS accounts,
+                (SELECT COUNT(*) FROM platform_users WHERE COALESCE(strike_access,false)=true)        AS strike_users"""
+        )
+    except Exception:
+        row = None
+        log_exc_swallow(log, "_adm_section_assets stats query failed")
+    bots         = int(row["bots"]         or 0) if row else 0
+    channels     = int(row["channels"]     or 0) if row else 0
+    accounts     = int(row["accounts"]     or 0) if row else 0
+    strike_users = int(row["strike_users"] or 0) if row else 0
     text = (
         "🤖 <b>Боты, токены и Strike</b>\n\n"
         f"Ботов в системе: <b>{bots}</b>\n"
@@ -787,22 +788,22 @@ async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
 
 async def _adm_section_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    running = await _fetchval_or_zero(
-        pool, "SELECT COUNT(*) FROM operation_queue WHERE status='running'"
-    )
-    pending = await _fetchval_or_zero(
-        pool, "SELECT COUNT(*) FROM operation_queue WHERE status='pending'"
-    )
-    failed = await _fetchval_or_zero(
-        pool,
-        "SELECT COUNT(*) FROM operation_queue WHERE status='failed' "
-        "AND finished_at > now() - INTERVAL '24 hours'",
-    )
-    floods = await _fetchval_or_zero(
-        pool,
-        "SELECT COUNT(*) FROM account_flood_log "
-        "WHERE created_at > now() - INTERVAL '24 hours'",
-    )
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                (SELECT COUNT(*) FROM operation_queue WHERE status='running')                                           AS running,
+                (SELECT COUNT(*) FROM operation_queue WHERE status='pending')                                           AS pending,
+                (SELECT COUNT(*) FROM operation_queue
+                    WHERE status='failed' AND finished_at > now() - INTERVAL '24 hours')                               AS failed,
+                (SELECT COUNT(*) FROM account_flood_log WHERE created_at > now() - INTERVAL '24 hours')               AS floods"""
+        )
+    except Exception:
+        row = None
+        log_exc_swallow(log, "_adm_section_ops stats query failed")
+    running = int(row["running"] or 0) if row else 0
+    pending = int(row["pending"] or 0) if row else 0
+    failed  = int(row["failed"]  or 0) if row else 0
+    floods  = int(row["floods"]  or 0) if row else 0
     text = (
         "⚙️ <b>Операции и здоровье процессов</b>\n\n"
         f"В работе: <b>{running}</b>\n"
@@ -842,8 +843,15 @@ async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 async def _adm_section_system(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    mode = await db.get_system_mode(pool)
-    new_errors = await _new_error_report_count(pool)
+    mode, new_errors = await asyncio.gather(
+        db.get_system_mode(pool),
+        _new_error_report_count(pool),
+        return_exceptions=True,
+    )
+    if isinstance(mode, BaseException):
+        mode = "auto"
+    if isinstance(new_errors, BaseException):
+        new_errors = 0
     env_flags = {
         "Railway": bool(os.getenv("RAILWAY_TOKEN")),
         "TG API": bool(os.getenv("TG_API_ID") and os.getenv("TG_API_HASH")),
@@ -873,23 +881,26 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     _PLAN_EMO = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
     try:
-        rows = await pool.fetch(
-            """SELECT pu.user_id, pu.username, pu.first_name,
-                      COALESCE(pu.current_plan, 'free') as current_plan,
-                      COALESCE(pu.is_banned, false) as is_banned,
-                      s.plan as sub_plan, s.expires_at as sub_exp
-               FROM platform_users pu
-               LEFT JOIN subscriptions s
-                 ON s.user_id=pu.user_id AND s.is_active=true AND s.expires_at > now()
-               ORDER BY COALESCE(pu.registered_at, pu.first_seen) DESC NULLS LAST
-               LIMIT 15"""
+        rows, total_row = await asyncio.gather(
+            pool.fetch(
+                """SELECT pu.user_id, pu.username, pu.first_name,
+                          COALESCE(pu.current_plan, 'free') as current_plan,
+                          COALESCE(pu.is_banned, false) as is_banned,
+                          s.plan as sub_plan, s.expires_at as sub_exp
+                   FROM platform_users pu
+                   LEFT JOIN subscriptions s
+                     ON s.user_id=pu.user_id AND s.is_active=true AND s.expires_at > now()
+                   ORDER BY COALESCE(pu.registered_at, pu.first_seen) DESC NULLS LAST
+                   LIMIT 15"""
+            ),
+            pool.fetchval("SELECT COUNT(*) FROM platform_users"),
         )
     except Exception as e:
         await callback.message.edit_text(
             f"❌ <code>{e}</code>", parse_mode="HTML", reply_markup=_back_kb()
         )
         return
-    total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
+    total = total_row or 0
     kb = InlineKeyboardBuilder()
     lines = []
     for r in rows:
