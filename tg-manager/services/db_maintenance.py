@@ -36,6 +36,11 @@ _RETENTION: list[tuple[str, str, str]] = [
     ("anomaly_events",         "detected_at",  "14 days"),
     ("system_health_snapshots","snapshot_at",  "7 days"),
     ("infrastructure_alerts",  "first_seen_at","30 days"),
+    # Proxy telemetry
+    ("proxy_quality_log",      "checked_at",   "30 days"),
+    ("proxy_health_log",       "checked_at",   "30 days"),
+    # Operation audit
+    ("operation_audit",        "occurred_at",  "60 days"),
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"
