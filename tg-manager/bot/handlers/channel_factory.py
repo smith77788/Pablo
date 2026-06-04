@@ -916,7 +916,7 @@ async def _show_bulk_confirm(event, state: FSMContext) -> None:
 async def cb_chanf_do_bulk_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Запускаю создание каналов...")
+    await callback.answer("⏳ Ставлю в очередь...")
     data = await state.get_data()
     await state.clear()
 
@@ -924,10 +924,10 @@ async def cb_chanf_do_bulk_create(
     count = data.get("channel_count", 1)
     prefix = data.get("prefix", "Channel")
     about = data.get("about", "")
+    username_pattern = data.get("username_pattern", "")
 
     acc = await pool.fetchrow(
-        "SELECT id, session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2",
         acc_id,
         callback.from_user.id,
     )
@@ -938,57 +938,31 @@ async def cb_chanf_do_bulk_create(
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
-    acc = dict(acc)
 
-    from services import account_manager
+    from services import operation_bus
 
-    results_ok: list[str] = []
-    results_err: list[str] = []
-    progress_msg = await callback.message.edit_text(
-        _progress_text("Создание каналов...", 0, count, 0, 0),
-        parse_mode="HTML",
+    op_id = await operation_bus.submit(
+        pool,
+        callback.from_user.id,
+        "bulk_create_channels",
+        {
+            "prefix": prefix,
+            "count": count,
+            "about": about,
+            "username_pattern": username_pattern,
+            "acc_id": acc_id,
+        },
+        total_items=count,
     )
 
-    for i in range(1, count + 1):
-        title = f"{prefix} {i}"
-        # Human-like delay before action (simulate typing channel name)
-        await session_simulator.typing_delay(title)
-        result = await account_manager.create_channel(
-            acc["session_str"],
-            title=title,
-            about=about,
-            _acc=acc,
-        )
-        if "error" in result:
-            results_err.append(
-                f"❌ {html.escape(title)}: {html.escape(result['error'][:60])}"
-            )
-        else:
-            ch_id = result["channel_id"]
-            results_ok.append(f"✅ {html.escape(title)} — id={ch_id}")
-        try:
-            await progress_msg.edit_text(
-                _progress_text(
-                    "Создание каналов...", i, count, len(results_ok), len(results_err)
-                ),
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(
-                log, "Не удалось обновить прогресс массового создания каналов"
-            )
-        if i < count:
-            # Smart anti-flood: human-like delay between channel creations
-            # Every 5 channels — longer pause (5-10 min), otherwise 45-90s
-            if i % 5 == 0:
-                delay = random.uniform(300, 600) * session_simulator.chaos_factor()
-            else:
-                delay = random.uniform(45, 90) * session_simulator.chaos_factor()
-            await asyncio.sleep(delay)
-
-    lines = ["📋 <b>Результаты массового создания</b>\n"] + results_ok + results_err
-    await progress_msg.edit_text(
-        "\n".join(lines),
+    await callback.message.edit_text(
+        f"📡 <b>Массовое создание поставлено в очередь</b>\n\n"
+        f"Аккаунт: <code>{acc_id}</code>\n"
+        f"Префикс: <b>{html.escape(prefix)}</b>\n"
+        f"Каналов: <b>{count}</b>\n"
+        f"ID операции: <code>#{op_id}</code>\n\n"
+        f"Каналы будут созданы в фоне. Вы получите уведомление по завершении.\n"
+        f"<i>Управление очередью: /ops → 📋 Очередь</i>",
         parse_mode="HTML",
         reply_markup=_back_menu_kb().as_markup(),
     )
