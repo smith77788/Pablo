@@ -1,7 +1,7 @@
 """Free Proxy Pool — scrapes, validates, caches SOCKS5 proxies for accounts without personal proxies.
 
 Background loop: refreshes every 6 hours.
-Validation: TCP connect to Telegram DC4 (149.154.167.51:443) via proxy, 8s timeout.
+Validation: HTTPS GET to api.telegram.org through proxy, 10s timeout.
 Selection: random valid proxy from in-memory cache (fallback to DB if cache cold).
 """
 
@@ -26,11 +26,10 @@ _PROXY_SOURCES: list[str] = [
     "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&proxy_type=socks5&country=all&ssl=all&anonymity=all&simplified=true",
 ]
 
-# Telegram DC4 — used for validation
-_TG_DC4_HOST = "149.154.167.51"
-_TG_DC4_PORT = 443
-_VALIDATE_TIMEOUT = 8.0
-_VALIDATE_CONCURRENCY = 60   # max simultaneous validation connections
+# Validation target — standard HTTPS endpoint (same as proxy_manager.py)
+_VALIDATE_URL = "https://api.telegram.org/"
+_VALIDATE_TIMEOUT = 10.0
+_VALIDATE_CONCURRENCY = 40   # max simultaneous validation connections
 _REFRESH_INTERVAL_H = 6
 _MAX_FAIL_COUNT = 3          # remove proxy after this many consecutive failures
 _MIN_POOL_SIZE = 20          # warn if valid pool drops below this
@@ -63,14 +62,14 @@ def _norm(raw: str) -> Optional[str]:
 async def _fetch_source(session, url: str) -> list[str]:
     """Download one proxy list, return normalised URLs."""
     try:
-        async with session.get(url, timeout=15) as resp:
+        async with session.get(url, timeout=20, ssl=False) as resp:
             text = await resp.text()
         proxies = []
         for line in text.splitlines():
             n = _norm(line)
             if n:
                 proxies.append(n)
-        log.debug("proxy_scraper: %s → %d proxies", url, len(proxies))
+        log.info("proxy_scraper: %s → %d proxies", url, len(proxies))
         return proxies
     except Exception as e:
         log.warning("proxy_scraper: source %s failed: %s", url, e)
@@ -87,13 +86,13 @@ async def _validate_one(proxy_url: str, sem: asyncio.Semaphore) -> tuple[str, bo
             connector = ProxyConnector.from_url(proxy_url, rdns=True)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
-                    f"http://{_TG_DC4_HOST}:{_TG_DC4_PORT}",
+                    _VALIDATE_URL,
                     timeout=aiohttp.ClientTimeout(total=_VALIDATE_TIMEOUT),
                     ssl=False,
                 ) as resp:
                     latency_ms = int((_time.monotonic() - t0) * 1000)
-                    # Any response (even 400/404) means the proxy reached TG
-                    return proxy_url, True, latency_ms
+                    # Any HTTP response means proxy reached Telegram
+                    return proxy_url, resp.status < 500, latency_ms
         except Exception:
             return proxy_url, False, None
 
@@ -120,6 +119,12 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
 
     if not raw:
         log.warning("proxy_scraper: no proxies fetched — all sources failed")
+        # Record the attempt time so UI shows when last check ran
+        try:
+            from database import db as _db
+            await _db.set_platform_setting(pool, "proxy_scraper_last_run", "0/0")
+        except Exception:
+            pass
         return {"fetched": 0, "valid": 0, "duration_s": int(_time.monotonic() - t_start)}
 
     # 2. Validate concurrently (limited semaphore)
@@ -174,6 +179,15 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
     )
     if len(valid) < _MIN_POOL_SIZE:
         log.warning("proxy_scraper: pool size %d < minimum %d", len(valid), _MIN_POOL_SIZE)
+
+    # Record last scrape timestamp so UI shows it even if pool is empty
+    try:
+        from database import db as _db
+        import datetime
+        now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        await _db.set_platform_setting(pool, "proxy_scraper_last_run", f"{len(valid)}/{len(raw)}@{now_str}")
+    except Exception:
+        pass
 
     return {"fetched": len(raw), "valid": len(valid), "duration_s": duration_s}
 
@@ -230,13 +244,31 @@ async def get_pool_stats(pool: asyncpg.Pool) -> dict:
             MAX(last_check) AS last_check
            FROM platform_proxy_pool"""
     )
-    if not row:
-        return {"valid": 0, "total": 0, "avg_latency": None, "last_check": None}
+    valid = row["valid_count"] or 0 if row else 0
+    total = row["total_count"] or 0 if row else 0
+    avg_lat = int(row["avg_latency"]) if (row and row["avg_latency"]) else None
+    last_check = row["last_check"] if row else None
+
+    # If DB table is empty but scraper has run, show last run time from platform_settings
+    if last_check is None:
+        try:
+            from database import db as _db
+            import datetime
+            val = await _db.get_platform_setting(pool, "proxy_scraper_last_run", "")
+            if val and "@" in val:
+                ts_str = val.split("@", 1)[1]
+                last_check = datetime.datetime.fromisoformat(ts_str.rstrip("Z")).replace(
+                    tzinfo=datetime.timezone.utc
+                )
+        except Exception:
+            pass
+
     return {
-        "valid": row["valid_count"] or 0,
-        "total": row["total_count"] or 0,
-        "avg_latency": int(row["avg_latency"]) if row["avg_latency"] else None,
-        "last_check": row["last_check"],
+        "valid": valid,
+        "total": total,
+        "avg_latency": avg_lat,
+        "last_check": last_check,
+        "last_run_info": row["valid_count"] if row else None,
     }
 
 
