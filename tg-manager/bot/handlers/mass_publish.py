@@ -31,7 +31,6 @@ from bot.utils.op_helpers import (
     _format_duration,
     _progress_text as _progress_text_base,
 )
-from services import task_registry as _treg
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
