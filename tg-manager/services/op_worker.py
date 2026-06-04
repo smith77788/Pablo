@@ -637,6 +637,8 @@ async def _exec_mass_publish(
     delay = params.get("delay_seconds") or params.get("delay") or 30
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
     channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
+    # target: "channels" | "groups" | "both" — фильтрует managed_channels по типу
+    target = params.get("target", "both")
 
     # ── Режим точечной публикации: конкретные channel_ids (quick_post) ─────────
     if channel_ids:
@@ -740,9 +742,15 @@ async def _exec_mass_publish(
         acc_dict = dict(acc)
         try:
             # Приоритет: managed_channels из БД (быстро), fallback → live Telethon dialogs
+            if target == "channels":
+                type_clause = "AND (mc.type = 'channel' OR mc.type IS NULL)"
+            elif target == "groups":
+                type_clause = "AND mc.type IN ('megagroup', 'supergroup', 'group', 'chat')"
+            else:
+                type_clause = ""
             db_channels = await pool.fetch(
-                "SELECT channel_id AS id, title, access_hash FROM managed_channels "
-                "WHERE owner_id=$1 AND acc_id=$2",
+                f"SELECT channel_id AS id, title, access_hash FROM managed_channels mc "
+                f"WHERE mc.owner_id=$1 AND mc.acc_id=$2 {type_clause}",
                 owner_id,
                 acc_dict["id"],
             )
