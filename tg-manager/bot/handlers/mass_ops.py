@@ -1391,88 +1391,27 @@ async def cb_bbe_confirm(
         )
         return
 
-    total = len(bots)
-    ok_count, err_count = 0, 0
-    _consecutive_errors = 0
-    progress_msg = await callback.message.edit_text(
-        f"⏳ Редактирую ботов... 0/{total}",
-        parse_mode="HTML",
-    )
-
-    import aiohttp
-
-    for idx, bot in enumerate(bots, 1):
-        token = bot["token"]
-        _call_ok = False
-        try:
-            async with aiohttp.ClientSession() as session:
-                if field == "name":
-                    url = f"https://api.telegram.org/bot{token}/setMyName"
-                    payload = {"name": value}
-                elif field == "desc":
-                    url = f"https://api.telegram.org/bot{token}/setMyDescription"
-                    payload = {"description": value}
-                elif field == "short_desc":
-                    url = f"https://api.telegram.org/bot{token}/setMyShortDescription"
-                    payload = {"short_description": value}
-                elif field == "commands":
-                    # Parse commands: "/cmd - description" format
-                    commands = []
-                    for line in value.strip().splitlines():
-                        line = line.strip()
-                        if " - " in line:
-                            cmd_part, desc_part = line.split(" - ", 1)
-                            cmd = cmd_part.strip().lstrip("/")
-                            if cmd:
-                                commands.append(
-                                    {
-                                        "command": cmd,
-                                        "description": desc_part.strip()[:256],
-                                    }
-                                )
-                    url = f"https://api.telegram.org/bot{token}/setMyCommands"
-                    payload = {"commands": json.dumps(commands)}
-                else:
-                    err_count += 1
-                    _consecutive_errors += 1
-                    continue
-
-                async with session.post(url, data=payload) as resp:
-                    result = await resp.json()
-                    if result.get("ok"):
-                        ok_count += 1
-                        _call_ok = True
-                        _consecutive_errors = 0
-                    else:
-                        err_count += 1
-                        _consecutive_errors += 1
-        except Exception:
-            err_count += 1
-            _consecutive_errors += 1
-
-        try:
-            await progress_msg.edit_text(
-                f"⏳ Редактирую ботов... {idx}/{total}\n✅ {ok_count} ❌ {err_count}",
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(
-                log, "Не удалось обновить прогресс массового редактирования ботов"
-            )
-        # exponential backoff: 1s normal, 2/4/8...s after consecutive errors (cap 30s)
-        _delay = (
-            min(1.0 * (2**_consecutive_errors), 30.0)
-            if _consecutive_errors > 0
-            else 1.0
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            "bulk_bot_edit",
+            {"field": field, "value": value},
+            total_items=len(bots),
         )
-        await asyncio.sleep(_delay)
+    except Exception as e:
+        log.error("bbe_confirm submit error: %s", e)
+        await safe_edit(callback, "⚠️ Ошибка постановки в очередь.", reply_markup=_back_menu_kb().as_markup())
+        return
 
-    await progress_msg.edit_text(
-        f"✅ <b>Массовое редактирование завершено</b>\n\n"
-        f"Всего ботов: {total}\n"
-        f"Успешно: {ok_count}\n"
-        f"Ошибок: {err_count}",
-        parse_mode="HTML",
+    _FIELD_LABEL = {"name": "Имя", "desc": "Описание", "short_desc": "Краткое описание", "commands": "Команды"}
+    await safe_edit(
+        callback,
+        f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
+        f"Тип: ✏️ Массовое редактирование ботов\n"
+        f"Поле: <b>{_FIELD_LABEL.get(field, field)}</b>\n"
+        f"Ботов: <b>{len(bots)}</b>\n\n"
+        f"Воркер применит изменения автоматически.",
         reply_markup=_back_menu_kb().as_markup(),
     )
 

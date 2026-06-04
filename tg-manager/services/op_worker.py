@@ -934,10 +934,23 @@ async def _exec_bulk_bot_edit(
         "name": "setMyName",
         "desc": "setMyDescription",
         "short_desc": "setMyShortDescription",
+        "commands": "setMyCommands",
     }
     method = field_to_method.get(field)
     if not method:
         return {"status": "skipped", "reason": f"Unknown field: {field}"}
+
+    # Parse commands for field=commands: "/cmd - description" format
+    commands_payload: list | None = None
+    if field == "commands":
+        commands_payload = []
+        for line in (value or "").strip().splitlines():
+            line = line.strip()
+            if " - " in line:
+                cmd_part, desc_part = line.split(" - ", 1)
+                cmd = cmd_part.strip().lstrip("/")
+                if cmd:
+                    commands_payload.append({"command": cmd, "description": desc_part.strip()[:256]})
 
     async with aiohttp.ClientSession() as sess:
         for b in bots_rows:
@@ -949,20 +962,22 @@ async def _exec_bulk_bot_edit(
                     "summary": f"Отменено. Обновлено: {ok_count}, ошибок: {fail_count}",
                 }
             try:
-                payload = {
-                    "name"
-                    if field == "name"
-                    else "description"
-                    if field == "desc"
-                    else "short_description": value
-                }
-                resp = await sess.post(
-                    f"https://api.telegram.org/bot{b['token']}/{method}",
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                )
-                data = await resp.json()
-                if data.get("ok"):
+                if field == "commands":
+                    payload = {"commands": json.dumps(commands_payload or [])}
+                    resp = await sess.post(
+                        f"https://api.telegram.org/bot{b['token']}/{method}",
+                        data=payload,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    )
+                else:
+                    param_key = "name" if field == "name" else "description" if field == "desc" else "short_description"
+                    resp = await sess.post(
+                        f"https://api.telegram.org/bot{b['token']}/{method}",
+                        json={param_key: value},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    )
+                data_resp = await resp.json()
+                if data_resp.get("ok"):
                     ok_count += 1
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
@@ -972,6 +987,10 @@ async def _exec_bulk_bot_edit(
                     )
                 else:
                     fail_count += 1
+                    log.warning(
+                        "op_worker bulk_bot_edit: bot=%s field=%s api_error=%s",
+                        b.get("id"), field, data_resp.get("description"),
+                    )
             except Exception as e:
                 fail_count += 1
                 log.warning(
