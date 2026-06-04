@@ -1223,7 +1223,6 @@ async def cb_gp_confirm_preview(
     pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
-    await state.set_state(GlobalPresenceFSM.confirming)
 
     sd = await state.get_data()
     asset_type = sd.get("asset_type", "channel")
@@ -1282,10 +1281,13 @@ async def cb_gp_confirm_preview(
         )
         intel_text = intelligence_engine.format_pre_launch_block(intel)
         if not intel.go_decision:
+            await state.set_state(GlobalPresenceFSM.previewing)
             await callback.answer(intel.go_reason, show_alert=True)
             return
     except Exception:
         intel_text = ""
+
+    await state.set_state(GlobalPresenceFSM.confirming)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Запустить", callback_data=GeoPresenceCb(action="launch"))
@@ -1293,6 +1295,8 @@ async def cb_gp_confirm_preview(
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(1)
 
+    if intel_text and len(intel_text) > 600:
+        intel_text = intel_text[:597] + "…"
     intel_section = f"\n\n{intel_text}" if intel_text else ""
     await _edit(
         callback,
