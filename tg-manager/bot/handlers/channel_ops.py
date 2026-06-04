@@ -4839,6 +4839,65 @@ async def cb_bulk_confirm_selection(
         )
 
 
+async def _bulk_leave_channel_bg(
+    pool: asyncpg.Pool,
+    user_id: int,
+    msg,
+    accounts: list,
+    channel_ref: str,
+    total: int,
+) -> None:
+    from services import account_manager
+    from database import db as _db
+
+    ok_list, err_list = [], []
+    attempt = 0
+    try:
+        for idx, acc in enumerate(accounts):
+            label = html.escape(acc["first_name"] or acc["phone"])
+            result = None
+            try:
+                result = await account_manager.leave_channel(
+                    acc["session_str"], channel_ref, _acc=dict(acc)
+                )
+            except Exception as e:
+                err_list.append(f"❌ {label}: {str(e)[:50]}")
+            if result is not None:
+                if isinstance(result, dict) and result.get("banned"):
+                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                    err_list.append(f"❌ {label}: забанен")
+                elif isinstance(result, dict) and result.get("flood_wait"):
+                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                elif result:
+                    ok_list.append(f"✅ {label}")
+                else:
+                    err_list.append(f"❌ {label}: не удалось")
+            try:
+                await msg.edit_text(
+                    _progress_text("Покидаю каналы...", idx + 1, total, len(ok_list), len(err_list)),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой обновления прогресса покидания каналов")
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = result.get("flood_wait", 0) if isinstance(result, dict) else 0
+            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
+    except asyncio.CancelledError:
+        log.info("_bulk_leave_channel_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_bulk_leave_channel_bg: неожиданная ошибка")
+
+    lines = [f"🚪 <b>Выход из {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
+    try:
+        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+    except Exception:
+        log_exc_swallow(log, "_bulk_leave_channel_bg: сбой финального отчёта")
+
+
 # ── FSM: channel reference input (leave or post) ──────────────────────────
 
 
@@ -4872,56 +4931,18 @@ async def fsm_bulk_channel_id(
     from services import account_manager
 
     if op == "leave":
-        from database import db as _db
-
         total = len(accounts)
         msg = await message.answer(
             _progress_text("Покидаю каналы...", 0, total, 0, 0), parse_mode="HTML"
         )
-        ok_list, err_list = [], []
-        attempt = 0
-        for idx, acc in enumerate(accounts):
-            label = html.escape(acc["first_name"] or acc["phone"])
-            result = None
-            try:
-                result = await account_manager.leave_channel(
-                    acc["session_str"], channel_ref, _acc=dict(acc)
-                )
-            except Exception as e:
-                err_list.append(f"❌ {label}: {str(e)[:50]}")
-            if result is not None:
-                if isinstance(result, dict) and result.get("banned"):
-                    await _db.deactivate_account(
-                        pool, acc["id"], "banned detected in bulk op"
-                    )
-                    err_list.append(f"❌ {label}: забанен")
-                elif isinstance(result, dict) and result.get("flood_wait"):
-                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                elif result:
-                    ok_list.append(f"✅ {label}")
-                else:
-                    err_list.append(f"❌ {label}: не удалось")
-            try:
-                await msg.edit_text(
-                    _progress_text(
-                        "Покидаю каналы...", idx + 1, total, len(ok_list), len(err_list)
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Сбой обновления прогресса покидания каналов")
-            # Exponential backoff; reset every 5 iterations
-            if attempt >= 4:
-                attempt = 0
-            else:
-                attempt += 1
-            flood = result.get("flood_wait", 0) if isinstance(result, dict) else 0
-            await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
-        lines = (
-            [f"🚪 <b>Выход из {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
+        task = asyncio.create_task(
+            _bulk_leave_channel_bg(pool, message.from_user.id, msg, list(accounts), channel_ref, total)
         )
-        await msg.edit_text(
-            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        _treg.register(
+            message.from_user.id,
+            "bulk_leave",
+            f"Выход из {html.escape(channel_ref)} ({total} аккаунтов)",
+            task,
         )
 
     elif op == "post":
@@ -4937,6 +4958,65 @@ async def fsm_bulk_channel_id(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
+
+
+async def _bulk_post_to_channel_bg(
+    pool: asyncpg.Pool,
+    user_id: int,
+    msg,
+    accounts: list,
+    channel_ref: str,
+    text_to_post: str,
+    bulk_access_hash: int,
+    total: int,
+) -> None:
+    from services import account_manager
+    from database import db as _db
+
+    ok_list, err_list = [], []
+    attempt = 0
+    try:
+        for idx, acc in enumerate(accounts):
+            label = html.escape(acc["first_name"] or acc["phone"])
+            acc_id_cur = acc.get("id")
+            result = await account_manager.post_to_channel(
+                acc["session_str"], channel_ref, text_to_post,
+                access_hash=bulk_access_hash, _acc=dict(acc),
+            )
+            if result.get("banned"):
+                if acc_id_cur:
+                    await _db.deactivate_account(pool, acc_id_cur, "banned detected in bulk op")
+                err_list.append(f"❌ {label}: забанен")
+            elif result.get("flood_wait"):
+                err_list.append(f"⏳ {label}: flood_wait, пропущен")
+            elif "msg_id" in result:
+                ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
+            else:
+                err_list.append(f"❌ {label}: {html.escape(result.get('error', 'ошибка')[:60])}")
+            try:
+                await msg.edit_text(
+                    _progress_text("Публикую посты...", idx + 1, total, len(ok_list), len(err_list)),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой обновления прогресса публикации в канал")
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            flood = result.get("flood_wait", 0)
+            await asyncio.sleep(max(backoff(attempt), flood))
+    except asyncio.CancelledError:
+        log.info("_bulk_post_to_channel_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_bulk_post_to_channel_bg: неожиданная ошибка")
+
+    lines = [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
+    try:
+        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+    except Exception:
+        log_exc_swallow(log, "_bulk_post_to_channel_bg: сбой финального отчёта")
 
 
 # ── FSM: post text input ──────────────────────────────────────────────────
@@ -4969,12 +5049,6 @@ async def fsm_bulk_post_text(
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return
         total = len(accounts)
-        msg = await message.answer(
-            _progress_text("Публикую посты...", 0, total, 0, 0), parse_mode="HTML"
-        )
-        from services import account_manager
-
-        # Для числового ID канала пробуем найти access_hash в кэше
         bulk_access_hash = 0
         if channel_ref.lstrip("-").isdigit():
             cid = abs(int(channel_ref))
@@ -4984,58 +5058,21 @@ async def fsm_bulk_post_text(
                 cid,
             )
             bulk_access_hash = (ah_row["access_hash"] if ah_row else 0) or 0
-        from database import db as _db
 
-        ok_list, err_list = [], []
-        attempt = 0
-        active_accounts = list(accounts)
-        for idx, acc in enumerate(active_accounts):
-            label = html.escape(acc["first_name"] or acc["phone"])
-            acc_id_cur = acc.get("id")
-            result = await account_manager.post_to_channel(
-                acc["session_str"],
-                channel_ref,
-                text_to_post,
-                access_hash=bulk_access_hash,
-                _acc=dict(acc),
-            )
-            if result.get("banned"):
-                if acc_id_cur:
-                    await _db.deactivate_account(
-                        pool, acc_id_cur, "banned detected in bulk op"
-                    )
-                err_list.append(f"❌ {label}: забанен")
-            elif result.get("flood_wait"):
-                err_list.append(f"⏳ {label}: flood_wait, пропущен")
-            elif "msg_id" in result:
-                ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
-            else:
-                err_list.append(
-                    f"❌ {label}: {html.escape(result.get('error', 'ошибка')[:60])}"
-                )
-            try:
-                await msg.edit_text(
-                    _progress_text(
-                        "Публикую посты...", idx + 1, total, len(ok_list), len(err_list)
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Сбой обновления прогресса публикации в канал")
-            # Exponential backoff; reset every 5 iterations
-            if attempt >= 4:
-                attempt = 0
-            else:
-                attempt += 1
-            flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(backoff(attempt), flood))
-        lines = (
-            [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"]
-            + ok_list
-            + err_list
+        msg = await message.answer(
+            _progress_text("Публикую посты...", 0, total, 0, 0), parse_mode="HTML"
         )
-        await msg.edit_text(
-            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        task = asyncio.create_task(
+            _bulk_post_to_channel_bg(
+                pool, message.from_user.id, msg,
+                list(accounts), channel_ref, text_to_post, bulk_access_hash, total,
+            )
+        )
+        _treg.register(
+            message.from_user.id,
+            "bulk_post_to_channel",
+            f"Публикация в {html.escape(channel_ref)} ({total} аккаунтов)",
+            task,
         )
     else:
         # Single-account post (from cb_post_channel_chosen)
@@ -5204,6 +5241,78 @@ async def fsm_join_invite_combined(
         )
 
 
+async def _bulk_update_profile_bg(
+    pool: asyncpg.Pool,
+    user_id: int,
+    msg,
+    accounts: list,
+    field: str,
+    value: str,
+    total: int,
+) -> None:
+    from services import account_manager
+    from database import db as _db
+
+    ok_list, err_list = [], []
+    attempt = 0
+    try:
+        for i, acc in enumerate(accounts):
+            label = html.escape(acc["first_name"] or acc["phone"])
+            actual_value = f"{value}{i + 1}" if field == "username" else value
+            try:
+                if field == "username":
+                    result = await account_manager.update_account_username(
+                        acc["session_str"], actual_value, _acc=dict(acc)
+                    )
+                    if isinstance(result, dict) and result.get("banned"):
+                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        err_list.append(f"❌ {label}: забанен")
+                    elif isinstance(result, dict) and result.get("flood_wait"):
+                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                    elif result and not isinstance(result, dict):
+                        err_list.append(f"❌ {label}: {html.escape(str(result)[:50])}")
+                    else:
+                        ok_list.append(f"✅ {label}: @{html.escape(actual_value)}")
+                else:
+                    result = await account_manager.update_profile(
+                        acc["session_str"], **{field: value}, _acc=dict(acc)
+                    )
+                    if isinstance(result, dict) and result.get("banned"):
+                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        err_list.append(f"❌ {label}: забанен")
+                    elif isinstance(result, dict) and result.get("flood_wait"):
+                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                    elif result:
+                        ok_list.append(f"✅ {label}")
+                    else:
+                        err_list.append(f"❌ {label}: ошибка")
+            except Exception as e:
+                err_list.append(f"❌ {label}: {str(e)[:50]}")
+            try:
+                await msg.edit_text(
+                    _progress_text("Обновляю профили...", i + 1, total, len(ok_list), len(err_list)),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой обновления прогресса обновления профилей")
+            if attempt >= 4:
+                attempt = 0
+            else:
+                attempt += 1
+            await asyncio.sleep(backoff(attempt, base=2.0, cap=30.0))
+    except asyncio.CancelledError:
+        log.info("_bulk_update_profile_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_bulk_update_profile_bg: неожиданная ошибка")
+
+    lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
+    try:
+        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+    except Exception:
+        log_exc_swallow(log, "_bulk_update_profile_bg: сбой финального отчёта")
+
+
 # ── FSM: profile update (single or bulk with selected accounts) ───────────
 
 
@@ -5238,64 +5347,14 @@ async def fsm_update_profile(
         msg = await message.answer(
             _progress_text("Обновляю профили...", 0, total, 0, 0), parse_mode="HTML"
         )
-        from database import db as _db
-
-        ok_list, err_list = [], []
-        attempt = 0
-        for i, acc in enumerate(accounts):
-            label = html.escape(acc["first_name"] or acc["phone"])
-            actual_value = f"{value}{i + 1}" if field == "username" else value
-            try:
-                if field == "username":
-                    result = await account_manager.update_account_username(
-                        acc["session_str"], actual_value, _acc=dict(acc)
-                    )
-                    if isinstance(result, dict) and result.get("banned"):
-                        await _db.deactivate_account(
-                            pool, acc["id"], "banned detected in bulk op"
-                        )
-                        err_list.append(f"❌ {label}: забанен")
-                    elif isinstance(result, dict) and result.get("flood_wait"):
-                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                    elif result and not isinstance(result, dict):
-                        err_list.append(f"❌ {label}: {html.escape(str(result)[:50])}")
-                    else:
-                        ok_list.append(f"✅ {label}: @{html.escape(actual_value)}")
-                else:
-                    result = await account_manager.update_profile(
-                        acc["session_str"], **{field: value}, _acc=dict(acc)
-                    )
-                    if isinstance(result, dict) and result.get("banned"):
-                        await _db.deactivate_account(
-                            pool, acc["id"], "banned detected in bulk op"
-                        )
-                        err_list.append(f"❌ {label}: забанен")
-                    elif isinstance(result, dict) and result.get("flood_wait"):
-                        err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                    elif result:
-                        ok_list.append(f"✅ {label}")
-                    else:
-                        err_list.append(f"❌ {label}: ошибка")
-            except Exception as e:
-                err_list.append(f"❌ {label}: {str(e)[:50]}")
-            try:
-                await msg.edit_text(
-                    _progress_text(
-                        "Обновляю профили...", i + 1, total, len(ok_list), len(err_list)
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Сбой обновления прогресса обновления профилей")
-            # Exponential backoff; reset every 5 iterations
-            if attempt >= 4:
-                attempt = 0
-            else:
-                attempt += 1
-            await asyncio.sleep(backoff(attempt, base=2.0, cap=30.0))
-        lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
-        await msg.edit_text(
-            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        task = asyncio.create_task(
+            _bulk_update_profile_bg(pool, message.from_user.id, msg, list(accounts), field, value, total)
+        )
+        _treg.register(
+            message.from_user.id,
+            "bulk_update_profile",
+            f"Обновление {field} у {total} аккаунтов",
+            task,
         )
     else:
         acc = await db.get_account_for_telethon(
