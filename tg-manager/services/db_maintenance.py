@@ -41,6 +41,8 @@ _RETENTION: list[tuple[str, str, str]] = [
     ("proxy_health_log",       "checked_at",   "30 days"),
     # Operation audit
     ("operation_audit",        "occurred_at",  "60 days"),
+    # Activity log (UI events) — keep 14 days
+    ("activity_log",           "occurred_at",  "14 days"),
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"

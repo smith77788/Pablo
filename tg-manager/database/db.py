@@ -4415,3 +4415,90 @@ async def get_intent_by_op(pool: asyncpg.Pool, op_id: int):
         "WHERE l.op_id = $1",
         op_id,
     )
+
+
+# ── Activity Log ──────────────────────────────────────────────────────────────
+
+
+async def get_activity_feed(
+    pool: asyncpg.Pool,
+    owner_id: int | None = None,
+    status_filter: str | None = None,
+    limit: int = 30,
+    offset: int = 0,
+) -> list[asyncpg.Record]:
+    """UI events from activity_log, newest first."""
+    conditions = []
+    params: list = []
+    idx = 1
+    if owner_id is not None:
+        conditions.append(f"owner_id=${idx}")
+        params.append(owner_id)
+        idx += 1
+    if status_filter:
+        conditions.append(f"status=${idx}")
+        params.append(status_filter)
+        idx += 1
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params += [limit, offset]
+    return await pool.fetch(
+        f"""SELECT id, owner_id, event_type, action, detail, status, error_msg,
+                   duration_ms, occurred_at
+            FROM activity_log
+            {where}
+            ORDER BY occurred_at DESC
+            LIMIT ${idx} OFFSET ${idx+1}""",
+        *params,
+    )
+
+
+async def get_account_ops_feed(
+    pool: asyncpg.Pool,
+    owner_id: int | None = None,
+    status_filter: str | None = None,
+    limit: int = 30,
+    offset: int = 0,
+) -> list[asyncpg.Record]:
+    """Account-level operations from operation_audit, newest first."""
+    conditions = []
+    params: list = []
+    idx = 1
+    if owner_id is not None:
+        conditions.append(f"owner_id=${idx}")
+        params.append(owner_id)
+        idx += 1
+    if status_filter == "error":
+        conditions.append(f"result != 'success'")
+    elif status_filter == "ok":
+        conditions.append(f"result = 'success'")
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params += [limit, offset]
+    return await pool.fetch(
+        f"""SELECT occurred_at, owner_id, action, target, result, error_msg,
+                   duration_ms, flood_wait_s, account_id
+            FROM operation_audit
+            {where}
+            ORDER BY occurred_at DESC
+            LIMIT ${idx} OFFSET ${idx+1}""",
+        *params,
+    )
+
+
+async def get_activity_stats(pool: asyncpg.Pool) -> dict:
+    """Quick platform-wide stats for admin dashboard."""
+    row = await pool.fetchrow(
+        """SELECT
+            COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '1 hour')  AS last_hour,
+            COUNT(*) FILTER (WHERE occurred_at > NOW() - INTERVAL '24 hours') AS last_day,
+            COUNT(*) FILTER (WHERE status='error' AND occurred_at > NOW() - INTERVAL '24 hours') AS errors_day,
+            COUNT(DISTINCT owner_id) FILTER (WHERE occurred_at > NOW() - INTERVAL '1 hour') AS active_users_hour
+           FROM activity_log"""
+    )
+    if not row:
+        return {"last_hour": 0, "last_day": 0, "errors_day": 0, "active_users_hour": 0}
+    return {
+        "last_hour": row["last_hour"] or 0,
+        "last_day": row["last_day"] or 0,
+        "errors_day": row["errors_day"] or 0,
+        "active_users_hour": row["active_users_hour"] or 0,
+    }

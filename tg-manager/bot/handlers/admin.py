@@ -142,11 +142,12 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="📨 Рассылка всем", callback_data="adm:broadcast")
         kb.adjust(2, 2, 1)
     elif section == "ops":
+        kb.button(text="📊 Логи действий", callback_data="adm:logs")
         kb.button(text="📈 Очередь операций", callback_data="adm:platform_ops")
-        kb.button(text="🔐 Аудит операций", callback_data="adm:audit_log")
+        kb.button(text="🔐 Аудит TG-операций", callback_data="adm:audit_log")
         kb.button(text="📊 Системная статистика", callback_data="adm:stats")
         kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
-        kb.adjust(2, 2)
+        kb.adjust(1, 2, 2)
     elif section == "ai":
         kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
         kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
@@ -578,6 +579,51 @@ async def cb_admin(
             "ON CONFLICT(admin_id) DO UPDATE SET state='bulk_grant',data=''",
             callback.from_user.id,
         )
+
+    elif action == "logs":
+        await _adm_logs(callback, pool, source="ui", status_filter=None, page=0)
+
+    elif action == "logs_err":
+        await _adm_logs(callback, pool, source="ui", status_filter="error", page=0)
+
+    elif action == "logs_ops":
+        await _adm_logs(callback, pool, source="ops", status_filter=None, page=0)
+
+    elif action == "logs_ops_err":
+        await _adm_logs(callback, pool, source="ops", status_filter="error", page=0)
+
+    elif action.startswith("logs_p:"):
+        # logs_p:ui:none:0  or  logs_p:ops:error:1
+        parts = action.split(":")
+        if len(parts) == 4:
+            src = parts[1]
+            sf = parts[2] if parts[2] != "none" else None
+            pg = int(parts[3])
+            await _adm_logs(callback, pool, source=src, status_filter=sf, page=pg)
+
+    elif action.startswith("logs_uid:"):
+        uid_str = action.split(":", 1)[1]
+        try:
+            target_uid = int(uid_str)
+        except ValueError:
+            await callback.answer("Неверный ID", show_alert=True)
+            return
+        await _adm_logs(callback, pool, source="ui", status_filter=None, page=0, owner_filter=target_uid)
+
+    elif action == "logs_find_user":
+        await callback.message.edit_text(
+            "🔍 <b>Логи по пользователю</b>\n\nВведите Telegram ID пользователя:",
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
+        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'logs_find_user','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='logs_find_user',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for logs_find_user")
 
     elif action == "platform_ops":
         await _adm_platform_ops(callback, pool)
@@ -1534,6 +1580,23 @@ async def handle_admin_message(
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
+    elif state == "logs_find_user":
+        try:
+            target_uid = int(text.strip())
+        except ValueError:
+            await message.answer("❌ Неверный Telegram ID.", reply_markup=_admin_main_kb())
+            return
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🖱 UI-события", callback_data=f"adm:logs_uid:{target_uid}")
+        kb.button(text="⚙️ TG-операции", callback_data=f"adm:logs_p:ops:none:0")
+        kb.button(text="◀️ Логи", callback_data="adm:logs")
+        kb.adjust(2, 1)
+        await message.answer(
+            f"🔍 Показываю логи для uid <code>{target_uid}</code>:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+
     elif state == "cleanup":
         if text.strip().upper() != "CLEAN":
             await message.answer(
@@ -1578,12 +1641,22 @@ async def handle_admin_message(
             )
         except Exception:
             dm_del = 0
+        try:
+            act_del = (
+                await pool.fetchval(
+                    "WITH d AS (DELETE FROM activity_log WHERE occurred_at < now() - INTERVAL '14 days' RETURNING 1) SELECT COUNT(*) FROM d"
+                )
+                or 0
+            )
+        except Exception:
+            act_del = 0
         await message.answer(
             f"🧹 <b>Очистка завершена</b>\n\n"
             f"• Флуд-логов удалено: <b>{flood_del}</b>\n"
             f"• Операций удалено: <b>{ops_del}</b>\n"
             f"• Аудит-записей удалено: <b>{audit_del}</b>\n"
-            f"• DM-логов удалено: <b>{dm_del}</b>",
+            f"• DM-логов удалено: <b>{dm_del}</b>\n"
+            f"• Activity-логов удалено: <b>{act_del}</b>",
             parse_mode="HTML",
             reply_markup=_admin_main_kb(),
         )
@@ -2120,3 +2193,172 @@ async def notify_new_platform_user(
                 "Не удалось отправить уведомление о новом пользователе админу",
                 user_id=admin_id,
             )
+
+
+# ── Activity Logs Admin Screen ────────────────────────────────────────────────
+
+_LOG_PAGE_SIZE = 25
+
+_EVENT_ICONS = {
+    "command": "⌨️",
+    "callback": "🖱",
+    "message": "💬",
+    "error": "❌",
+}
+
+
+def _logs_kb(source: str, sf: str | None, page: int, has_next: bool) -> InlineKeyboardBuilder:
+    sf_str = sf or "none"
+    kb = InlineKeyboardBuilder()
+    # Filter tabs
+    if source == "ui":
+        kb.button(text="🖱 UI (сейчас)", callback_data="adm:logs")
+        kb.button(text="⚙️ TG-операции", callback_data="adm:logs_ops")
+    else:
+        kb.button(text="🖱 UI", callback_data="adm:logs")
+        kb.button(text="⚙️ TG-операции (сейчас)", callback_data="adm:logs_ops")
+    # Error filter
+    err_cb = f"adm:logs_err" if source == "ui" else "adm:logs_ops_err"
+    if sf == "error":
+        kb.button(text="🔴 Только ошибки (сейчас)", callback_data=f"adm:logs_p:{source}:none:0")
+    else:
+        kb.button(text="🔴 Только ошибки", callback_data=err_cb)
+    kb.button(text="🔍 По пользователю", callback_data="adm:logs_find_user")
+    # Pagination
+    if page > 0:
+        kb.button(text="◀️ Назад", callback_data=f"adm:logs_p:{source}:{sf_str}:{page - 1}")
+    if has_next:
+        kb.button(text="▶️ Далее", callback_data=f"adm:logs_p:{source}:{sf_str}:{page + 1}")
+    kb.button(text="🔄 Обновить", callback_data=f"adm:logs_p:{source}:{sf_str}:{page}")
+    kb.button(text="◀️ Операции", callback_data="adm:section_ops")
+    nav_cols = (1 if (page == 0 and not has_next) else (2 if (page > 0 and has_next) else 1))
+    kb.adjust(2, 1, 1, nav_cols, 1, 1)
+    return kb
+
+
+async def _adm_logs(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    source: str = "ui",
+    status_filter: str | None = None,
+    page: int = 0,
+    owner_filter: int | None = None,
+) -> None:
+    offset = page * _LOG_PAGE_SIZE
+    lines = []
+    has_next = False
+
+    if source == "ui":
+        try:
+            rows = await db.get_activity_feed(
+                pool,
+                owner_id=owner_filter,
+                status_filter=status_filter,
+                limit=_LOG_PAGE_SIZE + 1,
+                offset=offset,
+            )
+        except Exception:
+            rows = []
+        has_next = len(rows) > _LOG_PAGE_SIZE
+        rows = rows[:_LOG_PAGE_SIZE]
+
+        title_parts = ["📊 <b>Логи действий (UI)</b>"]
+        if owner_filter:
+            title_parts.append(f" · uid:<code>{owner_filter}</code>")
+        if status_filter == "error":
+            title_parts.append(" · 🔴 ошибки")
+        title_parts.append(f" · стр.{page + 1}")
+        lines.append("".join(title_parts))
+        lines.append("")
+
+        if not rows:
+            lines.append("Нет записей.")
+        else:
+            for r in rows:
+                dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
+                uid = r.get("owner_id") or "?"
+                etype = r.get("event_type") or "?"
+                icon = _EVENT_ICONS.get(etype, "•")
+                action = _html.escape((r.get("action") or "")[:45])
+                detail = r.get("detail") or ""
+                detail_str = f" <i>{_html.escape(detail[:30])}</i>" if detail else ""
+                status = r.get("status") or "ok"
+                dur = r.get("duration_ms")
+                dur_str = f" {dur}ms" if dur is not None else ""
+                if status == "error":
+                    err = r.get("error_msg") or ""
+                    lines.append(
+                        f"<code>{dt}</code> {icon} uid:{uid} <b>{action}</b>{detail_str} ❌{dur_str}"
+                    )
+                    if err:
+                        lines.append(f"  └ <code>{_html.escape(err[:80])}</code>")
+                else:
+                    lines.append(
+                        f"<code>{dt}</code> {icon} uid:{uid} {action}{detail_str} ✅{dur_str}"
+                    )
+
+        # Activity stats header
+        try:
+            stats = await db.get_activity_stats(pool)
+            lines.insert(1,
+                f"⚡ За час: {stats['last_hour']} событий · "
+                f"👥 {stats['active_users_hour']} активных · "
+                f"🔴 Ошибок/24ч: {stats['errors_day']}"
+            )
+        except Exception:
+            pass
+
+    else:  # ops
+        try:
+            rows = await db.get_account_ops_feed(
+                pool,
+                owner_id=owner_filter,
+                status_filter=status_filter,
+                limit=_LOG_PAGE_SIZE + 1,
+                offset=offset,
+            )
+        except Exception:
+            rows = []
+        has_next = len(rows) > _LOG_PAGE_SIZE
+        rows = rows[:_LOG_PAGE_SIZE]
+
+        title_parts = ["⚙️ <b>Логи TG-операций</b>"]
+        if owner_filter:
+            title_parts.append(f" · uid:<code>{owner_filter}</code>")
+        if status_filter == "error":
+            title_parts.append(" · 🔴 ошибки")
+        title_parts.append(f" · стр.{page + 1}")
+        lines.append("".join(title_parts))
+        lines.append("")
+
+        if not rows:
+            lines.append("Нет записей.")
+        else:
+            for r in rows:
+                dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
+                uid = r.get("owner_id") or "?"
+                action = _html.escape((r.get("action") or "")[:30])
+                target = r.get("target") or ""
+                target_str = f" → <code>{_html.escape(target[:25])}</code>" if target else ""
+                result = r.get("result") or "?"
+                dur = r.get("duration_ms")
+                dur_str = f" {dur}ms" if dur is not None else ""
+                flood = r.get("flood_wait_s")
+                flood_str = f" ⏳{flood}s" if flood else ""
+                if result == "success":
+                    lines.append(f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ✅{dur_str}")
+                elif result == "flood_wait":
+                    lines.append(f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ⚠️{flood_str}")
+                else:
+                    err = r.get("error_msg") or ""
+                    lines.append(f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ❌{dur_str}")
+                    if err:
+                        lines.append(f"  └ <code>{_html.escape(err[:70])}</code>")
+
+    text = "\n".join(lines)
+    # Telegram message limit guard
+    if len(text) > 3800:
+        text = text[:3800] + "\n\n<i>...обрезано</i>"
+
+    kb = _logs_kb(source, status_filter, page, has_next)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
