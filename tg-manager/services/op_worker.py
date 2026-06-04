@@ -430,7 +430,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         return
 
     # Получить семафор для ограничения параллельных операций на одного владельца
-    owner_sem = await _get_owner_semaphore(owner_id)
+    try:
+        owner_sem = await _get_owner_semaphore(owner_id)
+    except Exception:
+        log.exception("op_worker: failed to get semaphore for owner=%d op=%d", owner_id, op_id)
+        async with _active_lock:
+            _active_op_ids.discard(op_id)
+        return
 
     progress_task: asyncio.Task | None = None
     _t_start = time.monotonic()
@@ -515,12 +521,22 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
 
             # Не перезаписывать статус если операция была отменена в процессе
             if result.get("status") == "cancelled":
+                await pool.execute(
+                    "UPDATE operation_queue SET status='cancelled', finished_at=now() "
+                    "WHERE id=$1 AND status NOT IN ('done','failed','cancelled')",
+                    op_id,
+                )
                 return
 
             current = await pool.fetchrow(
                 "SELECT status FROM operation_queue WHERE id=$1", op_id
             )
             if current and current["status"] == "cancelled":
+                await pool.execute(
+                    "UPDATE operation_queue SET finished_at=now() "
+                    "WHERE id=$1 AND status='cancelled' AND finished_at IS NULL",
+                    op_id,
+                )
                 return
 
             elapsed = time.monotonic() - _t_start
@@ -656,8 +672,12 @@ async def _exec_mass_publish(
     from services import account_manager
 
     text = params.get("text", "")
-    # Accept both "delay_seconds" (canonical) and legacy "delay" key from OpBuilder
-    delay = params.get("delay_seconds") or params.get("delay") or 30
+    # Accept both "delay_seconds" (canonical) and legacy "delay" key from OpBuilder.
+    # Use explicit None check so that delay=0 is honoured (0 is falsy but valid).
+    _d = params.get("delay_seconds")
+    if _d is None:
+        _d = params.get("delay")
+    delay = int(_d) if _d is not None else 30
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
     channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
     # target: "channels" | "groups" | "both" — фильтрует managed_channels по типу
@@ -1039,10 +1059,6 @@ async def _exec_bulk_join(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Вступить в список каналов/групп несколькими аккаунтами."""
-    from services import account_manager, session_simulator
-    import random
-
-    links = params.get("links", [])
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
     accounts = await resource_selector.select_all_active(
@@ -2373,6 +2389,8 @@ async def _exec_strike(
     reason = params.get("reason", "spam")
     preset = params.get("preset") or None
     label = params.get("label") or f"queued_strike_{op_id}"
+    # mode: сначала из params (явно), потом из strike_access (настройки пользователя)
+    mode_from_params = params.get("mode", "")
 
     try:
         num_waves = max(1, int(params.get("num_waves", 3)))
@@ -2419,6 +2437,17 @@ async def _exec_strike(
         op_id,
     )
 
+    # Определяем режим: явный из params > настройки пользователя > "normal"
+    strike_mode = mode_from_params if mode_from_params in ("fast", "normal", "maximum") else None
+    if not strike_mode:
+        try:
+            _mode_row = await pool.fetchrow(
+                "SELECT mode FROM strike_access WHERE user_id=$1", owner_id
+            )
+            strike_mode = (_mode_row.get("mode") or "normal") if _mode_row else "normal"
+        except Exception:
+            strike_mode = "normal"
+
     plan = StrikePlan(
         targets=[target],
         accounts=viable,
@@ -2432,7 +2461,7 @@ async def _exec_strike(
         waves=waves,
         started_at=_time.time(),
         phase="recon",  # начальная фаза: strike_engine начнёт со сбора данных
-        mode="normal",
+        mode=strike_mode,
         owner_id=owner_id,
     )
 

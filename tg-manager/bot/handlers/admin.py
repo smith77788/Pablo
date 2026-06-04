@@ -125,7 +125,8 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="🗑 Удалить данные", callback_data="adm:delete_ask")
         kb.button(text="📋 Экспорт CSV", callback_data="adm:users_csv")
         kb.button(text="🔔 Уведомления", callback_data="adm:notify_toggle")
-        kb.adjust(2, 2, 2, 1)
+        kb.button(text="🏠 Админка", callback_data="adm:main")
+        kb.adjust(2, 2, 2, 1, 1)
     elif section == "billing":
         kb.button(text="💳 Активные подписки", callback_data="adm:subs")
         kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
@@ -133,25 +134,29 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="💰 Bulk-выдача", callback_data="adm:bulk_grant_ask")
         kb.button(text="💵 Цены", callback_data="adm:prices")
         kb.button(text="⚙️ Методы оплаты", callback_data="adm:pay_cfg")
-        kb.adjust(2, 2, 2)
+        kb.button(text="🏠 Админка", callback_data="adm:main")
+        kb.adjust(2, 2, 2, 1)
     elif section == "assets":
         kb.button(text="🤖 Все боты", callback_data="adm:bots")
         kb.button(text="📁 Экспорт токенов", callback_data="adm:tokens_file")
         kb.button(text="⚔️ Выдать Strike", callback_data="adm:strike_grant_ask")
         kb.button(text="⚔️ Забрать Strike", callback_data="adm:strike_revoke_ask")
         kb.button(text="📨 Рассылка всем", callback_data="adm:broadcast")
-        kb.adjust(2, 2, 1)
+        kb.button(text="🏠 Админка", callback_data="adm:main")
+        kb.adjust(2, 2, 1, 1)
     elif section == "ops":
         kb.button(text="📊 Логи действий", callback_data="adm:logs")
         kb.button(text="📈 Очередь операций", callback_data="adm:platform_ops")
         kb.button(text="🔐 Аудит TG-операций", callback_data="adm:audit_log")
         kb.button(text="📊 Системная статистика", callback_data="adm:stats")
         kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
-        kb.adjust(1, 2, 2)
+        kb.button(text="🏠 Админка", callback_data="adm:main")
+        kb.adjust(1, 2, 2, 1)
     elif section == "ai":
         kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
         kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
         kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        kb.button(text="🏠 Админка", callback_data="adm:main")
         kb.adjust(1)
     elif section == "system":
         free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
@@ -171,9 +176,8 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
             else "🐛 Отчёты об ошибках"
         )
         kb.button(text=err_label, callback_data="adm:error_reports")
+        kb.button(text="🏠 Админка", callback_data="adm:main")
         kb.adjust(1)
-    kb.button(text="🏠 Админка", callback_data="adm:main")
-    kb.adjust(1)
     return kb.as_markup()
 
 
@@ -708,7 +712,9 @@ async def cb_admin(
         else:
             text = "🔐 <b>Аудит операций</b>\n\nЗаписей нет."
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data="adm:users")
+        kb.button(text="◀️ Назад", callback_data="adm:section_ops")
+        kb.button(text="🏠 Главное меню", callback_data="adm:main")
+        kb.adjust(1)
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=kb.as_markup()
         )

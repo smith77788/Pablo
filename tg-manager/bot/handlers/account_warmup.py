@@ -727,11 +727,11 @@ async def cb_wu_toggle_acc(
     WarmupCb.filter(F.action == "accs_done"), WarmupSessionFSM.choosing_accounts
 )
 async def cb_wu_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
     data = await state.get_data()
     if not data.get("sel_acc_ids"):
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(WarmupSessionFSM.choosing_target_type)
 
     kb = InlineKeyboardBuilder()

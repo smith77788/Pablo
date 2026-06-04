@@ -21,11 +21,18 @@ _MISSED_THRESHOLD = timedelta(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    # Track scheduled IDs currently being processed to prevent duplicate firing
+    # within a single scheduler cycle (in case processing takes longer than sleep interval).
+    _in_flight: set[int] = set()
+
     while True:
         try:
             rows = await db.get_pending_scheduled(pool)
             now = datetime.now(timezone.utc)
             for row in rows:
+                # Skip if already being processed in this scheduler instance
+                if row["id"] in _in_flight:
+                    continue
                 execute_at = row["execute_at"]
                 # Нормализуем timezone если нужно
                 if execute_at is not None and execute_at.tzinfo is None:
@@ -51,6 +58,19 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         )
                     continue
 
+                # Atomically claim this scheduled broadcast to prevent duplicate firing.
+                # Uses status='processing' as a transient state; reverted to 'pending'
+                # on failure if no broadcast was created yet.
+                claimed = await pool.execute(
+                    "UPDATE scheduled_broadcasts SET status='processing' "
+                    "WHERE id=$1 AND status='pending'",
+                    row["id"],
+                )
+                if claimed == "UPDATE 0":
+                    # Already claimed by another scheduler instance or concurrent cycle
+                    continue
+                _in_flight.add(row["id"])
+
                 bc_id = None
                 created_bc = False
                 try:
@@ -73,6 +93,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                                 "Scheduler: failed to mark scheduled #%d as failed",
                                 row["id"],
                             )
+                        _in_flight.discard(row["id"])
                         continue
 
                     total = await db.get_audience_count(pool, row["bot_id"])
@@ -93,6 +114,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         row["message_text"],
                     )
                     await db.mark_scheduled_done(pool, row["id"])
+                    _in_flight.discard(row["id"])
                     log.info(
                         "Scheduled #%d fired → broadcast #%d (bot %d)",
                         row["id"],
@@ -114,6 +136,20 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                                 "Scheduler: failed to mark scheduled #%d as done",
                                 row["id"],
                             )
+                    else:
+                        # No broadcast created — revert claim so it can be retried next cycle
+                        try:
+                            await pool.execute(
+                                "UPDATE scheduled_broadcasts SET status='pending' "
+                                "WHERE id=$1 AND status='processing'",
+                                row["id"],
+                            )
+                        except Exception:
+                            log.exception(
+                                "Scheduler: failed to revert status for scheduled #%d",
+                                row["id"],
+                            )
+                    _in_flight.discard(row["id"])
                     log.exception("Scheduler failed to fire scheduled #%d", row["id"])
         except Exception:
             log.exception("Scheduler loop error")

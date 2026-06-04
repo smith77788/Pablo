@@ -359,7 +359,7 @@ async def compute_health(
 
         # Proxies: ratio active/total
         proxy_rows = await pool.fetch(
-            """SELECT p.is_active, COALESCE(p.last_check_ok, TRUE) AS ok
+            """SELECT p.is_active, COALESCE(p.is_alive, TRUE) AS ok
                FROM ecosystem_members m
                JOIN user_proxies p ON p.id=m.object_id
                WHERE m.ecosystem_id=$1 AND m.object_type='proxy'""",
@@ -1324,7 +1324,7 @@ async def clone_ecosystem(
     )
 
     # Copy all members
-    members = await get_members(pool, ecosystem_id, owner_id)
+    members = await get_members(pool, ecosystem_id)
     for m in members:
         try:
             await add_member(
@@ -1494,7 +1494,7 @@ async def sync_ecosystem_members(
 
             elif otype == "proxy":
                 row = await pool.fetchrow(
-                    "SELECT id, is_active, fail_count, host FROM proxies WHERE id=$1 AND owner_id=$2",
+                    "SELECT id, is_active, is_alive, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2",
                     oid,
                     owner_id,
                 )
@@ -1511,17 +1511,17 @@ async def sync_ecosystem_members(
                         {
                             "type": otype,
                             "id": oid,
-                            "label": row["host"],
+                            "label": row["proxy_url"] or f"proxy#{oid}",
                             "issue": "прокси неактивен",
                         }
                     )
-                elif (row["fail_count"] or 0) >= 5:
+                elif row["is_alive"] is False:
                     stale.append(
                         {
                             "type": otype,
                             "id": oid,
-                            "label": row["host"],
-                            "issue": f"fail_count={row['fail_count']}",
+                            "label": row["proxy_url"] or f"proxy#{oid}",
+                            "issue": "прокси недоступен (is_alive=False)",
                         }
                     )
                 else:

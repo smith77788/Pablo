@@ -431,7 +431,7 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
 
     # Composite sort: trust + memory_score − risk (все в диапазоне [0,1])
     def _sort_key(a: dict) -> float:
-        trust = (a.get("trust_score") or 0) / 100.0  # нормализуем 0-100 → 0-1
+        trust = float(a.get("trust_score") or 0)  # trust_score уже в диапазоне 0-1
         risk = (
             _fe.get_account_state(a["id"]).risk_score
             if fe_available and a.get("id")
@@ -687,66 +687,96 @@ def _reason_to_email_cat(reason: str, preset: str | None) -> dict:
             "severity": "CRITICAL",
             "ncmec": True,
             "email_subject": "URGENT: CSAM on Telegram",
+            "label": "🚨 CSAM (детский контент)",
+            "report_msg_key": "csam",
         },
         "childabuse": {
             "tg_reason": "childabuse",
             "severity": "CRITICAL",
             "ncmec": True,
             "email_subject": "URGENT: CSAM on Telegram",
+            "label": "🚨 CSAM (детский контент)",
+            "report_msg_key": "csam",
         },
         "drugs": {
             "tg_reason": "drugs",
             "severity": "HIGH",
             "ncmec": False,
             "email_subject": "Report: Illegal Drug Sales on Telegram",
+            "label": "💊 Наркотики",
+            "report_msg_key": "drugs",
         },
         "terrorism": {
             "tg_reason": "violence",
             "severity": "CRITICAL",
             "ncmec": False,
             "email_subject": "Report: Terrorism/Extremism on Telegram",
+            "label": "💣 Терроризм/экстремизм",
+            "report_msg_key": "terrorism",
         },
         "violence": {
             "tg_reason": "violence",
             "severity": "HIGH",
             "ncmec": False,
             "email_subject": "Report: Violent Content on Telegram",
+            "label": "⚠️ Насилие",
+            "report_msg_key": "terrorism",
         },
         "weapons": {
             "tg_reason": "violence",
             "severity": "HIGH",
             "ncmec": False,
             "email_subject": "Report: Illegal Weapons on Telegram",
+            "label": "🔫 Оружие",
+            "report_msg_key": "weapons",
         },
         "fraud": {
             "tg_reason": "spam",
             "severity": "MEDIUM",
             "ncmec": False,
             "email_subject": "Report: Fraud/Scam on Telegram",
+            "label": "💸 Мошенничество",
+            "report_msg_key": "fraud",
         },
         "spam": {
             "tg_reason": "spam",
             "severity": "MEDIUM",
             "ncmec": False,
             "email_subject": "Report: Spam/Scam on Telegram",
+            "label": "📢 Спам",
+            "report_msg_key": "fraud",
         },
         "prostitution": {
             "tg_reason": "pornography",
             "severity": "HIGH",
             "ncmec": False,
             "email_subject": "Report: Sex Trafficking on Telegram",
+            "label": "🔞 Проституция/секс-трафик",
+            "report_msg_key": "escort",
+        },
+        "escort": {
+            "tg_reason": "pornography",
+            "severity": "HIGH",
+            "ncmec": False,
+            "email_subject": "Report: Sex Trafficking on Telegram",
+            "label": "🔞 Проституция/секс-трафик",
+            "report_msg_key": "escort",
         },
         "pornography": {
             "tg_reason": "pornography",
             "severity": "HIGH",
             "ncmec": False,
             "email_subject": "Report: Illegal Pornography on Telegram",
+            "label": "🔞 Незаконная порнография",
+            "report_msg_key": "escort",
         },
         "darknet": {
             "tg_reason": "other",
             "severity": "HIGH",
             "ncmec": False,
             "email_subject": "Report: Darknet Services on Telegram",
+            "label": "🕸 Даркнет-услуги",
+            "report_msg_key": "darknet",
         },
     }
     return _map.get(
@@ -756,6 +786,8 @@ def _reason_to_email_cat(reason: str, preset: str | None) -> dict:
             "severity": "MEDIUM",
             "ncmec": False,
             "email_subject": f"Report: ToS Violation on Telegram ({key})",
+            "label": f"⚠️ {key}",
+            "report_msg_key": "other",
         },
     )
 
@@ -1716,7 +1748,7 @@ def format_strike_summary(results: list[StrikeResult]) -> str:
             f"  ├ 📧 Email: <b>{r.emails_sent}</b> отправлено"
             + (" · NCMEC: ✅" if r.email_escalation.get("ncmec") else "")
             + (
-                f" (<i>{r.email_escalation.get('skip_reason', 'не настроен')}</i>"
+                f" (<i>{r.email_escalation.get('skip_reason', 'не настроен')}</i>)"
                 if r.emails_sent == 0
                 and r.email_escalation.get("skip_reason") not in (None, "no pool/owner")
                 else ""

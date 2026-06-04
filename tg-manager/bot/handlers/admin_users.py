@@ -76,11 +76,13 @@ async def _users_list_text(
 
         banned_mark = "🚫 " if u["is_banned"] else ""
         username = u["username"] or f"#{u['user_id']}"
+        reg_dt = u.get("registered_at")
+        reg_str = reg_dt.strftime('%d.%m.%y') if reg_dt else "—"
         text += (
             f"{banned_mark}{emoji} <b>@{username}</b>\n"
             f"  ID: <code>{u['user_id']}</code>\n"
             f"  План: {u['current_plan'].upper()}{expires}\n"
-            f"  Зарег: {u['registered_at'].strftime('%d.%m.%y')}\n\n"
+            f"  Зарег: {reg_str}\n\n"
         )
 
     return text, total

@@ -178,9 +178,13 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
         return
 
     # Get last recorded deployment
-    last_deploy = await pool.fetchrow(
-        "SELECT build, commit_sha, deployed_at FROM deploy_log ORDER BY id DESC LIMIT 1"
-    )
+    try:
+        last_deploy = await pool.fetchrow(
+            "SELECT build, commit_sha, deployed_at FROM deploy_log ORDER BY id DESC LIMIT 1"
+        )
+    except Exception as e:
+        log.warning("deploy_notifier: deploy_log table not ready yet: %s", e)
+        return
 
     if last_deploy and last_deploy["build"] == BUILD_VERSION:
         log.info("deploy_notifier: build %s already notified, skipping", BUILD_VERSION)
@@ -305,14 +309,17 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
     if not admin_ids:
         log.warning("deploy_notifier: no ADMIN_IDS configured, skipping notification")
         # Still record the deployment
-        await pool.execute(
-            "INSERT INTO deploy_log(build, commit_sha, commit_msg, branch, notified)"
-            " VALUES($1,$2,$3,$4,true)",
-            BUILD_VERSION,
-            current_sha or None,
-            git_log.split("\n")[0] if git_log else None,
-            branch or None,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO deploy_log(build, commit_sha, commit_msg, branch, notified)"
+                " VALUES($1,$2,$3,$4,true)",
+                BUILD_VERSION,
+                current_sha or None,
+                git_log.split("\n")[0] if git_log else None,
+                branch or None,
+            )
+        except Exception as e:
+            log.warning("deploy_notifier: failed to record deployment: %s", e)
         return
 
     notified = 0
@@ -342,15 +349,18 @@ async def notify_deploy(pool: asyncpg.Pool, bot: Bot) -> None:
             log.warning("deploy_notifier: failed to send to admin %d: %s", admin_id, e)
 
     # Record deployment
-    await pool.execute(
-        "INSERT INTO deploy_log(build, commit_sha, commit_msg, branch, notified)"
-        " VALUES($1,$2,$3,$4,$5)",
-        BUILD_VERSION,
-        current_sha or None,
-        git_log.split("\n")[0] if git_log else None,
-        branch or None,
-        notified > 0,
-    )
+    try:
+        await pool.execute(
+            "INSERT INTO deploy_log(build, commit_sha, commit_msg, branch, notified)"
+            " VALUES($1,$2,$3,$4,$5)",
+            BUILD_VERSION,
+            current_sha or None,
+            git_log.split("\n")[0] if git_log else None,
+            branch or None,
+            notified > 0,
+        )
+    except Exception as e:
+        log.warning("deploy_notifier: failed to record deployment: %s", e)
 
     log.info(
         "deploy_notifier: notified %d/%d admins about build %s",

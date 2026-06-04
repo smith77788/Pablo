@@ -285,7 +285,14 @@ async def cb_eco_view(
 
     snap = await _eb.get_snapshot(pool, eco_id, callback.from_user.id)
     if not snap:
-        await callback.answer("Экосистема не найдена", show_alert=True)
+        kb_back = InlineKeyboardBuilder()
+        kb_back.button(text="◀️ Все экосистемы", callback_data=EcoCb(action="menu"))
+        try:
+            await callback.message.edit_text(
+                "❌ Экосистема не найдена.", parse_mode="HTML", reply_markup=kb_back.as_markup()
+            )
+        except Exception:
+            pass
         return
 
     text = _eb.format_snapshot(snap)
@@ -561,20 +568,19 @@ async def cb_eco_autodiscover(
     await callback.answer("⏳ Обнаруживаю объекты...")
 
     added = await _eb.auto_discover_members(pool, eco_id, callback.from_user.id)
+
+    # Refresh members view
+    eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
+    members = await _eb.get_members(pool, eco_id)
     if added:
         added_str = " | ".join(
             f"{icon} +{added[t]}"
             for t, (icon, _) in _MEMBER_TYPES.items()
             if t in added
         )
-        await callback.answer(f"✅ Добавлено: {added_str}", show_alert=True)
+        lines = [f"👥 <b>Участники: {html.escape(eco['name'])}</b>\n✅ Добавлено: {added_str}\n"]
     else:
-        await callback.answer("Новых объектов не найдено", show_alert=True)
-
-    # Refresh members view
-    eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
-    members = await _eb.get_members(pool, eco_id)
-    lines = [f"👥 <b>Участники: {html.escape(eco['name'])}</b>\n"]
+        lines = [f"👥 <b>Участники: {html.escape(eco['name'])}</b>\nℹ️ Новых объектов не найдено.\n"]
     by_type: dict[str, list] = {}
     for m in members:
         by_type.setdefault(m["object_type"], []).append(m)
@@ -740,7 +746,15 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     ecosystems = await _eb.list_ecosystems(pool, callback.from_user.id)
     if not ecosystems:
-        await callback.answer("Экосистем нет", show_alert=True)
+        kb_back = InlineKeyboardBuilder()
+        kb_back.button(text="◀️ Назад", callback_data=EcoCb(action="menu"))
+        try:
+            await callback.message.edit_text(
+                "📊 Экосистем нет. Создайте первую в разделе 🌐 Ecosystem Brain.",
+                reply_markup=kb_back.as_markup(),
+            )
+        except Exception:
+            pass
         return
 
     lines = ["🌐 <b>Сводка всех экосистем</b>\n"]
@@ -1661,7 +1675,14 @@ async def cb_eco_recs(
 
     eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
     if not eco:
-        await callback.answer("Экосистема не найдена", show_alert=True)
+        kb_back = InlineKeyboardBuilder()
+        kb_back.button(text="◀️ Все экосистемы", callback_data=EcoCb(action="menu"))
+        try:
+            await callback.message.edit_text(
+                "❌ Экосистема не найдена.", reply_markup=kb_back.as_markup()
+            )
+        except Exception:
+            pass
         return
 
     recs = await _eb.generate_recommendations(pool, eco_id, callback.from_user.id)
@@ -1669,8 +1690,8 @@ async def cb_eco_recs(
     lines = [f"💡 <b>Рекомендации: {html.escape(eco['name'])}</b>\n"]
     _priority_labels = {"high": "🔴 Критично", "medium": "🟡 Важно", "low": "🟢 Совет"}
     for r in recs:
-        _priority_labels.get(r["priority"], "")
-        lines.append(f"{r['icon']} <b>{html.escape(r['title'])}</b>")
+        priority_label = _priority_labels.get(r["priority"], "")
+        lines.append(f"{r['icon']} <b>{html.escape(r['title'])}</b>  <i>{priority_label}</i>")
         lines.append(f"  ↳ {html.escape(r['action'])}")
     if len(recs) > 1:
         high_count = sum(1 for r in recs if r["priority"] == "high")

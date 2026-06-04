@@ -1033,20 +1033,35 @@ async def cb_ai_confirm_action(
         )
         return
 
-    await callback.message.edit_text("⏳ <i>Выполняю...</i>", parse_mode="HTML")
-    result = await execute_action(action_data, pool, callback.from_user.id, http)
+    status_msg = await callback.message.edit_text("⏳ <i>Выполняю...</i>", parse_mode="HTML")
 
-    await state.update_data(pending_action_data=None)
+    async def _do_action() -> None:
+        try:
+            result = await execute_action(action_data, pool, callback.from_user.id, http)
+        except Exception as exc:
+            result = f"❌ Ошибка при выполнении: {escape(str(exc)[:200])}"
+        await state.update_data(pending_action_data=None)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
+        kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
+        kb.adjust(2)
+        try:
+            await status_msg.edit_text(
+                f"<b>Результат выполнения:</b>\n\n{result}",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            try:
+                await callback.message.answer(
+                    f"<b>Результат выполнения:</b>\n\n{result}",
+                    parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
+                )
+            except Exception:
+                pass
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
-    kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
-    kb.adjust(2)
-    await callback.message.edit_text(
-        f"<b>Результат выполнения:</b>\n\n{result}",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    asyncio.create_task(_do_action())
 
 
 @router.callback_query(AiCb.filter(F.action == "cancel_action"))

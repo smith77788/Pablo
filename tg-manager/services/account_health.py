@@ -413,7 +413,7 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
             else:
                 # Любой спорный статус — только обновляем время проверки, не меняем acc_status
                 await pool.execute(
-                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$2",
+                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1",
                     acc["id"],
                 )
 

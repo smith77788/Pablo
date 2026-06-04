@@ -301,6 +301,10 @@ _FATAL_ERRORS = frozenset(
     }
 )
 
+# In-memory guards: предотвращают одновременный запуск прогрева одного и того же плана/сессии
+_active_plan_ids: set[int] = set()
+_active_session_ids: set[int] = set()
+
 
 async def _perform_read_channel(client, channel_ref: str) -> bool:
     """Читаем канал: получаем последние 10-15 сообщений, имитируем скролл."""
@@ -733,13 +737,43 @@ async def run_daily_warmup(
     Возвращает {'actions_done', 'actions_ok', 'actions_fail', 'completed',
                 'warmup_level'}.
     """
-    from services import account_manager
-
     account_id = plan["account_id"]
     owner_id = plan["owner_id"]
     current_day = plan["current_day"]
     daily_actions = plan["daily_actions"]
     plan_id = plan["id"]
+
+    # Защита от параллельного запуска одного и того же плана
+    if plan_id in _active_plan_ids:
+        log.info("warmup: plan %d already running, skipping concurrent launch", plan_id)
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+            "warmup_level": "light",
+        }
+    _active_plan_ids.add(plan_id)
+    try:
+        return await _run_daily_warmup_impl(
+            pool, plan, account_id, owner_id, current_day, daily_actions, plan_id, update_callback
+        )
+    finally:
+        _active_plan_ids.discard(plan_id)
+
+
+async def _run_daily_warmup_impl(
+    pool: asyncpg.Pool,
+    plan: dict,
+    account_id: int,
+    owner_id: int,
+    current_day: int,
+    daily_actions: int,
+    plan_id: int,
+    update_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> dict:
+    """Внутренняя реализация run_daily_warmup — вызывается только через guard."""
+    from services import account_manager
 
     # Получаем сессию аккаунта
     acc_row = await pool.fetchrow(
@@ -1083,13 +1117,37 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
 
     Возвращает {'actions_done', 'actions_ok', 'actions_fail', 'completed'}.
     """
+    session_id = session["id"]
+
+    # Защита от параллельного запуска одной и той же сессии
+    if session_id in _active_session_ids:
+        log.info(
+            "warmup_session: session %d already running, skipping concurrent launch",
+            session_id,
+        )
+        return {
+            "actions_done": 0,
+            "actions_ok": 0,
+            "actions_fail": 0,
+            "completed": False,
+        }
+    _active_session_ids.add(session_id)
+    try:
+        return await _run_warmup_session_impl(pool, session, session_id)
+    finally:
+        _active_session_ids.discard(session_id)
+
+
+async def _run_warmup_session_impl(
+    pool: asyncpg.Pool, session: dict, session_id: int
+) -> dict:
+    """Внутренняя реализация run_warmup_session — вызывается только через guard."""
     from services import account_manager
 
-    session_id = session["id"]
     owner_id = session["owner_id"]
     account_ids: list = session.get("account_ids") or []
     target_refs: list = session.get("target_refs") or []
-    session.get("plan_type", "standard")
+    plan_type: str = session.get("plan_type", "standard")  # noqa: F841 — kept for log context
     current_day: int = session.get("current_day", 0)
     daily_actions: int = session.get("daily_actions", 10)
     target_days: int = session.get("target_days", 14)
@@ -1185,7 +1243,7 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
                     try:
                         from services import infra_memory
 
-                        await infra_memory.record_account_op(
+                        infra_memory.record_account_op(
                             acc_id, "warmup_session", success, duration_s=dur_s
                         )
                     except Exception:
@@ -1226,7 +1284,16 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
 
         await asyncio.sleep(random.uniform(15, 45))
 
-    new_day = current_day + 1
+    # Advance day only if at least one action succeeded — mirror run_daily_warmup logic
+    if total_ok > 0:
+        new_day = current_day + 1
+    else:
+        log.warning(
+            "warmup_session %d: all actions failed, retrying same day %d on next cycle",
+            session_id,
+            current_day,
+        )
+        new_day = current_day
     completed = new_day >= target_days
     new_status = "completed" if completed else "active"
 
