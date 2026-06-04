@@ -748,6 +748,7 @@ WORLD_CAPITALS: list[dict] = [
     {
         "city": "Moscow",
         "city_slug": "moscow",
+        "city_native": "Москва",
         "country": "Russia",
         "country_code": "ru",
         "language": "ru",
@@ -959,6 +960,7 @@ TIER1_GLOBAL: list[dict] = [
     {
         "city": "Moscow",
         "city_slug": "moscow",
+        "city_native": "Москва",
         "country": "Russia",
         "country_code": "ru",
         "language": "ru",
