@@ -151,7 +151,6 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
         kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
         kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
-        kb.button(text="🏠 Главное меню", callback_data="adm:main")
         kb.adjust(1)
     elif section == "system":
         free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
