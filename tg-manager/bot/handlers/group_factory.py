@@ -694,62 +694,86 @@ async def cb_group_import_acc(
     )
 
 
-@router.callback_query(GroupFCb.filter(F.action == "import_all"))
-async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Импортировать группы со всех активных аккаунтов."""
-    from bot.utils.op_helpers import _get_active_accounts, _acc_label
-
-    accounts = await _get_active_accounts(pool, callback.from_user.id)
-    if not accounts:
-        await callback.answer("Нет активных аккаунтов.", show_alert=True)
-        return
-    await callback.answer("⏳ Загружаю группы со всех аккаунтов...")
-
+async def _group_import_all_bg(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    progress_msg,
+    accounts: list,
+) -> None:
     from services import account_manager
     from database.db import upsert_managed_channels
-    import asyncio
 
     total = 0
     errors = []
-    progress_msg = await callback.message.edit_text(
-        f"⏳ Обработка 0/{len(accounts)} аккаунтов...", parse_mode="HTML"
-    )
-    for idx, acc in enumerate(accounts):
-        try:
-            dialogs = (
-                await account_manager.get_dialogs(
-                    acc["session_str"], limit=200, _acc=acc
+    n = len(accounts)
+    try:
+        for idx, acc in enumerate(accounts):
+            try:
+                dialogs = (
+                    await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc)
+                    or []
                 )
-                or []
-            )
-            groups = [
-                d
-                for d in dialogs
-                if d.get("type")
-                in ("megagroup", "supergroup", "group", "chat", "gigagroup")
-            ]
-            if groups:
-                await upsert_managed_channels(
-                    pool, callback.from_user.id, acc["id"], groups
-                )
-                total += len(groups)
-            await progress_msg.edit_text(
-                f"⏳ Обработка {idx + 1}/{len(accounts)} аккаунтов...\nНайдено групп: {total}",
-                parse_mode="HTML",
-            )
-            if idx < len(accounts) - 1:
-                await asyncio.sleep(2)
-        except Exception as e:
-            log.warning("group import_all acc=%s error: %s", acc.get("id"), e)
-            errors.append(f"• {_acc_label(acc)}: {str(e)[:50]}")
+                groups = [
+                    d for d in dialogs
+                    if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+                ]
+                if groups:
+                    await upsert_managed_channels(pool, owner_id, acc["id"], groups)
+                    total += len(groups)
+                try:
+                    await progress_msg.edit_text(
+                        f"⏳ Обработка {idx + 1}/{n} аккаунтов...\nНайдено групп: {total}",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+                if idx < n - 1:
+                    await asyncio.sleep(2)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("_group_import_all_bg acc=%s error: %s", acc.get("id"), e)
+                errors.append(f"• {_acc_label(acc)}: {str(e)[:50]}")
+    except asyncio.CancelledError:
+        log.info("_group_import_all_bg: отменено")
+        raise
+    except Exception:
+        log_exc_swallow(log, "_group_import_all_bg: неожиданная ошибка")
 
     text = f"✅ <b>Импорт завершён</b>\n\nПодключено групп: <b>{total}</b>"
     if errors:
         text += f"\n\n⚠️ Ошибки ({len(errors)}):\n" + "\n".join(errors[:5])
-
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ В меню групп", callback_data=GroupFCb(action="menu"))
-    await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    try:
+        await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        log_exc_swallow(log, "_group_import_all_bg: сбой финального отчёта")
+
+
+@router.callback_query(GroupFCb.filter(F.action == "import_all"))
+async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Импортировать группы со всех активных аккаунтов."""
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        await callback.answer("Нет активных аккаунтов.", show_alert=True)
+        return
+    await callback.answer()
+
+    progress_msg = await callback.message.edit_text(
+        f"⏳ <b>Импорт групп запущен</b>\n\nАккаунтов: <b>{len(accounts)}</b>\n\n"
+        "<i>Операция выполняется в фоне — вы можете продолжать работу.</i>",
+        parse_mode="HTML",
+    )
+    task = asyncio.create_task(
+        _group_import_all_bg(pool, callback.from_user.id, progress_msg, list(accounts))
+    )
+    _treg.register(
+        callback.from_user.id,
+        "group_import_all",
+        f"Импорт групп с {len(accounts)} аккаунтов",
+        task,
+    )
 
 
 # ── Announce — Step 1: choose account ─────────────────────────────────────
