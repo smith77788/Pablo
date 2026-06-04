@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import html
 import json
 import logging
@@ -26,8 +25,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AssetTplCb, QuickPostCb
 from bot.states import QuickPostFSM
-from bot.handlers.mass_publish import _mpub_bg
-from services import task_registry as _treg
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -690,46 +687,27 @@ async def cb_qp_publish(
         )
         return
 
-    pairs = []
-    for row in rows:
-        acc_dict = {
-            "id": row["acc_id"],
-            "session_str": row["session_str"],
-            "first_name": row["first_name"],
-            "phone": row["phone"],
-            "device_model": row["device_model"],
-            "system_version": row["system_version"],
-            "app_version": row["app_version"],
-            "proxy_url": row["proxy_url"],
-        }
-        chan_dict = {
-            "id": row["id"],
-            "title": row["title"],
-            "access_hash": row["access_hash"],
-        }
-        pairs.append((acc_dict, chan_dict))
+    total = len(rows)
 
-    total = len(pairs)
-    progress_msg = await callback.message.edit_text(
-        f"📤 <b>Публикация запущена!</b>\n\n"
-        f"Каналов: <b>{total}</b>\n"
-        f"<i>Прогресс обновляется автоматически.\nДля отмены используйте /tasks</i>",
-        parse_mode="HTML",
-    )
+    from services import operation_bus
 
-    task = asyncio.create_task(
-        _mpub_bg(
-            bot=callback.bot,
-            user_id=callback.from_user.id,
-            progress_msg=progress_msg,
-            pairs=pairs,
-            post_text=post_text,
-            delay_s=delay_s,
-        )
-    )
-    _treg.register(
+    op_id = await operation_bus.submit(
+        pool,
         callback.from_user.id,
-        "publish",
-        f"Быстрый пост → {_plural_channels(total)}",
-        task,
+        "mass_publish",
+        {
+            "text": post_text,
+            "delay_seconds": delay_s,
+            "channel_ids": selected_chan_ids,
+        },
+        total_items=total,
+    )
+
+    await callback.message.edit_text(
+        f"📤 <b>Публикация поставлена в очередь</b>\n\n"
+        f"Каналов: <b>{total}</b>\n"
+        f"ID операции: <code>#{op_id}</code>\n\n"
+        f"Вы получите уведомление по завершении.\n"
+        f"<i>Управление очередью: /ops → 📋 Очередь</i>",
+        parse_mode="HTML",
     )

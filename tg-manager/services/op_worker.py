@@ -636,6 +636,71 @@ async def _exec_mass_publish(
     # Accept both "delay_seconds" (canonical) and legacy "delay" key from OpBuilder
     delay = params.get("delay_seconds") or params.get("delay") or 30
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
+
+    # ── Режим точечной публикации: конкретные channel_ids (quick_post) ─────────
+    if channel_ids:
+        rows = await pool.fetch(
+            "SELECT DISTINCT ON (mc.channel_id) "
+            "mc.channel_id AS ch_id, mc.title, mc.access_hash, "
+            "a.id AS acc_id, a.session_str, a.device_model, a.system_version, a.app_version, "
+            "p.proxy_url "
+            "FROM managed_channels mc "
+            "JOIN tg_accounts a ON a.id = mc.acc_id AND a.owner_id = $1 AND a.is_active = TRUE "
+            "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+            "WHERE mc.owner_id = $1 AND mc.channel_id = ANY($2::bigint[]) "
+            "ORDER BY mc.channel_id, a.id",
+            owner_id,
+            channel_ids,
+        )
+        if not rows:
+            return {"status": "failed", "sent": 0, "failed": 0,
+                    "summary": "Каналы не найдены или аккаунты неактивны"}
+
+        total_sent = 0
+        total_failed = 0
+        for step, row in enumerate(rows, start=1):
+            if await _is_cancelled(pool, op_id):
+                return {"status": "cancelled", "sent": total_sent, "failed": total_failed,
+                        "summary": f"Отменено. Отправлено: {total_sent}, ошибок: {total_failed}"}
+            acc_dict = {
+                "id": row["acc_id"],
+                "session_str": row["session_str"],
+                "device_model": row["device_model"],
+                "system_version": row["system_version"],
+                "app_version": row["app_version"],
+                "proxy_url": row["proxy_url"],
+            }
+            ch = {"id": row["ch_id"], "title": row["title"], "access_hash": row["access_hash"]}
+            try:
+                result = await account_manager.post_to_channel(
+                    row["session_str"], ch["id"], text, _acc=acc_dict
+                )
+                if isinstance(result, dict) and (result.get("error") or result.get("banned")):
+                    raise Exception(result.get("error") or "banned")
+                total_sent += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok','sent')",
+                    op_id, step, str(ch["id"]),
+                )
+                await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            except Exception as e:
+                total_failed += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, step, str(ch["id"]), str(e)[:200],
+                )
+                await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            if step < len(rows):
+                await asyncio.sleep(delay)
+
+        return {
+            "status": "done",
+            "sent": total_sent,
+            "failed": total_failed,
+            "summary": f"Готово. Отправлено: {total_sent}, ошибок: {total_failed}",
+        }
+    # ── Режим массовой публикации: все каналы выбранных аккаунтов ─────────────
 
     accounts = await resource_selector.select_all_active(
         pool,
