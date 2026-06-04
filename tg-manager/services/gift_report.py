@@ -119,7 +119,7 @@ class GiftTransferReportService:
             next_actions
         )
         
-        return report["id"]
+        return report["id"] if report else 0
     
     @staticmethod
     async def get_report(pool, report_id: int) -> dict | None:
