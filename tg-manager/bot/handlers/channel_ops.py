@@ -1083,6 +1083,23 @@ async def _bulk_create_bg(
                 results_ok.append(
                     f"✅ {html.escape(title)}: id={result.get('channel_id', '?')}"
                 )
+                # Сохранить созданный канал в managed_channels
+                try:
+                    await pool.execute(
+                        """INSERT INTO managed_channels
+                               (owner_id, acc_id, channel_id, title, username, access_hash, type)
+                           VALUES($1,$2,$3,$4,$5,$6,$7)
+                           ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                        user_id,
+                        candidate["id"],
+                        result["channel_id"],
+                        title,
+                        result.get("username") or None,
+                        result.get("access_hash", 0) or 0,
+                        result.get("type", "channel"),
+                    )
+                except Exception:
+                    log_exc_swallow(log, "Сбой записи канала в managed_channels")
             done_ops += 1
             global_idx += 1
             try:
