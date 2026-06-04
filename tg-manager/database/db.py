@@ -11,7 +11,13 @@ log = logging.getLogger(__name__)
 
 
 async def create_pool() -> asyncpg.Pool:
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=20)
+    pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=8,
+        max_size=32,
+        max_inactive_connection_lifetime=300,
+        command_timeout=30,
+    )
     async with pool.acquire() as conn:
         # Run all schema migration files in order — search both root and database/ subdir
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

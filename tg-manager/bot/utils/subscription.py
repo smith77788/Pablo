@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import os
+import time
 import asyncpg
 
 from services.logger import log_exc_swallow
@@ -8,6 +9,10 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 _FREE_MODE: bool = False
+
+# ── Plan cache: TTL-based, invalidated on subscription changes ────────────────
+_plan_cache: dict[int, tuple[str, float]] = {}
+_PLAN_CACHE_TTL = 60.0  # seconds
 
 
 def get_free_mode() -> bool:
@@ -17,6 +22,11 @@ def get_free_mode() -> bool:
 def set_free_mode(enabled: bool) -> None:
     global _FREE_MODE
     _FREE_MODE = enabled
+
+
+def invalidate_plan_cache(user_id: int) -> None:
+    """Call after subscription purchase/change to force fresh DB lookup."""
+    _plan_cache.pop(user_id, None)
 
 
 PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
@@ -54,12 +64,22 @@ def is_platform_admin(user_id: int) -> bool:
 async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
     if is_platform_admin(user_id):
         return "enterprise"
+
+    now = time.monotonic()
+    cached = _plan_cache.get(user_id)
+    if cached is not None:
+        plan, ts = cached
+        if now - ts < _PLAN_CACHE_TTL:
+            return plan
+
     row = await pool.fetchrow(
         "SELECT plan FROM subscriptions "
         "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
         user_id,
     )
-    return row["plan"] if row else "free"
+    plan = row["plan"] if row else "free"
+    _plan_cache[user_id] = (plan, now)
+    return plan
 
 
 async def require_plan(pool: asyncpg.Pool, user_id: int, min_plan: str) -> bool:

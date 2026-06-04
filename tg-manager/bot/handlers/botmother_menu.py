@@ -1,6 +1,7 @@
 """BotMother — главное Telegram-native OS меню (9 секций)."""
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -268,45 +269,52 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
     await callback.answer()
     user_id = callback.from_user.id
 
-    # Append live platform stats for today
+    # Append live platform stats for today (all queries in parallel)
     status_line = ""
     try:
-        row = await pool.fetchrow(
-            """SELECT
-                COUNT(DISTINCT oq.id) FILTER (
-                    WHERE oq.created_at >= CURRENT_DATE
-                ) AS today_ops,
-                COUNT(DISTINCT ta.id) FILTER (
-                    WHERE ta.is_active = TRUE
-                ) AS active_accs,
-                COUNT(DISTINCT ta.id) FILTER (
-                    WHERE ta.cooldown_until > now()
-                ) AS in_cooldown,
-                COUNT(DISTINCT re.id) FILTER (
-                    WHERE re.created_at > now() - INTERVAL '24 hours'
-                ) AS new_alerts
-            FROM (SELECT 1) x
-            LEFT JOIN operation_queue oq ON oq.owner_id=$1
-            LEFT JOIN tg_accounts ta ON ta.owner_id=$1
-            LEFT JOIN restriction_events re ON re.owner_id=$1""",
-            user_id,
+        from services import infra_pressure as _ip
+
+        async def _stats_query() -> object:
+            return await pool.fetchrow(
+                """SELECT
+                    COUNT(DISTINCT oq.id) FILTER (
+                        WHERE oq.created_at >= CURRENT_DATE
+                    ) AS today_ops,
+                    COUNT(DISTINCT ta.id) FILTER (
+                        WHERE ta.is_active = TRUE
+                    ) AS active_accs,
+                    COUNT(DISTINCT ta.id) FILTER (
+                        WHERE ta.cooldown_until > now()
+                    ) AS in_cooldown,
+                    COUNT(DISTINCT re.id) FILTER (
+                        WHERE re.created_at > now() - INTERVAL '24 hours'
+                    ) AS new_alerts
+                FROM (SELECT 1) x
+                LEFT JOIN operation_queue oq ON oq.owner_id=$1
+                LEFT JOIN tg_accounts ta ON ta.owner_id=$1
+                LEFT JOIN restriction_events re ON re.owner_id=$1""",
+                user_id,
+            )
+
+        row, pdata = await asyncio.gather(
+            _stats_query(),
+            _ip.compute_pressure(pool, user_id),
+            return_exceptions=True,
         )
+        if isinstance(row, BaseException):
+            row = None
+        if isinstance(pdata, BaseException):
+            pdata = {}
+
         if row:
             today_ops   = row["today_ops"] or 0
             active_accs = row["active_accs"] or 0
             in_cooldown = row["in_cooldown"] or 0
             new_alerts  = row["new_alerts"] or 0
 
-            # Infrastructure pressure
-            try:
-                from services import infra_pressure
-                pdata = await infra_pressure.compute_pressure(pool, user_id)
-                p_score = pdata.get("score", 0)
-                p_emoji = pdata.get("level_emoji", "🟢")
-                pressure_str = f" · Давление: {p_emoji} {p_score}"
-            except Exception:
-                pressure_str = ""
-
+            p_score = pdata.get("score", 0) if isinstance(pdata, dict) else 0
+            p_emoji = pdata.get("level_emoji", "🟢") if isinstance(pdata, dict) else "🟢"
+            pressure_str = f" · Давление: {p_emoji} {p_score}" if p_score else ""
             alert_str = f" · 🔔 {new_alerts} алертов" if new_alerts else ""
             cooldown_str = f" · ⏳ {in_cooldown} на паузе" if in_cooldown else ""
             status_line = (
@@ -325,7 +333,6 @@ async def cb_main(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Po
 @router.callback_query(BmCb.filter(F.action == "assets"))
 async def cb_assets(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    import asyncio
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0))
     await _edit(
         callback,
@@ -345,7 +352,6 @@ async def cb_assets(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.
 @router.callback_query(BmCb.filter(F.action == "infrastructure"))
 async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    import asyncio
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "assets", 0))
     await _edit(
         callback,
@@ -365,7 +371,6 @@ async def cb_infrastructure(callback: CallbackQuery, callback_data: BmCb, pool: 
 @router.callback_query(BmCb.filter(F.action == "analytics"))
 async def cb_analytics(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    import asyncio
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "analytics", 0))
     await _edit(
         callback,
@@ -407,7 +412,6 @@ async def cb_visibility(callback: CallbackQuery, callback_data: BmCb, pool: asyn
 @router.callback_query(BmCb.filter(F.action == "operations"))
 async def cb_operations(callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    import asyncio
     asyncio.create_task(_fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0))
 
     # Unified infrastructure state via orchestrator
