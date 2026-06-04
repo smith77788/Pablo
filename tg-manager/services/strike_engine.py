@@ -795,7 +795,10 @@ async def _run_email_escalation(
     db_emails: list[dict] = []
     try:
         rows = await pool.fetch(
-            """SELECT id, email, smtp_host, smtp_port, smtp_pass
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type,
+                      oauth_provider, oauth_refresh_token, oauth_access_token,
+                      oauth_expires_at
                FROM strike_email_accounts
                WHERE owner_id=$1 AND is_active=TRUE
                ORDER BY last_used_at ASC NULLS FIRST""",
@@ -850,15 +853,17 @@ async def _run_email_escalation(
             subject = (
                 f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
             )
+            smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
             ok, err = await _send_email(
                 ea["smtp_host"],
                 ea["smtp_port"],
                 ea["email"],
-                ea["smtp_pass"],
+                smtp_secret,
                 ea["email"],
                 tgt["addr"],
                 subject,
                 body,
+                auth_type=auth_type,
             )
             result["emails"].append(
                 {
@@ -912,15 +917,17 @@ async def _run_email_escalation(
         ncmec_addr = "cybertipline@ncmec.org"
         body_ncmec = _build_ncmec_email(target_clean, report_time)
         for ea in db_emails:
+            smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
             ok_n, err_n = await _send_email(
                 ea["smtp_host"],
                 ea["smtp_port"],
                 ea["email"],
-                ea["smtp_pass"],
+                smtp_secret,
                 ea["email"],
                 ncmec_addr,
                 f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
                 body_ncmec,
+                auth_type=auth_type,
             )
             result["emails"].append(
                 {
@@ -937,6 +944,16 @@ async def _run_email_escalation(
                 break
 
     return result
+
+
+async def _email_secret_for_account(pool, email_account: dict) -> tuple[str, str]:
+    auth_type = email_account.get("auth_type") or "password"
+    if auth_type != "oauth":
+        return str(email_account.get("smtp_pass") or ""), "password"
+
+    from services import email_oauth as _email_oauth
+
+    return await _email_oauth.get_access_token(pool, email_account), "oauth"
 
 
 async def staggered_strike(
@@ -1811,6 +1828,7 @@ async def strike_network_nodes(
 # MINI-STRIKE — одиночный удар с одного аккаунта + email + внешние организации
 # ══════════════════════════════════════════════════════════════════════════════
 
+import base64
 import smtplib
 import ssl as _ssl
 from email.mime.multipart import MIMEMultipart
@@ -2041,15 +2059,33 @@ def _build_ncmec_email(target: str, report_time: str) -> str:
     )
 
 
+def _smtp_auth(
+    srv: smtplib.SMTP | smtplib.SMTP_SSL,
+    smtp_user: str,
+    smtp_secret: str,
+    auth_type: str,
+) -> None:
+    if auth_type == "oauth":
+        token = base64.b64encode(
+            f"user={smtp_user}\x01auth=Bearer {smtp_secret}\x01\x01".encode()
+        ).decode()
+        code, response = srv.docmd("AUTH", "XOAUTH2 " + token)
+        if code != 235:
+            raise smtplib.SMTPAuthenticationError(code, response)
+        return
+    srv.login(smtp_user, smtp_secret)
+
+
 def _smtp_send_sync(
     smtp_host: str,
     smtp_port: int,
     smtp_user: str,
-    smtp_pass: str,
+    smtp_secret: str,
     from_addr: str,
     to_addr: str,
     subject: str,
     body: str,
+    auth_type: str = "password",
 ) -> None:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -2059,13 +2095,14 @@ def _smtp_send_sync(
     ctx = _ssl.create_default_context()
     if smtp_port == 465:
         with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=20) as srv:
-            srv.login(smtp_user, smtp_pass)
+            _smtp_auth(srv, smtp_user, smtp_secret, auth_type)
             srv.sendmail(from_addr, to_addr, msg.as_string())
     else:
         with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as srv:
             srv.ehlo()
             srv.starttls(context=ctx)
-            srv.login(smtp_user, smtp_pass)
+            srv.ehlo()
+            _smtp_auth(srv, smtp_user, smtp_secret, auth_type)
             srv.sendmail(from_addr, to_addr, msg.as_string())
 
 
@@ -2073,11 +2110,12 @@ async def _send_email(
     smtp_host: str,
     smtp_port: int,
     smtp_user: str,
-    smtp_pass: str,
+    smtp_secret: str,
     from_addr: str,
     to_addr: str,
     subject: str,
     body: str,
+    auth_type: str = "password",
 ) -> tuple[bool, str]:
     """Async email via thread executor. Returns (ok, error)."""
     try:
@@ -2086,11 +2124,12 @@ async def _send_email(
             smtp_host,
             smtp_port,
             smtp_user,
-            smtp_pass,
+            smtp_secret,
             from_addr,
             to_addr,
             subject,
             body,
+            auth_type,
         )
         log.info("mini_strike: email sent → %s", to_addr)
         return True, ""
@@ -2350,7 +2389,10 @@ async def execute_mini_strike(
     db_emails: list[dict] = []
     try:
         rows = await pool.fetch(
-            """SELECT id, email, smtp_host, smtp_port, smtp_pass
+            """SELECT id, email, smtp_host, smtp_port, smtp_pass,
+                      COALESCE(auth_type, 'password') AS auth_type,
+                      oauth_provider, oauth_refresh_token, oauth_access_token,
+                      oauth_expires_at
                FROM strike_email_accounts
                WHERE owner_id=$1 AND is_active=TRUE
                ORDER BY last_used_at ASC NULLS FIRST""",
@@ -2379,15 +2421,17 @@ async def execute_mini_strike(
                 subject = (
                     f"{cat['email_subject']} — @{target_clean} [{tgt['label'].upper()}]"
                 )
+                smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
                 ok, err = await _send_email(
                     ea["smtp_host"],
                     ea["smtp_port"],
                     ea["email"],
-                    ea["smtp_pass"],
+                    smtp_secret,
                     ea["email"],
                     tgt["addr"],
                     subject,
                     body,
+                    auth_type=auth_type,
                 )
                 result["emails"].append(
                     {
@@ -2448,15 +2492,17 @@ async def execute_mini_strike(
             ncmec_addr = "cybertipline@ncmec.org"
             body_ncmec = _build_ncmec_email(target_clean, report_time)
             for ea in db_emails:
+                smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
                 ok_n, err_n = await _send_email(
                     ea["smtp_host"],
                     ea["smtp_port"],
                     ea["email"],
-                    ea["smtp_pass"],
+                    smtp_secret,
                     ea["email"],
                     ncmec_addr,
                     f"URGENT CyberTip: CSAM on Telegram — t.me/{target_clean}",
                     body_ncmec,
+                    auth_type=auth_type,
                 )
                 result["emails"].append(
                     {

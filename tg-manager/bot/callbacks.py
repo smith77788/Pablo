@@ -1,4 +1,4 @@
-from typing import Optional
+﻿from typing import Optional
 from aiogram.filters.callback_data import CallbackData
 
 
@@ -166,6 +166,7 @@ class AccCb(CallbackData, prefix="acc"):
     action: str
     acc_id: int = 0
     chat_id: int = 0
+    page: int = 0
 
 
 class RankCb(CallbackData, prefix="rank"):
@@ -388,7 +389,7 @@ class EcoCb(CallbackData, prefix="eco"):
 
 
 class EcoPickCb(CallbackData, prefix="ecopick"):
-    """Выбор экосистемы для добавления объекта (из фабрик)."""
+    """����� ���������� ��� ���������� ������� (�� ������)."""
     action: str        # "list" | "add"
     object_type: str   # "channel" | "group" | "bot" | "account"
     object_id: int = 0
@@ -396,7 +397,7 @@ class EcoPickCb(CallbackData, prefix="ecopick"):
 
 
 class ResourceActCb(CallbackData, prefix="ract"):
-    """Resource Activity Engine — активность в собственных ресурсах."""
+    """Resource Activity Engine � ���������� � ����������� ��������."""
     action: str
     session_id: int = 0
     account_id: int = 0
@@ -404,7 +405,7 @@ class ResourceActCb(CallbackData, prefix="ract"):
 
 
 class IntentCb(CallbackData, prefix="intent"):
-    """Навигатор целей — управление намерениями (Эпоха IV)."""
+    """��������� ����� � ���������� ����������� (����� IV)."""
     action: str         # menu | new | preset | plan | strategy | confirm | manual | history | detail | cancel
     intent_id: int = 0
     value: Optional[str] = None  # intent_type for preset, strategy name for strategy
@@ -415,5 +416,3 @@ class InfraHCCb(CallbackData, prefix="ihc"):
     action: str         # menu | anomalies | recoveries | run_recovery | health_trend | copilot | resolve_anomaly | back
     item_id: int = 0   # anomaly_id, recovery_id, alert_id
     page: int = 0
-
-

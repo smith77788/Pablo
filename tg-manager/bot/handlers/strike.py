@@ -20,6 +20,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import StrikeCb, ChanCb, BmCb
 from bot.states import MiniStrikeFSM, StrikeEmailFSM
+from bot.utils.subscription import require_feature
+from services import email_oauth
 from services.logger import log_exc_swallow
 
 # SMTP авто-определение по домену почты
@@ -1023,7 +1025,8 @@ async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Показать список email аккаунтов с кнопками управления."""
     try:
         rows = await pool.fetch(
-            """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at
+            """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at,
+                      COALESCE(auth_type, 'password') AS auth_type, oauth_provider
                FROM strike_email_accounts
                WHERE owner_id=$1
                ORDER BY added_at""",
@@ -1067,6 +1070,16 @@ async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text="➕ Добавить email",
             callback_data=StrikeCb(action="email_add").pack(),
         )
+    )
+    kb.row(
+        InlineKeyboardButton(
+            text="🔐 Gmail OAuth",
+            callback_data=StrikeCb(action="email_oauth_google").pack(),
+        ),
+        InlineKeyboardButton(
+            text="🔐 Outlook OAuth",
+            callback_data=StrikeCb(action="email_oauth_microsoft").pack(),
+        ),
     )
     kb.row(
         InlineKeyboardButton(
@@ -1140,6 +1153,45 @@ async def cb_email_del(
         await callback.answer("Ошибка.", show_alert=True)
         return
     await _show_email_list(callback, pool)
+
+
+@router.callback_query(StrikeCb.filter(F.action == "email_oauth_google"))
+@router.callback_query(StrikeCb.filter(F.action == "email_oauth_microsoft"))
+async def cb_email_oauth(
+    callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
+) -> None:
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    if not await require_feature(pool, callback.from_user.id, "email_oauth"):
+        await callback.answer(
+            "OAuth почты доступен в MAX / Enterprise.", show_alert=True
+        )
+        return
+
+    provider_name = (
+        "google" if callback_data.action == "email_oauth_google" else "microsoft"
+    )
+    provider = email_oauth.PROVIDERS[provider_name]
+    if not email_oauth.is_provider_configured(provider_name):
+        await callback.answer(
+            f"{provider.label} OAuth не настроен на сервере.", show_alert=True
+        )
+        return
+
+    url = email_oauth.build_auth_url(callback.from_user.id, provider_name)
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"🔐 Подключить {provider.label}", url=url)
+    kb.button(text="◀️ Email аккаунты", callback_data=StrikeCb(action="emails"))
+    kb.adjust(1)
+    await callback.answer()
+    await callback.message.edit_text(
+        f"🔐 <b>{provider.label} OAuth</b>\n\n"
+        "Нажмите кнопку ниже, войдите в почту и разрешите доступ для отправки SMTP. "
+        "После успешной авторизации аккаунт появится в списке email.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(StrikeCb.filter(F.action == "email_add"))
@@ -1269,11 +1321,17 @@ async def msg_password_input(
         # Сохранить в БД
         await pool.execute(
             """INSERT INTO strike_email_accounts
-               (owner_id, email, smtp_host, smtp_port, smtp_pass)
-               VALUES ($1, $2, $3, $4, $5)
+               (owner_id, email, smtp_host, smtp_port, smtp_pass, auth_type)
+               VALUES ($1, $2, $3, $4, $5, 'password')
                ON CONFLICT (owner_id, email)
                DO UPDATE SET smtp_host=$3, smtp_port=$4, smtp_pass=$5,
-                             is_active=TRUE, fail_count=0""",
+                             auth_type='password',
+                             oauth_provider=NULL,
+                             oauth_refresh_token=NULL,
+                             oauth_access_token=NULL,
+                             oauth_expires_at=NULL,
+                             oauth_scopes='{}'::text[],
+                              is_active=TRUE, fail_count=0""",
             message.from_user.id,
             email,
             smtp_host,

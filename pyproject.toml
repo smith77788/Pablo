@@ -33,3 +33,7 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[tool.ty.environment]
+python-version = "3.12"
+extra-paths = ["tg-manager"]

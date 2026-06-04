@@ -39,6 +39,38 @@ PLAN_FEATURES = {
     "enterprise": "∞ ботов+аккаунтов, AI-ассистент, DM-кампании, Global Presence, сеть ботов, Swarm",
 }
 
+PLAN_ALIASES: dict[str, str] = {"max": "enterprise", "maximum": "enterprise"}
+FEATURE_PLAN: dict[str, str] = {
+    "basic_bots": "free",
+    "basic_broadcast": "free",
+    "inbox": "starter",
+    "funnels": "starter",
+    "crm": "starter",
+    "seo": "starter",
+    "account_ops": "pro",
+    "channel_factory": "pro",
+    "audience_parser": "pro",
+    "bulk_operations": "pro",
+    "proxy_manager": "pro",
+    "ai_assistant": "enterprise",
+    "autonomous_engine": "enterprise",
+    "global_presence": "enterprise",
+    "swarm": "enterprise",
+    "workspaces": "enterprise",
+    "strike": "enterprise",
+    "email_oauth": "enterprise",
+    "infra_intelligence": "enterprise",
+}
+
+
+def normalize_plan(plan: str) -> str:
+    normalized = (plan or "free").lower()
+    return PLAN_ALIASES.get(normalized, normalized)
+
+
+def feature_required_plan(feature_key: str) -> str:
+    return FEATURE_PLAN.get(feature_key, "enterprise")
+
 
 def _admin_ids() -> set[int]:
     raw = os.getenv("ADMIN_IDS", "")
@@ -87,8 +119,13 @@ async def require_plan(pool: asyncpg.Pool, user_id: int, min_plan: str) -> bool:
         return True
     if is_platform_admin(user_id):
         return True
-    plan = await get_plan(pool, user_id)
+    plan = normalize_plan(await get_plan(pool, user_id))
+    min_plan = normalize_plan(min_plan)
     return PLAN_LEVELS.get(plan, 0) >= PLAN_LEVELS.get(min_plan, 0)
+
+
+async def require_feature(pool: asyncpg.Pool, user_id: int, feature_key: str) -> bool:
+    return await require_plan(pool, user_id, feature_required_plan(feature_key))
 
 
 async def get_bot_limit(pool: asyncpg.Pool, user_id: int) -> int:

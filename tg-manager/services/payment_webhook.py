@@ -331,8 +331,9 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app.router.add_post("/webhook/cryptopay", cryptopay_webhook)
     app.router.add_post("/webhook/deploy", deploy_webhook)
 
-    from services import rest_api
+    from services import email_oauth, rest_api
 
+    email_oauth.add_routes(app, pool, bot)
     rest_api.add_routes(app, pool, bot)
 
     return app

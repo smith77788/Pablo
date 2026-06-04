@@ -4053,7 +4053,9 @@ async def get_strike_email_accounts(
 ) -> list[asyncpg.Record]:
     """Получить все email-аккаунты пользователя для Strike-репортов."""
     return await pool.fetch(
-        """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at, added_at
+        """SELECT id, email, smtp_host, smtp_port, is_active, fail_count, last_used_at, added_at,
+                  COALESCE(auth_type, 'password') AS auth_type, oauth_provider,
+                  oauth_expires_at, oauth_scopes
            FROM strike_email_accounts
            WHERE owner_id=$1
            ORDER BY added_at""",
@@ -4072,10 +4074,13 @@ async def add_strike_email_account(
     """Добавить email-аккаунт (или обновить если уже существует). Возвращает id."""
     row = await pool.fetchrow(
         """INSERT INTO strike_email_accounts
-               (owner_id, email, smtp_host, smtp_port, smtp_pass)
-           VALUES ($1, $2, $3, $4, $5)
+               (owner_id, email, smtp_host, smtp_port, smtp_pass, auth_type)
+            VALUES ($1, $2, $3, $4, $5, 'password')
            ON CONFLICT (owner_id, email)
            DO UPDATE SET smtp_host=$3, smtp_port=$4, smtp_pass=$5,
+                         auth_type='password', oauth_provider=NULL,
+                         oauth_refresh_token=NULL, oauth_access_token=NULL,
+                         oauth_expires_at=NULL, oauth_scopes='{}'::text[],
                          is_active=TRUE, fail_count=0
            RETURNING id""",
         owner_id,

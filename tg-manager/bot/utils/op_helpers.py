@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import random
 import re
 import asyncpg
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 _FLOOD_RE = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 
@@ -11,16 +11,16 @@ _FLOOD_RE = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 def backoff(
     attempt: int, base: float = 2.0, cap: float = 120.0, *, jitter: bool = True
 ) -> float:
-    """Exponential backoff: base^attempt capped at cap, with optional ±20% jitter."""
+    """Exponential backoff: base^attempt capped at cap, with optional +/-20% jitter."""
     raw = min(base**attempt, cap)
     return raw * random.uniform(0.8, 1.2) if jitter else raw
 
 
 def extract_flood_wait(exc: Exception, err_str: str) -> int:
-    """Извлекает секунды ожидания из FloodWaitError или строки ошибки.
+    """Extract wait seconds from FloodWaitError or an error string.
 
-    Возвращает 0 если ошибка не является flood-ошибкой.
-    Поддерживает Telethon FloodWaitError (.seconds) и строковые форматы.
+    Returns 0 when the exception is not a flood wait.
+    Supports Telethon FloodWaitError (.seconds) and string formats.
     """
     if hasattr(exc, "seconds"):
         try:
@@ -35,7 +35,7 @@ def extract_flood_wait(exc: Exception, err_str: str) -> int:
             return int(m.group(1))
         except (ValueError, IndexError):
             pass
-    return 60  # fallback если flood, но число не найдено
+    return 60  # fallback when flood wait is detected but seconds are missing
 
 
 def _acc_label(acc: asyncpg.Record) -> str:
@@ -79,7 +79,7 @@ async def _get_active_accounts(
 
 def _progress_bar(done: int, total: int, width: int = 10) -> str:
     filled = round(width * done / total) if total else 0
-    return "█" * filled + "░" * (width - filled)
+    return "#" * filled + "-" * (width - filled)
 
 
 def _progress_text(title: str, done: int, total: int, ok: int, err: int) -> str:
@@ -105,7 +105,7 @@ async def safe_edit(
 ) -> None:
     """Edit message only if content changed, otherwise answer silently."""
     msg = callback.message
-    if msg is None:
+    if not isinstance(msg, Message):
         await callback.answer()
         return
     current = msg.text or msg.caption or ""
@@ -119,3 +119,4 @@ async def safe_edit(
             await callback.answer()
         else:
             raise
+

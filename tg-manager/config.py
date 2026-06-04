@@ -35,6 +35,13 @@ SMTP_USER: str = os.getenv("SMTP_USER", "")
 SMTP_PASS: str = os.getenv("SMTP_PASS", "")
 REPORT_FROM_EMAIL: str = os.getenv("REPORT_FROM_EMAIL", "")
 NCMEC_EMAIL: str = os.getenv("NCMEC_EMAIL", "cybertipline@ncmec.org")
+PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "")
+EMAIL_OAUTH_REDIRECT_URI: str = os.getenv("EMAIL_OAUTH_REDIRECT_URI", "")
+EMAIL_OAUTH_STATE_SECRET: str = os.getenv("EMAIL_OAUTH_STATE_SECRET", "")
+GOOGLE_OAUTH_CLIENT_ID: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET: str = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+MICROSOFT_OAUTH_CLIENT_ID: str = os.getenv("MICROSOFT_OAUTH_CLIENT_ID", "")
+MICROSOFT_OAUTH_CLIENT_SECRET: str = os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET", "")
 
 
 def _price(plan: str, default: int) -> int:

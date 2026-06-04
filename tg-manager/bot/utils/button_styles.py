@@ -1,4 +1,4 @@
-"""Bot API 9.4 button style support for project-wide inline keyboards."""
+﻿"""Bot API 9.4 button style support for project-wide inline keyboards."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def infer_button_style(button: InlineKeyboardButton) -> ButtonStyle | None:
         or button.switch_inline_query
         or button.switch_inline_query_current_chat
         or button.switch_inline_query_chosen_chat
-        or button.copy_text
+        or getattr(button, "copy_text", None)
         or button.callback_game
         or button.pay
     ):
@@ -157,3 +157,4 @@ def install_button_style_patch() -> None:
     builder_cls.as_markup = styled_as_markup
     markup_cls.model_dump = styled_model_dump
     setattr(InlineKeyboardBuilder, _PATCHED_ATTR, True)
+
