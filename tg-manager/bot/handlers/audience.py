@@ -276,11 +276,11 @@ async def cb_export_xlsx(
 
     stat_rows = [
         ("Бот", label),
-        ("Всего активных", stats.get("active", 0)),
+        ("Всего активных", stats.get("total", 0)),
         ("Неактивных (отписались)", stats.get("inactive", 0)),
-        ("Новых за 24ч", stats.get("new_24h", 0)),
-        ("Новых за 7 дней", stats.get("new_7d", 0)),
-        ("Новых за 30 дней", stats.get("new_30d", 0)),
+        ("Новых за 24ч", stats.get("joined_today", 0)),
+        ("Новых за 7 дней", stats.get("joined_week", 0)),
+        ("Новых за 30 дней", stats.get("joined_month", 0)),
     ]
     for s_idx, (k, v) in enumerate(stat_rows, start=2):
         ws2.cell(row=s_idx, column=1, value=k).border = border

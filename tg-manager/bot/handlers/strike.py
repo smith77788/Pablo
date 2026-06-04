@@ -792,8 +792,6 @@ async def cb_mini_strike_category(
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
-    # Проверяем что FSM активен (пользователь может нажать кнопку повторно)
-    await state.get_state()
     sd = await state.get_data()
     target = sd.get("target", "")
 
@@ -1338,7 +1336,6 @@ async def msg_password_input(
             smtp_port,
             password,
         )
-        email.split("@")[-1]
         _kb_ok = InlineKeyboardBuilder()
         _kb_ok.button(
             text="➕ Добавить ещё", callback_data=StrikeCb(action="email_add")
