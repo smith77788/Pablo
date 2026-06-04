@@ -1,4 +1,4 @@
-﻿"""Bot API 9.4 button style support for project-wide inline keyboards."""
+"""Bot API 9.4 button style support for project-wide inline keyboards."""
 
 from __future__ import annotations
 
