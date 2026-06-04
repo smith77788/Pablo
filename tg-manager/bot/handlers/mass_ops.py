@@ -1806,7 +1806,7 @@ async def cb_bulk_join_accs(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⚡ Быстро (5-15с)",
+        text="⚡ Быстро (45-90с)",
         callback_data=MassOpCb(action="bj_delay", op_type="fast"),
     )
     kb.button(
@@ -1836,7 +1836,7 @@ async def cb_bulk_join_accs(
 
 
 _DELAY_LABELS = {
-    "fast": ("⚡ Быстро", "5–15с", "1–3 мин"),
+    "fast": ("⚡ Быстро", "45–90с", "7–25 мин"),
     "normal": ("🛡 Нормально", "30–60с", "5–15 мин"),
     "slow": ("🐌 Медленно", "60–120с", "10–30 мин"),
     "smart": ("🧠 Умный", "авто", "переменно"),
@@ -1857,7 +1857,7 @@ async def cb_bulk_join_redelay(callback: CallbackQuery, state: FSMContext) -> No
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⚡ Быстро (5-15с)",
+        text="⚡ Быстро (45-90с)",
         callback_data=MassOpCb(action="bj_delay", op_type="fast"),
     )
     kb.button(
@@ -2165,11 +2165,11 @@ async def cb_bulk_leave_accs(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⚡ Быстро (5-15с)",
+        text="⚡ Быстро (45-90с)",
         callback_data=MassOpCb(action="bl_delay", op_type="fast"),
     )
     kb.button(
-        text="🛡 Нормально (15-45с)",
+        text="🛡 Нормально (30-75с)",
         callback_data=MassOpCb(action="bl_delay", op_type="normal"),
     )
     kb.button(
@@ -2197,8 +2197,8 @@ async def cb_bulk_leave_accs(
 
 
 _DELAY_LABELS_LEAVE = {
-    "fast": ("⚡ Быстро", "5–15с", "1–2 мин"),
-    "normal": ("🛡 Нормально", "15–45с", "3–10 мин"),
+    "fast": ("⚡ Быстро", "45–90с", "7–25 мин"),
+    "normal": ("🛡 Нормально", "30–75с", "5–20 мин"),
     "slow": ("🐌 Медленно", "60–120с", "10–30 мин"),
     "smart": ("🧠 Умный", "авто", "переменно"),
 }
@@ -2218,11 +2218,11 @@ async def cb_bulk_leave_redelay(callback: CallbackQuery, state: FSMContext) -> N
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⚡ Быстро (5-15с)",
+        text="⚡ Быстро (45-90с)",
         callback_data=MassOpCb(action="bl_delay", op_type="fast"),
     )
     kb.button(
-        text="🛡 Нормально (15-45с)",
+        text="🛡 Нормально (30-75с)",
         callback_data=MassOpCb(action="bl_delay", op_type="normal"),
     )
     kb.button(

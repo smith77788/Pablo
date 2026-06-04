@@ -1031,9 +1031,27 @@ async def _exec_bulk_join(
     ok_count = 0
     fail_count = 0
     step = 0
+    delay_mode = params.get("delay_mode", "smart")
+    _JOIN_DAY_LIMITS = {"fast": 20, "normal": 15, "slow": 8, "smart": 12}
+    day_limit = _JOIN_DAY_LIMITS.get(delay_mode, 12)
 
-    for acc in accounts:
+    for acc_idx, acc in enumerate(accounts):
         acc_dict = dict(acc)
+        try:
+            joins_today = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_audit "
+                "WHERE account_id=$1 AND action='join' AND result='success' "
+                "AND occurred_at > NOW() - INTERVAL '24 hours'",
+                acc["id"],
+            )
+        except Exception:
+            joins_today = 0
+        if (joins_today or 0) >= day_limit:
+            log.info(
+                "bulk_join: аккаунт %s достиг дневного лимита join (%d), пропуск",
+                acc_dict.get("phone"), day_limit,
+            )
+            continue
         for i, link in enumerate(links):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -1171,11 +1189,10 @@ async def _exec_bulk_join(
                     op_id,
                 )
             # Apply pacing based on delay_mode from params
-            delay_mode = params.get("delay_mode", "smart")
             chaos = session_simulator.chaos_factor()
             tod = session_simulator.time_of_day_factor()
             if delay_mode == "fast":
-                pause = random.uniform(5, 15) * chaos
+                pause = random.uniform(45, 90) * chaos
             elif delay_mode == "normal":
                 pause = random.uniform(30, 60) * chaos * tod
             elif delay_mode == "slow":
@@ -1189,6 +1206,10 @@ async def _exec_bulk_join(
             if flood_wait:
                 pause = max(pause, float(flood_wait) + random.uniform(10, 30))
             await asyncio.sleep(pause)
+
+        # Пауза при смене аккаунта — защита от account-hopping detection
+        if acc_idx < len(accounts) - 1:
+            await session_simulator.between_accounts_pause(acc_idx)
 
     return {
         "status": "done",
@@ -1217,9 +1238,27 @@ async def _exec_bulk_leave(
     ok_count = 0
     fail_count = 0
     step = 0
+    delay_mode = params.get("delay_mode", "smart")
+    _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
+    day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
 
-    for acc in accounts:
+    for acc_idx, acc in enumerate(accounts):
         acc_dict = dict(acc)
+        try:
+            leaves_today = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_audit "
+                "WHERE account_id=$1 AND action='leave' AND result='success' "
+                "AND occurred_at > NOW() - INTERVAL '24 hours'",
+                acc["id"],
+            )
+        except Exception:
+            leaves_today = 0
+        if (leaves_today or 0) >= day_limit:
+            log.info(
+                "bulk_leave: аккаунт %s достиг дневного лимита leave (%d), пропуск",
+                acc_dict.get("phone"), day_limit,
+            )
+            continue
         for i, channel in enumerate(channels):
             if await _is_cancelled(pool, op_id):
                 return {
@@ -1320,20 +1359,27 @@ async def _exec_bulk_leave(
                     flood_wait_s=flood_wait or None,
                 )
             # Apply pacing based on delay_mode from params
-            delay_mode = params.get("delay_mode", "smart")
             chaos = session_simulator.chaos_factor()
             tod = session_simulator.time_of_day_factor()
             if delay_mode == "fast":
-                pause = random.uniform(5, 15) * chaos
+                pause = random.uniform(45, 90) * chaos
             elif delay_mode == "normal":
-                pause = random.uniform(15, 45) * chaos * tod
+                pause = random.uniform(30, 75) * chaos * tod
             elif delay_mode == "slow":
                 pause = random.uniform(60, 120) * chaos * tod
-            else:  # smart
-                pause = random.uniform(15, 45) * chaos * tod
+            else:  # smart — адаптивный с cooldown каждые 5
+                if i % 5 == 4:
+                    pause = random.uniform(120, 240) * chaos
+                else:
+                    pause = random.uniform(45, 90) * chaos
+                pause *= tod
             if flood_wait:
                 pause = max(pause, float(flood_wait) + random.uniform(10, 30))
             await asyncio.sleep(pause)
+
+        # Пауза при смене аккаунта — защита от account-hopping detection
+        if acc_idx < len(accounts) - 1:
+            await session_simulator.between_accounts_pause(acc_idx)
 
     return {
         "status": "done",
