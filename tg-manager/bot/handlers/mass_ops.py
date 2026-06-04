@@ -660,14 +660,44 @@ async def cb_mp_confirm(
         )
         return
 
-    from services import account_manager
+    acc_id_list = [acc["id"] for acc in accounts]
+
+    # Фильтр по типу для managed_channels
+    if target == "channels":
+        type_filter = "mc.type = 'channel' OR mc.type IS NULL"
+    elif target == "groups":
+        type_filter = "mc.type IN ('megagroup', 'supergroup', 'group', 'chat')"
+    else:
+        type_filter = "TRUE"
+
+    db_pairs = await pool.fetch(
+        f"SELECT DISTINCT ON (mc.channel_id) "
+        f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
+        f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
+        f"a.device_model, a.system_version, a.app_version, p.proxy_url "
+        f"FROM managed_channels mc "
+        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE "
+        f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+        f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) "
+        f"AND ({type_filter}) "
+        f"ORDER BY mc.channel_id, a.id",
+        callback.from_user.id,
+        acc_id_list,
+    )
 
     targets_with_dialogs: list[tuple] = []
-    for acc in accounts:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
-        for d in dialogs or []:
-            if _dialog_matches_target(d, target):
-                targets_with_dialogs.append((acc, d))
+    acc_map = {acc["id"]: acc for acc in accounts}
+    for row in db_pairs:
+        acc = acc_map.get(row["acc_id"])
+        if not acc:
+            continue
+        dialog = {
+            "id": row["id"],
+            "title": row["title"],
+            "access_hash": row["access_hash"],
+            "type": row["type"] or "channel",
+        }
+        targets_with_dialogs.append((acc, dialog))
 
     total = len(targets_with_dialogs)
     if total == 0:
