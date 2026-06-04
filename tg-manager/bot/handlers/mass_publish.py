@@ -388,7 +388,7 @@ async def _show_preview(
 async def cb_mpub_confirm_send(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Запускаю публикацию...")
+    await callback.answer("⏳ Ставлю в очередь...")
     data = await state.get_data()
     await state.clear()
 
@@ -396,74 +396,49 @@ async def cb_mpub_confirm_send(
     delay_s: int = data.get("delay_s", 30)
     post_text: str = data.get("post_text", "")
 
-    accounts = await pool.fetch(
-        "SELECT a.id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a "
-        "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
-        callback.from_user.id,
-        acc_ids,
-    )
-
-    from services import account_manager
-
-    # Gather all (acc, channel) pairs: first try managed_channels DB, fallback to dialogs
-    pairs: list[tuple[asyncpg.Record, dict]] = []
-    for acc in accounts:
-        acc_dict = dict(acc)
-        db_channels = await pool.fetch(
-            "SELECT channel_id AS id, title, access_hash FROM managed_channels "
-            "WHERE owner_id=$1 AND acc_id=$2",
+    # Считаем каналы из managed_channels для total_items
+    total_channels = 0
+    try:
+        row = await pool.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
             callback.from_user.id,
-            acc["id"],
+            acc_ids,
         )
-        if db_channels:
-            for ch in db_channels:
-                pairs.append((acc_dict, dict(ch)))
-        else:
-            # Fallback: live dialogs if managed_channels empty
-            dialogs = (
-                await account_manager.get_dialogs(acc["session_str"], _acc=acc_dict)
-                or []
-            )
-            channels = [
-                d
-                for d in dialogs
-                if d.get("type") in ("channel", "megagroup", "supergroup")
-            ]
-            for ch in channels:
-                pairs.append((acc_dict, ch))
+        total_channels = row["cnt"] if row else 0
+    except Exception:
+        pass
 
-    total = len(pairs)
-    if total == 0:
+    from services import operation_bus
+
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            "mass_publish",
+            {
+                "text": post_text,
+                "delay_seconds": delay_s,
+                "account_ids": acc_ids,
+            },
+            total_items=total_channels,
+        )
         await callback.message.edit_text(
-            "ℹ️ Нет каналов для публикации.",
+            f"📤 <b>Публикация поставлена в очередь</b>\n\n"
+            f"Каналов для публикации: <b>{total_channels}</b>\n"
+            f"ID операции: <code>#{op_id}</code>\n\n"
+            f"Вы получите уведомление по мере выполнения.\n"
+            f"<i>Управление очередью: /ops → 📋 Очередь</i>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
-        return
-
-    progress_msg = await callback.message.edit_text(
-        f"📤 <b>Публикация запущена в фоне</b>\n\n"
-        f"Каналов для обработки: <b>{total}</b>\n"
-        f"<i>Для отмены: /tasks</i>",
-        parse_mode="HTML",
-    )
-
-    task = asyncio.create_task(
-        _mpub_bg(
-            bot=callback.bot,
-            user_id=callback.from_user.id,
-            progress_msg=progress_msg,
-            pairs=pairs,
-            post_text=post_text,
-            delay_s=delay_s,
+    except Exception as exc:
+        log.exception("mass_publish submit error user=%s: %s", callback.from_user.id, exc)
+        await callback.message.edit_text(
+            f"⚠️ Ошибка постановки в очередь: {html.escape(str(exc)[:200])}",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
         )
-    )
-    _treg.register(
-        callback.from_user.id, "publish", f"Mass publish {total} каналов", task
-    )
 
 
 async def _mpub_bg(
@@ -588,7 +563,7 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     rows: list[asyncpg.Record] = []
     try:
         rows = await pool.fetch(
-            "SELECT op_type, status, total_items, done_items, created_at, finished_at "
+            "SELECT id, status, total_items, done_items, created_at, finished_at, error_msg "
             "FROM operation_queue "
             "WHERE owner_id=$1 AND op_type='mass_publish' "
             "ORDER BY created_at DESC LIMIT 10",
@@ -600,27 +575,36 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not rows:
         await callback.message.edit_text(
             "📋 <b>История публикаций</b>\n\n"
-            "История недоступна (нужна БД) или публикаций ещё не было.\n\n"
-            "<i>Записи появятся после первой массовой публикации.</i>",
+            "Публикаций ещё не было.\n\n"
+            "<i>Запустите публикацию — записи появятся здесь автоматически.</i>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
 
+    _status_icon = {
+        "done": "✅",
+        "running": "⏳",
+        "pending": "🕐",
+        "failed": "❌",
+        "cancelled": "🚫",
+        "skipped": "⏭",
+    }
     lines = ["📋 <b>История публикаций (последние 10)</b>\n"]
     for r in rows:
-        status_icon = {
-            "done": "✅",
-            "running": "⏳",
-            "failed": "❌",
-        }.get(r["status"], "❓")
+        icon = _status_icon.get(r["status"], "❓")
         done = r["done_items"] or 0
         total = r["total_items"] or 0
         created = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "—"
-        lines.append(f"{status_icon} {created} — {done}/{total} каналов")
+        err_hint = f" — {html.escape(r['error_msg'][:40])}" if r.get("error_msg") else ""
+        lines.append(f"{icon} {created} — {done}/{total} каналов{err_hint}")
 
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Открыть очередь", callback_data=MassPubCb(action="back_to_factory"))
+    kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
+    kb.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
+        reply_markup=kb.as_markup(),
     )

@@ -674,14 +674,24 @@ async def _exec_mass_publish(
             }
         acc_dict = dict(acc)
         try:
-            dialogs = await account_manager.get_dialogs(
-                acc["session_str"], _acc=acc_dict
+            # Приоритет: managed_channels из БД (быстро), fallback → live Telethon dialogs
+            db_channels = await pool.fetch(
+                "SELECT channel_id AS id, title, access_hash FROM managed_channels "
+                "WHERE owner_id=$1 AND acc_id=$2",
+                owner_id,
+                acc_dict["id"],
             )
-            channels = [
-                d
-                for d in (dialogs or [])
-                if d.get("type") in ("channel", "megagroup", "gigagroup")
-            ]
+            if db_channels:
+                channels = [dict(r) for r in db_channels]
+            else:
+                dialogs = await account_manager.get_dialogs(
+                    acc["session_str"], _acc=acc_dict
+                )
+                channels = [
+                    d
+                    for d in (dialogs or [])
+                    if d.get("type") in ("channel", "megagroup", "gigagroup")
+                ]
 
             if not channels:
                 log.info(
