@@ -92,6 +92,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "⚡",
     },
+    "gift_transfer": {
+        "description": "Передача Telegram-подарков",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "🎁",
+    },
 }
 
 
