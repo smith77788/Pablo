@@ -151,6 +151,7 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="🧠 Статус AI", callback_data="adm:ai_status")
         kb.button(text="🔑 Переменные AI", callback_data="adm:env_list")
         kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        kb.button(text="🏠 Главное меню", callback_data="adm:main")
         kb.adjust(1)
     elif section == "system":
         free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
@@ -267,56 +268,30 @@ async def cmd_admin_secret(message: Message) -> None:
 
 
 async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> None:
-    total_users = (
-        await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots") or 0
-    )
-    total_bots = await pool.fetchval("SELECT COUNT(*) FROM managed_bots") or 0
-    total_subs = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM subscriptions WHERE is_active=true AND expires_at > now()"
+    # All stats in a single round-trip instead of 8 sequential queries
+    try:
+        row = await pool.fetchrow(
+            """SELECT
+                (SELECT COUNT(*)           FROM managed_bots)                                      AS total_bots,
+                (SELECT COUNT(*)           FROM subscriptions WHERE is_active=true AND expires_at > now()) AS total_subs,
+                (SELECT COUNT(*)           FROM payments WHERE status='confirmed')                 AS total_payments,
+                (SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='confirmed')       AS revenue,
+                (SELECT COUNT(*)           FROM platform_users)                                    AS total_users,
+                (SELECT COUNT(*)           FROM platform_users
+                    WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE)                     AS today_users,
+                (SELECT COUNT(*)           FROM error_reports WHERE status='new')                  AS new_error_reports"""
         )
-        or 0
-    )
-    total_payments = (
-        await pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='confirmed'")
-        or 0
-    )
-    revenue = (
-        await pool.fetchval(
-            "SELECT COALESCE(SUM(amount_usd),0) FROM payments WHERE status='confirmed'"
-        )
-        or 0
-    )
+    except Exception:
+        row = None
+        log_exc_swallow(log, "_show_admin_main stats query failed")
 
-    try:
-        total_users = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
-    except Exception:
-        log_exc_swallow(
-            log,
-            "Не удалось получить количество пользователей из platform_users",
-            user_id=msg_or_cb.from_user.id,
-        )
-        # total_users already set above as fallback
-    try:
-        today_users = (
-            await pool.fetchval(
-                "SELECT COUNT(*) FROM platform_users "
-                "WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE"
-            )
-            or 0
-        )
-    except Exception:
-        today_users = 0
-
-    # Счётчик непросмотренных отчётов об ошибках
-    new_error_reports = 0
-    try:
-        new_error_reports = (
-            await pool.fetchval("SELECT COUNT(*) FROM error_reports WHERE status='new'")
-            or 0
-        )
-    except Exception:
-        log_exc_swallow(log, "Не удалось получить счётчик новых error_reports")
+    total_bots       = int(row["total_bots"]        or 0) if row else 0
+    total_subs       = int(row["total_subs"]        or 0) if row else 0
+    total_payments   = int(row["total_payments"]    or 0) if row else 0
+    revenue          = float(row["revenue"]         or 0) if row else 0.0
+    total_users      = int(row["total_users"]       or 0) if row else 0
+    today_users      = int(row["today_users"]       or 0) if row else 0
+    new_error_reports= int(row["new_error_reports"] or 0) if row else 0
 
     text = (
         "🛡 <b>Admin Panel</b>\n\n"
