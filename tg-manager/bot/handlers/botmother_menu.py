@@ -180,9 +180,10 @@ def _settings_kb():
     kb.button(text="🤖 ИИ Помощник",     callback_data=AiCb(action="start"))
     kb.button(text="🏢 Пространства",    callback_data=WorkspaceCb(action="menu"))
     kb.button(text="📄 Шаблоны",         callback_data=AssetTplCb(action="menu"))
+    kb.button(text="🎁 Передача подарков",  callback_data="gt:main")
     kb.button(text="🐛 Исправить ошибку",  callback_data=ErrorReportCb(action="start"))
     kb.button(text="◀️ Назад",           callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 

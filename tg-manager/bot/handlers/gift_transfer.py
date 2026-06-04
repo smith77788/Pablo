@@ -79,22 +79,22 @@ async def cb_gift_transfer_main(callback: CallbackQuery, state: FSMContext, pool
     await callback.answer()
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔍 Scan Gifts", callback_data="gt:scan")
-    kb.button(text="📦 Transfer Gifts", callback_data="gt:transfer")
-    kb.button(text="👥 Saved Recipients", callback_data="gt:recipients")
-    kb.button(text="📊 Reports", callback_data="gt:reports")
-    kb.button(text="❓ Help", callback_data="gt:help")
-    kb.button(text="◀️ Back to BotMother", callback_data="main_menu")
+    kb.button(text="🔍 Сканировать подарки", callback_data="gt:scan")
+    kb.button(text="📦 Передать подарки", callback_data="gt:transfer")
+    kb.button(text="👥 Сохранённые получатели", callback_data="gt:recipients")
+    kb.button(text="📊 Отчёты", callback_data="gt:reports")
+    kb.button(text="❓ Помощь", callback_data="gt:help")
+    kb.button(text="◀️ Назад в BotMother", callback_data="main_menu")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        "🎁 <b>Gift Transfer Manager</b>\n\n"
-        "Transfer Telegram star gifts from multiple accounts to one recipient with one click.\n\n"
-        "• Scan gifts from your accounts\n"
-        "• Select recipient (saved or custom)\n"
-        "• Review plan & cost\n"
-        "• One final confirmation\n"
-        "• Watch automatic transfer progress",
+        "🎁 <b>Менеджер передачи подарков</b>\n\n"
+        "Передача Telegram-подарков с нескольких аккаунтов одному получателю в один клик.\n\n"
+        "• Сканирование подарков на аккаунтах\n"
+        "• Выбор получателя (сохранённый или новый)\n"
+        "• Просмотр плана и стоимости\n"
+        "• Одно финальное подтверждение\n"
+        "• Автоматическое выполнение передачи",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.main_menu)
@@ -111,37 +111,37 @@ async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
     
     # Get accounts with gifts capability
     accounts = await pool.fetch("""
-        SELECT id, phone, status FROM tg_accounts
+        SELECT id, phone, is_active FROM tg_accounts
         WHERE owner_id=$1 AND session_str IS NOT NULL
         ORDER BY phone
     """, user_id)
-    
+
     if not accounts:
-        await callback.answer("No accounts found", show_alert=True)
+        await callback.answer("Нет аккаунтов", show_alert=True)
         return
-    
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Select All", callback_data="gt:scan_all")
-    kb.button(text="❌ Deselect All", callback_data="gt:scan_none")
+    kb.button(text="✅ Выбрать все", callback_data="gt:scan_all")
+    kb.button(text="❌ Снять выбор", callback_data="gt:scan_none")
     kb.row()
-    
+
     for acc in accounts:
-        status_emoji = "🟢" if acc["status"] == "active" else "🔴"
+        status_emoji = "🟢" if acc["is_active"] else "🔴"
         kb.button(
             text=f"{status_emoji} {acc['phone']}", 
             callback_data=f"gt:toggle_acc:{acc['id']}"
         )
     
     kb.row()
-    kb.button(text="▶️ Start Scan", callback_data="gt:start_scan")
-    kb.button(text="◀️ Back", callback_data="gt:main")
+    kb.button(text="▶️ Начать сканирование", callback_data="gt:start_scan")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(2, 1)
-    
+
     await state.update_data(scan_accounts=[])
     await callback.message.edit_text(
-        "🔍 <b>Scan Accounts for Gifts</b>\n\n"
-        "Select accounts to scan for Telegram star gifts:\n\n"
-        "<i>Scanning retrieves all star gifts from selected accounts.</i>",
+        "🔍 <b>Сканирование подарков</b>\n\n"
+        "Выберите аккаунты для сканирования звёздных подарков Telegram:\n\n"
+        "<i>Сканирование извлекает все звёздные подарки с выбранных аккаунтов.</i>",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.selecting_accounts)
@@ -164,7 +164,7 @@ async def cb_toggle_account(callback: CallbackQuery, state: FSMContext):
     await state.update_data(scan_accounts=accounts)
     
     # Refresh button states (just acknowledge)
-    await callback.answer(f"Account toggled. Selected: {len(accounts)}")
+    await callback.answer(f"Аккаунт переключён. Выбрано: {len(accounts)}")
 
 
 @router.callback_query(F.data == "gt:scan_all", GiftTransferFSM.selecting_accounts)
@@ -178,7 +178,7 @@ async def cb_scan_all(callback: CallbackQuery, state: FSMContext, pool):
         user_id
     )
     await state.update_data(scan_accounts=[a["id"] for a in accounts])
-    await callback.answer(f"All accounts selected ({len(accounts)})")
+    await callback.answer(f"Все аккаунты выбраны ({len(accounts)})")
 
 
 @router.callback_query(F.data == "gt:scan_none", GiftTransferFSM.selecting_accounts)
@@ -186,52 +186,52 @@ async def cb_scan_none(callback: CallbackQuery, state: FSMContext):
     """Deselect all accounts."""
     await callback.answer()
     await state.update_data(scan_accounts=[])
-    await callback.answer("All deselected")
+    await callback.answer("Выбор снят")
 
 
 @router.callback_query(F.data == "gt:start_scan", GiftTransferFSM.selecting_accounts)
 async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
     """Start scanning selected accounts."""
-    await callback.answer("⏳ Scanning...")
-    
+    await callback.answer("⏳ Сканирование...")
+
     user_id = callback.from_user.id
     data = await state.get_data()
     account_ids = data.get("scan_accounts", [])
-    
+
     if not account_ids:
-        await callback.answer("Select at least one account", show_alert=True)
+        await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
-    
+
     # Show scanning message
     await callback.message.edit_text(
-        "⏳ <b>Scanning for Gifts...</b>\n\n"
-        "Please wait while we scan your accounts for Telegram star gifts.\n\n"
-        "This may take a few moments...",
+        "⏳ <b>Сканирование подарков...</b>\n\n"
+        "Пожалуйста, подождите — идёт поиск Telegram-подарков на выбранных аккаунтах.\n\n"
+        "Это может занять несколько секунд...",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏳ Processing...", callback_data="gt:ignore")]
+            [InlineKeyboardButton(text="⏳ Обработка...", callback_data="gt:ignore")]
         ])
     )
     
     # Perform scan
     gifts = await GiftInventoryService.scan_multiple_accounts(pool, user_id, account_ids)
-    
+
     # Sync to DB
     synced = await GiftInventoryService.sync_inventory_to_db(pool, user_id, gifts)
-    
+
     # Show results
     kb = InlineKeyboardBuilder()
-    kb.button(text="📦 View Inventory", callback_data="gt:inventory")
-    kb.button(text="🔄 Scan Again", callback_data="gt:scan")
-    kb.button(text="◀️ Back", callback_data="gt:main")
+    kb.button(text="📦 Просмотр инвентаря", callback_data="gt:inventory")
+    kb.button(text="🔄 Сканировать снова", callback_data="gt:scan")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        f"✅ <b>Scan Complete!</b>\n\n"
-        f"📊 <b>Results:</b>\n"
-        f"• Accounts scanned: {len(account_ids)}\n"
-        f"• Gifts found: {len(gifts)}\n"
-        f"• Gift records synced: {synced}\n\n"
-        f"<i>Transferable gifts can be sent to another user.</i>",
+        f"✅ <b>Сканирование завершено!</b>\n\n"
+        f"📊 <b>Результаты:</b>\n"
+        f"• Аккаунтов просканировано: {len(account_ids)}\n"
+        f"• Подарков найдено: {len(gifts)}\n"
+        f"• Записей синхронизировано: {synced}\n\n"
+        f"<i>Передаваемые подарки можно отправить другому пользователю.</i>",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.scanning_gifts)
@@ -248,28 +248,28 @@ async def cb_view_inventory(callback: CallbackQuery, state: FSMContext, pool):
     summary = await GiftInventoryService.get_inventory_summary(pool, user_id)
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="📤 Start Transfer", callback_data="gt:transfer")
-    kb.button(text="🔄 Refresh", callback_data="gt:inventory")
-    kb.button(text="◀️ Back", callback_data="gt:main")
+    kb.button(text="📤 Начать передачу", callback_data="gt:transfer")
+    kb.button(text="🔄 Обновить", callback_data="gt:inventory")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(1)
-    
+
     # Build account list
     account_lines = []
     for acc in summary.get("by_account", []):
         account_lines.append(
-            f"• {acc['phone']}: {acc['total_gifts']} gifts "
-            f"({acc['transferable']} transferable, {acc['total_stars_cost']}⭐)"
+            f"• {acc['phone']}: {acc['total_gifts']} подарков "
+            f"({acc['transferable']} передаваемых, {acc['total_stars_cost']}⭐)"
         )
-    
-    accounts_text = "\n".join(account_lines) if account_lines else "No gifts found."
-    
+
+    accounts_text = "\n".join(account_lines) if account_lines else "Подарков не найдено."
+
     await callback.message.edit_text(
-        f"📦 <b>Gift Inventory</b>\n\n"
-        f"📊 <b>Summary:</b>\n"
-        f"• Total gifts: {summary['total_gifts']}\n"
-        f"• Transferable: {summary['transferable_gifts']} ⭐\n"
-        f"• Non-transferable: {summary['non_transferable_gifts']}\n\n"
-        f"<b>By Account:</b>\n{accounts_text}",
+        f"📦 <b>Инвентарь подарков</b>\n\n"
+        f"📊 <b>Сводка:</b>\n"
+        f"• Всего подарков: {summary['total_gifts']}\n"
+        f"• Передаваемых: {summary['transferable_gifts']} ⭐\n"
+        f"• Непередаваемых: {summary['non_transferable_gifts']}\n\n"
+        f"<b>По аккаунтам:</b>\n{accounts_text}",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.viewing_inventory)
@@ -297,30 +297,30 @@ async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
     """, user_id)
     
     if not accounts_with_gifts:
-        await callback.answer("No gifts found. Scan accounts first.", show_alert=True)
+        await callback.answer("Подарки не найдены. Сначала выполните сканирование.", show_alert=True)
         return
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Select All with Gifts", callback_data="gt:transfer_all")
-    kb.button(text="❌ Clear Selection", callback_data="gt:transfer_none")
+    kb.button(text="✅ Выбрать все с подарками", callback_data="gt:transfer_all")
+    kb.button(text="❌ Снять выбор", callback_data="gt:transfer_none")
     kb.row()
-    
+
     for acc in accounts_with_gifts:
         kb.button(
             text=f"📱 {acc['phone']} ({acc['transfer_count']}⭐)",
             callback_data=f"gt:transfer_toggle:{acc['id']}"
         )
-    
+
     kb.row()
-    kb.button(text="▶️ Continue to Recipient", callback_data="gt:select_recipient")
-    kb.button(text="◀️ Back", callback_data="gt:main")
+    kb.button(text="▶️ Выбрать получателя", callback_data="gt:select_recipient")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(2, 1)
-    
+
     await state.update_data(transfer_accounts=[])
     await callback.message.edit_text(
-        "📤 <b>Transfer Gifts</b>\n\n"
-        "Select accounts containing transferable gifts:\n\n"
-        "Only accounts with ⭐ (transferable) gifts are shown.",
+        "📤 <b>Передать подарки</b>\n\n"
+        "Выберите аккаунты с передаваемыми подарками:\n\n"
+        "Отображаются только аккаунты с ⭐ (передаваемыми) подарками.",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.selecting_accounts)
@@ -357,7 +357,7 @@ async def cb_transfer_all(callback: CallbackQuery, state: FSMContext, pool):
     """, user_id)
     
     await state.update_data(transfer_accounts=[a["id"] for a in accounts])
-    await callback.answer(f"Selected {len(accounts)} accounts")
+    await callback.answer(f"Выбрано аккаунтов: {len(accounts)}")
 
 
 @router.callback_query(F.data == "gt:transfer_none", GiftTransferFSM.selecting_accounts)
@@ -365,7 +365,7 @@ async def cb_transfer_none(callback: CallbackQuery, state: FSMContext):
     """Clear selection."""
     await callback.answer()
     await state.update_data(transfer_accounts=[])
-    await callback.answer("Cleared")
+    await callback.answer("Выбор очищен")
 
 
 @router.callback_query(F.data == "gt:select_recipient", GiftTransferFSM.selecting_accounts)
@@ -377,34 +377,34 @@ async def cb_select_recipient(callback: CallbackQuery, state: FSMContext, pool):
     data = await state.get_data()
     
     if not data.get("transfer_accounts"):
-        await callback.answer("Select at least one account", show_alert=True)
+        await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
-    
+
     # Get saved recipients
     recipients = await db.get_gift_recipients(pool, user_id)
-    
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔹 Enter @username", callback_data="gt:enter_username")
-    
+    kb.button(text="🔹 Ввести @username", callback_data="gt:enter_username")
+
     if recipients:
         kb.row()
         for r in recipients[:5]:  # Show up to 5 saved
             kb.button(
-                text=f"👤 {r['name']} ({r['username'] or 'no @'})",
+                text=f"👤 {r['name']} ({r['username'] or 'нет @'})",
                 callback_data=f"gt:use_recipient:{r['id']}"
             )
-    
+
     kb.row()
-    kb.button(text="💾 Save as New Recipient", callback_data="gt:save_recipient")
-    kb.button(text="◀️ Back", callback_data="gt:transfer")
+    kb.button(text="💾 Сохранить нового получателя", callback_data="gt:save_recipient")
+    kb.button(text="◀️ Назад", callback_data="gt:transfer")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        "👥 <b>Select Recipient</b>\n\n"
-        "Choose who will receive the transferred gifts:\n\n"
-        "• Enter a @username manually\n"
-        "• Use a saved recipient\n"
-        "• Save current recipient for future use",
+        "👥 <b>Выбор получателя</b>\n\n"
+        "Выберите, кто получит переданные подарки:\n\n"
+        "• Введите @username вручную\n"
+        "• Используйте сохранённого получателя\n"
+        "• Сохраните текущего получателя для будущего использования",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.selecting_recipient)
@@ -416,11 +416,11 @@ async def cb_enter_username(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     
     await callback.message.edit_text(
-        "📝 <b>Enter Recipient</b>\n\n"
-        "Send me the @username or profile link of the recipient.\n\n"
-        "Example: @username or https://t.me/username",
+        "📝 <b>Введите получателя</b>\n\n"
+        "Отправьте @username или ссылку на профиль получателя.\n\n"
+        "Пример: @username или https://t.me/username",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Cancel", callback_data="gt:select_recipient")]
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data="gt:select_recipient")]
         ])
     )
     await state.set_state(GiftTransferFSM.selecting_recipient)
@@ -437,7 +437,7 @@ async def msg_handle_username(message: Message, state: FSMContext, pool):
     
     # Validate format
     if not username or len(username) < 5:
-        await message.answer("❌ Invalid username format. Try again:")
+        await message.answer("❌ Неверный формат имени пользователя. Попробуйте снова:")
         return
     
     # Save to state and continue
@@ -451,17 +451,17 @@ async def msg_handle_username(message: Message, state: FSMContext, pool):
     kb = InlineKeyboardBuilder()
     kb.button(text="⭐ Telegram Stars", callback_data="gt:payment_stars")
     kb.button(text="💼 @wallet", callback_data="gt:payment_wallet")
-    kb.button(text="🔄 Auto-detect", callback_data="gt:payment_auto")
+    kb.button(text="🔄 Автоопределение", callback_data="gt:payment_auto")
     kb.row()
-    kb.button(text="◀️ Back", callback_data="gt:select_recipient")
+    kb.button(text="◀️ Назад", callback_data="gt:select_recipient")
     kb.adjust(1)
-    
+
     await message.answer(
-        "💳 <b>Payment Source</b>\n\n"
-        "How should transfer costs be paid?\n\n"
-        "• <b>⭐ Stars</b> — Pay from Telegram Stars balance\n"
-        "• <b>💼 @wallet</b> — Use connected Wallet bot\n"
-        "• <b>🔄 Auto</b> — We'll try to detect the best option",
+        "💳 <b>Источник оплаты</b>\n\n"
+        "Как оплачивать расходы на передачу?\n\n"
+        "• <b>⭐ Stars</b> — Оплата из баланса Telegram Stars\n"
+        "• <b>💼 @wallet</b> — Использовать подключённый Wallet бот\n"
+        "• <b>🔄 Авто</b> — Система выберет лучший вариант",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.selecting_payment)
@@ -478,47 +478,47 @@ async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
     )
     
     if not recipient:
-        await callback.answer("Recipient not found", show_alert=True)
+        await callback.answer("Получатель не найден", show_alert=True)
         return
-    
+
     await state.update_data(
         recipient_username=recipient["username"],
         recipient_user_id=recipient["user_id"],
         recipient_name=recipient["name"]
     )
-    
+
     # Continue to payment selection
     kb = InlineKeyboardBuilder()
     kb.button(text="⭐ Stars", callback_data="gt:payment_stars")
     kb.button(text="💼 @wallet", callback_data="gt:payment_wallet")
-    kb.button(text="🔄 Auto", callback_data="gt:payment_auto")
+    kb.button(text="🔄 Авто", callback_data="gt:payment_auto")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        "💳 <b>Payment Source</b>\n\n"
-        f"Recipient: <b>{recipient['name']}</b>\n\n"
-        "Select payment method:",
+        "💳 <b>Источник оплаты</b>\n\n"
+        f"Получатель: <b>{recipient['name']}</b>\n\n"
+        "Выберите способ оплаты:",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.selecting_payment)
 
 
 @router.callback_query(F.data.startswith("gt:payment_"), GiftTransferFSM.selecting_payment)
-async def cb_select_payment(callback: CallbackQuery, state: FSMContext):
+async def cb_select_payment(callback: CallbackQuery, state: FSMContext, pool):
     """Handle payment source selection."""
     await callback.answer()
-    
+
     payment_map = {
         "gt:payment_stars": "stars",
         "gt:payment_wallet": "wallet",
         "gt:payment_auto": "auto"
     }
-    
+
     payment_source = payment_map.get(callback.data, "stars")
     await state.update_data(payment_source=payment_source)
-    
+
     # Build and show preview
-    await _show_transfer_preview(callback.message, state, callback.from_user.id)
+    await _show_transfer_preview(callback.message, state, callback.from_user.id, pool)
 
 
 @router.callback_query(F.data == "gt:preview_confirm", GiftTransferFSM.preview)
@@ -538,15 +538,15 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
     """, user_id, account_ids)
     
     if not gifts:
-        await callback.answer("No transferable gifts found", show_alert=True)
+        await callback.answer("Передаваемых подарков не найдено", show_alert=True)
         return
-    
+
     # Create plan
     plan_id = await GiftTransferService.create_plan(
         pool, user_id,
         recipient_username=data.get("recipient_username", ""),
         recipient_user_id=data.get("recipient_user_id", 0),
-        recipient_name=data.get("recipient_name", "Unknown"),
+        recipient_name=data.get("recipient_name", "Неизвестно"),
         payment_source=data.get("payment_source", "stars")
     )
     
@@ -567,14 +567,13 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
     validation = await GiftTransferService.validate_plan(pool, plan_id)
     
     if not validation["valid"]:
-        await callback.answer(f"Validation failed: {validation['errors']}", show_alert=True)
+        await callback.answer(f"Ошибка проверки: {validation['errors']}", show_alert=True)
         return
-    
+
     # Queue operation
-    from services.operation_bus import OperationBus
-    op_bus = OperationBus()
-    
-    op_id = await op_bus.submit(
+    from services import operation_bus as _op_bus
+
+    op_id = await _op_bus.submit(
         pool, user_id, "gift_transfer",
         {"plan_id": plan_id},
         total_items=len(items)
@@ -591,30 +590,30 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
     
     # Show progress
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Check Progress", callback_data="gt:check_progress")
-    kb.button(text="◀️ Back to Menu", callback_data="gt:main")
+    kb.button(text="🔄 Проверить прогресс", callback_data="gt:check_progress")
+    kb.button(text="◀️ В главное меню", callback_data="gt:main")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        f"🚀 <b>Transfer Started!</b>\n\n"
-        f"📦 Plan ID: {plan_id}\n"
-        f"🎁 Gifts: {len(items)}\n"
-        f"👤 Recipient: {data.get('recipient_name')}\n\n"
-        f"Transfer is running in background.\n"
-        f"Use the button below to check progress.",
+        f"🚀 <b>Передача запущена!</b>\n\n"
+        f"📦 ID плана: {plan_id}\n"
+        f"🎁 Подарков: {len(items)}\n"
+        f"👤 Получатель: {data.get('recipient_name')}\n\n"
+        f"Передача выполняется в фоновом режиме.\n"
+        f"Используйте кнопку ниже для проверки прогресса.",
         reply_markup=kb.as_markup()
     )
     await state.set_state(GiftTransferFSM.executing)
 
 
-async def _show_transfer_preview(message, state, user_id):
+async def _show_transfer_preview(message, state, user_id, pool):
     """Build and show transfer preview."""
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     from aiogram.utils.keyboard import InlineKeyboardBuilder
-    
+
     data = await state.get_data()
     account_ids = data.get("transfer_accounts", [])
-    
+
     # Get gift stats
     gifts = await pool.fetch("""
         SELECT g.* FROM gift_inventory g
@@ -626,30 +625,30 @@ async def _show_transfer_preview(message, state, user_id):
     unique_accounts = len(set(g["account_id"] for g in gifts))
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ OK, Transfer Selected Gifts", callback_data="gt:preview_confirm")
+    kb.button(text="✅ Подтвердить передачу подарков", callback_data="gt:preview_confirm")
     kb.row()
-    kb.button(text="❌ Cancel", callback_data="gt:main")
+    kb.button(text="❌ Отмена", callback_data="gt:main")
     kb.adjust(1)
-    
+
     preview_text = (
-        f"📋 <b>Transfer Preview</b>\n\n"
-        f"👤 <b>Recipient:</b> {data.get('recipient_name', 'Unknown')}\n"
-        f"💳 <b>Payment:</b> {data.get('payment_source', 'Stars').upper()}\n\n"
-        f"📊 <b>Summary:</b>\n"
-        f"• Accounts: {unique_accounts}\n"
-        f"• Transferable gifts: {total_gifts}\n"
-        f"• Estimated cost: {total_cost}⭐\n\n"
+        f"📋 <b>Предпросмотр передачи</b>\n\n"
+        f"👤 <b>Получатель:</b> {data.get('recipient_name', 'Неизвестно')}\n"
+        f"💳 <b>Оплата:</b> {data.get('payment_source', 'Stars').upper()}\n\n"
+        f"📊 <b>Сводка:</b>\n"
+        f"• Аккаунтов: {unique_accounts}\n"
+        f"• Передаваемых подарков: {total_gifts}\n"
+        f"• Примерная стоимость: {total_cost}⭐\n\n"
     )
-    
+
     if data.get("payment_source") == "auto":
-        preview_text += "⚠️ <i>Payment source will be auto-detected. May require confirmation.</i>\n\n"
-    
+        preview_text += "⚠️ <i>Источник оплаты будет определён автоматически. Может потребоваться подтверждение.</i>\n\n"
+
     preview_text += (
-        "⏳ <b>Warning:</b>\n"
-        "• Some transfers may fail if balance is insufficient\n"
-        "• Non-retryable errors will be marked separately\n"
-        "• You can retry failed items later\n\n"
-        "Press <b>Confirm</b> to start the transfer."
+        "⏳ <b>Внимание:</b>\n"
+        "• Некоторые передачи могут завершиться ошибкой при недостатке баланса\n"
+        "• Неповторяемые ошибки будут помечены отдельно\n"
+        "• Неудачные элементы можно повторить позже\n\n"
+        "Нажмите <b>Подтвердить</b> для начала передачи."
     )
     
     await message.edit_text(preview_text, reply_markup=kb.as_markup())
@@ -667,46 +666,46 @@ async def cb_check_progress(callback: CallbackQuery, state: FSMContext, pool):
     plan_id = data.get("plan_id")
     
     if not plan_id:
-        await callback.answer("No active transfer", show_alert=True)
+        await callback.answer("Нет активной передачи", show_alert=True)
         return
-    
+
     stats = await db.get_gift_transfer_stats(pool, plan_id)
     plan = await db.get_gift_transfer_plan(pool, plan_id, callback.from_user.id)
-    
+
     kb = InlineKeyboardBuilder()
-    
+
     if stats["remaining"] > 0:
-        kb.button(text="🔄 Refresh", callback_data="gt:check_progress")
-    
+        kb.button(text="🔄 Обновить", callback_data="gt:check_progress")
+
     if stats["failed"] > 0:
         retryable = await GiftTransferService.get_retryable_items(pool, plan_id)
         if retryable:
-            kb.button(text=f"🔁 Retry ({len(retryable)} failed)", callback_data="gt:retry_failed")
-    
-    kb.button(text="📊 View Report", callback_data="gt:view_report")
-    kb.button(text="◀️ Back", callback_data="gt:main")
+            kb.button(text=f"🔁 Повторить ({len(retryable)} неудачных)", callback_data="gt:retry_failed")
+
+    kb.button(text="📊 Просмотр отчёта", callback_data="gt:view_report")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(2, 1)
-    
+
     status = plan["status"] if plan else "unknown"
     status_emoji = {"queued": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}.get(status, "❓")
-    
+
     progress_text = (
-        f"{status_emoji} <b>Transfer Progress</b>\n\n"
-        f"Plan ID: {plan_id}\n"
-        f"Status: {status.upper()}\n\n"
-        f"📦 <b>Progress:</b>\n"
-        f"• Total: {stats['total'] or 0}\n"
-        f"• Transferred: ✅ {stats['transferred'] or 0}\n"
-        f"• Failed: ❌ {stats['failed'] or 0}\n"
-        f"• Skipped: ⏭️ {stats['skipped'] or 0}\n"
-        f"• Pending: ⏳ {stats['pending'] or 0}\n"
-        f"• Remaining: {stats['remaining'] or 0}\n\n"
-        f"💰 <b>Cost:</b> {stats['actual_cost'] or 0}⭐"
+        f"{status_emoji} <b>Прогресс передачи</b>\n\n"
+        f"ID плана: {plan_id}\n"
+        f"Статус: {status.upper()}\n\n"
+        f"📦 <b>Прогресс:</b>\n"
+        f"• Всего: {stats['total'] or 0}\n"
+        f"• Передано: ✅ {stats['transferred'] or 0}\n"
+        f"• Ошибок: ❌ {stats['failed'] or 0}\n"
+        f"• Пропущено: ⏭️ {stats['skipped'] or 0}\n"
+        f"• Ожидает: ⏳ {stats['pending'] or 0}\n"
+        f"• Осталось: {stats['remaining'] or 0}\n\n"
+        f"💰 <b>Стоимость:</b> {stats['actual_cost'] or 0}⭐"
     )
-    
+
     if plan["status"] == "done":
-        progress_text += "\n\n✅ <b>Transfer Complete!</b> View report for details."
-    
+        progress_text += "\n\n✅ <b>Передача завершена!</b> Просмотрите отчёт для подробностей."
+
     await callback.message.edit_text(progress_text, reply_markup=kb.as_markup())
 
 
@@ -725,24 +724,23 @@ async def cb_retry_failed(callback: CallbackQuery, state: FSMContext, pool):
     reset_count = await GiftTransferService.reset_failed_for_retry(pool, plan_id)
     
     # Re-queue operation
-    from services.operation_bus import OperationBus
-    op_bus = OperationBus()
-    
-    op_id = await op_bus.submit(
+    from services import operation_bus as _op_bus
+
+    op_id = await _op_bus.submit(
         pool, callback.from_user.id, "gift_transfer",
         {"plan_id": plan_id, "retry": True},
         total_items=reset_count
     )
-    
+
     await state.update_data(op_id=op_id)
-    
+
     await callback.message.edit_text(
-        f"🔄 <b>Retry Started</b>\n\n"
-        f"{reset_count} failed items have been reset for retry.\n\n"
-        "Processing in background. Check progress shortly.",
+        f"🔄 <b>Повтор запущен</b>\n\n"
+        f"{reset_count} неудачных элементов сброшены для повтора.\n\n"
+        "Обработка выполняется в фоне. Скоро проверьте прогресс.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Check Progress", callback_data="gt:check_progress")],
-            [InlineKeyboardButton(text="◀️ Back to Menu", callback_data="gt:main")]
+            [InlineKeyboardButton(text="🔄 Проверить прогресс", callback_data="gt:check_progress")],
+            [InlineKeyboardButton(text="◀️ В главное меню", callback_data="gt:main")]
         ])
     )
 
@@ -765,31 +763,31 @@ async def cb_view_report(callback: CallbackQuery, state: FSMContext, pool):
     report = await GiftTransferReportService.get_report_for_plan(pool, plan_id)
     
     if not report:
-        await callback.answer("Report not available", show_alert=True)
+        await callback.answer("Отчёт недоступен", show_alert=True)
         return
-    
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Back to Menu", callback_data="gt:main")
+    kb.button(text="◀️ В главное меню", callback_data="gt:main")
     kb.adjust(1)
-    
+
     report_text = (
-        f"📊 <b>Transfer Report</b>\n\n"
-        f"👤 <b>Recipient:</b> {report.get('recipient_name', 'Unknown')}\n\n"
-        f"📦 <b>Gifts:</b>\n"
-        f"• Found: {report.get('total_gifts_found', 0)}\n"
-        f"• Selected: {report.get('total_selected', 0)}\n"
-        f"• Transferred: ✅ {report.get('transferred', 0)}\n"
-        f"• Failed: ❌ {report.get('failed', 0)}\n"
-        f"• Skipped: ⏭️ {report.get('skipped', 0)}\n"
-        f"• Pending confirmation: ⏳ {report.get('pending_confirmation', 0)}\n\n"
-        f"💰 <b>Total Cost:</b> {report.get('total_cost', 0)}⭐\n\n"
+        f"📊 <b>Отчёт о передаче</b>\n\n"
+        f"👤 <b>Получатель:</b> {report.get('recipient_name', 'Неизвестно')}\n\n"
+        f"📦 <b>Подарки:</b>\n"
+        f"• Найдено: {report.get('total_gifts_found', 0)}\n"
+        f"• Выбрано: {report.get('total_selected', 0)}\n"
+        f"• Передано: ✅ {report.get('transferred', 0)}\n"
+        f"• Ошибок: ❌ {report.get('failed', 0)}\n"
+        f"• Пропущено: ⏭️ {report.get('skipped', 0)}\n"
+        f"• Ожидает подтверждения: ⏳ {report.get('pending_confirmation', 0)}\n\n"
+        f"💰 <b>Итоговая стоимость:</b> {report.get('total_cost', 0)}⭐\n\n"
     )
-    
+
     if report.get('retryable_failures'):
-        report_text += f"⚠️ <b>Retryable failures:</b> {len(report['retryable_failures'])}\n"
-    
+        report_text += f"⚠️ <b>Повторяемые ошибки:</b> {len(report['retryable_failures'])}\n"
+
     if report.get('next_actions'):
-        report_text += "\n<b>📋 Suggested Actions:</b>\n"
+        report_text += "\n<b>📋 Рекомендуемые действия:</b>\n"
         for action in report['next_actions']:
             report_text += f"• {action['description']}\n"
     
@@ -812,22 +810,22 @@ async def cb_manage_recipients(callback: CallbackQuery, state: FSMContext, pool)
     if recipients:
         for r in recipients:
             kb.button(
-                text=f"👤 {r['name']} ({r['username'] or 'no @'})",
+                text=f"👤 {r['name']} ({r['username'] or 'нет @'})",
                 callback_data=f"gt:edit_recipient:{r['id']}"
             )
         kb.row()
-    
-    kb.button(text="➕ Add New Recipient", callback_data="gt:add_recipient")
-    kb.button(text="◀️ Back", callback_data="gt:main")
+
+    kb.button(text="➕ Добавить получателя", callback_data="gt:add_recipient")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(1)
-    
+
     recipients_text = "\n".join(
-        f"• {r['name']} — {r['username'] or 'no @'}"
+        f"• {r['name']} — {r['username'] or 'нет @'}"
         for r in recipients
-    ) if recipients else "No saved recipients."
-    
+    ) if recipients else "Нет сохранённых получателей."
+
     await callback.message.edit_text(
-        "👥 <b>Saved Recipients</b>\n\n"
+        "👥 <b>Сохранённые получатели</b>\n\n"
         f"{recipients_text}",
         reply_markup=kb.as_markup()
     )
@@ -852,12 +850,12 @@ async def cb_view_reports(callback: CallbackQuery, state: FSMContext, pool):
             callback_data=f"gt:report_detail:{r['id']}"
         )
     
-    kb.button(text="◀️ Back", callback_data="gt:main")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        "📊 <b>Transfer Reports</b>\n\n"
-        "Recent transfer reports:",
+        "📊 <b>Отчёты о передачах</b>\n\n"
+        "Последние отчёты о передаче подарков:",
         reply_markup=kb.as_markup()
     )
 
@@ -870,28 +868,51 @@ async def cb_help(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Back", callback_data="gt:main")
+    kb.button(text="◀️ Назад", callback_data="gt:main")
     kb.adjust(1)
-    
+
     await callback.message.edit_text(
-        "❓ <b>Gift Transfer Help</b>\n\n"
-        "<b>How it works:</b>\n"
-        "1. Scan your accounts for Telegram star gifts\n"
-        "2. Select which accounts' gifts to transfer\n"
-        "3. Choose a recipient (@username or saved)\n"
-        "4. Review the plan and total cost\n"
-        "5. Press <b>Confirm</b> once\n"
-        "6. Transfers happen automatically\n\n"
-        "<b>Payment:</b>\n"
-        "• Telegram Stars — pay from Stars balance\n"
-        "• @wallet — use connected Wallet bot\n"
-        "• Auto — system chooses best option\n\n"
-        "<b>Failed transfers:</b>\n"
-        "• Insufficient balance — retry after adding Stars\n"
-        "• Rate limits — wait and retry\n"
-        "• External confirmation — confirm in Telegram app\n\n"
-        "<b>Non-transferable gifts:</b>\n"
-        "• Some gifts cannot be transferred\n"
-        "• These will be automatically skipped",
+        "❓ <b>Справка по передаче подарков</b>\n\n"
+        "<b>Как это работает:</b>\n"
+        "1. Сканируйте аккаунты на наличие Telegram-подарков\n"
+        "2. Выберите аккаунты с подарками для передачи\n"
+        "3. Укажите получателя (@username или сохранённый)\n"
+        "4. Ознакомьтесь с планом и итоговой стоимостью\n"
+        "5. Нажмите <b>Подтвердить</b> один раз\n"
+        "6. Передача выполняется автоматически\n\n"
+        "<b>Оплата:</b>\n"
+        "• Telegram Stars — оплата из баланса Stars\n"
+        "• @wallet — использовать подключённый Wallet-бот\n"
+        "• Авто — система выберет лучший вариант\n\n"
+        "<b>Неудачные передачи:</b>\n"
+        "• Недостаточно баланса — добавьте Stars и повторите\n"
+        "• Лимиты запросов — подождите и повторите\n"
+        "• Внешнее подтверждение — подтвердите в приложении Telegram\n\n"
+        "<b>Непередаваемые подарки:</b>\n"
+        "• Некоторые подарки нельзя передать\n"
+        "• Они будут автоматически пропущены",
         reply_markup=kb.as_markup()
+    )
+
+@router.message(Command("gifts"))
+async def cmd_gifts(message: Message, state: FSMContext) -> None:
+    """Entry point for Gift Transfer via /gifts command."""
+    await state.set_state(GiftTransferFSM.main_menu)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔍 Сканировать подарки", callback_data="gt:scan")
+    kb.button(text="📤 Передать подарки", callback_data="gt:transfer")
+    kb.button(text="👥 Получатели", callback_data="gt:recipients")
+    kb.button(text="📊 Отчёты", callback_data="gt:reports")
+    kb.button(text="❓ Помощь", callback_data="gt:help")
+    kb.button(text="◀️ Назад", callback_data="main_menu")
+    kb.adjust(1)
+    await message.answer(
+        "🎁 <b>Менеджер передачи подарков</b>\n\n"
+        "Массовая передача Telegram-подарков с нескольких аккаунтов одному получателю.\n\n"
+        "• Сканирование подарков на аккаунтах\n"
+        "• Выбор получателя\n"
+        "• Просмотр плана и стоимости\n"
+        "• Одно подтверждение → автоматическая передача",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )

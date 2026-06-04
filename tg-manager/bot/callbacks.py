@@ -324,8 +324,8 @@ class DmCb(CallbackData, prefix="dm"):
 
 
 class GiftTransferCb(CallbackData, prefix="gt"):
-    action: str = ""
-    id: str = ""
+    action: str
+    id: Optional[str] = None
     page: int = 0
 
 
