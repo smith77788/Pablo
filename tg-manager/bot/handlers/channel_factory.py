@@ -1149,7 +1149,12 @@ async def cb_chanf_be_confirm(
     )
 
     for acc in accounts:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+        try:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+        except Exception as _e:
+            log.warning("bulk_edit get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+            err_total += 1
+            continue
         channels = [
             d
             for d in dialogs
@@ -1228,7 +1233,16 @@ async def cb_chanf_gen_links_acc(
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    except Exception as _e:
+        log.warning("gen_links get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     channels = [
         d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")
     ]
@@ -1358,7 +1372,16 @@ async def cb_chanf_stats_acc(
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    except Exception as _e:
+        log.warning("stats_acc get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     channels = [
         d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")
     ]
@@ -1417,8 +1440,16 @@ async def cb_chanf_stats_chan(
     await callback.answer("⏳ Получаю статистику...")
     from services import account_manager
 
-    # Get dialogs to find the channel metadata
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    except Exception as _e:
+        log.warning("stats_channel get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить данные канала: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     chan_data = next((d for d in dialogs if d["id"] == callback_data.channel_id), None)
 
     if not chan_data:

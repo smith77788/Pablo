@@ -1012,6 +1012,143 @@ async def cb_bulk_pacing(
     await _render_bulk_confirm(callback, state, pacing=pacing_key)
 
 
+async def _bulk_create_bg(
+    pool: asyncpg.Pool,
+    progress_msg,
+    data: dict,
+    accounts: list,
+    user_id: int,
+) -> None:
+    """Фоновое выполнение массового создания каналов с round-robin по аккаунтам."""
+    from services import account_manager
+    from database import db as _db
+
+    channel_count = data.get("channel_count", 1)
+    name_mode = data.get("name_mode", "none")
+    results_ok: list[str] = []
+    results_err: list[str] = []
+    total_ops = len(accounts) * channel_count
+    done_ops = 0
+    global_idx = 1
+    attempt = 0
+
+    active_accounts = list(accounts)
+    task_list = [
+        (i, active_accounts[i % len(active_accounts)] if active_accounts else None)
+        for i in range(total_ops)
+    ]
+
+    try:
+        for task_i, acc in task_list:
+            if not acc:
+                results_err.append("❌ Нет доступных аккаунтов")
+                done_ops += 1
+                global_idx += 1
+                continue
+            label = html.escape(acc["first_name"] or acc["phone"])
+            title = _make_title(
+                data["title"], name_mode, global_idx, acc["first_name"] or acc["phone"]
+            )
+            tried_accs: set[int] = set()
+            result = None
+            for candidate in active_accounts:
+                if candidate["id"] in tried_accs:
+                    continue
+                tried_accs.add(candidate["id"])
+                result = await account_manager.create_channel(
+                    candidate["session_str"],
+                    title=title,
+                    about=data.get("about", ""),
+                    megagroup=data.get("is_group", False),
+                    _acc=dict(candidate),
+                )
+                if result.get("banned"):
+                    await _db.deactivate_account(
+                        pool, candidate["id"], "banned detected in bulk op"
+                    )
+                    active_accounts = [
+                        a for a in active_accounts if a["id"] != candidate["id"]
+                    ]
+                    continue
+                if result.get("flood_wait"):
+                    continue
+                break
+            if result is None:
+                result = {"error": "нет доступных аккаунтов"}
+            if "error" in result:
+                results_err.append(
+                    f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}"
+                )
+            else:
+                results_ok.append(
+                    f"✅ {html.escape(title)}: id={result.get('channel_id', '?')}"
+                )
+            done_ops += 1
+            global_idx += 1
+            try:
+                await progress_msg.edit_text(
+                    _progress_text(
+                        "Создание каналов...",
+                        done_ops,
+                        total_ops,
+                        len(results_ok),
+                        len(results_err),
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Сбой обновления прогресса bulk-создания")
+            if done_ops < total_ops:
+                attempt = (attempt + 1) % 5
+                pacing_key = data.get("bulk_pacing", _DEFAULT_PACING)
+                preset = _BULK_PACING.get(pacing_key, _BULK_PACING[_DEFAULT_PACING])
+                cooldown_every = preset["cooldown_every"]
+                if (task_i + 1) % cooldown_every == 0:
+                    base_delay = _human_delay(*preset["cooldown_delay"])
+                else:
+                    base_delay = _human_delay(*preset["item_delay"])
+                chaos = session_simulator.chaos_factor()
+                flood = result.get("flood_wait", 0)
+                await asyncio.sleep(
+                    max(backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos)
+                )
+    except asyncio.CancelledError:
+        ok = len(results_ok)
+        err = len(results_err)
+        try:
+            await progress_msg.edit_text(
+                f"❌ <b>Создание каналов отменено</b>\n\n"
+                f"✅ Создано: <b>{ok}</b>  ❌ Ошибок: <b>{err}</b>",
+                parse_mode="HTML",
+                reply_markup=_back_kb().as_markup(),
+            )
+        except Exception:
+            pass
+        raise
+    except Exception as exc:
+        log.exception("bulk_create_bg FATAL user=%s: %s", user_id, exc)
+        try:
+            await progress_msg.edit_text(
+                f"❌ <b>Ошибка при создании каналов</b>\n\n<code>{html.escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_back_kb().as_markup(),
+            )
+        except Exception:
+            pass
+        return
+
+    lines = ["🔁 <b>Результаты массового создания</b>\n"]
+    lines += results_ok + results_err
+    try:
+        await progress_msg.edit_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+    except Exception:
+        pass
+
+
 @router.callback_query(ChanCb.filter(F.action == "do_bulk_create"))
 async def cb_do_bulk_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
@@ -1037,112 +1174,27 @@ async def cb_do_bulk_create(
             "WHERE a.owner_id=$1 AND a.is_active=TRUE",
             callback.from_user.id,
         )
-    from services import account_manager
-    from database import db as _db
 
     channel_count = data.get("channel_count", 1)
-    name_mode = data.get("name_mode", "none")
-    results_ok, results_err = [], []
     total_ops = len(accounts) * channel_count
-    done_ops = 0
-    global_idx = 1
-    attempt = 0
+    user_id = callback.from_user.id
+
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет доступных аккаунтов для создания каналов.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
     progress_msg = await callback.message.edit_text(
         _progress_text("Создание каналов...", 0, total_ops, 0, 0),
         parse_mode="HTML",
     )
-    # Round-robin: task i uses accounts[i % len(accounts)]
-    active_accounts = list(accounts)
-    tasks = []
-    for i in range(total_ops):
-        acc = active_accounts[i % len(active_accounts)] if active_accounts else None
-        tasks.append((i, acc))
-
-    for task_i, acc in tasks:
-        if not acc:
-            results_err.append("❌ Нет доступных аккаунтов")
-            done_ops += 1
-            global_idx += 1
-            continue
-        label = html.escape(acc["first_name"] or acc["phone"])
-        title = _make_title(
-            data["title"], name_mode, global_idx, acc["first_name"] or acc["phone"]
-        )
-        # Account rotation on banned/flood_wait
-        tried_accs = set()
-        result = None
-        for candidate in active_accounts:
-            if candidate["id"] in tried_accs:
-                continue
-            tried_accs.add(candidate["id"])
-            result = await account_manager.create_channel(
-                candidate["session_str"],
-                title=title,
-                about=data.get("about", ""),
-                megagroup=data.get("is_group", False),
-                _acc=dict(candidate),
-            )
-            if result.get("banned"):
-                await _db.deactivate_account(
-                    pool, candidate["id"], "banned detected in bulk op"
-                )
-                active_accounts = [
-                    a for a in active_accounts if a["id"] != candidate["id"]
-                ]
-                continue
-            if result.get("flood_wait"):
-                continue
-            break
-        if result is None:
-            result = {"error": "нет доступных аккаунтов"}
-        if "error" in result:
-            results_err.append(
-                f"❌ {html.escape(label)}: {html.escape(result['error'][:60])}"
-            )
-        else:
-            results_ok.append(
-                f"✅ {html.escape(title)}: id={result.get('channel_id', '?')}"
-            )
-        done_ops += 1
-        global_idx += 1
-        try:
-            await progress_msg.edit_text(
-                _progress_text(
-                    "Создание каналов...",
-                    done_ops,
-                    total_ops,
-                    len(results_ok),
-                    len(results_err),
-                ),
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Сбой обновления прогресса bulk-создания")
-        # Apply pacing-aware delay between operations
-        if done_ops < total_ops:
-            attempt = (attempt + 1) % 5  # rotate 0-4 for backoff
-            pacing_key = data.get("bulk_pacing", _DEFAULT_PACING)
-            preset = _BULK_PACING.get(pacing_key, _BULK_PACING[_DEFAULT_PACING])
-            cooldown_every = preset["cooldown_every"]
-
-            if (task_i + 1) % cooldown_every == 0:
-                base_delay = _human_delay(*preset["cooldown_delay"])
-            else:
-                base_delay = _human_delay(*preset["item_delay"])
-
-            chaos = session_simulator.chaos_factor()
-            flood = result.get("flood_wait", 0)
-            await asyncio.sleep(
-                max(backoff(attempt, base=2.0, cap=30.0), flood, base_delay * chaos)
-            )
-
-    lines = ["🔁 <b>Результаты массового создания</b>\n"]
-    lines += results_ok + results_err
-    await progress_msg.edit_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
+    task = asyncio.create_task(
+        _bulk_create_bg(pool, progress_msg, dict(data), list(accounts), user_id)
     )
+    _treg.register(user_id, "bulk_create", f"Создание каналов ({total_ops} шт.)", task)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1209,7 +1261,16 @@ async def cb_bulk_post_chans_acc(
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    except Exception as _e:
+        log.warning("bpchans get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить каналы аккаунта: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     channels = [
         d
         for d in (dialogs or [])
@@ -1538,7 +1599,16 @@ async def cb_leave_show_dialogs(
         return
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    except Exception as _e:
+        log.warning("leave get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     if not dialogs:
         await callback.message.edit_text(
             "ℹ️ <b>Каналов не найдено</b>\n\n"
@@ -2287,7 +2357,16 @@ async def cb_members_dialogs(
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    except Exception as _e:
+        log.warning("members get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     if not dialogs:
         await callback.message.edit_text(
             "ℹ️ <b>Нет каналов/групп</b>\n\n"
@@ -3386,7 +3465,16 @@ async def cb_react_dialogs(
     await callback.answer("⏳ Загружаю каналы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+    except Exception as _e:
+        log.warning("react_dialogs get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     await state.update_data(acc_id=callback_data.acc_id)
     if not dialogs:
         await callback.message.edit_text(

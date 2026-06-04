@@ -23,6 +23,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
 from bot.utils.subscription import locked_text, require_plan
+from services import task_registry as _treg
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -394,7 +395,16 @@ async def cb_group_list_acc(
     await callback.answer("⏳ Загружаю группы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    except Exception as _e:
+        log.warning("my_groups get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список групп: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     groups = [
         d
         for d in (dialogs or [])
@@ -473,7 +483,16 @@ async def cb_group_members_acc(
     await callback.answer("⏳ Загружаю группы...")
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    except Exception as _e:
+        log.warning("members_acc get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список групп: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     groups = [
         d
         for d in (dialogs or [])
@@ -836,10 +855,86 @@ async def fsm_announce_text(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(GroupFCb.filter(F.action == "do_announce"))
+async def _group_announce_bg(
+    acc: dict, groups: list, announce_text: str, progress_msg, user_id: int
+) -> None:
+    """Фоновая отправка объявления во все группы аккаунта."""
+    from services import account_manager
+
+    total = len(groups)
+    ok_count = 0
+    err_count = 0
+    try:
+        for idx, grp in enumerate(groups, 1):
+            access_hash = grp.get("access_hash", 0) or 0
+            try:
+                result = await account_manager.post_to_channel(
+                    acc["session_str"],
+                    grp["id"],
+                    announce_text,
+                    access_hash=access_hash,
+                    _acc=acc,
+                )
+                if "error" in result or result.get("banned"):
+                    err_count += 1
+                else:
+                    ok_count += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log_exc_swallow(
+                    log, "Ошибка отправки объявления в группу %s", grp.get("id")
+                )
+                err_count += 1
+
+            try:
+                await progress_msg.edit_text(
+                    f"⏳ Отправляю объявление... {idx}/{total}\n✅ {ok_count} ❌ {err_count}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(log, "Ошибка обновления прогресса отправки объявления")
+            if idx < total:
+                await asyncio.sleep(3)
+    except asyncio.CancelledError:
+        try:
+            await progress_msg.edit_text(
+                f"❌ <b>Объявление отменено</b>\n\n✅ Отправлено: <b>{ok_count}</b>  ❌ Ошибок: <b>{err_count}</b>",
+                parse_mode="HTML",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
+        except Exception:
+            pass
+        raise
+    except Exception as exc:
+        log.exception("group_announce_bg FATAL user=%s: %s", user_id, exc)
+        try:
+            await progress_msg.edit_text(
+                f"❌ <b>Ошибка при отправке объявления</b>\n\n<code>{html.escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+                reply_markup=_back_menu_kb().as_markup(),
+            )
+        except Exception:
+            pass
+        return
+
+    try:
+        await progress_msg.edit_text(
+            f"✅ <b>Объявление отправлено</b>\n\n"
+            f"Всего групп: {total}\n"
+            f"Успешно: {ok_count}\n"
+            f"Ошибок: {err_count}",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+    except Exception:
+        pass
+
+
 async def cb_group_do_announce(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Отправляю...")
+    await callback.answer("⏳ Запускаю...")
     data = await state.get_data()
     await state.clear()
 
@@ -868,7 +963,17 @@ async def cb_group_do_announce(
 
     from services import account_manager
 
-    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    try:
+        dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+    except Exception as exc:
+        log.warning("group_do_announce: get_dialogs failed: %s", exc)
+        await callback.message.edit_text(
+            f"❌ Не удалось получить список групп: <code>{html.escape(str(exc)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
     groups = [
         d
         for d in (dialogs or [])
@@ -883,48 +988,12 @@ async def cb_group_do_announce(
         )
         return
 
-    total = len(groups)
-    ok_count = 0
-    err_count = 0
+    user_id = callback.from_user.id
     progress_msg = await callback.message.edit_text(
-        f"⏳ Отправляю объявление... 0/{total}",
+        f"⏳ Запускаю отправку объявления в {len(groups)} групп(ы)...\n<i>Для отмены: /tasks</i>",
         parse_mode="HTML",
     )
-
-    for idx, grp in enumerate(groups, 1):
-        access_hash = grp.get("access_hash", 0) or 0
-        try:
-            result = await account_manager.post_to_channel(
-                acc["session_str"],
-                grp["id"],
-                announce_text,
-                access_hash=access_hash,
-                _acc=acc,
-            )
-            if "error" in result or result.get("banned"):
-                err_count += 1
-            else:
-                ok_count += 1
-        except Exception:
-            log_exc_swallow(
-                log, "Ошибка отправки объявления в группу %s", grp.get("id")
-            )
-            err_count += 1
-
-        try:
-            await progress_msg.edit_text(
-                f"⏳ Отправляю объявление... {idx}/{total}\n✅ {ok_count} ❌ {err_count}",
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Ошибка обновления прогресса отправки объявления")
-        await asyncio.sleep(3)
-
-    await progress_msg.edit_text(
-        f"✅ <b>Объявление отправлено</b>\n\n"
-        f"Всего групп: {total}\n"
-        f"Успешно: {ok_count}\n"
-        f"Ошибок: {err_count}",
-        parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
+    task = asyncio.create_task(
+        _group_announce_bg(dict(acc), groups, announce_text, progress_msg, user_id)
     )
+    _treg.register(user_id, "announce", f"Объявление в {len(groups)} групп", task)
