@@ -253,7 +253,7 @@ async def record_reentry(
             owner_id,
             entity_type,
             entity_id,
-            json.dumps({"days_absent": round(days_absent, 1)}),
+            json.dumps({"days_absent": round(days_absent, 1)}, ensure_ascii=False),
         )
     except Exception:
         log.exception("record_reentry error")
@@ -281,7 +281,7 @@ async def record_search_repeat(
             "(owner_id, entity_type, entity_id, event_type, meta) "
             "VALUES ($1, 'keyword', 0, 'search_repeat', $2)",
             owner_id,
-            json.dumps({"keyword": keyword}),
+            json.dumps({"keyword": keyword}, ensure_ascii=False),
         )
     except Exception:
         log.exception("record_search_repeat error")
@@ -303,7 +303,8 @@ async def record_cross_nav(
                 "from_id": from_id,
                 "to_type": to_type,
                 "to_id": to_id,
-            }
+            },
+            ensure_ascii=False,
         )
         await pool.execute(
             "INSERT INTO behavioral_events"
@@ -355,7 +356,8 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                         "type": "decay_spike",
                         "decay_rate": float(r["decay_rate"]),
                         "attention_score": float(r["attention_score"]),
-                    }
+                    },
+                    ensure_ascii=False,
                 ),
             )
 
@@ -381,7 +383,8 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                         "days_absent": (
                             datetime.now(tz=timezone.utc) - r["last_searched"]
                         ).days,
-                    }
+                    },
+                    ensure_ascii=False,
                 ),
             )
 
@@ -402,7 +405,7 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 r["owner_id"],
                 r["entity_type"],
                 r["entity_id"],
-                json.dumps({"type": "reentry_burst", "count": int(r["cnt"])}),
+                json.dumps({"type": "reentry_burst", "count": int(r["cnt"])}, ensure_ascii=False),
             )
 
         if decay_anomalies or cold_keywords or burst_rows:
@@ -457,7 +460,8 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                         "ratio": round(
                             float(r["current_hour"]) / max(1, float(r["avg_hourly"])), 1
                         ),
-                    }
+                    },
+                    ensure_ascii=False,
                 ),
             )
 
@@ -517,7 +521,8 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                         "baseline_attention": float(r["baseline_att"] or 0),
                         "current_ecosystem": float(r["ecosystem_score"]),
                         "baseline_ecosystem": float(r["baseline_eco"] or 0),
-                    }
+                    },
+                    ensure_ascii=False,
                 ),
             )
 
@@ -595,7 +600,8 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                         "unusual_hour": unusual,
                         "normal_hours": normal,
                         "detail": f"Активность в {unusual}:00, обычно в {normal}",
-                    }
+                    },
+                    ensure_ascii=False,
                 ),
             )
 

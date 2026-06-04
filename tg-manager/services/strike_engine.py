@@ -2514,7 +2514,8 @@ async def execute_mini_strike(
                     "emails": result["emails"],
                     "abuse_form": result["abuse_form"],
                     "errors": result["errors"],
-                }
+                },
+                ensure_ascii=False,
             ),
         )
     except Exception as e:

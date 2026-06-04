@@ -247,7 +247,8 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
                                 {"name": m["template_name"], "ratio": m["ratio"]}
                                 for m in tpl_result["matched_templates"]
                             ],
-                        }
+                        },
+                        ensure_ascii=False,
                     ),
                 )
                 # Update stored values

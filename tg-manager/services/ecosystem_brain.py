@@ -1103,7 +1103,7 @@ async def create_dna(
         name,
         dna_type,
         description,
-        _json.dumps(template_data or {}),
+        _json.dumps(template_data or {}, ensure_ascii=False),
         is_public,
     )
     return row["id"]

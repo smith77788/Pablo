@@ -993,7 +993,7 @@ async def cb_eco_dna_save(
         eco["name"] + " — ДНК",
         eco["ecosystem_type"],
         f"Шаблон из экосистемы {eco['name']}",
-        _json.dumps(member_counts and template_data or {}),
+        _json.dumps(member_counts and template_data or {}, ensure_ascii=False),
     )
 
     await pool.execute(

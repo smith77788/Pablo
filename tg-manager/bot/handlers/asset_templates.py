@@ -270,7 +270,7 @@ async def _save_template(
         owner_id,
         asset_type,
         name,
-        json.dumps(template),
+        json.dumps(template, ensure_ascii=False),
     )
     return row["id"]
 

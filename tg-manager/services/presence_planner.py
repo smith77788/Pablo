@@ -7,17 +7,10 @@ from services.username_engine import slugify
 
 def render_pattern(pattern: str, geo: dict) -> str:
     """Replace {{PLACEHOLDER}} tokens in pattern with geo values. Never crashes."""
-    # DEBUG: log input
-    import logging
-    log = logging.getLogger("presence_planner")
-    log.info("🔍 render_pattern: pattern='%s' city=%s city_native=%s", 
-             pattern, geo.get("city"), geo.get("city_native"))
-    
     city_slug = geo.get("city_slug") or slugify(geo.get("city", ""))
     country_slug = geo.get("country_slug") or slugify(geo.get("country", ""))
     # {{CITY_NAME}} = нативное название (Москва, Київ, Wien), fallback → английское
     city_native = geo.get("city_native") or geo.get("city") or ""
-    log.info("🔍 city_native='%s'", city_native)
     replacements = {
         "{{CITY}}": geo.get("city") or "",
         "{{CITY_NAME}}": city_native,

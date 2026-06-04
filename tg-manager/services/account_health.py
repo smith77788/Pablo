@@ -284,7 +284,7 @@ async def _persist_health_snapshots(pool: asyncpg.Pool) -> int:
                 health.success_ops,
                 health.fail_ops,
                 health.warmup_state.value,
-                _json.dumps(health.suitability),
+                _json.dumps(health.suitability, ensure_ascii=False),
             )
         )
 

@@ -84,7 +84,7 @@ async def _record_event(
         bot_id,
         event_type,
         severity,
-        json.dumps(details),
+        json.dumps(details, ensure_ascii=False),
     )
 
 

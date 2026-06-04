@@ -585,7 +585,7 @@ async def cb_dm_launch_or_draft(
         target_type,
         target_id,
         initial_status,
-        _json.dumps(params_dict) if params_dict else "{}",
+        _json.dumps(params_dict, ensure_ascii=False) if params_dict else "{}",
     )
     await state.clear()
 

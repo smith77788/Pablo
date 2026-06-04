@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import html
 import logging
 
 import asyncpg
@@ -1272,19 +1274,37 @@ async def cb_gp_confirm_preview(
 
     # Intelligence block
     try:
-        intel = await intelligence_engine.get_pre_launch_intelligence(
-            pool,
-            callback.from_user.id,
-            "global_presence",
-            n_cities,
-            account_ids=selected_acc_ids if selected_acc_ids else None,
+        intel = await asyncio.wait_for(
+            intelligence_engine.get_pre_launch_intelligence(
+                pool,
+                callback.from_user.id,
+                "global_presence",
+                n_cities,
+                account_ids=selected_acc_ids if selected_acc_ids else None,
+            ),
+            timeout=30.0,
         )
         intel_text = intelligence_engine.format_pre_launch_block(intel)
         if not intel.go_decision:
             await state.set_state(GlobalPresenceFSM.previewing)
-            await callback.answer(intel.go_reason, show_alert=True)
+            kb_err = InlineKeyboardBuilder()
+            kb_err.button(
+                text="◀️ Назад к аккаунтам",
+                callback_data=GeoPresenceCb(action="back_to_acc"),
+            )
+            kb_err.button(
+                text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel")
+            )
+            kb_err.adjust(1)
+            await _edit(
+                callback,
+                f"🚫 <b>Запуск заблокирован</b>\n\n"
+                f"{html.escape(intel.go_reason)}\n\n"
+                f"Исправьте проблему и попробуйте снова.",
+                markup=kb_err.as_markup(),
+            )
             return
-    except Exception:
+    except (asyncio.TimeoutError, Exception):
         intel_text = ""
 
     await state.set_state(GlobalPresenceFSM.confirming)

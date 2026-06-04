@@ -37,7 +37,7 @@ async def create_pool() -> asyncpg.Pool:
                 seen.add(bn)
                 schema_files.append(p)
         for path in schema_files:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 sql = f.read().strip()
             if sql:
                 try:
@@ -2886,8 +2886,8 @@ async def create_global_presence_plan(
         asset_type,
         name_pattern,
         username_pattern,
-        json.dumps(geo_selection),
-        json.dumps(account_selection),
+        json.dumps(geo_selection, ensure_ascii=False),
+        json.dumps(account_selection, ensure_ascii=False),
         template_id,
     )
 
@@ -3365,7 +3365,8 @@ async def grant_plan_to_user(
             admin_id,
             user_id,
             json.dumps(
-                {"plan": plan, "months": months, "expires_at": expires.isoformat()}
+                {"plan": plan, "months": months, "expires_at": expires.isoformat()},
+                ensure_ascii=False,
             ),
         )
     except Exception:
@@ -3605,8 +3606,8 @@ async def update_presence_pack_channels(
         "UPDATE presence_packs SET channel_ids=$3, group_ids=$4 WHERE id=$1 AND owner_id=$2",
         pack_id,
         owner_id,
-        json.dumps(channel_ids),
-        json.dumps(group_ids),
+        json.dumps(channel_ids, ensure_ascii=False),
+        json.dumps(group_ids, ensure_ascii=False),
     )
 
 
@@ -3655,7 +3656,7 @@ async def enqueue_op_with_approval(
            VALUES ($1,$2,$3,$4,$5,$6,now()) RETURNING id""",
         owner_id,
         op_type,
-        _json.dumps(params) if isinstance(params, dict) else params,
+        _json.dumps(params, ensure_ascii=False) if isinstance(params, dict) else params,
         total_items,
         status,
         needs_approval,
@@ -4015,7 +4016,7 @@ async def save_pressure_cache(
            SET pressure_score=$2, breakdown=$3, computed_at=NOW()""",
         owner_id,
         score,
-        json.dumps(breakdown),
+        json.dumps(breakdown, ensure_ascii=False),
     )
 
 
