@@ -2211,9 +2211,7 @@ async def _exec_bulk_create_channels(
                 title,
                 username or None,
             )
-            # Set username if pattern provided — with variant fallback on collision
-            # Delay before setting public username: setting it immediately after creation
-            # is a strong spam signal. Minimum 60-120s delay reduces risk.
+            # Set username if pattern provided — 60-120s delay prevents geo-ban detection
             if username:
                 await asyncio.sleep(random.uniform(60, 120))
                 err = await account_manager.set_channel_username(
