@@ -839,7 +839,71 @@ async def _adm_section_ai(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await _adm_section_ai(callback, pool)
+    """Live ping each configured AI provider and report latency/status."""
+    import time as _time
+    from services.ai_providers import configured_providers
+
+    await callback.message.edit_text(
+        "🧠 <b>Проверяю AI провайдеры...</b>\n\n⏳ Тестирую соединение с каждым...",
+        parse_mode="HTML",
+    )
+
+    providers = configured_providers()
+    if not providers:
+        await callback.message.edit_text(
+            "🧠 <b>Статус AI</b>\n\n❌ Нет настроенных провайдеров.\n\n"
+            "Добавьте API ключи через 🔑 Переменные AI.",
+            parse_mode="HTML",
+            reply_markup=_admin_section_kb("ai"),
+        )
+        return
+
+    async def _ping_one(provider) -> tuple[str, bool, int]:
+        t0 = _time.monotonic()
+        try:
+            payload = {
+                "model": provider.models[0],
+                "messages": [{"role": "user", "content": "1+1=?"}],
+                "max_tokens": 5,
+            }
+            headers = {"Authorization": f"Bearer {provider.api_key}", "Content-Type": "application/json"}
+            import aiohttp
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(
+                    f"{provider.base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                    ssl=False,
+                ) as resp:
+                    ok = resp.status < 500
+                    ms = int((_time.monotonic() - t0) * 1000)
+                    return provider.name, ok, ms
+        except Exception:
+            ms = int((_time.monotonic() - t0) * 1000)
+            return provider.name, False, ms
+
+    results = await asyncio.gather(*[_ping_one(p) for p in providers], return_exceptions=True)
+
+    lines = ["🧠 <b>Статус AI провайдеров (live)</b>", ""]
+    for r in results:
+        if isinstance(r, BaseException):
+            lines.append(f"❓ Неизвестная ошибка: {r}")
+            continue
+        name, ok, ms = r
+        icon = "✅" if ok else "❌"
+        lines.append(f"{icon} <b>{name}</b> · {ms} мс")
+
+    lines.extend(["", "<i>Обновлено сейчас</i>"])
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data="adm:ai_status")
+    kb.button(text="◀️ Назад", callback_data="adm:section_ai")
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 async def _adm_section_system(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -1110,25 +1174,33 @@ async def _adm_price_edit_ask(
     )
 
 
+_SWARM_MODE_DESCRIPTIONS = {
+    "manual":     "🟢 Manual — вы запускаете каждую операцию вручную. Полный контроль, ничего автоматически.",
+    "assisted":   "🟡 Assisted — система предлагает оптимизации, но вы подтверждаете. Рекомендуется для начала.",
+    "autopilot":  "🔵 Autopilot — автоматически оптимизирует расписание, очередь и роутинг операций.",
+    "growth":     "🔴 Growth — агрессивный рост: максимальная скорость операций, больше аккаунтов в параллели.",
+    "experiment": "🟣 Experiment — максимальное A/B тестирование, пробует новые стратегии роутинга.",
+    "stability":  "⚫ Stability — фиксированный роутинг без изменений, приоритет надёжности над скоростью.",
+}
+
 async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     current = await db.get_system_mode(pool)
-    modes = {
-        "manual": "🟢 Manual — ручной контроль",
-        "assisted": "🟡 Assisted — система предлагает",
-        "autopilot": "🔵 Autopilot — авто-оптимизация",
-        "growth": "🔴 Growth — агрессивный рост",
-        "experiment": "🟣 Experiment — макс. тестирование",
-        "stability": "⚫ Stability — фиксированный роутинг",
-    }
     kb = InlineKeyboardBuilder()
-    for mode, label in modes.items():
+    for mode, desc in _SWARM_MODE_DESCRIPTIONS.items():
         prefix = "✅ " if mode == current else ""
-        kb.button(text=f"{prefix}{label}", callback_data=f"adm:set_mode:{mode}")
-    kb.button(text="◀️ Назад", callback_data="adm:main")
+        short_label = desc.split("—")[0].strip()
+        kb.button(text=f"{prefix}{short_label}", callback_data=f"adm:set_mode:{mode}")
+    kb.button(text="◀️ Назад", callback_data="adm:section_ai")
     kb.adjust(1)
+
+    current_desc = _SWARM_MODE_DESCRIPTIONS.get(current, current)
+    desc_lines = "\n".join(f"  {d}" for d in _SWARM_MODE_DESCRIPTIONS.values())
     await callback.message.edit_text(
-        f"⚙️ <b>Swarm системный режим</b>\n\nТекущий: <b>{current.upper()}</b>\n\n"
-        "Режим определяет поведение всего swarm-роутинга:",
+        f"⚙️ <b>Swarm режим</b>\n\n"
+        f"Текущий: <b>{current.upper()}</b>\n"
+        f"<i>{current_desc.split('—',1)[-1].strip()}</i>\n\n"
+        f"<b>Описание режимов:</b>\n{desc_lines}\n\n"
+        "Выберите режим работы системы:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
