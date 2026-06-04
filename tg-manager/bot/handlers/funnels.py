@@ -1,5 +1,6 @@
 """Funnel (message chain) management handlers."""
 
+import html as _html
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -208,7 +209,7 @@ async def msg_fn_name(message: Message, state: FSMContext) -> None:
     await state.update_data(funnel_name=name)
     await state.set_state(CreateFunnel.waiting_trigger)
     await message.answer(
-        f"📝 Название: <b>{name}</b>\n\nВыберите тип триггера:",
+        f"📝 Название: <b>{_html.escape(name)}</b>\n\nВыберите тип триггера:",
         parse_mode="HTML",
         reply_markup=funnel_trigger_menu(data["bot_id"]),
     )
@@ -247,7 +248,7 @@ async def cb_fn_trig_start(
     kb.adjust(1)
     await callback.message.edit_text(
         "✅ <b>Воронка создана!</b>\n\n"
-        f"🔗 <b>{funnel_name}</b>\n"
+        f"🔗 <b>{_html.escape(funnel_name)}</b>\n"
         "▶️ Триггер: <b>/start</b>\n\n"
         "Добавьте первый шаг или вернитесь к списку воронок.",
         parse_mode="HTML",
@@ -309,8 +310,8 @@ async def msg_fn_keyword(
     kb.adjust(1)
     await message.answer(
         "✅ <b>Воронка создана!</b>\n\n"
-        f"🔗 <b>{funnel_name}</b>\n"
-        f"🔑 Ключевое слово: <code>{keyword}</code>\n\n"
+        f"🔗 <b>{_html.escape(funnel_name)}</b>\n"
+        f"🔑 Ключевое слово: <code>{_html.escape(keyword)}</code>\n\n"
         "Добавьте первый шаг или вернитесь к списку воронок.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

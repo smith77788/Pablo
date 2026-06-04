@@ -206,9 +206,10 @@ async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         data.get("keyword"),
         text,
     )
+    _kw = _html.escape(data.get("keyword") or "")
     trigger_label = {
         "start": "/start",
-        "keyword": f"🔑 {data.get('keyword')}",
+        "keyword": f"🔑 {_kw}",
         "any": "любое сообщение",
     }.get(data["trigger_type"])
     await message.answer(
