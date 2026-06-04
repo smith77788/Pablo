@@ -1475,9 +1475,36 @@ async def _exec_global_presence_channel(
                     "city": target.get("city", ""),
                     "city_slug": target.get("city_slug", ""),
                 }
+                # ── Расширенная генерация вариантов username ──
+                from services.username_engine import slugify
                 variants = generate_username_variants(planned_username, geo)
-                for variant in variants[1:4]:
-                    await asyncio.sleep(random.uniform(8, 15))
+
+                # Добавляем город + случайное число
+                city_slug = slugify(geo.get("city", ""))[:10] if geo else ""
+                cc = slugify(geo.get("country_code", ""))[:3] if geo else ""
+                for num in [10, 15, 20, 25, 30, 35, 40, 45, 50]:
+                    if city_slug:
+                        variants.append(f"{city_slug}_{num}")
+                    if cc and city_slug:
+                        variants.append(f"{cc}_{city_slug}{num}")
+                # Случайные числовые суффиксы
+                import random as _random
+                for _ in range(12):
+                    variants.append(f"{planned_username}_{_random.randint(100, 999)}")
+
+                # Дедупликация
+                seen = {planned_username}
+                final_variants = []
+                for v in variants:
+                    if v not in seen and len(v) <= 32:
+                        seen.add(v)
+                        final_variants.append(v)
+
+                success_variant = None
+                for variant in final_variants[:8]:
+                    if variant == planned_username:
+                        continue  # уже пробовали
+                    await asyncio.sleep(random.uniform(5, 12))
                     err2 = await account_manager.set_channel_username(
                         acc["session_str"], channel_id, variant, _acc=acc
                     )
@@ -1486,6 +1513,7 @@ async def _exec_global_presence_channel(
                             "op_worker gp_channel: username variant '%s' accepted",
                             variant,
                         )
+                        success_variant = variant
                         err = None
                         break
                     log.info(
@@ -1493,7 +1521,12 @@ async def _exec_global_presence_channel(
                         variant,
                         err2[:60],
                     )
-                username_error = err
+                    # Flood wait handling
+                    if "FloodWait" in str(err2):
+                        m2 = _re.search(r"(\d+)", str(err2))
+                        fw = int(m2.group(1)) + 5 if m2 else 30
+                        await asyncio.sleep(fw)
+                username_error = err if not success_variant else None
 
         # ── Атомарная запись: обновить targets + вставить в managed_channels одной транзакцией.
         # Если Telethon создал канал, но DB-запись падает, канал станет «призраком» без записи.
