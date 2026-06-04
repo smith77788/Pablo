@@ -734,7 +734,7 @@ async def detect_drift(
                FROM ecosystem_members m
                JOIN tg_accounts a ON a.id=m.object_id
                WHERE m.ecosystem_id=$1 AND m.object_type='account'
-                 AND a.is_banned = TRUE""",
+                 AND a.acc_status = 'banned'""",
             ecosystem_id,
         )
         for ba in banned_accs[:3]:
@@ -1447,7 +1447,7 @@ async def sync_ecosystem_members(
         try:
             if otype == "account":
                 row = await pool.fetchrow(
-                    "SELECT id, is_active, is_banned, trust_score, "
+                    "SELECT id, is_active, acc_status, trust_score, "
                     "COALESCE(first_name, phone, 'id'||id::text) AS label "
                     "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
                     oid,
@@ -1461,7 +1461,7 @@ async def sync_ecosystem_members(
                         otype,
                         oid,
                     )
-                elif row["is_banned"]:
+                elif row["acc_status"] == "banned":
                     stale.append(
                         {
                             "type": otype,
