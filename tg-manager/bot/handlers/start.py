@@ -55,17 +55,32 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
     await state.clear()
     uid = message.from_user.id
     admin = is_platform_admin(uid)
+
+    # Parallel: blocked check + user info + bots list (all independent reads)
     try:
-        blocked = await pool.fetchval("SELECT 1 FROM blocked_users WHERE user_id=$1", uid)
-        if blocked:
-            await message.answer("⛔️ Ваш аккаунт заблокирован. Обратитесь в поддержку.")
-            return
+        blocked_val, existing, bots = await asyncio.gather(
+            pool.fetchval("SELECT 1 FROM blocked_users WHERE user_id=$1", uid),
+            db.get_user_info(pool, uid),
+            db.get_bots(pool, uid),
+            return_exceptions=True,
+        )
     except Exception:
+        blocked_val, existing, bots = None, None, []
+
+    if isinstance(blocked_val, BaseException):
         log_exc_swallow(log, "Не удалось проверить блокировку пользователя")
+        blocked_val = None
+    if isinstance(existing, BaseException):
+        existing = None
+    if isinstance(bots, BaseException):
+        bots = []
+
+    if blocked_val:
+        await message.answer("⛔️ Ваш аккаунт заблокирован. Обратитесь в поддержку.")
+        return
 
     is_new = False
     try:
-        existing = await db.get_user_info(pool, uid)
         is_new = existing is None
         await db.register_or_update_user(
             pool,
@@ -106,7 +121,7 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
             except Exception as e:
                 log.warning("Referral processing error: %s", e)
 
-    bots = await db.get_bots(pool, uid)
+    # bots already fetched in parallel above
     bot_count = len(bots)
 
     if not bot_count:
