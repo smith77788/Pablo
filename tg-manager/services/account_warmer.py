@@ -1119,6 +1119,15 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
     total_fail = 0
 
     for acc_id in account_ids:
+        # Пропускаем аккаунт если он сейчас занят op_worker-операцией
+        try:
+            from services import op_worker as _opw
+            if _opw.is_account_in_use(acc_id):
+                log.info("warmup_session: acc=%d in use by op_worker, skipping this cycle", acc_id)
+                continue
+        except Exception:
+            pass
+
         acc_row = await pool.fetchrow(
             """SELECT a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
                FROM tg_accounts a
@@ -1247,13 +1256,15 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
     }
 
 
+_MAX_PARALLEL_WARMUP = 4  # максимум одновременных warmup-планов/сессий
+
+
 async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     """
     Фоновый цикл: каждый час проверяет активные планы И сессии разогрева.
     Один запуск в сутки на план/сессию (проверяем last_action_at > 20ч).
+    Планы и сессии запускаются ПАРАЛЛЕЛЬНО (до _MAX_PARALLEL_WARMUP одновременно).
     """
-    import asyncio
-
     while True:
         try:
             # Одиночные планы разогрева
@@ -1266,10 +1277,12 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                           OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
             )
             if rows:
-                log.info("warmup loop: found %d single-plans to run", len(rows))
-            for plan in rows:
-                await run_daily_warmup(pool, dict(plan))
-                await asyncio.sleep(30)
+                log.info("warmup loop: %d single-plans to run (parallel)", len(rows))
+            # Запускаем батчами по _MAX_PARALLEL_WARMUP, не блокируем loop
+            for i in range(0, len(rows), _MAX_PARALLEL_WARMUP):
+                batch = rows[i : i + _MAX_PARALLEL_WARMUP]
+                tasks = [asyncio.create_task(run_daily_warmup(pool, dict(p))) for p in batch]
+                await asyncio.gather(*tasks, return_exceptions=True)
 
             # Мультиаккаунтные сессии прогрева
             session_rows = await pool.fetch(
@@ -1279,10 +1292,11 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                           OR last_run_at < NOW() - INTERVAL '20 hours')""",
             )
             if session_rows:
-                log.info("warmup loop: found %d sessions to run", len(session_rows))
-            for session in session_rows:
-                await run_warmup_session(pool, dict(session))
-                await asyncio.sleep(30)
+                log.info("warmup loop: %d sessions to run (parallel)", len(session_rows))
+            for i in range(0, len(session_rows), _MAX_PARALLEL_WARMUP):
+                batch = session_rows[i : i + _MAX_PARALLEL_WARMUP]
+                tasks = [asyncio.create_task(run_warmup_session(pool, dict(s))) for s in batch]
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         except Exception as e:
             log.warning("warmup loop error: %s", e)

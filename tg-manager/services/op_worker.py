@@ -16,7 +16,31 @@ from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10  # секунд между проверками очереди
-_MAX_PARALLEL = 3  # максимум параллельных операций
+_MAX_PARALLEL = 8   # максимум параллельных операций глобально
+_MAX_PARALLEL_PER_OWNER = 3  # максимум на одного владельца (далее в коде)
+
+# Реестр аккаунтов, занятых активными операциями op_worker.
+# account_warmer проверяет этот реестр перед использованием аккаунта.
+_accounts_in_use: set[int] = set()
+_accounts_lock = asyncio.Lock()
+
+
+async def mark_accounts_in_use(acc_ids: list[int]) -> None:
+    """Пометить аккаунты как занятые op_worker-операцией."""
+    async with _accounts_lock:
+        _accounts_in_use.update(acc_ids)
+
+
+async def release_accounts(acc_ids: list[int]) -> None:
+    """Освободить аккаунты после завершения операции."""
+    async with _accounts_lock:
+        for aid in acc_ids:
+            _accounts_in_use.discard(aid)
+
+
+def is_account_in_use(acc_id: int) -> bool:
+    """Проверить занят ли аккаунт (non-async, читает snapshot)."""
+    return acc_id in _accounts_in_use
 
 
 # ── Retry Intelligence ─────────────────────────────────────────────────────────
@@ -220,8 +244,7 @@ async def _audit(
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
 
-# Per-owner semaphores: не более 3 параллельных операций на одного владельца
-_MAX_PARALLEL_PER_OWNER = 3
+# Per-owner semaphores: не более _MAX_PARALLEL_PER_OWNER параллельных операций на владельца
 _owner_semaphores: dict[int, asyncio.Semaphore] = {}
 _owner_sem_lock = asyncio.Lock()
 
@@ -1028,10 +1051,25 @@ async def _exec_bulk_join(
         include_ids=account_ids or None,
     )
 
+    used_acc_ids = [a["id"] for a in accounts]
+    await mark_accounts_in_use(used_acc_ids)
+    try:
+        return await _exec_bulk_join_inner(pool, bot, op_id, owner_id, params, accounts)
+    finally:
+        await release_accounts(used_acc_ids)
+
+
+async def _exec_bulk_join_inner(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict, accounts
+) -> dict:
+    from services import account_manager, session_simulator
+    import random
+
+    links = params.get("links", [])
+    delay_mode = params.get("delay_mode", "smart")
     ok_count = 0
     fail_count = 0
     step = 0
-    delay_mode = params.get("delay_mode", "smart")
     _JOIN_DAY_LIMITS = {"fast": 20, "normal": 15, "slow": 8, "smart": 12}
     day_limit = _JOIN_DAY_LIMITS.get(delay_mode, 12)
 
