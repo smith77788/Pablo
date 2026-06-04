@@ -1245,6 +1245,8 @@ async def _exec_global_presence_channel(
     from services import account_manager, session_simulator
     import random
 
+    log.info("🔍 _exec_global_presence_channel: op_id=%d plan_id=%s", op_id, params.get("plan_id"))
+
     plan_id = params.get("plan_id")
     if not plan_id:
         return {"status": "failed", "reason": "Не указан plan_id"}
@@ -1270,6 +1272,7 @@ async def _exec_global_presence_channel(
         "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
         plan_id,
     )
+    log.info("🔍 targets fetched: %d pending targets for plan_id=%s", len(targets), plan_id)
     if not targets:
         await pool.execute(
             "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
@@ -1375,6 +1378,8 @@ async def _exec_global_presence_channel(
         await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
 
         t0_gp = time.monotonic()
+        log.info("🔍 About to create channel: title='%s' is_group=%s acc=%s", 
+                  title[:50] if title else "NONE", is_group, acc.get("phone", "?"))
         result = await account_manager.create_channel(
             acc["session_str"], title, about="", megagroup=is_group, _acc=acc
         )
@@ -1707,6 +1712,7 @@ async def _exec_global_presence_bot(
         "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
         plan_id,
     )
+    log.info("🔍 targets fetched: %d pending targets for plan_id=%s", len(targets), plan_id)
     if not targets:
         await pool.execute(
             "UPDATE global_presence_plans SET status='done', updated_at=now() WHERE id=$1",
