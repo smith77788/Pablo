@@ -270,7 +270,7 @@ async def _build_network_plan(pool, owner_id, description, resources):
 async def _build_audit_plan(pool, owner_id, description, resources):
     bots_cnt = (
         await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", owner_id
         )
         or 0
     )
@@ -306,7 +306,7 @@ async def _build_sync_plan(pool, owner_id, description, resources):
         "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
     ) or 0
     bots_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE owner_id=$1", owner_id
+        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", owner_id
     ) or 0
     total = channels_cnt + bots_cnt
 
