@@ -838,13 +838,19 @@ async def cb_mini_strike_category(
 
     await state.update_data(category=category, acc_id=acc["id"])
 
-    from config import SMTP_HOST, SMTP_USER
-
-    smtp_status = (
-        "✅ настроен"
-        if (SMTP_HOST and SMTP_USER)
-        else "⚠️ не настроен (email-репорты недоступны)"
-    )
+    # Проверяем наличие email-аккаунтов через БД (не глобальный SMTP)
+    try:
+        _email_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM strike_email_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+        smtp_status = (
+            f"✅ настроен ({_email_count} ящик{'ов' if _email_count != 1 else ''})"
+            if _email_count
+            else "⚠️ не настроен (добавьте в ⚙️ Настройки → 📧 Email)"
+        )
+    except Exception:
+        smtp_status = "⚠️ статус неизвестен"
 
     # Full pre-launch intelligence (intelligence_engine)
     intel_block = ""

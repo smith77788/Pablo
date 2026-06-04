@@ -1436,7 +1436,7 @@ async def sync_ecosystem_members(
 
     Возвращает diff: {"stale": [...], "ok": [...], "removed": int}
     """
-    members = await get_members(pool, ecosystem_id, owner_id)
+    members = await get_members(pool, ecosystem_id)
     stale: list[dict] = []
     ok_count = 0
     removed_count = 0
