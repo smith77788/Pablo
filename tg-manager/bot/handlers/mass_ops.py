@@ -42,6 +42,8 @@ from bot.utils.op_helpers import (
     extract_flood_wait,
 )
 
+from services import task_registry as _treg
+
 log = logging.getLogger(__name__)
 router = Router()
 
@@ -608,6 +610,113 @@ async def cb_mp_timing(
     )
 
 
+async def _mass_publish_inline_bg(
+    pool: asyncpg.Pool,
+    user_id: int,
+    progress_msg,
+    targets_with_dialogs: list,
+    mp_text: str,
+    delay: int,
+    op_id,
+) -> None:
+    """Фоновое выполнение массовой публикации из cb_mp_confirm."""
+    from services import account_manager
+    from bot.utils.op_helpers import extract_flood_wait, _progress_bar
+    from services.logger import log_exc_swallow as _les
+    import asyncio
+
+    ok_count = 0
+    err_count = 0
+    total = len(targets_with_dialogs)
+    for idx, (acc, dialog) in enumerate(targets_with_dialogs, 1):
+        access_hash = dialog.get("access_hash", 0) or 0
+        flood_extra = 0
+        step_status = "ok"
+        try:
+            result = await account_manager.post_to_channel(
+                acc["session_str"],
+                dialog["id"],
+                mp_text,
+                access_hash=access_hash,
+                _acc=acc,
+            )
+            if "error" in result or result.get("banned"):
+                err_count += 1
+                step_status = "error"
+                err_str = str(result.get("error", ""))
+                flood_wait = extract_flood_wait(Exception(err_str), err_str)
+                from services.infra_memory import record_account_op as _rim_rec
+                _rim_rec(acc["id"], "publish", success=False, error=err_str[:100])
+                if flood_wait:
+                    from services.flood_engine import record_flood
+                    try:
+                        await record_flood(pool, acc["id"], flood_wait, "publish")
+                    except Exception:
+                        _les(log, "Сбой record_flood в _mass_publish_inline_bg")
+                    flood_extra = flood_wait
+            else:
+                ok_count += 1
+                from services.infra_memory import record_account_op as _rim_rec
+                _rim_rec(acc["id"], "publish", success=True)
+                from services.flood_engine import record_success
+                try:
+                    await record_success(acc["id"], "publish")
+                except Exception:
+                    _les(log, "Сбой record_success в _mass_publish_inline_bg")
+        except Exception as e:
+            err_count += 1
+            step_status = "error"
+            err_str = str(e)
+            flood_wait = extract_flood_wait(e, err_str)
+            if flood_wait:
+                from services.flood_engine import record_flood
+                try:
+                    await record_flood(pool, acc["id"], flood_wait, "publish")
+                except Exception:
+                    _les(log, "Сбой record_flood (except) в _mass_publish_inline_bg")
+                flood_extra = flood_wait
+            else:
+                _les(log, f"mass_publish bg: post_to_channel failed for dialog {dialog.get('id')}")
+
+        if op_id:
+            await _log_op_step(pool, op_id, idx, str(dialog["id"]), step_status)
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+
+        bar = _progress_bar(idx, total)
+        pct = round(100 * idx / total)
+        try:
+            await progress_msg.edit_text(
+                f"⏳ Рассылка... {idx}/{total}\n[{bar}] {pct}%\n✅ {ok_count} ❌ {err_count}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            _les(log, "Не удалось обновить прогресс массовой публикации")
+
+        actual_delay = max(delay, flood_extra + 5 if flood_extra else 0)
+        if actual_delay > 0 and idx < total:
+            await asyncio.sleep(actual_delay)
+
+    if op_id:
+        await _finish_op_record(pool, op_id, ok_count, err_count)
+
+    err_note = (
+        f"\n\n⚠️ <b>{err_count} ошибок</b> — некоторые каналы пропущены (FloodWait / бан / недоступно)."
+        if err_count > 0
+        else ""
+    )
+    try:
+        await progress_msg.edit_text(
+            f"✅ <b>Рассылка завершена</b>\n\n"
+            f"Всего: {total} · ✅ {ok_count} · ❌ {err_count}" + err_note,
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+    except Exception:
+        _les(log, "Сбой финального edit_text в _mass_publish_inline_bg")
+
+
 # Step 5: confirm and run
 
 
@@ -745,112 +854,22 @@ async def cb_mp_confirm(
         },
     )
 
-    ok_count, err_count = 0, 0
     progress_msg = await callback.message.edit_text(
         f"⏳ Рассылка... 0/{total}\n[{'░' * 10}] 0%",
         parse_mode="HTML",
     )
 
-    for idx, (acc, dialog) in enumerate(targets_with_dialogs, 1):
-        access_hash = dialog.get("access_hash", 0) or 0
-        flood_extra = 0
-        try:
-            result = await account_manager.post_to_channel(
-                acc["session_str"],
-                dialog["id"],
-                mp_text,
-                access_hash=access_hash,
-                _acc=acc,
-            )
-            if "error" in result or result.get("banned"):
-                err_count += 1
-                step_status = "error"
-                err_str = str(result.get("error", ""))
-                flood_wait = extract_flood_wait(Exception(err_str), err_str)
-                from services.infra_memory import record_account_op as _rim_rec
-
-                _rim_rec(acc["id"], "publish", success=False, error=err_str[:100])
-                if flood_wait:
-                    from services.flood_engine import record_flood
-
-                    try:
-                        await record_flood(pool, acc["id"], flood_wait, "publish")
-                    except Exception:
-                        log_exc_swallow(
-                            log,
-                            "Не удалось записать flood в flood_engine при публикации",
-                        )
-                    flood_extra = flood_wait
-            else:
-                ok_count += 1
-                step_status = "ok"
-                from services.infra_memory import record_account_op as _rim_rec
-
-                _rim_rec(acc["id"], "publish", success=True)
-                from services.flood_engine import record_success
-
-                try:
-                    await record_success(acc["id"], "publish")
-                except Exception:
-                    log_exc_swallow(
-                        log,
-                        f"mass_ops: record_success flood_engine failed acc={acc.get('id')}",
-                    )
-        except Exception as e:
-            err_count += 1
-            step_status = "error"
-            err_str = str(e)
-            flood_wait = extract_flood_wait(e, err_str)
-            if flood_wait:
-                from services.flood_engine import record_flood
-
-                try:
-                    await record_flood(pool, acc["id"], flood_wait, "publish")
-                except Exception:
-                    log_exc_swallow(
-                        log,
-                        "Не удалось записать flood в flood_engine при публикации (except)",
-                    )
-                flood_extra = flood_wait
-            else:
-                log_exc_swallow(
-                    log,
-                    f"mass_publish cb: post_to_channel failed for dialog {dialog.get('id')}",
-                )
-
-        if op_id:
-            await _log_op_step(pool, op_id, idx, str(dialog["id"]), step_status)
-            await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-            )
-
-        bar = _progress_bar(idx, total)
-        pct = round(100 * idx / total)
-        try:
-            await progress_msg.edit_text(
-                f"⏳ Рассылка... {idx}/{total}\n[{bar}] {pct}%\n✅ {ok_count} ❌ {err_count}",
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "Не удалось обновить прогресс массовой публикации")
-
-        actual_delay = max(delay, flood_extra + 5 if flood_extra else 0)
-        if actual_delay > 0:
-            await asyncio.sleep(actual_delay)
-
-    if op_id:
-        await _finish_op_record(pool, op_id, ok_count, err_count)
-
-    err_note = (
-        f"\n\n⚠️ <b>{err_count} ошибок</b> — некоторые каналы пропущены (FloodWait / бан / недоступно)."
-        if err_count > 0
-        else ""
+    task = asyncio.create_task(
+        _mass_publish_inline_bg(
+            pool, callback.from_user.id, progress_msg,
+            targets_with_dialogs, mp_text, delay, op_id,
+        )
     )
-    await progress_msg.edit_text(
-        f"✅ <b>Рассылка завершена</b>\n\n"
-        f"Всего: {total} · ✅ {ok_count} · ❌ {err_count}" + err_note,
-        parse_mode="HTML",
-        reply_markup=_back_menu_kb().as_markup(),
+    _treg.register(
+        callback.from_user.id,
+        "mass_publish",
+        f"Рассылка в {total} каналов",
+        task,
     )
 
 
