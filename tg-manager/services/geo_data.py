@@ -2383,7 +2383,7 @@ GEO_PRESETS: dict[str, dict] = {
 
 
 def parse_custom_geo_list(text: str) -> list[dict]:
-    """Parse newline-separated city names into minimal geo dicts."""
+    """Parse newline-separated city names into minimal geo dicts with native names."""
     from services.username_engine import slugify
 
     cities = []
@@ -2404,4 +2404,54 @@ def parse_custom_geo_list(text: str) -> list[dict]:
                 "timezone": "",
             }
         )
-    return cities
+    # Enrich all cities with native names if available
+    return enrich_geo_list(cities)
+
+
+def enrich_geo_with_native(geo: dict) -> dict:
+    """Add city_native and other missing fields by looking up from master city lists.
+    
+    Uses exact city name match (case-insensitive) to find native name.
+    Preserves all existing fields, only adds missing ones.
+    """
+    city_name = geo.get("city", "")
+    if not city_name:
+        return geo
+    
+    # Build master lookup: lowercase city -> native name (case-insensitive)
+    if not hasattr(enrich_geo_with_native, '_cache'):
+        # Build cache once
+        cache = {}
+        for city_list in [RUSSIA_CITIES, UKRAINE_CITIES, BELARUS_CITIES, EUROPE_CAPITALS, WORLD_CAPITALS, TIER1_GLOBAL, DACH_CITIES, LATAM_CITIES, CIS_CITIES]:
+            for entry in city_list:
+                city_val = entry.get('city', '')
+                if city_val and 'city_native' in entry:
+                    # Store both original and lowercase variants
+                    cache[city_val] = entry.get('city_native')
+                    cache[city_val.lower()] = entry.get('city_native')
+                    
+        # Add aliases for common English spellings (lowercase)
+        alias_map = {
+            "kiev": "kyiv",
+            "st. petersburg": "saint petersburg", 
+            "st petersburg": "saint petersburg",
+            "saint-petersburg": "saint petersburg",
+        }
+        for alias, canonical in alias_map.items():
+            canonical_lower = canonical.lower()
+            if canonical_lower in cache:
+                cache[alias] = cache[canonical_lower]
+        enrich_geo_with_native._cache = cache
+    
+    native_name = enrich_geo_with_native._cache.get(city_name.lower(), "")
+    
+    result = dict(geo)
+    if 'city_native' not in result and native_name:
+        result['city_native'] = native_name
+    
+    return result
+
+
+def enrich_geo_list(geo_list: list[dict]) -> list[dict]:
+    """Enrich a list of geo dicts with missing fields (city_native, etc)."""
+    return [enrich_geo_with_native(g) for g in geo_list]

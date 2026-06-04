@@ -15,7 +15,7 @@ from bot.states import GlobalPresenceFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
-from services.geo_data import GEO_PRESETS, parse_custom_geo_list
+from services.geo_data import GEO_PRESETS, parse_custom_geo_list, enrich_geo_list
 from services.presence_planner import (
     render_pattern,
     build_targets,
@@ -1089,6 +1089,8 @@ async def _show_preview(
     username_pattern = sd.get("username_pattern")
     geo_preset = sd.get("geo_preset", "")
     geo_list: list[dict] = sd.get("geo_list") or []
+    # Enrich with city_native for proper localization
+    geo_list = enrich_geo_list(geo_list)
     selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
     template_name = sd.get("template_name") or "Нет"
 
@@ -1228,6 +1230,8 @@ async def cb_gp_confirm_preview(
     name_pattern = sd.get("name_pattern", "")
     username_pattern = sd.get("username_pattern")
     geo_list: list[dict] = sd.get("geo_list") or []
+    # Enrich with city_native for proper localization
+    geo_list = enrich_geo_list(geo_list)
     selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
     template_name = sd.get("template_name") or "Нет"
     geo_preset = sd.get("geo_preset", "")
@@ -1338,6 +1342,8 @@ async def cb_gp_launch(
     name_pattern = sd.get("name_pattern", "Channel {{CITY}}")
     username_pattern = sd.get("username_pattern")
     geo_list: list[dict] = sd.get("geo_list") or []
+    # Enrich with city_native for proper localization
+    geo_list = enrich_geo_list(geo_list)
     selected_acc_ids: list[int] = sd.get("selected_acc_ids") or []
     template_id = sd.get("template_id")
     geo_preset = sd.get("geo_preset", "")
