@@ -1522,12 +1522,19 @@ async def _exec_global_presence_channel(
             target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
         )
 
+        # Генерируем описание: пустое описание = немедленный spam-сигнал для Telegram
+        _geo_label = (target.get("city") or target.get("country") or "").strip()
+        if is_group:
+            _about = f"Группа для общения и обмена информацией.{(' ' + _geo_label) if _geo_label else ''}"
+        else:
+            _about = f"Актуальные новости и обновления.{(' ' + _geo_label) if _geo_label else ''}"
+
         # ── Умная задержка перед созданием ──
         await session_simulator.typing_delay(title)  # 0.5-2с для натуральности
 
         t0_gp = time.monotonic()
         result = await account_manager.create_channel(
-            acc["session_str"], title, about="", megagroup=is_group, _acc=acc
+            acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc
         )
 
         if result.get("error") and result.get("flood_wait"):
@@ -1550,7 +1557,7 @@ async def _exec_global_presence_channel(
                 )
                 await asyncio.sleep(wait_time)
                 result = await account_manager.create_channel(
-                    acc["session_str"], title, about="", megagroup=is_group, _acc=acc
+                    acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc
                 )
 
         if result.get("error"):
@@ -1594,12 +1601,18 @@ async def _exec_global_presence_channel(
             continue
 
         channel_id = result.get("channel_id")
+        channel_access_hash = result.get("access_hash", 0)
 
         username_error = None
         planned_username = target.get("planned_username")
         if planned_username and channel_id:
-            # ── Умная пауза перед установкой username ──
-            pause = random.uniform(15, 25) * session_simulator.chaos_factor()
+            # Пауза 90-180с перед установкой username — Telegram детектирует мгновенное
+            # присвоение username как автоматизацию и применяет geo-ban / shadow-ban
+            pause = random.uniform(90, 180) * session_simulator.chaos_factor()
+            log.info(
+                "op_worker gp_channel: waiting %.0fs before assigning username '%s'",
+                pause, planned_username,
+            )
             await asyncio.sleep(pause)
             err = await account_manager.set_channel_username(
                 acc["session_str"], channel_id, planned_username, _acc=acc
@@ -1706,6 +1719,25 @@ async def _exec_global_presence_channel(
             success=True,
             duration_s=time.monotonic() - t0_gp,
         )
+
+        # Публикуем начальный пост — пустой канал немедленно попадает в shadow ban.
+        # Любой пост делает канал "живым" для алгоритмов Telegram.
+        try:
+            _welcome_text = f"{'👥' if is_group else '📢'} {title}"
+            if _geo_label:
+                _welcome_text += f"\n\n📍 {_geo_label}"
+            _post_delay = random.uniform(30, 60) * session_simulator.chaos_factor()
+            await asyncio.sleep(_post_delay)
+            await account_manager.post_to_channel(
+                acc["session_str"],
+                channel_id,
+                _welcome_text,
+                access_hash=channel_access_hash,
+                _acc=dict(acc),
+            )
+            log.info("op_worker gp_channel: initial post sent to channel_id=%s", channel_id)
+        except Exception:
+            log_exc_swallow(log, f"initial post failed for channel_id={channel_id}")
 
         # Link to ecosystem if one exists for this owner
         try:

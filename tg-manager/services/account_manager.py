@@ -262,8 +262,8 @@ def _make_client(session_string: str = "", device: dict | None = None):
         device_model=d.get("device_model") or "Samsung SM-S911B",
         system_version=d.get("system_version") or "Android 14",
         app_version=d.get("app_version") or "11.5.3",
-        lang_code="ru",
-        system_lang_code="ru-RU",
+        lang_code=d.get("lang_code") or "ru",
+        system_lang_code=d.get("system_lang_code") or "ru-RU",
         connection_retries=1,
         request_retries=1,
         timeout=_CONNECT_TIMEOUT,
@@ -1414,6 +1414,7 @@ async def create_channel(
             log_exc_swallow(log, "Сбой в create_channel")
         return {
             "channel_id": ch.id,
+            "access_hash": getattr(ch, "access_hash", 0) or 0,
             "title": ch.title,
             "username": getattr(ch, "username", "") or "",
             "type": "group" if megagroup else "channel",
