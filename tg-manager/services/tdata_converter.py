@@ -1,4 +1,4 @@
-﻿"""
+"""
 �������� ��������� tdata > Telethon StringSession.
 �� ������� opentele. ���������� pycryptodome ��� AES-IGE.
 

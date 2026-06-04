@@ -1,4 +1,4 @@
-﻿"""Intent Engine � Epoch IV. ���������� ������, � �� ��������."""
+"""Intent Engine � Epoch IV. ���������� ������, � �� ��������."""
 
 from __future__ import annotations
 
