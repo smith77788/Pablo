@@ -153,7 +153,7 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
 
     # 5. Delete hard-dead proxies
     deleted = await pool.fetchval(
-        "DELETE FROM platform_proxy_pool WHERE fail_count >= $1 RETURNING COUNT(*)",
+        "WITH d AS (DELETE FROM platform_proxy_pool WHERE fail_count >= $1 RETURNING 1) SELECT COUNT(*) FROM d",
         _MAX_FAIL_COUNT,
     )
 

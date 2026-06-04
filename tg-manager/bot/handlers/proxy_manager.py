@@ -531,36 +531,35 @@ async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(ProxyCb.filter(F.action == "free_pool_refresh"))
 async def cb_free_pool_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Trigger manual proxy pool refresh."""
+    """Trigger manual proxy pool refresh (background task)."""
     await callback.answer("🔄 Запускаю обновление пула...", show_alert=False)
     from services import proxy_scraper as _ps
 
-    await callback.message.edit_text(
+    progress_msg = await callback.message.edit_text(
         "⏳ <b>Обновление прокси-пула...</b>\n\nЗагружаю и проверяю прокси. Это может занять 1-2 минуты.",
         parse_mode="HTML",
     )
-    try:
-        result = await _ps.scrape_and_refresh(pool)
-        valid = result.get("valid", 0)
-        fetched = result.get("fetched", 0)
-        duration = result.get("duration_s", 0)
 
-        if valid >= 50:
-            icon = "🟢"
-        elif valid >= 20:
-            icon = "🟡"
-        else:
-            icon = "🔴"
+    async def _refresh_bg() -> None:
+        try:
+            result = await _ps.scrape_and_refresh(pool)
+            valid = result.get("valid", 0)
+            fetched = result.get("fetched", 0)
+            duration = result.get("duration_s", 0)
+            icon = "🟢" if valid >= 50 else ("🟡" if valid >= 20 else "🔴")
+            text = (
+                f"{icon} <b>Пул обновлён!</b>\n\n"
+                f"📥 Получено из источников: {fetched}\n"
+                f"✅ Прошли проверку: <b>{valid}</b>\n"
+                f"⏱ Время: {duration}с"
+            )
+        except Exception as e:
+            text = f"❌ Ошибка обновления: {html.escape(str(e)[:200])}"
+        try:
+            kb = InlineKeyboardBuilder()
+            kb.button(text="◀️ К пулу", callback_data=ProxyCb(action="free_pool"))
+            await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        except Exception:
+            log_exc_swallow(log, "_refresh_bg: сбой финального сообщения")
 
-        text = (
-            f"{icon} <b>Пул обновлён!</b>\n\n"
-            f"📥 Получено из источников: {fetched}\n"
-            f"✅ Прошли проверку: <b>{valid}</b>\n"
-            f"⏱ Время: {duration}с"
-        )
-    except Exception as e:
-        text = f"❌ Ошибка обновления: {html.escape(str(e)[:200])}"
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ К пулу", callback_data=ProxyCb(action="free_pool"))
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    asyncio.create_task(_refresh_bg())
