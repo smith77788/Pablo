@@ -253,7 +253,6 @@ async def cb_cluster_view(
 
     lines = [f"🔗 <b>Кластер: {_html.escape(cluster_name)}</b>\n"]
     kb = InlineKeyboardBuilder()
-    len(rows)
 
     if not rows:
         lines.append(

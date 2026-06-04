@@ -520,7 +520,6 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             for acc in grp_restricted:
                 acc_status = acc["acc_status"] or "active"
                 status_emoji = _STATUS_EMOJI.get(acc_status, "⛔")
-                _STATUS_LABEL.get(acc_status, acc_status.upper())
                 trust = float(acc["trust_score"] or 0)
                 name = html.escape(
                     acc["username"]
@@ -1284,7 +1283,6 @@ async def cb_health_recommendations(
             )
             health_tips.add("intensity_reduce")
         elif flood_cnt > 5:
-            float(acc["trust_score"] or 0)
             recs.append(
                 f"🟡 <b>{name}</b> — {flood_cnt} flood-событий за 7д.\n"
                 "   ↳ Увеличьте задержки до 60-90s.\n"

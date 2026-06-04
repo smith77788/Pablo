@@ -878,7 +878,6 @@ async def fsm_announce_text(message: Message, state: FSMContext) -> None:
 # ── Announce — Step 4: do send ─────────────────────────────────────────────
 
 
-@router.callback_query(GroupFCb.filter(F.action == "do_announce"))
 async def _group_announce_bg(
     acc: dict, groups: list, announce_text: str, progress_msg, user_id: int
 ) -> None:
@@ -955,6 +954,7 @@ async def _group_announce_bg(
         pass
 
 
+@router.callback_query(GroupFCb.filter(F.action == "do_announce"))
 async def cb_group_do_announce(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
