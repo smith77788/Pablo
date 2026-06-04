@@ -288,7 +288,7 @@ async def record_event(
             event_type,
             severity,
             title,
-            __import__("json").dumps(details or {}),
+            __import__("json").dumps(details or {}, ensure_ascii=False),
             object_type,
             object_id,
         )
