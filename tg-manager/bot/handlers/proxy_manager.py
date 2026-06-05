@@ -18,7 +18,9 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ProxyCb, BmCb
+from bot.keyboards import subscription_locked_markup
 from bot.states import AddProxyFSM
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services.logger import log_exc_swallow
 
@@ -199,7 +201,15 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ProxyCb.filter(F.action == "add"))
-async def cb_proxy_add(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_proxy_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Управление прокси", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     await state.set_state(AddProxyFSM.waiting_url)
     await callback.message.edit_text(
@@ -453,6 +463,14 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_proxy_delete(
     callback: CallbackQuery, callback_data: ProxyCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Управление прокси", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     user_id = callback.from_user.id
     proxy_id = callback_data.proxy_id
 

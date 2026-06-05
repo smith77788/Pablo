@@ -9,8 +9,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import BulkCb
-from bot.keyboards import bulk_menu, main_menu
+from bot.keyboards import bulk_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 
@@ -53,6 +54,14 @@ def _result_text(ok: int, fail: int, total: int, action: str) -> str:
 
 @router.callback_query(BulkCb.filter(F.action == "menu"))
 async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Массовые операции с ботами", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     try:
         bots = await db.get_bots(pool, callback.from_user.id)
@@ -535,6 +544,14 @@ async def cb_import(callback: CallbackQuery, state: FSMContext) -> None:
 async def msg_import_tokens(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
+    if not await require_plan(pool, message.from_user.id, "starter"):
+        await state.clear()
+        await message.answer(
+            locked_text("Массовый импорт ботов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await state.clear()
     lines = [l.strip() for l in (message.text or "").strip().splitlines() if l.strip()]
     if not lines:
