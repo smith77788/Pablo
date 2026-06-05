@@ -87,8 +87,16 @@ async def cb_engage_info(callback: CallbackQuery, callback_data: EngageCb) -> No
 
 @router.callback_query(EngageCb.filter(F.action == "reactivate_cold"))
 async def cb_reactivate_cold(
-    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
+    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Реактивация аудитории", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="cold")
@@ -111,8 +119,16 @@ async def cb_reactivate_cold(
 
 @router.callback_query(EngageCb.filter(F.action == "reactivate_lost"))
 async def cb_reactivate_lost(
-    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext
+    callback: CallbackQuery, callback_data: EngageCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Реактивация аудитории", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     await state.set_state(ReactivateBroadcast.waiting_message)
     await state.update_data(bot_id=callback_data.bot_id, segment="lost")
