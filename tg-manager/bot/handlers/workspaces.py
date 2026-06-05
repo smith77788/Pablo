@@ -9,7 +9,8 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import WorkspaceCb, BmCb
 from bot.states import WorkspaceFSM
-from bot.utils.subscription import require_plan
+from bot.keyboards import subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
@@ -203,6 +204,14 @@ async def msg_ws_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
 
 @router.message(WorkspaceFSM.entering_description)
 async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, message.from_user.id, "enterprise"):
+        await state.clear()
+        await message.answer(
+            locked_text("Workspaces", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     description = (message.text or "").strip()[:256]
     data = await state.get_data()
     name = data.get("ws_name", "Workspace")
