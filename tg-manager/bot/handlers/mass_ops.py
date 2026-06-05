@@ -850,6 +850,7 @@ async def cb_mp_confirm(
         return
 
     # Log operation to DB if table exists
+    # Include text so op_worker can resume/retry if bot restarts mid-execution
     op_id = await _create_op_record(
         pool,
         callback.from_user.id,
@@ -859,6 +860,7 @@ async def cb_mp_confirm(
             "target": target,
             "filter": filter_type,
             "delay": delay,
+            "text": mp_text,
         },
     )
 
@@ -1410,9 +1412,9 @@ async def cb_bbe_confirm(
     field = data.get("bbe_field", "")
     value = data.get("bbe_value", "")
 
-    # Fetch all bots for this user
+    # Fetch all active bots for this user (same filter as op_worker uses)
     bots = await pool.fetch(
-        "SELECT id, token FROM managed_bots WHERE added_by=$1",
+        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
         callback.from_user.id,
     )
     if not bots:

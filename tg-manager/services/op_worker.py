@@ -168,7 +168,7 @@ async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool
     Возвращает True если операция поставлена на повторную попытку.
     """
     kind = _classify_op_error(exc)
-    if kind == "fatal":
+    if kind in ("fatal", "skip"):
         return False
 
     row = await pool.fetchrow(
@@ -723,10 +723,9 @@ async def _exec_bulk_bot_edit(
                 }
             try:
                 if field == "commands":
-                    payload = {"commands": json.dumps(commands_payload or [])}
                     resp = await sess.post(
                         f"https://api.telegram.org/bot{b['token']}/{method}",
-                        data=payload,
+                        json={"commands": commands_payload or []},
                         timeout=aiohttp.ClientTimeout(total=10),
                     )
                 else:
