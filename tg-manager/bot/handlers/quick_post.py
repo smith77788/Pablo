@@ -693,17 +693,32 @@ async def cb_qp_publish(
 
     from services import operation_bus
 
-    op_id = await operation_bus.submit(
-        pool,
-        callback.from_user.id,
-        "mass_publish",
-        {
-            "text": post_text,
-            "delay_seconds": delay_s,
-            "channel_ids": selected_chan_ids,
-        },
-        total_items=total,
-    )
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            "mass_publish",
+            {
+                "text": post_text,
+                "delay_seconds": delay_s,
+                "channel_ids": selected_chan_ids,
+            },
+            total_items=total,
+        )
+    except Exception as _e:
+        log.error("quick_post publish submit error: %s", _e)
+        await callback.message.edit_text(
+            "❌ <b>Ошибка постановки в очередь</b>\n\nПопробуйте ещё раз или обратитесь в поддержку.",
+            parse_mode="HTML",
+        )
+        return
+
+    if not op_id:
+        await callback.message.edit_text(
+            "⚠️ <b>Не удалось создать операцию</b>\n\nПовторите попытку через /post",
+            parse_mode="HTML",
+        )
+        return
 
     await callback.message.edit_text(
         f"📤 <b>Публикация поставлена в очередь</b>\n\n"

@@ -1444,13 +1444,28 @@ async def cb_gp_launch(
     await db.create_global_presence_targets(pool, plan_id, targets)
 
     # Queue the primary operation
-    op_id = await operation_bus.submit(
-        pool,
-        callback.from_user.id,
-        _op_type,
-        {"plan_id": plan_id},
-        total_items=len(targets),
-    )
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            callback.from_user.id,
+            _op_type,
+            {"plan_id": plan_id},
+            total_items=len(targets),
+        )
+    except Exception as _sub_err:
+        log.error("global_presence submit primary op failed: %s", _sub_err)
+        await callback.message.edit_text(
+            "❌ <b>Не удалось поставить операцию в очередь</b>\n\nПопробуйте ещё раз.",
+            parse_mode="HTML",
+        )
+        return
+
+    if not op_id:
+        await callback.message.edit_text(
+            "❌ <b>Не удалось создать операцию</b>\n\nПовторите попытку.",
+            parse_mode="HTML",
+        )
+        return
 
     # Link operation to plan
     await db.link_plan_to_operation(pool, plan_id, op_id)
@@ -1529,14 +1544,19 @@ async def cb_gp_launch(
             template_id=template_id,
         )
         await db.create_global_presence_targets(pool, plan_id2, grp_targets)
-        op_id2 = await operation_bus.submit(
-            pool,
-            callback.from_user.id,
-            "global_presence_group",
-            {"plan_id": plan_id2},
-            total_items=len(grp_targets),
-        )
-        await db.link_plan_to_operation(pool, plan_id2, op_id2)
+        try:
+            op_id2 = await operation_bus.submit(
+                pool,
+                callback.from_user.id,
+                "global_presence_group",
+                {"plan_id": plan_id2},
+                total_items=len(grp_targets),
+            )
+        except Exception as _sub_err2:
+            log.error("global_presence submit group op failed: %s", _sub_err2)
+            op_id2 = None
+        if op_id2:
+            await db.link_plan_to_operation(pool, plan_id2, op_id2)
         log.info(
             "global_presence package group queued: user_id=%s plan_id=%s op_id=%s targets=%d",
             callback.from_user.id,
@@ -1561,14 +1581,19 @@ async def cb_gp_launch(
             template_id=template_id,
         )
         await db.create_global_presence_targets(pool, plan_id3, bot_targets)
-        op_id3 = await operation_bus.submit(
-            pool,
-            callback.from_user.id,
-            "global_presence_bot",
-            {"plan_id": plan_id3},
-            total_items=len(bot_targets),
-        )
-        await db.link_plan_to_operation(pool, plan_id3, op_id3)
+        try:
+            op_id3 = await operation_bus.submit(
+                pool,
+                callback.from_user.id,
+                "global_presence_bot",
+                {"plan_id": plan_id3},
+                total_items=len(bot_targets),
+            )
+        except Exception as _sub_err3:
+            log.error("global_presence submit bot op failed: %s", _sub_err3)
+            op_id3 = None
+        if op_id3:
+            await db.link_plan_to_operation(pool, plan_id3, op_id3)
         log.info(
             "global_presence full_package bot queued: user_id=%s plan_id=%s op_id=%s targets=%d",
             callback.from_user.id,

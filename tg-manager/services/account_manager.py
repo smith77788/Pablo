@@ -1553,8 +1553,8 @@ async def leave_channel(
         from telethon.errors import FloodWaitError
 
         if isinstance(e, FloodWaitError):
-            log.warning("leave_channel FloodWait %ds", e.seconds)
-            raise
+            log.warning("leave_channel FloodWait %ds — returning False", e.seconds)
+            return False
         log.exception("leave_channel error: %s", e)
         return False
     finally:

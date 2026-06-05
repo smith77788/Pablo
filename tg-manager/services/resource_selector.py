@@ -139,7 +139,7 @@ async def select_all_active(
 
     include_ids: если указан — вернуть только эти аккаунты (пользователь выбрал конкретные).
     """
-    conditions = ["a.owner_id=$1", "a.is_active=TRUE"]
+    conditions = ["a.owner_id=$1", "a.is_active=TRUE", "a.session_str IS NOT NULL"]
     params: list = [owner_id]
 
     if respect_cooldown:

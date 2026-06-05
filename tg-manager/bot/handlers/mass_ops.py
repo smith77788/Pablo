@@ -1423,6 +1423,10 @@ async def cb_bbe_confirm(
         await safe_edit(callback, "⚠️ Ошибка постановки в очередь.", reply_markup=_back_menu_kb().as_markup())
         return
 
+    if not op_id:
+        await safe_edit(callback, "⚠️ Не удалось создать операцию. Попробуйте ещё раз.", reply_markup=_back_menu_kb().as_markup())
+        return
+
     _FIELD_LABEL = {"name": "Имя", "desc": "Описание", "short_desc": "Краткое описание", "commands": "Команды"}
     await safe_edit(
         callback,

@@ -503,8 +503,6 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
             elif op_type == "strike":
                 result = await _exec_strike(pool, bot, op_id, owner_id, params)
-            elif op_type == "mass_publish":
-                result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
             elif op_type == "gift_transfer":
                 from services.gift_operation import _exec_gift_transfer
                 result = await _exec_gift_transfer(pool, op_id, params)
