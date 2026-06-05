@@ -671,7 +671,9 @@ async def cb_net_broadcast_confirm(
     total_users = sum(len(v) for v in by_bot.values())
     started_bots = 0
     for bot_id, user_ids in by_bot.items():
-        token = token_map[bot_id]
+        token = token_map.get(bot_id)
+        if not token:
+            continue
         bc_id = await db.create_broadcast(
             pool, bot_id, text, len(user_ids), callback.from_user.id
         )

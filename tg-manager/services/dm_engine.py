@@ -189,9 +189,17 @@ async def run_campaign(
         campaign_id,
     )
 
-    from services.flood_engine import get_active_accounts
+    try:
+        from services.flood_engine import get_active_accounts
 
-    accounts = await get_active_accounts(pool, owner_id)
+        accounts = await get_active_accounts(pool, owner_id)
+    except Exception:
+        log.exception("dm_engine: get_active_accounts failed for campaign %d", campaign_id)
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
+        )
+        return
+
     if not accounts:
         log.error(
             "dm_engine: no active accounts for campaign %d owner=%d",
@@ -203,7 +211,14 @@ async def run_campaign(
         )
         return
 
-    targets = await _get_targets(pool, campaign)
+    try:
+        targets = await _get_targets(pool, campaign)
+    except Exception:
+        log.exception("dm_engine: _get_targets failed for campaign %d", campaign_id)
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
+        )
+        return
     total = len(targets)
     await pool.execute(
         "UPDATE dm_campaigns SET total_targets=$1 WHERE id=$2", total, campaign_id
