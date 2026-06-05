@@ -87,20 +87,23 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
-            callback.from_user.id,
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
         )
-        or 0
-    )
-    runs = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1",
-            callback.from_user.id,
+        runs = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parser_runs WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        total = runs = 0
 
     await callback.message.edit_text(
         "🔍 <b>Парсер аудитории</b>\n\n"
@@ -413,14 +416,17 @@ async def cb_parser_audience(
         limit=_PAGE_SIZE,
     )
 
-    total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1"
-            + (" AND parse_run_id=$2" if run_id else ""),
-            *([callback.from_user.id, run_id] if run_id else [callback.from_user.id]),
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1"
+                + (" AND parse_run_id=$2" if run_id else ""),
+                *([callback.from_user.id, run_id] if run_id else [callback.from_user.id]),
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        total = 0
 
     if not users:
         await callback.message.edit_text(
@@ -540,13 +546,16 @@ async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🗑 Да, очистить всё", callback_data=ParserCb(action="confirm_clear"))
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
     kb.adjust(1)
-    total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
-            callback.from_user.id,
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        total = 0
     await callback.message.edit_text(
         f"⚠️ <b>Очистить всю аудиторию?</b>\n\n"
         f"Будет удалено: <b>{total:,}</b> пользователей\n"

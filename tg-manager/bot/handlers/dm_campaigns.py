@@ -619,7 +619,10 @@ async def cb_dm_launch_or_draft(
             pool, callback.from_user.id
         )
         if not ready:
-            await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
+            try:
+                await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
+            except Exception:
+                pass
             await _edit(
                 callback,
                 f"⚠️ {reason}\n\nКампания не запущена.",
@@ -628,10 +631,20 @@ async def cb_dm_launch_or_draft(
                 .as_markup(),
             )
             return
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
-            campaign_id,
-        )
+        try:
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
+                campaign_id,
+            )
+        except Exception as exc:
+            await _edit(
+                callback,
+                f"❌ Ошибка запуска кампании: <code>{html.escape(str(exc)[:200])}</code>",
+                InlineKeyboardBuilder()
+                .button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+                .as_markup(),
+            )
+            return
         # Запустить асинхронно уже после установки статуса
         _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
         _treg.register(
@@ -772,11 +785,14 @@ async def cb_dm_pause(
         if entry.kind == "dm_campaign" and f"#{campaign_id}" in entry.label:
             entry.task.cancel()
             break
-    await pool.execute(
-        "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
-        campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
+            campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
     await cb_dm_detail(callback, callback_data, pool)
 
 
@@ -797,11 +813,14 @@ async def cb_dm_resume(
     await callback.answer("▶️ Запущена")
     campaign_id = callback_data.campaign_id
     # Update DB status before creating task (same ordering as initial launch)
-    await pool.execute(
-        "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
-        campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
+            campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
     _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
     _treg.register(
         callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t
@@ -817,9 +836,12 @@ async def cb_dm_delete(
     state: FSMContext,
 ) -> None:
     await callback.answer("🗑️ Удалено")
-    await pool.execute(
-        "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
-        callback_data.campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            callback_data.campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
     await cb_dm_menu(callback, pool, state)

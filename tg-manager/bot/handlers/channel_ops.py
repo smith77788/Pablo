@@ -3833,14 +3833,17 @@ async def cb_bulk_report_start(
 ) -> None:
     await callback.answer()
     # Проверка доступа к Strike Module
-    await pool.execute(
-        "CREATE TABLE IF NOT EXISTS strike_access "
-        "(user_id BIGINT PRIMARY KEY, purchased_at TIMESTAMPTZ DEFAULT now(), "
-        "payment_ref TEXT, granted_by BIGINT)"
-    )
-    has_strike = await pool.fetchrow(
-        "SELECT 1 FROM strike_access WHERE user_id=$1", callback.from_user.id
-    )
+    try:
+        await pool.execute(
+            "CREATE TABLE IF NOT EXISTS strike_access "
+            "(user_id BIGINT PRIMARY KEY, purchased_at TIMESTAMPTZ DEFAULT now(), "
+            "payment_ref TEXT, granted_by BIGINT)"
+        )
+        has_strike = await pool.fetchrow(
+            "SELECT 1 FROM strike_access WHERE user_id=$1", callback.from_user.id
+        )
+    except Exception:
+        has_strike = None
     if not has_strike:
         from bot.callbacks import StrikeCb
 
@@ -5841,12 +5844,15 @@ async def _bulk_chan_exec_bg(
                     err_list.append(f"❌ {chan_title}: {html.escape(err[:60])}")
                 else:
                     ok_list.append(f"✅ {chan_title}: @{candidate}")
-                    await pool.execute(
-                        "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
-                        candidate,
-                        owner_id,
-                        chan["channel_id"],
-                    )
+                    try:
+                        await pool.execute(
+                            "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
+                            candidate,
+                            owner_id,
+                            chan["channel_id"],
+                        )
+                    except Exception:
+                        pass
 
             elif op == "chan_about":
                 ok = await account_manager.edit_channel_about(
