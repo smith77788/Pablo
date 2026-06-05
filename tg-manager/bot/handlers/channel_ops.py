@@ -3900,7 +3900,6 @@ async def cb_br_mode_single(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     from bot.handlers.strike import _has_access
-    from bot.callbacks import StrikeCb
 
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа к Strike Module.", show_alert=True)
@@ -3924,7 +3923,6 @@ async def cb_br_mode_batch(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     from bot.handlers.strike import _has_access
-    from bot.callbacks import StrikeCb
 
     if not await _has_access(pool, callback.from_user.id):
         await callback.answer("Нет доступа к Strike Module.", show_alert=True)
