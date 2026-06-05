@@ -336,9 +336,9 @@ async def cb_eco_factory(
     await callback.answer()
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Создать канал", callback_data=ChanFactCb(action="create_start"))
-    kb.button(text="👥 Создать группу", callback_data=GroupFCb(action="create_start"))
-    kb.button(text="🤖 Добавить бота", callback_data=BotFactCb(action="import_start"))
+    kb.button(text="📡 Создать канал", callback_data=ChanFactCb(action="create"))
+    kb.button(text="👥 Создать группу", callback_data=GroupFCb(action="create"))
+    kb.button(text="🤖 Добавить бота", callback_data=BotFactCb(action="import_tokens"))
     kb.button(text="🌍 Global Presence", callback_data=GeoPresenceCb(action="menu"))
     kb.button(
         text="🔍 Автообнаружение",

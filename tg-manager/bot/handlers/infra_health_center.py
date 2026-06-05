@@ -448,5 +448,5 @@ async def cb_hc_back(callback: CallbackQuery) -> None:
     await callback.answer()
     from bot.callbacks import BmCb
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="menu"))
+    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
     await safe_edit(callback, "Выберите раздел:", reply_markup=kb.as_markup())
