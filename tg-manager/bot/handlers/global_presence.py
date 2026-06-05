@@ -1849,6 +1849,15 @@ async def cb_gp_retry(
     callback_data: GeoPresenceCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        from bot.keyboards import subscription_locked_markup
+        await callback.message.edit_text(
+            locked_text("Global Presence", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     plan_id = callback_data.plan_id
     try:
         plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
