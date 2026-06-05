@@ -1207,7 +1207,7 @@ async def _exec_bulk_join_inner(
     from services import account_manager, session_simulator
     import random
 
-    links = params.get("links", [])
+    links = params.get("links") or params.get("targets") or []
     delay_mode = params.get("delay_mode", "smart")
     ok_count = 0
     fail_count = 0
