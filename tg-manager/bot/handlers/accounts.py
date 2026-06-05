@@ -29,6 +29,7 @@ _DIALOGS_PAGE_SIZE = 10
 from bot.callbacks import AccCb, BotCb, ChanCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
+from bot.utils.event_status import mark_handled_error
 from config import TG_API_ID, TG_API_HASH
 from database import db
 from services.account_manager import (
@@ -1511,6 +1512,7 @@ async def cb_assign_proxy(
             )
             await callback.answer("✅ Прокси назначен", show_alert=True)
     except Exception as exc:
+        mark_handled_error(f"assign_proxy: {exc}")
         await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
         return
     # Refresh account view
@@ -2296,6 +2298,7 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
         except (ValueError, IndexError):
             deleted = 0
     except Exception as exc:
+        mark_handled_error(f"purge_expired_confirm: {exc}")
         await callback.message.edit_text(
             f"❌ <b>Ошибка при удалении:</b> <code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",

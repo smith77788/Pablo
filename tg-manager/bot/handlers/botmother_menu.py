@@ -56,6 +56,7 @@ from bot.callbacks import (
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
+from bot.utils.event_status import mark_handled_error
 from bot.keyboards import subscription_locked_markup
 from database import db
 from services.logger import log_exc_swallow
@@ -1883,7 +1884,7 @@ async def cb_op_retry(
             user_id,
         )
     except Exception as exc:
-        from html import escape as _esc
+        mark_handled_error(f"op_retry update: {exc}")
         await callback.answer(f"Ошибка: {str(exc)[:80]}", show_alert=True)
         return
     await callback.answer(

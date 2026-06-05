@@ -7,6 +7,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ApprovalCb
+from bot.utils.event_status import mark_handled_error
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ async def cb_approval_confirm(
             "SELECT op_type, total_items, owner_id FROM operation_queue WHERE id=$1 AND status='waiting_approval'",
             op_id,
         )
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"approval_confirm fetch: {exc}")
         await callback.answer("Ошибка при подтверждении операции.", show_alert=True)
         return
     if not op or op["owner_id"] != callback.from_user.id:
@@ -49,6 +51,7 @@ async def cb_approval_confirm(
         )
     except Exception as exc:
         from html import escape
+        mark_handled_error(f"approval_confirm update: {exc}")
         await callback.message.edit_text(
             f"❌ <b>Ошибка подтверждения операции:</b>\n<code>{escape(str(exc)[:200])}</code>",
             parse_mode="HTML",
@@ -85,7 +88,8 @@ async def cb_approval_cancel(
             "SELECT owner_id FROM operation_queue WHERE id=$1 AND status='waiting_approval'",
             op_id,
         )
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"approval_cancel fetch: {exc}")
         await callback.answer("Ошибка при отмене операции.", show_alert=True)
         return
     if not op_check or op_check != callback.from_user.id:

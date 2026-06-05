@@ -10,6 +10,15 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from services.logger import set_correlation_id
+from bot.utils.event_status import clear_handled_error, get_handled_error
+
+# Telegram API errors that are non-critical (user-side / race conditions).
+# Log as 'warning' instead of 'error' so real errors stand out.
+_NONCRITICAL_TG_PATTERNS = (
+    "message is not modified",
+    "query is too old",
+    "query id is invalid",
+)
 
 log = logging.getLogger(__name__)
 
@@ -136,19 +145,30 @@ class UserActivityLogMiddleware(BaseMiddleware):
             extra["fsm_state"] = fsm_state_name
 
         log.info("user_event received", extra=extra)
+        clear_handled_error()
         status = "ok"
         error_msg: str | None = None
         try:
             result = await handler(event, data)
             duration_ms = int((time.monotonic() - started) * 1000)
+            handled_err = get_handled_error()
+            if handled_err:
+                status = "warning"
+                error_msg = handled_err
             log.info("user_event handled", extra={**extra, "duration_ms": duration_ms})
         except Exception as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
-            status = "error"
-            error_msg = str(exc)[:200]
-            log.exception(
-                "user_event failed", extra={**extra, "duration_ms": duration_ms}
-            )
+            exc_lower = str(exc).lower()
+            if any(p in exc_lower for p in _NONCRITICAL_TG_PATTERNS):
+                status = "warning"
+                error_msg = str(exc)[:200]
+                log.debug("user_event noncritical tg: %s", exc)
+            else:
+                status = "error"
+                error_msg = str(exc)[:200]
+                log.exception(
+                    "user_event failed", extra={**extra, "duration_ms": duration_ms}
+                )
             raise
         finally:
             # Write to activity_log (fire-and-forget via queue)
