@@ -390,21 +390,59 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     if available_slots <= 0:
         return
 
-    # Атомарно захватить до available_slots pending-операций и перевести их в 'running'
+    candidate_window = max(
+        available_slots * (_MAX_PARALLEL_PER_OWNER + 1), available_slots
+    )
+
+    # Атомарно захватить задачи с учетом реальной per-owner параллельности.
+    # Иначе лишние задачи одного владельца получают status='running', но фактически
+    # стоят внутри semaphore и выглядят для пользователя как зависшие.
     rows = await pool.fetch(
-        """UPDATE operation_queue
-           SET status = 'running', started_at = now()
-           WHERE id IN (
-               SELECT id FROM operation_queue
-               WHERE status = 'pending'
-                 AND (scheduled_for IS NULL OR scheduled_for <= now())
-                 AND (requires_approval IS NOT TRUE)
+        """WITH owner_running AS (
+               SELECT owner_id, COUNT(*)::int AS running_count
+               FROM operation_queue
+               WHERE status = 'running'
+               GROUP BY owner_id
+           ),
+           pending_locked AS (
+               SELECT oq.id,
+                      oq.owner_id,
+                      oq.created_at,
+                      COALESCE(owner_running.running_count, 0) AS running_count
+               FROM operation_queue oq
+               LEFT JOIN owner_running ON owner_running.owner_id = oq.owner_id
+               WHERE oq.status = 'pending'
+                 AND (oq.scheduled_for IS NULL OR oq.scheduled_for <= now())
+                 AND (oq.requires_approval IS NOT TRUE)
+               ORDER BY oq.created_at ASC
+               LIMIT $3
+               FOR UPDATE OF oq SKIP LOCKED
+           ),
+           candidates AS (
+               SELECT pending_locked.id,
+                      pending_locked.owner_id,
+                      pending_locked.created_at,
+                      ROW_NUMBER() OVER (
+                          PARTITION BY pending_locked.owner_id
+                          ORDER BY pending_locked.created_at ASC
+                      ) AS owner_pending_rank,
+                      pending_locked.running_count
+               FROM pending_locked
+           ),
+           picked AS (
+               SELECT id
+               FROM candidates
+               WHERE running_count + owner_pending_rank <= $2
                ORDER BY created_at ASC
                LIMIT $1
-               FOR UPDATE SKIP LOCKED
            )
+           UPDATE operation_queue
+           SET status = 'running', started_at = now()
+           WHERE id IN (SELECT id FROM picked)
            RETURNING id, owner_id, op_type, params""",
         available_slots,
+        _MAX_PARALLEL_PER_OWNER,
+        candidate_window,
     )
 
     for row in rows:
@@ -883,8 +921,12 @@ async def _exec_mass_publish(
             ok_count += 1
             _infra_mem.record_account_op(acc["id"], "publish", success=True)
             await _audit(
-                pool, owner_id, "publish", "success",
-                operation_id=op_id, account_id=acc["id"],
+                pool,
+                owner_id,
+                "publish",
+                "success",
+                operation_id=op_id,
+                account_id=acc["id"],
                 target=str(dialog.get("title") or dialog["id"])[:100],
             )
             try:
@@ -904,8 +946,12 @@ async def _exec_mass_publish(
                 acc["id"], "publish", success=False, error=err_str[:100]
             )
             await _audit(
-                pool, owner_id, "publish", "flood_wait" if flood_wait else "error",
-                operation_id=op_id, account_id=acc["id"],
+                pool,
+                owner_id,
+                "publish",
+                "flood_wait" if flood_wait else "error",
+                operation_id=op_id,
+                account_id=acc["id"],
                 target=ch_label,
                 error_msg=err_str[:200],
                 flood_wait_s=flood_wait if flood_wait else None,
@@ -1606,13 +1652,17 @@ async def _exec_global_presence_channel(
                 error=err_str[:100],
             )
             await _audit(
-                pool, owner_id,
+                pool,
+                owner_id,
                 "gp_create_group" if is_group else "gp_create_channel",
                 "flood_wait" if result.get("flood_wait") else "error",
-                operation_id=op_id, account_id=acc["id"],
+                operation_id=op_id,
+                account_id=acc["id"],
                 target=title[:100],
                 error_msg=err_str[:200],
-                flood_wait_s=int(result["flood_wait"]) if result.get("flood_wait") else None,
+                flood_wait_s=int(result["flood_wait"])
+                if result.get("flood_wait")
+                else None,
             )
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
@@ -1751,10 +1801,12 @@ async def _exec_global_presence_channel(
             duration_s=time.monotonic() - t0_gp,
         )
         await _audit(
-            pool, owner_id,
+            pool,
+            owner_id,
             "gp_create_group" if is_group else "gp_create_channel",
             "success",
-            operation_id=op_id, account_id=acc["id"],
+            operation_id=op_id,
+            account_id=acc["id"],
             target=title[:100],
             duration_ms=int((time.monotonic() - t0_gp) * 1000),
         )
@@ -2022,8 +2074,12 @@ async def _exec_global_presence_bot(
                 error=str(result["error"])[:100],
             )
             await _audit(
-                pool, owner_id, "gp_create_bot", "error",
-                operation_id=op_id, account_id=acc["id"],
+                pool,
+                owner_id,
+                "gp_create_bot",
+                "error",
+                operation_id=op_id,
+                account_id=acc["id"],
                 target=bot_name[:100],
                 error_msg=str(result["error"])[:200],
             )
@@ -2058,8 +2114,12 @@ async def _exec_global_presence_bot(
             duration_s=time.monotonic() - t0_gp_bot,
         )
         await _audit(
-            pool, owner_id, "gp_create_bot", "success",
-            operation_id=op_id, account_id=acc["id"],
+            pool,
+            owner_id,
+            "gp_create_bot",
+            "success",
+            operation_id=op_id,
+            account_id=acc["id"],
             target=(actual_username or bot_name)[:100],
             duration_ms=int((time.monotonic() - t0_gp_bot) * 1000),
         )
