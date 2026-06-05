@@ -56,7 +56,7 @@ async def cb_relay_toggle(
         await callback.answer("Бот не найден.", show_alert=True)
         return
     new_state = not row.get("relay_enabled", False)
-    await db.enable_relay(pool, callback_data.bot_id, new_state)
+    await db.enable_relay(pool, callback_data.bot_id, new_state, added_by=callback.from_user.id)
     status = "включены ✅" if new_state else "отключены ❌"
     await callback.answer(f"Диалоги {status}")
     # Reload row with updated state

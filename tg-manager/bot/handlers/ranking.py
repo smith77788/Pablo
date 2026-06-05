@@ -327,7 +327,7 @@ async def cb_rank_history(
     keyword_id = callback_data.keyword_id
     bot_id = callback_data.bot_id
 
-    rankings = await db.get_ranking_history(pool, keyword_id, limit=7)
+    rankings = await db.get_ranking_history(pool, keyword_id, limit=7, owner_id=callback.from_user.id)
 
     # Fetch keyword name
     keywords = await db.get_tracked_keywords(pool, bot_id)
@@ -825,8 +825,8 @@ async def _render_rank_menu(
     # Build keyword lines
     kw_lines: list[str] = []
     for kw in keywords:
-        latest = await db.get_latest_ranking(pool, kw["id"])
-        history = await db.get_keyword_rankings(pool, kw["id"], limit=2)
+        latest = await db.get_latest_ranking(pool, kw["id"], owner_id=owner_id)
+        history = await db.get_keyword_rankings(pool, kw["id"], limit=2, owner_id=owner_id)
 
         cur_pos = latest["position"] if latest else None
         # history[0] == latest entry, history[1] == previous entry

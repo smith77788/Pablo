@@ -179,6 +179,9 @@ async def cb_exp_list(
 async def cb_exp_view(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     await callback.answer()
     exp = await db.get_experiment(pool, callback_data.exp_id)
     if not exp:
@@ -417,6 +420,9 @@ async def cb_exp_resume(
 async def cb_pick_winner(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
+    if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
+        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        return
     await callback.answer()
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if not variants:

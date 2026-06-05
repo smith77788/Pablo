@@ -1706,7 +1706,7 @@ async def cb_gp_progress(
     await callback.answer()
 
     try:
-        stats = await db.get_global_presence_stats(pool, plan_id)
+        stats = await db.get_global_presence_stats(pool, plan_id, owner_id=callback.from_user.id)
         op_id = plan.get("op_id")
         op_status = "—"
         if op_id:
@@ -1836,7 +1836,7 @@ async def cb_gp_retry(
         return
 
     try:
-        reset_count = await db.reset_failed_targets(pool, plan_id)
+        reset_count = await db.reset_failed_targets(pool, plan_id, owner_id=callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_retry: reset_failed_targets failed")
         await callback.answer("Ошибка сброса целей", show_alert=True)
@@ -1901,7 +1901,7 @@ async def cb_gp_report(
     await callback.answer()
 
     try:
-        stats = await db.get_global_presence_stats(pool, plan_id)
+        stats = await db.get_global_presence_stats(pool, plan_id, owner_id=callback.from_user.id)
         done_targets = await pool.fetch(
             "SELECT city, planned_name, planned_username, result_asset_id "
             "FROM global_presence_targets WHERE plan_id=$1 AND status='done' ORDER BY id LIMIT 20",

@@ -343,7 +343,8 @@ async def cb_dm_target_cohort_pick(
     kb.adjust(1)
 
     bot_row = await pool.fetchrow(
-        "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", bot_id
+        "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        bot_id, callback.from_user.id,
     )
     bot_label = (
         (bot_row.get("first_name") or bot_row.get("username") or str(bot_id))
@@ -419,8 +420,8 @@ async def _show_dm_preview(
             target_id,
         )
         bot_row = await pool.fetchrow(
-            "SELECT first_name, username FROM managed_bots WHERE bot_id=$1",
-            target_id,
+            "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            target_id, callback.from_user.id,
         )
         bot_label = (
             (bot_row.get("first_name") or bot_row.get("username") or str(target_id))
@@ -448,7 +449,8 @@ async def _show_dm_preview(
             log_exc_swallow(log, "Ошибка подсчёта размера когорты для DM-кампании")
             cnt = 0
         bot_row = await pool.fetchrow(
-            "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", target_id
+            "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            target_id, callback.from_user.id,
         )
         bot_label = (
             (bot_row.get("first_name") or bot_row.get("username") or str(target_id))

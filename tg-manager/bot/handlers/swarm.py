@@ -89,7 +89,7 @@ async def cb_swarm_toggle(
         return
     new_state = not row.get("swarm_enabled", False)
     try:
-        await db.toggle_swarm(pool, callback_data.bot_id, new_state)
+        await db.toggle_swarm(pool, callback_data.bot_id, new_state, added_by=callback.from_user.id)
         log.info(
             "swarm toggle: bot=%s new_state=%s user=%s",
             callback_data.bot_id,
@@ -208,7 +208,7 @@ async def cb_swarm_role(
                 f"Роль уже установлена: {role_label}", show_alert=True
             )
             return
-        await db.set_bot_role(pool, callback_data.bot_id, role)
+        await db.set_bot_role(pool, callback_data.bot_id, role, added_by=callback.from_user.id)
         log.info(
             "swarm role: bot=%s role=%s user=%s",
             callback_data.bot_id,

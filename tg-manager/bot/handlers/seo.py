@@ -2027,7 +2027,7 @@ async def cb_seo_momentum(
     total_up = total_down = total_same = 0
 
     for kw in keywords:
-        history = await db.get_ranking_history(pool, kw["id"], limit=5)
+        history = await db.get_ranking_history(pool, kw["id"], limit=5, owner_id=callback.from_user.id)
         if not history or len(history) < 2:
             pos_now = history[0]["position"] if history else "—"
             lines.append(

@@ -276,7 +276,11 @@ async def update_broadcast(
     )
 
 
-async def get_broadcast(pool: asyncpg.Pool, broadcast_id: int) -> asyncpg.Record | None:
+async def get_broadcast(pool: asyncpg.Pool, broadcast_id: int, bot_id: int | None = None) -> asyncpg.Record | None:
+    if bot_id is not None:
+        return await pool.fetchrow(
+            "SELECT * FROM broadcasts WHERE id=$1 AND bot_id=$2", broadcast_id, bot_id
+        )
     return await pool.fetchrow("SELECT * FROM broadcasts WHERE id=$1", broadcast_id)
 
 
@@ -550,10 +554,16 @@ async def get_bots_for_polling(pool: asyncpg.Pool) -> list[asyncpg.Record]:
 # ── Hermes Relay ───────────────────────────────────────────────────────────
 
 
-async def enable_relay(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
-    await pool.execute(
-        "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2", enabled, bot_id
-    )
+async def enable_relay(pool: asyncpg.Pool, bot_id: int, enabled: bool, added_by: int | None = None) -> None:
+    if added_by is not None:
+        await pool.execute(
+            "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
+            enabled, bot_id, added_by,
+        )
+    else:
+        await pool.execute(
+            "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2", enabled, bot_id
+        )
 
 
 async def get_bots_with_relay(pool: asyncpg.Pool) -> list[asyncpg.Record]:
@@ -1016,20 +1026,30 @@ async def set_system_mode(pool: asyncpg.Pool, mode: str) -> None:
 
 
 async def set_bot_role(
-    pool: asyncpg.Pool, bot_id: int, role: str, cluster: str = "default"
+    pool: asyncpg.Pool, bot_id: int, role: str, cluster: str = "default", added_by: int | None = None
 ) -> None:
-    await pool.execute(
-        "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1",
-        bot_id,
-        role,
-        cluster,
-    )
+    if added_by is not None:
+        await pool.execute(
+            "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1 AND added_by=$4",
+            bot_id, role, cluster, added_by,
+        )
+    else:
+        await pool.execute(
+            "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1",
+            bot_id, role, cluster,
+        )
 
 
-async def toggle_swarm(pool: asyncpg.Pool, bot_id: int, enabled: bool) -> None:
-    await pool.execute(
-        "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1", bot_id, enabled
-    )
+async def toggle_swarm(pool: asyncpg.Pool, bot_id: int, enabled: bool, added_by: int | None = None) -> None:
+    if added_by is not None:
+        await pool.execute(
+            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3",
+            bot_id, enabled, added_by,
+        )
+    else:
+        await pool.execute(
+            "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1", bot_id, enabled
+        )
 
 
 async def get_swarm_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
@@ -1193,7 +1213,11 @@ async def get_experiments(pool, bot_id: int) -> list:
     )
 
 
-async def get_experiment(pool, exp_id: int) -> asyncpg.Record | None:
+async def get_experiment(pool, exp_id: int, bot_id: int | None = None) -> asyncpg.Record | None:
+    if bot_id is not None:
+        return await pool.fetchrow(
+            "SELECT * FROM experiments WHERE id=$1 AND bot_id=$2", exp_id, bot_id
+        )
     return await pool.fetchrow("SELECT * FROM experiments WHERE id=$1", exp_id)
 
 
@@ -1226,8 +1250,13 @@ async def add_experiment_variant(
     return row["id"]
 
 
-async def set_experiment_status(pool, exp_id: int, status: str) -> None:
-    await pool.execute("UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status)
+async def set_experiment_status(pool, exp_id: int, status: str, bot_id: int | None = None) -> None:
+    if bot_id is not None:
+        await pool.execute(
+            "UPDATE experiments SET status=$2 WHERE id=$1 AND bot_id=$3", exp_id, status, bot_id
+        )
+    else:
+        await pool.execute("UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status)
 
 
 async def get_active_experiment(pool, bot_id: int, exp_type: str = "start_message"):
@@ -2306,8 +2335,15 @@ async def remove_tracked_keyword(
 
 
 async def get_keyword_rankings(
-    pool: asyncpg.Pool, keyword_id: int, limit: int = 10
+    pool: asyncpg.Pool, keyword_id: int, limit: int = 10, owner_id: int | None = None
 ) -> list:
+    if owner_id is not None:
+        return await pool.fetch(
+            "SELECT sr.position, sr.checked_at FROM search_rankings sr "
+            "JOIN tracked_keywords tk ON tk.id=sr.keyword_id AND tk.owner_id=$3 "
+            "WHERE sr.keyword_id=$1 ORDER BY sr.checked_at DESC LIMIT $2",
+            keyword_id, limit, owner_id,
+        )
     return await pool.fetch(
         "SELECT position, checked_at FROM search_rankings "
         "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
@@ -2316,7 +2352,14 @@ async def get_keyword_rankings(
     )
 
 
-async def get_latest_ranking(pool: asyncpg.Pool, keyword_id: int):
+async def get_latest_ranking(pool: asyncpg.Pool, keyword_id: int, owner_id: int | None = None):
+    if owner_id is not None:
+        return await pool.fetchrow(
+            "SELECT sr.position, sr.checked_at FROM search_rankings sr "
+            "JOIN tracked_keywords tk ON tk.id=sr.keyword_id AND tk.owner_id=$2 "
+            "WHERE sr.keyword_id=$1 ORDER BY sr.checked_at DESC LIMIT 1",
+            keyword_id, owner_id,
+        )
     return await pool.fetchrow(
         "SELECT position, checked_at FROM search_rankings "
         "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT 1",
@@ -2336,9 +2379,16 @@ async def save_ranking(
 
 
 async def get_ranking_history(
-    pool: asyncpg.Pool, keyword_id: int, limit: int = 7
+    pool: asyncpg.Pool, keyword_id: int, limit: int = 7, owner_id: int | None = None
 ) -> list:
     """Return last N ranking records for a keyword: [(position, checked_at)]."""
+    if owner_id is not None:
+        return await pool.fetch(
+            "SELECT sr.position, sr.checked_at FROM search_rankings sr "
+            "JOIN tracked_keywords tk ON tk.id=sr.keyword_id AND tk.owner_id=$3 "
+            "WHERE sr.keyword_id=$1 ORDER BY sr.checked_at DESC LIMIT $2",
+            keyword_id, limit, owner_id,
+        )
     return await pool.fetch(
         "SELECT position, checked_at FROM search_rankings "
         "WHERE keyword_id=$1 ORDER BY checked_at DESC LIMIT $2",
@@ -2953,17 +3003,31 @@ async def get_global_presence_plans(
     )
 
 
-async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
-    row = await pool.fetchrow(
-        """SELECT
-               COUNT(*) FILTER (WHERE status='pending')  AS pending,
-               COUNT(*) FILTER (WHERE status='done')     AS done,
-               COUNT(*) FILTER (WHERE status='failed')   AS failed,
-               COUNT(*) FILTER (WHERE status='running')  AS running,
-               COUNT(*) AS total
-           FROM global_presence_targets WHERE plan_id=$1""",
-        plan_id,
-    )
+async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None) -> dict:
+    if owner_id is not None:
+        row = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) FILTER (WHERE gpt.status='pending')  AS pending,
+                   COUNT(*) FILTER (WHERE gpt.status='done')     AS done,
+                   COUNT(*) FILTER (WHERE gpt.status='failed')   AS failed,
+                   COUNT(*) FILTER (WHERE gpt.status='running')  AS running,
+                   COUNT(*) AS total
+               FROM global_presence_targets gpt
+               JOIN global_presence_plans gpp ON gpp.id=gpt.plan_id AND gpp.owner_id=$2
+               WHERE gpt.plan_id=$1""",
+            plan_id, owner_id,
+        )
+    else:
+        row = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) FILTER (WHERE status='pending')  AS pending,
+                   COUNT(*) FILTER (WHERE status='done')     AS done,
+                   COUNT(*) FILTER (WHERE status='failed')   AS failed,
+                   COUNT(*) FILTER (WHERE status='running')  AS running,
+                   COUNT(*) AS total
+               FROM global_presence_targets WHERE plan_id=$1""",
+            plan_id,
+        )
     return (
         dict(row)
         if row
@@ -2971,13 +3035,21 @@ async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
     )
 
 
-async def reset_failed_targets(pool: asyncpg.Pool, plan_id: int) -> int:
+async def reset_failed_targets(pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None) -> int:
     """Reset failed+retryable targets to pending for retry. Returns count reset."""
-    result = await pool.execute(
-        "UPDATE global_presence_targets SET status='pending', error_message=NULL "
-        "WHERE plan_id=$1 AND status='failed' AND retryable=TRUE",
-        plan_id,
-    )
+    if owner_id is not None:
+        result = await pool.execute(
+            "UPDATE global_presence_targets SET status='pending', error_message=NULL "
+            "WHERE plan_id=$1 AND status='failed' AND retryable=TRUE "
+            "AND EXISTS (SELECT 1 FROM global_presence_plans WHERE id=$1 AND owner_id=$2)",
+            plan_id, owner_id,
+        )
+    else:
+        result = await pool.execute(
+            "UPDATE global_presence_targets SET status='pending', error_message=NULL "
+            "WHERE plan_id=$1 AND status='failed' AND retryable=TRUE",
+            plan_id,
+        )
     return int(result.split()[-1]) if result else 0
 
 
