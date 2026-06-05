@@ -1611,6 +1611,17 @@ async def cb_op_detail(
             summary = res.get("summary", "")
             if summary:
                 lines.append(f"\n✅ <b>Итог:</b> {html.escape(summary)}")
+            skipped = res.get("skipped_accounts", 0)
+            if skipped:
+                lines.append(f"⚠️ Пропущено аккаунтов (лимит): {skipped}")
+            failed_links = res.get("failed_links") or res.get("failed_channels") or []
+            if failed_links:
+                sample = failed_links[:5]
+                more = len(failed_links) - len(sample)
+                links_txt = "\n".join(f"  • <code>{html.escape(str(l)[:60])}</code>" for l in sample)
+                if more:
+                    links_txt += f"\n  <i>...ещё {more}</i>"
+                lines.append(f"\n❌ <b>Не удалось ({len(failed_links)}):</b>\n{links_txt}")
         except Exception:
             log_exc_swallow(log, "Не удалось распарсить result JSON операции")
 

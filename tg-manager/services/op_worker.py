@@ -1086,8 +1086,20 @@ async def _exec_bulk_join_inner(
     ok_count = 0
     fail_count = 0
     step = 0
+    skipped_by_limit = 0
+    failed_links: list[str] = []
     _JOIN_DAY_LIMITS = {"fast": 20, "normal": 15, "slow": 8, "smart": 12}
     day_limit = _JOIN_DAY_LIMITS.get(delay_mode, 12)
+
+    if not links:
+        return {
+            "status": "done",
+            "ok": 0,
+            "failed": 0,
+            "skipped_accounts": 0,
+            "failed_links": [],
+            "summary": "Список ссылок пуст — нечего выполнять.",
+        }
 
     for acc_idx, acc in enumerate(accounts):
         acc_dict = dict(acc)
@@ -1105,6 +1117,7 @@ async def _exec_bulk_join_inner(
                 "bulk_join: аккаунт %s достиг дневного лимита join (%d), пропуск",
                 acc_dict.get("phone"), day_limit,
             )
+            skipped_by_limit += 1
             continue
         for i, link in enumerate(links):
             if await _is_cancelled(pool, op_id):
@@ -1112,6 +1125,8 @@ async def _exec_bulk_join_inner(
                     "status": "cancelled",
                     "ok": ok_count,
                     "failed": fail_count,
+                    "skipped_accounts": skipped_by_limit,
+                    "failed_links": failed_links[:50],
                     "summary": f"Отменено. Вступлено: {ok_count}, ошибок: {fail_count}",
                 }
             step += 1
@@ -1159,7 +1174,7 @@ async def _exec_bulk_join_inner(
                     )
                     break  # stop all remaining links for this account
                 if res.get("error"):
-                    raise Exception(res["error"])
+                    raise Exception(str(res["error"]))
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
                 await pool.execute(
@@ -1199,6 +1214,8 @@ async def _exec_bulk_join_inner(
                 fail_count += 1
                 err_str = str(e)[:200]
                 flood_wait = extract_flood_wait(e, err_str)
+                if link not in failed_links:
+                    failed_links.append(link)
                 _infra_mem.record_account_op(
                     acc["id"], "join", success=False, error=err_str[:100]
                 )
@@ -1265,11 +1282,16 @@ async def _exec_bulk_join_inner(
         if acc_idx < len(accounts) - 1:
             await session_simulator.between_accounts_pause(acc_idx)
 
+    parts = [f"Вступлено: {ok_count}", f"ошибок: {fail_count}"]
+    if skipped_by_limit:
+        parts.append(f"пропущено (лимит): {skipped_by_limit}")
     return {
         "status": "done",
         "ok": ok_count,
         "failed": fail_count,
-        "summary": f"Вступлено: {ok_count}, ошибок: {fail_count}",
+        "skipped_accounts": skipped_by_limit,
+        "failed_links": failed_links[:50],
+        "summary": ", ".join(parts),
     }
 
 
@@ -1292,9 +1314,21 @@ async def _exec_bulk_leave(
     ok_count = 0
     fail_count = 0
     step = 0
+    skipped_by_limit = 0
+    failed_channels: list[str] = []
     delay_mode = params.get("delay_mode", "smart")
     _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
     day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
+
+    if not channels:
+        return {
+            "status": "done",
+            "ok": 0,
+            "failed": 0,
+            "skipped_accounts": 0,
+            "failed_channels": [],
+            "summary": "Список каналов пуст — нечего выполнять.",
+        }
 
     for acc_idx, acc in enumerate(accounts):
         acc_dict = dict(acc)
@@ -1312,6 +1346,7 @@ async def _exec_bulk_leave(
                 "bulk_leave: аккаунт %s достиг дневного лимита leave (%d), пропуск",
                 acc_dict.get("phone"), day_limit,
             )
+            skipped_by_limit += 1
             continue
         for i, channel in enumerate(channels):
             if await _is_cancelled(pool, op_id):
@@ -1319,6 +1354,8 @@ async def _exec_bulk_leave(
                     "status": "cancelled",
                     "ok": ok_count,
                     "failed": fail_count,
+                    "skipped_accounts": skipped_by_limit,
+                    "failed_channels": failed_channels[:50],
                     "summary": f"Отменено. Вышли: {ok_count}, ошибок: {fail_count}",
                 }
             step += 1
@@ -1369,6 +1406,9 @@ async def _exec_bulk_leave(
                 fail_count += 1
                 err_str = str(e)[:200]
                 flood_wait = extract_flood_wait(e, err_str)
+                ch_str = str(channel)
+                if ch_str not in failed_channels:
+                    failed_channels.append(ch_str)
                 _infra_mem.record_account_op(
                     acc["id"], "leave", success=False, error=err_str[:100]
                 )
@@ -1435,11 +1475,16 @@ async def _exec_bulk_leave(
         if acc_idx < len(accounts) - 1:
             await session_simulator.between_accounts_pause(acc_idx)
 
+    parts = [f"Вышли: {ok_count}", f"ошибок: {fail_count}"]
+    if skipped_by_limit:
+        parts.append(f"пропущено (лимит): {skipped_by_limit}")
     return {
         "status": "done",
         "ok": ok_count,
         "failed": fail_count,
-        "summary": f"Вышли: {ok_count}, ошибок: {fail_count}",
+        "skipped_accounts": skipped_by_limit,
+        "failed_channels": failed_channels[:50],
+        "summary": ", ".join(parts),
     }
 
 
@@ -1567,10 +1612,14 @@ async def _exec_global_presence_channel(
 
             acc = alt_acc
 
-        await pool.execute(
-            "UPDATE global_presence_targets SET status='running' WHERE id=$1",
+        # Atomic claim: only proceed if target is still 'pending' to prevent duplicate processing
+        claimed = await pool.execute(
+            "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
             target["id"],
         )
+        if claimed == "UPDATE 0":
+            log.info("op_worker gp: target %d already claimed by another worker, skipping", target["id"])
+            continue
 
         title = (
             target["planned_name"] or f"{'Group' if is_group else 'Channel'} {i + 1}"
@@ -1739,10 +1788,16 @@ async def _exec_global_presence_channel(
                         variant,
                         err2[:60],
                     )
-                    # Flood wait handling
+                    # Flood wait handling — cap at 600s; longer waits abort variant loop
                     if "FloodWait" in str(err2):
                         m2 = _re.search(r"(\d+)", str(err2))
                         fw = int(m2.group(1)) + 5 if m2 else 30
+                        if fw > 600:
+                            log.warning(
+                                "op_worker gp_channel: FloodWait %ds for username exceeds cap, aborting variants",
+                                fw,
+                            )
+                            break
                         await asyncio.sleep(fw)
                 username_error = err if not success_variant else None
 
@@ -1982,10 +2037,14 @@ async def _exec_global_presence_bot(
         if bot_username and not bot_username.lower().endswith("bot"):
             bot_username = bot_username + "_bot"
 
-        await pool.execute(
-            "UPDATE global_presence_targets SET status='running' WHERE id=$1",
+        # Atomic claim: skip if already claimed by another worker
+        claimed = await pool.execute(
+            "UPDATE global_presence_targets SET status='running' WHERE id=$1 AND status='pending'",
             target["id"],
         )
+        if claimed == "UPDATE 0":
+            log.info("op_worker gp_bot: target %d already claimed, skipping", target["id"])
+            continue
         await session_simulator.typing_delay(bot_name)
 
         t0_gp_bot = time.monotonic()
