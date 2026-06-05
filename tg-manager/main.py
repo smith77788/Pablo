@@ -250,16 +250,6 @@ async def main() -> None:
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
 
-    # On restart: reset any "running" operations back to "pending" so they get replayed.
-    # This prevents operations from hanging forever when the bot was killed mid-execution.
-    try:
-        _reset_count = await pool.execute(
-            "UPDATE operation_queue SET status='pending', started_at=NULL WHERE status='running'"
-        )
-        log.info("Startup: reset stale running operations → pending (%s)", _reset_count)
-    except Exception as _e:
-        log.warning("Startup: could not reset stale running operations: %s", _e)
-
     # Send deployment notification to admins on startup (detects new deploys)
     asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 
