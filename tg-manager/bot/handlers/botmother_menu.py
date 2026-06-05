@@ -817,9 +817,12 @@ async def cb_alerts(
 
 @router.callback_query(BmCb.filter(F.action == "alerts_clear"))
 async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await pool.execute(
-        "DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id
+        )
+    except Exception:
+        pass
     await callback.answer("Алерты очищены", show_alert=True)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
