@@ -211,7 +211,14 @@ async def msg_reactivate(
 async def cb_engage_heatmap(
     callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Аналитика активности", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     data = await db.get_activity_heatmap(pool, callback_data.bot_id, days=7)
     chart = _heatmap_chart(data)
@@ -233,7 +240,14 @@ async def cb_engage_heatmap(
 async def cb_engage_top(
     callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Аналитика активности", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     users = await db.get_top_active_users(pool, callback_data.bot_id, limit=10)
     kb = InlineKeyboardBuilder()
@@ -262,6 +276,14 @@ async def cb_engage_top(
 async def cb_engage_autotag(
     callback: CallbackQuery, callback_data: EngageCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Авто-теги по активности", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer("⏳ Присваиваю теги...")
     segs = await db.autotag_by_activity(pool, callback_data.bot_id)
     kb = InlineKeyboardBuilder()
