@@ -177,8 +177,16 @@ async def cb_fn_view(
 
 @router.callback_query(FunnelCb.filter(F.action == "create"))
 async def cb_fn_create(
-    callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext
+    callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Воронки", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     await state.set_state(CreateFunnel.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -480,6 +488,14 @@ async def cb_fn_broadcast(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Воронки", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
 
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
