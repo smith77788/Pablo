@@ -1605,6 +1605,15 @@ async def _exec_global_presence_channel(
                 success=False,
                 error=err_str[:100],
             )
+            await _audit(
+                pool, owner_id,
+                "gp_create_group" if is_group else "gp_create_channel",
+                "flood_wait" if result.get("flood_wait") else "error",
+                operation_id=op_id, account_id=acc["id"],
+                target=title[:100],
+                error_msg=err_str[:200],
+                flood_wait_s=int(result["flood_wait"]) if result.get("flood_wait") else None,
+            )
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
@@ -1740,6 +1749,14 @@ async def _exec_global_presence_channel(
             "global_presence_channel",
             success=True,
             duration_s=time.monotonic() - t0_gp,
+        )
+        await _audit(
+            pool, owner_id,
+            "gp_create_group" if is_group else "gp_create_channel",
+            "success",
+            operation_id=op_id, account_id=acc["id"],
+            target=title[:100],
+            duration_ms=int((time.monotonic() - t0_gp) * 1000),
         )
 
         # Публикуем начальный пост — пустой канал немедленно попадает в shadow ban.
@@ -2004,6 +2021,12 @@ async def _exec_global_presence_bot(
                 success=False,
                 error=str(result["error"])[:100],
             )
+            await _audit(
+                pool, owner_id, "gp_create_bot", "error",
+                operation_id=op_id, account_id=acc["id"],
+                target=bot_name[:100],
+                error_msg=str(result["error"])[:200],
+            )
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
             )
@@ -2033,6 +2056,12 @@ async def _exec_global_presence_bot(
             "global_presence_bot",
             success=True,
             duration_s=time.monotonic() - t0_gp_bot,
+        )
+        await _audit(
+            pool, owner_id, "gp_create_bot", "success",
+            operation_id=op_id, account_id=acc["id"],
+            target=(actual_username or bot_name)[:100],
+            duration_ms=int((time.monotonic() - t0_gp_bot) * 1000),
         )
 
         # Add created bot to ecosystem
