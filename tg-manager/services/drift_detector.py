@@ -166,7 +166,7 @@ async def _check_all(pool: asyncpg.Pool, bot) -> None:
 
     for (owner_id, acc_id), channels in groups.items():
         acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1 AND is_active=true", acc_id
+            "SELECT * FROM tg_accounts WHERE id=$1 AND is_active=true AND session_str IS NOT NULL", acc_id
         )
         if not acc:
             continue

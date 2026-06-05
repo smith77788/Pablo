@@ -2840,7 +2840,7 @@ async def get_trusted_accounts(
         """SELECT a.*, p.proxy_url
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.owner_id=$1 AND a.is_active=true
+           WHERE a.owner_id=$1 AND a.is_active=true AND a.session_str IS NOT NULL
              AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
            ORDER BY a.trust_score DESC NULLS LAST, a.last_used ASC NULLS FIRST""",
         owner_id,
