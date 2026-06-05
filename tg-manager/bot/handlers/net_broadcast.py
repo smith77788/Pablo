@@ -154,12 +154,12 @@ async def cb_net_bc_bots_confirmed(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    await callback.answer()
     data = await state.get_data()
     selected: list[int] = data.get("selected_bot_ids", [])
     if not selected:
         await callback.answer("Выберите хотя бы одного бота.", show_alert=True)
         return
+    await callback.answer()
     bots = await db.get_bots(pool, callback.from_user.id)
     bots_map = {b["bot_id"]: b for b in bots}
     chosen = [bots_map[bid] for bid in selected if bid in bots_map]

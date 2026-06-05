@@ -1168,7 +1168,6 @@ async def cb_wu_session_list(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 async def cb_wu_sess_detail(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     sess_id = callback_data.session_id
 
     s = await pool.fetchrow(
@@ -1179,6 +1178,7 @@ async def cb_wu_sess_detail(
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
+    await callback.answer()
 
     logs = await pool.fetch(
         """SELECT account_id, action_type, target, success, performed_at
@@ -1245,7 +1245,6 @@ async def cb_wu_sess_detail(
 async def cb_wu_sess_run(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("▶️ Запускаю в фоне...")
     from services.account_warmer import run_warmup_session
     from services import task_registry
     import asyncio
@@ -1259,6 +1258,7 @@ async def cb_wu_sess_run(
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
         return
+    await callback.answer("▶️ Запускаю в фоне...")
 
     task = asyncio.create_task(run_warmup_session(pool, dict(s)))
     task_registry.register(
@@ -1288,7 +1288,6 @@ async def cb_wu_sess_run(
 async def cb_wu_sess_pause(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     sess_id = callback_data.session_id
     await pool.execute(
         "UPDATE warmup_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
@@ -1302,7 +1301,6 @@ async def cb_wu_sess_pause(
 async def cb_wu_sess_resume(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     sess_id = callback_data.session_id
     await pool.execute(
         "UPDATE warmup_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
@@ -1493,11 +1491,11 @@ async def cb_ract_toggle_acc(
     ResourceActCb.filter(F.action == "accs_done"), ResourceActivityFSM.choosing_accounts
 )
 async def cb_ract_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
     data = await state.get_data()
     if not data.get("ract_acc_ids"):
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(ResourceActivityFSM.choosing_profile)
 
     kb = InlineKeyboardBuilder()
@@ -1716,7 +1714,6 @@ async def cb_ract_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_ract_detail(
     callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     sess_id = callback_data.session_id
     uid = callback.from_user.id
 
@@ -1728,6 +1725,7 @@ async def cb_ract_detail(
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
+    await callback.answer()
 
     logs = await pool.fetch(
         """SELECT account_id, action_type, resource_ref, success, performed_at
@@ -1794,7 +1792,6 @@ async def cb_ract_detail(
 async def cb_ract_run(
     callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("▶️ Запускаю в фоне...")
     from services.activity_engine import run_resource_activity_session
     from services import task_registry
     import asyncio
@@ -1809,6 +1806,7 @@ async def cb_ract_run(
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
         return
+    await callback.answer("▶️ Запускаю в фоне...")
 
     task = asyncio.create_task(run_resource_activity_session(pool, dict(s)))
     task_registry.register(
