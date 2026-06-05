@@ -36,6 +36,7 @@ async def get_accounts_by_geo(
            JOIN user_proxies p ON p.id = a.proxy_id
            WHERE a.owner_id = $1
              AND a.is_active = true
+             AND a.session_str IS NOT NULL
              AND UPPER(p.geo_country) = UPPER($2)
            ORDER BY a.trust_score DESC NULLS LAST
            LIMIT $3""",

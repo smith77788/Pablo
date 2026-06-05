@@ -156,6 +156,7 @@ async def get_best_account(
     conditions = [
         "a.owner_id = $1",
         "a.is_active = TRUE",
+        "a.session_str IS NOT NULL",
         "(a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
         "a.id != ALL($2::bigint[])",
     ]
@@ -215,6 +216,7 @@ async def get_active_accounts(
     conditions = [
         "a.owner_id = $1",
         "a.is_active = TRUE",
+        "a.session_str IS NOT NULL",
         "(a.cooldown_until IS NULL OR a.cooldown_until < NOW())",
     ]
     params: list = [owner_id]

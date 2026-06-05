@@ -90,7 +90,7 @@ async def _generate_links(
         """SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version
            FROM tg_accounts a
            JOIN managed_channels mc ON mc.acc_id = a.id AND mc.channel_id = $1
-           WHERE a.owner_id = $2 AND a.is_active = true
+           WHERE a.owner_id = $2 AND a.is_active = true AND a.session_str IS NOT NULL
            ORDER BY a.trust_score DESC NULLS LAST
            LIMIT $3""",
         channel_id,

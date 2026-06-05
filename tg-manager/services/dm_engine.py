@@ -121,11 +121,11 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[int]:
     target_type = campaign["target_type"]
     target_id = campaign["target_id"]
 
-    # Исключить уже отправленных
+    # Исключить уже успешно отправленных, заблокированных и пропущенных (не retry)
     sent_ids = {
         r["tg_user_id"]
         for r in await pool.fetch(
-            "SELECT tg_user_id FROM dm_campaign_log WHERE campaign_id=$1 AND status='sent'",
+            "SELECT tg_user_id FROM dm_campaign_log WHERE campaign_id=$1 AND status IN ('sent','blocked','skip')",
             campaign_id,
         )
     }
