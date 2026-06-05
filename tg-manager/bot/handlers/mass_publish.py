@@ -303,13 +303,16 @@ async def _show_preview(
     dry_run: bool = data.get("dry_run", False)
 
     # Count total channels from DB (fast, no Telegram connections)
-    channel_counts = await pool.fetch(
-        "SELECT acc_id, COUNT(*) AS cnt FROM managed_channels "
-        "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
-        "GROUP BY acc_id",
-        callback.from_user.id,
-        acc_ids,
-    )
+    try:
+        channel_counts = await pool.fetch(
+            "SELECT acc_id, COUNT(*) AS cnt FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
+            "GROUP BY acc_id",
+            callback.from_user.id,
+            acc_ids,
+        )
+    except Exception:
+        channel_counts = []
     total_channels = sum(r["cnt"] for r in channel_counts)
     acc_count = len(channel_counts)
 

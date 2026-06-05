@@ -192,14 +192,17 @@ async def _show_template_step(
 
     user_id = callback.from_user.id
     offset = page * _TPL_PAGE_SIZE
-    templates = await pool.fetch(
-        "SELECT id, name FROM asset_templates WHERE owner_id=$1 AND asset_type=$2 "
-        "ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-        user_id,
-        asset_type,
-        _TPL_PAGE_SIZE + 1,
-        offset,
-    )
+    try:
+        templates = await pool.fetch(
+            "SELECT id, name FROM asset_templates WHERE owner_id=$1 AND asset_type=$2 "
+            "ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            user_id,
+            asset_type,
+            _TPL_PAGE_SIZE + 1,
+            offset,
+        )
+    except Exception:
+        templates = []
     has_more = len(templates) > _TPL_PAGE_SIZE
     templates = templates[:_TPL_PAGE_SIZE]
 
@@ -333,11 +336,14 @@ async def cb_gp_sel_tpl(
         )
     else:
         tpl_id = int(item) if item.isdigit() else 0
-        tpl = await pool.fetchrow(
-            "SELECT id, name, template FROM asset_templates WHERE id=$1 AND owner_id=$2",
-            tpl_id,
-            callback.from_user.id,
-        )
+        try:
+            tpl = await pool.fetchrow(
+                "SELECT id, name, template FROM asset_templates WHERE id=$1 AND owner_id=$2",
+                tpl_id,
+                callback.from_user.id,
+            )
+        except Exception:
+            tpl = None
         if not tpl:
             await callback.answer("Шаблон не найден", show_alert=True)
             return
