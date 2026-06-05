@@ -503,6 +503,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
             elif op_type == "strike":
                 result = await _exec_strike(pool, bot, op_id, owner_id, params)
+            elif op_type == "mass_publish":
+                result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
             elif op_type == "gift_transfer":
                 from services.gift_operation import _exec_gift_transfer
                 result = await _exec_gift_transfer(pool, op_id, params)
@@ -1052,6 +1054,130 @@ async def _exec_bulk_bot_edit(
         "ok": ok_count,
         "failed": fail_count,
         "summary": f"Обновлено: {ok_count} ботов, ошибок: {fail_count}",
+    }
+
+
+async def _exec_mass_publish(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Опубликовать сообщение во все управляемые каналы/группы владельца."""
+    from services import account_manager, session_simulator
+    import random
+
+    target = params.get("target", "channels")
+    mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
+    delay = int(params.get("delay_seconds") or params.get("delay") or 30)
+
+    if not mp_text:
+        return {"status": "failed", "summary": "⚠️ Текст сообщения не указан"}
+
+    if target == "channels":
+        type_filter = "(mc.type = 'channel' OR mc.type IS NULL)"
+    elif target == "groups":
+        type_filter = "mc.type IN ('megagroup', 'supergroup', 'group', 'chat')"
+    else:
+        type_filter = "TRUE"
+
+    accounts_rows = await resource_selector.select_all_active(pool, owner_id)
+    if not accounts_rows:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
+
+    acc_ids = [a["id"] for a in accounts_rows]
+    db_pairs = await pool.fetch(
+        f"SELECT DISTINCT ON (mc.channel_id) "
+        f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
+        f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
+        f"a.device_model, a.system_version, a.app_version "
+        f"FROM managed_channels mc "
+        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE "
+        f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) AND {type_filter} "
+        f"ORDER BY mc.channel_id, a.id",
+        owner_id,
+        acc_ids,
+    )
+
+    if not db_pairs:
+        return {"status": "done", "ok": 0, "failed": 0, "summary": "Нет каналов для рассылки"}
+
+    acc_map = {a["id"]: dict(a) for a in accounts_rows}
+    targets = []
+    for row in db_pairs:
+        acc = acc_map.get(row["acc_id"])
+        if acc:
+            targets.append((acc, {"id": row["id"], "title": row["title"],
+                                  "access_hash": row["access_hash"] or 0,
+                                  "type": row["type"] or "channel"}))
+
+    total = len(targets)
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    )
+
+    ok_count = 0
+    fail_count = 0
+    failed_channels: list[str] = []
+
+    for idx, (acc, dialog) in enumerate(targets, 1):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "failed": fail_count,
+                "failed_channels": failed_channels[:50],
+                "summary": f"Отменено. Опубликовано: {ok_count}, ошибок: {fail_count}",
+            }
+        flood_wait = 0
+        try:
+            result = await account_manager.post_to_channel(
+                acc["session_str"],
+                dialog["id"],
+                mp_text,
+                access_hash=dialog["access_hash"],
+                _acc=acc,
+            )
+            if "error" in result or result.get("banned"):
+                raise Exception(str(result.get("error", "publish error")))
+            ok_count += 1
+            _infra_mem.record_account_op(acc["id"], "publish", success=True)
+            try:
+                from services.flood_engine import record_success
+                await record_success(acc["id"], "publish")
+            except Exception:
+                log_exc_swallow(log, "mass_publish: record_success failed")
+        except Exception as e:
+            fail_count += 1
+            err_str = str(e)[:200]
+            flood_wait = extract_flood_wait(e, err_str)
+            ch_label = str(dialog.get("title") or dialog["id"])[:60]
+            if ch_label not in failed_channels:
+                failed_channels.append(ch_label)
+            _infra_mem.record_account_op(acc["id"], "publish", success=False, error=err_str[:100])
+            if flood_wait:
+                try:
+                    from services.flood_engine import record_flood
+                    await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
+                except Exception:
+                    log_exc_swallow(log, "mass_publish: record_flood failed")
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id, idx, str(dialog["id"]), err_str,
+            )
+
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+        if delay > 0 and idx < total:
+            effective_delay = max(delay, float(flood_wait) + 5) if flood_wait else delay
+            await asyncio.sleep(effective_delay)
+
+    parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "failed": fail_count,
+        "failed_channels": failed_channels[:50],
+        "summary": ", ".join(parts),
     }
 
 
