@@ -124,6 +124,16 @@ Shared systems should be reused:
 
 If a feature bypasses shared infrastructure, repair it.
 
+## Git discipline
+
+Before every commit:
+1. `git fetch origin <branch>` — check for remote changes from parallel agents.
+2. If remote is ahead: `git pull --rebase` before committing.
+3. After commit: `git push` immediately (stop-hook requires it).
+4. Never commit on top of a stale local branch — always sync first.
+
+This prevents overwriting parallel agent work.
+
 ## Checks
 
 Run available:
