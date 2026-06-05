@@ -3893,7 +3893,15 @@ async def cb_bulk_report_start(
 
 
 @router.callback_query(ChanCb.filter(F.action == "br_mode_single"))
-async def cb_br_mode_single(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_br_mode_single(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    from bot.handlers.strike import _has_access
+    from bot.callbacks import StrikeCb
+
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа к Strike Module.", show_alert=True)
+        return
     await callback.answer()
     await state.set_state(BulkReportFSM.waiting_peer)
     kb = InlineKeyboardBuilder()
@@ -3909,7 +3917,15 @@ async def cb_br_mode_single(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(ChanCb.filter(F.action == "br_mode_batch"))
-async def cb_br_mode_batch(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_br_mode_batch(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    from bot.handlers.strike import _has_access
+    from bot.callbacks import StrikeCb
+
+    if not await _has_access(pool, callback.from_user.id):
+        await callback.answer("Нет доступа к Strike Module.", show_alert=True)
+        return
     await callback.answer()
     await state.set_state(BulkReportFSM.waiting_peers_batch)
     kb = InlineKeyboardBuilder()

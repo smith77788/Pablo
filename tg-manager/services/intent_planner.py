@@ -113,31 +113,41 @@ def detect_asset_type(description: str) -> str:
 
 
 async def assess_resources(pool: asyncpg.Pool, owner_id: int) -> dict:
-    acc_row = await pool.fetchrow(
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    async def _safe_fetchrow(query: str, *args):
+        try:
+            return await pool.fetchrow(query, *args)
+        except Exception as exc:
+            _log.warning("assess_resources: query failed: %s", exc)
+            return None
+
+    acc_row = await _safe_fetchrow(
         "SELECT COUNT(*) AS cnt, COALESCE(AVG(trust_score), 0.5) AS avg_trust "
         "FROM tg_accounts WHERE owner_id=$1 AND trust_score > 0.3",
         owner_id,
     )
-    proxy_row = await pool.fetchrow(
+    proxy_row = await _safe_fetchrow(
         "SELECT COUNT(*) AS cnt FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
         owner_id,
     )
-    ops_row = await pool.fetchrow(
+    ops_row = await _safe_fetchrow(
         "SELECT COUNT(*) AS cnt FROM operation_queue "
         "WHERE owner_id=$1 AND status IN ('pending','running')",
         owner_id,
     )
-    gp_row = await pool.fetchrow(
+    gp_row = await _safe_fetchrow(
         "SELECT COUNT(*) AS cnt FROM global_presence_plans "
         "WHERE owner_id=$1 AND status NOT IN ('done','failed','cancelled')",
         owner_id,
     )
     return {
-        "accounts_available": int(acc_row["cnt"] or 0),
-        "accounts_avg_trust": round(float(acc_row["avg_trust"] or 0.5), 2),
-        "proxies_available": int(proxy_row["cnt"] or 0),
-        "active_operations": int(ops_row["cnt"] or 0),
-        "active_gp_plans": int(gp_row["cnt"] or 0),
+        "accounts_available": int((acc_row["cnt"] if acc_row else None) or 0),
+        "accounts_avg_trust": round(float((acc_row["avg_trust"] if acc_row else None) or 0.5), 2),
+        "proxies_available": int((proxy_row["cnt"] if proxy_row else None) or 0),
+        "active_operations": int((ops_row["cnt"] if ops_row else None) or 0),
+        "active_gp_plans": int((gp_row["cnt"] if gp_row else None) or 0),
     }
 
 
@@ -151,6 +161,9 @@ async def build_plan(
     description: str,
     resources: dict,
 ) -> dict:
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     builders = {
         "presence": _build_presence_plan,
         "network": _build_network_plan,
@@ -161,7 +174,14 @@ async def build_plan(
         "visibility": _build_visibility_plan,
     }
     builder = builders.get(intent_type, _build_custom_plan)
-    return await builder(pool, owner_id, description, resources)
+    try:
+        return await builder(pool, owner_id, description, resources)
+    except Exception as exc:
+        _log.warning(
+            "build_plan: builder %s failed (owner=%d): %s — falling back to custom plan",
+            intent_type, owner_id, exc,
+        )
+        return await _build_custom_plan(pool, owner_id, description, resources)
 
 
 async def _build_presence_plan(pool, owner_id, description, resources):

@@ -53,11 +53,39 @@ async def build_autonomous_contract(
     requested_strategy: StrategyRequest = "auto",
 ) -> AutonomousContract:
     """Build a full execution contract from a user goal."""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     intent_type = intent_planner.classify_intent(description)
-    resources = await intent_planner.assess_resources(pool, owner_id)
-    base_plan = await intent_planner.build_plan(
-        pool, owner_id, intent_type, description, resources
-    )
+
+    try:
+        resources = await intent_planner.assess_resources(pool, owner_id)
+    except Exception as exc:
+        _log.warning("build_autonomous_contract: assess_resources failed: %s", exc)
+        resources = {
+            "accounts_available": 0,
+            "accounts_avg_trust": 0.5,
+            "proxies_available": 0,
+            "active_operations": 0,
+            "active_gp_plans": 0,
+        }
+
+    try:
+        base_plan = await intent_planner.build_plan(
+            pool, owner_id, intent_type, description, resources
+        )
+    except Exception as exc:
+        _log.warning("build_autonomous_contract: build_plan failed: %s", exc)
+        base_plan = {
+            "intent_type": intent_type or "custom",
+            "goal": description[:120],
+            "n_accounts_available": resources.get("accounts_available", 0),
+            "steps": ["1. Уточните цель — выберите тип намерения"],
+            "risks": ["ℹ️ Не удалось загрузить данные инфраструктуры"],
+            "executable": False,
+            "action": "navigate",
+            "navigate_to": "main",
+        }
     infra_state = await _safe_infra_state(pool, owner_id)
     strategy = choose_strategy(base_plan, resources, infra_state, requested_strategy)
     forecast = intent_planner.forecast_execution(base_plan, strategy=strategy)

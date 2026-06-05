@@ -179,7 +179,17 @@ async def _show_intent_main(
 ) -> None:
     await state.clear()
     owner_id = target.from_user.id
-    resources = await assess_resources(pool, owner_id)
+    try:
+        resources = await assess_resources(pool, owner_id)
+    except Exception as exc:
+        log.warning("_show_intent_main: assess_resources failed: %s", exc)
+        resources = {
+            "accounts_available": 0,
+            "accounts_avg_trust": 0.5,
+            "proxies_available": 0,
+            "active_operations": 0,
+            "active_gp_plans": 0,
+        }
 
     status_lines = [
         f"📱 Аккаунтов готово: <b>{resources['accounts_available']}</b>",
@@ -545,10 +555,14 @@ async def _execute_growth_intent(
 ) -> None:
     from services import operation_bus
 
-    rows = await pool.fetch(
-        "SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1 LIMIT 20",
-        owner_id,
-    )
+    try:
+        rows = await pool.fetch(
+            "SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1 LIMIT 20",
+            owner_id,
+        )
+    except Exception as exc:
+        log_exc_swallow(log, f"_execute_growth_intent: fetch channels failed: {exc}")
+        rows = []
     channel_ids = [str(row["channel_id"]) for row in rows]
     if not channel_ids:
         await _navigate_to_tool(callback, plan)
@@ -580,13 +594,17 @@ async def _execute_sync_intent(
 async def _execute_visibility_intent(
     callback: CallbackQuery, pool: asyncpg.Pool, intent_id: int, owner_id: int
 ) -> None:
-    keywords_cnt = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
-            owner_id,
+    try:
+        keywords_cnt = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
+                owner_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception as exc:
+        log_exc_swallow(log, f"_execute_visibility_intent: fetch failed: {exc}")
+        keywords_cnt = 0
     await db.update_intent_status(pool, intent_id, owner_id, "completed")
     await db.save_intent_feedback(
         pool, intent_id, owner_id, {"keywords_cnt": keywords_cnt}
