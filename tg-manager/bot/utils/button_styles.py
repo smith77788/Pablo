@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 ButtonStyle = Literal["primary", "success", "danger"]
 
@@ -31,6 +36,10 @@ _DANGER_WORDS = (
     "очист",
     "сброс",
     "стоп",
+    "отмена",
+    "отменить",
+    "удалить",
+    "заблокировать",
 )
 _SUCCESS_WORDS = (
     "add",
@@ -56,6 +65,15 @@ _SUCCESS_WORDS = (
     "оплат",
     "купить",
     "вкл",
+    "добав",
+    "добавить",
+    "выбрать",
+    "выбрать все",
+    "применить",
+    "продолжить",
+    "готово",
+    "проверить",
+    "скан",
 )
 _PRIMARY_WORDS = (
     "main",
@@ -79,16 +97,28 @@ _PRIMARY_WORDS = (
     "стат",
     "поиск",
     "измен",
+    "открыть",
+    "реестр",
+    "история",
+    "лог",
+    "след",
+    "пред",
 )
 
 
-def infer_button_style(button: InlineKeyboardButton) -> ButtonStyle | None:
+def infer_button_style(
+    button: InlineKeyboardButton | KeyboardButton,
+) -> ButtonStyle | None:
     """Infer Bot API 9.4 color style from text and callback semantics."""
-    if button.url or button.web_app or button.login_url:
+    if (
+        getattr(button, "url", None)
+        or getattr(button, "web_app", None)
+        or getattr(button, "login_url", None)
+    ):
         return "primary"
     payload = " ".join(
         part
-        for part in (button.text, button.callback_data or "")
+        for part in (button.text, getattr(button, "callback_data", None) or "")
         if isinstance(part, str)
     ).casefold()
     if not payload:
@@ -100,31 +130,50 @@ def infer_button_style(button: InlineKeyboardButton) -> ButtonStyle | None:
     if any(word in payload for word in _PRIMARY_WORDS):
         return "primary"
     if (
-        button.callback_data
-        or button.switch_inline_query
-        or button.switch_inline_query_current_chat
-        or button.switch_inline_query_chosen_chat
+        getattr(button, "callback_data", None)
+        or getattr(button, "switch_inline_query", None)
+        or getattr(button, "switch_inline_query_current_chat", None)
+        or getattr(button, "switch_inline_query_chosen_chat", None)
         or getattr(button, "copy_text", None)
-        or button.callback_game
-        or button.pay
+        or getattr(button, "callback_game", None)
+        or getattr(button, "pay", None)
+        or getattr(button, "request_users", None)
+        or getattr(button, "request_chat", None)
+        or getattr(button, "request_contact", None)
+        or getattr(button, "request_location", None)
+        or getattr(button, "request_poll", None)
+        or getattr(button, "request_web_view", None)
     ):
         return "primary"
     return None
 
 
-def apply_button_styles(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
+def _apply_button_style(button: InlineKeyboardButton | KeyboardButton) -> None:
+    extra = cast(dict[str, Any] | None, getattr(button, "__pydantic_extra__"))
+    if extra and extra.get("style"):
+        return
+    style = infer_button_style(button)
+    if style:
+        if extra is None:
+            extra = {}
+            setattr(button, "__pydantic_extra__", extra)
+        extra["style"] = style
+
+
+def apply_button_styles(
+    markup: InlineKeyboardMarkup | ReplyKeyboardMarkup,
+) -> InlineKeyboardMarkup | ReplyKeyboardMarkup:
     """Mutate markup with Bot API 9.4 style values while keeping aiogram 3.13 safe."""
-    for row in markup.inline_keyboard:
+    rows = (
+        markup.inline_keyboard
+        if isinstance(markup, InlineKeyboardMarkup)
+        else markup.keyboard
+    )
+    for row in rows:
         for button in row:
-            extra = cast(dict[str, Any] | None, getattr(button, "__pydantic_extra__"))
-            if extra and extra.get("style"):
+            if isinstance(button, str):
                 continue
-            style = infer_button_style(button)
-            if style:
-                if extra is None:
-                    extra = {}
-                    setattr(button, "__pydantic_extra__", extra)
-                extra["style"] = style
+            _apply_button_style(button)
     return markup
 
 
@@ -134,7 +183,11 @@ def install_button_style_patch() -> None:
         return
 
     original_as_markup = InlineKeyboardBuilder.as_markup
+    original_reply_as_markup = ReplyKeyboardBuilder.as_markup
     original_model_dump = InlineKeyboardMarkup.model_dump
+    original_reply_model_dump = ReplyKeyboardMarkup.model_dump
+    original_button_model_dump = InlineKeyboardButton.model_dump
+    original_keyboard_button_model_dump = KeyboardButton.model_dump
 
     def styled_as_markup(
         self: InlineKeyboardBuilder,
@@ -142,6 +195,13 @@ def install_button_style_patch() -> None:
     ) -> InlineKeyboardMarkup:
         markup = original_as_markup(self, **kwargs)
         return apply_button_styles(markup)
+
+    def styled_reply_as_markup(
+        self: ReplyKeyboardBuilder,
+        **kwargs: Any,
+    ) -> ReplyKeyboardMarkup:
+        markup = original_reply_as_markup(self, **kwargs)
+        return cast(ReplyKeyboardMarkup, apply_button_styles(markup))
 
     def styled_model_dump(
         self: InlineKeyboardMarkup,
@@ -152,8 +212,43 @@ def install_button_style_patch() -> None:
         dumped = original_model_dump(self, *args, **kwargs)
         return cast(dict[str, Any], dumped)
 
+    def styled_reply_model_dump(
+        self: ReplyKeyboardMarkup,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        apply_button_styles(self)
+        dumped = original_reply_model_dump(self, *args, **kwargs)
+        return cast(dict[str, Any], dumped)
+
+    def styled_button_model_dump(
+        self: InlineKeyboardButton,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _apply_button_style(self)
+        dumped = original_button_model_dump(self, *args, **kwargs)
+        return cast(dict[str, Any], dumped)
+
+    def styled_keyboard_button_model_dump(
+        self: KeyboardButton,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _apply_button_style(self)
+        dumped = original_keyboard_button_model_dump(self, *args, **kwargs)
+        return cast(dict[str, Any], dumped)
+
     builder_cls = cast(Any, InlineKeyboardBuilder)
+    reply_builder_cls = cast(Any, ReplyKeyboardBuilder)
     markup_cls = cast(Any, InlineKeyboardMarkup)
+    reply_markup_cls = cast(Any, ReplyKeyboardMarkup)
+    button_cls = cast(Any, InlineKeyboardButton)
+    keyboard_button_cls = cast(Any, KeyboardButton)
     builder_cls.as_markup = styled_as_markup
+    reply_builder_cls.as_markup = styled_reply_as_markup
     markup_cls.model_dump = styled_model_dump
+    reply_markup_cls.model_dump = styled_reply_model_dump
+    button_cls.model_dump = styled_button_model_dump
+    keyboard_button_cls.model_dump = styled_keyboard_button_model_dump
     setattr(InlineKeyboardBuilder, _PATCHED_ATTR, True)

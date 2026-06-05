@@ -3,8 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from aiogram.types import InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
@@ -56,3 +56,29 @@ def test_neutral_interactive_buttons_fallback_to_primary() -> None:
         )
         == "primary"
     )
+
+
+def test_reply_keyboard_buttons_receive_styles() -> None:
+    install_button_style_patch()
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="✅ Запустить")
+    kb.button(text="❌ Отмена")
+    kb.button(text="⚙️ Настройки")
+
+    dumped = kb.as_markup(resize_keyboard=True).model_dump(exclude_none=True)
+
+    assert dumped["keyboard"][0][0]["style"] == "success"
+    assert dumped["keyboard"][0][1]["style"] == "danger"
+    assert dumped["keyboard"][0][2]["style"] == "primary"
+
+
+def test_direct_reply_keyboard_markup_dump_is_styled() -> None:
+    install_button_style_patch()
+    markup = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="➕ Добавить"), KeyboardButton(text="◀️ Назад")]]
+    )
+
+    dumped = markup.model_dump(exclude_none=True)
+
+    assert dumped["keyboard"][0][0]["style"] == "success"
+    assert dumped["keyboard"][0][1]["style"] == "primary"
