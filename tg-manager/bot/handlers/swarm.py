@@ -77,7 +77,14 @@ async def cb_swarm_menu(
 async def cb_swarm_toggle(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Swarm-роутинг", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
@@ -191,7 +198,14 @@ async def cb_swarm_stats(
 async def cb_swarm_role(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Swarm-роутинг", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     role = callback_data.action.replace("role_", "")
     if role not in ("entry", "conversion", "retention", "general"):
         await callback.answer("Неверная роль", show_alert=True)
@@ -256,7 +270,14 @@ MODE_DESCRIPTIONS = {
 async def cb_set_mode(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Swarm-роутинг", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from bot.callbacks import SwarmCb as SC
@@ -289,7 +310,14 @@ async def cb_set_mode(
 async def cb_change_mode(
     callback: CallbackQuery, callback_data: SwarmCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Swarm-роутинг", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     mode = callback_data.action.removeprefix("mode_")
     valid_modes = [
         "manual",
