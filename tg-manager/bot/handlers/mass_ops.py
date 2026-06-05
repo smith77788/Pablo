@@ -23,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import MassOpCb, BmCb
 from services.logger import log_exc_swallow
 from services import operation_bus, infra_orchestrator
+from bot.utils.event_status import mark_handled_error
 
 try:
     from services import intelligence_engine as _ie
@@ -355,11 +356,14 @@ async def cb_mp_filter_chosen(
 
     if filter_type == "cluster":
         # Fetch distinct clusters from tg_accounts
-        rows = await pool.fetch(
-            "SELECT DISTINCT cluster FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND cluster IS NOT NULL",
-            callback.from_user.id,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT DISTINCT cluster FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND cluster IS NOT NULL",
+                callback.from_user.id,
+            )
+        except Exception:
+            rows = []
         clusters = [r["cluster"] for r in rows if r["cluster"]]
         if not clusters:
             # No clusters defined — fall back to "all"
@@ -577,9 +581,12 @@ async def cb_mp_timing(
     target_label = _TARGET_LABELS.get(target, target)
     filter_label = _FILTER_LABELS.get(filter_type, filter_type)
     if filter_type == "account" and mp_acc_id:
-        acc_row = await pool.fetchrow(
-            "SELECT first_name, phone FROM tg_accounts WHERE id=$1", mp_acc_id
-        )
+        try:
+            acc_row = await pool.fetchrow(
+                "SELECT first_name, phone FROM tg_accounts WHERE id=$1", mp_acc_id
+            )
+        except Exception:
+            acc_row = None
         if acc_row:
             filter_label = f"Аккаунт: {acc_row['first_name'] or acc_row['phone']}"
     elif filter_type == "cluster" and mp_cluster:
@@ -688,9 +695,12 @@ async def _mass_publish_inline_bg(
 
         if op_id:
             await _log_op_step(pool, op_id, idx, str(dialog["id"]), step_status)
-            await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
-            )
+            try:
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+            except Exception:
+                pass
 
         bar = _progress_bar(idx, total)
         pct = round(100 * idx / total)
@@ -787,20 +797,29 @@ async def cb_mp_confirm(
     else:
         type_filter = "TRUE"
 
-    db_pairs = await pool.fetch(
-        f"SELECT DISTINCT ON (mc.channel_id) "
-        f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
-        f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
-        f"a.device_model, a.system_version, a.app_version, p.proxy_url "
-        f"FROM managed_channels mc "
-        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
-        f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
-        f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) "
-        f"AND ({type_filter}) "
-        f"ORDER BY mc.channel_id, a.id",
-        callback.from_user.id,
-        acc_id_list,
-    )
+    try:
+        db_pairs = await pool.fetch(
+            f"SELECT DISTINCT ON (mc.channel_id) "
+            f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
+            f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
+            f"a.device_model, a.system_version, a.app_version, p.proxy_url "
+            f"FROM managed_channels mc "
+            f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
+            f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+            f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) "
+            f"AND ({type_filter}) "
+            f"ORDER BY mc.channel_id, a.id",
+            callback.from_user.id,
+            acc_id_list,
+        )
+    except Exception as exc:
+        mark_handled_error(f"mp_confirm db_pairs: {exc}")
+        await safe_edit(
+            callback,
+            f"❌ Ошибка загрузки каналов: <code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
 
     targets_with_dialogs: list[tuple] = []
     acc_map = {acc["id"]: acc for acc in accounts}
@@ -893,24 +912,32 @@ async def cb_cancel_op(
     callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
 ) -> None:
     # Cancel both pending and running operations
-    result = await pool.execute(
-        "UPDATE operation_queue SET status='cancelled', finished_at=now() "
-        "WHERE id=$1 AND owner_id=$2 AND status IN ('pending','running')",
-        callback_data.op_id,
-        callback.from_user.id,
-    )
+    try:
+        result = await pool.execute(
+            "UPDATE operation_queue SET status='cancelled', finished_at=now() "
+            "WHERE id=$1 AND owner_id=$2 AND status IN ('pending','running')",
+            callback_data.op_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"cancel_op: {exc}")
+        await callback.answer(f"Ошибка БД: {exc}", show_alert=True)
+        return
     if result == "UPDATE 0":
         await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
         return
     await callback.answer()
     # Refresh queue view
-    rows = await pool.fetch(
-        "SELECT id, op_type, status, done_items, total_items, created_at "
-        "FROM operation_queue "
-        "WHERE owner_id=$1 "
-        "ORDER BY created_at DESC LIMIT 10",
-        callback.from_user.id,
-    )
+    try:
+        rows = await pool.fetch(
+            "SELECT id, op_type, status, done_items, total_items, created_at "
+            "FROM operation_queue "
+            "WHERE owner_id=$1 "
+            "ORDER BY created_at DESC LIMIT 10",
+            callback.from_user.id,
+        )
+    except Exception:
+        rows = []
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
@@ -1413,10 +1440,19 @@ async def cb_bbe_confirm(
     value = data.get("bbe_value", "")
 
     # Fetch all active bots for this user (same filter as op_worker uses)
-    bots = await pool.fetch(
-        "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    try:
+        bots = await pool.fetch(
+            "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"bbe_confirm bots: {exc}")
+        await safe_edit(
+            callback,
+            f"❌ Ошибка загрузки ботов: <code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     if not bots:
         await safe_edit(
             callback,
@@ -1492,39 +1528,43 @@ async def _get_accounts_for_filter(
         "id, session_str, first_name, phone, device_model, system_version, app_version, "
         "trust_score, cooldown_until"
     )
-    if filter_type == "account" and acc_id:
+    try:
+        if filter_type == "account" and acc_id:
+            return await pool.fetch(
+                f"SELECT {_cols} FROM tg_accounts "
+                "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE "
+                "AND (cooldown_until IS NULL OR cooldown_until < now())",
+                acc_id,
+                owner_id,
+            )
+        if filter_type == "cluster" and cluster:
+            return await pool.fetch(
+                f"SELECT {_cols} FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND cluster=$2 "
+                "AND (cooldown_until IS NULL OR cooldown_until < now()) "
+                "ORDER BY trust_score DESC NULLS LAST",
+                owner_id,
+                cluster,
+            )
+        if filter_type == "pool" and pool_name:
+            return await pool.fetch(
+                f"SELECT {_cols} FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND pool=$2 "
+                "AND (cooldown_until IS NULL OR cooldown_until < now()) "
+                "ORDER BY trust_score DESC NULLS LAST",
+                owner_id,
+                pool_name,
+            )
         return await pool.fetch(
             f"SELECT {_cols} FROM tg_accounts "
-            "WHERE id=$1 AND owner_id=$2 AND is_active=TRUE "
-            "AND (cooldown_until IS NULL OR cooldown_until < now())",
-            acc_id,
-            owner_id,
-        )
-    if filter_type == "cluster" and cluster:
-        return await pool.fetch(
-            f"SELECT {_cols} FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND cluster=$2 "
+            "WHERE owner_id=$1 AND is_active=TRUE "
             "AND (cooldown_until IS NULL OR cooldown_until < now()) "
             "ORDER BY trust_score DESC NULLS LAST",
             owner_id,
-            cluster,
         )
-    if filter_type == "pool" and pool_name:
-        return await pool.fetch(
-            f"SELECT {_cols} FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND pool=$2 "
-            "AND (cooldown_until IS NULL OR cooldown_until < now()) "
-            "ORDER BY trust_score DESC NULLS LAST",
-            owner_id,
-            pool_name,
-        )
-    return await pool.fetch(
-        f"SELECT {_cols} FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE "
-        "AND (cooldown_until IS NULL OR cooldown_until < now()) "
-        "ORDER BY trust_score DESC NULLS LAST",
-        owner_id,
-    )
+    except Exception as e:
+        log.warning("_get_accounts_for_filter error: %s", e)
+        return []
 
 
 async def _count_targets(
@@ -1835,11 +1875,14 @@ async def cb_bulk_join_accs(
             acc_list_preview += f"\n  … и ещё {len(acc_ids) - 5}"
     else:
         acc_ids = [callback_data.op_id]
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.op_id,
-            uid,
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                callback_data.op_id,
+                uid,
+            )
+        except Exception:
+            acc = None
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
         acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
@@ -2195,11 +2238,14 @@ async def cb_bulk_leave_accs(
             bl_acc_list_preview += f"\n  … и ещё {len(acc_ids) - 5}"
     else:
         acc_ids = [callback_data.op_id]
-        acc = await pool.fetchrow(
-            "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.op_id,
-            uid,
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                callback_data.op_id,
+                uid,
+            )
+        except Exception:
+            acc = None
         acc_label = acc["phone"] if acc else f"id{callback_data.op_id}"
         bl_acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
