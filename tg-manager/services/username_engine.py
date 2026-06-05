@@ -144,20 +144,30 @@ def generate_username_variants(base: str, geo: dict | None = None) -> list[str]:
     """
     Generate candidate username variants from a base string.
     Returns a list of valid Telegram usernames, base first then fallbacks.
+    Now generates up to 40+ variants for better collision coverage.
     """
+    import random
+    import string
+
     base_slug = slugify(base)[:27]
     if len(base_slug) < 3:
         base_slug = (base_slug + "channel")[:27]
 
     candidates: list[str] = [base_slug]
 
-    # Numeric suffixes
-    for i in range(1, 6):
+    # Numeric suffixes (1-20)
+    for i in range(1, 21):
         candidates.append(f"{base_slug}_{i}")
 
     # Word suffixes
-    for suffix in ("hub", "news", "info", "group", "chat", "official", "tg"):
+    for suffix in ("hub", "news", "info", "group", "chat", "official", "tg", "media", "daily", "update", "channel"):
         c = f"{base_slug}_{suffix}"
+        if len(c) <= 32:
+            candidates.append(c)
+
+    # Year suffixes
+    for year in (2024, 2025, 2026):
+        c = f"{base_slug}_{year}"
         if len(c) <= 32:
             candidates.append(c)
 
@@ -168,6 +178,15 @@ def generate_username_variants(base: str, geo: dict | None = None) -> list[str]:
         if cc and city:
             candidates.append(f"{cc}_{city}")
             candidates.append(f"{city}_{cc}")
+            candidates.append(f"{cc}_{city}_news")
+            candidates.append(f"{city}_{cc}_channel")
+
+    # Random 4-char suffixes for additional variety
+    for _ in range(10):
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        c = f"{base_slug}_{suffix}"
+        if len(c) <= 32:
+            candidates.append(c)
 
     seen: set[str] = set()
     valid: list[str] = []
