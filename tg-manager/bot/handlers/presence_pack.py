@@ -40,7 +40,14 @@ def _jlist(val) -> list:
 
 
 async def _edit(cb: CallbackQuery, text: str, markup=None):
-    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "message is not modified" in err_str:
+            await cb.answer()
+            return
+        await cb.message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
 # ── Pack List ──────────────────────────────────────────────────────────────

@@ -60,7 +60,10 @@ async def _edit(cb: CallbackQuery, text: str, markup=None, **kw) -> None:
     await cb.answer()
     try:
         await cb.message.edit_text(text, parse_mode="HTML", reply_markup=markup, **kw)
-    except Exception:
+    except Exception as e:
+        err_str = str(e).lower()
+        if "message is not modified" in err_str:
+            return
         await cb.message.answer(text, parse_mode="HTML", reply_markup=markup, **kw)
 
 

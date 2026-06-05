@@ -47,7 +47,11 @@ _STATUS_LABELS = {
 async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-    except Exception:
+    except Exception as e:
+        err_str = str(e).lower()
+        if "message is not modified" in err_str:
+            await callback.answer()
+            return
         await callback.message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 

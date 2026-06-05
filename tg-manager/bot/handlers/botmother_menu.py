@@ -272,6 +272,11 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
                 callback.from_user.id, text, parse_mode="HTML", reply_markup=markup
             )
     except Exception as e:
+        err_str = str(e).lower()
+        if "message is not modified" in err_str:
+            # Same content - just acknowledge silently
+            await callback.answer()
+            return
         log.warning("BotMother _edit error: %s", e)
         try:
             await callback.bot.send_message(
