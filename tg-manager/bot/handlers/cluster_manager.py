@@ -15,7 +15,9 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ClustMCb, BotCb, NetBcCb
+from bot.keyboards import subscription_locked_markup
 from bot.states import CreateClusterFSM
+from bot.utils.subscription import require_plan, locked_text
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -50,7 +52,15 @@ def _cancel_kb() -> InlineKeyboardBuilder:
 
 
 @router.callback_query(ClustMCb.filter(F.action == "menu"))
-async def cb_cluster_menu(callback: CallbackQuery) -> None:
+async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Кластеры ботов", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await callback.message.edit_text(
         "🔗 <b>Кластеры ботов</b>\n\n"
@@ -159,7 +169,15 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ClustMCb.filter(F.action == "create"))
-async def cb_cluster_create(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_cluster_create(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Кластеры ботов", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await state.set_state(CreateClusterFSM.waiting_name)
     await callback.message.edit_text(
