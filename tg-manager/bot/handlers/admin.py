@@ -605,6 +605,13 @@ async def cb_admin(
             pg = int(parts[3])
             await _adm_logs(callback, pool, source=src, status_filter=sf, page=pg)
 
+    elif action.startswith("logs_csv:"):
+        # logs_csv:ui:none  or  logs_csv:ops:error
+        parts = action.split(":")
+        src = parts[1] if len(parts) > 1 else "ui"
+        sf = parts[2] if len(parts) > 2 and parts[2] != "none" else None
+        await _adm_logs_csv(callback, pool, source=src, status_filter=sf)
+
     elif action.startswith("logs_uid:"):
         uid_str = action.split(":", 1)[1]
         try:
@@ -1187,6 +1194,80 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         file,
         caption=f"📋 Экспорт пользователей ({len(rows)} чел.) — {ts} UTC",
     )
+
+
+async def _adm_logs_csv(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    source: str = "ui",
+    status_filter: str | None = None,
+) -> None:
+    """Выгрузить логи (до 2000 строк) в CSV и отправить файлом."""
+    await callback.answer("⏳ Формирую CSV…")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    try:
+        if source == "ui":
+            rows = await db.get_activity_feed(
+                pool,
+                status_filter=status_filter,
+                limit=2000,
+                offset=0,
+            )
+            writer.writerow(
+                ["occurred_at", "owner_id", "event_type", "action",
+                 "detail", "status", "error_msg", "duration_ms"]
+            )
+            for r in rows:
+                writer.writerow([
+                    r["occurred_at"].strftime("%Y-%m-%d %H:%M:%S") if r.get("occurred_at") else "",
+                    r.get("owner_id") or "",
+                    r.get("event_type") or "",
+                    r.get("action") or "",
+                    r.get("detail") or "",
+                    r.get("status") or "",
+                    r.get("error_msg") or "",
+                    r.get("duration_ms") or "",
+                ])
+            fname = f"logs_ui_{ts}.csv"
+            caption = f"📊 UI-логи: {len(rows)} строк — {ts} UTC"
+        else:
+            rows = await db.get_account_ops_feed(
+                pool,
+                status_filter=status_filter,
+                limit=2000,
+                offset=0,
+            )
+            writer.writerow(
+                ["occurred_at", "owner_id", "account_id", "action",
+                 "target", "result", "error_msg", "duration_ms", "flood_wait_s"]
+            )
+            for r in rows:
+                writer.writerow([
+                    r["occurred_at"].strftime("%Y-%m-%d %H:%M:%S") if r.get("occurred_at") else "",
+                    r.get("owner_id") or "",
+                    r.get("account_id") or "",
+                    r.get("action") or "",
+                    r.get("target") or "",
+                    r.get("result") or "",
+                    r.get("error_msg") or "",
+                    r.get("duration_ms") or "",
+                    r.get("flood_wait_s") or "",
+                ])
+            fname = f"logs_tg_ops_{ts}.csv"
+            caption = f"⚙️ TG-операции: {len(rows)} строк — {ts} UTC"
+    except Exception as exc:
+        await callback.message.answer(
+            f"❌ Ошибка формирования CSV: <code>{_html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    content = buf.getvalue().encode("utf-8-sig")  # utf-8-sig for Excel compatibility
+    file = BufferedInputFile(content, filename=fname)
+    await callback.message.answer_document(file, caption=caption)
 
 
 async def _adm_prices(callback: CallbackQuery) -> None:
@@ -2261,11 +2342,12 @@ def _logs_kb(
             text="▶️ Далее", callback_data=f"adm:logs_p:{source}:{sf_str}:{page + 1}"
         )
     kb.button(text="🔄 Обновить", callback_data=f"adm:logs_p:{source}:{sf_str}:{page}")
+    kb.button(text="📥 Скачать CSV", callback_data=f"adm:logs_csv:{source}:{sf_str}")
     kb.button(text="◀️ Операции", callback_data="adm:section_ops")
     nav_cols = (
         1 if (page == 0 and not has_next) else (2 if (page > 0 and has_next) else 1)
     )
-    kb.adjust(2, 1, 1, nav_cols, 1, 1)
+    kb.adjust(2, 1, 1, nav_cols, 2, 1)
     return kb
 
 

@@ -882,6 +882,11 @@ async def _exec_mass_publish(
                 raise Exception(str(result.get("error", "publish error")))
             ok_count += 1
             _infra_mem.record_account_op(acc["id"], "publish", success=True)
+            await _audit(
+                pool, owner_id, "publish", "success",
+                operation_id=op_id, account_id=acc["id"],
+                target=str(dialog.get("title") or dialog["id"])[:100],
+            )
             try:
                 from services.flood_engine import record_success
 
@@ -897,6 +902,13 @@ async def _exec_mass_publish(
                 failed_channels.append(ch_label)
             _infra_mem.record_account_op(
                 acc["id"], "publish", success=False, error=err_str[:100]
+            )
+            await _audit(
+                pool, owner_id, "publish", "flood_wait" if flood_wait else "error",
+                operation_id=op_id, account_id=acc["id"],
+                target=ch_label,
+                error_msg=err_str[:200],
+                flood_wait_s=flood_wait if flood_wait else None,
             )
             if flood_wait:
                 try:
