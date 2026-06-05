@@ -1870,19 +1870,24 @@ async def cb_op_retry(
         )
         return
 
-    await pool.execute(
-        "UPDATE operation_queue SET status='pending', error_msg=NULL, started_at=NULL, finished_at=NULL "
-        "WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE operation_queue SET status='pending', error_msg=NULL, started_at=NULL, finished_at=NULL "
+            "WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=0 WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+    except Exception as exc:
+        from html import escape as _esc
+        await callback.answer(f"Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     await callback.answer(
         f"✅ Операция #{op_id} поставлена в очередь повторно.", show_alert=True
-    )
-    await pool.execute(
-        "UPDATE operation_queue SET done_items=0 WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Назад к отчётам", callback_data=BmCb(action="op_reports"))
@@ -1917,11 +1922,14 @@ async def cb_op_cancel(
         )
         return
 
-    await pool.execute(
-        "UPDATE operation_queue SET status='cancelled', finished_at=now() WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE operation_queue SET status='cancelled', finished_at=now() WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+    except Exception:
+        pass
     await callback.answer("🛑 Операция отменена", show_alert=False)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
@@ -2040,14 +2048,17 @@ _NOTIF_LABELS = {
 }
 
 
-async def _get_or_create_notif(pool: asyncpg.Pool, user_id: int) -> asyncpg.Record:
-    await pool.execute(
-        "INSERT INTO notification_settings(user_id) VALUES($1) ON CONFLICT DO NOTHING",
-        user_id,
-    )
-    return await pool.fetchrow(
-        "SELECT * FROM notification_settings WHERE user_id=$1", user_id
-    )
+async def _get_or_create_notif(pool: asyncpg.Pool, user_id: int) -> asyncpg.Record | None:
+    try:
+        await pool.execute(
+            "INSERT INTO notification_settings(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+            user_id,
+        )
+        return await pool.fetchrow(
+            "SELECT * FROM notification_settings WHERE user_id=$1", user_id
+        )
+    except Exception:
+        return None
 
 
 def _notif_kb(row: asyncpg.Record) -> object:
