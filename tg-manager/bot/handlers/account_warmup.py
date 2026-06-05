@@ -22,6 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
+from bot.utils.event_status import mark_handled_error
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -51,10 +52,13 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     plans = await get_active_plans(pool, callback.from_user.id)
     active_plans = len(plans)
 
-    sessions = await pool.fetch(
-        "SELECT COUNT(*) AS c FROM warmup_sessions WHERE owner_id=$1 AND status='active'",
-        callback.from_user.id,
-    )
+    try:
+        sessions = await pool.fetch(
+            "SELECT COUNT(*) AS c FROM warmup_sessions WHERE owner_id=$1 AND status='active'",
+            callback.from_user.id,
+        )
+    except Exception:
+        sessions = []
     active_sessions = sessions[0]["c"] if sessions else 0
 
     kb = InlineKeyboardBuilder()
@@ -103,16 +107,19 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
 
-    accounts = await pool.fetch(
-        """SELECT a.id, a.phone, a.first_name,
-                  COALESCE(a.acc_status, 'active') AS acc_status,
-                  EXISTS(SELECT 1 FROM account_warmup_plans wp
-                         WHERE wp.account_id=a.id AND wp.status='active') AS has_plan
-           FROM tg_accounts a
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           ORDER BY a.added_at DESC""",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT a.id, a.phone, a.first_name,
+                      COALESCE(a.acc_status, 'active') AS acc_status,
+                      EXISTS(SELECT 1 FROM account_warmup_plans wp
+                             WHERE wp.account_id=a.id AND wp.status='active') AS has_plan
+               FROM tg_accounts a
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               ORDER BY a.added_at DESC""",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
 
     if not accounts:
         empty_kb = InlineKeyboardBuilder()
@@ -173,9 +180,12 @@ async def cb_warmup_select_plan(
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="create_list"))
     kb.adjust(1)
 
-    acc = await pool.fetchrow(
-        "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+        )
+    except Exception:
+        acc = None
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
     await callback.message.edit_text(
@@ -191,12 +201,15 @@ async def cb_warmup_select_all_plan(
 ) -> None:
     await callback.answer()
 
-    count = await pool.fetchval(
-        """SELECT COUNT(*) FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=TRUE
-             AND session_str IS NOT NULL AND session_str != ''""",
-        callback.from_user.id,
-    )
+    try:
+        count = await pool.fetchval(
+            """SELECT COUNT(*) FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND session_str IS NOT NULL AND session_str != ''""",
+            callback.from_user.id,
+        )
+    except Exception:
+        count = 0
 
     kb = InlineKeyboardBuilder()
     for plan_key, plan_label in _PLAN_LABELS.items():
@@ -228,13 +241,16 @@ async def cb_warmup_create_all_plans(
     user_id = callback.from_user.id
 
     # Only accounts with a valid session can be warmed
-    accounts = await pool.fetch(
-        """SELECT id FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=TRUE
-             AND session_str IS NOT NULL AND session_str != ''
-           ORDER BY added_at DESC""",
-        user_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT id FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND session_str IS NOT NULL AND session_str != ''
+               ORDER BY added_at DESC""",
+            user_id,
+        )
+    except Exception:
+        accounts = []
 
     if not accounts:
         await callback.message.edit_text(
@@ -290,9 +306,12 @@ async def cb_warmup_create_plan(
 
     plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
 
-    acc = await pool.fetchrow(
-        "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+        )
+    except Exception:
+        acc = None
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
     await callback.message.edit_text(
@@ -424,11 +443,16 @@ async def cb_warmup_delete_plan(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    await pool.execute(
-        "UPDATE account_warmup_plans SET status='cancelled' WHERE id=$1 AND owner_id=$2",
-        callback_data.plan_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE account_warmup_plans SET status='cancelled' WHERE id=$1 AND owner_id=$2",
+            callback_data.plan_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"warmup_delete_plan: {exc}")
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     await callback.message.edit_text(
         "🗑 <b>План разогрева отменён</b>",
         parse_mode="HTML",
@@ -571,28 +595,37 @@ async def cb_warmup_plan_log(
     plan_id = callback_data.plan_id
 
     # Get account name
-    acc_row = await pool.fetchrow(
-        "SELECT first_name, phone FROM tg_accounts WHERE id=$1", acc_id
-    )
+    try:
+        acc_row = await pool.fetchrow(
+            "SELECT first_name, phone FROM tg_accounts WHERE id=$1", acc_id
+        )
+    except Exception:
+        acc_row = None
     label = ""
     if acc_row:
         label = acc_row.get("first_name") or acc_row.get("phone") or f"id{acc_id}"
 
     # Get plan info
-    plan_row = await pool.fetchrow(
-        "SELECT current_day, target_days, plan_type, daily_actions FROM account_warmup_plans WHERE id=$1",
-        plan_id,
-    )
+    try:
+        plan_row = await pool.fetchrow(
+            "SELECT current_day, target_days, plan_type, daily_actions FROM account_warmup_plans WHERE id=$1",
+            plan_id,
+        )
+    except Exception:
+        plan_row = None
 
     # Get last 50 actions from warmup log
-    rows = await pool.fetch(
-        """SELECT action_type, target, success, error, performed_at
-           FROM account_warmup_log
-           WHERE account_id=$1
-           ORDER BY performed_at DESC
-           LIMIT 30""",
-        acc_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT action_type, target, success, error, performed_at
+               FROM account_warmup_log
+               WHERE account_id=$1
+               ORDER BY performed_at DESC
+               LIMIT 30""",
+            acc_id,
+        )
+    except Exception:
+        rows = []
 
     lines = [f"📋 <b>Лог разогрева: {html.escape(label)}</b>\n"]
 
@@ -674,15 +707,18 @@ async def _show_account_picker(
     data = await state.get_data()
     selected: set[int] = set(data.get("sel_acc_ids", []))
 
-    accounts = await pool.fetch(
-        """SELECT a.id, a.phone, a.first_name,
-                  COALESCE(a.acc_status, 'active') AS acc_status
-           FROM tg_accounts a
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-             AND a.session_str IS NOT NULL AND a.session_str != ''
-           ORDER BY a.added_at DESC""",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT a.id, a.phone, a.first_name,
+                      COALESCE(a.acc_status, 'active') AS acc_status
+               FROM tg_accounts a
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+                 AND a.session_str IS NOT NULL AND a.session_str != ''
+               ORDER BY a.added_at DESC""",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
 
     kb = InlineKeyboardBuilder()
     for acc in accounts:
@@ -783,24 +819,30 @@ async def _show_infra_picker(
     selected_refs: list[str] = data.get("sel_tgt_refs", [])
     selected_set: set[str] = set(selected_refs)
 
-    channels = await pool.fetch(
-        """SELECT DISTINCT channel_id::text AS ref,
-                  COALESCE(username, title, 'id'||channel_id::text) AS label,
-                  'ch' AS kind
-           FROM managed_channels
-           WHERE owner_id=$1
-           LIMIT 15""",
-        callback.from_user.id,
-    )
-    bots = await pool.fetch(
-        """SELECT DISTINCT username AS ref,
-                  COALESCE(first_name, username) AS label,
-                  'bt' AS kind
-           FROM managed_bots
-           WHERE added_by=$1 AND is_active=TRUE AND username IS NOT NULL AND username != ''
-           LIMIT 10""",
-        callback.from_user.id,
-    )
+    try:
+        channels = await pool.fetch(
+            """SELECT DISTINCT channel_id::text AS ref,
+                      COALESCE(username, title, 'id'||channel_id::text) AS label,
+                      'ch' AS kind
+               FROM managed_channels
+               WHERE owner_id=$1
+               LIMIT 15""",
+            callback.from_user.id,
+        )
+    except Exception:
+        channels = []
+    try:
+        bots = await pool.fetch(
+            """SELECT DISTINCT username AS ref,
+                      COALESCE(first_name, username) AS label,
+                      'bt' AS kind
+               FROM managed_bots
+               WHERE added_by=$1 AND is_active=TRUE AND username IS NOT NULL AND username != ''
+               LIMIT 10""",
+            callback.from_user.id,
+        )
+    except Exception:
+        bots = []
 
     all_resources = list(channels) + list(bots)
 
@@ -1003,10 +1045,13 @@ async def cb_wu_mode(
     target_type: str = data.get("target_type", "infra")
     cfg = _SESSION_PLAN_CONFIG[plan_type]
 
-    acc_rows = await pool.fetch(
-        "SELECT id, COALESCE(first_name, phone) AS label FROM tg_accounts WHERE id=ANY($1)",
-        acc_ids,
-    )
+    try:
+        acc_rows = await pool.fetch(
+            "SELECT id, COALESCE(first_name, phone) AS label FROM tg_accounts WHERE id=ANY($1)",
+            acc_ids,
+        )
+    except Exception:
+        acc_rows = []
     acc_labels = [html.escape(str(r["label"])) for r in acc_rows]
 
     tgt_preview = "\n".join(f"  • <code>{html.escape(r)}</code>" for r in tgt_refs[:5])
@@ -1049,19 +1094,27 @@ async def cb_wu_sess_start(
     plan_type: str = data.get("plan_type", "standard")
     cfg = _SESSION_PLAN_CONFIG[plan_type]
 
-    session_id = await pool.fetchval(
-        """INSERT INTO warmup_sessions
-           (owner_id, account_ids, target_type, target_refs, plan_type, target_days, daily_actions)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING id""",
-        callback.from_user.id,
-        acc_ids,
-        target_type,
-        tgt_refs,
-        plan_type,
-        cfg["days"],
-        cfg["daily"],
-    )
+    try:
+        session_id = await pool.fetchval(
+            """INSERT INTO warmup_sessions
+               (owner_id, account_ids, target_type, target_refs, plan_type, target_days, daily_actions)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id""",
+            callback.from_user.id,
+            acc_ids,
+            target_type,
+            tgt_refs,
+            plan_type,
+            cfg["days"],
+            cfg["daily"],
+        )
+    except Exception as exc:
+        mark_handled_error(f"wu_sess_start insert: {exc}")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
 
     await state.clear()
 
@@ -1094,15 +1147,18 @@ async def cb_wu_sess_start(
 async def cb_wu_session_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
 
-    sessions = await pool.fetch(
-        """SELECT id, account_ids, target_refs, plan_type, status,
-                  current_day, target_days, daily_actions, last_run_at, created_at
-           FROM warmup_sessions
-           WHERE owner_id=$1 AND status IN ('active', 'paused')
-           ORDER BY created_at DESC
-           LIMIT 20""",
-        callback.from_user.id,
-    )
+    try:
+        sessions = await pool.fetch(
+            """SELECT id, account_ids, target_refs, plan_type, status,
+                      current_day, target_days, daily_actions, last_run_at, created_at
+               FROM warmup_sessions
+               WHERE owner_id=$1 AND status IN ('active', 'paused')
+               ORDER BY created_at DESC
+               LIMIT 20""",
+            callback.from_user.id,
+        )
+    except Exception:
+        sessions = []
 
     if not sessions:
         kb = InlineKeyboardBuilder()
@@ -1176,24 +1232,30 @@ async def cb_wu_sess_detail(
 ) -> None:
     sess_id = callback_data.session_id
 
-    s = await pool.fetchrow(
-        "SELECT * FROM warmup_sessions WHERE id=$1 AND owner_id=$2",
-        sess_id,
-        callback.from_user.id,
-    )
+    try:
+        s = await pool.fetchrow(
+            "SELECT * FROM warmup_sessions WHERE id=$1 AND owner_id=$2",
+            sess_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        s = None
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
     await callback.answer()
 
-    logs = await pool.fetch(
-        """SELECT account_id, action_type, target, success, performed_at
-           FROM warmup_session_log
-           WHERE session_id=$1
-           ORDER BY performed_at DESC
-           LIMIT 20""",
-        sess_id,
-    )
+    try:
+        logs = await pool.fetch(
+            """SELECT account_id, action_type, target, success, performed_at
+               FROM warmup_session_log
+               WHERE session_id=$1
+               ORDER BY performed_at DESC
+               LIMIT 20""",
+            sess_id,
+        )
+    except Exception:
+        logs = []
 
     n_acc = len(s["account_ids"] or [])
     n_tgt = len(s["target_refs"] or [])
@@ -1256,11 +1318,14 @@ async def cb_wu_sess_run(
     import asyncio
 
     sess_id = callback_data.session_id
-    s = await pool.fetchrow(
-        "SELECT * FROM warmup_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
-        sess_id,
-        callback.from_user.id,
-    )
+    try:
+        s = await pool.fetchrow(
+            "SELECT * FROM warmup_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
+            sess_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        s = None
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
         return
@@ -1295,11 +1360,16 @@ async def cb_wu_sess_pause(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
     sess_id = callback_data.session_id
-    await pool.execute(
-        "UPDATE warmup_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
-        sess_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE warmup_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
+            sess_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"wu_sess_pause: {exc}")
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
 
 
@@ -1308,11 +1378,16 @@ async def cb_wu_sess_resume(
     callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
 ) -> None:
     sess_id = callback_data.session_id
-    await pool.execute(
-        "UPDATE warmup_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
-        sess_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE warmup_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
+            sess_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"wu_sess_resume: {exc}")
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     await callback.answer("▶️ Сессия возобновлена", show_alert=True)
 
 
@@ -1322,11 +1397,20 @@ async def cb_wu_sess_delete(
 ) -> None:
     await callback.answer()
     sess_id = callback_data.session_id
-    await pool.execute(
-        "DELETE FROM warmup_sessions WHERE id=$1 AND owner_id=$2",
-        sess_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM warmup_sessions WHERE id=$1 AND owner_id=$2",
+            sess_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"wu_sess_delete: {exc}")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка удаления:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     await callback.message.edit_text(
         "🗑 <b>Сессия удалена</b>",
         parse_mode="HTML",
@@ -1425,15 +1509,18 @@ async def _show_ract_account_picker(
     data = await state.get_data()
     selected: set[int] = set(data.get("ract_acc_ids", []))
 
-    accounts = await pool.fetch(
-        """SELECT a.id, a.phone, a.first_name,
-                  COALESCE(a.acc_status, 'active') AS acc_status
-           FROM tg_accounts a
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-             AND a.session_str IS NOT NULL AND a.session_str != ''
-           ORDER BY a.added_at DESC""",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT a.id, a.phone, a.first_name,
+                      COALESCE(a.acc_status, 'active') AS acc_status
+               FROM tg_accounts a
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+                 AND a.session_str IS NOT NULL AND a.session_str != ''
+               ORDER BY a.added_at DESC""",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
 
     kb = InlineKeyboardBuilder()
     for acc in accounts:
@@ -1550,21 +1637,27 @@ async def cb_ract_profile(
     acc_ids: list[int] = data.get("ract_acc_ids", [])
 
     # Preview own resources
-    resources = await pool.fetch(
-        """SELECT COALESCE('@'||username, title) AS label
-           FROM managed_channels WHERE owner_id=$1 LIMIT 5""",
-        callback.from_user.id,
-    )
+    try:
+        resources = await pool.fetch(
+            """SELECT COALESCE('@'||username, title) AS label
+               FROM managed_channels WHERE owner_id=$1 LIMIT 5""",
+            callback.from_user.id,
+        )
+    except Exception:
+        resources = []
     res_preview = "\n".join(
         f"  • <code>{html.escape(str(r['label']))}</code>" for r in resources
     )
     if not res_preview:
         res_preview = "  <i>Ресурсы из инфраструктуры (авто)</i>"
 
-    acc_rows = await pool.fetch(
-        "SELECT id, COALESCE(first_name, phone) AS label FROM tg_accounts WHERE id=ANY($1)",
-        acc_ids,
-    )
+    try:
+        acc_rows = await pool.fetch(
+            "SELECT id, COALESCE(first_name, phone) AS label FROM tg_accounts WHERE id=ANY($1)",
+            acc_ids,
+        )
+    except Exception:
+        acc_rows = []
     acc_preview = ", ".join(html.escape(str(r["label"])) for r in acc_rows[:4])
     if len(acc_rows) > 4:
         acc_preview += f" и ещё {len(acc_rows) - 4}"
@@ -1605,18 +1698,26 @@ async def cb_ract_start(
     profile: str = data.get("ract_profile", "mixed")
     cfg = _RACT_CONFIG["standard"]
 
-    sess_id = await pool.fetchval(
-        """INSERT INTO resource_activity_sessions
-           (owner_id, account_ids, resource_refs, profile_type, target_days, daily_actions)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id""",
-        callback.from_user.id,
-        acc_ids,
-        [],
-        profile,
-        cfg["days"],
-        cfg["daily"],
-    )
+    try:
+        sess_id = await pool.fetchval(
+            """INSERT INTO resource_activity_sessions
+               (owner_id, account_ids, resource_refs, profile_type, target_days, daily_actions)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id""",
+            callback.from_user.id,
+            acc_ids,
+            [],
+            profile,
+            cfg["days"],
+            cfg["daily"],
+        )
+    except Exception as exc:
+        mark_handled_error(f"ract_start insert: {exc}")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка создания сессии:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
 
     await state.clear()
 
@@ -1647,14 +1748,17 @@ async def cb_ract_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
 
-    sessions = await pool.fetch(
-        """SELECT id, account_ids, profile_type, status, current_day, target_days,
-                  daily_actions, last_run_at, created_at
-           FROM resource_activity_sessions
-           WHERE owner_id=$1 AND status IN ('active', 'paused')
-           ORDER BY created_at DESC LIMIT 15""",
-        uid,
-    )
+    try:
+        sessions = await pool.fetch(
+            """SELECT id, account_ids, profile_type, status, current_day, target_days,
+                      daily_actions, last_run_at, created_at
+               FROM resource_activity_sessions
+               WHERE owner_id=$1 AND status IN ('active', 'paused')
+               ORDER BY created_at DESC LIMIT 15""",
+            uid,
+        )
+    except Exception:
+        sessions = []
 
     if not sessions:
         kb = InlineKeyboardBuilder()
@@ -1723,23 +1827,29 @@ async def cb_ract_detail(
     sess_id = callback_data.session_id
     uid = callback.from_user.id
 
-    s = await pool.fetchrow(
-        "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
-        sess_id,
-        uid,
-    )
+    try:
+        s = await pool.fetchrow(
+            "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
+            sess_id,
+            uid,
+        )
+    except Exception:
+        s = None
     if not s:
         await callback.answer("Сессия не найдена", show_alert=True)
         return
     await callback.answer()
 
-    logs = await pool.fetch(
-        """SELECT account_id, action_type, resource_ref, success, performed_at
-           FROM resource_activity_log
-           WHERE session_id=$1
-           ORDER BY performed_at DESC LIMIT 20""",
-        sess_id,
-    )
+    try:
+        logs = await pool.fetch(
+            """SELECT account_id, action_type, resource_ref, success, performed_at
+               FROM resource_activity_log
+               WHERE session_id=$1
+               ORDER BY performed_at DESC LIMIT 20""",
+            sess_id,
+        )
+    except Exception:
+        logs = []
 
     day = s["current_day"] or 0
     days = s["target_days"] or 1
@@ -1804,11 +1914,14 @@ async def cb_ract_run(
 
     sess_id = callback_data.session_id
     uid = callback.from_user.id
-    s = await pool.fetchrow(
-        "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
-        sess_id,
-        uid,
-    )
+    try:
+        s = await pool.fetchrow(
+            "SELECT * FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
+            sess_id,
+            uid,
+        )
+    except Exception:
+        s = None
     if not s:
         await callback.answer("Сессия не найдена или не активна", show_alert=True)
         return
@@ -1842,11 +1955,16 @@ async def cb_ract_run(
 async def cb_ract_pause(
     callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
 ) -> None:
-    await pool.execute(
-        "UPDATE resource_activity_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
-        callback_data.session_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE resource_activity_sessions SET status='paused' WHERE id=$1 AND owner_id=$2",
+            callback_data.session_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"ract_pause: {exc}")
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     await callback.answer("⏸ Сессия поставлена на паузу", show_alert=True)
 
 
@@ -1854,11 +1972,16 @@ async def cb_ract_pause(
 async def cb_ract_resume(
     callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
 ) -> None:
-    await pool.execute(
-        "UPDATE resource_activity_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
-        callback_data.session_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE resource_activity_sessions SET status='active' WHERE id=$1 AND owner_id=$2",
+            callback_data.session_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"ract_resume: {exc}")
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     await callback.answer("▶️ Сессия возобновлена", show_alert=True)
 
 
@@ -1867,11 +1990,20 @@ async def cb_ract_delete(
     callback: CallbackQuery, callback_data: ResourceActCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    await pool.execute(
-        "DELETE FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
-        callback_data.session_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM resource_activity_sessions WHERE id=$1 AND owner_id=$2",
+            callback_data.session_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        mark_handled_error(f"ract_delete: {exc}")
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка удаления:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_ract_back_kb().as_markup(),
+        )
+        return
     await callback.message.edit_text(
         "🗑 <b>Сессия удалена</b>",
         parse_mode="HTML",
