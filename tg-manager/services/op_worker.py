@@ -802,7 +802,7 @@ async def _exec_mass_publish(
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
         f"a.device_model, a.system_version, a.app_version "
         f"FROM managed_channels mc "
-        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE "
+        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
         f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) AND {type_filter} {chan_filter} "
         f"ORDER BY mc.channel_id, a.id",
         *fetch_params,

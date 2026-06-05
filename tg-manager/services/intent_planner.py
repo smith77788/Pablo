@@ -177,6 +177,7 @@ async def _build_presence_plan(pool, owner_id, description, resources):
     )
     acc_rows = await pool.fetch(
         "SELECT id FROM tg_accounts WHERE owner_id=$1 AND trust_score > 0.3 "
+        "AND is_active=TRUE AND session_str IS NOT NULL "
         "ORDER BY trust_score DESC LIMIT $2",
         owner_id,
         n_accounts_needed,
