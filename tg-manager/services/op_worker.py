@@ -1067,6 +1067,7 @@ async def _exec_mass_publish(
     target = params.get("target", "channels")
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
+    explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
 
     if not mp_text:
         return {"status": "failed", "summary": "⚠️ Текст сообщения не указан"}
@@ -1078,11 +1079,18 @@ async def _exec_mass_publish(
     else:
         type_filter = "TRUE"
 
-    accounts_rows = await resource_selector.select_all_active(pool, owner_id)
+    explicit_acc_ids = [int(i) for i in (params.get("account_ids") or [])]
+    accounts_rows = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=explicit_acc_ids or None
+    )
     if not accounts_rows:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
 
     acc_ids = [a["id"] for a in accounts_rows]
+    chan_filter = f"AND mc.channel_id = ANY($3::bigint[])" if explicit_channel_ids else ""
+    fetch_params: list = [owner_id, acc_ids]
+    if explicit_channel_ids:
+        fetch_params.append(explicit_channel_ids)
     db_pairs = await pool.fetch(
         f"SELECT DISTINCT ON (mc.channel_id) "
         f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
@@ -1090,10 +1098,9 @@ async def _exec_mass_publish(
         f"a.device_model, a.system_version, a.app_version "
         f"FROM managed_channels mc "
         f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE "
-        f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) AND {type_filter} "
+        f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) AND {type_filter} {chan_filter} "
         f"ORDER BY mc.channel_id, a.id",
-        owner_id,
-        acc_ids,
+        *fetch_params,
     )
 
     if not db_pairs:
