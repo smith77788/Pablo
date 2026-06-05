@@ -531,7 +531,7 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     from bot.keyboards import subscription_locked_markup
 
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await callback.answer("🔒 Реестр ассетов — Starter+", show_alert=True)
         await callback.message.edit_text(
             "🔒 <b>Реестр ассетов — Starter+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
