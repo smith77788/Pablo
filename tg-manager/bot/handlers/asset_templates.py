@@ -241,21 +241,27 @@ def _view_kb(tpl_id: int, asset_type: str) -> object:
 
 
 async def _get_templates(pool: asyncpg.Pool, owner_id: int, asset_type: str) -> list:
-    return await pool.fetch(
-        """SELECT id, name, template, created_at FROM asset_templates
-           WHERE owner_id=$1 AND asset_type=$2
-           ORDER BY created_at DESC LIMIT 10""",
-        owner_id,
-        asset_type,
-    )
+    try:
+        return await pool.fetch(
+            """SELECT id, name, template, created_at FROM asset_templates
+               WHERE owner_id=$1 AND asset_type=$2
+               ORDER BY created_at DESC LIMIT 10""",
+            owner_id,
+            asset_type,
+        )
+    except Exception:
+        return []
 
 
 async def _get_template(pool: asyncpg.Pool, tpl_id: int, owner_id: int):
-    return await pool.fetchrow(
-        "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2",
-        tpl_id,
-        owner_id,
-    )
+    try:
+        return await pool.fetchrow(
+            "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2",
+            tpl_id,
+            owner_id,
+        )
+    except Exception:
+        return None
 
 
 async def _save_template(
@@ -278,12 +284,15 @@ async def _save_template(
 
 
 async def _delete_template(pool: asyncpg.Pool, tpl_id: int, owner_id: int) -> bool:
-    result = await pool.execute(
-        "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2",
-        tpl_id,
-        owner_id,
-    )
-    return result != "DELETE 0"
+    try:
+        result = await pool.execute(
+            "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2",
+            tpl_id,
+            owner_id,
+        )
+        return result != "DELETE 0"
+    except Exception:
+        return False
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────────
@@ -790,10 +799,13 @@ async def cb_apply(
         )
 
     else:  # bot — pick which managed bot to apply to
-        bots = await pool.fetch(
-            "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY first_name",
-            callback.from_user.id,
-        )
+        try:
+            bots = await pool.fetch(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY first_name",
+                callback.from_user.id,
+            )
+        except Exception:
+            bots = []
         if not bots:
             kb = InlineKeyboardBuilder()
             kb.button(
@@ -954,11 +966,14 @@ async def cb_apply_bot_exec(
         tpl_name = tpl["name"]
 
     # Load bot token
-    bot_row = await pool.fetchrow(
-        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id,
-        user_id,
-    )
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id,
+            user_id,
+        )
+    except Exception:
+        bot_row = None
     if not bot_row:
         await callback.message.edit_text(
             "❌ Бот не найден.",
@@ -1343,10 +1358,13 @@ async def cb_lib_apply(
 
     elif atype == "bot":
         # Bot: pick which managed bot to apply to
-        bots = await pool.fetch(
-            "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
-            callback.from_user.id,
-        )
+        try:
+            bots = await pool.fetch(
+                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
+                callback.from_user.id,
+            )
+        except Exception:
+            bots = []
         if not bots:
             kb = InlineKeyboardBuilder()
             kb.button(text="◀️ Назад", callback_data=LibCb(action="menu"))
