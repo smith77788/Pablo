@@ -859,11 +859,11 @@ async def cb_wu_toggle_tgt(
     WarmupCb.filter(F.action == "tgts_done"), WarmupSessionFSM.picking_infra
 )
 async def cb_wu_infra_done(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
     data = await state.get_data()
     if not data.get("sel_tgt_refs"):
         await callback.answer("Выберите хотя бы одну цель", show_alert=True)
         return
+    await callback.answer()
     await _show_mode_picker(callback, state)
 
 
