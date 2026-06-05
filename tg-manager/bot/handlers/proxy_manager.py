@@ -23,6 +23,7 @@ from bot.callbacks import ProxyCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import AddProxyFSM
 from bot.utils.subscription import require_plan, locked_text
+from bot.utils.event_status import mark_handled_error
 from database import db
 from services.logger import log_exc_swallow
 
@@ -435,10 +436,13 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer("🌍 Определяю гео прокси...")
     user_id = callback.from_user.id
-    rows = await pool.fetch(
-        "SELECT id, proxy_url, label FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            "SELECT id, proxy_url, label FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+            user_id,
+        )
+    except Exception:
+        rows = []
     if not rows:
         await callback.message.edit_text(
             "📋 Нет активных прокси.", reply_markup=_menu_kb().as_markup()
@@ -497,7 +501,8 @@ async def cb_proxy_delete(
             proxy_id,
             user_id,
         )
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"proxy_delete fetch: {exc}")
         await callback.answer("Ошибка при загрузке прокси.", show_alert=True)
         return
     if not row:
@@ -512,6 +517,7 @@ async def cb_proxy_delete(
             user_id,
         )
     except Exception as exc:
+        mark_handled_error(f"proxy_delete execute: {exc}")
         await callback.message.edit_text(
             f"❌ Не удалось удалить прокси: <code>{html.escape(str(exc)[:200])}</code>",
             parse_mode="HTML",

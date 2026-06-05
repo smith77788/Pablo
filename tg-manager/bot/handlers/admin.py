@@ -18,6 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command
 from bot.keyboards import main_menu
 from bot.utils.subscription import get_free_mode, set_free_mode
+from bot.utils.event_status import mark_handled_error
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -1031,6 +1032,7 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             pool.fetchval("SELECT COUNT(*) FROM platform_users"),
         )
     except Exception as e:
+        mark_handled_error(f"adm_users: {e}")
         await callback.message.edit_text(
             f"❌ <code>{e}</code>", parse_mode="HTML", reply_markup=_back_kb()
         )
@@ -1259,6 +1261,7 @@ async def _adm_logs_csv(
             fname = f"logs_tg_ops_{ts}.csv"
             caption = f"⚙️ TG-операции: {len(rows)} строк — {ts} UTC"
     except Exception as exc:
+        mark_handled_error(f"adm_logs_csv: {exc}")
         await callback.message.answer(
             f"❌ Ошибка формирования CSV: <code>{_html.escape(str(exc)[:200])}</code>",
             parse_mode="HTML",

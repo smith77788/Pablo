@@ -21,6 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import StrikeCb, ChanCb, BmCb
 from bot.states import MiniStrikeFSM, StrikeEmailFSM
 from bot.utils.subscription import require_feature
+from bot.utils.event_status import mark_handled_error
 from services import email_oauth
 from services.logger import log_exc_swallow
 
@@ -282,7 +283,8 @@ async def _set_strike_mode(
             mode,
         )
         log.info("strike mode set user=%s mode=%s", callback.from_user.id, mode)
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"set_strike_mode: {exc}")
         log_exc_swallow(log, "set_strike_mode: DB failed")
         await callback.answer("Ошибка сохранения режима.", show_alert=True)
         return
@@ -358,7 +360,8 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             callback.from_user.id,
             ref,
         )
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"strike_buy: DB insert failed: {exc}")
         log_exc_swallow(log, "cb_strike_buy: DB insert failed")
         await callback.message.edit_text(
             "❌ Ошибка создания платежа. Попробуйте позже."
@@ -1003,6 +1006,7 @@ async def cb_mini_strike_run(
             progress_cb=progress,
         )
     except Exception as e:
+        mark_handled_error(f"mini_strike_run: {e}")
         log_exc_swallow(log, "cb_mini_strike_run: execute failed")
         await msg.edit_text(
             f"❌ <b>Ошибка выполнения страйка</b>\n\n<code>{str(e)[:200]}</code>",
@@ -1130,7 +1134,8 @@ async def cb_email_toggle(
             email_id,
         )
         await callback.answer("✅ Включён" if new_val else "⛔ Выключен")
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"email_toggle: {exc}")
         log_exc_swallow(log, "cb_email_toggle: DB failed")
         await callback.answer("Ошибка.", show_alert=True)
         return
@@ -1360,6 +1365,7 @@ async def msg_password_input(
         log.info("strike: email added user=%s email=%s", message.from_user.id, email)
     except Exception as e:
         err = str(e)[:120]
+        mark_handled_error(f"email_add smtp_test: {err}")
         log.warning("strike: email test failed %s: %s", email, err)
         kb = InlineKeyboardBuilder()
         kb.button(

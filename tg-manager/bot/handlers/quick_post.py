@@ -27,6 +27,7 @@ from bot.callbacks import AssetTplCb, QuickPostCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
 from bot.utils.subscription import require_plan, locked_text
+from bot.utils.event_status import mark_handled_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -402,7 +403,8 @@ async def cb_qp_use_template(
             tpl_id,
             callback.from_user.id,
         )
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"qp_use_template: {exc}")
         await callback.answer("Ошибка загрузки шаблона.", show_alert=True)
         return
     if not row:
@@ -702,7 +704,8 @@ async def cb_qp_publish(
             callback.from_user.id,
             selected_chan_ids,
         )
-    except Exception:
+    except Exception as exc:
+        mark_handled_error(f"qp_post_confirm channels: {exc}")
         await callback.message.edit_text(
             "⚠️ Ошибка загрузки данных. Попробуйте ещё раз.",
             parse_mode="HTML",
