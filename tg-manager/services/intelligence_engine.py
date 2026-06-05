@@ -997,8 +997,8 @@ async def _pre_launch_impl(
                 if not intel.warning_text:
                     intel.warning_text = _eco_warn
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("intelligence_engine: ecosystem check failed owner=%d: %s", owner_id, e)
 
     return intel
 

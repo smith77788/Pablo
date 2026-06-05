@@ -84,11 +84,40 @@ async def _get_chat_messages(
     _acc: dict | None = None,
 ) -> list[dict]:
     """Получить последние сообщения из чата (включая ЛС с ботом)."""
+    from telethon.errors import (
+        ChannelPrivateError,
+        FloodWaitError,
+        ChatWriteForbiddenError,
+    )
+
     client = account_manager._make_client(session_str, _acc)
     result = []
     try:
         await client.connect()
-        msgs = await client.get_messages(chat_id, limit=limit)
+        try:
+            msgs = await client.get_messages(chat_id, limit=limit)
+        except ChannelPrivateError:
+            log.warning("_get_chat_messages: ChannelPrivate chat_id=%s", chat_id)
+            await client.disconnect()
+            return []
+        except FloodWaitError as e:
+            log.warning("_get_chat_messages: FloodWait %ds chat_id=%s", e.seconds, chat_id)
+            await client.disconnect()
+            return []
+        except ChatWriteForbiddenError:
+            log.warning("_get_chat_messages: no write access chat_id=%s", chat_id)
+            # Still try to read messages
+            try:
+                msgs = await client.get_messages(chat_id, limit=limit)
+            except Exception as e:
+                log.warning("_get_chat_messages: read failed chat_id=%s: %s", chat_id, e)
+                await client.disconnect()
+                return []
+        except Exception as e:
+            log.warning("_get_chat_messages: unexpected error chat_id=%s: %s", chat_id, e)
+            await client.disconnect()
+            return []
+
         for m in msgs:
             entry: dict = {
                 "id": m.id,

@@ -410,6 +410,25 @@ _FATAL_ERRORS = frozenset(
 # In-memory guards: предотвращают одновременный запуск прогрева одного и того же плана/сессии
 _active_plan_ids: set[int] = set()
 _active_session_ids: set[int] = set()
+_plan_locks: dict[int, asyncio.Lock] = {}  # Per-plan locks for fine-grained concurrency
+_session_locks: dict[int, asyncio.Lock] = {}  # Per-session locks
+_global_lock = asyncio.Lock()  # For accessing _plan_locks/_session_locks dicts
+
+
+async def _get_plan_lock(plan_id: int) -> asyncio.Lock:
+    """Get or create a lock for a specific plan."""
+    async with _global_lock:
+        if plan_id not in _plan_locks:
+            _plan_locks[plan_id] = asyncio.Lock()
+        return _plan_locks[plan_id]
+
+
+async def _get_session_lock(session_id: int) -> asyncio.Lock:
+    """Get or create a lock for a specific session."""
+    async with _global_lock:
+        if session_id not in _session_locks:
+            _session_locks[session_id] = asyncio.Lock()
+        return _session_locks[session_id]
 
 
 async def _perform_read_channel(client, channel_ref: str) -> bool:
@@ -756,7 +775,9 @@ async def _perform_story_view(client) -> bool:
             await client(GetAllStoriesRequest(next=False, hidden=False))
             await asyncio.sleep(random.uniform(4, 12))
         except (ImportError, AttributeError):
-            await asyncio.sleep(random.uniform(5, 10))
+            # Stories API not available on this client version - skip gracefully
+            log.debug("warmup story_view: API not available, skipping")
+            return True  # Not a failure, just not supported
         return True
     except Exception as e:
         etype = type(e).__name__
@@ -852,7 +873,8 @@ async def run_daily_warmup(
     plan_id = plan["id"]
 
     # Защита от параллельного запуска одного и того же плана
-    if plan_id in _active_plan_ids:
+    plan_lock = await _get_plan_lock(plan_id)
+    if plan_lock.locked():
         log.info("warmup: plan %d already running, skipping concurrent launch", plan_id)
         return {
             "actions_done": 0,
@@ -861,8 +883,7 @@ async def run_daily_warmup(
             "completed": False,
             "warmup_level": "light",
         }
-    _active_plan_ids.add(plan_id)
-    try:
+    async with plan_lock:
         return await _run_daily_warmup_impl(
             pool,
             plan,
@@ -873,8 +894,6 @@ async def run_daily_warmup(
             plan_id,
             update_callback,
         )
-    finally:
-        _active_plan_ids.discard(plan_id)
 
 
 async def _run_daily_warmup_impl(
@@ -1239,7 +1258,8 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
     session_id = session["id"]
 
     # Защита от параллельного запуска одной и той же сессии
-    if session_id in _active_session_ids:
+    session_lock = await _get_session_lock(session_id)
+    if session_lock.locked():
         log.info(
             "warmup_session: session %d already running, skipping concurrent launch",
             session_id,
@@ -1250,11 +1270,8 @@ async def run_warmup_session(pool: asyncpg.Pool, session: dict) -> dict:
             "actions_fail": 0,
             "completed": False,
         }
-    _active_session_ids.add(session_id)
-    try:
+    async with session_lock:
         return await _run_warmup_session_impl(pool, session, session_id)
-    finally:
-        _active_session_ids.discard(session_id)
 
 
 async def _run_warmup_session_impl(
@@ -1306,8 +1323,9 @@ async def _run_warmup_session_impl(
                     acc_id,
                 )
                 continue
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("warmup_session: is_account_in_use check failed acc=%d: %s", acc_id, e)
+            # Proceed with warmup if check fails - better than skipping
 
         acc_row = await pool.fetchrow(
             """SELECT a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
@@ -1369,8 +1387,8 @@ async def _run_warmup_session_impl(
                         infra_memory.record_account_op(
                             acc_id, "warmup_session", success, duration_s=dur_s
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("warmup_session: infra_memory record failed acc=%d: %s", acc_id, e)
                 except Exception as exc:
                     error_str = str(exc)[:200]
                     success = False
@@ -1392,8 +1410,8 @@ async def _run_warmup_session_impl(
                         success,
                         error_str,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("warmup_session: DB log insert failed acc=%d: %s", acc_id, e)
 
                 await asyncio.sleep(random.uniform(8, 25))
 

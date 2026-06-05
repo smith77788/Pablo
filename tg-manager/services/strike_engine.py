@@ -591,8 +591,8 @@ async def _one_account_strike(
                         success=True,
                         duration_s=time.monotonic() - t0_strike,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("strike: record_account_op success failed acc=%s: %s", acc.get("id"), e)
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
@@ -648,8 +648,8 @@ async def _one_account_strike(
                     from services.infra_memory import record_account_op
 
                     record_account_op(acc["id"], "strike", success=False, error=err_str)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("strike: record_account_op failed acc=%s: %s", acc.get("id"), e)
                 return {
                     "peer_reported": False,
                     "error": err_str,

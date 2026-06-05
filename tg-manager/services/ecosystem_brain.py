@@ -230,7 +230,8 @@ async def add_member(
             role,
         )
         return True
-    except Exception:
+    except Exception as e:
+        log.warning("ecosystem: add_member failed eco=%d: %s", ecosystem_id, e)
         return False
 
 
