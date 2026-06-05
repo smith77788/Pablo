@@ -9,6 +9,7 @@ Account Warmup UI — управление сессиями и планами р
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from datetime import datetime, timezone, timedelta
@@ -21,6 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import WarmupCb, BmCb, AccCb, ResourceActCb
 from bot.states import WarmupSessionFSM, ResourceActivityFSM
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -244,23 +246,34 @@ async def cb_warmup_create_all_plans(
         )
         return
 
-    created = 0
-    for acc in accounts:
-        try:
-            await create_warmup_plan(pool, user_id, acc["id"], plan_type)
-            created += 1
-        except Exception as exc:
-            log.warning("warmup create_all: acc=%d error=%s", acc["id"], exc)
-
-    await callback.message.edit_text(
-        f"✅ <b>Планы разогрева созданы!</b>\n\n"
-        f"Аккаунтов: <b>{created}/{len(accounts)}</b>\n"
-        f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
-        "Разогрев запускается автоматически каждые 6 часов.\n"
-        "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
+    total = len(accounts)
+    msg = await callback.message.edit_text(
+        f"⏳ Создаю планы разогрева для {total} аккаунтов...",
         parse_mode="HTML",
-        reply_markup=_back_kb().as_markup(),
     )
+
+    async def _create_bg():
+        created = 0
+        for acc in accounts:
+            try:
+                await create_warmup_plan(pool, user_id, acc["id"], plan_type)
+                created += 1
+            except Exception as exc:
+                log.warning("warmup create_all: acc=%d error=%s", acc["id"], exc)
+        try:
+            await msg.edit_text(
+                f"✅ <b>Планы разогрева созданы!</b>\n\n"
+                f"Аккаунтов: <b>{created}/{total}</b>\n"
+                f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
+                "Разогрев запускается автоматически каждые 6 часов.\n"
+                "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
+                parse_mode="HTML",
+                reply_markup=_back_kb().as_markup(),
+            )
+        except Exception:
+            log_exc_swallow(log, "warmup create_all: не удалось обновить сообщение")
+
+    asyncio.create_task(_create_bg())
 
 
 @router.callback_query(
@@ -323,7 +336,7 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
     kb = InlineKeyboardBuilder()
     now_utc = datetime.now(timezone.utc)
     for plan in plans:
-        label = plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
+        label = plan.get("first_name") or plan.get("phone") or str(plan.get("account_id", ""))
         current_day = plan["current_day"] or 0
         target_days = max(plan["target_days"] or 1, 1)
         pct = round(current_day / target_days * 100)
@@ -443,7 +456,7 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     async def _run_all():
         for plan in plans:
             label = (
-                plan.get("first_name") or plan.get("phone") or str(plan["account_id"])
+                plan.get("first_name") or plan.get("phone") or str(plan.get("account_id", ""))
             )
             try:
                 await run_daily_warmup(pool, plan)
