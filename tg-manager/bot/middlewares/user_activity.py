@@ -18,8 +18,18 @@ _LONG_SECRET_RE = re.compile(r"\b[A-Za-z0-9_-]{48,}\b")
 
 # FSM states where message content must NOT be logged (phone/session/code/password input)
 _SENSITIVE_STATE_KEYWORDS = (
-    "phone", "code", "password", "session", "token", "2fa", "twofa",
-    "qr", "secret", "hash", "api_id", "api_hash",
+    "phone",
+    "code",
+    "password",
+    "session",
+    "token",
+    "2fa",
+    "twofa",
+    "qr",
+    "secret",
+    "hash",
+    "api_id",
+    "api_hash",
 )
 
 
@@ -145,19 +155,34 @@ class UserActivityLogMiddleware(BaseMiddleware):
             if user_id:
                 try:
                     from services import activity_logger
+
                     if isinstance(event, CallbackQuery):
                         action = _cb_action(event.data)
-                        detail = f"fsm:{fsm_state_name.split(':')[-1]}" if fsm_state_name else None
+                        detail = (
+                            f"fsm:{fsm_state_name.split(':')[-1]}"
+                            if fsm_state_name
+                            else None
+                        )
                         activity_logger.log_event(
-                            user_id, "callback", action, detail,
-                            status, error_msg, duration_ms,
+                            user_id,
+                            "callback",
+                            action,
+                            detail,
+                            status,
+                            error_msg,
+                            duration_ms,
                         )
                     elif isinstance(event, Message):
                         action, detail = _msg_action(event, fsm_state_name)
                         event_type = "command" if action.startswith("/") else "message"
                         activity_logger.log_event(
-                            user_id, event_type, action, detail,
-                            status, error_msg, duration_ms,
+                            user_id,
+                            event_type,
+                            action,
+                            detail,
+                            status,
+                            error_msg,
+                            duration_ms,
                         )
                 except Exception:
                     pass  # logging must never break the bot

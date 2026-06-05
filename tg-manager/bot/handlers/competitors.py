@@ -267,7 +267,9 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    progress_msg = await safe_edit(cb, f"🔄 Обновляю данные для {len(rows)} конкурентов...")
+    progress_msg = await safe_edit(
+        cb, f"🔄 Обновляю данные для {len(rows)} конкурентов..."
+    )
 
     async def _refresh_bg() -> None:
         updated = 0
@@ -310,7 +312,9 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
                 reply_markup=kb2.as_markup(),
             )
         except Exception:
-            log_exc_swallow(log, "comp_refresh: не удалось обновить сообщение о результате")
+            log_exc_swallow(
+                log, "comp_refresh: не удалось обновить сообщение о результате"
+            )
 
     asyncio.create_task(_refresh_bg())
 

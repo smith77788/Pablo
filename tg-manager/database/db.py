@@ -276,7 +276,9 @@ async def update_broadcast(
     )
 
 
-async def get_broadcast(pool: asyncpg.Pool, broadcast_id: int, bot_id: int | None = None) -> asyncpg.Record | None:
+async def get_broadcast(
+    pool: asyncpg.Pool, broadcast_id: int, bot_id: int | None = None
+) -> asyncpg.Record | None:
     if bot_id is not None:
         return await pool.fetchrow(
             "SELECT * FROM broadcasts WHERE id=$1 AND bot_id=$2", broadcast_id, bot_id
@@ -554,11 +556,15 @@ async def get_bots_for_polling(pool: asyncpg.Pool) -> list[asyncpg.Record]:
 # ── Hermes Relay ───────────────────────────────────────────────────────────
 
 
-async def enable_relay(pool: asyncpg.Pool, bot_id: int, enabled: bool, added_by: int | None = None) -> None:
+async def enable_relay(
+    pool: asyncpg.Pool, bot_id: int, enabled: bool, added_by: int | None = None
+) -> None:
     if added_by is not None:
         await pool.execute(
             "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
-            enabled, bot_id, added_by,
+            enabled,
+            bot_id,
+            added_by,
         )
     else:
         await pool.execute(
@@ -1026,25 +1032,38 @@ async def set_system_mode(pool: asyncpg.Pool, mode: str) -> None:
 
 
 async def set_bot_role(
-    pool: asyncpg.Pool, bot_id: int, role: str, cluster: str = "default", added_by: int | None = None
+    pool: asyncpg.Pool,
+    bot_id: int,
+    role: str,
+    cluster: str = "default",
+    added_by: int | None = None,
 ) -> None:
     if added_by is not None:
         await pool.execute(
             "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1 AND added_by=$4",
-            bot_id, role, cluster, added_by,
+            bot_id,
+            role,
+            cluster,
+            added_by,
         )
     else:
         await pool.execute(
             "UPDATE managed_bots SET bot_role=$2, cluster=$3 WHERE bot_id=$1",
-            bot_id, role, cluster,
+            bot_id,
+            role,
+            cluster,
         )
 
 
-async def toggle_swarm(pool: asyncpg.Pool, bot_id: int, enabled: bool, added_by: int | None = None) -> None:
+async def toggle_swarm(
+    pool: asyncpg.Pool, bot_id: int, enabled: bool, added_by: int | None = None
+) -> None:
     if added_by is not None:
         await pool.execute(
             "UPDATE managed_bots SET swarm_enabled=$2 WHERE bot_id=$1 AND added_by=$3",
-            bot_id, enabled, added_by,
+            bot_id,
+            enabled,
+            added_by,
         )
     else:
         await pool.execute(
@@ -1213,7 +1232,9 @@ async def get_experiments(pool, bot_id: int) -> list:
     )
 
 
-async def get_experiment(pool, exp_id: int, bot_id: int | None = None) -> asyncpg.Record | None:
+async def get_experiment(
+    pool, exp_id: int, bot_id: int | None = None
+) -> asyncpg.Record | None:
     if bot_id is not None:
         return await pool.fetchrow(
             "SELECT * FROM experiments WHERE id=$1 AND bot_id=$2", exp_id, bot_id
@@ -1250,13 +1271,20 @@ async def add_experiment_variant(
     return row["id"]
 
 
-async def set_experiment_status(pool, exp_id: int, status: str, bot_id: int | None = None) -> None:
+async def set_experiment_status(
+    pool, exp_id: int, status: str, bot_id: int | None = None
+) -> None:
     if bot_id is not None:
         await pool.execute(
-            "UPDATE experiments SET status=$2 WHERE id=$1 AND bot_id=$3", exp_id, status, bot_id
+            "UPDATE experiments SET status=$2 WHERE id=$1 AND bot_id=$3",
+            exp_id,
+            status,
+            bot_id,
         )
     else:
-        await pool.execute("UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status)
+        await pool.execute(
+            "UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status
+        )
 
 
 async def get_active_experiment(pool, bot_id: int, exp_type: str = "start_message"):
@@ -2342,7 +2370,9 @@ async def get_keyword_rankings(
             "SELECT sr.position, sr.checked_at FROM search_rankings sr "
             "JOIN tracked_keywords tk ON tk.id=sr.keyword_id AND tk.owner_id=$3 "
             "WHERE sr.keyword_id=$1 ORDER BY sr.checked_at DESC LIMIT $2",
-            keyword_id, limit, owner_id,
+            keyword_id,
+            limit,
+            owner_id,
         )
     return await pool.fetch(
         "SELECT position, checked_at FROM search_rankings "
@@ -2352,13 +2382,16 @@ async def get_keyword_rankings(
     )
 
 
-async def get_latest_ranking(pool: asyncpg.Pool, keyword_id: int, owner_id: int | None = None):
+async def get_latest_ranking(
+    pool: asyncpg.Pool, keyword_id: int, owner_id: int | None = None
+):
     if owner_id is not None:
         return await pool.fetchrow(
             "SELECT sr.position, sr.checked_at FROM search_rankings sr "
             "JOIN tracked_keywords tk ON tk.id=sr.keyword_id AND tk.owner_id=$2 "
             "WHERE sr.keyword_id=$1 ORDER BY sr.checked_at DESC LIMIT 1",
-            keyword_id, owner_id,
+            keyword_id,
+            owner_id,
         )
     return await pool.fetchrow(
         "SELECT position, checked_at FROM search_rankings "
@@ -2387,7 +2420,9 @@ async def get_ranking_history(
             "SELECT sr.position, sr.checked_at FROM search_rankings sr "
             "JOIN tracked_keywords tk ON tk.id=sr.keyword_id AND tk.owner_id=$3 "
             "WHERE sr.keyword_id=$1 ORDER BY sr.checked_at DESC LIMIT $2",
-            keyword_id, limit, owner_id,
+            keyword_id,
+            limit,
+            owner_id,
         )
     return await pool.fetch(
         "SELECT position, checked_at FROM search_rankings "
@@ -3003,7 +3038,9 @@ async def get_global_presence_plans(
     )
 
 
-async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None) -> dict:
+async def get_global_presence_stats(
+    pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None
+) -> dict:
     if owner_id is not None:
         row = await pool.fetchrow(
             """SELECT
@@ -3015,7 +3052,8 @@ async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int, owner_id: 
                FROM global_presence_targets gpt
                JOIN global_presence_plans gpp ON gpp.id=gpt.plan_id AND gpp.owner_id=$2
                WHERE gpt.plan_id=$1""",
-            plan_id, owner_id,
+            plan_id,
+            owner_id,
         )
     else:
         row = await pool.fetchrow(
@@ -3035,14 +3073,17 @@ async def get_global_presence_stats(pool: asyncpg.Pool, plan_id: int, owner_id: 
     )
 
 
-async def reset_failed_targets(pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None) -> int:
+async def reset_failed_targets(
+    pool: asyncpg.Pool, plan_id: int, owner_id: int | None = None
+) -> int:
     """Reset failed+retryable targets to pending for retry. Returns count reset."""
     if owner_id is not None:
         result = await pool.execute(
             "UPDATE global_presence_targets SET status='pending', error_message=NULL "
             "WHERE plan_id=$1 AND status='failed' AND retryable=TRUE "
             "AND EXISTS (SELECT 1 FROM global_presence_plans WHERE id=$1 AND owner_id=$2)",
-            plan_id, owner_id,
+            plan_id,
+            owner_id,
         )
     else:
         result = await pool.execute(
@@ -3119,10 +3160,10 @@ async def sync_plan_status_from_op(pool: asyncpg.Pool, plan_id: int) -> str | No
 # ── Operation Reports and Statistics ──────────────────────────────────────
 
 
-
 # ─────────────────────────────────────────────────────────────────────────
 # Gift Transfer Database Functions
 # ─────────────────────────────────────────────────────────────────────────
+
 
 async def create_gift_transfer_plan(
     pool: asyncpg.Pool,
@@ -3140,16 +3181,23 @@ async def create_gift_transfer_plan(
                 payment_source, payment_method_id, status)
            VALUES ($1, $2, $3, $4, $5, $6, 'pending')
            RETURNING id""",
-        owner_id, recipient_username, recipient_user_id, recipient_name,
-        payment_source, payment_method_id,
+        owner_id,
+        recipient_username,
+        recipient_user_id,
+        recipient_name,
+        payment_source,
+        payment_method_id,
     )
 
 
-async def get_gift_transfer_plan(pool: asyncpg.Pool, plan_id: int, owner_id: int) -> dict | None:
+async def get_gift_transfer_plan(
+    pool: asyncpg.Pool, plan_id: int, owner_id: int
+) -> dict | None:
     """Get a gift transfer plan."""
     row = await pool.fetchrow(
         "SELECT * FROM gift_transfer_plans WHERE id=$1 AND owner_id=$2",
-        plan_id, owner_id
+        plan_id,
+        owner_id,
     )
     return dict(row) if row else None
 
@@ -3157,15 +3205,15 @@ async def get_gift_transfer_plan(pool: asyncpg.Pool, plan_id: int, owner_id: int
 async def get_gift_transfer_items(pool: asyncpg.Pool, plan_id: int) -> list[dict]:
     """Get all items in a gift transfer plan."""
     rows = await pool.fetch(
-        "SELECT * FROM gift_transfer_items WHERE plan_id=$1 ORDER BY id",
-        plan_id
+        "SELECT * FROM gift_transfer_items WHERE plan_id=$1 ORDER BY id", plan_id
     )
     return [dict(r) for r in rows]
 
 
 async def get_gift_transfer_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
     """Get transfer stats for a plan."""
-    row = await pool.fetchrow("""
+    row = await pool.fetchrow(
+        """
         SELECT 
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE status='transferred') as transferred,
@@ -3176,7 +3224,9 @@ async def get_gift_transfer_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
             SUM(stars_cost) FILTER (WHERE status='transferred') as actual_cost
         FROM gift_transfer_items
         WHERE plan_id=$1
-    """, plan_id)
+    """,
+        plan_id,
+    )
     return dict(row) if row else {}
 
 
@@ -3184,10 +3234,11 @@ async def update_gift_transfer_plan(pool: asyncpg.Pool, plan_id: int, **kwargs) 
     """Update gift transfer plan fields."""
     if not kwargs:
         return
-    set_clause = ", ".join(f"{k}=${i+2}" for i, k in enumerate(kwargs.keys()))
+    set_clause = ", ".join(f"{k}=${i + 2}" for i, k in enumerate(kwargs.keys()))
     await pool.execute(
         f"UPDATE gift_transfer_plans SET {set_clause}, updated_at=now() WHERE id=$1",
-        plan_id, *kwargs.values()
+        plan_id,
+        *kwargs.values(),
     )
 
 
@@ -3195,7 +3246,7 @@ async def get_gift_recipients(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
     """Get saved recipients for a user."""
     rows = await pool.fetch(
         "SELECT * FROM gift_recipients WHERE owner_id=$1 ORDER BY is_main_admin DESC, name",
-        owner_id
+        owner_id,
     )
     return [dict(r) for r in rows]
 
@@ -3218,36 +3269,49 @@ async def save_gift_recipient(
                user_id = EXCLUDED.user_id,
                updated_at = now()
            RETURNING id""",
-        owner_id, name, username, user_id, is_main_admin
+        owner_id,
+        name,
+        username,
+        user_id,
+        is_main_admin,
     )
 
 
-async def delete_gift_recipient(pool: asyncpg.Pool, owner_id: int, recipient_id: int) -> bool:
+async def delete_gift_recipient(
+    pool: asyncpg.Pool, owner_id: int, recipient_id: int
+) -> bool:
     """Delete a saved recipient. Returns True if deleted."""
     result = await pool.execute(
         "DELETE FROM gift_recipients WHERE id=$1 AND owner_id=$2",
-        recipient_id, owner_id
+        recipient_id,
+        owner_id,
     )
     return "DELETE 1" in result
 
 
-async def get_gift_transfer_reports(pool: asyncpg.Pool, owner_id: int, limit: int = 10) -> list[dict]:
+async def get_gift_transfer_reports(
+    pool: asyncpg.Pool, owner_id: int, limit: int = 10
+) -> list[dict]:
     """Get recent gift transfer reports."""
     rows = await pool.fetch(
         """SELECT * FROM gift_transfer_reports
            WHERE owner_id=$1
            ORDER BY created_at DESC
            LIMIT $2""",
-        owner_id, limit
+        owner_id,
+        limit,
     )
     return [dict(r) for r in rows]
 
 
-async def get_gift_transfer_report(pool: asyncpg.Pool, report_id: int, owner_id: int) -> dict | None:
+async def get_gift_transfer_report(
+    pool: asyncpg.Pool, report_id: int, owner_id: int
+) -> dict | None:
     """Get a specific report."""
     row = await pool.fetchrow(
         "SELECT * FROM gift_transfer_reports WHERE id=$1 AND owner_id=$2",
-        report_id, owner_id
+        report_id,
+        owner_id,
     )
     return dict(row) if row else None
 
@@ -4519,7 +4583,7 @@ async def get_activity_feed(
             FROM activity_log
             {where}
             ORDER BY occurred_at DESC
-            LIMIT ${idx} OFFSET ${idx+1}""",
+            LIMIT ${idx} OFFSET ${idx + 1}""",
         *params,
     )
 
@@ -4540,9 +4604,9 @@ async def get_account_ops_feed(
         params.append(owner_id)
         idx += 1
     if status_filter == "error":
-        conditions.append(f"result != 'success'")
+        conditions.append("result != 'success'")
     elif status_filter == "ok":
-        conditions.append(f"result = 'success'")
+        conditions.append("result = 'success'")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params += [limit, offset]
     return await pool.fetch(
@@ -4551,7 +4615,7 @@ async def get_account_ops_feed(
             FROM operation_audit
             {where}
             ORDER BY occurred_at DESC
-            LIMIT ${idx} OFFSET ${idx+1}""",
+            LIMIT ${idx} OFFSET ${idx + 1}""",
         *params,
     )
 

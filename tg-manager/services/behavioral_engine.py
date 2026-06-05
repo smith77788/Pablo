@@ -25,7 +25,7 @@ _RESCORE_INTERVAL = 900  # 15 minutes
 
 
 _PRUNE_INTERVAL_CYCLES = 96  # prune once every 96 × 15min ≈ 24 hours
-_PRUNE_RETAIN_DAYS = 60       # keep 60 days of events (2 months of history)
+_PRUNE_RETAIN_DAYS = 60  # keep 60 days of events (2 months of history)
 
 
 async def run(pool: asyncpg.Pool, bot=None) -> None:
@@ -405,7 +405,10 @@ async def _detect_anomalies(pool: asyncpg.Pool) -> None:
                 r["owner_id"],
                 r["entity_type"],
                 r["entity_id"],
-                json.dumps({"type": "reentry_burst", "count": int(r["cnt"])}, ensure_ascii=False),
+                json.dumps(
+                    {"type": "reentry_burst", "count": int(r["cnt"])},
+                    ensure_ascii=False,
+                ),
             )
 
         if decay_anomalies or cold_keywords or burst_rows:

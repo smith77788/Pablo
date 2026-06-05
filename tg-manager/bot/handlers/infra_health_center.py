@@ -15,7 +15,6 @@ from __future__ import annotations
 import html
 import json
 import logging
-from datetime import datetime, timezone
 
 import asyncpg
 from aiogram import F, Router
@@ -31,7 +30,13 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _SEVERITY_ICON = {"critical": "🔴", "warning": "🟡", "info": "🔵", "opportunity": "💡"}
-_STATUS_ICON = {"success": "✅", "failed": "❌", "pending": "⏳", "running": "🔄", "skipped": "⏩"}
+_STATUS_ICON = {
+    "success": "✅",
+    "failed": "❌",
+    "pending": "⏳",
+    "running": "🔄",
+    "skipped": "⏩",
+}
 _ANOMALY_ICON = {
     "error_spike": "⚡",
     "success_drop": "📉",
@@ -73,6 +78,7 @@ def _score_emoji(score: int) -> str:
 
 # ─── Команда /health_center ───────────────────────────────────────────────────
 
+
 @router.message(Command("health_center"))
 async def cmd_health_center(message: Message, pool: asyncpg.Pool) -> None:
     await _show_hc_menu(message, pool, message.from_user.id)
@@ -113,10 +119,10 @@ async def _show_hc_menu(
 
     score_icon = _score_emoji(score)
     lines = [
-        f"🏥 <b>Infrastructure Health Center</b>",
-        f"",
+        "🏥 <b>Infrastructure Health Center</b>",
+        "",
         f"{score_icon} <b>Health Score: {_score_bar(score)}</b>",
-        f"",
+        "",
     ]
 
     if critical_count:
@@ -135,22 +141,29 @@ async def _show_hc_menu(
         acc_ready = health.get("accounts_ready", 0)
         acc_total = health.get("accounts_total", 0)
         avg_trust = health.get("avg_trust_score", 0)
-        lines.append(f"")
+        lines.append("")
         lines.append(f"📱 Аккаунтов: <b>{acc_ready}/{acc_total}</b> готовы")
         lines.append(f"🛡 Trust: <b>{round(float(avg_trust or 0) * 100)}%</b>")
         ops_f = health.get("ops_failed_24h", 0) or 0
         ops_d = health.get("ops_done_24h", 0) or 0
         if ops_f + ops_d > 0:
             fail_rate = round(ops_f / (ops_f + ops_d) * 100)
-            lines.append(f"⚙️ Операции 24ч: {ops_d} ✅ / {ops_f} ❌ ({fail_rate}% ошибок)")
+            lines.append(
+                f"⚙️ Операции 24ч: {ops_d} ✅ / {ops_f} ❌ ({fail_rate}% ошибок)"
+            )
 
     text = "\n".join(lines)
 
     kb = InlineKeyboardBuilder()
     if anomalies:
-        kb.button(text=f"⚡ Аномалии ({len(anomalies)})", callback_data=InfraHCCb(action="anomalies"))
+        kb.button(
+            text=f"⚡ Аномалии ({len(anomalies)})",
+            callback_data=InfraHCCb(action="anomalies"),
+        )
     kb.button(text="📋 Восстановления", callback_data=InfraHCCb(action="recoveries"))
-    kb.button(text="🔄 Запустить Recovery", callback_data=InfraHCCb(action="run_recovery"))
+    kb.button(
+        text="🔄 Запустить Recovery", callback_data=InfraHCCb(action="run_recovery")
+    )
     kb.button(text="📊 Тренд здоровья", callback_data=InfraHCCb(action="health_trend"))
     kb.button(text="🔍 Copilot анализ", callback_data=InfraHCCb(action="copilot"))
     kb.button(text="◀️ Главное меню", callback_data=InfraHCCb(action="back"))
@@ -163,6 +176,7 @@ async def _show_hc_menu(
 
 
 # ─── Callbacks ────────────────────────────────────────────────────────────────
+
 
 @router.callback_query(InfraHCCb.filter(F.action == "menu"))
 async def cb_hc_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
@@ -181,17 +195,20 @@ async def cb_hc_anomalies(
     page = callback_data.page
 
     from services import anomaly_detector
+
     all_anomalies = await anomaly_detector.get_active_anomalies(pool, owner_id)
 
     per_page = 5
     total = len(all_anomalies)
     start = page * per_page
-    anomalies = all_anomalies[start: start + per_page]
+    anomalies = all_anomalies[start : start + per_page]
 
     if not anomalies:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=InfraHCCb(action="menu"))
-        await safe_edit(callback, "✅ Активных аномалий нет.", reply_markup=kb.as_markup())
+        await safe_edit(
+            callback, "✅ Активных аномалий нет.", reply_markup=kb.as_markup()
+        )
         return
 
     lines = [f"⚡ <b>Активные аномалии</b> ({total})\n"]
@@ -202,12 +219,12 @@ async def cb_hc_anomalies(
         desc = html.escape((a.get("description") or "")[:120])
         detected = ""
         if a.get("detected_at"):
-            detected = a["detected_at"].strftime("%d.%m %H:%M") if hasattr(a["detected_at"], "strftime") else ""
-        lines.append(
-            f"{sev}{icon} <b>{title}</b>\n"
-            f"   {desc}\n"
-            f"   <i>{detected}</i>\n"
-        )
+            detected = (
+                a["detected_at"].strftime("%d.%m %H:%M")
+                if hasattr(a["detected_at"], "strftime")
+                else ""
+            )
+        lines.append(f"{sev}{icon} <b>{title}</b>\n   {desc}\n   <i>{detected}</i>\n")
 
     kb = InlineKeyboardBuilder()
     for a in anomalies:
@@ -217,9 +234,13 @@ async def cb_hc_anomalies(
             callback_data=InfraHCCb(action="resolve_anomaly", item_id=anom_id),
         )
     if page > 0:
-        kb.button(text="◀️ Пред.", callback_data=InfraHCCb(action="anomalies", page=page - 1))
+        kb.button(
+            text="◀️ Пред.", callback_data=InfraHCCb(action="anomalies", page=page - 1)
+        )
     if start + per_page < total:
-        kb.button(text="След. ▶️", callback_data=InfraHCCb(action="anomalies", page=page + 1))
+        kb.button(
+            text="След. ▶️", callback_data=InfraHCCb(action="anomalies", page=page + 1)
+        )
     kb.button(text="🔄 Recovery Engine", callback_data=InfraHCCb(action="run_recovery"))
     kb.button(text="◀️ Назад", callback_data=InfraHCCb(action="menu"))
     kb.adjust(1)
@@ -238,6 +259,7 @@ async def cb_hc_resolve_anomaly(
     anom_id = callback_data.item_id
 
     from services import anomaly_detector
+
     ok = await anomaly_detector.resolve_anomaly(pool, anom_id, owner_id)
 
     if ok:
@@ -256,12 +278,15 @@ async def cb_hc_recoveries(
     page = callback_data.page
 
     from services import recovery_engine
-    all_events = await recovery_engine.get_recent_recovery_events(pool, owner_id, limit=50)
+
+    all_events = await recovery_engine.get_recent_recovery_events(
+        pool, owner_id, limit=50
+    )
 
     per_page = 6
     total = len(all_events)
     start = page * per_page
-    events = all_events[start: start + per_page]
+    events = all_events[start : start + per_page]
 
     if not events:
         kb = InlineKeyboardBuilder()
@@ -283,7 +308,11 @@ async def cb_hc_recoveries(
         target_label = f"#{target_id}" if target_id else ""
         created = ""
         if ev.get("created_at"):
-            created = ev["created_at"].strftime("%d.%m %H:%M") if hasattr(ev["created_at"], "strftime") else ""
+            created = (
+                ev["created_at"].strftime("%d.%m %H:%M")
+                if hasattr(ev["created_at"], "strftime")
+                else ""
+            )
 
         details = ev.get("details") or {}
         if isinstance(details, str):
@@ -301,9 +330,13 @@ async def cb_hc_recoveries(
 
     kb = InlineKeyboardBuilder()
     if page > 0:
-        kb.button(text="◀️ Пред.", callback_data=InfraHCCb(action="recoveries", page=page - 1))
+        kb.button(
+            text="◀️ Пред.", callback_data=InfraHCCb(action="recoveries", page=page - 1)
+        )
     if start + per_page < total:
-        kb.button(text="След. ▶️", callback_data=InfraHCCb(action="recoveries", page=page + 1))
+        kb.button(
+            text="След. ▶️", callback_data=InfraHCCb(action="recoveries", page=page + 1)
+        )
     kb.button(text="◀️ Назад", callback_data=InfraHCCb(action="menu"))
     kb.adjust(2, 1)
 
@@ -320,7 +353,6 @@ async def cb_hc_run_recovery(
 
     try:
         from services import recovery_engine
-        import asyncio
 
         # Запустить recovery engine для этого пользователя
         actions = await recovery_engine._recover_owner(pool, None, owner_id)
@@ -389,7 +421,9 @@ async def cb_hc_health_trend(
     lines = ["📊 <b>Тренд здоровья системы (24ч)</b>\n"]
 
     if not rows:
-        lines.append("<i>Данных пока нет — подождите первый цикл Recovery Engine (~15 мин)</i>")
+        lines.append(
+            "<i>Данных пока нет — подождите первый цикл Recovery Engine (~15 мин)</i>"
+        )
     else:
         scores = [r["health_score"] for r in rows]
         current = scores[-1]
@@ -405,13 +439,19 @@ async def cb_hc_health_trend(
             spark += _SPARK[idx]
 
         lines.append(f"{_score_emoji(current)} Текущий: <b>{current}/100</b>")
-        lines.append(f"📈 Максимум: <b>{max_score}</b> | Минимум: <b>{min_score}</b> | Среднее: <b>{avg}</b>")
+        lines.append(
+            f"📈 Максимум: <b>{max_score}</b> | Минимум: <b>{min_score}</b> | Среднее: <b>{avg}</b>"
+        )
         lines.append(f"<code>{spark}</code>")
         lines.append("")
 
         # Последние 6 снапшотов
         for r in rows[-6:]:
-            ts = r["snapshot_at"].strftime("%H:%M") if hasattr(r["snapshot_at"], "strftime") else ""
+            ts = (
+                r["snapshot_at"].strftime("%H:%M")
+                if hasattr(r["snapshot_at"], "strftime")
+                else ""
+            )
             sc = r["health_score"]
             lines.append(f"{_score_emoji(sc)} {ts}  {_score_bar(sc)}")
 
@@ -430,6 +470,7 @@ async def cb_hc_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     try:
         from services import infra_copilot
+
         insights = await infra_copilot.run_full_analysis(pool, owner_id)
         text = infra_copilot.format_copilot_report(insights, max_items=6)
     except Exception as e:
@@ -447,6 +488,7 @@ async def cb_hc_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_hc_back(callback: CallbackQuery) -> None:
     await callback.answer()
     from bot.callbacks import BmCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
     await safe_edit(callback, "Выберите раздел:", reply_markup=kb.as_markup())

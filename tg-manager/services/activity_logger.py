@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 import asyncpg
 
@@ -61,4 +60,6 @@ async def run(pool: asyncpg.Pool) -> None:
                 batch,
             )
         except Exception as e:
-            log.debug("activity_logger: batch insert failed (%d rows): %s", len(batch), e)
+            log.debug(
+                "activity_logger: batch insert failed (%d rows): %s", len(batch), e
+            )

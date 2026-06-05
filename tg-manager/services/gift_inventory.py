@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +28,8 @@ class GiftInventoryService:
 
         acc = await pool.fetchrow(
             "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            account_id, owner_id,
+            account_id,
+            owner_id,
         )
         if not acc:
             log.warning("scan_account_gifts: account %d not found", account_id)
@@ -47,35 +47,46 @@ class GiftInventoryService:
             offset = ""
             while True:
                 result = await asyncio.wait_for(
-                    client(GetSavedStarGiftsRequest(
-                        peer=InputPeerSelf(),
-                        offset=offset,
-                        limit=100,
-                    )),
+                    client(
+                        GetSavedStarGiftsRequest(
+                            peer=InputPeerSelf(),
+                            offset=offset,
+                            limit=100,
+                        )
+                    ),
                     timeout=_CONNECT_TIMEOUT,
                 )
 
-                for sg in (result.gifts or []):
+                for sg in result.gifts or []:
                     # sg is SavedStarGift; sg.gift is StarGift (or StarGiftUnique)
                     star_gift = sg.gift
-                    is_unique = getattr(star_gift, "CONSTRUCTOR_ID", 0) != 0x313a9547
+                    is_unique = getattr(star_gift, "CONSTRUCTOR_ID", 0) != 0x313A9547
 
-                    gifts.append({
-                        "account_id": account_id,
-                        # msg_id is used for InputSavedStarGiftUser in transfer calls
-                        "gift_id": str(sg.msg_id) if sg.msg_id else str(sg.saved_id or ""),
-                        "gift_type": getattr(star_gift, "title", "") or str(getattr(star_gift, "stars", 0)),
-                        "slug": getattr(star_gift, "auction_slug", "") or "",
-                        "stars_cost": getattr(star_gift, "stars", 0) or 0,
-                        # transferable if transfer_stars is set (even if 0)
-                        "is_transferable": sg.transfer_stars is not None,
-                        "is_premium": bool(getattr(star_gift, "require_premium", False)),
-                        "is_unique": is_unique,
-                        "is_limited": bool(getattr(star_gift, "limited", False)),
-                        "limited_count": getattr(star_gift, "availability_total", None),
-                        "first_owner": False,
-                        "generation": 1,
-                    })
+                    gifts.append(
+                        {
+                            "account_id": account_id,
+                            # msg_id is used for InputSavedStarGiftUser in transfer calls
+                            "gift_id": str(sg.msg_id)
+                            if sg.msg_id
+                            else str(sg.saved_id or ""),
+                            "gift_type": getattr(star_gift, "title", "")
+                            or str(getattr(star_gift, "stars", 0)),
+                            "slug": getattr(star_gift, "auction_slug", "") or "",
+                            "stars_cost": getattr(star_gift, "stars", 0) or 0,
+                            # transferable if transfer_stars is set (even if 0)
+                            "is_transferable": sg.transfer_stars is not None,
+                            "is_premium": bool(
+                                getattr(star_gift, "require_premium", False)
+                            ),
+                            "is_unique": is_unique,
+                            "is_limited": bool(getattr(star_gift, "limited", False)),
+                            "limited_count": getattr(
+                                star_gift, "availability_total", None
+                            ),
+                            "first_owner": False,
+                            "generation": 1,
+                        }
+                    )
 
                 next_offset = getattr(result, "next_offset", None)
                 if not next_offset:
@@ -85,7 +96,9 @@ class GiftInventoryService:
         except asyncio.TimeoutError:
             log.error("scan_account_gifts: timeout for account %d", account_id)
         except Exception as e:
-            log.error("scan_account_gifts: error for account %d: %s", account_id, str(e)[:300])
+            log.error(
+                "scan_account_gifts: error for account %d: %s", account_id, str(e)[:300]
+            )
         finally:
             try:
                 await client.disconnect()
@@ -95,7 +108,9 @@ class GiftInventoryService:
         return gifts
 
     @staticmethod
-    async def scan_multiple_accounts(pool, owner_id: int, account_ids: list[int]) -> list[dict]:
+    async def scan_multiple_accounts(
+        pool, owner_id: int, account_ids: list[int]
+    ) -> list[dict]:
         """Scan multiple accounts for gifts concurrently."""
         tasks = [
             GiftInventoryService.scan_account_gifts(pool, acc_id, owner_id)
@@ -107,7 +122,11 @@ class GiftInventoryService:
         all_gifts: list[dict] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                log.error("scan_accounts: failed for account %d: %s", account_ids[i], str(result)[:200])
+                log.error(
+                    "scan_accounts: failed for account %d: %s",
+                    account_ids[i],
+                    str(result)[:200],
+                )
             else:
                 all_gifts.extend(result)
 
@@ -153,7 +172,11 @@ class GiftInventoryService:
                 )
                 synced += 1
             except Exception as e:
-                log.error("sync_inventory: failed for gift %s: %s", gift.get("gift_id"), str(e)[:200])
+                log.error(
+                    "sync_inventory: failed for gift %s: %s",
+                    gift.get("gift_id"),
+                    str(e)[:200],
+                )
 
         return synced
 

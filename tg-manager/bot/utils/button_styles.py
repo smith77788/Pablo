@@ -157,4 +157,3 @@ def install_button_style_patch() -> None:
     builder_cls.as_markup = styled_as_markup
     markup_cls.model_dump = styled_model_dump
     setattr(InlineKeyboardBuilder, _PATCHED_ATTR, True)
-

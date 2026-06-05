@@ -2610,19 +2610,19 @@ async def execute_mini_strike(
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
             owner_id,
             target_clean,
-            category,                                        # reason = category label
-            None,                                            # preset (mini-strike не использует)
-            1,                                               # accounts_used
+            category,  # reason = category label
+            None,  # preset (mini-strike не использует)
+            1,  # accounts_used
             1 if tg_data.get("peer_reported") else 0,
             int(tg_data.get("msg_reported") or 0),
-            0,                                               # msgs_fetched
+            0,  # msgs_fetched
             int(tg_data.get("pinned_reported") or 0),
             int(tg_data.get("admins_reported") or 0),
-            0,                                               # network_nodes
-            0,                                               # network_reports
+            0,  # network_nodes
+            0,  # network_reports
             1 if tg_data.get("blocked") else 0,
-            None,                                            # verified_down
-            0.0,                                             # duration_s (not tracked per mini-strike)
+            None,  # verified_down
+            0.0,  # duration_s (not tracked per mini-strike)
             bool(result.get("abuse_form", {}).get("ok")),
             "skipped",
         )

@@ -432,7 +432,9 @@ async def cb_mpub_confirm_send(
             reply_markup=_back_menu_kb().as_markup(),
         )
     except Exception as exc:
-        log.exception("mass_publish submit error user=%s: %s", callback.from_user.id, exc)
+        log.exception(
+            "mass_publish submit error user=%s: %s", callback.from_user.id, exc
+        )
         await callback.message.edit_text(
             f"⚠️ Ошибка постановки в очередь: {html.escape(str(exc)[:200])}",
             parse_mode="HTML",
@@ -595,11 +597,15 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         done = r["done_items"] or 0
         total = r["total_items"] or 0
         created = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "—"
-        err_hint = f" — {html.escape(r['error_msg'][:40])}" if r.get("error_msg") else ""
+        err_hint = (
+            f" — {html.escape(r['error_msg'][:40])}" if r.get("error_msg") else ""
+        )
         lines.append(f"{icon} {created} — {done}/{total} каналов{err_hint}")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Открыть очередь", callback_data=MassPubCb(action="back_to_factory"))
+    kb.button(
+        text="📋 Открыть очередь", callback_data=MassPubCb(action="back_to_factory")
+    )
     kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(

@@ -56,41 +56,98 @@ _WARMUP_PUBLIC_CHANNELS = [
 # 7 ниш с достаточным кол-вом каналов для разнообразия + fallback на общие
 _NICHE_CHANNELS: dict[str, list[str]] = {
     "tech": [
-        "@proglib", "@techcrunch", "@hackernoon", "@wired",
-        "@linuxoid", "@telegram", "@bbcrussian", "@rian_ru", "@rbc_news",
+        "@proglib",
+        "@techcrunch",
+        "@hackernoon",
+        "@wired",
+        "@linuxoid",
+        "@telegram",
+        "@bbcrussian",
+        "@rian_ru",
+        "@rbc_news",
     ],
     "news": [
-        "@rian_ru", "@rbc_news", "@lentach", "@meduzaio",
-        "@bbcrussian", "@breakingmash", "@varlamov",
-        "@reuters", "@bbc", "@guardian",
+        "@rian_ru",
+        "@rbc_news",
+        "@lentach",
+        "@meduzaio",
+        "@bbcrussian",
+        "@breakingmash",
+        "@varlamov",
+        "@reuters",
+        "@bbc",
+        "@guardian",
     ],
     "crypto": [
-        "@rbc_news", "@bbcrussian", "@breakingmash", "@rian_ru",
-        "@proglib", "@hackernoon", "@linuxoid", "@techcrunch", "@wired",
-        "@telegram", "@durov",
+        "@rbc_news",
+        "@bbcrussian",
+        "@breakingmash",
+        "@rian_ru",
+        "@proglib",
+        "@hackernoon",
+        "@linuxoid",
+        "@techcrunch",
+        "@wired",
+        "@telegram",
+        "@durov",
     ],
     "trading": [
-        "@rbc_news", "@bbcrussian", "@rian_ru", "@reuters",
-        "@bbc", "@guardian", "@varlamov", "@lentach",
-        "@proglib", "@telegram",
+        "@rbc_news",
+        "@bbcrussian",
+        "@rian_ru",
+        "@reuters",
+        "@bbc",
+        "@guardian",
+        "@varlamov",
+        "@lentach",
+        "@proglib",
+        "@telegram",
     ],
     "marketing": [
-        "@proglib", "@hackernoon", "@rbc_news", "@bbcrussian",
-        "@varlamov", "@lentach", "@techcrunch", "@wired",
-        "@telegram", "@rian_ru",
+        "@proglib",
+        "@hackernoon",
+        "@rbc_news",
+        "@bbcrussian",
+        "@varlamov",
+        "@lentach",
+        "@techcrunch",
+        "@wired",
+        "@telegram",
+        "@rian_ru",
     ],
     "business": [
-        "@rbc_news", "@bbcrussian", "@rian_ru", "@reuters",
-        "@bbc", "@guardian", "@lentach", "@varlamov",
-        "@proglib", "@telegram",
+        "@rbc_news",
+        "@bbcrussian",
+        "@rian_ru",
+        "@reuters",
+        "@bbc",
+        "@guardian",
+        "@lentach",
+        "@varlamov",
+        "@proglib",
+        "@telegram",
     ],
     "entertainment": [
-        "@varlamov", "@lentach", "@breakingmash", "@meduzaio",
-        "@bbcrussian", "@bbc", "@telegram",
-        "@rian_ru", "@proglib", "@durov",
+        "@varlamov",
+        "@lentach",
+        "@breakingmash",
+        "@meduzaio",
+        "@bbcrussian",
+        "@bbc",
+        "@telegram",
+        "@rian_ru",
+        "@proglib",
+        "@durov",
     ],
-    "science": ["@spacex", "@nasa", "@nature", "@wired", "@guardian",
-                "@proglib", "@hackernoon"],
+    "science": [
+        "@spacex",
+        "@nasa",
+        "@nature",
+        "@wired",
+        "@guardian",
+        "@proglib",
+        "@hackernoon",
+    ],
     "sports": ["@telegram", "@bbcrussian", "@rian_ru", "@lentach", "@varlamov"],
     "general": _WARMUP_PUBLIC_CHANNELS,
 }
@@ -148,41 +205,90 @@ _BOT_COMMANDS = ["/start", "/help", "/menu", "/info"]
 # Действия по дням разогрева — прогрессивная нагрузка
 _WARMUP_SCHEDULE: dict[str, list[str]] = {
     "days_1_3": [
-        "read_channel", "view_profile", "open_chat",
-        "mark_read", "update_presence", "browse_dialogs",
+        "read_channel",
+        "view_profile",
+        "open_chat",
+        "mark_read",
+        "update_presence",
+        "browse_dialogs",
         "check_notifications",
     ],
     "days_4_7": [
-        "read_channel", "view_profile", "join_channel", "send_reaction",
-        "mark_read", "browse_dialogs", "forward_to_saved",
-        "story_view", "check_notifications",
+        "read_channel",
+        "view_profile",
+        "join_channel",
+        "send_reaction",
+        "mark_read",
+        "browse_dialogs",
+        "forward_to_saved",
+        "story_view",
+        "check_notifications",
     ],
     "days_8_14": [
-        "read_channel", "join_channel", "send_reaction", "search",
-        "forward_to_saved", "vote_poll", "own_channel_read", "mark_read",
+        "read_channel",
+        "join_channel",
+        "send_reaction",
+        "search",
+        "forward_to_saved",
+        "vote_poll",
+        "own_channel_read",
+        "mark_read",
         "story_view",
     ],
     "days_15_plus": [
-        "read_channel", "join_channel", "send_reaction", "search",
-        "dm_bot", "send_comment", "smart_bot_start", "smart_bot_help",
-        "forward_to_saved", "vote_poll", "own_channel_read", "own_bot_start",
+        "read_channel",
+        "join_channel",
+        "send_reaction",
+        "search",
+        "dm_bot",
+        "send_comment",
+        "smart_bot_start",
+        "smart_bot_help",
+        "forward_to_saved",
+        "vote_poll",
+        "own_channel_read",
+        "own_bot_start",
         "story_view",
     ],
 }
 
 # Профильные веса: определяют «характер» аккаунта при выборе действий
 _PROFILE_WEIGHTS: dict[str, dict[str, float]] = {
-    "reader":    {"read_channel": 0.40, "mark_read": 0.25, "browse_dialogs": 0.15,
-                  "view_profile": 0.12, "send_reaction": 0.08},
-    "commenter": {"read_channel": 0.25, "send_comment": 0.30, "send_reaction": 0.20,
-                  "mark_read": 0.15, "vote_poll": 0.10},
-    "reactor":   {"send_reaction": 0.45, "read_channel": 0.30, "forward_to_saved": 0.15,
-                  "vote_poll": 0.10},
-    "lurker":    {"browse_dialogs": 0.40, "mark_read": 0.35, "read_channel": 0.15,
-                  "check_notifications": 0.10},
-    "mixed":     {"read_channel": 0.25, "send_reaction": 0.20, "mark_read": 0.20,
-                  "browse_dialogs": 0.15, "view_profile": 0.10,
-                  "forward_to_saved": 0.07, "vote_poll": 0.03},
+    "reader": {
+        "read_channel": 0.40,
+        "mark_read": 0.25,
+        "browse_dialogs": 0.15,
+        "view_profile": 0.12,
+        "send_reaction": 0.08,
+    },
+    "commenter": {
+        "read_channel": 0.25,
+        "send_comment": 0.30,
+        "send_reaction": 0.20,
+        "mark_read": 0.15,
+        "vote_poll": 0.10,
+    },
+    "reactor": {
+        "send_reaction": 0.45,
+        "read_channel": 0.30,
+        "forward_to_saved": 0.15,
+        "vote_poll": 0.10,
+    },
+    "lurker": {
+        "browse_dialogs": 0.40,
+        "mark_read": 0.35,
+        "read_channel": 0.15,
+        "check_notifications": 0.10,
+    },
+    "mixed": {
+        "read_channel": 0.25,
+        "send_reaction": 0.20,
+        "mark_read": 0.20,
+        "browse_dialogs": 0.15,
+        "view_profile": 0.10,
+        "forward_to_saved": 0.07,
+        "vote_poll": 0.03,
+    },
 }
 
 
@@ -646,6 +752,7 @@ async def _perform_story_view(client) -> bool:
     try:
         try:
             from telethon.tl.functions.stories import GetAllStoriesRequest
+
             await client(GetAllStoriesRequest(next=False, hidden=False))
             await asyncio.sleep(random.uniform(4, 12))
         except (ImportError, AttributeError):
@@ -663,6 +770,7 @@ async def _perform_check_notifications(client) -> bool:
     """Симулирует проверку уведомлений (GetState)."""
     try:
         from telethon.tl.functions.updates import GetStateRequest
+
         await client(GetStateRequest())
         await asyncio.sleep(random.uniform(2, 6))
         return True
@@ -756,7 +864,14 @@ async def run_daily_warmup(
     _active_plan_ids.add(plan_id)
     try:
         return await _run_daily_warmup_impl(
-            pool, plan, account_id, owner_id, current_day, daily_actions, plan_id, update_callback
+            pool,
+            plan,
+            account_id,
+            owner_id,
+            current_day,
+            daily_actions,
+            plan_id,
+            update_callback,
         )
     finally:
         _active_plan_ids.discard(plan_id)
@@ -818,7 +933,7 @@ async def _run_daily_warmup_impl(
     consecutive_fails = 0
     available_actions = _get_actions_for_day(current_day)
     resources = await _get_warmup_resources(pool, owner_id)
-    own_bots    = resources["bots"]
+    own_bots = resources["bots"]
     own_channels = resources["channels"]
     # Нишево-осведомлённый список каналов: через account_niche_profiles
     channels = await get_account_niche_channels(pool, account_id)
@@ -828,25 +943,25 @@ async def _run_daily_warmup_impl(
 
     # Описания действий для прогресс-коллбэка
     _action_descriptions = {
-        "read_channel":       "📖 читаю канал",
-        "join_channel":       "🔔 вступаю в канал",
-        "send_reaction":      "❤️ реакция на пост",
-        "search":             "🔍 поиск",
-        "view_profile":       "👁 смотрю профиль",
-        "open_chat":          "💬 открываю чат",
-        "dm_bot":             "🤖 пишу боту",
-        "mark_read":          "✅ отмечаю прочитанным",
-        "update_presence":    "🟢 онлайн-присутствие",
-        "browse_dialogs":     "📱 проверяю диалоги",
-        "forward_to_saved":   "📌 сохраняю пост",
-        "vote_poll":          "📊 голосую в опросе",
-        "send_comment":       "💬 оставляю комментарий",
-        "own_channel_read":   "📡 читаю свой канал",
-        "smart_bot_start":    "🤖 /start своему боту",
-        "smart_bot_help":     "🤖 /help своему боту",
-        "own_bot_start":      "🤖 запуск своего бота",
-        "story_view":         "📸 просматриваю истории",
-        "check_notifications":"🔔 проверяю уведомления",
+        "read_channel": "📖 читаю канал",
+        "join_channel": "🔔 вступаю в канал",
+        "send_reaction": "❤️ реакция на пост",
+        "search": "🔍 поиск",
+        "view_profile": "👁 смотрю профиль",
+        "open_chat": "💬 открываю чат",
+        "dm_bot": "🤖 пишу боту",
+        "mark_read": "✅ отмечаю прочитанным",
+        "update_presence": "🟢 онлайн-присутствие",
+        "browse_dialogs": "📱 проверяю диалоги",
+        "forward_to_saved": "📌 сохраняю пост",
+        "vote_poll": "📊 голосую в опросе",
+        "send_comment": "💬 оставляю комментарий",
+        "own_channel_read": "📡 читаю свой канал",
+        "smart_bot_start": "🤖 /start своему боту",
+        "smart_bot_help": "🤖 /help своему боту",
+        "own_bot_start": "🤖 запуск своего бота",
+        "story_view": "📸 просматриваю истории",
+        "check_notifications": "🔔 проверяю уведомления",
     }
 
     try:
@@ -1023,8 +1138,12 @@ async def _run_daily_warmup_impl(
             if i < daily_actions - 1:
                 if consecutive_fails >= 3:
                     base_pause = random.uniform(120, 300)
-                    log.info("warmup: adaptive pause %.0fs (acc=%d, %d cons.fails)",
-                             base_pause, account_id, consecutive_fails)
+                    log.info(
+                        "warmup: adaptive pause %.0fs (acc=%d, %d cons.fails)",
+                        base_pause,
+                        account_id,
+                        consecutive_fails,
+                    )
                     consecutive_fails = 0
                 elif consecutive_fails >= 2:
                     base_pause = random.uniform(45, 120)
@@ -1180,8 +1299,12 @@ async def _run_warmup_session_impl(
         # Пропускаем аккаунт если он сейчас занят op_worker-операцией
         try:
             from services import op_worker as _opw
+
             if _opw.is_account_in_use(acc_id):
-                log.info("warmup_session: acc=%d in use by op_worker, skipping this cycle", acc_id)
+                log.info(
+                    "warmup_session: acc=%d in use by op_worker, skipping this cycle",
+                    acc_id,
+                )
                 continue
         except Exception:
             pass
@@ -1348,7 +1471,9 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
             # Запускаем батчами по _MAX_PARALLEL_WARMUP, не блокируем loop
             for i in range(0, len(rows), _MAX_PARALLEL_WARMUP):
                 batch = rows[i : i + _MAX_PARALLEL_WARMUP]
-                tasks = [asyncio.create_task(run_daily_warmup(pool, dict(p))) for p in batch]
+                tasks = [
+                    asyncio.create_task(run_daily_warmup(pool, dict(p))) for p in batch
+                ]
                 await asyncio.gather(*tasks, return_exceptions=True)
 
             # Мультиаккаунтные сессии прогрева
@@ -1359,10 +1484,15 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                           OR last_run_at < NOW() - INTERVAL '20 hours')""",
             )
             if session_rows:
-                log.info("warmup loop: %d sessions to run (parallel)", len(session_rows))
+                log.info(
+                    "warmup loop: %d sessions to run (parallel)", len(session_rows)
+                )
             for i in range(0, len(session_rows), _MAX_PARALLEL_WARMUP):
                 batch = session_rows[i : i + _MAX_PARALLEL_WARMUP]
-                tasks = [asyncio.create_task(run_warmup_session(pool, dict(s))) for s in batch]
+                tasks = [
+                    asyncio.create_task(run_warmup_session(pool, dict(s)))
+                    for s in batch
+                ]
                 await asyncio.gather(*tasks, return_exceptions=True)
 
         except Exception as e:

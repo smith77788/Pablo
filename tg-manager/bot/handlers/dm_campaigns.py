@@ -140,7 +140,9 @@ async def cb_dm_menu(
 
 
 @router.callback_query(DmCb.filter(F.action == "new"))
-async def cb_dm_new(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_dm_new(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         await callback.message.edit_text(
@@ -352,7 +354,8 @@ async def cb_dm_target_cohort_pick(
 
     bot_row = await pool.fetchrow(
         "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id, callback.from_user.id,
+        bot_id,
+        callback.from_user.id,
     )
     bot_label = (
         (bot_row.get("first_name") or bot_row.get("username") or str(bot_id))
@@ -429,7 +432,8 @@ async def _show_dm_preview(
         )
         bot_row = await pool.fetchrow(
             "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            target_id, callback.from_user.id,
+            target_id,
+            callback.from_user.id,
         )
         bot_label = (
             (bot_row.get("first_name") or bot_row.get("username") or str(target_id))
@@ -458,7 +462,8 @@ async def _show_dm_preview(
             cnt = 0
         bot_row = await pool.fetchrow(
             "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            target_id, callback.from_user.id,
+            target_id,
+            callback.from_user.id,
         )
         bot_label = (
             (bot_row.get("first_name") or bot_row.get("username") or str(target_id))

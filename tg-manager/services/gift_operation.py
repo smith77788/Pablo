@@ -26,6 +26,7 @@ ERR_UNKNOWN = "unknown_error"
 @dataclass
 class GiftTransferResult:
     """Result of a single gift transfer."""
+
     item_id: int
     success: bool
     error_message: str = ""
@@ -61,7 +62,9 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
         INSERT INTO gift_transfer_ops (plan_id, operation_id, total_items)
         VALUES ($1, $2, $3)
         """,
-        plan_id, op_id, len(plan["items"]),
+        plan_id,
+        op_id,
+        len(plan["items"]),
     )
 
     # Filter to transferable pending items
@@ -76,7 +79,9 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
                 pending_items.append(item)
             else:
                 await GiftTransferService.update_item_status(
-                    pool, item["id"], "skipped",
+                    pool,
+                    item["id"],
+                    "skipped",
                     error_message="Gift is not transferable",
                     error_code=ERR_NOT_TRANSFERABLE,
                     is_retryable=False,
@@ -94,11 +99,15 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
         if result.success:
             transferred_count += 1
             total_cost += result.cost
-            await GiftTransferService.update_item_status(pool, item["id"], "transferred")
+            await GiftTransferService.update_item_status(
+                pool, item["id"], "transferred"
+            )
         else:
             failed_count += 1
             await GiftTransferService.update_item_status(
-                pool, item["id"], "failed",
+                pool,
+                item["id"],
+                "failed",
                 error_message=result.error_message,
                 error_code=result.error_code,
                 is_retryable=result.is_retryable,
@@ -112,7 +121,9 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
                 updated_at = now()
             WHERE plan_id=$1
             """,
-            plan_id, transferred_count, failed_count,
+            plan_id,
+            transferred_count,
+            failed_count,
         )
 
     await GiftTransferService.mark_plan_done(pool, plan_id, total_cost)
@@ -127,13 +138,19 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
             failed_items = $4
         WHERE id = $1
         """,
-        op_id, len(plan["items"]), transferred_count, failed_count,
+        op_id,
+        len(plan["items"]),
+        transferred_count,
+        failed_count,
     )
 
     report_id = await GiftTransferReportService.generate_report(pool, plan_id, op_id)
     log.info(
         "_exec_gift_transfer: completed plan_id=%d report_id=%d transferred=%d failed=%d",
-        plan_id, report_id, transferred_count, failed_count,
+        plan_id,
+        report_id,
+        transferred_count,
+        failed_count,
     )
 
 
@@ -195,10 +212,12 @@ async def _transfer_single_gift(
             await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
             result = await asyncio.wait_for(
-                client(TransferStarGiftRequest(
-                    stargift=InputSavedStarGiftUser(msg_id=msg_id),
-                    to_id=await client.get_input_entity(recipient),
-                )),
+                client(
+                    TransferStarGiftRequest(
+                        stargift=InputSavedStarGiftUser(msg_id=msg_id),
+                        to_id=await client.get_input_entity(recipient),
+                    )
+                ),
                 timeout=_CONNECT_TIMEOUT,
             )
 
@@ -250,7 +269,9 @@ async def _transfer_single_gift(
                 pass
 
     except Exception as e:
-        log.error("_transfer_single_gift: error for item %d: %s", item["id"], str(e)[:200])
+        log.error(
+            "_transfer_single_gift: error for item %d: %s", item["id"], str(e)[:200]
+        )
         return GiftTransferResult(
             item_id=item["id"],
             success=False,

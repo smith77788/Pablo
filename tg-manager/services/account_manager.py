@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import importlib
 from datetime import datetime, timezone
 import logging
 import random
@@ -86,6 +87,8 @@ def _get_pool_proxy_url() -> str:
     url = _pool_proxy_cache[_pool_proxy_idx % len(_pool_proxy_cache)]
     _pool_proxy_idx = (_pool_proxy_idx + 1) % len(_pool_proxy_cache)
     return url
+
+
 _TG_PUBLIC_RE = re.compile(
     r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:s/)?([A-Za-z0-9_]{5,32})(?:[/?#].*)?$",
     re.IGNORECASE,
@@ -631,9 +634,12 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     """
     # ── Попытка 1: opentele (если доступен) ──────────────────────────────────
     try:
-        from opentele.td import TDesktop  # type: ignore
-        from opentele.api import UseCurrentSession  # type: ignore
         from telethon.sessions import StringSession as _SS
+
+        td_module = importlib.import_module("opentele.td")
+        api_module = importlib.import_module("opentele.api")
+        TDesktop = getattr(td_module, "TDesktop")
+        UseCurrentSession = getattr(api_module, "UseCurrentSession")
 
         try:
             td = TDesktop(tdata_path)
@@ -1553,7 +1559,9 @@ async def leave_channel(
         from telethon.errors import FloodWaitError
 
         if isinstance(e, FloodWaitError):
-            log.warning("leave_channel FloodWait %ds — re-raising for caller", e.seconds)
+            log.warning(
+                "leave_channel FloodWait %ds — re-raising for caller", e.seconds
+            )
             raise
         log.exception("leave_channel error: %s", e)
         return False

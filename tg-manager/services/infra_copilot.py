@@ -64,6 +64,7 @@ def get_snooze_remaining(owner_id: int) -> str:
 async def reload_snoozes_from_db(pool: asyncpg.Pool) -> None:
     """Загружает снуз-состояния из БД в оперативный словарь (вызывать при старте цикла)."""
     import time
+
     try:
         rows = await pool.fetch(
             "SELECT key, value FROM platform_settings WHERE key LIKE 'copilot_snooze_%'"

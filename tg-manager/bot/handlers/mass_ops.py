@@ -12,6 +12,7 @@ import asyncio
 import html
 import json
 import logging
+from typing import Any
 
 import asyncpg
 from aiogram import F, Router
@@ -26,7 +27,7 @@ from services import operation_bus, infra_orchestrator
 try:
     from services import intelligence_engine as _ie
 except ImportError:
-    _ie = None  # type: ignore[assignment]
+    _ie: Any | None = None
 from bot.states import (
     MassPublishFSM,
     BulkBotEditFSM,
@@ -621,7 +622,6 @@ async def _mass_publish_inline_bg(
 ) -> None:
     """Фоновое выполнение массовой публикации из cb_mp_confirm."""
     from services import account_manager
-    from bot.utils.op_helpers import extract_flood_wait, _progress_bar
     from services.logger import log_exc_swallow as _les
     import asyncio
 
@@ -646,9 +646,11 @@ async def _mass_publish_inline_bg(
                 err_str = str(result.get("error", ""))
                 flood_wait = extract_flood_wait(Exception(err_str), err_str)
                 from services.infra_memory import record_account_op as _rim_rec
+
                 _rim_rec(acc["id"], "publish", success=False, error=err_str[:100])
                 if flood_wait:
                     from services.flood_engine import record_flood
+
                     try:
                         await record_flood(pool, acc["id"], flood_wait, "publish")
                     except Exception:
@@ -657,8 +659,10 @@ async def _mass_publish_inline_bg(
             else:
                 ok_count += 1
                 from services.infra_memory import record_account_op as _rim_rec
+
                 _rim_rec(acc["id"], "publish", success=True)
                 from services.flood_engine import record_success
+
                 try:
                     await record_success(acc["id"], "publish")
                 except Exception:
@@ -670,13 +674,17 @@ async def _mass_publish_inline_bg(
             flood_wait = extract_flood_wait(e, err_str)
             if flood_wait:
                 from services.flood_engine import record_flood
+
                 try:
                     await record_flood(pool, acc["id"], flood_wait, "publish")
                 except Exception:
                     _les(log, "Сбой record_flood (except) в _mass_publish_inline_bg")
                 flood_extra = flood_wait
             else:
-                _les(log, f"mass_publish bg: post_to_channel failed for dialog {dialog.get('id')}")
+                _les(
+                    log,
+                    f"mass_publish bg: post_to_channel failed for dialog {dialog.get('id')}",
+                )
 
         if op_id:
             await _log_op_step(pool, op_id, idx, str(dialog["id"]), step_status)
@@ -861,8 +869,13 @@ async def cb_mp_confirm(
 
     task = asyncio.create_task(
         _mass_publish_inline_bg(
-            pool, callback.from_user.id, progress_msg,
-            targets_with_dialogs, mp_text, delay, op_id,
+            pool,
+            callback.from_user.id,
+            progress_msg,
+            targets_with_dialogs,
+            mp_text,
+            delay,
+            op_id,
         )
     )
     _treg.register(
@@ -1420,14 +1433,27 @@ async def cb_bbe_confirm(
         )
     except Exception as e:
         log.error("bbe_confirm submit error: %s", e)
-        await safe_edit(callback, "⚠️ Ошибка постановки в очередь.", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "⚠️ Ошибка постановки в очередь.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
     if not op_id:
-        await safe_edit(callback, "⚠️ Не удалось создать операцию. Попробуйте ещё раз.", reply_markup=_back_menu_kb().as_markup())
+        await safe_edit(
+            callback,
+            "⚠️ Не удалось создать операцию. Попробуйте ещё раз.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
 
-    _FIELD_LABEL = {"name": "Имя", "desc": "Описание", "short_desc": "Краткое описание", "commands": "Команды"}
+    _FIELD_LABEL = {
+        "name": "Имя",
+        "desc": "Описание",
+        "short_desc": "Краткое описание",
+        "commands": "Команды",
+    }
     await safe_edit(
         callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"

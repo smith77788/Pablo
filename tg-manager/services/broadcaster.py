@@ -76,7 +76,9 @@ async def run(
 
     # Skip users already delivered (supports crash-resume without duplicate sends)
     try:
-        already_sent: set[int] = await db.get_broadcast_delivered_ids(pool, broadcast_id)
+        already_sent: set[int] = await db.get_broadcast_delivered_ids(
+            pool, broadcast_id
+        )
     except Exception as _e:
         logger.warning(
             "Broadcast %d: could not load delivery log, starting fresh: %s",

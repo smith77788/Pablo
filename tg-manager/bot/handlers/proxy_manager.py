@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import html
+import importlib
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any, cast
 
 import asyncpg
 from aiogram import F, Router
@@ -66,7 +68,9 @@ async def _check_proxy_alive(proxy_url: str) -> dict:
 
     try:
         import aiohttp
-        from aiohttp_socks import ProxyConnector  # type: ignore
+
+        socks_module = importlib.import_module("aiohttp_socks")
+        ProxyConnector = cast(Any, getattr(socks_module, "ProxyConnector"))
 
         connector = ProxyConnector.from_url(proxy_url)
         t0 = _time.monotonic()
@@ -86,7 +90,9 @@ async def _detect_proxy_geo(proxy_url: str) -> dict:
     """Attempt to detect geo country/city via ip-api.com through the proxy."""
     try:
         import aiohttp
-        from aiohttp_socks import ProxyConnector  # type: ignore
+
+        socks_module = importlib.import_module("aiohttp_socks")
+        ProxyConnector = cast(Any, getattr(socks_module, "ProxyConnector"))
 
         # Extract IP from proxy URL for geo lookup
         import re
@@ -520,9 +526,7 @@ async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     else:
         health_icon = "🔴"
 
-    last_str = (
-        last_check.strftime("%d.%m %H:%M") if last_check else "никогда"
-    )
+    last_str = last_check.strftime("%d.%m %H:%M") if last_check else "никогда"
     lat_str = f"{avg_lat} мс" if avg_lat else "нет данных"
 
     text = (
@@ -541,10 +545,14 @@ async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить сейчас", callback_data=ProxyCb(action="free_pool_refresh"))
+    kb.button(
+        text="🔄 Обновить сейчас", callback_data=ProxyCb(action="free_pool_refresh")
+    )
     kb.button(text="◀️ Назад", callback_data=ProxyCb(action="menu"))
     kb.adjust(1)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(ProxyCb.filter(F.action == "free_pool_refresh"))
@@ -576,7 +584,9 @@ async def cb_free_pool_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         try:
             kb = InlineKeyboardBuilder()
             kb.button(text="◀️ К пулу", callback_data=ProxyCb(action="free_pool"))
-            await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            await progress_msg.edit_text(
+                text, parse_mode="HTML", reply_markup=kb.as_markup()
+            )
         except Exception:
             log_exc_swallow(log, "_refresh_bg: сбой финального сообщения")
 

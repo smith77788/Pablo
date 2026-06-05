@@ -336,7 +336,11 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
     kb = InlineKeyboardBuilder()
     now_utc = datetime.now(timezone.utc)
     for plan in plans:
-        label = plan.get("first_name") or plan.get("phone") or str(plan.get("account_id", ""))
+        label = (
+            plan.get("first_name")
+            or plan.get("phone")
+            or str(plan.get("account_id", ""))
+        )
         current_day = plan["current_day"] or 0
         target_days = max(plan["target_days"] or 1, 1)
         pct = round(current_day / target_days * 100)
@@ -456,7 +460,9 @@ async def cb_warmup_run_now(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     async def _run_all():
         for plan in plans:
             label = (
-                plan.get("first_name") or plan.get("phone") or str(plan.get("account_id", ""))
+                plan.get("first_name")
+                or plan.get("phone")
+                or str(plan.get("account_id", ""))
             )
             try:
                 await run_daily_warmup(pool, plan)

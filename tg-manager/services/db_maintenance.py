@@ -25,24 +25,24 @@ log = logging.getLogger(__name__)
 
 _RETENTION: list[tuple[str, str, str]] = [
     # (table, timestamp_column, interval)
-    ("behavioral_events",      "occurred_at",  "90 days"),
-    ("operation_log",          "created_at",   "30 days"),
-    ("restriction_events",     "created_at",   "90 days"),
-    ("account_flood_log",      "created_at",   "30 days"),
-    ("search_rankings",        "checked_at",   "90 days"),
-    ("search_snapshots",       "checked_at",   "14 days"),
+    ("behavioral_events", "occurred_at", "90 days"),
+    ("operation_log", "created_at", "30 days"),
+    ("restriction_events", "created_at", "90 days"),
+    ("account_flood_log", "created_at", "30 days"),
+    ("search_rankings", "checked_at", "90 days"),
+    ("search_snapshots", "checked_at", "14 days"),
     # EPOCH VI tables
-    ("recovery_events",        "created_at",   "30 days"),
-    ("anomaly_events",         "detected_at",  "14 days"),
-    ("system_health_snapshots","snapshot_at",  "7 days"),
-    ("infrastructure_alerts",  "first_seen_at","30 days"),
+    ("recovery_events", "created_at", "30 days"),
+    ("anomaly_events", "detected_at", "14 days"),
+    ("system_health_snapshots", "snapshot_at", "7 days"),
+    ("infrastructure_alerts", "first_seen_at", "30 days"),
     # Proxy telemetry
-    ("proxy_quality_log",      "checked_at",   "30 days"),
-    ("proxy_health_log",       "checked_at",   "30 days"),
+    ("proxy_quality_log", "checked_at", "30 days"),
+    ("proxy_health_log", "checked_at", "30 days"),
     # Operation audit
-    ("operation_audit",        "occurred_at",  "60 days"),
+    ("operation_audit", "occurred_at", "60 days"),
     # Activity log (UI events) — keep 14 days
-    ("activity_log",           "occurred_at",  "14 days"),
+    ("activity_log", "occurred_at", "14 days"),
 ]
 
 _OPERATION_QUEUE_RETENTION = "30 days"
@@ -63,7 +63,9 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
             n = int(deleted or 0)
             results[table] = n
             if n:
-                log.info("db_maintenance: pruned %d rows from %s (>%s)", n, table, interval)
+                log.info(
+                    "db_maintenance: pruned %d rows from %s (>%s)", n, table, interval
+                )
         except Exception as e:
             log.warning("db_maintenance: failed to prune %s: %s", table, e)
             results[table] = -1
@@ -89,7 +91,8 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
         if n:
             log.info(
                 "db_maintenance: pruned %d completed operations from operation_queue (>%s)",
-                n, _OPERATION_QUEUE_RETENTION,
+                n,
+                _OPERATION_QUEUE_RETENTION,
             )
     except Exception as e:
         log.warning("db_maintenance: failed to prune operation_queue: %s", e)

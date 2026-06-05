@@ -16,22 +16,20 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 import asyncpg
 
-from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 
 # Порог для авто-исключения аккаунта из ротации
-_ACCOUNT_FAIL_RATE_THRESHOLD = 0.70   # 70% ошибок за последние 24ч → исключить
-_ACCOUNT_MIN_OPS_FOR_DECISION = 5     # минимум операций для вывода
-_ACCOUNT_TRUST_CRITICAL = 0.25        # trust ниже этого → немедленно исключить
-_PROXY_FAIL_RATE_THRESHOLD = 0.60     # 60% ошибок прокси → переназначить
-_QUEUE_STUCK_MINUTES = 90             # операция "running" дольше этого → stuck
-_RECOVERY_INTERVAL = 900              # 15 минут между полными циклами
-_COOLDOWN_RECOVERY_HOURS = 4          # куллдаун для восстановленного аккаунта
+_ACCOUNT_FAIL_RATE_THRESHOLD = 0.70  # 70% ошибок за последние 24ч → исключить
+_ACCOUNT_MIN_OPS_FOR_DECISION = 5  # минимум операций для вывода
+_ACCOUNT_TRUST_CRITICAL = 0.25  # trust ниже этого → немедленно исключить
+_PROXY_FAIL_RATE_THRESHOLD = 0.60  # 60% ошибок прокси → переназначить
+_QUEUE_STUCK_MINUTES = 90  # операция "running" дольше этого → stuck
+_RECOVERY_INTERVAL = 900  # 15 минут между полными циклами
+_COOLDOWN_RECOVERY_HOURS = 4  # куллдаун для восстановленного аккаунта
 
 # In-memory: owner_id → {account_id → last_recovery_ts}
 _last_account_recovery: dict[int, dict[int, float]] = {}
@@ -40,13 +38,14 @@ _last_proxy_recovery: dict[int, dict[int, float]] = {}
 
 # ─── Результат действия по восстановлению ─────────────────────────────────────
 
+
 @dataclass
 class RecoveryAction:
-    recovery_type: str         # account | proxy | session | queue | operation
-    target_type: str           # account | proxy | operation
+    recovery_type: str  # account | proxy | session | queue | operation
+    target_type: str  # account | proxy | operation
     target_id: int | None
-    action: str                # exclude | reassign | cooldown | restart | resume
-    severity: str              # info | warning | critical
+    action: str  # exclude | reassign | cooldown | restart | resume
+    severity: str  # info | warning | critical
     owner_id: int
     details: dict = field(default_factory=dict)
     outcome: dict = field(default_factory=dict)
@@ -54,6 +53,7 @@ class RecoveryAction:
 
 
 # ─── Основной оркестратор ─────────────────────────────────────────────────────
+
 
 async def run_full_recovery(pool: asyncpg.Pool, bot) -> list[RecoveryAction]:
     """Запустить все восстановительные анализаторы параллельно для всех владельцев."""
@@ -77,7 +77,9 @@ async def run_full_recovery(pool: asyncpg.Pool, bot) -> list[RecoveryAction]:
     return actions
 
 
-async def _recover_owner(pool: asyncpg.Pool, bot, owner_id: int) -> list[RecoveryAction]:
+async def _recover_owner(
+    pool: asyncpg.Pool, bot, owner_id: int
+) -> list[RecoveryAction]:
     tasks = [
         _account_recovery(pool, bot, owner_id),
         _proxy_recovery(pool, bot, owner_id),
@@ -98,7 +100,10 @@ async def _recover_owner(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recover
 
 # ─── Account Recovery ─────────────────────────────────────────────────────────
 
-async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[RecoveryAction]:
+
+async def _account_recovery(
+    pool: asyncpg.Pool, bot, owner_id: int
+) -> list[RecoveryAction]:
     """Обнаруживает деградировавшие аккаунты и автоматически их исключает."""
     actions: list[RecoveryAction] = []
 
@@ -114,7 +119,8 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
                  AND (cooldown_until IS NULL OR cooldown_until < NOW())
                ORDER BY trust_score ASC
                LIMIT 10""",
-            owner_id, _ACCOUNT_TRUST_CRITICAL,
+            owner_id,
+            _ACCOUNT_TRUST_CRITICAL,
         )
         for acc in critical_trust:
             acc_id = acc["id"]
@@ -128,7 +134,9 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
                 await pool.execute(
                     "UPDATE tg_accounts SET cooldown_until=NOW()+($1 * INTERVAL '1 hour') "
                     "WHERE id=$2 AND owner_id=$3",
-                    cooldown_hours, acc_id, owner_id,
+                    cooldown_hours,
+                    acc_id,
+                    owner_id,
                 )
             except Exception as e:
                 log.debug("recovery: cooldown update failed acc=%d: %s", acc_id, e)
@@ -158,7 +166,10 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
             await _log_recovery_event(pool, action)
             log.info(
                 "recovery_engine: account %s (owner=%d) → forced cooldown %dh (trust=%.2f)",
-                acc["label"], owner_id, cooldown_hours, acc.get("trust_score") or 0,
+                acc["label"],
+                owner_id,
+                cooldown_hours,
+                acc.get("trust_score") or 0,
             )
     except Exception as e:
         log.debug("recovery account critical trust: %s", e)
@@ -182,7 +193,9 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
                   AND COUNT(*) FILTER (WHERE oq.status='failed')::float / NULLIF(COUNT(*),0) >= $3
                ORDER BY fail_rate DESC
                LIMIT 5""",
-            owner_id, _ACCOUNT_MIN_OPS_FOR_DECISION, _ACCOUNT_FAIL_RATE_THRESHOLD,
+            owner_id,
+            _ACCOUNT_MIN_OPS_FOR_DECISION,
+            _ACCOUNT_FAIL_RATE_THRESHOLD,
         )
         for acc in high_fail:
             acc_id = acc["account_id"]
@@ -196,7 +209,9 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
                 await pool.execute(
                     "UPDATE tg_accounts SET cooldown_until=NOW()+($1 * INTERVAL '1 hour') "
                     "WHERE id=$2 AND owner_id=$3 AND (cooldown_until IS NULL OR cooldown_until<NOW())",
-                    cooldown_h, acc_id, owner_id,
+                    cooldown_h,
+                    acc_id,
+                    owner_id,
                 )
             except Exception as e:
                 log.debug("recovery: high fail cooldown failed acc=%d: %s", acc_id, e)
@@ -225,8 +240,11 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
             await _log_recovery_event(pool, action)
             log.info(
                 "recovery_engine: account %s → cooldown %dh (fail_rate=%.0f%%, %d/%d ops)",
-                acc["label"], cooldown_h,
-                (acc.get("fail_rate") or 0) * 100, acc["fails"], acc["total"],
+                acc["label"],
+                cooldown_h,
+                (acc.get("fail_rate") or 0) * 100,
+                acc["fails"],
+                acc["total"],
             )
     except Exception as e:
         log.debug("recovery account high fail: %s", e)
@@ -236,7 +254,10 @@ async def _account_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Reco
 
 # ─── Proxy Recovery ────────────────────────────────────────────────────────────
 
-async def _proxy_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[RecoveryAction]:
+
+async def _proxy_recovery(
+    pool: asyncpg.Pool, bot, owner_id: int
+) -> list[RecoveryAction]:
     """Обнаруживает сбойные прокси и снижает их приоритет / переназначает аккаунты."""
     actions: list[RecoveryAction] = []
 
@@ -257,7 +278,8 @@ async def _proxy_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
                   AND COUNT(*) FILTER (WHERE NOT pql.success)::float / NULLIF(COUNT(*),0) >= $2
                ORDER BY fail_rate DESC
                LIMIT 5""",
-            owner_id, _PROXY_FAIL_RATE_THRESHOLD,
+            owner_id,
+            _PROXY_FAIL_RATE_THRESHOLD,
         )
         for prx in bad_proxies:
             proxy_id = prx["proxy_id"]
@@ -269,7 +291,8 @@ async def _proxy_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
             # Найти аккаунты использующие этот прокси
             affected = await pool.fetch(
                 "SELECT id FROM tg_accounts WHERE owner_id=$1 AND proxy_id=$2 AND is_active=TRUE",
-                owner_id, proxy_id,
+                owner_id,
+                proxy_id,
             )
 
             # Найти другой рабочий прокси для переназначения
@@ -284,7 +307,8 @@ async def _proxy_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
                      AND up.id != $2
                    ORDER BY COALESCE(pql.sr, 0.5) DESC
                    LIMIT 1""",
-                owner_id, proxy_id,
+                owner_id,
+                proxy_id,
             )
 
             reassigned = 0
@@ -292,11 +316,14 @@ async def _proxy_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
                 try:
                     await pool.execute(
                         "UPDATE tg_accounts SET proxy_id=$1 WHERE id=ANY($2)",
-                        alt_proxy["id"], [a["id"] for a in affected],
+                        alt_proxy["id"],
+                        [a["id"] for a in affected],
                     )
                     reassigned = len(affected)
                 except Exception as e:
-                    log.debug("recovery proxy reassign failed proxy=%d: %s", proxy_id, e)
+                    log.debug(
+                        "recovery proxy reassign failed proxy=%d: %s", proxy_id, e
+                    )
 
             _last_proxy_recovery.setdefault(owner_id, {})[proxy_id] = now
 
@@ -336,7 +363,10 @@ async def _proxy_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
 
 # ─── Queue Recovery ────────────────────────────────────────────────────────────
 
-async def _queue_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[RecoveryAction]:
+
+async def _queue_recovery(
+    pool: asyncpg.Pool, bot, owner_id: int
+) -> list[RecoveryAction]:
     """Обнаруживает зависшие операции в статусе 'running' и восстанавливает их."""
     actions: list[RecoveryAction] = []
 
@@ -350,7 +380,8 @@ async def _queue_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
                  AND started_at < NOW() - ($2 * INTERVAL '1 minute')
                ORDER BY stuck_minutes DESC
                LIMIT 10""",
-            owner_id, _QUEUE_STUCK_MINUTES,
+            owner_id,
+            _QUEUE_STUCK_MINUTES,
         )
         for op in stuck:
             op_id = op["id"]
@@ -375,7 +406,9 @@ async def _queue_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
                            started_at=NULL,
                            retry_count=CASE WHEN $1='pending' THEN retry_count+1 ELSE retry_count END
                        WHERE id=$3 AND status='running'""",
-                    new_status, new_msg, op_id,
+                    new_status,
+                    new_msg,
+                    op_id,
                 )
             except Exception as e:
                 log.debug("recovery queue update failed op=%d: %s", op_id, e)
@@ -400,7 +433,10 @@ async def _queue_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
             await _log_recovery_event(pool, action)
             log.info(
                 "recovery_engine: stuck op #%d (%s, %dmin) → %s",
-                op_id, op["op_type"], stuck_min, new_status,
+                op_id,
+                op["op_type"],
+                stuck_min,
+                new_status,
             )
     except Exception as e:
         log.debug("queue_recovery failed owner=%d: %s", owner_id, e)
@@ -410,7 +446,10 @@ async def _queue_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Recove
 
 # ─── Operation Recovery ────────────────────────────────────────────────────────
 
-async def _operation_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[RecoveryAction]:
+
+async def _operation_recovery(
+    pool: asyncpg.Pool, bot, owner_id: int
+) -> list[RecoveryAction]:
     """Восстанавливает операции с retry_count >= max_retries — уведомляет владельца."""
     actions: list[RecoveryAction] = []
 
@@ -463,10 +502,12 @@ async def _operation_recovery(pool: asyncpg.Pool, bot, owner_id: int) -> list[Re
 
 # ─── Запись в БД ──────────────────────────────────────────────────────────────
 
+
 async def _log_recovery_event(pool: asyncpg.Pool, action: RecoveryAction) -> int | None:
     """Записать действие по восстановлению в recovery_events."""
     try:
         import json
+
         row = await pool.fetchrow(
             """INSERT INTO recovery_events
                (owner_id, recovery_type, target_type, target_id, trigger,
@@ -503,6 +544,7 @@ async def log_manual_recovery(
 ) -> int | None:
     """Записать ручное действие по восстановлению (из UI)."""
     import json
+
     try:
         row = await pool.fetchrow(
             """INSERT INTO recovery_events
@@ -510,8 +552,15 @@ async def log_manual_recovery(
                 action, status, severity, details, outcome, started_at, completed_at)
                VALUES ($1,$2,$3,$4,'manual',$5,$6,$7,$8,$9,NOW(),NOW())
                RETURNING id""",
-            owner_id, recovery_type, target_type, target_id, action,
-            status, severity, json.dumps(details), json.dumps(outcome),
+            owner_id,
+            recovery_type,
+            target_type,
+            target_id,
+            action,
+            status,
+            severity,
+            json.dumps(details),
+            json.dumps(outcome),
         )
         return row["id"] if row else None
     except Exception as e:
@@ -520,6 +569,7 @@ async def log_manual_recovery(
 
 
 # ─── Snapshot здоровья системы ────────────────────────────────────────────────
+
 
 async def take_health_snapshot(pool: asyncpg.Pool, owner_id: int) -> int:
     """Сделать снапшот состояния системы и вернуть health_score 0-100."""
@@ -631,10 +681,22 @@ async def take_health_snapshot(pool: asyncpg.Pool, owner_id: int) -> int:
                 proxies_healthy, proxies_total, active_alerts, active_anomalies,
                 active_recoveries, components)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
-            owner_id, health_score, ready_acc, total_acc, in_cooldown,
-            avg_trust, ops_pending, ops_running, ops_failed_24h, ops_done_24h,
-            proxies_healthy, proxies_total, active_alerts, active_anomalies,
-            active_recoveries, json.dumps(components),
+            owner_id,
+            health_score,
+            ready_acc,
+            total_acc,
+            in_cooldown,
+            avg_trust,
+            ops_pending,
+            ops_running,
+            ops_failed_24h,
+            ops_done_24h,
+            proxies_healthy,
+            proxies_total,
+            active_alerts,
+            active_anomalies,
+            active_recoveries,
+            json.dumps(components),
         )
         return health_score
 
@@ -654,7 +716,10 @@ async def get_current_health(pool: asyncpg.Pool, owner_id: int) -> dict:
         )
         if row and row["snapshot_at"]:
             import datetime
-            age = (datetime.datetime.now(datetime.timezone.utc) - row["snapshot_at"]).total_seconds()
+
+            age = (
+                datetime.datetime.now(datetime.timezone.utc) - row["snapshot_at"]
+            ).total_seconds()
             if age < 3600:  # если снапшот свежее 1ч — вернуть его
                 return dict(row)
     except Exception as e:
@@ -679,7 +744,8 @@ async def get_recent_recovery_events(
                WHERE owner_id=$1
                ORDER BY created_at DESC
                LIMIT $2""",
-            owner_id, limit,
+            owner_id,
+            limit,
         )
         return [dict(r) for r in rows]
     except Exception as e:
@@ -688,6 +754,7 @@ async def get_recent_recovery_events(
 
 
 # ─── Фоновый цикл ─────────────────────────────────────────────────────────────
+
 
 async def run_recovery_loop(pool: asyncpg.Pool, bot) -> None:
     """Фоновый цикл: каждые 15 минут запускает полный цикл восстановления."""
@@ -701,7 +768,8 @@ async def run_recovery_loop(pool: asyncpg.Pool, bot) -> None:
                 success = [a for a in actions if a.status == "success"]
                 log.info(
                     "recovery_engine: cycle complete — %d actions (%d successful)",
-                    len(actions), len(success),
+                    len(actions),
+                    len(success),
                 )
 
             # Снапшоты здоровья для всех владельцев

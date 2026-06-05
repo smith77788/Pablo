@@ -50,7 +50,17 @@ _INTENT_PATTERNS: list[tuple[str, list[str]]] = [
     ),
     (
         "visibility",
-        ["видимость", "visibility", "поиск", "seo", "позиции", "ранжировани", "рейтинг", "ranking", "усилить присутствие"],
+        [
+            "видимость",
+            "visibility",
+            "поиск",
+            "seo",
+            "позиции",
+            "ранжировани",
+            "рейтинг",
+            "ranking",
+            "усилить присутствие",
+        ],
     ),
 ]
 
@@ -303,12 +313,18 @@ async def _build_audit_plan(pool, owner_id, description, resources):
 
 
 async def _build_sync_plan(pool, owner_id, description, resources):
-    channels_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-    ) or 0
-    bots_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", owner_id
-    ) or 0
+    channels_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
+    bots_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", owner_id
+        )
+        or 0
+    )
     total = channels_cnt + bots_cnt
 
     can_execute = channels_cnt > 0
@@ -342,9 +358,12 @@ async def _build_growth_plan(pool, owner_id, description, resources):
     geo_preset = detect_geo_preset(description)
     preset_info = GEO_PRESETS.get(geo_preset) or GEO_PRESETS["eu_capitals"]
 
-    channels_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-    ) or 0
+    channels_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
 
     n_accs = resources["accounts_available"]
     can_execute = n_accs > 0 and channels_cnt > 0
@@ -404,12 +423,19 @@ async def _build_strike_plan(pool, owner_id, description, resources):
 
 
 async def _build_visibility_plan(pool, owner_id, description, resources):
-    keywords_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE", owner_id
-    ) or 0
-    channels_cnt = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-    ) or 0
+    keywords_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
+            owner_id,
+        )
+        or 0
+    )
+    channels_cnt = (
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+        )
+        or 0
+    )
 
     # Get avg position if rankings exist
     avg_pos = await pool.fetchval(
@@ -433,7 +459,9 @@ async def _build_visibility_plan(pool, owner_id, description, resources):
     if keywords_cnt == 0:
         risks.append("⚠️ Нет отслеживаемых ключевых слов — добавьте их для анализа")
     else:
-        risks.append(f"ℹ️ Средняя позиция: {avg_pos or '—'} (по {keywords_cnt} ключевым словам)")
+        risks.append(
+            f"ℹ️ Средняя позиция: {avg_pos or '—'} (по {keywords_cnt} ключевым словам)"
+        )
 
     return {
         "intent_type": "visibility",

@@ -3772,9 +3772,6 @@ async def cb_scan_connect(
             ],
         )
 
-    ch_count = len([c for c in to_connect if c in result["channels"]])
-    gr_count = len(to_connect) - ch_count
-
     parts = []
     if action in ("scan_connect_all", "scan_connect_ch"):
         parts.append(f"📢 {len(result['channels'])} каналов")

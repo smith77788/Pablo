@@ -678,11 +678,21 @@ async def _pack_seed_bg(
             )
             posted = False
             if bot_token:
-                chan_target = f"@{ch['username']}" if ch.get("username") else int(f"-100{ch['channel_id']}")
-                posted = await presence_setup.seed_channel_post(http, bot_token, chan_target, post_text)
+                chan_target = (
+                    f"@{ch['username']}"
+                    if ch.get("username")
+                    else int(f"-100{ch['channel_id']}")
+                )
+                posted = await presence_setup.seed_channel_post(
+                    http, bot_token, chan_target, post_text
+                )
             if not posted:
                 posted = await presence_setup.seed_channel_via_account(
-                    pool, owner_id, ch["channel_id"], ch.get("access_hash") or 0, post_text
+                    pool,
+                    owner_id,
+                    ch["channel_id"],
+                    ch.get("access_hash") or 0,
+                    post_text,
                 )
             if posted:
                 success += 1
@@ -704,8 +714,13 @@ async def _pack_seed_bg(
 
     kb = InlineKeyboardBuilder()
     if fail > 0:
-        kb.button(text="🔁 Повторить посев", callback_data=PackCb(action="seed", pack_id=pack_id))
-    kb.button(text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id))
+        kb.button(
+            text="🔁 Повторить посев",
+            callback_data=PackCb(action="seed", pack_id=pack_id),
+        )
+    kb.button(
+        text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id)
+    )
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
 
@@ -737,7 +752,9 @@ async def _pack_seed_bg(
             f"{fail_hint}"
         )
     try:
-        await progress_msg.edit_text(result_text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await progress_msg.edit_text(
+            result_text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
     except Exception:
         log_exc_swallow(log, "_pack_seed_bg: сбой финального отчёта")
 
@@ -802,7 +819,17 @@ async def cb_pack_seed(
         parse_mode="HTML",
     )
     task = asyncio.create_task(
-        _pack_seed_bg(pool, http, progress_msg, owner_id, pack_id, dict(pack), list(channels), bot_token, group_link)
+        _pack_seed_bg(
+            pool,
+            http,
+            progress_msg,
+            owner_id,
+            pack_id,
+            dict(pack),
+            list(channels),
+            bot_token,
+            group_link,
+        )
     )
     _treg.register(owner_id, "pack_seed", f"Посев постов пакета {pack_id}", task)
 
@@ -842,7 +869,9 @@ async def _pack_promote_bg(
         log_exc_swallow(log, "_pack_promote_bg: mark_presence_pack_promoted failed")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌱 Посеять посты", callback_data=PackCb(action="seed", pack_id=pack_id))
+    kb.button(
+        text="🌱 Посеять посты", callback_data=PackCb(action="seed", pack_id=pack_id)
+    )
     kb.button(text="📋 Детали", callback_data=PackCb(action="view", pack_id=pack_id))
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
@@ -895,9 +924,13 @@ async def cb_pack_promote(
         parse_mode="HTML",
     )
     task = asyncio.create_task(
-        _pack_promote_bg(pool, progress_msg, owner_id, pack_id, list(channels), bot_tg_id)
+        _pack_promote_bg(
+            pool, progress_msg, owner_id, pack_id, list(channels), bot_tg_id
+        )
     )
-    _treg.register(owner_id, "pack_promote", f"Назначение бота admin пакета {pack_id}", task)
+    _treg.register(
+        owner_id, "pack_promote", f"Назначение бота admin пакета {pack_id}", task
+    )
 
 
 # ── Mirror Sync ────────────────────────────────────────────────────────────

@@ -92,22 +92,26 @@ _MAX_TURNS = 100
 _FAST_ACTION_PATTERNS: list[tuple] = [
     # "создай 5 каналов <prefix>" — bulk first (more specific)
     (
-        re.compile(r'созда(?:й|йте|ть|вай)\s+(\d+)\s+канал\w*\s+(.+)', re.I | re.DOTALL),
+        re.compile(
+            r"созда(?:й|йте|ть|вай)\s+(\d+)\s+канал\w*\s+(.+)", re.I | re.DOTALL
+        ),
         "bulk_channels",
     ),
     # "создай канал <title>"
     (
-        re.compile(r'созда(?:й|йте|ть|вай)\s+канал(?!\w)\s+(.+)', re.I | re.DOTALL),
+        re.compile(r"созда(?:й|йте|ть|вай)\s+канал(?!\w)\s+(.+)", re.I | re.DOTALL),
         "channel",
     ),
     # "создай группу <title>"
     (
-        re.compile(r'созда(?:й|йте|ть|вай)\s+(?:чат|групп\w+)\s+(.+)', re.I | re.DOTALL),
+        re.compile(
+            r"созда(?:й|йте|ть|вай)\s+(?:чат|групп\w+)\s+(.+)", re.I | re.DOTALL
+        ),
         "group",
     ),
     # "создай бота <name>"
     (
-        re.compile(r'созда(?:й|йте|ть|вай)\s+бот\w*\s+(.+)', re.I | re.DOTALL),
+        re.compile(r"созда(?:й|йте|ть|вай)\s+бот\w*\s+(.+)", re.I | re.DOTALL),
         "bot",
     ),
 ]
@@ -139,10 +143,12 @@ async def _fast_parse_action(
                 count = min(50, max(1, int(m.group(1))))
             except ValueError:
                 continue
-            prefix = m.group(2).strip().strip('«»"\' \t\n')[:80]
+            prefix = m.group(2).strip().strip("«»\"' \t\n")[:80]
             if len(prefix) < 2:
                 continue
-            result = await action_bulk_create_channels(pool, user_id, prefix=prefix, count=count)
+            result = await action_bulk_create_channels(
+                pool, user_id, prefix=prefix, count=count
+            )
             if "error" in result:
                 return None
             return {
@@ -155,7 +161,7 @@ async def _fast_parse_action(
             }
 
         elif kind == "channel":
-            title = m.group(1).strip().strip('«»"\' \t\n')[:80]
+            title = m.group(1).strip().strip("«»\"' \t\n")[:80]
             if len(title) < 2:
                 continue
             result = await action_create_channel(pool, user_id, title=title)
@@ -168,7 +174,7 @@ async def _fast_parse_action(
             }
 
         elif kind == "group":
-            title = m.group(1).strip().strip('«»"\' \t\n')[:80]
+            title = m.group(1).strip().strip("«»\"' \t\n")[:80]
             if len(title) < 2:
                 continue
             result = await action_create_group(pool, user_id, title=title)
@@ -181,7 +187,7 @@ async def _fast_parse_action(
             }
 
         elif kind == "bot":
-            name = m.group(1).strip().strip('«»"\' \t\n')[:80]
+            name = m.group(1).strip().strip("«»\"' \t\n")[:80]
             if len(name) < 2:
                 continue
             result = await action_create_bot(pool, user_id, name=name)
@@ -1033,11 +1039,15 @@ async def cb_ai_confirm_action(
         )
         return
 
-    status_msg = await callback.message.edit_text("⏳ <i>Выполняю...</i>", parse_mode="HTML")
+    status_msg = await callback.message.edit_text(
+        "⏳ <i>Выполняю...</i>", parse_mode="HTML"
+    )
 
     async def _do_action() -> None:
         try:
-            result = await execute_action(action_data, pool, callback.from_user.id, http)
+            result = await execute_action(
+                action_data, pool, callback.from_user.id, http
+            )
         except Exception as exc:
             result = f"❌ Ошибка при выполнении: {escape(str(exc)[:200])}"
         await state.update_data(pending_action_data=None)

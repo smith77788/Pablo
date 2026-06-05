@@ -29,14 +29,14 @@ _PROXY_SOURCES: list[str] = [
 # Validation target — standard HTTPS endpoint (same as proxy_manager.py)
 _VALIDATE_URL = "https://api.telegram.org/"
 _VALIDATE_TIMEOUT = 10.0
-_VALIDATE_CONCURRENCY = 40   # max simultaneous validation connections
+_VALIDATE_CONCURRENCY = 40  # max simultaneous validation connections
 _REFRESH_INTERVAL_H = 6
-_MAX_FAIL_COUNT = 3          # remove proxy after this many consecutive failures
-_MIN_POOL_SIZE = 20          # warn if valid pool drops below this
+_MAX_FAIL_COUNT = 3  # remove proxy after this many consecutive failures
+_MIN_POOL_SIZE = 20  # warn if valid pool drops below this
 
 # ── In-memory cache ────────────────────────────────────────────────────────────
-_valid_pool: list[str] = []         # proxy_urls ready for use
-_pool_updated_at: float = 0.0       # monotonic timestamp of last refresh
+_valid_pool: list[str] = []  # proxy_urls ready for use
+_pool_updated_at: float = 0.0  # monotonic timestamp of last refresh
 _pool_lock = asyncio.Lock()
 
 
@@ -76,13 +76,16 @@ async def _fetch_source(session, url: str) -> list[str]:
         return []
 
 
-async def _validate_one(proxy_url: str, sem: asyncio.Semaphore) -> tuple[str, bool, Optional[int]]:
+async def _validate_one(
+    proxy_url: str, sem: asyncio.Semaphore
+) -> tuple[str, bool, Optional[int]]:
     """Returns (proxy_url, is_valid, latency_ms)."""
     async with sem:
         t0 = _time.monotonic()
         try:
             from aiohttp_socks import ProxyConnector
             import aiohttp
+
             connector = ProxyConnector.from_url(proxy_url, rdns=True)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
@@ -122,10 +125,15 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
         # Record the attempt time so UI shows when last check ran
         try:
             from database import db as _db
+
             await _db.set_platform_setting(pool, "proxy_scraper_last_run", "0/0")
         except Exception:
             pass
-        return {"fetched": 0, "valid": 0, "duration_s": int(_time.monotonic() - t_start)}
+        return {
+            "fetched": 0,
+            "valid": 0,
+            "duration_s": int(_time.monotonic() - t_start),
+        }
 
     # 2. Validate concurrently (limited semaphore)
     sem = asyncio.Semaphore(_VALIDATE_CONCURRENCY)
@@ -168,6 +176,7 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
         _pool_updated_at = _time.monotonic()
     try:
         from services import account_manager
+
         account_manager.set_pool_proxy_cache(valid_urls[:500])
     except Exception as _e:
         log.debug("proxy_scraper: account_manager cache update failed: %s", _e)
@@ -175,17 +184,26 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
     duration_s = int(_time.monotonic() - t_start)
     log.info(
         "proxy_scraper: cycle done — valid=%d deleted=%s duration=%ds",
-        len(valid), deleted or 0, duration_s,
+        len(valid),
+        deleted or 0,
+        duration_s,
     )
     if len(valid) < _MIN_POOL_SIZE:
-        log.warning("proxy_scraper: pool size %d < minimum %d", len(valid), _MIN_POOL_SIZE)
+        log.warning(
+            "proxy_scraper: pool size %d < minimum %d", len(valid), _MIN_POOL_SIZE
+        )
 
     # Record last scrape timestamp so UI shows it even if pool is empty
     try:
         from database import db as _db
         import datetime
-        now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        await _db.set_platform_setting(pool, "proxy_scraper_last_run", f"{len(valid)}/{len(raw)}@{now_str}")
+
+        now_str = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        await _db.set_platform_setting(
+            pool, "proxy_scraper_last_run", f"{len(valid)}/{len(raw)}@{now_str}"
+        )
     except Exception:
         pass
 
@@ -210,7 +228,9 @@ async def get_pool_proxy(pool: asyncpg.Pool) -> Optional[str]:
     return random.choice(urls) if urls else None
 
 
-async def record_proxy_result(pool: asyncpg.Pool, proxy_url: str, success: bool) -> None:
+async def record_proxy_result(
+    pool: asyncpg.Pool, proxy_url: str, success: bool
+) -> None:
     """Update proxy stats after actual use in an operation."""
     try:
         if success:
@@ -224,7 +244,8 @@ async def record_proxy_result(pool: asyncpg.Pool, proxy_url: str, success: bool)
                    SET fail_count=fail_count+1,
                        is_valid=CASE WHEN fail_count+1 >= $2 THEN FALSE ELSE is_valid END
                    WHERE proxy_url=$1""",
-                proxy_url, _MAX_FAIL_COUNT,
+                proxy_url,
+                _MAX_FAIL_COUNT,
             )
             # Evict from in-memory cache if dead
             async with _pool_lock:
@@ -254,12 +275,13 @@ async def get_pool_stats(pool: asyncpg.Pool) -> dict:
         try:
             from database import db as _db
             import datetime
+
             val = await _db.get_platform_setting(pool, "proxy_scraper_last_run", "")
             if val and "@" in val:
                 ts_str = val.split("@", 1)[1]
-                last_check = datetime.datetime.fromisoformat(ts_str.rstrip("Z")).replace(
-                    tzinfo=datetime.timezone.utc
-                )
+                last_check = datetime.datetime.fromisoformat(
+                    ts_str.rstrip("Z")
+                ).replace(tzinfo=datetime.timezone.utc)
         except Exception:
             pass
 
@@ -274,7 +296,9 @@ async def get_pool_stats(pool: asyncpg.Pool) -> dict:
 
 async def run_scraper_loop(pool: asyncpg.Pool) -> None:
     """Background loop: refresh proxy pool every 6 hours."""
-    log.info("proxy_scraper: background loop started (interval=%dh)", _REFRESH_INTERVAL_H)
+    log.info(
+        "proxy_scraper: background loop started (interval=%dh)", _REFRESH_INTERVAL_H
+    )
     # Initial refresh after 30s startup delay (let other services initialize first)
     await asyncio.sleep(30)
     while True:

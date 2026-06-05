@@ -119,4 +119,3 @@ async def safe_edit(
             await callback.answer()
         else:
             raise
-

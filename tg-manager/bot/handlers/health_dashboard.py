@@ -1763,7 +1763,8 @@ async def cb_set_cooldown_confirm(
 
     acc = await pool.fetchrow(
         "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, user_id,
+        acc_id,
+        user_id,
     )
     name = "—"
     if acc:
@@ -1868,7 +1869,8 @@ async def cb_reset_cooldown_one(
 
     acc = await pool.fetchrow(
         "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id, user_id,
+        acc_id,
+        user_id,
     )
     name = f"id{acc_id}"
     if acc:

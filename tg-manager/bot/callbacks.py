@@ -101,10 +101,12 @@ class CrmCb(CallbackData, prefix="crm"):
     user_id: int = 0
     tag: Optional[str] = None
 
+
 class AutoCb(CallbackData, prefix="au"):
     action: str
     bot_id: int = 0
     rule_id: int = 0
+
 
 class ExperimentCb(CallbackData, prefix="exp"):
     action: str
@@ -112,10 +114,12 @@ class ExperimentCb(CallbackData, prefix="exp"):
     exp_id: int = 0
     variant_id: int = 0
 
+
 class DeepLinkCb(CallbackData, prefix="dl"):
     action: str
     bot_id: int = 0
     link_id: int = 0
+
 
 class EngageCb(CallbackData, prefix="eng"):
     action: str
@@ -125,8 +129,8 @@ class EngageCb(CallbackData, prefix="eng"):
 class SeoCb(CallbackData, prefix="seo"):
     action: str
     bot_id: int = 0
-    chan_id: int = 0          # channel/group ID from managed_channels
-    acc_id: int = 0           # account to use for Telethon edits
+    chan_id: int = 0  # channel/group ID from managed_channels
+    acc_id: int = 0  # account to use for Telethon edits
     etype: Optional[str] = None  # 'bot' | 'channel' | 'group'
 
 
@@ -280,15 +284,17 @@ class GeoPresenceCb(CallbackData, prefix="gp"):
 
 
 class TplBotApplyCb(CallbackData, prefix="tba"):
-    tpl_id: int = 0           # 0 = preset, >0 = user template id
-    bot_id: int = 0           # target managed bot
-    preset_key: Optional[str] = None   # 'asset_type__preset_id' for library presets
+    tpl_id: int = 0  # 0 = preset, >0 = user template id
+    bot_id: int = 0  # target managed bot
+    preset_key: Optional[str] = None  # 'asset_type__preset_id' for library presets
 
 
 class LibCb(CallbackData, prefix="lib"):
     action: str
     asset_type: Optional[str] = None
-    preset_key: Optional[str] = None  # 'channel__news_channel'  (__ avoids aiogram3 separator clash)
+    preset_key: Optional[str] = (
+        None  # 'channel__news_channel'  (__ avoids aiogram3 separator clash)
+    )
     page: int = 0
 
 
@@ -336,49 +342,49 @@ class StrikeCb(CallbackData, prefix="strk"):
 
 
 class TaskCb(CallbackData, prefix="tsk"):
-    action: str          # "list", "cancel", "cancel_all"
+    action: str  # "list", "cancel", "cancel_all"
     task_id: Optional[str] = None
 
 
 class TopoCb(CallbackData, prefix="topo"):
-    action: str       # "menu", "overview", "acc_view", "chan_view"
+    action: str  # "menu", "overview", "acc_view", "chan_view"
     acc_id: int = 0
     chan_id: int = 0
     page: int = 0
 
 
 class PackCb(CallbackData, prefix="ppk"):
-    action: str        # "menu","create","view","seed","promote","mirror","delete","confirm_delete"
+    action: str  # "menu","create","view","seed","promote","mirror","delete","confirm_delete"
     pack_id: int = 0
     page: int = 0
 
 
 class BotAdminCb(CallbackData, prefix="badm"):
-    action: str        # "panel","edit_reply","list_replies","stats","sync_mirrors"
+    action: str  # "panel","edit_reply","list_replies","stats","sync_mirrors"
     bot_id: int = 0
     reply_id: int = 0
 
 
 class ApprovalCb(CallbackData, prefix="appr"):
-    action: str   # "confirm", "cancel"
+    action: str  # "confirm", "cancel"
     op_id: int = 0
 
 
 class WorkspaceCb(CallbackData, prefix="ws"):
-    action: str   # menu, create, view, invite, join, members, leave
+    action: str  # menu, create, view, invite, join, members, leave
     ws_id: int = 0
     page: int = 0
 
 
 class QuickPostCb(CallbackData, prefix="qp"):
-    action: str   # start, cancel, toggle, page, sel_all, desel_all, chans_done,
-                  # back_to_text, back_to_chans, back_to_timing, timing, publish, save_template
+    action: str  # start, cancel, toggle, page, sel_all, desel_all, chans_done,
+    # back_to_text, back_to_chans, back_to_timing, timing, publish, save_template
     val: int = 0  # channel_id for toggle; delay_s for timing
     page: int = 0
 
 
 class ErrorReportCb(CallbackData, prefix="err"):
-    action: str   # "start", "cancel"
+    action: str  # "start", "cancel"
     report_id: int = 0
 
 
@@ -390,14 +396,16 @@ class EcoCb(CallbackData, prefix="eco"):
 
 class EcoPickCb(CallbackData, prefix="ecopick"):
     """����� ���������� ��� ���������� ������� (�� ������)."""
-    action: str        # "list" | "add"
-    object_type: str   # "channel" | "group" | "bot" | "account"
+
+    action: str  # "list" | "add"
+    object_type: str  # "channel" | "group" | "bot" | "account"
     object_id: int = 0
     eco_id: int = 0
 
 
 class ResourceActCb(CallbackData, prefix="ract"):
     """Resource Activity Engine � ���������� � ����������� ��������."""
+
     action: str
     session_id: int = 0
     account_id: int = 0
@@ -406,13 +414,15 @@ class ResourceActCb(CallbackData, prefix="ract"):
 
 class IntentCb(CallbackData, prefix="intent"):
     """��������� ����� � ���������� ����������� (����� IV)."""
-    action: str         # menu | new | preset | plan | strategy | confirm | manual | history | detail | cancel
+
+    action: str  # menu | new | preset | plan | strategy | confirm | manual | history | detail | cancel
     intent_id: int = 0
     value: Optional[str] = None  # intent_type for preset, strategy name for strategy
 
 
 class InfraHCCb(CallbackData, prefix="ihc"):
     """EPOCH VI: Infrastructure Health Center."""
-    action: str         # menu | anomalies | recoveries | run_recovery | health_trend | copilot | resolve_anomaly | back
-    item_id: int = 0   # anomaly_id, recovery_id, alert_id
+
+    action: str  # menu | anomalies | recoveries | run_recovery | health_trend | copilot | resolve_anomaly | back
+    item_id: int = 0  # anomaly_id, recovery_id, alert_id
     page: int = 0

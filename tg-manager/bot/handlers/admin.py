@@ -289,13 +289,13 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         row = None
         log_exc_swallow(log, "_show_admin_main stats query failed")
 
-    total_bots       = int(row["total_bots"]        or 0) if row else 0
-    total_subs       = int(row["total_subs"]        or 0) if row else 0
-    total_payments   = int(row["total_payments"]    or 0) if row else 0
-    revenue          = float(row["revenue"]         or 0) if row else 0.0
-    total_users      = int(row["total_users"]       or 0) if row else 0
-    today_users      = int(row["today_users"]       or 0) if row else 0
-    new_error_reports= int(row["new_error_reports"] or 0) if row else 0
+    total_bots = int(row["total_bots"] or 0) if row else 0
+    total_subs = int(row["total_subs"] or 0) if row else 0
+    total_payments = int(row["total_payments"] or 0) if row else 0
+    revenue = float(row["revenue"] or 0) if row else 0.0
+    total_users = int(row["total_users"] or 0) if row else 0
+    today_users = int(row["today_users"] or 0) if row else 0
+    new_error_reports = int(row["new_error_reports"] or 0) if row else 0
 
     text = (
         "🛡 <b>Admin Panel</b>\n\n"
@@ -612,7 +612,14 @@ async def cb_admin(
         except ValueError:
             await callback.answer("Неверный ID", show_alert=True)
             return
-        await _adm_logs(callback, pool, source="ui", status_filter=None, page=0, owner_filter=target_uid)
+        await _adm_logs(
+            callback,
+            pool,
+            source="ui",
+            status_filter=None,
+            page=0,
+            owner_filter=target_uid,
+        )
 
     elif action == "logs_find_user":
         await callback.message.edit_text(
@@ -763,9 +770,9 @@ async def _adm_section_users(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     except Exception:
         row = None
         log_exc_swallow(log, "_adm_section_users stats query failed")
-    total       = int(row["total"]       or 0) if row else 0
-    today       = int(row["today"]       or 0) if row else 0
-    banned      = int(row["banned"]      or 0) if row else 0
+    total = int(row["total"] or 0) if row else 0
+    today = int(row["today"] or 0) if row else 0
+    banned = int(row["banned"] or 0) if row else 0
     subscribers = int(row["subscribers"] or 0) if row else 0
     text = (
         "👥 <b>Пользователи</b>\n\n"
@@ -792,10 +799,10 @@ async def _adm_section_billing(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     except Exception:
         row = None
         log_exc_swallow(log, "_adm_section_billing stats query failed")
-    active    = int(row["active"]    or 0)   if row else 0
-    confirmed = int(row["confirmed"] or 0)   if row else 0
-    pending   = int(row["pending"]   or 0)   if row else 0
-    revenue   = float(row["revenue"] or 0.0) if row else 0.0
+    active = int(row["active"] or 0) if row else 0
+    confirmed = int(row["confirmed"] or 0) if row else 0
+    pending = int(row["pending"] or 0) if row else 0
+    revenue = float(row["revenue"] or 0.0) if row else 0.0
     text = (
         "💳 <b>Деньги и подписки</b>\n\n"
         f"Активные подписки: <b>{active}</b>\n"
@@ -821,9 +828,9 @@ async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     except Exception:
         row = None
         log_exc_swallow(log, "_adm_section_assets stats query failed")
-    bots         = int(row["bots"]         or 0) if row else 0
-    channels     = int(row["channels"]     or 0) if row else 0
-    accounts     = int(row["accounts"]     or 0) if row else 0
+    bots = int(row["bots"] or 0) if row else 0
+    channels = int(row["channels"] or 0) if row else 0
+    accounts = int(row["accounts"] or 0) if row else 0
     strike_users = int(row["strike_users"] or 0) if row else 0
     text = (
         "🤖 <b>Боты, токены и Strike</b>\n\n"
@@ -853,8 +860,8 @@ async def _adm_section_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         log_exc_swallow(log, "_adm_section_ops stats query failed")
     running = int(row["running"] or 0) if row else 0
     pending = int(row["pending"] or 0) if row else 0
-    failed  = int(row["failed"]  or 0) if row else 0
-    floods  = int(row["floods"]  or 0) if row else 0
+    failed = int(row["failed"] or 0) if row else 0
+    floods = int(row["floods"] or 0) if row else 0
     text = (
         "⚙️ <b>Операции и здоровье процессов</b>\n\n"
         f"В работе: <b>{running}</b>\n"
@@ -917,8 +924,12 @@ async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 "messages": [{"role": "user", "content": "1+1=?"}],
                 "max_tokens": 5,
             }
-            headers = {"Authorization": f"Bearer {provider.api_key}", "Content-Type": "application/json"}
+            headers = {
+                "Authorization": f"Bearer {provider.api_key}",
+                "Content-Type": "application/json",
+            }
             import aiohttp
+
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(
                     f"{provider.base_url}/chat/completions",
@@ -934,7 +945,9 @@ async def _adm_ai_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             ms = int((_time.monotonic() - t0) * 1000)
             return provider.name, False, ms
 
-    results = await asyncio.gather(*[_ping_one(p) for p in providers], return_exceptions=True)
+    results = await asyncio.gather(
+        *[_ping_one(p) for p in providers], return_exceptions=True
+    )
 
     lines = ["🧠 <b>Статус AI провайдеров (live)</b>", ""]
     for r in results:
@@ -1226,13 +1239,14 @@ async def _adm_price_edit_ask(
 
 
 _SWARM_MODE_DESCRIPTIONS = {
-    "manual":     "🟢 Manual — вы запускаете каждую операцию вручную. Полный контроль, ничего автоматически.",
-    "assisted":   "🟡 Assisted — система предлагает оптимизации, но вы подтверждаете. Рекомендуется для начала.",
-    "autopilot":  "🔵 Autopilot — автоматически оптимизирует расписание, очередь и роутинг операций.",
-    "growth":     "🔴 Growth — агрессивный рост: максимальная скорость операций, больше аккаунтов в параллели.",
+    "manual": "🟢 Manual — вы запускаете каждую операцию вручную. Полный контроль, ничего автоматически.",
+    "assisted": "🟡 Assisted — система предлагает оптимизации, но вы подтверждаете. Рекомендуется для начала.",
+    "autopilot": "🔵 Autopilot — автоматически оптимизирует расписание, очередь и роутинг операций.",
+    "growth": "🔴 Growth — агрессивный рост: максимальная скорость операций, больше аккаунтов в параллели.",
     "experiment": "🟣 Experiment — максимальное A/B тестирование, пробует новые стратегии роутинга.",
-    "stability":  "⚫ Stability — фиксированный роутинг без изменений, приоритет надёжности над скоростью.",
+    "stability": "⚫ Stability — фиксированный роутинг без изменений, приоритет надёжности над скоростью.",
 }
+
 
 async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     current = await db.get_system_mode(pool)
@@ -1249,7 +1263,7 @@ async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(
         f"⚙️ <b>Swarm режим</b>\n\n"
         f"Текущий: <b>{current.upper()}</b>\n"
-        f"<i>{current_desc.split('—',1)[-1].strip()}</i>\n\n"
+        f"<i>{current_desc.split('—', 1)[-1].strip()}</i>\n\n"
         f"<b>Описание режимов:</b>\n{desc_lines}\n\n"
         "Выберите режим работы системы:",
         parse_mode="HTML",
@@ -1590,11 +1604,13 @@ async def handle_admin_message(
         try:
             target_uid = int(text.strip())
         except ValueError:
-            await message.answer("❌ Неверный Telegram ID.", reply_markup=_admin_main_kb())
+            await message.answer(
+                "❌ Неверный Telegram ID.", reply_markup=_admin_main_kb()
+            )
             return
         kb = InlineKeyboardBuilder()
         kb.button(text="🖱 UI-события", callback_data=f"adm:logs_uid:{target_uid}")
-        kb.button(text="⚙️ TG-операции", callback_data=f"adm:logs_p:ops:none:0")
+        kb.button(text="⚙️ TG-операции", callback_data="adm:logs_p:ops:none:0")
         kb.button(text="◀️ Логи", callback_data="adm:logs")
         kb.adjust(2, 1)
         await message.answer(
@@ -2213,7 +2229,9 @@ _EVENT_ICONS = {
 }
 
 
-def _logs_kb(source: str, sf: str | None, page: int, has_next: bool) -> InlineKeyboardBuilder:
+def _logs_kb(
+    source: str, sf: str | None, page: int, has_next: bool
+) -> InlineKeyboardBuilder:
     sf_str = sf or "none"
     kb = InlineKeyboardBuilder()
     # Filter tabs
@@ -2224,20 +2242,29 @@ def _logs_kb(source: str, sf: str | None, page: int, has_next: bool) -> InlineKe
         kb.button(text="🖱 UI", callback_data="adm:logs")
         kb.button(text="⚙️ TG-операции (сейчас)", callback_data="adm:logs_ops")
     # Error filter
-    err_cb = f"adm:logs_err" if source == "ui" else "adm:logs_ops_err"
+    err_cb = "adm:logs_err" if source == "ui" else "adm:logs_ops_err"
     if sf == "error":
-        kb.button(text="🔴 Только ошибки (сейчас)", callback_data=f"adm:logs_p:{source}:none:0")
+        kb.button(
+            text="🔴 Только ошибки (сейчас)",
+            callback_data=f"adm:logs_p:{source}:none:0",
+        )
     else:
         kb.button(text="🔴 Только ошибки", callback_data=err_cb)
     kb.button(text="🔍 По пользователю", callback_data="adm:logs_find_user")
     # Pagination
     if page > 0:
-        kb.button(text="◀️ Назад", callback_data=f"adm:logs_p:{source}:{sf_str}:{page - 1}")
+        kb.button(
+            text="◀️ Назад", callback_data=f"adm:logs_p:{source}:{sf_str}:{page - 1}"
+        )
     if has_next:
-        kb.button(text="▶️ Далее", callback_data=f"adm:logs_p:{source}:{sf_str}:{page + 1}")
+        kb.button(
+            text="▶️ Далее", callback_data=f"adm:logs_p:{source}:{sf_str}:{page + 1}"
+        )
     kb.button(text="🔄 Обновить", callback_data=f"adm:logs_p:{source}:{sf_str}:{page}")
     kb.button(text="◀️ Операции", callback_data="adm:section_ops")
-    nav_cols = (1 if (page == 0 and not has_next) else (2 if (page > 0 and has_next) else 1))
+    nav_cols = (
+        1 if (page == 0 and not has_next) else (2 if (page > 0 and has_next) else 1)
+    )
     kb.adjust(2, 1, 1, nav_cols, 1, 1)
     return kb
 
@@ -2281,7 +2308,11 @@ async def _adm_logs(
             lines.append("Нет записей.")
         else:
             for r in rows:
-                dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
+                dt = (
+                    r["occurred_at"].strftime("%d.%m %H:%M")
+                    if r.get("occurred_at")
+                    else "?"
+                )
                 uid = r.get("owner_id") or "?"
                 etype = r.get("event_type") or "?"
                 icon = _EVENT_ICONS.get(etype, "•")
@@ -2306,10 +2337,11 @@ async def _adm_logs(
         # Activity stats header
         try:
             stats = await db.get_activity_stats(pool)
-            lines.insert(1,
+            lines.insert(
+                1,
                 f"⚡ За час: {stats['last_hour']} событий · "
                 f"👥 {stats['active_users_hour']} активных · "
-                f"🔴 Ошибок/24ч: {stats['errors_day']}"
+                f"🔴 Ошибок/24ч: {stats['errors_day']}",
             )
         except Exception:
             pass
@@ -2341,23 +2373,35 @@ async def _adm_logs(
             lines.append("Нет записей.")
         else:
             for r in rows:
-                dt = r["occurred_at"].strftime("%d.%m %H:%M") if r.get("occurred_at") else "?"
+                dt = (
+                    r["occurred_at"].strftime("%d.%m %H:%M")
+                    if r.get("occurred_at")
+                    else "?"
+                )
                 uid = r.get("owner_id") or "?"
                 action = _html.escape((r.get("action") or "")[:30])
                 target = r.get("target") or ""
-                target_str = f" → <code>{_html.escape(target[:25])}</code>" if target else ""
+                target_str = (
+                    f" → <code>{_html.escape(target[:25])}</code>" if target else ""
+                )
                 result = r.get("result") or "?"
                 dur = r.get("duration_ms")
                 dur_str = f" {dur}ms" if dur is not None else ""
                 flood = r.get("flood_wait_s")
                 flood_str = f" ⏳{flood}s" if flood else ""
                 if result == "success":
-                    lines.append(f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ✅{dur_str}")
+                    lines.append(
+                        f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ✅{dur_str}"
+                    )
                 elif result == "flood_wait":
-                    lines.append(f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ⚠️{flood_str}")
+                    lines.append(
+                        f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ⚠️{flood_str}"
+                    )
                 else:
                     err = r.get("error_msg") or ""
-                    lines.append(f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ❌{dur_str}")
+                    lines.append(
+                        f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ❌{dur_str}"
+                    )
                     if err:
                         lines.append(f"  └ <code>{_html.escape(err[:70])}</code>")
 
@@ -2367,4 +2411,6 @@ async def _adm_logs(
         text = text[:3800] + "\n\n<i>...обрезано</i>"
 
     kb = _logs_kb(source, status_filter, page, has_next)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )

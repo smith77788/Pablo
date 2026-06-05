@@ -77,7 +77,7 @@ async def _users_list_text(
         banned_mark = "🚫 " if u["is_banned"] else ""
         username = u["username"] or f"#{u['user_id']}"
         reg_dt = u.get("registered_at")
-        reg_str = reg_dt.strftime('%d.%m.%y') if reg_dt else "—"
+        reg_str = reg_dt.strftime("%d.%m.%y") if reg_dt else "—"
         text += (
             f"{banned_mark}{emoji} <b>@{username}</b>\n"
             f"  ID: <code>{u['user_id']}</code>\n"
@@ -529,12 +529,27 @@ async def cb_ban(
     await callback.answer(f"✅ Пользователь #{user_id} забанен.", show_alert=True)
     # Обновить экран действий, чтобы кнопки бана/разбана отразили новый статус
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="💳 Выдать подписку", callback_data=AdminUserCb(action="grant_plan", user_id=user_id))
-    kb.button(text="❌ Забрать подписку", callback_data=AdminUserCb(action="revoke_plan", user_id=user_id))
-    kb.button(text="⚔️ Выдать Strike", callback_data=AdminUserCb(action="grant_strike", user_id=user_id))
-    kb.button(text="⚔️ Забрать Strike", callback_data=AdminUserCb(action="revoke_strike", user_id=user_id))
-    kb.button(text="✅ Разбанить", callback_data=AdminUserCb(action="unban", user_id=user_id))
+    kb.button(
+        text="💳 Выдать подписку",
+        callback_data=AdminUserCb(action="grant_plan", user_id=user_id),
+    )
+    kb.button(
+        text="❌ Забрать подписку",
+        callback_data=AdminUserCb(action="revoke_plan", user_id=user_id),
+    )
+    kb.button(
+        text="⚔️ Выдать Strike",
+        callback_data=AdminUserCb(action="grant_strike", user_id=user_id),
+    )
+    kb.button(
+        text="⚔️ Забрать Strike",
+        callback_data=AdminUserCb(action="revoke_strike", user_id=user_id),
+    )
+    kb.button(
+        text="✅ Разбанить", callback_data=AdminUserCb(action="unban", user_id=user_id)
+    )
     kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
     kb.adjust(1)
     try:
@@ -561,12 +576,27 @@ async def cb_unban(
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
     # Обновить экран действий, чтобы кнопки бана/разбана отразили новый статус
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="💳 Выдать подписку", callback_data=AdminUserCb(action="grant_plan", user_id=user_id))
-    kb.button(text="❌ Забрать подписку", callback_data=AdminUserCb(action="revoke_plan", user_id=user_id))
-    kb.button(text="⚔️ Выдать Strike", callback_data=AdminUserCb(action="grant_strike", user_id=user_id))
-    kb.button(text="⚔️ Забрать Strike", callback_data=AdminUserCb(action="revoke_strike", user_id=user_id))
-    kb.button(text="🚫 Забанить", callback_data=AdminUserCb(action="ban", user_id=user_id))
+    kb.button(
+        text="💳 Выдать подписку",
+        callback_data=AdminUserCb(action="grant_plan", user_id=user_id),
+    )
+    kb.button(
+        text="❌ Забрать подписку",
+        callback_data=AdminUserCb(action="revoke_plan", user_id=user_id),
+    )
+    kb.button(
+        text="⚔️ Выдать Strike",
+        callback_data=AdminUserCb(action="grant_strike", user_id=user_id),
+    )
+    kb.button(
+        text="⚔️ Забрать Strike",
+        callback_data=AdminUserCb(action="revoke_strike", user_id=user_id),
+    )
+    kb.button(
+        text="🚫 Забанить", callback_data=AdminUserCb(action="ban", user_id=user_id)
+    )
     kb.button(text="◀️ Назад", callback_data=AdminUserCb(action="list", page=0))
     kb.adjust(1)
     try:

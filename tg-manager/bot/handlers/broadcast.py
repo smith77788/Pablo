@@ -419,7 +419,9 @@ async def cb_detail(
     callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
 ) -> None:
 
-    bc = await db.get_broadcast(pool, callback_data.broadcast_id, bot_id=callback_data.bot_id)
+    bc = await db.get_broadcast(
+        pool, callback_data.broadcast_id, bot_id=callback_data.bot_id
+    )
     if not bc:
         await callback.answer("Рассылка не найдена.", show_alert=True)
         return
@@ -519,7 +521,9 @@ async def cb_bc_stat(
     callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
 ) -> None:
     """Show detailed stats for a completed broadcast."""
-    bc = await db.get_broadcast(pool, callback_data.broadcast_id, bot_id=callback_data.bot_id)
+    bc = await db.get_broadcast(
+        pool, callback_data.broadcast_id, bot_id=callback_data.bot_id
+    )
     if not bc:
         await callback.answer("Рассылка не найдена.", show_alert=True)
         return

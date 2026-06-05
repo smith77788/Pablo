@@ -710,12 +710,16 @@ async def _group_import_all_bg(
         for idx, acc in enumerate(accounts):
             try:
                 dialogs = (
-                    await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc)
+                    await account_manager.get_dialogs(
+                        acc["session_str"], limit=200, _acc=acc
+                    )
                     or []
                 )
                 groups = [
-                    d for d in dialogs
-                    if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+                    d
+                    for d in dialogs
+                    if d.get("type")
+                    in ("megagroup", "supergroup", "group", "chat", "gigagroup")
                 ]
                 if groups:
                     await upsert_managed_channels(pool, owner_id, acc["id"], groups)
@@ -746,7 +750,9 @@ async def _group_import_all_bg(
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ В меню групп", callback_data=GroupFCb(action="menu"))
     try:
-        await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await progress_msg.edit_text(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
     except Exception:
         log_exc_swallow(log, "_group_import_all_bg: сбой финального отчёта")
 

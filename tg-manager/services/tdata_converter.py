@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib
 import io
 import logging
 import os
 import struct
-from typing import Optional
+from typing import Any, Optional, cast
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ def _xor(a: bytes, b: bytes) -> bytes:
 
 def _aes_ige_decrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
     """AES-256-IGE ����������� (����� MTProto/TDesktop)."""
-    from Crypto.Cipher import AES as _AES  # type: ignore
+    crypto_cipher = importlib.import_module("Crypto.Cipher")
+    _AES = cast(Any, getattr(crypto_cipher, "AES"))
 
     aes = _AES.new(key, _AES.MODE_ECB)
     m_prev, c_prev = iv[:16], iv[16:]
@@ -412,9 +414,8 @@ def convert_tdata(tdata_dir: str, passphrase: str = "") -> list[dict]:
 def check_pycryptodome() -> bool:
     """��������� ������� pycryptodome (AES)."""
     try:
-        from Crypto.Cipher import AES  # type: ignore  # noqa
+        importlib.import_module("Crypto.Cipher.AES")
 
         return True
     except ImportError:
         return False
-

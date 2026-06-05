@@ -1206,6 +1206,7 @@ async def cb_do_bulk_create(
 
     # ── Pre-flight: проверить возраст и trust_score аккаунтов ────────────────
     from datetime import datetime, timezone as _tz
+
     acc_ids = [a["id"] for a in accounts]
     health_rows = await pool.fetch(
         "SELECT id, added_at, trust_score, first_name, phone FROM tg_accounts WHERE id = ANY($1)",
@@ -1538,7 +1539,9 @@ async def fsm_bpchans_text(
         parse_mode="HTML",
     )
     task = asyncio.create_task(
-        _bulk_post_chans_bg(pool, acc_id, progress_msg, acc, selected_ids, ch_map, text, total)
+        _bulk_post_chans_bg(
+            pool, acc_id, progress_msg, acc, selected_ids, ch_map, text, total
+        )
     )
     _treg.register(
         message.from_user.id,
@@ -1690,7 +1693,9 @@ async def cb_leave_show_dialogs(
     from services import account_manager
 
     try:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+        dialogs = await account_manager.get_dialogs(
+            acc["session_str"], limit=30, _acc=acc
+        )
     except Exception as _e:
         log.warning("leave get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
@@ -2448,7 +2453,9 @@ async def cb_members_dialogs(
     from services import account_manager
 
     try:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+        dialogs = await account_manager.get_dialogs(
+            acc["session_str"], limit=30, _acc=acc
+        )
     except Exception as _e:
         log.warning("members get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
@@ -3405,7 +3412,13 @@ async def _botfather_create_bg(
             done_ops += 1
             try:
                 await msg.edit_text(
-                    _progress_text("Создание ботов...", done_ops, total, len(results_ok), len(results_err)),
+                    _progress_text(
+                        "Создание ботов...",
+                        done_ops,
+                        total,
+                        len(results_ok),
+                        len(results_err),
+                    ),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -3425,7 +3438,9 @@ async def _botfather_create_bg(
     lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
     lines += results_ok + results_err
     try:
-        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+        await msg.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        )
     except Exception:
         log_exc_swallow(log, "_botfather_create_bg: сбой финального отчёта")
 
@@ -3465,7 +3480,15 @@ async def fsm_botfather_username(
         parse_mode="HTML",
     )
     task = asyncio.create_task(
-        _botfather_create_bg(pool, message.from_user.id, msg, list(accounts), base_username, data.get("bot_name", ""), total)
+        _botfather_create_bg(
+            pool,
+            message.from_user.id,
+            msg,
+            list(accounts),
+            base_username,
+            data.get("bot_name", ""),
+            total,
+        )
     )
     _treg.register(
         message.from_user.id,
@@ -3571,7 +3594,9 @@ async def cb_react_dialogs(
     from services import account_manager
 
     try:
-        dialogs = await account_manager.get_dialogs(acc["session_str"], limit=30, _acc=acc)
+        dialogs = await account_manager.get_dialogs(
+            acc["session_str"], limit=30, _acc=acc
+        )
     except Exception as _e:
         log.warning("react_dialogs get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
@@ -4864,7 +4889,9 @@ async def _bulk_leave_channel_bg(
                 err_list.append(f"❌ {label}: {str(e)[:50]}")
             if result is not None:
                 if isinstance(result, dict) and result.get("banned"):
-                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                    await _db.deactivate_account(
+                        pool, acc["id"], "banned detected in bulk op"
+                    )
                     err_list.append(f"❌ {label}: забанен")
                 elif isinstance(result, dict) and result.get("flood_wait"):
                     err_list.append(f"⏳ {label}: flood_wait, пропущен")
@@ -4874,7 +4901,9 @@ async def _bulk_leave_channel_bg(
                     err_list.append(f"❌ {label}: не удалось")
             try:
                 await msg.edit_text(
-                    _progress_text("Покидаю каналы...", idx + 1, total, len(ok_list), len(err_list)),
+                    _progress_text(
+                        "Покидаю каналы...", idx + 1, total, len(ok_list), len(err_list)
+                    ),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -4893,7 +4922,9 @@ async def _bulk_leave_channel_bg(
 
     lines = [f"🚪 <b>Выход из {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
     try:
-        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+        await msg.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        )
     except Exception:
         log_exc_swallow(log, "_bulk_leave_channel_bg: сбой финального отчёта")
 
@@ -4928,15 +4959,15 @@ async def fsm_bulk_channel_id(
         await message.answer("⚠️ Нет выбранных аккаунтов. Начните заново: /ops")
         return
 
-    from services import account_manager
-
     if op == "leave":
         total = len(accounts)
         msg = await message.answer(
             _progress_text("Покидаю каналы...", 0, total, 0, 0), parse_mode="HTML"
         )
         task = asyncio.create_task(
-            _bulk_leave_channel_bg(pool, message.from_user.id, msg, list(accounts), channel_ref, total)
+            _bulk_leave_channel_bg(
+                pool, message.from_user.id, msg, list(accounts), channel_ref, total
+            )
         )
         _treg.register(
             message.from_user.id,
@@ -4980,22 +5011,31 @@ async def _bulk_post_to_channel_bg(
             label = html.escape(acc["first_name"] or acc["phone"])
             acc_id_cur = acc.get("id")
             result = await account_manager.post_to_channel(
-                acc["session_str"], channel_ref, text_to_post,
-                access_hash=bulk_access_hash, _acc=dict(acc),
+                acc["session_str"],
+                channel_ref,
+                text_to_post,
+                access_hash=bulk_access_hash,
+                _acc=dict(acc),
             )
             if result.get("banned"):
                 if acc_id_cur:
-                    await _db.deactivate_account(pool, acc_id_cur, "banned detected in bulk op")
+                    await _db.deactivate_account(
+                        pool, acc_id_cur, "banned detected in bulk op"
+                    )
                 err_list.append(f"❌ {label}: забанен")
             elif result.get("flood_wait"):
                 err_list.append(f"⏳ {label}: flood_wait, пропущен")
             elif "msg_id" in result:
                 ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
             else:
-                err_list.append(f"❌ {label}: {html.escape(result.get('error', 'ошибка')[:60])}")
+                err_list.append(
+                    f"❌ {label}: {html.escape(result.get('error', 'ошибка')[:60])}"
+                )
             try:
                 await msg.edit_text(
-                    _progress_text("Публикую посты...", idx + 1, total, len(ok_list), len(err_list)),
+                    _progress_text(
+                        "Публикую посты...", idx + 1, total, len(ok_list), len(err_list)
+                    ),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -5012,9 +5052,13 @@ async def _bulk_post_to_channel_bg(
     except Exception:
         log_exc_swallow(log, "_bulk_post_to_channel_bg: неожиданная ошибка")
 
-    lines = [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
+    lines = (
+        [f"📤 <b>Публикация в {html.escape(channel_ref)}</b>\n"] + ok_list + err_list
+    )
     try:
-        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+        await msg.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        )
     except Exception:
         log_exc_swallow(log, "_bulk_post_to_channel_bg: сбой финального отчёта")
 
@@ -5064,8 +5108,14 @@ async def fsm_bulk_post_text(
         )
         task = asyncio.create_task(
             _bulk_post_to_channel_bg(
-                pool, message.from_user.id, msg,
-                list(accounts), channel_ref, text_to_post, bulk_access_hash, total,
+                pool,
+                message.from_user.id,
+                msg,
+                list(accounts),
+                channel_ref,
+                text_to_post,
+                bulk_access_hash,
+                total,
             )
         )
         _treg.register(
@@ -5265,7 +5315,9 @@ async def _bulk_update_profile_bg(
                         acc["session_str"], actual_value, _acc=dict(acc)
                     )
                     if isinstance(result, dict) and result.get("banned"):
-                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        await _db.deactivate_account(
+                            pool, acc["id"], "banned detected in bulk op"
+                        )
                         err_list.append(f"❌ {label}: забанен")
                     elif isinstance(result, dict) and result.get("flood_wait"):
                         err_list.append(f"⏳ {label}: flood_wait, пропущен")
@@ -5278,7 +5330,9 @@ async def _bulk_update_profile_bg(
                         acc["session_str"], **{field: value}, _acc=dict(acc)
                     )
                     if isinstance(result, dict) and result.get("banned"):
-                        await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                        await _db.deactivate_account(
+                            pool, acc["id"], "banned detected in bulk op"
+                        )
                         err_list.append(f"❌ {label}: забанен")
                     elif isinstance(result, dict) and result.get("flood_wait"):
                         err_list.append(f"⏳ {label}: flood_wait, пропущен")
@@ -5290,7 +5344,9 @@ async def _bulk_update_profile_bg(
                 err_list.append(f"❌ {label}: {str(e)[:50]}")
             try:
                 await msg.edit_text(
-                    _progress_text("Обновляю профили...", i + 1, total, len(ok_list), len(err_list)),
+                    _progress_text(
+                        "Обновляю профили...", i + 1, total, len(ok_list), len(err_list)
+                    ),
                     parse_mode="HTML",
                 )
             except Exception:
@@ -5308,7 +5364,9 @@ async def _bulk_update_profile_bg(
 
     lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
     try:
-        await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+        await msg.edit_text(
+            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        )
     except Exception:
         log_exc_swallow(log, "_bulk_update_profile_bg: сбой финального отчёта")
 
@@ -5348,7 +5406,9 @@ async def fsm_update_profile(
             _progress_text("Обновляю профили...", 0, total, 0, 0), parse_mode="HTML"
         )
         task = asyncio.create_task(
-            _bulk_update_profile_bg(pool, message.from_user.id, msg, list(accounts), field, value, total)
+            _bulk_update_profile_bg(
+                pool, message.from_user.id, msg, list(accounts), field, value, total
+            )
         )
         _treg.register(
             message.from_user.id,
@@ -5517,7 +5577,9 @@ async def _bulk_dm_bg(
 
             u_escaped = html.escape(username)
             if result.get("banned"):
-                await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                await _db.deactivate_account(
+                    pool, acc["id"], "banned detected in bulk op"
+                )
                 active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
                 err_list.append(f"❌ @{u_escaped}: аккаунт забанен")
             elif result.get("flood_wait"):
@@ -5614,7 +5676,16 @@ async def fsm_bulk_dm_text(
         parse_mode="HTML",
     )
     task = asyncio.create_task(
-        _bulk_dm_bg(pool, message.from_user.id, progress_msg, list(accounts), usernames, text_to_send, base_delay, total)
+        _bulk_dm_bg(
+            pool,
+            message.from_user.id,
+            progress_msg,
+            list(accounts),
+            usernames,
+            text_to_send,
+            base_delay,
+            total,
+        )
     )
     _treg.register(
         message.from_user.id,
@@ -5874,8 +5945,16 @@ async def cb_bulk_chan_exec(
     acc_by_id = {acc["id"]: dict(acc) for acc in accounts}
     task = asyncio.create_task(
         _bulk_chan_exec_bg(
-            pool, callback.from_user.id, progress_msg,
-            list(channels), acc_by_id, op, base_uname, value, op_label, total,
+            pool,
+            callback.from_user.id,
+            progress_msg,
+            list(channels),
+            acc_by_id,
+            op,
+            base_uname,
+            value,
+            op_label,
+            total,
         )
     )
     _treg.register(

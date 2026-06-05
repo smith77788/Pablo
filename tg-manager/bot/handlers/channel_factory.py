@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-import random
 
 import asyncpg
 from aiogram import F, Router
@@ -34,7 +33,6 @@ from bot.states import (
 from bot.utils.op_helpers import (
     _acc_label,
     _get_active_accounts,
-    _progress_text,
     backoff,
 )
 from services import session_simulator
@@ -1128,13 +1126,19 @@ async def _chanf_be_bg(
         for acc in accounts:
             acc = dict(acc)
             try:
-                dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+                dialogs = (
+                    await account_manager.get_dialogs(acc["session_str"], _acc=acc)
+                    or []
+                )
             except Exception as _e:
-                log.warning("_chanf_be_bg get_dialogs failed acc=%s: %s", acc.get("id"), _e)
+                log.warning(
+                    "_chanf_be_bg get_dialogs failed acc=%s: %s", acc.get("id"), _e
+                )
                 err_total += 1
                 continue
             channels = [
-                d for d in dialogs
+                d
+                for d in dialogs
                 if d.get("type") in ("channel", "megagroup", "supergroup")
             ]
             for ch in channels:

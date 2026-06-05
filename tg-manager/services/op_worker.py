@@ -16,7 +16,7 @@ from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10  # секунд между проверками очереди
-_MAX_PARALLEL = 8   # максимум параллельных операций глобально
+_MAX_PARALLEL = 8  # максимум параллельных операций глобально
 _MAX_PARALLEL_PER_OWNER = 3  # максимум на одного владельца (далее в коде)
 
 # Реестр аккаунтов, занятых активными операциями op_worker.
@@ -122,7 +122,9 @@ def _classify_op_error(exc: Exception) -> str:
     return "retry"
 
 
-async def _deactivate_dead_session(pool: asyncpg.Pool, exc: Exception, params: dict) -> None:
+async def _deactivate_dead_session(
+    pool: asyncpg.Pool, exc: Exception, params: dict
+) -> None:
     """При AUTH_KEY/SESSION_REVOKED ошибке немедленно деактивировать аккаунт в БД.
 
     Без этого аккаунт продолжает попадать в выборки resource_selector до следующего
@@ -433,7 +435,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     try:
         owner_sem = await _get_owner_semaphore(owner_id)
     except Exception:
-        log.exception("op_worker: failed to get semaphore for owner=%d op=%d", owner_id, op_id)
+        log.exception(
+            "op_worker: failed to get semaphore for owner=%d op=%d", owner_id, op_id
+        )
         async with _active_lock:
             _active_op_ids.discard(op_id)
         return
@@ -505,6 +509,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_strike(pool, bot, op_id, owner_id, params)
             elif op_type == "gift_transfer":
                 from services.gift_operation import _exec_gift_transfer
+
                 result = await _exec_gift_transfer(pool, op_id, params)
             else:
                 log.warning(
@@ -586,13 +591,16 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # Memory Feedback Loop: mark linked intent as completed
             try:
                 from database import db as _db
+
                 intent_row = await _db.get_intent_by_op(pool, op_id)
                 if intent_row:
                     await _db.update_intent_status(
                         pool, intent_row["id"], intent_row["owner_id"], "completed"
                     )
                     await _db.save_intent_feedback(
-                        pool, intent_row["id"], intent_row["owner_id"],
+                        pool,
+                        intent_row["id"],
+                        intent_row["owner_id"],
                         {
                             "op_id": op_id,
                             "actual_done": result.get("ok", 0),
@@ -700,7 +708,9 @@ async def _exec_bulk_bot_edit(
                 cmd_part, desc_part = line.split(" - ", 1)
                 cmd = cmd_part.strip().lstrip("/")
                 if cmd:
-                    commands_payload.append({"command": cmd, "description": desc_part.strip()[:256]})
+                    commands_payload.append(
+                        {"command": cmd, "description": desc_part.strip()[:256]}
+                    )
 
     async with aiohttp.ClientSession() as sess:
         for b in bots_rows:
@@ -720,7 +730,13 @@ async def _exec_bulk_bot_edit(
                         timeout=aiohttp.ClientTimeout(total=10),
                     )
                 else:
-                    param_key = "name" if field == "name" else "description" if field == "desc" else "short_description"
+                    param_key = (
+                        "name"
+                        if field == "name"
+                        else "description"
+                        if field == "desc"
+                        else "short_description"
+                    )
                     resp = await sess.post(
                         f"https://api.telegram.org/bot{b['token']}/{method}",
                         json={param_key: value},
@@ -739,7 +755,9 @@ async def _exec_bulk_bot_edit(
                     fail_count += 1
                     log.warning(
                         "op_worker bulk_bot_edit: bot=%s field=%s api_error=%s",
-                        b.get("id"), field, data_resp.get("description"),
+                        b.get("id"),
+                        field,
+                        data_resp.get("description"),
                     )
             except Exception as e:
                 fail_count += 1
@@ -766,8 +784,7 @@ async def _exec_mass_publish(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Опубликовать сообщение во все управляемые каналы/группы владельца."""
-    from services import account_manager, session_simulator
-    import random
+    from services import account_manager
 
     target = params.get("target", "channels")
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
@@ -792,7 +809,9 @@ async def _exec_mass_publish(
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
 
     acc_ids = [a["id"] for a in accounts_rows]
-    chan_filter = f"AND mc.channel_id = ANY($3::bigint[])" if explicit_channel_ids else ""
+    chan_filter = (
+        "AND mc.channel_id = ANY($3::bigint[])" if explicit_channel_ids else ""
+    )
     fetch_params: list = [owner_id, acc_ids]
     if explicit_channel_ids:
         fetch_params.append(explicit_channel_ids)
@@ -809,16 +828,29 @@ async def _exec_mass_publish(
     )
 
     if not db_pairs:
-        return {"status": "done", "ok": 0, "failed": 0, "summary": "Нет каналов для рассылки"}
+        return {
+            "status": "done",
+            "ok": 0,
+            "failed": 0,
+            "summary": "Нет каналов для рассылки",
+        }
 
     acc_map = {a["id"]: dict(a) for a in accounts_rows}
     targets = []
     for row in db_pairs:
         acc = acc_map.get(row["acc_id"])
         if acc:
-            targets.append((acc, {"id": row["id"], "title": row["title"],
-                                  "access_hash": row["access_hash"] or 0,
-                                  "type": row["type"] or "channel"}))
+            targets.append(
+                (
+                    acc,
+                    {
+                        "id": row["id"],
+                        "title": row["title"],
+                        "access_hash": row["access_hash"] or 0,
+                        "type": row["type"] or "channel",
+                    },
+                )
+            )
 
     total = len(targets)
     await pool.execute(
@@ -853,6 +885,7 @@ async def _exec_mass_publish(
             _infra_mem.record_account_op(acc["id"], "publish", success=True)
             try:
                 from services.flood_engine import record_success
+
                 await record_success(acc["id"], "publish")
             except Exception:
                 log_exc_swallow(log, "mass_publish: record_success failed")
@@ -863,17 +896,23 @@ async def _exec_mass_publish(
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
-            _infra_mem.record_account_op(acc["id"], "publish", success=False, error=err_str[:100])
+            _infra_mem.record_account_op(
+                acc["id"], "publish", success=False, error=err_str[:100]
+            )
             if flood_wait:
                 try:
                     from services.flood_engine import record_flood
+
                     await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_flood failed")
             await pool.execute(
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                 "VALUES($1,$2,$3,'error',$4)",
-                op_id, idx, str(dialog["id"]), err_str,
+                op_id,
+                idx,
+                str(dialog["id"]),
+                err_str,
             )
 
         await pool.execute(
@@ -953,7 +992,8 @@ async def _exec_bulk_join_inner(
         if (joins_today or 0) >= day_limit:
             log.info(
                 "bulk_join: аккаунт %s достиг дневного лимита join (%d), пропуск",
-                acc_dict.get("phone"), day_limit,
+                acc_dict.get("phone"),
+                day_limit,
             )
             skipped_by_limit += 1
             continue
@@ -988,7 +1028,10 @@ async def _exec_bulk_join_inner(
                     )
                     try:
                         from services.flood_engine import record_flood
-                        await record_flood(pool, acc["id"], _peer_flood_wait, "join", op_id)
+
+                        await record_flood(
+                            pool, acc["id"], _peer_flood_wait, "join", op_id
+                        )
                     except Exception:
                         log_exc_swallow(
                             log,
@@ -1000,15 +1043,25 @@ async def _exec_bulk_join_inner(
                     await pool.execute(
                         "INSERT INTO operation_log(op_id, step_num, target, status, message) "
                         "VALUES($1,$2,$3,'error',$4)",
-                        op_id, step, link, err_str,
+                        op_id,
+                        step,
+                        link,
+                        err_str,
                     )
                     await _audit(
-                        pool, owner_id, "join", "peer_flood",
-                        operation_id=op_id, account_id=acc["id"],
-                        target=link, error_msg=err_str, flood_wait_s=_peer_flood_wait,
+                        pool,
+                        owner_id,
+                        "join",
+                        "peer_flood",
+                        operation_id=op_id,
+                        account_id=acc["id"],
+                        target=link,
+                        error_msg=err_str,
+                        flood_wait_s=_peer_flood_wait,
                     )
                     await pool.execute(
-                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                        "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
+                        op_id,
                     )
                     break  # stop all remaining links for this account
                 if res.get("error"):
@@ -1182,7 +1235,8 @@ async def _exec_bulk_leave(
         if (leaves_today or 0) >= day_limit:
             log.info(
                 "bulk_leave: аккаунт %s достиг дневного лимита leave (%d), пропуск",
-                acc_dict.get("phone"), day_limit,
+                acc_dict.get("phone"),
+                day_limit,
             )
             skipped_by_limit += 1
             continue
@@ -1456,7 +1510,10 @@ async def _exec_global_presence_channel(
             target["id"],
         )
         if claimed == "UPDATE 0":
-            log.info("op_worker gp: target %d already claimed by another worker, skipping", target["id"])
+            log.info(
+                "op_worker gp: target %d already claimed by another worker, skipping",
+                target["id"],
+            )
             continue
 
         title = (
@@ -1498,7 +1555,11 @@ async def _exec_global_presence_channel(
                 )
                 await asyncio.sleep(wait_time)
                 result = await account_manager.create_channel(
-                    acc["session_str"], title, about=_about, megagroup=is_group, _acc=acc
+                    acc["session_str"],
+                    title,
+                    about=_about,
+                    megagroup=is_group,
+                    _acc=acc,
                 )
 
         if result.get("error"):
@@ -1552,7 +1613,8 @@ async def _exec_global_presence_channel(
             pause = random.uniform(90, 180) * session_simulator.chaos_factor()
             log.info(
                 "op_worker gp_channel: waiting %.0fs before assigning username '%s'",
-                pause, planned_username,
+                pause,
+                planned_username,
             )
             await asyncio.sleep(pause)
             err = await account_manager.set_channel_username(
@@ -1582,6 +1644,7 @@ async def _exec_global_presence_channel(
                 }
                 # ── Расширенная генерация вариантов username ──
                 from services.username_engine import slugify
+
                 variants = generate_username_variants(planned_username, geo)
 
                 # Добавляем город + случайное число
@@ -1594,6 +1657,7 @@ async def _exec_global_presence_channel(
                         variants.append(f"{cc}_{city_slug}{num}")
                 # Случайные числовые суффиксы
                 import random as _random
+
                 for _ in range(12):
                     variants.append(f"{planned_username}_{_random.randint(100, 999)}")
 
@@ -1682,7 +1746,9 @@ async def _exec_global_presence_channel(
                 access_hash=channel_access_hash,
                 _acc=dict(acc),
             )
-            log.info("op_worker gp_channel: initial post sent to channel_id=%s", channel_id)
+            log.info(
+                "op_worker gp_channel: initial post sent to channel_id=%s", channel_id
+            )
         except Exception:
             log_exc_swallow(log, f"initial post failed for channel_id={channel_id}")
 
@@ -1881,7 +1947,9 @@ async def _exec_global_presence_bot(
             target["id"],
         )
         if claimed == "UPDATE 0":
-            log.info("op_worker gp_bot: target %d already claimed, skipping", target["id"])
+            log.info(
+                "op_worker gp_bot: target %d already claimed, skipping", target["id"]
+            )
             continue
         await session_simulator.typing_delay(bot_name)
 
@@ -2026,8 +2094,8 @@ async def _exec_global_presence_bot(
 
 
 _MIN_ACCOUNT_AGE_DAYS = 14  # минимальный возраст аккаунта в системе для bulk-операций
-_MIN_TRUST_SCORE = 0.35      # минимальный trust_score для создания каналов
-_MAX_CHANNELS_PER_DAY = 2    # максимум каналов в сутки с одного аккаунта
+_MIN_TRUST_SCORE = 0.35  # минимальный trust_score для создания каналов
+_MAX_CHANNELS_PER_DAY = 2  # максимум каналов в сутки с одного аккаунта
 
 
 async def _exec_bulk_create_channels(
@@ -2036,7 +2104,7 @@ async def _exec_bulk_create_channels(
     """Массовое создание каналов через Telethon с умными задержками (из AI-ассистента)."""
     from services import account_manager, session_simulator
     import random
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
 
     prefix = params.get("prefix", "Channel")
     count = int(params.get("count", 5))
@@ -2065,7 +2133,9 @@ async def _exec_bulk_create_channels(
         added_at = acc_data["added_at"]
         trust_score = float(acc_data["trust_score"] or 0.5)
         if added_at:
-            age_days = (datetime.now(timezone.utc) - added_at.replace(tzinfo=timezone.utc)).days
+            age_days = (
+                datetime.now(timezone.utc) - added_at.replace(tzinfo=timezone.utc)
+            ).days
             if age_days < _MIN_ACCOUNT_AGE_DAYS:
                 return {
                     "status": "failed",
@@ -2088,12 +2158,15 @@ async def _exec_bulk_create_channels(
         """SELECT COUNT(*) FROM managed_channels
            WHERE acc_id=$1 AND owner_id=$2
              AND added_at >= now() - INTERVAL '24 hours'""",
-        acc["id"], owner_id,
+        acc["id"],
+        owner_id,
     )
     if (created_today or 0) >= _MAX_CHANNELS_PER_DAY:
         log.warning(
             "op_worker bulk_channels: daily cap reached acc=%s created_today=%s requested=%s",
-            acc["id"], created_today, count,
+            acc["id"],
+            created_today,
+            count,
         )
         return {
             "status": "failed",
@@ -2135,7 +2208,8 @@ async def _exec_bulk_create_channels(
             if raw_flood > 600:
                 # Flood wait too long to block the batch — skip this channel
                 log.warning(
-                    "op_worker bulk_channels: flood wait %ds too long — skipping", raw_flood
+                    "op_worker bulk_channels: flood wait %ds too long — skipping",
+                    raw_flood,
                 )
             else:
                 wait_time = raw_flood + 15
@@ -2335,7 +2409,9 @@ async def _exec_strike(
     )
 
     # Определяем режим: явный из params > настройки пользователя > "normal"
-    strike_mode = mode_from_params if mode_from_params in ("fast", "normal", "maximum") else None
+    strike_mode = (
+        mode_from_params if mode_from_params in ("fast", "normal", "maximum") else None
+    )
     if not strike_mode:
         try:
             _mode_row = await pool.fetchrow(

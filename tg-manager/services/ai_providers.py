@@ -130,7 +130,11 @@ def configured_providers() -> list[AiProvider]:
         if provider:
             providers["ollama"] = provider
 
-    default_order = "ollama,openrouter,groq,gemini" if "ollama" in providers else "openrouter,groq,gemini"
+    default_order = (
+        "ollama,openrouter,groq,gemini"
+        if "ollama" in providers
+        else "openrouter,groq,gemini"
+    )
     order = _csv_env("AI_PROVIDER_ORDER", default_order)
     ordered = [providers[name] for name in order if name in providers]
     ordered.extend(
