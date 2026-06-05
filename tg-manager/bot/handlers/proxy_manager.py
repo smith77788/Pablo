@@ -335,10 +335,13 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer("Проверяем прокси…")
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        "SELECT id, proxy_url, label FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            "SELECT id, proxy_url, label FROM user_proxies WHERE owner_id=$1 AND is_active=TRUE",
+            user_id,
+        )
+    except Exception:
+        rows = []
 
     if not rows:
         await callback.message.edit_text(
@@ -381,18 +384,21 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 fail_count += 1
                 lines.append(f"❌ {html.escape(row['label'] or row['proxy_url'][:30])}")
 
-            await conn.execute(
-                """UPDATE user_proxies
-                   SET is_alive=$1, last_check=$2,
-                       latency_avg_ms=CASE WHEN $3::int IS NOT NULL THEN $3::int
-                                           ELSE latency_avg_ms END,
+            try:
+                await conn.execute(
+                    """UPDATE user_proxies
+                       SET is_alive=$1, last_check=$2,
+                           latency_avg_ms=CASE WHEN $3::int IS NOT NULL THEN $3::int
+                                               ELSE latency_avg_ms END,
                        last_checked_at=$2
-                   WHERE id=$4""",
-                alive,
-                now,
-                latency_ms,
-                row["id"],
-            )
+                       WHERE id=$4""",
+                    alive,
+                    now,
+                    latency_ms,
+                    row["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, f"Не удалось обновить прокси id={row['id']}")
             # Log to proxy_health_log
             try:
                 await conn.execute(
@@ -448,12 +454,15 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             country = geo.get("geo_country") or "?"
             city = geo.get("geo_city") or "?"
             lines.append(f"• {label} → {country}, {city}")
-            await pool.execute(
-                "UPDATE user_proxies SET geo_country=$1, geo_city=$2 WHERE id=$3",
-                geo.get("geo_country"),
-                geo.get("geo_city"),
-                row["id"],
-            )
+            try:
+                await pool.execute(
+                    "UPDATE user_proxies SET geo_country=$1, geo_city=$2 WHERE id=$3",
+                    geo.get("geo_country"),
+                    geo.get("geo_city"),
+                    row["id"],
+                )
+            except Exception:
+                log_exc_swallow(log, f"Не удалось сохранить гео для прокси id={row['id']}")
             updated += 1
         else:
             lines.append(f"• {label} → ❓ не определено")
@@ -482,21 +491,33 @@ async def cb_proxy_delete(
     user_id = callback.from_user.id
     proxy_id = callback_data.proxy_id
 
-    row = await pool.fetchrow(
-        "SELECT label, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2",
-        proxy_id,
-        user_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT label, proxy_url FROM user_proxies WHERE id=$1 AND owner_id=$2",
+            proxy_id,
+            user_id,
+        )
+    except Exception:
+        await callback.answer("Ошибка при загрузке прокси.", show_alert=True)
+        return
     if not row:
         await callback.answer("Прокси не найден.", show_alert=True)
         return
     await callback.answer()
 
-    await pool.execute(
-        "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2",
-        proxy_id,
-        user_id,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2",
+            proxy_id,
+            user_id,
+        )
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ Не удалось удалить прокси: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_menu_kb().as_markup(),
+        )
+        return
 
     label = row["label"] or row["proxy_url"]
     await callback.message.edit_text(

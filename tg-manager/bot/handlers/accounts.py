@@ -1021,11 +1021,14 @@ async def _finalize_login(
 
     # Check for duplicate phone before insert (ON CONFLICT will update, but warn user)
     normalized_phone = info.get("phone") or phone
-    existing = await pool.fetchrow(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND phone=$2",
-        message.from_user.id,
-        normalized_phone,
-    )
+    try:
+        existing = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND phone=$2",
+            message.from_user.id,
+            normalized_phone,
+        )
+    except Exception:
+        existing = None
 
     try:
         await db.add_tg_account(
@@ -1436,11 +1439,14 @@ async def cb_set_proxy(
 ) -> None:
     await callback.answer()
     acc_id = callback_data.acc_id
-    proxies = await pool.fetch(
-        "SELECT id, label, proxy_url, is_alive FROM user_proxies "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY label",
-        callback.from_user.id,
-    )
+    try:
+        proxies = await pool.fetch(
+            "SELECT id, label, proxy_url, is_alive FROM user_proxies "
+            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY label",
+            callback.from_user.id,
+        )
+    except Exception:
+        proxies = []
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🚫 Без прокси",
@@ -1480,30 +1486,33 @@ async def cb_assign_proxy(
 ) -> None:
     acc_id = callback_data.acc_id
     proxy_id = callback_data.page  # 0 = no proxy, >0 = proxy id
-    if proxy_id == 0:
-        await pool.execute(
-            "UPDATE tg_accounts SET proxy_id=NULL WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            callback.from_user.id,
-        )
-        await callback.answer("✅ Прокси снят", show_alert=True)
-    else:
-        # Verify proxy belongs to this user
-        px = await pool.fetchrow(
-            "SELECT id FROM user_proxies WHERE id=$1 AND owner_id=$2",
-            proxy_id,
-            callback.from_user.id,
-        )
-        if not px:
-            await callback.answer("Прокси не найден", show_alert=True)
-            return
-        await pool.execute(
-            "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
-            proxy_id,
-            acc_id,
-            callback.from_user.id,
-        )
-        await callback.answer("✅ Прокси назначен", show_alert=True)
+    try:
+        if proxy_id == 0:
+            await pool.execute(
+                "UPDATE tg_accounts SET proxy_id=NULL WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                callback.from_user.id,
+            )
+            await callback.answer("✅ Прокси снят", show_alert=True)
+        else:
+            px = await pool.fetchrow(
+                "SELECT id FROM user_proxies WHERE id=$1 AND owner_id=$2",
+                proxy_id,
+                callback.from_user.id,
+            )
+            if not px:
+                await callback.answer("Прокси не найден", show_alert=True)
+                return
+            await pool.execute(
+                "UPDATE tg_accounts SET proxy_id=$1 WHERE id=$2 AND owner_id=$3",
+                proxy_id,
+                acc_id,
+                callback.from_user.id,
+            )
+            await callback.answer("✅ Прокси назначен", show_alert=True)
+    except Exception as exc:
+        await callback.answer(f"❌ Ошибка: {str(exc)[:80]}", show_alert=True)
+        return
     # Refresh account view
     acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
     if acc:
@@ -2232,12 +2241,15 @@ async def cb_purge_expired_sessions(
     uid = callback.from_user.id
     await callback.answer()
 
-    expired = await pool.fetch(
-        """SELECT id, first_name, phone FROM tg_accounts
-           WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE
-           ORDER BY added_at DESC""",
-        uid,
-    )
+    try:
+        expired = await pool.fetch(
+            """SELECT id, first_name, phone FROM tg_accounts
+               WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE
+               ORDER BY added_at DESC""",
+            uid,
+        )
+    except Exception:
+        expired = []
     if not expired:
         await callback.message.edit_text(
             "✅ <b>Нет аккаунтов с истёкшей сессией</b>",
@@ -2274,14 +2286,24 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
     uid = callback.from_user.id
     await callback.answer("🧹 Удаляю...")
 
-    result = await pool.execute(
-        "DELETE FROM tg_accounts WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE",
-        uid,
-    )
     try:
-        deleted = int(str(result).split()[-1])
-    except (ValueError, IndexError):
-        deleted = 0
+        result = await pool.execute(
+            "DELETE FROM tg_accounts WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE",
+            uid,
+        )
+        try:
+            deleted = int(str(result).split()[-1])
+        except (ValueError, IndexError):
+            deleted = 0
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при удалении:</b> <code>{escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
