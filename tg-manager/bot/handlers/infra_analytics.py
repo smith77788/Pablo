@@ -940,6 +940,17 @@ async def cb_intelligence_report(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_apply"))
 async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    from bot.utils.subscription import require_plan
+    from bot.keyboards import subscription_locked_markup
+
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            "🔒 <b>Авто-балансировка — Starter+</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Применяю...")
     uid = callback.from_user.id
 

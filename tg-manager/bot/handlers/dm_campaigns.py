@@ -140,7 +140,15 @@ async def cb_dm_menu(
 
 
 @router.callback_query(DmCb.filter(F.action == "new"))
-async def cb_dm_new(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_dm_new(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("DM-кампании", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     await state.set_state(DmCampaignFSM.waiting_name)
     kb = InlineKeyboardBuilder()
@@ -509,6 +517,14 @@ async def cb_dm_launch_or_draft(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("DM-кампании", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     sd = await state.get_data()
     name = sd.get("dm_name", "")

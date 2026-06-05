@@ -1179,7 +1179,7 @@ async def cb_do_bulk_create(
             "SELECT a.id, a.session_str, a.first_name, a.phone, "
             "a.device_model, a.system_version, a.app_version, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
             callback.from_user.id,
             selected_ids,
         )
@@ -1188,7 +1188,7 @@ async def cb_do_bulk_create(
             "SELECT a.id, a.session_str, a.first_name, a.phone, "
             "a.device_model, a.system_version, a.app_version, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=TRUE",
+            "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL",
             callback.from_user.id,
         )
 
@@ -2942,7 +2942,7 @@ async def _run_invite_bg(
         "SELECT a.id, a.tg_user_id, a.session_str, a.first_name, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=TRUE"
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL"
     )
     if selected_acc_ids:
         accounts = await pool.fetch(
@@ -3451,7 +3451,7 @@ async def fsm_botfather_username(
         "SELECT a.id, a.session_str, a.first_name, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
         message.from_user.id,
         selected_ids,
     )
@@ -4916,7 +4916,7 @@ async def fsm_bulk_channel_id(
             "SELECT a.id, a.session_str, a.first_name, a.phone, "
             "a.device_model, a.system_version, a.app_version, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
             message.from_user.id,
             selected_ids,
         )
@@ -5041,7 +5041,7 @@ async def fsm_bulk_post_text(
             "SELECT a.id, a.session_str, a.first_name, a.phone, "
             "a.device_model, a.system_version, a.app_version, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
             message.from_user.id,
             selected_ids,
         )
@@ -5136,7 +5136,7 @@ async def fsm_join_invite_combined(
             "SELECT a.id, a.session_str, a.first_name, a.phone, "
             "a.device_model, a.system_version, a.app_version, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
             message.from_user.id,
             selected_ids,
         )
@@ -5336,7 +5336,7 @@ async def fsm_update_profile(
             "SELECT a.id, a.session_str, a.first_name, a.phone, "
             "a.device_model, a.system_version, a.app_version, p.proxy_url "
             "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[])",
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
             message.from_user.id,
             selected_ids,
         )
@@ -5594,7 +5594,7 @@ async def fsm_bulk_dm_text(
         "SELECT a.id, a.session_str, a.first_name, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE",
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         message.from_user.id,
         selected_ids,
     )
@@ -5833,7 +5833,7 @@ async def cb_bulk_chan_exec(
         "SELECT a.id, a.session_str, a.first_name, a.phone, "
         "a.device_model, a.system_version, a.app_version, p.proxy_url "
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE",
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         callback.from_user.id,
         selected_ids,
     )

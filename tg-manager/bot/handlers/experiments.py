@@ -334,6 +334,14 @@ async def cb_add_variant(
 async def cb_exp_start(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("A/B тесты", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return

@@ -236,6 +236,14 @@ async def cb_seo_analyze(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO-анализ", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
 
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
@@ -335,6 +343,14 @@ async def cb_seo_analyze(
 async def cb_seo_keywords(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO — ключевые слова", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
 
     await callback.answer()
     keywords = await db.get_top_keywords(pool, callback_data.bot_id, limit=20)
@@ -732,6 +748,14 @@ async def cb_seo_chan_menu(
 async def cb_seo_chan_analyze(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO-анализ канала", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
@@ -853,6 +877,14 @@ async def cb_seo_chan_export_txt(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
     """Send SEO analysis as a plain-text message for easy copy-paste."""
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Экспорт SEO-анализа", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
@@ -938,6 +970,14 @@ async def cb_seo_chan_ai(
     http: aiohttp.ClientSession,
     state: FSMContext,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("AI SEO-оптимизация", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
@@ -1549,6 +1589,14 @@ async def _apply_chan_field(
 async def cb_seo_apply(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO-оптимизация", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
@@ -1858,6 +1906,14 @@ async def cb_seo_preview(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO-превью", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -1938,6 +1994,14 @@ async def cb_seo_preview(
 async def cb_seo_chan_preview(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("SEO-превью канала", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     chan_id = callback_data.chan_id
     chan = await pool.fetchrow(
         "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
@@ -1998,6 +2062,14 @@ async def cb_seo_chan_preview(
 async def cb_seo_momentum(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Динамика позиций", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     bot_id = callback_data.bot_id
     row = await db.get_bot(pool, bot_id, callback.from_user.id)
     if not row:
@@ -2086,6 +2158,14 @@ async def cb_seo_content_gap(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Keyword Gap анализ", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     bot_id = callback_data.bot_id
     row = await db.get_bot(pool, bot_id, callback.from_user.id)
     if not row:
@@ -2168,6 +2248,14 @@ async def cb_seo_content_gap(
 async def cb_seo_chan_content_gap(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Keyword Gap — канал", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
@@ -2272,6 +2360,14 @@ async def cb_seo_chan_content_gap(
 async def cb_seo_uname_alts(
     callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Альтернативы username", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     is_chan = callback_data.action == "chan_uname_alts"
 
     if is_chan:
