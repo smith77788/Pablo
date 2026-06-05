@@ -785,7 +785,7 @@ async def cb_mp_confirm(
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
         f"a.device_model, a.system_version, a.app_version, p.proxy_url "
         f"FROM managed_channels mc "
-        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE "
+        f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
         f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) "
         f"AND ({type_filter}) "

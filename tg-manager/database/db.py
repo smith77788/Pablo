@@ -2290,7 +2290,7 @@ async def get_active_account_for_owner(
     row = await pool.fetchrow(
         "SELECT a.*, p.proxy_url FROM tg_accounts a "
         "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL "
         "ORDER BY a.last_used DESC NULLS LAST, a.added_at DESC LIMIT 1",
         owner_id,
     )
