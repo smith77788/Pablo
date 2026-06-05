@@ -200,8 +200,16 @@ async def cb_exp_view(
 
 @router.callback_query(ExperimentCb.filter(F.action == "create"))
 async def cb_exp_create(
-    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext
+    callback: CallbackQuery, callback_data: ExperimentCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("A/B тесты", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await state.set_state(CreateExperiment.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id)
@@ -407,6 +415,14 @@ async def cb_exp_pause(
 async def cb_exp_resume(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("A/B тесты", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return

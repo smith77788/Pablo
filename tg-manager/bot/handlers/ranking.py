@@ -322,6 +322,14 @@ async def cb_rank_history(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Трекер позиций в поиске", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
 
     keyword_id = callback_data.keyword_id
@@ -809,6 +817,14 @@ async def cb_rank_toggle_keyword(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Трекер позиций в поиске", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     keyword_id = callback_data.keyword_id
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id

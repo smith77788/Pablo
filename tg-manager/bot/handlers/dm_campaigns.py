@@ -781,6 +781,14 @@ async def cb_dm_resume(
     callback_data: DmCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("DM-кампании", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer("▶️ Запущена")
     campaign_id = callback_data.campaign_id
     # Update DB status before creating task (same ordering as initial launch)
