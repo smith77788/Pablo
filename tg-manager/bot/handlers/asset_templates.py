@@ -37,7 +37,9 @@ from bot.states import (
     BulkJoinFSM,
     BulkLeaveFSM,
 )
+from bot.keyboards import subscription_locked_markup
 from bot.utils.op_helpers import _get_active_accounts
+from bot.utils.subscription import require_plan, locked_text
 from bot.utils.template_validator import validate_asset_template
 from database import db
 
@@ -383,7 +385,15 @@ async def cb_view(
 
 
 @router.callback_query(AssetTplCb.filter(F.action == "create"))
-async def cb_create(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_create(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Шаблоны активов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     await state.set_state(AssetTemplateFSM.choosing_type)
     await callback.message.edit_text(
@@ -546,6 +556,15 @@ async def cb_save(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await state.clear()
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Шаблоны активов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     data = await state.get_data()
     asset_type = data.get("asset_type", callback_data.asset_type or "")
@@ -857,6 +876,14 @@ async def cb_delete(
     callback_data: AssetTplCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Шаблоны активов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     deleted = await _delete_template(pool, callback_data.tpl_id, callback.from_user.id)
     if not deleted:
         await callback.answer("Не удалось удалить шаблон.", show_alert=True)
@@ -889,6 +916,14 @@ async def cb_apply_bot_exec(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Шаблоны активов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Применяю шаблон...")
     user_id = callback.from_user.id
     bot_id = callback_data.bot_id
@@ -1167,6 +1202,14 @@ async def cb_lib_preview(
 async def cb_lib_clone(
     callback: CallbackQuery, callback_data: LibCb, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Шаблоны активов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer()
     from services.preset_templates import get_preset_by_key
 

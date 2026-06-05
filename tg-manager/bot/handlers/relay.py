@@ -6,7 +6,8 @@ from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import RelayCb
-from bot.keyboards import relay_menu, relay_session_view
+from bot.keyboards import relay_menu, relay_session_view, subscription_locked_markup
+from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import bot_api
 
@@ -35,7 +36,14 @@ async def _relay_menu_text(row: asyncpg.Record, sessions: list) -> tuple[str, ob
 async def cb_relay_menu(
     callback: CallbackQuery, callback_data: RelayCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Диалоги / Relay", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -50,7 +58,14 @@ async def cb_relay_menu(
 async def cb_relay_toggle(
     callback: CallbackQuery, callback_data: RelayCb, pool: asyncpg.Pool
 ) -> None:
-
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Диалоги / Relay", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
