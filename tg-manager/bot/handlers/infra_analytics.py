@@ -56,52 +56,53 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     uid = callback.from_user.id
 
     # Быстрые метрики
-    acc_total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
+    try:
+        acc_total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
+            )
+            or 0
         )
-        or 0
-    )
-    floods_24h = (
-        await pool.fetchval(
-            """SELECT COUNT(*) FROM account_flood_log fl
-           JOIN tg_accounts a ON a.id=fl.account_id
-           WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '24h'""",
-            uid,
+        floods_24h = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM account_flood_log fl
+               JOIN tg_accounts a ON a.id=fl.account_id
+               WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '24h'""",
+                uid,
+            )
+            or 0
         )
-        or 0
-    )
-    ops_today = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24h'",
-            uid,
+        ops_today = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24h'",
+                uid,
+            )
+            or 0
         )
-        or 0
-    )
-    warmup_active = (
-        await pool.fetchval(
-            """SELECT COUNT(*) FROM account_warmup_plans wp
-           JOIN tg_accounts a ON a.id=wp.account_id
-           WHERE a.owner_id=$1 AND wp.status='active'""",
-            uid,
+        warmup_active = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM account_warmup_plans wp
+               JOIN tg_accounts a ON a.id=wp.account_id
+               WHERE a.owner_id=$1 AND wp.status='active'""",
+                uid,
+            )
+            or 0
         )
-        or 0
-    )
+        pool_count = (
+            await pool.fetchval(
+                "SELECT COUNT(DISTINCT pool) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL",
+                uid,
+            )
+            or 0
+        )
+    except Exception:
+        acc_total = floods_24h = ops_today = warmup_active = pool_count = 0
 
     # Infrastructure Pressure Score
     pressure = await infra_pressure.compute_pressure(pool, uid)
     p_emoji = pressure.get("level_emoji", "🟢")
     p_score = pressure.get("score", 0)
     p_label = pressure.get("level_label", "Норма")
-
-    # Distinct pools count
-    pool_count = (
-        await pool.fetchval(
-            "SELECT COUNT(DISTINCT pool) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL",
-            uid,
-        )
-        or 0
-    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🗂️ Реестр ассетов", callback_data=InfraCb(action="asset_registry"))
@@ -150,11 +151,14 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     uid = callback.from_user.id
     await load_from_db(pool, uid)
 
-    accounts = await pool.fetch(
-        "SELECT id, first_name, phone, trust_score, acc_status FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, first_name, phone, trust_score, acc_status FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     if not accounts:
         await callback.message.edit_text(
@@ -211,19 +215,22 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     from services.flood_engine import get_risk_summary
 
     uid = callback.from_user.id
-    rows = await pool.fetch(
-        """SELECT a.id, a.first_name, a.phone,
-                  COUNT(fl.id) AS floods_total,
-                  COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '24h') AS floods_24h,
-                  COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '7d') AS floods_7d,
-                  MAX(fl.created_at) AS last_flood
-           FROM tg_accounts a
-           LEFT JOIN account_flood_log fl ON fl.account_id=a.id
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           GROUP BY a.id, a.first_name, a.phone
-           ORDER BY floods_24h DESC, floods_7d DESC""",
-        uid,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT a.id, a.first_name, a.phone,
+                      COUNT(fl.id) AS floods_total,
+                      COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '24h') AS floods_24h,
+                      COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '7d') AS floods_7d,
+                      MAX(fl.created_at) AS last_flood
+               FROM tg_accounts a
+               LEFT JOIN account_flood_log fl ON fl.account_id=a.id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               GROUP BY a.id, a.first_name, a.phone
+               ORDER BY floods_24h DESC, floods_7d DESC""",
+            uid,
+        )
+    except Exception:
+        rows = []
 
     lines = ["⚡ <b>Flood Intelligence</b>\n"]
     risk_summary = get_risk_summary([r["id"] for r in rows])
@@ -241,14 +248,17 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
 
     # Топ action-типов
-    action_stats = await pool.fetch(
-        """SELECT action_type, COUNT(*) as cnt
-           FROM account_flood_log fl
-           JOIN tg_accounts a ON a.id=fl.account_id
-           WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '7d'
-           GROUP BY action_type ORDER BY cnt DESC LIMIT 5""",
-        uid,
-    )
+    try:
+        action_stats = await pool.fetch(
+            """SELECT action_type, COUNT(*) as cnt
+               FROM account_flood_log fl
+               JOIN tg_accounts a ON a.id=fl.account_id
+               WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '7d'
+               GROUP BY action_type ORDER BY cnt DESC LIMIT 5""",
+            uid,
+        )
+    except Exception:
+        action_stats = []
     if action_stats:
         lines.append("\n<b>Топ действий с flood (7 дней):</b>")
         for s in action_stats:
@@ -366,19 +376,22 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     uid = callback.from_user.id
     today = date.today()
 
-    rows = await pool.fetch(
-        """SELECT a.first_name, a.phone,
-                  COALESCE(ds.actions_ok, 0) AS actions_ok,
-                  COALESCE(ds.actions_fail, 0) AS actions_fail,
-                  COALESCE(ds.flood_events, 0) AS flood_events,
-                  COALESCE(ds.messages_sent, 0) AS messages_sent
-           FROM tg_accounts a
-           LEFT JOIN account_daily_stats ds ON ds.account_id=a.id AND ds.stat_date=$2
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           ORDER BY (COALESCE(ds.actions_ok,0) + COALESCE(ds.messages_sent,0)) DESC""",
-        uid,
-        today,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT a.first_name, a.phone,
+                      COALESCE(ds.actions_ok, 0) AS actions_ok,
+                      COALESCE(ds.actions_fail, 0) AS actions_fail,
+                      COALESCE(ds.flood_events, 0) AS flood_events,
+                      COALESCE(ds.messages_sent, 0) AS messages_sent
+               FROM tg_accounts a
+               LEFT JOIN account_daily_stats ds ON ds.account_id=a.id AND ds.stat_date=$2
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               ORDER BY (COALESCE(ds.actions_ok,0) + COALESCE(ds.messages_sent,0)) DESC""",
+            uid,
+            today,
+        )
+    except Exception:
+        rows = []
 
     lines = [f"📊 <b>Статистика за {today.strftime('%d.%m.%Y')}</b>\n"]
     total_ok = total_fail = total_floods = total_msgs = 0
@@ -415,20 +428,23 @@ async def cb_infra_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     await callback.answer()
     uid = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT a.first_name, a.phone, a.trust_score,
-                  COALESCE(ac.can_invite, TRUE) AS can_invite,
-                  COALESCE(ac.can_dm, TRUE) AS can_dm,
-                  COALESCE(ac.can_create_channel, TRUE) AS can_create,
-                  COALESCE(ac.is_premium, FALSE) AS is_premium,
-                  COALESCE(ac.daily_dm_limit, 50) AS dm_limit,
-                  ac.last_discovery
-           FROM tg_accounts a
-           LEFT JOIN account_capabilities ac ON ac.account_id=a.id
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           ORDER BY a.trust_score DESC NULLS LAST""",
-        uid,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT a.first_name, a.phone, a.trust_score,
+                      COALESCE(ac.can_invite, TRUE) AS can_invite,
+                      COALESCE(ac.can_dm, TRUE) AS can_dm,
+                      COALESCE(ac.can_create_channel, TRUE) AS can_create,
+                      COALESCE(ac.is_premium, FALSE) AS is_premium,
+                      COALESCE(ac.daily_dm_limit, 50) AS dm_limit,
+                      ac.last_discovery
+               FROM tg_accounts a
+               LEFT JOIN account_capabilities ac ON ac.account_id=a.id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               ORDER BY a.trust_score DESC NULLS LAST""",
+            uid,
+        )
+    except Exception:
+        rows = []
 
     if not rows:
         await callback.message.edit_text(
