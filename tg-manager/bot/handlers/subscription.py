@@ -129,8 +129,6 @@ def _mask(val: str) -> str:
 
 async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
     """Возвращает (plan, expires_at) или (plan, None) для бесплатного плана."""
-    from bot.utils.subscription import is_platform_admin
-
     if is_platform_admin(user_id):
         return "enterprise", None
     row = await pool.fetchrow(
@@ -158,8 +156,6 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     if plan == "free":
         plan_info = f"Текущий план: <b>{emoji} FREE</b> · до {lim_label} ботов"
     else:
-        from bot.utils.subscription import is_platform_admin
-
         if is_platform_admin(user_id):
             plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · ∞ ботов\n🔑 <i>Администратор платформы</i>"
         elif expires_at:
