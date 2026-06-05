@@ -438,7 +438,7 @@ async def create_scheduled(
 async def get_pending_scheduled(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     return await pool.fetch(
         """SELECT s.*, m.token FROM scheduled_broadcasts s
-           JOIN managed_bots m ON m.bot_id=s.bot_id
+           JOIN managed_bots m ON m.bot_id=s.bot_id AND m.is_active=true
            WHERE s.status='pending' AND s.execute_at <= NOW()
            ORDER BY s.execute_at ASC LIMIT 100""",
     )
@@ -785,7 +785,7 @@ async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
            FROM funnel_subscriptions fs
            JOIN funnels f ON f.id=fs.funnel_id AND f.is_active=true
            JOIN funnel_steps fst ON fst.funnel_id=fs.funnel_id AND fst.step_order=fs.current_step
-           JOIN managed_bots mb ON mb.bot_id=f.bot_id
+           JOIN managed_bots mb ON mb.bot_id=f.bot_id AND mb.is_active=true
            WHERE fs.completed=false AND fs.next_send_at<=now()""",
     )
 

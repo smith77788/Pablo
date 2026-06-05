@@ -18,7 +18,7 @@ from bot.callbacks import RankCb, VisCb, BmCb
 from bot.keyboards import back_to_bot, subscription_locked_markup
 from bot.states import AddKeyword, AddKeywordFSM, KeywordAlertFSM
 from bot.utils.op_helpers import safe_edit
-from bot.utils.subscription import get_plan, locked_text
+from bot.utils.subscription import get_plan, locked_text, require_plan
 from database import db
 from services.logger import log_exc_swallow
 
@@ -390,6 +390,14 @@ async def cb_rank_check_now(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Трекер позиций в поиске", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Запускаю проверку...")
 
     bot_id = callback_data.bot_id
@@ -590,6 +598,14 @@ async def cb_rank_check_all(
     callback_data: RankCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Трекер позиций в поиске", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Проверяю все ключевые слова...")
 
     bot_id = callback_data.bot_id

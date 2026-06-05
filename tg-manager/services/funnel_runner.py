@@ -80,7 +80,6 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                                 retry_after,
                             )
                             await asyncio.sleep(retry_after)
-                            f" (retry {attempt + 1}, {retry_after}s)"
                             continue
                         # Non-429 failure (user blocked, bot kicked, etc.) — don't retry
                         log.warning(
