@@ -6,6 +6,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCAN_ROOTS = (PROJECT_ROOT / "tg-manager", PROJECT_ROOT / "tests")
 MOJIBAKE_MARKERS = (
+    chr(0xFFFD),
+    "".join(chr(code) for code in (0x043F, 0x0457, 0x0405)),
+    "".join(chr(0xFFFD) for _ in range(4)),
     "\u0420\u045f",
     "\u0420\u0452",
     "\u0420\u045c",

@@ -196,7 +196,9 @@ async def run_campaign(
 
         accounts = await get_active_accounts(pool, owner_id)
     except Exception:
-        log.exception("dm_engine: get_active_accounts failed for campaign %d", campaign_id)
+        log.exception(
+            "dm_engine: get_active_accounts failed for campaign %d", campaign_id
+        )
         await pool.execute(
             "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
         )

@@ -207,7 +207,9 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ProxyCb.filter(F.action == "add"))
-async def cb_proxy_add(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_proxy_add(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(

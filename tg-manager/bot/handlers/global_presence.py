@@ -1856,6 +1856,7 @@ async def cb_gp_retry(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.answer()
         from bot.keyboards import subscription_locked_markup
+
         await callback.message.edit_text(
             locked_text("Global Presence", "enterprise"),
             parse_mode="HTML",

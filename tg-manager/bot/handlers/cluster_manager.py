@@ -169,7 +169,9 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ClustMCb.filter(F.action == "create"))
-async def cb_cluster_create(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_cluster_create(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
         await callback.message.edit_text(

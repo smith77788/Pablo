@@ -385,7 +385,9 @@ async def cb_view(
 
 
 @router.callback_query(AssetTplCb.filter(F.action == "create"))
-async def cb_create(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+async def cb_create(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(

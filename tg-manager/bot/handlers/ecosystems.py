@@ -516,51 +516,86 @@ async def cb_eco_risk(
 # ── Members ───────────────────────────────────────────────────────────────────
 
 
-async def _fetch_member_names(pool: asyncpg.Pool, by_type: dict, owner_id: int) -> dict[str, list[str]]:
+async def _fetch_member_names(
+    pool: asyncpg.Pool, by_type: dict, owner_id: int
+) -> dict[str, list[str]]:
     """Возвращает {object_type: [label, ...]} с именами участников."""
     result: dict[str, list[str]] = {}
 
     if "channel" in by_type or "group" in by_type:
-        chan_ids = [m["object_id"] for m in by_type.get("channel", []) + by_type.get("group", [])]
+        chan_ids = [
+            m["object_id"]
+            for m in by_type.get("channel", []) + by_type.get("group", [])
+        ]
         if chan_ids:
             rows = await pool.fetch(
                 "SELECT channel_id, title, username FROM managed_channels "
                 "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
-                owner_id, chan_ids,
+                owner_id,
+                chan_ids,
             )
-            name_map = {r["channel_id"]: r["title"] or f"@{r['username']}" or str(r["channel_id"]) for r in rows}
+            name_map = {
+                r["channel_id"]: r["title"]
+                or f"@{r['username']}"
+                or str(r["channel_id"])
+                for r in rows
+            }
             for t in ("channel", "group"):
                 if t in by_type:
-                    result[t] = [html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}")) for m in by_type[t]]
+                    result[t] = [
+                        html.escape(
+                            name_map.get(m["object_id"], f"id:{m['object_id']}")
+                        )
+                        for m in by_type[t]
+                    ]
 
     if "bot" in by_type:
         bot_ids = [m["object_id"] for m in by_type["bot"]]
         rows = await pool.fetch(
             "SELECT bot_id, username, first_name FROM managed_bots "
             "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
-            owner_id, bot_ids,
+            owner_id,
+            bot_ids,
         )
-        name_map = {r["bot_id"]: f"@{r['username']}" if r["username"] else r["first_name"] or str(r["bot_id"]) for r in rows}
-        result["bot"] = [html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}")) for m in by_type["bot"]]
+        name_map = {
+            r["bot_id"]: f"@{r['username']}"
+            if r["username"]
+            else r["first_name"] or str(r["bot_id"])
+            for r in rows
+        }
+        result["bot"] = [
+            html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}"))
+            for m in by_type["bot"]
+        ]
 
     if "account" in by_type:
         acc_ids = [m["object_id"] for m in by_type["account"]]
         rows = await pool.fetch(
             "SELECT id, phone, first_name FROM tg_accounts "
             "WHERE owner_id=$1 AND id = ANY($2::int[])",
-            owner_id, acc_ids,
+            owner_id,
+            acc_ids,
         )
-        name_map = {r["id"]: r["first_name"] or r["phone"] or str(r["id"]) for r in rows}
-        result["account"] = [html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}")) for m in by_type["account"]]
+        name_map = {
+            r["id"]: r["first_name"] or r["phone"] or str(r["id"]) for r in rows
+        }
+        result["account"] = [
+            html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}"))
+            for m in by_type["account"]
+        ]
 
     if "proxy" in by_type:
         proxy_ids = [m["object_id"] for m in by_type["proxy"]]
         rows = await pool.fetch(
             "SELECT id, proxy_url FROM user_proxies WHERE id = ANY($2::int[]) AND owner_id=$1",
-            owner_id, proxy_ids,
+            owner_id,
+            proxy_ids,
         )
         name_map = {r["id"]: (r["proxy_url"] or str(r["id"]))[:40] for r in rows}
-        result["proxy"] = [html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}")) for m in by_type["proxy"]]
+        result["proxy"] = [
+            html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}"))
+            for m in by_type["proxy"]
+        ]
 
     return result
 

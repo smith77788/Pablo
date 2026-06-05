@@ -395,7 +395,7 @@ class EcoCb(CallbackData, prefix="eco"):
 
 
 class EcoPickCb(CallbackData, prefix="ecopick"):
-    """����� ���������� ��� ���������� ������� (�� ������)."""
+    """Select ecosystem object for attach/detach actions."""
 
     action: str  # "list" | "add"
     object_type: str  # "channel" | "group" | "bot" | "account"
@@ -404,7 +404,7 @@ class EcoPickCb(CallbackData, prefix="ecopick"):
 
 
 class ResourceActCb(CallbackData, prefix="ract"):
-    """Resource Activity Engine � ���������� � ����������� ��������."""
+    """Resource Activity Engine callback payload."""
 
     action: str
     session_id: int = 0
@@ -413,7 +413,7 @@ class ResourceActCb(CallbackData, prefix="ract"):
 
 
 class IntentCb(CallbackData, prefix="intent"):
-    """��������� ����� � ���������� ����������� (����� IV)."""
+    """Intent Engine callback payload."""
 
     action: str  # menu | new | preset | plan | strategy | confirm | manual | history | detail | cancel
     intent_id: int = 0

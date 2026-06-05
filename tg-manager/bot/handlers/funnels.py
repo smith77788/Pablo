@@ -177,7 +177,10 @@ async def cb_fn_view(
 
 @router.callback_query(FunnelCb.filter(F.action == "create"))
 async def cb_fn_create(
-    callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery,
+    callback_data: FunnelCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
