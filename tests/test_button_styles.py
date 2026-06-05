@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -82,3 +83,57 @@ def test_direct_reply_keyboard_markup_dump_is_styled() -> None:
 
     assert dumped["keyboard"][0][0]["style"] == "success"
     assert dumped["keyboard"][0][1]["style"] == "primary"
+
+
+def test_markup_json_dump_is_styled() -> None:
+    install_button_style_patch()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Подтвердить", callback_data="task:confirm")
+    kb.button(text="❌ Отмена", callback_data="task:cancel")
+
+    dumped = json.loads(kb.as_markup().model_dump_json(exclude_none=True))
+
+    assert dumped["inline_keyboard"][0][0]["style"] == "success"
+    assert dumped["inline_keyboard"][0][1]["style"] == "danger"
+
+
+def _assert_all_buttons_styled(dumped: dict) -> None:
+    rows = dumped.get("inline_keyboard") or dumped.get("keyboard") or []
+    assert rows, "keyboard has no rows"
+    missing = [
+        button.get("text", "")
+        for row in rows
+        for button in row
+        if "style" not in button
+    ]
+    assert missing == []
+
+
+def test_project_inline_keyboards_are_styled() -> None:
+    install_button_style_patch()
+
+    from bot.keyboards import bot_menu, bots_list, main_menu
+
+    _assert_all_buttons_styled(main_menu(is_admin=True).model_dump(exclude_none=True))
+    _assert_all_buttons_styled(
+        bots_list(
+            [
+                {
+                    "bot_id": 1,
+                    "username": "demo_bot",
+                    "first_name": "Demo",
+                    "audience_count": 12,
+                },
+                {
+                    "bot_id": 2,
+                    "username": None,
+                    "first_name": "Second",
+                    "audience_count": 0,
+                },
+            ],
+            page=0,
+        ).model_dump(exclude_none=True)
+    )
+    _assert_all_buttons_styled(
+        bot_menu(1, username="demo_bot").model_dump(exclude_none=True)
+    )

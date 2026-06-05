@@ -188,6 +188,10 @@ def install_button_style_patch() -> None:
     original_reply_model_dump = ReplyKeyboardMarkup.model_dump
     original_button_model_dump = InlineKeyboardButton.model_dump
     original_keyboard_button_model_dump = KeyboardButton.model_dump
+    original_model_dump_json = InlineKeyboardMarkup.model_dump_json
+    original_reply_model_dump_json = ReplyKeyboardMarkup.model_dump_json
+    original_button_model_dump_json = InlineKeyboardButton.model_dump_json
+    original_keyboard_button_model_dump_json = KeyboardButton.model_dump_json
 
     def styled_as_markup(
         self: InlineKeyboardBuilder,
@@ -239,6 +243,40 @@ def install_button_style_patch() -> None:
         dumped = original_keyboard_button_model_dump(self, *args, **kwargs)
         return cast(dict[str, Any], dumped)
 
+    def styled_model_dump_json(
+        self: InlineKeyboardMarkup,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        apply_button_styles(self)
+        return cast(str, original_model_dump_json(self, *args, **kwargs))
+
+    def styled_reply_model_dump_json(
+        self: ReplyKeyboardMarkup,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        apply_button_styles(self)
+        return cast(str, original_reply_model_dump_json(self, *args, **kwargs))
+
+    def styled_button_model_dump_json(
+        self: InlineKeyboardButton,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        _apply_button_style(self)
+        return cast(str, original_button_model_dump_json(self, *args, **kwargs))
+
+    def styled_keyboard_button_model_dump_json(
+        self: KeyboardButton,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        _apply_button_style(self)
+        return cast(
+            str, original_keyboard_button_model_dump_json(self, *args, **kwargs)
+        )
+
     builder_cls = cast(Any, InlineKeyboardBuilder)
     reply_builder_cls = cast(Any, ReplyKeyboardBuilder)
     markup_cls = cast(Any, InlineKeyboardMarkup)
@@ -251,4 +289,8 @@ def install_button_style_patch() -> None:
     reply_markup_cls.model_dump = styled_reply_model_dump
     button_cls.model_dump = styled_button_model_dump
     keyboard_button_cls.model_dump = styled_keyboard_button_model_dump
+    markup_cls.model_dump_json = styled_model_dump_json
+    reply_markup_cls.model_dump_json = styled_reply_model_dump_json
+    button_cls.model_dump_json = styled_button_model_dump_json
+    keyboard_button_cls.model_dump_json = styled_keyboard_button_model_dump_json
     setattr(InlineKeyboardBuilder, _PATCHED_ATTR, True)
