@@ -160,9 +160,10 @@ async def _request_token(
 ) -> dict[str, Any]:
     timeout = aiohttp.ClientTimeout(total=30)
     async with session.post(provider.token_url, data=payload, timeout=timeout) as resp:
-        data = await resp.json(content_type=None)
         if resp.status >= 400:
-            raise RuntimeError(f"token exchange failed: {resp.status} {data}")
+            text = await resp.text()
+            raise RuntimeError(f"token exchange failed: {resp.status} {text[:200]}")
+        data = await resp.json(content_type=None)
         return data
 
 
@@ -176,9 +177,10 @@ async def _fetch_profile(
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=aiohttp.ClientTimeout(total=30),
     ) as resp:
-        data = await resp.json(content_type=None)
         if resp.status >= 400:
-            raise RuntimeError(f"profile fetch failed: {resp.status} {data}")
+            text = await resp.text()
+            raise RuntimeError(f"profile fetch failed: {resp.status} {text[:200]}")
+        data = await resp.json(content_type=None)
         return data
 
 
