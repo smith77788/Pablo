@@ -78,11 +78,22 @@ def is_provider_configured(provider_name: str) -> bool:
     provider = PROVIDERS.get(provider_name)
     if not provider:
         return False
-    return bool(
-        os.getenv(provider.client_id_env, "").strip()
-        and os.getenv(provider.client_secret_env, "").strip()
-        and redirect_uri()
-    )
+    return not missing_provider_settings(provider_name)
+
+
+def missing_provider_settings(provider_name: str) -> list[str]:
+    provider = PROVIDERS.get(provider_name)
+    if not provider:
+        return ["unknown provider"]
+
+    missing: list[str] = []
+    if not os.getenv(provider.client_id_env, "").strip():
+        missing.append(provider.client_id_env)
+    if not os.getenv(provider.client_secret_env, "").strip():
+        missing.append(provider.client_secret_env)
+    if not redirect_uri():
+        missing.append("EMAIL_OAUTH_REDIRECT_URI or PUBLIC_BASE_URL")
+    return missing
 
 
 def provider_status() -> dict[str, bool]:

@@ -56,3 +56,20 @@ def test_build_auth_url_includes_provider_scope_and_redirect(monkeypatch) -> Non
     assert "client_id=google-client" in url
     assert "redirect_uri=https%3A%2F%2Fbot.example%2Foauth%2Femail%2Fcallback" in url
     assert "https%3A%2F%2Fmail.google.com%2F" in url
+
+
+def test_missing_provider_settings_lists_required_env(monkeypatch) -> None:
+    email_oauth = _module(monkeypatch)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("EMAIL_OAUTH_REDIRECT_URI", raising=False)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+
+    missing = email_oauth.missing_provider_settings("google")
+
+    assert missing == [
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "EMAIL_OAUTH_REDIRECT_URI or PUBLIC_BASE_URL",
+    ]
+    assert email_oauth.is_provider_configured("google") is False

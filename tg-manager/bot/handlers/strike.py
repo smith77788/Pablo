@@ -1183,8 +1183,10 @@ async def cb_email_oauth(
     )
     provider = email_oauth.PROVIDERS[provider_name]
     if not email_oauth.is_provider_configured(provider_name):
+        missing = ", ".join(email_oauth.missing_provider_settings(provider_name))
         await callback.answer(
-            f"{provider.label} OAuth не настроен на сервере.", show_alert=True
+            f"{provider.label} OAuth не настроен. Нужно задать: {missing}",
+            show_alert=True,
         )
         return
 
