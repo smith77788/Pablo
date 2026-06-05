@@ -167,18 +167,25 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
     result["low"] = low_n
 
     if crit_n > 0 or low_n > 0:
-        # Найти владельцев затронутых аккаунтов и уведомить
-        owners = await pool.fetch(
-            """SELECT DISTINCT owner_id FROM tg_accounts
+        # Получаем per-owner счётчики — показываем каждому ТОЛЬКО его аккаунты
+        owner_rows = await pool.fetch(
+            """SELECT owner_id,
+                      SUM(CASE WHEN trust_score < $1 THEN 1 ELSE 0 END)::int AS owner_crit,
+                      SUM(CASE WHEN trust_score >= $1 AND trust_score < $2 THEN 1 ELSE 0 END)::int AS owner_low
+               FROM tg_accounts
                WHERE is_active = TRUE
-                 AND (cooldown_until IS NOT NULL AND cooldown_until > now())
-                 AND trust_score < $1""",
+                 AND cooldown_until IS NOT NULL AND cooldown_until > now()
+                 AND trust_score < $2
+               GROUP BY owner_id""",
+            _ROTATE_CRITICAL_THRESHOLD,
             _ROTATE_LOW_THRESHOLD,
         )
-        for row in owners:
+        for row in owner_rows:
             owner_id = row["owner_id"]
+            owner_crit = row["owner_crit"] or 0
+            owner_low = row["owner_low"] or 0
             result["notified_owners"].add(owner_id)
-            if bot:
+            if bot and (owner_crit > 0 or owner_low > 0):
                 try:
                     await notify_if_enabled(
                         pool,
@@ -186,8 +193,8 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
                         owner_id,
                         "flood_warning",
                         "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
-                        f"🔴 Критических (trust &lt; {_ROTATE_CRITICAL_THRESHOLD}) → {_ROTATE_CRITICAL_HOURS}ч кулдаун: <b>{crit_n}</b>\n"
-                        f"🟡 Низкий trust ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{low_n}</b>\n\n"
+                        f"🔴 Критических (trust &lt; {_ROTATE_CRITICAL_THRESHOLD}) → {_ROTATE_CRITICAL_HOURS}ч кулдаун: <b>{owner_crit}</b>\n"
+                        f"🟡 Низкий trust ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{owner_low}</b>\n\n"
                         "Аккаунты не будут использоваться для операций до окончания кулдауна.\n"
                         "Trust score восстановится со временем при отсутствии операций.",
                     )
