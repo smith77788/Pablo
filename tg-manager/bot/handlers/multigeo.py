@@ -193,8 +193,16 @@ async def cb_multigeo_cancel_fsm(
 
 @router.callback_query(MultigeoCb.filter(F.action == "lang_name"))
 async def cb_lang_name(
-    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Мультигео", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await state.set_state(MultigeoEdit.waiting_name)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
@@ -216,6 +224,11 @@ async def cb_lang_name(
 async def msg_multigeo_name(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
+    if not await require_plan(pool, message.from_user.id, "pro"):
+        await state.clear()
+        await message.answer(locked_text("Мультигео", "pro"), parse_mode="HTML",
+                             reply_markup=subscription_locked_markup("pro"))
+        return
     data = await state.get_data()
     bot_id = data["bot_id"]
     lang = data["lang"]
@@ -239,8 +252,16 @@ async def msg_multigeo_name(
 
 @router.callback_query(MultigeoCb.filter(F.action == "lang_short"))
 async def cb_lang_short(
-    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Мультигео", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await state.set_state(MultigeoEdit.waiting_short)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
@@ -262,6 +283,11 @@ async def cb_lang_short(
 async def msg_multigeo_short(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
+    if not await require_plan(pool, message.from_user.id, "pro"):
+        await state.clear()
+        await message.answer(locked_text("Мультигео", "pro"), parse_mode="HTML",
+                             reply_markup=subscription_locked_markup("pro"))
+        return
     data = await state.get_data()
     bot_id = data["bot_id"]
     lang = data["lang"]
@@ -285,8 +311,16 @@ async def msg_multigeo_short(
 
 @router.callback_query(MultigeoCb.filter(F.action == "lang_desc"))
 async def cb_lang_desc(
-    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext
+    callback: CallbackQuery, callback_data: MultigeoCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Мультигео", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
     await callback.answer()
     await state.set_state(MultigeoEdit.waiting_desc)
     await state.update_data(bot_id=callback_data.bot_id, lang=callback_data.lang or "")
@@ -308,6 +342,11 @@ async def cb_lang_desc(
 async def msg_multigeo_desc(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
+    if not await require_plan(pool, message.from_user.id, "pro"):
+        await state.clear()
+        await message.answer(locked_text("Мультигео", "pro"), parse_mode="HTML",
+                             reply_markup=subscription_locked_markup("pro"))
+        return
     data = await state.get_data()
     bot_id = data["bot_id"]
     lang = data["lang"]
