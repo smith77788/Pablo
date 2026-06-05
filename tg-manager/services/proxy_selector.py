@@ -7,17 +7,123 @@ Proxy Selector — унифицированный выбор и оценка п�
   - Запись результатов работы прокси в infra_memory
   - Ранжирование аккаунтов с учётом качества их прокси
   - Быстрая проверка здоровья прокси из in-memory состояния
+  - IP diversity validation для предотвращения datacenter-банов
 """
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
+from typing import Optional
 
 import asyncpg
 
 from services import infra_memory
 
 log = logging.getLogger(__name__)
+
+# Known datacenter IP ranges (Railway, Render, AWS, DigitalOcean, etc.)
+_DATACENTER_RANGES = [
+    # Railway.app
+    (ipaddress.ip_network("10.0.0.0/8"), "Railway"),
+    (ipaddress.ip_network("172.16.0.0/12"), "Railway/Cloud"),
+    # Render
+    (ipaddress.ip_network("45.33.0.0/16"), "Render"),
+    # AWS
+    (ipaddress.ip_network("52.0.0.0/8"), "AWS"),
+    (ipaddress.ip_network("54.0.0.0/8"), "AWS"),
+    # DigitalOcean
+    (ipaddress.ip_network("64.227.0.0/16"), "DigitalOcean"),
+    (ipaddress.ip_network("159.89.0.0/16"), "DigitalOcean"),
+    # Hetzner
+    (ipaddress.ip_network("168.119.0.0/16"), "Hetzner"),
+    # Linode
+    (ipaddress.ip_network("45.79.0.0/16"), "Linode"),
+    # Google Cloud
+    (ipaddress.ip_network("34.0.0.0/8"), "Google Cloud"),
+    # Azure
+    (ipaddress.ip_network("40.0.0.0/8"), "Azure"),
+    # Vultr
+    (ipaddress.ip_network("45.76.0.0/16"), "Vultr"),
+    # OVH
+    (ipaddress.ip_network("51.0.0.0/8"), "OVH"),
+]
+
+
+def extract_ip_from_proxy(proxy_url: str) -> Optional[str]:
+    """Extract IP address from proxy URL."""
+    if not proxy_url:
+        return None
+    # Try to extract IP from socks5://user:pass@host:port format
+    match = re.search(r'@((\[?[0-9a-fA-F.:]+\]?)|(\d+\.\d+\.\d+\.\d+)):', proxy_url)
+    if match:
+        return match.group(1).strip("[]")
+    return None
+
+
+def is_datacenter_ip(ip_str: str) -> tuple[bool, str]:
+    """Check if IP is a known datacenter IP. Returns (is_datacenter, provider)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        for network, provider in _DATACENTER_RANGES:
+            if ip in network:
+                return True, provider
+    except ValueError:
+        pass
+    return False, ""
+
+
+def validate_ip_diversity(accounts: list[dict], max_per_ip: int = 3) -> dict:
+    """Validate that accounts don't share too many IPs.
+    
+    Returns: {
+        'valid': bool,
+        'warnings': list[str],
+        'ip_usage': {ip: [account_ids]},
+        'datacenter_warnings': list[str]
+    }
+    """
+    ip_to_accounts: dict[str, list[int]] = {}
+    datacenter_accounts: list[tuple[int, str]] = []  # (account_id, provider)
+    
+    for acc in accounts:
+        ip = extract_ip_from_proxy(acc.get("proxy_url", ""))
+        if not ip:
+            continue
+            
+        if ip not in ip_to_accounts:
+            ip_to_accounts[ip] = []
+        ip_to_accounts[ip].append(acc.get("id", 0))
+        
+        # Check for datacenter IPs
+        is_dc, provider = is_datacenter_ip(ip)
+        if is_dc:
+            datacenter_accounts.append((acc.get("id", 0), provider))
+    
+    # Check violations
+    warnings = []
+    for ip, acc_ids in ip_to_accounts.items():
+        if len(acc_ids) > max_per_ip:
+            warnings.append(
+                f"IP {ip} используется {len(acc_ids)} аккаунтами (> {max_per_ip}). "
+                f"Риск datacenter-бана!"
+            )
+    
+    datacenter_warnings = [
+        f"Аккаунт {acc_id} на datacenter IP ({provider}). "
+        f"Рекомендуется residential прокси."
+        for acc_id, provider in datacenter_accounts
+    ]
+    
+    return {
+        "valid": len(warnings) == 0,
+        "warnings": warnings,
+        "ip_usage": ip_to_accounts,
+        "datacenter_warnings": datacenter_warnings,
+        "datacenter_count": len(datacenter_accounts),
+        "total_accounts_checked": len(accounts),
+    }
 
 
 def get_proxy_score(proxy_url: str, action_type: str = "default") -> float:

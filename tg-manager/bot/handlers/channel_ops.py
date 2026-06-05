@@ -75,17 +75,17 @@ _BULK_PACING = {
     },
     "fast": {
         "label": "🚀 Быстрый",
-        "item_delay": (15, 30),
+        "item_delay": (30, 60),
         "cooldown_every": 5,
-        "cooldown_delay": (60, 120),
-        "desc": "~1-2 мин между группами по 5",
+        "cooldown_delay": (120, 300),
+        "desc": "~2-3 мин между группами по 5",
     },
     "turbo": {
         "label": "⚡ Турбо",
-        "item_delay": (8, 15),
-        "cooldown_every": 10,
-        "cooldown_delay": (45, 90),
-        "desc": "⚠️ Риск флуд-бана! Каждые 10 — пауза",
+        "item_delay": (45, 90),
+        "cooldown_every": 3,
+        "cooldown_delay": (180, 360),
+        "desc": "⚠️ Умеренный риск. Каждые 3 — большая пауза",
     },
 }
 _DEFAULT_PACING = "medium"

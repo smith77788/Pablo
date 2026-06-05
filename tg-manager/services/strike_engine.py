@@ -47,7 +47,8 @@ _MAX_RETRIES = 2  # макс ретраев при FloodWait на аккаунт
 _FLOOD_CAP = 65.0  # кап exponential backoff
 # Минимальный интервал между аккаунтами внутри волны (в секундах).
 # Telegram rate-limit работает per-peer: >2 GetHistory на один канал за 60с = FLOOD_WAIT.
-_STAGGER_BASE = (25, 45)
+# Увеличено до 60-120с для снижения риска coordinated attack detection
+_STAGGER_BASE = (60, 120)
 
 
 # ── Уникальные тексты жалоб ───────────────────────────────────────────────────

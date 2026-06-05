@@ -7,12 +7,31 @@ from datetime import datetime, timezone
 import logging
 import random
 import re
-from typing import Any
+from typing import Any, Optional
 from config import TG_API_ID, TG_API_HASH, TG_PROXY
-
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
+
+# ── get_me() caching to reduce API calls ────────────────────────────────────
+_GET_ME_CACHE: dict[int, tuple[Any, float]] = {}
+_GET_ME_TTL = 300  # 5 minutes cache
+
+
+def _get_cached_me(session_id: int, me: Any) -> Optional[Any]:
+    """Get cached get_me() result if still valid."""
+    if session_id in _GET_ME_CACHE:
+        cached_me, cached_at = _GET_ME_CACHE[session_id]
+        if asyncio.get_event_loop().time() - cached_at < _GET_ME_TTL:
+            return cached_me
+    # Cache miss or expired - update cache
+    _GET_ME_CACHE[session_id] = (me, asyncio.get_event_loop().time())
+    return None
+
+
+def _invalidate_me_cache(session_id: int) -> None:
+    """Invalidate get_me() cache after logout or significant changes."""
+    _GET_ME_CACHE.pop(session_id, None)
 
 
 def _parse_proxy(proxy_url: str):
@@ -299,7 +318,7 @@ def _make_client(session_string: str = "", device: dict | None = None):
         connection_retries=1,
         request_retries=1,
         timeout=_CONNECT_TIMEOUT,
-        flood_sleep_threshold=0,
+        flood_sleep_threshold=120,  # Auto-sleep on flood wait up to 2 min
         proxy=proxy,
     )
 
