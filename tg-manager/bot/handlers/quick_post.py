@@ -50,24 +50,30 @@ _TIMING_OPTIONS: dict[int, str] = {
 
 async def _load_channels(pool: asyncpg.Pool, user_id: int) -> list[asyncpg.Record]:
     """Возвращает уникальные каналы пользователя из managed_channels."""
-    return await pool.fetch(
-        "SELECT channel_id AS id, MAX(title) AS title, MAX(access_hash) AS access_hash, "
-        "MIN(acc_id) AS acc_id "
-        "FROM managed_channels WHERE owner_id=$1 "
-        "GROUP BY channel_id ORDER BY MAX(title)",
-        user_id,
-    )
+    try:
+        return await pool.fetch(
+            "SELECT channel_id AS id, MAX(title) AS title, MAX(access_hash) AS access_hash, "
+            "MIN(acc_id) AS acc_id "
+            "FROM managed_channels WHERE owner_id=$1 "
+            "GROUP BY channel_id ORDER BY MAX(title)",
+            user_id,
+        )
+    except Exception:
+        return []
 
 
 async def _load_post_templates(
     pool: asyncpg.Pool, user_id: int
 ) -> list[asyncpg.Record]:
     """Возвращает шаблоны постов пользователя."""
-    return await pool.fetch(
-        "SELECT id, name, template FROM asset_templates "
-        "WHERE owner_id=$1 AND asset_type='post' ORDER BY created_at DESC LIMIT 10",
-        user_id,
-    )
+    try:
+        return await pool.fetch(
+            "SELECT id, name, template FROM asset_templates "
+            "WHERE owner_id=$1 AND asset_type='post' ORDER BY created_at DESC LIMIT 10",
+            user_id,
+        )
+    except Exception:
+        return []
 
 
 async def _save_post_template(
@@ -390,11 +396,15 @@ async def cb_qp_use_template(
     pool: asyncpg.Pool,
 ) -> None:
     tpl_id = callback_data.val
-    row = await pool.fetchrow(
-        "SELECT template FROM asset_templates WHERE id=$1 AND owner_id=$2 AND asset_type='post'",
-        tpl_id,
-        callback.from_user.id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT template FROM asset_templates WHERE id=$1 AND owner_id=$2 AND asset_type='post'",
+            tpl_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        await callback.answer("Ошибка загрузки шаблона.", show_alert=True)
+        return
     if not row:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
@@ -677,20 +687,27 @@ async def cb_qp_publish(
         )
         return
 
-    rows = await pool.fetch(
-        "SELECT DISTINCT ON (mc.channel_id) "
-        "mc.channel_id AS id, mc.title, mc.access_hash, "
-        "a.id AS acc_id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM managed_channels mc "
-        "JOIN tg_accounts a ON a.id = mc.acc_id "
-        "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
-        "WHERE mc.owner_id=$1 AND mc.channel_id = ANY($2::bigint[]) "
-        "AND a.is_active = TRUE AND a.session_str IS NOT NULL "
-        "ORDER BY mc.channel_id, a.id",
-        callback.from_user.id,
-        selected_chan_ids,
-    )
+    try:
+        rows = await pool.fetch(
+            "SELECT DISTINCT ON (mc.channel_id) "
+            "mc.channel_id AS id, mc.title, mc.access_hash, "
+            "a.id AS acc_id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM managed_channels mc "
+            "JOIN tg_accounts a ON a.id = mc.acc_id "
+            "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+            "WHERE mc.owner_id=$1 AND mc.channel_id = ANY($2::bigint[]) "
+            "AND a.is_active = TRUE AND a.session_str IS NOT NULL "
+            "ORDER BY mc.channel_id, a.id",
+            callback.from_user.id,
+            selected_chan_ids,
+        )
+    except Exception:
+        await callback.message.edit_text(
+            "⚠️ Ошибка загрузки данных. Попробуйте ещё раз.",
+            parse_mode="HTML",
+        )
+        return
 
     if not rows:
         await callback.message.edit_text(
