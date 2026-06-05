@@ -8,7 +8,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import BulkCb
+from bot.callbacks import BmCb, BotCb, BulkCb
 from bot.keyboards import bulk_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text
@@ -70,8 +70,8 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     total = len(bots)
     if total == 0:
         kb = InlineKeyboardBuilder()
-        kb.button(text="🤖 Перейти к ботам", callback_data="bots_list")
-        kb.button(text="◀️ Назад", callback_data="bm_main")
+        kb.button(text="🤖 Перейти к ботам", callback_data=BotCb(action="list", page=0))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
         kb.adjust(1)
         await callback.message.edit_text(
             "📦 <b>Массовые операции</b>\n\n"

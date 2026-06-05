@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import (
+    AccCb,
     BmCb,
     EcoCb,
     GeoPresenceCb,
@@ -21,6 +22,7 @@ from bot.callbacks import (
     IntentCb,
     MassOpCb,
     StrikeCb,
+    VisCb,
 )
 from bot.states import IntentFSM
 from bot.utils.subscription import require_plan
@@ -610,7 +612,7 @@ async def _execute_visibility_intent(
         pool, intent_id, owner_id, {"keywords_cnt": keywords_cnt}
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔎 Rankings", callback_data=BmCb(action="visibility"))
+    kb.button(text="🔎 Rankings", callback_data=VisCb(action="dashboard"))
     kb.button(text="📍 Навигатор", callback_data=IntentCb(action="menu"))
     kb.adjust(1)
     if callback.message:
@@ -651,14 +653,14 @@ async def _show_manual_hint(
 def _nav_callback(nav_key: str) -> object:
     nav_map: dict[str, object] = {
         "gp_factory": GeoPresenceCb(action="menu"),
-        "accounts": BmCb(action="accounts"),
+        "accounts": AccCb(action="menu"),
         "strike": StrikeCb(action="menu"),
         "mass_ops": MassOpCb(action="menu"),
         "health_dashboard": HealthCb(action="menu"),
         "ecosystems": EcoCb(action="menu"),
         "main": BmCb(action="main"),
         "factory": BmCb(action="operations"),
-        "ranking": BmCb(action="visibility"),
+        "ranking": VisCb(action="dashboard"),
     }
     return nav_map.get(nav_key, BmCb(action="main"))
 
