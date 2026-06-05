@@ -24,7 +24,9 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AssetTplCb, QuickPostCb
+from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
+from bot.utils.subscription import require_plan, locked_text
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -651,6 +653,15 @@ async def cb_qp_publish(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await state.clear()
+        await callback.message.edit_text(
+            locked_text("Публикация в каналы", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Запускаю публикацию…")
     sd = await state.get_data()
     await state.clear()
@@ -675,7 +686,7 @@ async def cb_qp_publish(
         "JOIN tg_accounts a ON a.id = mc.acc_id "
         "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         "WHERE mc.owner_id=$1 AND mc.channel_id = ANY($2::bigint[]) "
-        "AND a.is_active = TRUE "
+        "AND a.is_active = TRUE AND a.session_str IS NOT NULL "
         "ORDER BY mc.channel_id, a.id",
         callback.from_user.id,
         selected_chan_ids,

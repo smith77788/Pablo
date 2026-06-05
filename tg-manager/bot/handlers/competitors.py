@@ -11,8 +11,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import CompCb, BmCb
+from bot.keyboards import subscription_locked_markup
 from bot.states import AddCompetitorFSM
 from bot.utils.op_helpers import safe_edit
+from bot.utils.subscription import require_plan, locked_text
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -36,6 +38,14 @@ def _members_trend(current: int | None, previous: int | None) -> str:
 async def comp_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     # Если пользователь нажал «Назад» из FSM — сбрасываем состояние
     await state.clear()
+    if not await require_plan(pool, cb.from_user.id, "starter"):
+        await cb.answer()
+        await cb.message.edit_text(
+            locked_text("Мониторинг конкурентов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await cb.answer()
     try:
         rows = await pool.fetch(
@@ -229,6 +239,14 @@ async def _save_competitor(
 
 @router.callback_query(CompCb.filter(F.action == "refresh"))
 async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await require_plan(pool, cb.from_user.id, "starter"):
+        await cb.answer()
+        await cb.message.edit_text(
+            locked_text("Мониторинг конкурентов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await cb.answer()
     try:
         rows = await pool.fetch(
