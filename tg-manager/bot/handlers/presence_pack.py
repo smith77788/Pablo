@@ -494,6 +494,15 @@ async def _render_preview_cb(callback: CallbackQuery, state: FSMContext) -> None
 async def cb_pack_confirm_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await state.clear()
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Presence Pack", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Создаю пакет...")
     sd = await state.get_data()
     await state.clear()
@@ -740,6 +749,14 @@ async def cb_pack_seed(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("Presence Pack", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     owner_id = callback.from_user.id
     pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
     if not pack:
