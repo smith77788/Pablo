@@ -4147,6 +4147,16 @@ async def update_account_username(
 
 _BOTFATHER_USERNAME = "BotFather"
 
+# Phrases BotFather uses at each step of /newbot (English + Russian variants)
+_BF_STEP_NAME = ("name", "alright", "good name", "few words", "how are you going",
+                 "название", "имя", "назовите", "хорошо", "отлично")
+_BF_STEP_USERNAME = ("username", "юзернейм", "пользователь", "логин", "choose a username",
+                     "must end in", "должен заканчиваться", "choose")
+_BF_STEP_SUCCESS = ("congratulations", "done!", "t.me/", "token", "use this token",
+                    "поздравляем", "готово", "используйте")
+_BF_RATE_LIMIT = ("too many", "try again", "slow down", "attempts", "подождите", "попробуй")
+_BF_USERNAME_TAKEN = ("already", "taken", "занят", "sorry", "exists")
+
 
 async def create_bot_via_botfather(
     session_string: str,
@@ -4165,102 +4175,133 @@ async def create_bot_via_botfather(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
+        # Resolve BotFather entity once so get_messages sender check works
+        bf_entity = await client.get_entity(_BOTFATHER_USERNAME)
+        bf_id = bf_entity.id
+
+        async def _get_last_bf_msg_id() -> int:
+            """Return the message_id of the latest BotFather message (0 if none)."""
+            try:
+                msgs = await client.get_messages(bf_entity, limit=1)
+                if msgs and msgs[0].sender_id == bf_id:
+                    return msgs[0].id
+            except Exception:
+                pass
+            return 0
+
+        async def _bf_send(text: str, timeout: float = 45.0) -> str:
+            """Send message to BotFather, wait for and return its response.
+
+            Polls until a NEW message from BotFather appears (message_id > baseline).
+            Retries up to 5 times with 3-second intervals before giving up.
+            """
+            # Record baseline before sending so we detect the NEW response
+            baseline_id = await _get_last_bf_msg_id()
+            await asyncio.sleep(random.uniform(1.5, 3.5))  # human-like pre-send pause
+            await client.send_message(bf_entity, text)
+
+            # Poll for BotFather's reply
+            deadline = asyncio.get_event_loop().time() + timeout
+            poll_interval = 3.0
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(poll_interval)
+                try:
+                    msgs = await client.get_messages(bf_entity, limit=3)
+                    for msg in msgs:
+                        if msg.id > baseline_id and msg.sender_id == bf_id:
+                            return msg.text or ""
+                except Exception:
+                    pass
+                poll_interval = min(poll_interval + 1.0, 8.0)  # back off slowly
+            return ""  # timed out
+
         def _parse_flood_wait(text: str) -> int | None:
-            """Extract wait seconds from BotFather 'too many attempts' message."""
-            m = re.search(r"try again in (\d+) seconds", text, re.IGNORECASE)
+            m = re.search(r"try again in (\d+) seconds?", text, re.IGNORECASE)
+            if m:
+                return int(m.group(1))
+            m = re.search(r"(\d+)\s*(?:сек|секунд)", text, re.IGNORECASE)
             return int(m.group(1)) if m else None
 
-        async def _bf_send(text: str) -> str:
-            """Send message to BotFather with human-like delay, return its response."""
-            # Random pre-send pause — like a human thinking before typing
-            await asyncio.sleep(random.uniform(2.0, 5.0))
-            await client.send_message(_BOTFATHER_USERNAME, text)
-            # Random wait for BotFather to respond
-            await asyncio.sleep(random.uniform(5.0, 9.0))
-            msgs = await client.get_messages(_BOTFATHER_USERNAME, limit=1)
-            return msgs[0].text if msgs else ""
-
         async def _bf_send_with_retry(text: str, max_retries: int = 2) -> str:
-            """Send to BotFather, handling rate limit gracefully."""
             for attempt in range(max_retries + 1):
                 resp = await _bf_send(text)
                 wait = _parse_flood_wait(resp)
                 if wait is None:
                     return resp
-                # Rate limited — wait exactly as BotFather says + random buffer
                 jitter = random.randint(10, 30)
                 total_wait = wait + jitter
-                log.info(
-                    "BotFather rate limit: waiting %ds (asked %ds + %ds buffer)",
-                    total_wait,
-                    wait,
-                    jitter,
-                )
+                log.info("BotFather rate limit: waiting %ds", total_wait)
                 if attempt == max_retries:
-                    return resp  # Return the error response to caller
+                    return resp
                 await asyncio.sleep(total_wait)
             return ""
 
-        # Step 1: start fresh — detect if in a previous incomplete flow
-        resp = await _bf_send_with_retry("/newbot")
+        async def _bf_cancel() -> None:
+            """Cancel any in-progress BotFather dialog."""
+            try:
+                await client.send_message(bf_entity, "/cancel")
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+            except Exception:
+                pass
 
-        # Check for rate limit in initial response
+        # Validate username format before starting dialog
+        uname = bot_username.lstrip("@").strip()
+        if not uname.lower().endswith("bot"):
+            uname = uname + "_bot"
+        if len(uname) < 5 or len(uname) > 32:
+            return {"error": f"Username @{uname} слишком короткий или длинный (5-32 символа)"}
+
+        # Step 1: /newbot — may land in an incomplete previous flow
+        resp = await _bf_send_with_retry("/newbot")
+        resp_low = resp.lower()
+
         wait = _parse_flood_wait(resp)
         if wait is not None:
-            return {
-                "error": f"BotFather: слишком много попыток, подождите {wait}с",
-                "flood_wait": wait,
-            }
+            return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
 
-        if (
-            "name" not in resp.lower()
-            and "alright" not in resp.lower()
-            and "good name" not in resp.lower()
-        ):
-            # Previous incomplete flow — cancel it, then retry once
-            await _bf_send("/cancel")
-            await asyncio.sleep(random.uniform(3.0, 6.0))
+        # Detect incomplete previous flow (BotFather asks for username without asking for name first)
+        if any(k in resp_low for k in _BF_STEP_USERNAME) and not any(k in resp_low for k in _BF_STEP_NAME):
+            await _bf_cancel()
             resp = await _bf_send_with_retry("/newbot")
+            resp_low = resp.lower()
             wait = _parse_flood_wait(resp)
             if wait is not None:
-                return {
-                    "error": f"BotFather: слишком много попыток, подождите {wait}с",
-                    "flood_wait": wait,
-                }
+                return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
 
-        if "name" not in resp.lower() and "alright" not in resp.lower():
-            return {"error": f"Неожиданный ответ BotFather: {resp[:200]}"}
+        if not resp or not any(k in resp_low for k in _BF_STEP_NAME):
+            await _bf_cancel()
+            return {"error": f"Неожиданный ответ BotFather на /newbot: {resp[:200]}"}
 
         # Step 2: send display name
         resp = await _bf_send_with_retry(bot_display_name)
-        if "username" not in resp.lower():
+        resp_low = resp.lower()
+        if not resp or not any(k in resp_low for k in _BF_STEP_USERNAME):
             wait = _parse_flood_wait(resp)
             if wait is not None:
-                return {
-                    "error": f"BotFather rate limit после имени: {wait}с",
-                    "flood_wait": wait,
-                }
+                await _bf_cancel()
+                return {"error": f"BotFather rate limit после имени: {wait}с", "flood_wait": wait}
+            await _bf_cancel()
             return {"error": f"Неожиданный ответ после имени бота: {resp[:200]}"}
 
         # Step 3: send username
-        uname = bot_username.lstrip("@")
-        if not uname.lower().endswith("bot"):
-            uname = uname + "bot"
         resp = await _bf_send_with_retry(uname)
+        resp_low = resp.lower()
 
-        # Extract token (format: 123456789:AAABBBCCC...)
+        # Check for username taken
+        if any(k in resp_low for k in _BF_USERNAME_TAKEN) and not any(k in resp_low for k in _BF_STEP_SUCCESS):
+            await _bf_cancel()
+            return {"error": f"Username @{uname} уже занят — выберите другой"}
+
+        # Check for rate limit
+        wait = _parse_flood_wait(resp)
+        if wait is not None:
+            await _bf_cancel()
+            return {"error": f"BotFather rate limit при создании: {wait}с", "flood_wait": wait}
+
+        # Extract token
         token_match = re.search(r"\b(\d{8,12}:[A-Za-z0-9_-]{35,})\b", resp)
         if not token_match:
-            wait = _parse_flood_wait(resp)
-            if wait is not None:
-                return {
-                    "error": f"BotFather rate limit при создании: {wait}с",
-                    "flood_wait": wait,
-                }
-            if "username" in resp.lower() and (
-                "already" in resp.lower() or "taken" in resp.lower()
-            ):
-                return {"error": f"Username @{uname} уже занят — выберите другой"}
+            await _bf_cancel()
             return {"error": f"Токен не найден в ответе BotFather: {resp[:300]}"}
 
         token = token_match.group(1)
@@ -4269,18 +4310,16 @@ async def create_bot_via_botfather(
             "username": uname,
             "display_name": bot_display_name,
         }
+
     except Exception as e:
         from telethon.errors import FloodWaitError
 
         if isinstance(e, FloodWaitError):
-            return {
-                "error": f"FloodWait {e.seconds}с — Telegram ограничил создание",
-                "flood_wait": e.seconds,
-            }
+            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
         log.exception("create_bot_via_botfather error: %s", e)
         return {"error": str(e)[:200]}
     finally:
         try:
             await client.disconnect()
         except Exception:
-            log_exc_swallow(log, "Сбой в _bf_send_with_retry")
+            log_exc_swallow(log, "Сбой в create_bot_via_botfather")
