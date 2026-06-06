@@ -908,32 +908,39 @@ async def _swap_step_content(
 ) -> None:
     """Обменять содержимое (message_text, delay_minutes) двух шагов по step_order.
     Так мы избегаем нарушения UNIQUE(funnel_id, step_order)."""
-    row_a = await pool.fetchrow(
-        "SELECT message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
-        funnel_id,
-        order_a,
-    )
-    row_b = await pool.fetchrow(
-        "SELECT message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
-        funnel_id,
-        order_b,
-    )
+    try:
+        row_a = await pool.fetchrow(
+            "SELECT message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
+            funnel_id,
+            order_a,
+        )
+        row_b = await pool.fetchrow(
+            "SELECT message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
+            funnel_id,
+            order_b,
+        )
+    except Exception:
+        log_exc_swallow(log, "_swap_step_content fetchrow failed")
+        return
     if not row_a or not row_b:
         return
-    await pool.execute(
-        "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
-        row_b["message_text"],
-        row_b["delay_minutes"],
-        funnel_id,
-        order_a,
-    )
-    await pool.execute(
-        "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
-        row_a["message_text"],
-        row_a["delay_minutes"],
-        funnel_id,
-        order_b,
-    )
+    try:
+        await pool.execute(
+            "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
+            row_b["message_text"],
+            row_b["delay_minutes"],
+            funnel_id,
+            order_a,
+        )
+        await pool.execute(
+            "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
+            row_a["message_text"],
+            row_a["delay_minutes"],
+            funnel_id,
+            order_b,
+        )
+    except Exception:
+        log_exc_swallow(log, "_swap_step_content execute failed")
 
 
 @router.callback_query(FunnelCb.filter(F.action == "step_up"))

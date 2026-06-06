@@ -29,24 +29,24 @@ Last updated: 2026-06-06
 - [MEDIUM] reports — activity_log shows "no records" for users due to ok-only logging (FIXED in middleware, pending deploy)
 - [FIXED-2026-06-06] admin.py — all 66 pool calls wrapped
 - [FIXED-2026-06-06] botmother_menu.py — all 29 pool calls wrapped
-- [MEDIUM] health_dashboard.py — 21 unprotected pool calls
+- [FIXED-2026-06-06] health_dashboard.py — 16 pool calls wrapped
 - [FIXED-2026-06-06] infra_analytics.py — all pool calls wrapped
 - [FIXED-2026-06-06] subscription.py — all 6 pool calls wrapped
-- [MEDIUM] seo.py — 23 unprotected calls
-- [MEDIUM] ecosystems.py — 18 unprotected calls
-- [MEDIUM] presence_pack.py — 18 unprotected calls
+- [FIXED-2026-06-06] seo.py — 23 pool calls wrapped
+- [FIXED-2026-06-06] ecosystems.py — 18 pool calls wrapped
+- [FIXED-2026-06-06] presence_pack.py — 18 pool calls wrapped
 
 ## LOW
 
-- [LOW] funnels.py — 8 unprotected calls
+- [FIXED-2026-06-06] funnels.py — 8 pool calls wrapped
 - [LOW] channel_factory.py — 12 unprotected calls
 - [LOW] group_factory.py — 8 unprotected calls
 - [LOW] gift_transfer.py — 8 unprotected calls
 - [LOW] account_cleaner.py — 7 unprotected calls
-- [LOW] cluster_manager.py — 5 unprotected calls
-- [LOW] crm.py — 1 unprotected call
-- [LOW] net_broadcast.py — 2 unprotected calls
-- [LOW] relay.py — 4 unprotected calls
+- [FIXED-2026-06-06] cluster_manager.py — 5 pool calls wrapped
+- [FIXED-2026-06-06] crm.py — 1 pool call wrapped
+- [FIXED-2026-06-06] net_broadcast.py — 2 pool calls wrapped
+- [FIXED-2026-06-06] relay.py — 4 pool calls wrapped
 
 ---
 

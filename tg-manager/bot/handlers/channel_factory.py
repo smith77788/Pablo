@@ -179,13 +179,17 @@ async def cb_chanf_import_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     """Step 2: загрузить каналы аккаунта и сохранить в систему."""
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, phone, first_name, username, "
-        "device_model, system_version, app_version FROM tg_accounts "
-        "WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, phone, first_name, username, "
+            "device_model, system_version, app_version FROM tg_accounts "
+            "WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "import_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -382,12 +386,16 @@ async def cb_chanf_create_acc_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, phone, first_name, username, session_str "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, phone, first_name, username, session_str "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "create_acc_chosen fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -570,9 +578,13 @@ async def cb_chanf_pick_cluster(
     state: FSMContext,
 ) -> None:
     await callback.answer()
-    cl = await pool.fetchrow(
-        "SELECT id, name FROM clusters WHERE id=$1", callback_data.channel_id
-    )
+    try:
+        cl = await pool.fetchrow(
+            "SELECT id, name FROM clusters WHERE id=$1", callback_data.channel_id
+        )
+    except Exception:
+        log_exc_swallow(log, "pick_cluster fetchrow failed")
+        cl = None
     cluster_name = cl["name"] if cl else ""
     await state.update_data(
         cluster_id=callback_data.channel_id, cluster_name=cluster_name
@@ -640,12 +652,16 @@ async def cb_chanf_do_create(
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "confirm_create fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.",
