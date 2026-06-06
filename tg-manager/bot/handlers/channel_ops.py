@@ -55,6 +55,7 @@ from bot.utils.subscription import require_plan
 from bot.utils.op_helpers import _acc_label, _progress_text, backoff
 from services import session_simulator
 from services.logger import log_exc_swallow
+from bot.utils.event_status import mark_handled_error
 
 # ── Bulk Pacing Presets ──────────────────────────────────────────────────────
 
@@ -329,15 +330,19 @@ def _human_delay(min_s: float, max_s: float) -> float:
 
 
 async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
-        "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
-        "a.trust_score, a.flood_count_7d, a.cooldown_until, a.tg_user_id, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a "
-        "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 ORDER BY a.added_at",
-        owner_id,
-    )
+    try:
+        return await pool.fetch(
+            "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
+            "a.trust_score, a.flood_count_7d, a.cooldown_until, a.tg_user_id, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a "
+            "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 ORDER BY a.added_at",
+            owner_id,
+        )
+    except Exception as e:
+        log.warning("_get_accounts error: %s", e)
+        return []
 
 
 def _back_kb(acc_id: int = 0) -> InlineKeyboardBuilder:
@@ -791,10 +796,13 @@ async def cb_bulk_create_start(
             reply_markup=_back_kb().as_markup(),
         )
         return
-    accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
     selected = {a["id"] for a in accounts}
     await state.update_data(bulk_op="create", bulk_selected=list(selected))
     await _show_bulk_select(callback, pool, "create", selected)
@@ -1174,23 +1182,32 @@ async def cb_do_bulk_create(
     data = await state.get_data()
     selected_ids = data.get("bulk_selected", [])
     await state.clear()
-    if selected_ids:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-            callback.from_user.id,
-            selected_ids,
+    try:
+        if selected_ids:
+            accounts = await pool.fetch(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, "
+                "a.device_model, a.system_version, a.app_version, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+                callback.from_user.id,
+                selected_ids,
+            )
+        else:
+            accounts = await pool.fetch(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, "
+                "a.device_model, a.system_version, a.app_version, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+                callback.from_user.id,
+            )
+    except Exception as exc:
+        mark_handled_error(f"bulk_create_confirm accounts: {exc}")
+        await callback.message.edit_text(
+            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
         )
-    else:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL",
-            callback.from_user.id,
-        )
+        return
 
     channel_count = data.get("channel_count", 1)
     total_ops = len(accounts) * channel_count
@@ -1208,10 +1225,13 @@ async def cb_do_bulk_create(
     from datetime import datetime, timezone as _tz
 
     acc_ids = [a["id"] for a in accounts]
-    health_rows = await pool.fetch(
-        "SELECT id, added_at, trust_score, first_name, phone FROM tg_accounts WHERE id = ANY($1)",
-        acc_ids,
-    )
+    try:
+        health_rows = await pool.fetch(
+            "SELECT id, added_at, trust_score, first_name, phone FROM tg_accounts WHERE id = ANY($1)",
+            acc_ids,
+        )
+    except Exception:
+        health_rows = []
     risk_warnings: list[str] = []
     blocked_accs: list[str] = []
     for row in health_rows:
@@ -1584,9 +1604,15 @@ async def cb_join_pick_account(
         )
         return
     if len(active) == 1:
-        acc = await pool.fetchrow(
-            "SELECT id, session_str FROM tg_accounts WHERE id=$1", active[0]["id"]
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id, session_str FROM tg_accounts WHERE id=$1", active[0]["id"]
+            )
+        except Exception:
+            acc = None
+        if not acc:
+            await callback.answer("Аккаунт не найден", show_alert=True)
+            return
         await state.update_data(acc_id=acc["id"], session_str=acc["session_str"])
         await _start_join_fsm(callback.message, state, edit=True)
         return
@@ -1907,12 +1933,15 @@ async def cb_manage_show_dialogs(
     uid = callback.from_user.id
 
     # First try managed_channels from DB (instant)
-    db_chans = await pool.fetch(
-        "SELECT channel_id, title, username FROM managed_channels "
-        "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title",
-        uid,
-        acc_id,
-    )
+    try:
+        db_chans = await pool.fetch(
+            "SELECT channel_id, title, username FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title",
+            uid,
+            acc_id,
+        )
+    except Exception:
+        db_chans = []
 
     kb = InlineKeyboardBuilder()
     if db_chans:
@@ -2193,13 +2222,16 @@ async def cb_manage_admins(
     ch_id = callback_data.channel_id
     owner_id = callback.from_user.id
 
-    accounts = await pool.fetch(
-        "SELECT id, phone, first_name, username, tg_user_id FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2 "
-        "ORDER BY trust_score DESC NULLS LAST",
-        owner_id,
-        acc_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, phone, first_name, username, tg_user_id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2 "
+            "ORDER BY trust_score DESC NULLS LAST",
+            owner_id,
+            acc_id,
+        )
+    except Exception:
+        accounts = []
 
     kb = InlineKeyboardBuilder()
     lines = [
@@ -2254,11 +2286,14 @@ async def cb_do_promote(
         await callback.answer("Аккаунт-администратор не найден.", show_alert=True)
         return
 
-    target = await pool.fetchrow(
-        "SELECT id, phone, first_name, tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        target_db_id,
-        owner_id,
-    )
+    try:
+        target = await pool.fetchrow(
+            "SELECT id, phone, first_name, tg_user_id FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            target_db_id,
+            owner_id,
+        )
+    except Exception:
+        target = None
     if not target or not target["tg_user_id"]:
         await callback.answer(
             "Целевой аккаунт не найден или нет Telegram ID.", show_alert=True
@@ -2306,12 +2341,15 @@ async def cb_promote_all(
         return
     await callback.answer("⏳ Промовую всех аккаунтов...")
 
-    accounts = await pool.fetch(
-        "SELECT id, phone, first_name, tg_user_id FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
-        owner_id,
-        acc_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, phone, first_name, tg_user_id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
+            owner_id,
+            acc_id,
+        )
+    except Exception:
+        accounts = []
 
     from services import account_manager
 
@@ -2591,11 +2629,14 @@ async def cb_members_invite(
     # Получаем данные канала из БД для отображения
     channel_row = None
     if callback_data.channel_id:
-        channel_row = await pool.fetchrow(
-            "SELECT title, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
-            callback_data.channel_id,
-            callback.from_user.id,
-        )
+        try:
+            channel_row = await pool.fetchrow(
+                "SELECT title, access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+                callback_data.channel_id,
+                callback.from_user.id,
+            )
+        except Exception:
+            channel_row = None
     channel_display = (channel_row["title"] if channel_row else None) or str(
         callback_data.channel_id
     )
@@ -2951,14 +2992,22 @@ async def _run_invite_bg(
         "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
         "WHERE a.owner_id=$1 AND a.is_active=TRUE AND a.session_str IS NOT NULL"
     )
-    if selected_acc_ids:
-        accounts = await pool.fetch(
-            _acc_q + " AND a.id = ANY($2::bigint[])",
-            user_id,
-            selected_acc_ids,
+    try:
+        if selected_acc_ids:
+            accounts = await pool.fetch(
+                _acc_q + " AND a.id = ANY($2::bigint[])",
+                user_id,
+                selected_acc_ids,
+            )
+        else:
+            accounts = await pool.fetch(_acc_q + " LIMIT 1", user_id)
+    except Exception as exc:
+        mark_handled_error(f"invite_users accounts: {exc}")
+        await msg_obj.answer(
+            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=_back_kb().as_markup(),
         )
-    else:
-        accounts = await pool.fetch(_acc_q + " LIMIT 1", user_id)
+        return
 
     if not accounts:
         await msg_obj.answer(
@@ -3462,14 +3511,19 @@ async def fsm_botfather_username(
     if not selected_ids and data.get("acc_id"):
         selected_ids = [data["acc_id"]]
 
-    accounts = await pool.fetch(
-        "SELECT a.id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-        message.from_user.id,
-        selected_ids,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+            message.from_user.id,
+            selected_ids,
+        )
+    except Exception as exc:
+        mark_handled_error(f"botfather_create accounts: {exc}")
+        await message.answer(f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>")
+        return
     if not accounts:
         await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
         return
@@ -4542,10 +4596,13 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             reply_markup=_back_kb().as_markup(),
         )
         return
-    accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
     count = len(accounts)
     await callback.message.edit_text(
         f"⚡ <b>Массовые операции</b>\n\n"
@@ -4576,11 +4633,14 @@ async def _show_bulk_select(
     is_cb = isinstance(msg_or_cb, _CQ)
     owner_id = msg_or_cb.from_user.id
 
-    accounts = await pool.fetch(
-        "SELECT id, first_name, username, phone, is_active FROM tg_accounts "
-        "WHERE owner_id=$1 ORDER BY added_at",
-        owner_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, first_name, username, phone, is_active FROM tg_accounts "
+            "WHERE owner_id=$1 ORDER BY added_at",
+            owner_id,
+        )
+    except Exception:
+        accounts = []
     active = [a for a in accounts if a["is_active"]]
 
     if not active:
@@ -4667,10 +4727,13 @@ async def cb_bulk_start_op(
         "bulk_chan_about": "chan_about",
     }
     op = op_map[callback_data.action]
-    accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
     selected = {a["id"] for a in accounts}  # start with all selected
     await state.update_data(bulk_op=op, bulk_selected=list(selected))
     await _show_bulk_select(callback, pool, op, selected)
@@ -4707,10 +4770,13 @@ async def cb_bulk_select_all(
 ) -> None:
     await callback.answer()
     op = callback.data.split(":", 2)[2] if callback.data.count(":") >= 2 else ""
-    accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        callback.from_user.id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            callback.from_user.id,
+        )
+    except Exception:
+        accounts = []
     selected = {a["id"] for a in accounts}
     await state.update_data(bulk_selected=list(selected), bulk_op=op)
     await _show_bulk_select(callback, pool, op, selected)
@@ -4959,18 +5025,21 @@ async def fsm_bulk_channel_id(
     selected_ids = data.get("bulk_selected", [])
     await state.clear()
 
-    accounts = (
-        await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-            message.from_user.id,
-            selected_ids,
+    try:
+        accounts = (
+            await pool.fetch(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, "
+                "a.device_model, a.system_version, a.app_version, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+                message.from_user.id,
+                selected_ids,
+            )
+            if selected_ids
+            else []
         )
-        if selected_ids
-        else []
-    )
+    except Exception:
+        accounts = []
 
     if not accounts:
         await message.answer("⚠️ Нет выбранных аккаунтов. Начните заново: /ops")
@@ -5098,14 +5167,17 @@ async def fsm_bulk_post_text(
     if op == "post" and selected_ids:
         channel_ref = data.get("channel_id_ref", "")
         await state.clear()
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-            message.from_user.id,
-            selected_ids,
-        )
+        try:
+            accounts = await pool.fetch(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, "
+                "a.device_model, a.system_version, a.app_version, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+                message.from_user.id,
+                selected_ids,
+            )
+        except Exception:
+            accounts = []
         if not accounts:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return
@@ -5113,11 +5185,14 @@ async def fsm_bulk_post_text(
         bulk_access_hash = 0
         if channel_ref.lstrip("-").isdigit():
             cid = abs(int(channel_ref))
-            ah_row = await pool.fetchrow(
-                "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-                message.from_user.id,
-                cid,
-            )
+            try:
+                ah_row = await pool.fetchrow(
+                    "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                    message.from_user.id,
+                    cid,
+                )
+            except Exception:
+                ah_row = None
             bulk_access_hash = (ah_row["access_hash"] if ah_row else 0) or 0
 
         msg = await message.answer(
@@ -5153,11 +5228,14 @@ async def fsm_bulk_post_text(
         msg = await message.answer("⏳ Публикую...")
         from services import account_manager
 
-        single_ah_row = await pool.fetchrow(
-            "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-            message.from_user.id,
-            ch_id,
-        )
+        try:
+            single_ah_row = await pool.fetchrow(
+                "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+                message.from_user.id,
+                ch_id,
+            )
+        except Exception:
+            single_ah_row = None
         single_access_hash = (single_ah_row["access_hash"] if single_ah_row else 0) or 0
         result = await account_manager.post_to_channel(
             acc["session_str"],
@@ -5199,14 +5277,17 @@ async def fsm_join_invite_combined(
     from services import account_manager
 
     if is_bulk:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-            message.from_user.id,
-            selected_ids,
-        )
+        try:
+            accounts = await pool.fetch(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, "
+                "a.device_model, a.system_version, a.app_version, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+                message.from_user.id,
+                selected_ids,
+            )
+        except Exception:
+            accounts = []
         if not accounts:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return
@@ -5407,14 +5488,17 @@ async def fsm_update_profile(
     from services import account_manager
 
     if is_bulk:
-        accounts = await pool.fetch(
-            "SELECT a.id, a.session_str, a.first_name, a.phone, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
-            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-            message.from_user.id,
-            selected_ids,
-        )
+        try:
+            accounts = await pool.fetch(
+                "SELECT a.id, a.session_str, a.first_name, a.phone, "
+                "a.device_model, a.system_version, a.app_version, p.proxy_url "
+                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+                message.from_user.id,
+                selected_ids,
+            )
+        except Exception:
+            accounts = []
         if not accounts:
             await message.answer("⚠️ Аккаунты не найдены.")
             return
@@ -5669,14 +5753,17 @@ async def fsm_bulk_dm_text(
         await message.answer("⚠️ Данные рассылки устарели. Начните заново: /ops")
         return
 
-    accounts = await pool.fetch(
-        "SELECT a.id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
-        message.from_user.id,
-        selected_ids,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+            message.from_user.id,
+            selected_ids,
+        )
+    except Exception:
+        accounts = []
     if not accounts:
         await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
         return
@@ -5754,15 +5841,18 @@ async def fsm_bulk_chan_value(
         value = value[:255]
 
     # Count channels from DB cache for preview
-    chan_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels mc "
-            "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[])",
-            message.from_user.id,
-            selected_ids,
+    try:
+        chan_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels mc "
+                "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[])",
+                message.from_user.id,
+                selected_ids,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        chan_count = 0
 
     if chan_count == 0:
         await message.answer(
@@ -5779,14 +5869,17 @@ async def fsm_bulk_chan_value(
 
     op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
     value_preview = html.escape(value[:80])
-    acc_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) AND is_active=TRUE",
-            message.from_user.id,
-            selected_ids,
+    try:
+        acc_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) AND is_active=TRUE",
+                message.from_user.id,
+                selected_ids,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        acc_count = len(selected_ids)
     eta_s = chan_count * 6  # ~6s per channel average
     eta_str = f"{eta_s // 60} мин" if eta_s >= 60 else f"{eta_s}с"
 
@@ -5920,14 +6013,22 @@ async def cb_bulk_chan_exec(
 
     base_uname = value.lstrip("@") if op == "chan_uname" else ""
 
-    accounts = await pool.fetch(
-        "SELECT a.id, a.session_str, a.first_name, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
-        callback.from_user.id,
-        selected_ids,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT a.id, a.session_str, a.first_name, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+            callback.from_user.id,
+            selected_ids,
+        )
+    except Exception as exc:
+        mark_handled_error(f"bulk_chan_exec accounts: {exc}")
+        await callback.message.edit_text(
+            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
     if not accounts:
         await callback.message.edit_text(
             "⚠️ Аккаунты не найдены. Начните заново: /ops",
@@ -5935,14 +6036,17 @@ async def cb_bulk_chan_exec(
         )
         return
 
-    channels = await pool.fetch(
-        "SELECT mc.channel_id, mc.title, mc.username, mc.acc_id, mc.access_hash "
-        "FROM managed_channels mc "
-        "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[]) "
-        "ORDER BY mc.acc_id, mc.title",
-        callback.from_user.id,
-        selected_ids,
-    )
+    try:
+        channels = await pool.fetch(
+            "SELECT mc.channel_id, mc.title, mc.username, mc.acc_id, mc.access_hash "
+            "FROM managed_channels mc "
+            "WHERE mc.owner_id=$1 AND mc.acc_id = ANY($2::bigint[]) "
+            "ORDER BY mc.acc_id, mc.title",
+            callback.from_user.id,
+            selected_ids,
+        )
+    except Exception:
+        channels = []
 
     if not channels:
         await callback.message.edit_text(
@@ -6014,9 +6118,15 @@ async def cb_my_chans(
         )
         return
     if len(active) == 1:
-        acc = await pool.fetchrow(
-            "SELECT * FROM tg_accounts WHERE id=$1", active[0]["id"]
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT * FROM tg_accounts WHERE id=$1", active[0]["id"]
+            )
+        except Exception:
+            acc = None
+        if not acc:
+            await callback.answer("Аккаунт не найден", show_alert=True)
+            return
         await state.update_data(
             my_chans_acc_id=acc["id"], my_chans_session=acc["session_str"]
         )
@@ -6055,11 +6165,14 @@ async def cb_my_chans_acc(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -6296,12 +6409,15 @@ async def cb_my_chans_leave(
     acc = None
     session = data.get("my_chans_session")
     if not session:
-        acc = await pool.fetchrow(
-            "SELECT id, session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.acc_id,
-            callback.from_user.id,
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id, session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                callback_data.acc_id,
+                callback.from_user.id,
+            )
+        except Exception:
+            acc = None
         session = acc["session_str"] if acc else None
     if not session:
         await callback.message.edit_text(
@@ -6367,21 +6483,27 @@ async def fsm_my_chans_post_text(
     acc_id = data.get("my_chans_post_acc_id")
     await state.clear()
 
-    session_row = await pool.fetchrow(
-        "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        message.from_user.id,
-    )
+    try:
+        session_row = await pool.fetchrow(
+            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            message.from_user.id,
+        )
+    except Exception:
+        session_row = None
     if not session_row:
         await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
         return
     from services import account_manager
 
-    access_hash_row = await pool.fetchrow(
-        "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-        message.from_user.id,
-        ch_id,
-    )
+    try:
+        access_hash_row = await pool.fetchrow(
+            "SELECT access_hash FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            message.from_user.id,
+            ch_id,
+        )
+    except Exception:
+        access_hash_row = None
     access_hash = (access_hash_row["access_hash"] if access_hash_row else 0) or 0
     msg = await message.answer("⏳ Публикую...")
     result = await account_manager.post_to_channel(
@@ -6579,11 +6701,14 @@ async def cb_cinv_pick_channel(
 ) -> None:
     await callback.answer()
     ch_id = callback_data.channel_id
-    row = await pool.fetchrow(
-        "SELECT title, username, access_hash, acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
-        callback.from_user.id,
-        ch_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT title, username, access_hash, acc_id FROM managed_channels WHERE owner_id=$1 AND channel_id=$2",
+            callback.from_user.id,
+            ch_id,
+        )
+    except Exception:
+        row = None
     display = (
         f"@{row['username']}"
         if row and row["username"]
@@ -6694,14 +6819,17 @@ async def cb_cinv_proceed(
     )
     from services import account_manager as _am
 
-    acc_rows = await pool.fetch(
-        "SELECT a.id, a.session_str, a.first_name, a.username, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
-        selected_accs,
-        callback.from_user.id,
-    )
+    try:
+        acc_rows = await pool.fetch(
+            "SELECT a.id, a.session_str, a.first_name, a.username, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
+            selected_accs,
+            callback.from_user.id,
+        )
+    except Exception:
+        acc_rows = []
 
     async def _fetch_one(acc) -> list:
         try:
@@ -6752,14 +6880,17 @@ async def cb_cinv_run(
         return
     await callback.answer()
     await state.clear()
-    acc_rows = await pool.fetch(
-        "SELECT a.id, a.session_str, a.tg_user_id, a.first_name, a.username, a.phone, "
-        "a.device_model, a.system_version, a.app_version, p.proxy_url "
-        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-        "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
-        selected_accs,
-        callback.from_user.id,
-    )
+    try:
+        acc_rows = await pool.fetch(
+            "SELECT a.id, a.session_str, a.tg_user_id, a.first_name, a.username, a.phone, "
+            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+            "WHERE a.id = ANY($1::int[]) AND a.owner_id=$2 AND a.is_active=true",
+            selected_accs,
+            callback.from_user.id,
+        )
+    except Exception:
+        acc_rows = []
     selected_order = {acc_id: idx for idx, acc_id in enumerate(selected_accs)}
     acc_rows = sorted(
         acc_rows,
