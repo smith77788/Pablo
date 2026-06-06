@@ -268,12 +268,16 @@ async def cb_seo_analyze(
     if isinstance(commands, Exception):
         commands = []
 
-    audience = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+    try:
+        audience = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log.warning("seo analyze: failed to fetch audience count")
+        audience = 0
 
     bot_username = row.get("username") or ""
     score, tips = _seo_score(
@@ -674,11 +678,15 @@ async def cb_seo_chan_menu(
     chan_id = callback_data.chan_id
     acc_id = callback_data.acc_id
 
-    chan = await pool.fetchrow(
-        "SELECT title, username, access_hash FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        callback.from_user.id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT title, username, access_hash FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log.warning("seo chan_menu: failed to fetch channel row")
+        chan = None
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
@@ -760,11 +768,15 @@ async def cb_seo_chan_analyze(
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
-    chan = await pool.fetchrow(
-        "SELECT id, title, username, access_hash, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        user_id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT id, title, username, access_hash, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            user_id,
+        )
+    except Exception:
+        log.warning("seo chan_analyze: failed to fetch channel row")
+        chan = None
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
@@ -779,16 +791,20 @@ async def cb_seo_chan_analyze(
     # Try to get full about from Telethon
     about = ""
     members = 0
-    acc = (
-        await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            user_id,
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                user_id,
+            )
+            if acc_id
+            else None
         )
-        if acc_id
-        else None
-    )
+    except Exception:
+        log.warning("seo chan_analyze: failed to fetch account row")
+        acc = None
 
     if acc:
         try:
@@ -889,11 +905,15 @@ async def cb_seo_chan_export_txt(
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
-    chan = await pool.fetchrow(
-        "SELECT id, title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        user_id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT id, title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            user_id,
+        )
+    except Exception:
+        log.warning("seo chan_export: failed to fetch channel row")
+        chan = None
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
@@ -905,16 +925,20 @@ async def cb_seo_chan_export_txt(
 
     about = ""
     members = 0
-    acc = (
-        await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            user_id,
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                user_id,
+            )
+            if acc_id
+            else None
         )
-        if acc_id
-        else None
-    )
+    except Exception:
+        log.warning("seo chan_export: failed to fetch account row")
+        acc = None
 
     if acc:
         try:
@@ -982,11 +1006,15 @@ async def cb_seo_chan_ai(
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
-    chan = await pool.fetchrow(
-        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        user_id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            user_id,
+        )
+    except Exception:
+        log.warning("seo chan_ai: failed to fetch channel row")
+        chan = None
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
@@ -994,16 +1022,20 @@ async def cb_seo_chan_ai(
 
     # Берём текущее описание через Telethon
     about = ""
-    acc = (
-        await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            user_id,
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                user_id,
+            )
+            if acc_id
+            else None
         )
-        if acc_id
-        else None
-    )
+    except Exception:
+        log.warning("seo chan_ai: failed to fetch account row")
+        acc = None
 
     if acc:
         try:
@@ -1020,10 +1052,14 @@ async def cb_seo_chan_ai(
             )
 
     # Ключевые слова из поисковой памяти
-    kw_rows = await pool.fetch(
-        "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
-        user_id,
-    )
+    try:
+        kw_rows = await pool.fetch(
+            "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
+            user_id,
+        )
+    except Exception:
+        log.warning("seo chan_ai: failed to fetch search_memory keywords")
+        kw_rows = []
     keywords = [r["keyword"] for r in kw_rows]
 
     # Получаем сохранённый фидбек и preferred_username из FSM (если это перегенерация)
@@ -1180,25 +1216,33 @@ async def fsm_seo_feedback(
     )
 
     # Получаем данные канала
-    chan = await pool.fetchrow(
-        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        message.from_user.id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            message.from_user.id,
+        )
+    except Exception:
+        log.warning("seo feedback: failed to fetch channel row")
+        chan = None
     if not chan:
         await thinking.edit_text("⚠️ Канал не найден. Откройте меню заново.")
         return
 
-    acc = (
-        await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            message.from_user.id,
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                message.from_user.id,
+            )
+            if acc_id
+            else None
         )
-        if acc_id
-        else None
-    )
+    except Exception:
+        log.warning("seo feedback: failed to fetch account row")
+        acc = None
 
     about = ""
     if acc:
@@ -1216,10 +1260,14 @@ async def fsm_seo_feedback(
                 "Не удалось получить about канала через get_full_channel_info (обновление)",
             )
 
-    kw_rows = await pool.fetch(
-        "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
-        message.from_user.id,
-    )
+    try:
+        kw_rows = await pool.fetch(
+            "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
+            message.from_user.id,
+        )
+    except Exception:
+        log.warning("seo feedback: failed to fetch search_memory keywords")
+        kw_rows = []
     keywords = [r["keyword"] for r in kw_rows]
     preferred_username = data.get("seo_preferred_username", "")
 
@@ -1383,25 +1431,33 @@ async def fsm_seo_username(
     )
 
     # Имитируем нажатие кнопки "Перегенерировать"
-    chan = await pool.fetchrow(
-        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        message.from_user.id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            message.from_user.id,
+        )
+    except Exception:
+        log.warning("seo preferred_username: failed to fetch channel row")
+        chan = None
     if not chan:
         await message.answer("⚠️ Канал не найден.")
         return
 
-    acc = (
-        await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            message.from_user.id,
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                message.from_user.id,
+            )
+            if acc_id
+            else None
         )
-        if acc_id
-        else None
-    )
+    except Exception:
+        log.warning("seo preferred_username: failed to fetch account row")
+        acc = None
     about = ""
     if acc:
         try:
@@ -1418,10 +1474,14 @@ async def fsm_seo_username(
                 "Не удалось получить about канала через get_full_channel_info (по username)",
             )
 
-    kw_rows = await pool.fetch(
-        "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
-        message.from_user.id,
-    )
+    try:
+        kw_rows = await pool.fetch(
+            "SELECT keyword FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 10",
+            message.from_user.id,
+        )
+    except Exception:
+        log.warning("seo preferred_username: failed to fetch search_memory keywords")
+        kw_rows = []
     keywords = [r["keyword"] for r in kw_rows]
     user_feedback = (await state.get_data()).get("seo_feedback", "")
 
@@ -1530,21 +1590,29 @@ async def _apply_chan_field(
     value: str,
 ) -> tuple[bool, str]:
     """Apply a single field change to channel via Telethon."""
-    chan = await pool.fetchrow(
-        "SELECT channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        user_id,
-    )
-    acc = (
-        await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
+    try:
+        chan = await pool.fetchrow(
+            "SELECT channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
             user_id,
         )
-        if acc_id
-        else None
-    )
+    except Exception:
+        log.warning("_apply_chan_field: failed to fetch channel row")
+        chan = None
+    try:
+        acc = (
+            await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                user_id,
+            )
+            if acc_id
+            else None
+        )
+    except Exception:
+        log.warning("_apply_chan_field: failed to fetch account row")
+        acc = None
 
     if not chan or not acc:
         return False, "Канал или аккаунт не найден"
@@ -1937,12 +2005,16 @@ async def cb_seo_preview(
         short_desc = ""
 
     uname = row.get("username") or ""
-    audience = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+    try:
+        audience = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", callback_data.bot_id
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log.warning("seo preview: failed to fetch audience count")
+        audience = 0
 
     uname_line = f"@{uname}" if uname else "⚠️ username не задан"
     aud_str = f"{int(audience):,}" if int(audience) >= 1000 else str(int(audience))
@@ -2009,11 +2081,15 @@ async def cb_seo_chan_preview(
         )
         return
     chan_id = callback_data.chan_id
-    chan = await pool.fetchrow(
-        "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        callback.from_user.id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log.warning("seo chan_preview: failed to fetch channel row")
+        chan = None
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
@@ -2268,11 +2344,15 @@ async def cb_seo_chan_content_gap(
     acc_id = callback_data.acc_id
     user_id = callback.from_user.id
 
-    chan = await pool.fetchrow(
-        "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
-        chan_id,
-        user_id,
-    )
+    try:
+        chan = await pool.fetchrow(
+            "SELECT title, username, channel_id FROM managed_channels WHERE id=$1 AND owner_id=$2",
+            chan_id,
+            user_id,
+        )
+    except Exception:
+        log.warning("seo chan_content_gap: failed to fetch channel row")
+        chan = None
     if not chan:
         await callback.answer("Канал не найден.", show_alert=True)
         return
@@ -2280,12 +2360,16 @@ async def cb_seo_chan_content_gap(
 
     about = ""
     if acc_id:
-        acc = await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            user_id,
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id,
+                user_id,
+            )
+        except Exception:
+            log.warning("seo chan_content_gap: failed to fetch account row")
+            acc = None
         if acc:
             try:
                 from services import account_manager
@@ -2301,10 +2385,14 @@ async def cb_seo_chan_content_gap(
                 )
 
     all_text = f"{chan.get('title', '')} {chan.get('username', '')} {about}"
-    tracked = await pool.fetch(
-        "SELECT keyword FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE LIMIT 20",
-        user_id,
-    )
+    try:
+        tracked = await pool.fetch(
+            "SELECT keyword FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE LIMIT 20",
+            user_id,
+        )
+    except Exception:
+        log.warning("seo chan_content_gap: failed to fetch tracked keywords")
+        tracked = []
     kw_list = [r["keyword"] for r in tracked]
 
     if not kw_list:
@@ -2379,11 +2467,15 @@ async def cb_seo_uname_alts(
     is_chan = callback_data.action == "chan_uname_alts"
 
     if is_chan:
-        chan = await pool.fetchrow(
-            "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
-            callback_data.chan_id,
-            callback.from_user.id,
-        )
+        try:
+            chan = await pool.fetchrow(
+                "SELECT title, username FROM managed_channels WHERE id=$1 AND owner_id=$2",
+                callback_data.chan_id,
+                callback.from_user.id,
+            )
+        except Exception:
+            log.warning("seo uname_alts: failed to fetch channel row")
+            chan = None
         if not chan:
             await callback.answer("Не найдено.", show_alert=True)
             return

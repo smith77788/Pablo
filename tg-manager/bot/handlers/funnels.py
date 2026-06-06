@@ -1,12 +1,16 @@
 """Funnel (message chain) management handlers."""
 
 import html as _html
+import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
 from bot.callbacks import FunnelCb, BmCb
+from services.logger import log_exc_swallow
+
+log = logging.getLogger(__name__)
 from bot.keyboards import (
     funnels_list,
     funnel_view,
@@ -42,15 +46,19 @@ def _fn_back_cancel_kb(bot_id: int, back_action: str) -> object:
 
 
 async def _owns_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) -> bool:
-    return bool(
-        await pool.fetchval(
-            """SELECT 1 FROM funnels f
+    try:
+        return bool(
+            await pool.fetchval(
+                """SELECT 1 FROM funnels f
            JOIN managed_bots b ON b.bot_id = f.bot_id
            WHERE f.id=$1 AND b.added_by=$2""",
-            funnel_id,
-            user_id,
+                funnel_id,
+                user_id,
+            )
         )
-    )
+    except Exception:
+        log_exc_swallow(log, "_owns_funnel fetchval failed")
+        return False
 
 
 async def _show_funnel_view(
@@ -125,13 +133,17 @@ async def cb_fn_list(
     # Fetch active subscriber counts for each funnel
     subscriber_counts: dict = {}
     for f in funnels:
-        cnt = (
-            await pool.fetchval(
-                "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1 AND completed=false",
-                f["id"],
+        try:
+            cnt = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1 AND completed=false",
+                    f["id"],
+                )
+                or 0
             )
-            or 0
-        )
+        except Exception:
+            log_exc_swallow(log, "fetchval subscriber_counts failed")
+            cnt = 0
         subscriber_counts[f["id"]] = int(cnt)
 
     if not funnels:
@@ -865,20 +877,26 @@ async def cb_fn_step_delete(
     steps = await db.get_funnel_steps(pool, funnel_id)
 
     # Удаляем шаг и перенумеровываем
-    await pool.execute(
-        "DELETE FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
-        funnel_id,
-        step_to_delete,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM funnel_steps WHERE funnel_id=$1 AND step_order=$2",
+            funnel_id,
+            step_to_delete,
+        )
+    except Exception:
+        log_exc_swallow(log, "step_delete execute failed")
     # Сдвинуть все шаги после удалённого на -1
     for s in steps:
         if s["step_order"] > step_to_delete:
-            await pool.execute(
-                "UPDATE funnel_steps SET step_order=$1 WHERE funnel_id=$2 AND step_order=$3",
-                s["step_order"] - 1,
-                funnel_id,
-                s["step_order"],
-            )
+            try:
+                await pool.execute(
+                    "UPDATE funnel_steps SET step_order=$1 WHERE funnel_id=$2 AND step_order=$3",
+                    s["step_order"] - 1,
+                    funnel_id,
+                    s["step_order"],
+                )
+            except Exception:
+                log_exc_swallow(log, "step_delete renumber execute failed")
 
     await callback.answer(f"🗑 Шаг {step_to_delete + 1} удалён", show_alert=False)
     # Обновить экран управления шагами

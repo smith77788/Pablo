@@ -171,10 +171,14 @@ async def _go_to_bot_step(
     is_msg = isinstance(target, Message)
     uid = target.from_user.id
 
-    bots = await pool.fetch(
-        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE LIMIT 20",
-        uid,
-    )
+    try:
+        bots = await pool.fetch(
+            "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE LIMIT 20",
+            uid,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_bots")
+        bots = []
     kb = InlineKeyboardBuilder()
     for b in bots:
         label = (
@@ -217,9 +221,13 @@ async def cb_pack_pick_bot(
     bot_id = callback_data.pack_id
     bot_username = None
     if bot_id:
-        bot_row = await pool.fetchrow(
-            "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
-        )
+        try:
+            bot_row = await pool.fetchrow(
+                "SELECT username FROM managed_bots WHERE bot_id=$1", bot_id
+            )
+        except Exception:
+            log_exc_swallow(log, "pool.fetchrow managed_bots pick_bot")
+            bot_row = None
         bot_username = bot_row["username"] if bot_row else None
     await state.update_data(pack_bot_id=bot_id or None, pack_bot_username=bot_username)
     await state.set_state(PresencePackFSM.selecting_channels)
@@ -232,11 +240,15 @@ async def _render_channel_step(
     sd = await state.get_data()
     selected: list[int] = sd.get("pack_channel_ids") or []
 
-    channels = await pool.fetch(
-        "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 "
-        "AND (type = 'channel' OR type IS NULL) ORDER BY title LIMIT 30",
-        callback.from_user.id,
-    )
+    try:
+        channels = await pool.fetch(
+            "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 "
+            "AND (type = 'channel' OR type IS NULL) ORDER BY title LIMIT 30",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_channels (channel step)")
+        channels = []
     kb = InlineKeyboardBuilder()
     if not channels:
         kb.button(
@@ -324,11 +336,15 @@ async def _render_group_step(
     sd = await state.get_data()
     selected: list[int] = sd.get("pack_group_ids") or []
 
-    groups = await pool.fetch(
-        "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 "
-        "AND type IN ('megagroup', 'supergroup', 'group') ORDER BY title LIMIT 30",
-        callback.from_user.id,
-    )
+    try:
+        groups = await pool.fetch(
+            "SELECT id, title, username FROM managed_channels WHERE owner_id=$1 "
+            "AND type IN ('megagroup', 'supergroup', 'group') ORDER BY title LIMIT 30",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_channels (group step)")
+        groups = []
     kb = InlineKeyboardBuilder()
     if not groups:
         kb.button(
@@ -577,22 +593,30 @@ async def cb_pack_view(
     ch_ids = _jlist(pack["channel_ids"])
     gr_ids = _jlist(pack["group_ids"])
 
-    ch_rows = (
-        await pool.fetch(
-            "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])",
-            ch_ids,
+    try:
+        ch_rows = (
+            await pool.fetch(
+                "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])",
+                ch_ids,
+            )
+            if ch_ids
+            else []
         )
-        if ch_ids
-        else []
-    )
-    gr_rows = (
-        await pool.fetch(
-            "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])",
-            gr_ids,
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_channels ch_rows (pack view)")
+        ch_rows = []
+    try:
+        gr_rows = (
+            await pool.fetch(
+                "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[])",
+                gr_ids,
+            )
+            if gr_ids
+            else []
         )
-        if gr_ids
-        else []
-    )
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_channels gr_rows (pack view)")
+        gr_rows = []
 
     def _row_label(r) -> str:
         return r["title"] or r.get("username") or "—"
@@ -796,28 +820,40 @@ async def cb_pack_seed(
 
     bot_token = None
     if pack.get("bot_id"):
-        bot_row = await pool.fetchrow(
-            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            pack["bot_id"],
-            owner_id,
-        )
+        try:
+            bot_row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                pack["bot_id"],
+                owner_id,
+            )
+        except Exception:
+            log_exc_swallow(log, "pool.fetchrow managed_bots token (pack seed)")
+            bot_row = None
         if bot_row:
             bot_token = bot_row["token"]
 
     gr_ids = _jlist(pack["group_ids"])
     group_link = None
     if gr_ids:
-        gr_row = await pool.fetchrow(
-            "SELECT username FROM managed_channels WHERE id = ANY($1::int[]) AND username IS NOT NULL LIMIT 1",
-            gr_ids,
-        )
+        try:
+            gr_row = await pool.fetchrow(
+                "SELECT username FROM managed_channels WHERE id = ANY($1::int[]) AND username IS NOT NULL LIMIT 1",
+                gr_ids,
+            )
+        except Exception:
+            log_exc_swallow(log, "pool.fetchrow managed_channels group_link (pack seed)")
+            gr_row = None
         if gr_row:
             group_link = f"@{gr_row['username']}"
 
-    channels = await pool.fetch(
-        "SELECT title, username, channel_id, access_hash FROM managed_channels WHERE id = ANY($1::int[])",
-        ch_ids,
-    )
+    try:
+        channels = await pool.fetch(
+            "SELECT title, username, channel_id, access_hash FROM managed_channels WHERE id = ANY($1::int[])",
+            ch_ids,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_channels (pack seed)")
+        channels = []
 
     pack_id = callback_data.pack_id
     progress_msg = await callback.message.edit_text(
@@ -918,10 +954,14 @@ async def cb_pack_promote(
 
     await callback.answer()
 
-    channels = await pool.fetch(
-        "SELECT channel_id, access_hash FROM managed_channels WHERE id = ANY($1::int[])",
-        all_asset_ids,
-    )
+    try:
+        channels = await pool.fetch(
+            "SELECT channel_id, access_hash FROM managed_channels WHERE id = ANY($1::int[])",
+            all_asset_ids,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetch managed_channels (pack promote)")
+        channels = []
 
     pack_id = callback_data.pack_id
     bot_tg_id = pack["bot_id"]
@@ -1075,33 +1115,49 @@ async def cb_bot_admin_panel(
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id
 
-    bot_row = await pool.fetchrow(
-        "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id,
-        owner_id,
-    )
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id,
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetchrow managed_bots (bot admin panel)")
+        bot_row = None
     if not bot_row:
         await callback.answer("Бот не найден", show_alert=True)
         return
     await callback.answer()
 
-    user_count = (
-        await pool.fetchval("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
-        or 0
-    )
-    reply_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
-            bot_id,
+    try:
+        user_count = (
+            await pool.fetchval("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
+            or 0
         )
-        or 0
-    )
-    funnel_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+    except Exception:
+        log_exc_swallow(log, "pool.fetchval bot_users count (bot admin panel)")
+        user_count = 0
+    try:
+        reply_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
+                bot_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log_exc_swallow(log, "pool.fetchval auto_replies count (bot admin panel)")
+        reply_count = 0
+    try:
+        funnel_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+            )
+            or 0
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetchval funnels count (bot admin panel)")
+        funnel_count = 0
 
     token = await db.get_bot_admin_token(pool, bot_id)
     bot_name = (
@@ -1150,30 +1206,46 @@ async def cb_bot_regen_token(
     # Refresh the panel directly without triggering another answer()
     bot_id = callback_data.bot_id
     owner_id = callback.from_user.id
-    bot_row = await pool.fetchrow(
-        "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-        bot_id,
-        owner_id,
-    )
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id,
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetchrow managed_bots (regen_token panel refresh)")
+        bot_row = None
     if not bot_row:
         return
-    user_count = (
-        await pool.fetchval("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
-        or 0
-    )
-    reply_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
-            bot_id,
+    try:
+        user_count = (
+            await pool.fetchval("SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
+            or 0
         )
-        or 0
-    )
-    funnel_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+    except Exception:
+        log_exc_swallow(log, "pool.fetchval bot_users count (regen_token panel refresh)")
+        user_count = 0
+    try:
+        reply_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM auto_replies WHERE bot_id=$1 AND is_active=TRUE",
+                bot_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log_exc_swallow(log, "pool.fetchval auto_replies count (regen_token panel refresh)")
+        reply_count = 0
+    try:
+        funnel_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM funnels WHERE bot_id=$1 AND is_active=true", bot_id
+            )
+            or 0
+        )
+    except Exception:
+        log_exc_swallow(log, "pool.fetchval funnels count (regen_token panel refresh)")
+        funnel_count = 0
     token = await db.get_bot_admin_token(pool, bot_id)
     bot_name = (
         f"@{bot_row['username']}"

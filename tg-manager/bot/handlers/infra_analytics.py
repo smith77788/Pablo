@@ -570,25 +570,31 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     uid = callback.from_user.id
 
     # Parallel aggregation queries
-    acc_row = await pool.fetchrow(
-        """SELECT COUNT(*) AS total,
-                  COUNT(CASE WHEN is_active THEN 1 END) AS active,
-                  COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
-                  ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust
-           FROM tg_accounts WHERE owner_id=$1""",
-        uid,
-    )
-    bot_row = await pool.fetchrow(
-        """SELECT COUNT(*) AS total,
-                  COUNT(CASE WHEN is_active THEN 1 END) AS active,
-                  COALESCE(SUM(u.cnt), 0) AS total_users
-           FROM managed_bots b
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) u ON u.bot_id = b.bot_id
-           WHERE b.added_by=$1""",
-        uid,
-    )
+    try:
+        acc_row = await pool.fetchrow(
+            """SELECT COUNT(*) AS total,
+                      COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                      COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
+                      ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust
+               FROM tg_accounts WHERE owner_id=$1""",
+            uid,
+        )
+    except Exception:
+        acc_row = None
+    try:
+        bot_row = await pool.fetchrow(
+            """SELECT COUNT(*) AS total,
+                      COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                      COALESCE(SUM(u.cnt), 0) AS total_users
+               FROM managed_bots b
+               LEFT JOIN (
+                   SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+               ) u ON u.bot_id = b.bot_id
+               WHERE b.added_by=$1""",
+            uid,
+        )
+    except Exception:
+        bot_row = None
 
     # Channels and groups via managed_channels
     try:
@@ -741,12 +747,15 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     await callback.answer()
     uid = callback.from_user.id
 
-    accounts = await pool.fetch(
-        """SELECT id, first_name, phone, trust_score, pool, warnings,
-                  (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
-           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, first_name, phone, trust_score, pool, warnings,
+                      (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
+               FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     if not accounts:
         await callback.message.edit_text(
@@ -982,24 +991,30 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.answer("⏳ Применяю...")
     uid = callback.from_user.id
 
-    accounts = await pool.fetch(
-        """SELECT id, first_name, phone, trust_score, pool, warnings,
-                  (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
-           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, first_name, phone, trust_score, pool, warnings,
+                      (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
+               FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     changed = 0
     for acc in accounts:
         target_pool = _classify_account(dict(acc))
         if target_pool and acc["pool"] != target_pool:
-            await pool.execute(
-                "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
-                target_pool,
-                acc["id"],
-                uid,
-            )
-            changed += 1
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
+                    target_pool,
+                    acc["id"],
+                    uid,
+                )
+                changed += 1
+            except Exception:
+                log.warning("rebalance_apply: failed to update pool for acc=%d uid=%d", acc["id"], uid)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К аналитике", callback_data=InfraCb(action="menu"))

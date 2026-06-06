@@ -496,12 +496,16 @@ async def cb_pay(
 @router.callback_query(SubCb.filter(F.action == "check_status"))
 async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    row = await pool.fetchrow(
-        "SELECT * FROM payments WHERE user_id=$1 "
-        "AND status IN ('pending','confirming','confirmed') "
-        "ORDER BY created_at DESC LIMIT 1",
-        callback.from_user.id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT * FROM payments WHERE user_id=$1 "
+            "AND status IN ('pending','confirming','confirmed') "
+            "ORDER BY created_at DESC LIMIT 1",
+            callback.from_user.id,
+        )
+    except Exception:
+        log.warning("cb_check_status: DB error for user_id=%s", callback.from_user.id, exc_info=True)
+        row = None
     if not row:
         kb = InlineKeyboardBuilder()
         kb.button(text="💳 К планам", callback_data=SubCb(action="menu"))
@@ -597,24 +601,31 @@ async def cb_admin_grant(
     plan, months = callback_data.plan or "", max(1, callback_data.months)
     from datetime import datetime, timedelta, timezone
 
-    await pool.execute(
-        """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-           VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-           ON CONFLICT(user_id) DO UPDATE
-           SET plan      = EXCLUDED.plan,
-               is_active = true,
-               expires_at = CASE
-                   WHEN subscriptions.expires_at > now()
-                       THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                   ELSE now() + ($3 || ' months')::INTERVAL
-               END""",
-        callback.from_user.id,
-        plan,
-        str(months),
-    )
-    row = await pool.fetchrow(
-        "SELECT expires_at FROM subscriptions WHERE user_id=$1", callback.from_user.id
-    )
+    try:
+        await pool.execute(
+            """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+               VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+               ON CONFLICT(user_id) DO UPDATE
+               SET plan      = EXCLUDED.plan,
+                   is_active = true,
+                   expires_at = CASE
+                       WHEN subscriptions.expires_at > now()
+                           THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                       ELSE now() + ($3 || ' months')::INTERVAL
+                   END""",
+            callback.from_user.id,
+            plan,
+            str(months),
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_admin_grant: failed to upsert subscription")
+    try:
+        row = await pool.fetchrow(
+            "SELECT expires_at FROM subscriptions WHERE user_id=$1", callback.from_user.id
+        )
+    except Exception:
+        log.warning("cb_admin_grant: DB error fetching expires_at", exc_info=True)
+        row = None
     expires = (
         row["expires_at"]
         if row

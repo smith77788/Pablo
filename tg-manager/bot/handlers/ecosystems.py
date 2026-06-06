@@ -28,6 +28,7 @@ from bot.callbacks import (
 from bot.states import EcosystemCreateFSM, EcosystemDnaFSM, EcosystemCloneFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
+from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -531,12 +532,16 @@ async def _fetch_member_names(
             for m in by_type.get("channel", []) + by_type.get("group", [])
         ]
         if chan_ids:
-            rows = await pool.fetch(
-                "SELECT channel_id, title, username FROM managed_channels "
-                "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
-                owner_id,
-                chan_ids,
-            )
+            try:
+                rows = await pool.fetch(
+                    "SELECT channel_id, title, username FROM managed_channels "
+                    "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[])",
+                    owner_id,
+                    chan_ids,
+                )
+            except Exception:
+                log_exc_swallow(log, "_fetch_member_names: channel fetch failed")
+                rows = []
             name_map = {
                 r["channel_id"]: r["title"]
                 or f"@{r['username']}"
@@ -554,12 +559,16 @@ async def _fetch_member_names(
 
     if "bot" in by_type:
         bot_ids = [m["object_id"] for m in by_type["bot"]]
-        rows = await pool.fetch(
-            "SELECT bot_id, username, first_name FROM managed_bots "
-            "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
-            owner_id,
-            bot_ids,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT bot_id, username, first_name FROM managed_bots "
+                "WHERE added_by=$1 AND bot_id = ANY($2::bigint[])",
+                owner_id,
+                bot_ids,
+            )
+        except Exception:
+            log_exc_swallow(log, "_fetch_member_names: bot fetch failed")
+            rows = []
         name_map = {
             r["bot_id"]: f"@{r['username']}"
             if r["username"]
@@ -573,12 +582,16 @@ async def _fetch_member_names(
 
     if "account" in by_type:
         acc_ids = [m["object_id"] for m in by_type["account"]]
-        rows = await pool.fetch(
-            "SELECT id, phone, first_name FROM tg_accounts "
-            "WHERE owner_id=$1 AND id = ANY($2::int[])",
-            owner_id,
-            acc_ids,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT id, phone, first_name FROM tg_accounts "
+                "WHERE owner_id=$1 AND id = ANY($2::int[])",
+                owner_id,
+                acc_ids,
+            )
+        except Exception:
+            log_exc_swallow(log, "_fetch_member_names: account fetch failed")
+            rows = []
         name_map = {
             r["id"]: r["first_name"] or r["phone"] or str(r["id"]) for r in rows
         }
@@ -589,11 +602,15 @@ async def _fetch_member_names(
 
     if "proxy" in by_type:
         proxy_ids = [m["object_id"] for m in by_type["proxy"]]
-        rows = await pool.fetch(
-            "SELECT id, proxy_url FROM user_proxies WHERE id = ANY($2::int[]) AND owner_id=$1",
-            owner_id,
-            proxy_ids,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT id, proxy_url FROM user_proxies WHERE id = ANY($2::int[]) AND owner_id=$1",
+                owner_id,
+                proxy_ids,
+            )
+        except Exception:
+            log_exc_swallow(log, "_fetch_member_names: proxy fetch failed")
+            rows = []
         name_map = {r["id"]: (r["proxy_url"] or str(r["id"]))[:40] for r in rows}
         result["proxy"] = [
             html.escape(name_map.get(m["object_id"], f"id:{m['object_id']}"))
@@ -719,11 +736,14 @@ async def cb_eco_members_clear(
     callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
 ) -> None:
     eco_id = callback_data.eco_id
-    await pool.execute(
-        "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND owner_id=$2",
-        eco_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM ecosystem_members WHERE ecosystem_id=$1 AND owner_id=$2",
+            eco_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_members_clear: execute failed")
     await callback.answer("✅ Все участники удалены", show_alert=True)
     from services import ecosystem_brain as _eb
 
@@ -811,13 +831,17 @@ async def cb_eco_history(
         return
 
     await callback.answer()
-    events = await pool.fetch(
-        """SELECT event_type, severity, title, occurred_at
-           FROM ecosystem_events
-           WHERE ecosystem_id=$1
-           ORDER BY occurred_at DESC LIMIT 20""",
-        eco_id,
-    )
+    try:
+        events = await pool.fetch(
+            """SELECT event_type, severity, title, occurred_at
+               FROM ecosystem_events
+               WHERE ecosystem_id=$1
+               ORDER BY occurred_at DESC LIMIT 20""",
+            eco_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_history: fetch failed")
+        events = []
 
     if not events:
         text = f"📋 <b>История: {html.escape(eco['name'])}</b>\n\nСобытий пока нет."
@@ -933,50 +957,66 @@ async def cb_eco_sync_preview(
 
     owner_id = callback.from_user.id
 
-    new_accounts = (
-        await pool.fetchval(
-            """SELECT COUNT(*) FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=TRUE
-             AND NOT EXISTS (
-                 SELECT 1 FROM ecosystem_members em
-                 WHERE em.ecosystem_id=$2 AND em.object_type='account' AND em.object_id=tg_accounts.id
-             )""",
-            owner_id,
-            eco_id,
+    try:
+        new_accounts = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND NOT EXISTS (
+                     SELECT 1 FROM ecosystem_members em
+                     WHERE em.ecosystem_id=$2 AND em.object_type='account' AND em.object_id=tg_accounts.id
+                 )""",
+                owner_id,
+                eco_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync_preview: new_accounts fetchval failed")
+        new_accounts = 0
 
-    new_channels = (
-        await pool.fetchval(
-            """SELECT COUNT(*) FROM managed_channels mc
-           WHERE mc.owner_id=$1
-             AND NOT EXISTS (
-                 SELECT 1 FROM ecosystem_members em
-                 WHERE em.ecosystem_id=$2 AND em.object_type='channel' AND em.object_id=mc.channel_id
-             )""",
-            owner_id,
-            eco_id,
+    try:
+        new_channels = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM managed_channels mc
+               WHERE mc.owner_id=$1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM ecosystem_members em
+                     WHERE em.ecosystem_id=$2 AND em.object_type='channel' AND em.object_id=mc.channel_id
+                 )""",
+                owner_id,
+                eco_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync_preview: new_channels fetchval failed")
+        new_channels = 0
 
-    stale_ids = await pool.fetch(
-        """SELECT em.id FROM ecosystem_members em
-           LEFT JOIN tg_accounts a ON a.id=em.object_id AND a.is_active=TRUE AND a.owner_id=$2
-           WHERE em.ecosystem_id=$1 AND em.object_type='account' AND a.id IS NULL""",
-        eco_id,
-        owner_id,
-    )
+    try:
+        stale_ids = await pool.fetch(
+            """SELECT em.id FROM ecosystem_members em
+               LEFT JOIN tg_accounts a ON a.id=em.object_id AND a.is_active=TRUE AND a.owner_id=$2
+               WHERE em.ecosystem_id=$1 AND em.object_type='account' AND a.id IS NULL""",
+            eco_id,
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync_preview: stale_ids fetch failed")
+        stale_ids = []
     stale_count = len(stale_ids)
 
-    current_count = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM ecosystem_members WHERE ecosystem_id=$1",
-            eco_id,
+    try:
+        current_count = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM ecosystem_members WHERE ecosystem_id=$1",
+                eco_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync_preview: current_count fetchval failed")
+        current_count = 0
 
     lines = [
         f"🔁 <b>Синхронизация: {html.escape(eco['name'])}</b>\n",
@@ -1024,18 +1064,25 @@ async def cb_eco_sync_execute(
     await callback.answer("⏳ Синхронизирую...")
 
     # Remove stale account members (account disabled/deleted)
-    stale_ids = await pool.fetch(
-        """SELECT em.id FROM ecosystem_members em
-           LEFT JOIN tg_accounts a ON a.id=em.object_id AND a.is_active=TRUE AND a.owner_id=$2
-           WHERE em.ecosystem_id=$1 AND em.object_type='account' AND a.id IS NULL""",
-        eco_id,
-        owner_id,
-    )
-    if stale_ids:
-        await pool.execute(
-            "DELETE FROM ecosystem_members WHERE id=ANY($1::bigint[])",
-            [r["id"] for r in stale_ids],
+    try:
+        stale_ids = await pool.fetch(
+            """SELECT em.id FROM ecosystem_members em
+               LEFT JOIN tg_accounts a ON a.id=em.object_id AND a.is_active=TRUE AND a.owner_id=$2
+               WHERE em.ecosystem_id=$1 AND em.object_type='account' AND a.id IS NULL""",
+            eco_id,
+            owner_id,
         )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync_execute: stale_ids fetch failed")
+        stale_ids = []
+    if stale_ids:
+        try:
+            await pool.execute(
+                "DELETE FROM ecosystem_members WHERE id=ANY($1::bigint[])",
+                [r["id"] for r in stale_ids],
+            )
+        except Exception:
+            log_exc_swallow(log, "cb_eco_sync_execute: delete stale execute failed")
 
     # Add new members via auto-discover
     added = await _eb.auto_discover_members(pool, eco_id, owner_id)
@@ -1094,10 +1141,14 @@ async def cb_eco_dna_save(
         return
     await callback.answer("⏳ Сохраняю ДНК...")
 
-    counts_rows = await pool.fetch(
-        "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members WHERE ecosystem_id=$1 GROUP BY object_type",
-        eco_id,
-    )
+    try:
+        counts_rows = await pool.fetch(
+            "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members WHERE ecosystem_id=$1 GROUP BY object_type",
+            eco_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_dna_save: counts_rows fetch failed")
+        counts_rows = []
     member_counts = {r["object_type"]: r["cnt"] for r in counts_rows}
 
     template_data = {
@@ -1108,22 +1159,30 @@ async def cb_eco_dna_save(
         "region": eco["region"],
     }
 
-    dna_id = await pool.fetchval(
-        """INSERT INTO ecosystem_dna (owner_id, name, dna_type, description, template_data)
-           VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id""",
-        owner_id,
-        eco["name"] + " — ДНК",
-        eco["ecosystem_type"],
-        f"Шаблон из экосистемы {eco['name']}",
-        _json.dumps(member_counts and template_data or {}, ensure_ascii=False),
-    )
+    try:
+        dna_id = await pool.fetchval(
+            """INSERT INTO ecosystem_dna (owner_id, name, dna_type, description, template_data)
+               VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id""",
+            owner_id,
+            eco["name"] + " — ДНК",
+            eco["ecosystem_type"],
+            f"Шаблон из экосистемы {eco['name']}",
+            _json.dumps(member_counts and template_data or {}, ensure_ascii=False),
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_dna_save: dna INSERT failed")
+        await callback.answer("❌ Ошибка сохранения ДНК", show_alert=True)
+        return
 
-    await pool.execute(
-        "UPDATE ecosystems SET dna_id=$1 WHERE id=$2 AND owner_id=$3",
-        dna_id,
-        eco_id,
-        owner_id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE ecosystems SET dna_id=$1 WHERE id=$2 AND owner_id=$3",
+            dna_id,
+            eco_id,
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_dna_save: update dna_id execute failed")
 
     await _eb.record_event(
         pool,
@@ -1164,11 +1223,15 @@ async def cb_eco_dna_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     owner_id = callback.from_user.id
 
-    templates = await pool.fetch(
-        """SELECT id, name, dna_type, template_data, created_at
-           FROM ecosystem_dna WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 10""",
-        owner_id,
-    )
+    try:
+        templates = await pool.fetch(
+            """SELECT id, name, dna_type, template_data, created_at
+               FROM ecosystem_dna WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 10""",
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_dna_list: fetch failed")
+        templates = []
 
     if not templates:
         text = (
@@ -1261,20 +1324,28 @@ async def cb_eco_sync(
         await callback.answer("Экосистема не найдена", show_alert=True)
         return
 
-    counts_rows = await pool.fetch(
-        "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members "
-        "WHERE ecosystem_id=$1 GROUP BY object_type",
-        eco_id,
-    )
+    try:
+        counts_rows = await pool.fetch(
+            "SELECT object_type, COUNT(*) AS cnt FROM ecosystem_members "
+            "WHERE ecosystem_id=$1 GROUP BY object_type",
+            eco_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync: counts_rows fetch failed")
+        counts_rows = []
     counts = {r["object_type"]: r["cnt"] for r in counts_rows}
     total = sum(counts.values())
 
-    last_sync = await pool.fetchrow(
-        "SELECT occurred_at FROM ecosystem_events "
-        "WHERE ecosystem_id=$1 AND event_type='sync' "
-        "ORDER BY occurred_at DESC LIMIT 1",
-        eco_id,
-    )
+    try:
+        last_sync = await pool.fetchrow(
+            "SELECT occurred_at FROM ecosystem_events "
+            "WHERE ecosystem_id=$1 AND event_type='sync' "
+            "ORDER BY occurred_at DESC LIMIT 1",
+            eco_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_eco_sync: last_sync fetchrow failed")
+        last_sync = None
     last_sync_str = "никогда"
     if last_sync:
         ts = last_sync["occurred_at"]
