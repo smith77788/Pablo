@@ -10,6 +10,7 @@ os.environ.setdefault("TG_API_ID", "1")
 os.environ.setdefault("TG_API_HASH", "test-hash")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 from services.account_manager import (
     classify_spambot_reply,
@@ -54,3 +55,15 @@ def test_recommended_delay_grows_with_risk_and_cooldown() -> None:
     state.cooldown_until = 9999999999.0
 
     assert recommended_delay(202, "join") > 140.0
+
+
+def test_status_persistence_uses_shared_verified_restriction_helper() -> None:
+    account_health_source = (
+        PROJECT_ROOT / "tg-manager/services/account_health.py"
+    ).read_text(encoding="utf-8")
+    dashboard_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/health_dashboard.py"
+    ).read_text(encoding="utf-8")
+
+    assert "is_verified_account_restriction(" in account_health_source
+    assert "is_verified_account_restriction(" in dashboard_source

@@ -691,15 +691,16 @@ async def cb_health_real_check(
 
         # Update acc_status in DB — только подтверждённые статусы
         try:
-            if status in ("active", "spamblock", "cooldown"):
+            if status in ("active", "cooldown", "spamblock"):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
                     status,
                     acc["id"],
                 )
-            elif status in ("session_expired", "banned", "deactivated") and res.get(
-                "auth_error"
-            ):
+            elif is_verified_account_restriction(
+                status,
+                has_session=not res.get("no_session", False),
+            ) and (status != "session_expired" or res.get("auth_error")):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
                     status,
