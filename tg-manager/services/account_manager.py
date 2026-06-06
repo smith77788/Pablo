@@ -974,9 +974,15 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
         async def _collect():
+            from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
             _ch, _gr = [], []
             async for dialog in client.iter_dialogs(limit=300):
-                entity = dialog.entity
+                try:
+                    entity = dialog.entity
+                except (ChannelPrivateError, ChatAdminRequiredError):
+                    continue
+                except Exception:
+                    continue
                 if isinstance(entity, Channel):
                     is_creator = getattr(entity, "creator", False)
                     admin_rights = getattr(entity, "admin_rights", None)
