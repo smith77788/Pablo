@@ -1119,8 +1119,17 @@ async def _run_daily_warmup_impl(
                     target,
                 )
             except Exception as e:
+                etype = type(e).__name__
                 error = str(e)[:100]
                 success = False
+                # FloodWait for any action — sleep and let the loop handle consecutive_fails
+                if etype == "FloodWaitError":
+                    fw_secs = getattr(e, "seconds", 60)
+                    log.warning(
+                        "warmup: FloodWait %ds on action %s acc=%d — sleeping",
+                        fw_secs, action, account_id,
+                    )
+                    await asyncio.sleep(min(fw_secs + random.uniform(5, 15), 600))
 
             await _log_warmup_action(pool, account_id, action, target, success, error)
             _action_dur = time.monotonic() - t0_action
@@ -1464,7 +1473,7 @@ async def _run_warmup_session_impl(
     }
 
 
-_MAX_PARALLEL_WARMUP = 4  # максимум одновременных warmup-планов/сессий
+_MAX_PARALLEL_WARMUP = 2  # максимум одновременных warmup-планов/сессий; >2 triggers Telegram coordinated-activity detection
 
 
 async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:

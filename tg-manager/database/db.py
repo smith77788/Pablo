@@ -54,6 +54,21 @@ async def create_pool() -> asyncpg.Pool:
                         os.path.basename(path),
                         exc,
                     )
+
+        # Verify critical tables exist after migration — log ERROR if missing
+        _CRITICAL_TABLES = ["activity_log", "operation_audit", "operation_queue"]
+        for tbl in _CRITICAL_TABLES:
+            exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name=$1)",
+                tbl,
+            )
+            if not exists:
+                log.error(
+                    "CRITICAL: table '%s' missing after schema migration — "
+                    "events will be silently lost. Apply the relevant schema_vN.sql manually.",
+                    tbl,
+                )
     return pool
 
 

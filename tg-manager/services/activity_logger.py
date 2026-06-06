@@ -60,6 +60,15 @@ async def run(pool: asyncpg.Pool) -> None:
                 batch,
             )
         except Exception as e:
-            log.debug(
-                "activity_logger: batch insert failed (%d rows): %s", len(batch), e
+            log.warning(
+                "activity_logger: batch insert failed (%d rows): %s — "
+                "check that schema_v84.sql was applied (activity_log table may be missing)",
+                len(batch),
+                e,
             )
+            # Re-enqueue up to 200 events so they survive a transient DB error
+            for row in batch[:200]:
+                try:
+                    _queue.put_nowait(row)
+                except asyncio.QueueFull:
+                    break

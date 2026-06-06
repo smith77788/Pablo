@@ -243,6 +243,32 @@ async def _audit(
         )
 
 
+async def write_op_audit(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    action: str,
+    result: str,
+    target: str | None = None,
+    account_id: int | None = None,
+    error_msg: str | None = None,
+    flood_wait_s: int | None = None,
+    duration_ms: int | None = None,
+) -> None:
+    """Public wrapper for _audit — use from handlers that bypass op_worker queue."""
+    await _audit(
+        pool,
+        owner_id=owner_id,
+        action=action,
+        result=result,
+        operation_id=None,
+        account_id=account_id,
+        target=target,
+        error_msg=error_msg,
+        flood_wait_s=flood_wait_s,
+        duration_ms=duration_ms,
+    )
+
+
 _active_op_ids: set[int] = set()
 _active_lock = asyncio.Lock()
 

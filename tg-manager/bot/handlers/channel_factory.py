@@ -697,14 +697,21 @@ async def cb_chanf_do_create(
     uname_result = ""
     if uname:
         try:
-            err_u = await account_manager.set_channel_username(
-                acc["session_str"], channel_id, uname, _acc=acc
+            # Pre-check availability before attempting to set
+            available = await account_manager.check_username_available(
+                acc["session_str"], uname, _acc=acc
             )
-            uname_result = (
-                f"\nUsername: @{html.escape(uname)}"
-                if not err_u
-                else f"\n⚠️ Username не установлен: {html.escape(err_u)}"
-            )
+            if not available:
+                uname_result = f"\n⚠️ Username @{html.escape(uname)} уже занят — установите вручную"
+            else:
+                err_u = await account_manager.set_channel_username(
+                    acc["session_str"], channel_id, uname, _acc=acc
+                )
+                uname_result = (
+                    f"\nUsername: @{html.escape(uname)}"
+                    if not err_u
+                    else f"\n⚠️ Username не установлен: {html.escape(err_u)}"
+                )
         except Exception as e:
             uname_result = f"\n⚠️ Username не установлен: {html.escape(str(e))}"
 
