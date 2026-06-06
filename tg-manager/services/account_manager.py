@@ -4031,6 +4031,42 @@ async def update_profile(
             log_exc_swallow(log, "Сбой в update_profile")
 
 
+async def check_username_available(
+    session_string: str, username: str, _acc: dict | None = None
+) -> bool:
+    """Check if a Telegram username is available before attempting to claim it.
+
+    Returns True if available, False if taken or check failed.
+    Uses ResolveUsername — if the username resolves, it is taken.
+    """
+    from telethon.tl.functions.contacts import ResolveUsernameRequest
+    from telethon.errors import UsernameNotOccupiedError, UsernameInvalidError
+
+    clean = username.lstrip("@").strip()
+    if not clean or len(clean) < 5 or len(clean) > 32:
+        return False  # invalid format, treat as unavailable
+
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        try:
+            await client(ResolveUsernameRequest(username=clean))
+            return False  # resolved successfully → username is taken
+        except UsernameNotOccupiedError:
+            return True  # username is available
+        except UsernameInvalidError:
+            return False  # invalid username format
+        except Exception:
+            return False  # unknown error → treat as unavailable to be safe
+    except Exception:
+        return False
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
 async def update_account_username(
     session_string: str, username: str, _acc: dict | None = None
 ) -> str:

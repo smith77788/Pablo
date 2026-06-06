@@ -131,11 +131,15 @@ async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
     """Возвращает (plan, expires_at) или (plan, None) для бесплатного плана."""
     if is_platform_admin(user_id):
         return "enterprise", None
-    row = await pool.fetchrow(
-        "SELECT plan, expires_at FROM subscriptions "
-        "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
-        user_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT plan, expires_at FROM subscriptions "
+            "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
+            user_id,
+        )
+    except Exception:
+        log.warning("_get_plan_expiry: DB error for user_id=%s", user_id, exc_info=True)
+        row = None
     if row:
         return row["plan"], row["expires_at"]
     return "free", None
@@ -430,24 +434,32 @@ async def cb_pay(
 
     ref = _gen_ref()
     for _ in range(5):
-        if not await pool.fetchrow("SELECT id FROM payments WHERE reference=$1", ref):
+        try:
+            existing = await pool.fetchrow("SELECT id FROM payments WHERE reference=$1", ref)
+        except Exception:
+            log.warning("cb_pay: DB error checking reference uniqueness", exc_info=True)
+            existing = None
+        if not existing:
             break
         ref = _gen_ref()
 
-    await pool.execute(
-        """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                                  wallet_address, reference)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (reference) DO NOTHING""",
-        callback.from_user.id,
-        plan,
-        months,
-        currency,
-        crypto,
-        usd,
-        wallet,
-        ref,
-    )
+    try:
+        await pool.execute(
+            """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
+                                      wallet_address, reference)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+               ON CONFLICT (reference) DO NOTHING""",
+            callback.from_user.id,
+            plan,
+            months,
+            currency,
+            crypto,
+            usd,
+            wallet,
+            ref,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_pay: failed to insert payment record")
 
     if currency == "TON":
         crypto_str = f"{crypto:.2f} TON"
