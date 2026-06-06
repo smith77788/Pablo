@@ -839,11 +839,20 @@ async def _exec_mass_publish(
         type_filter = "TRUE"
 
     explicit_acc_ids = [int(i) for i in (params.get("account_ids") or [])]
-    accounts_rows = await resource_selector.select_all_active(
+    accounts_raw = await resource_selector.select_all_active(
         pool, owner_id, include_ids=explicit_acc_ids or None
     )
-    if not accounts_rows:
+    if not accounts_raw:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
+
+    # Mark accounts in use to prevent double-use in concurrent ops
+    async with _accounts_lock:
+        accounts_rows = [a for a in accounts_raw if a["id"] not in _accounts_in_use]
+        mp_used_acc_ids = [a["id"] for a in accounts_rows]
+        _accounts_in_use.update(mp_used_acc_ids)
+
+    if not accounts_rows:
+        return {"status": "failed", "summary": "⚠️ Mass Publish: все аккаунты заняты другой операцией"}
 
     acc_ids = [a["id"] for a in accounts_rows]
     chan_filter = (
@@ -979,6 +988,7 @@ async def _exec_mass_publish(
             effective_delay = max(delay, float(flood_wait) + 5) if flood_wait else delay
             await asyncio.sleep(effective_delay)
 
+    await release_accounts(mp_used_acc_ids)
     parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
     return {
         "status": "done",
@@ -1001,8 +1011,15 @@ async def _exec_bulk_join(
         include_ids=account_ids or None,
     )
 
-    used_acc_ids = [a["id"] for a in accounts]
-    await mark_accounts_in_use(used_acc_ids)
+    # Filter accounts already in use by another concurrent op (under lock to avoid race)
+    async with _accounts_lock:
+        accounts = [a for a in accounts if a["id"] not in _accounts_in_use]
+        used_acc_ids = [a["id"] for a in accounts]
+        _accounts_in_use.update(used_acc_ids)
+
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Bulk Join: все аккаунты заняты другой операцией"}
+
     try:
         return await _exec_bulk_join_inner(pool, bot, op_id, owner_id, params, accounts)
     finally:
@@ -1253,21 +1270,6 @@ async def _exec_bulk_leave(
     channels = params.get("channels", [])
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
-    accounts = await resource_selector.select_all_active(
-        pool,
-        owner_id,
-        include_ids=account_ids or None,
-    )
-
-    ok_count = 0
-    fail_count = 0
-    step = 0
-    skipped_by_limit = 0
-    failed_channels: list[str] = []
-    delay_mode = params.get("delay_mode", "smart")
-    _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
-    day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
-
     if not channels:
         return {
             "status": "done",
@@ -1277,6 +1279,27 @@ async def _exec_bulk_leave(
             "failed_channels": [],
             "summary": "Список каналов пуст — нечего выполнять.",
         }
+
+    accounts_raw = await resource_selector.select_all_active(
+        pool, owner_id, include_ids=account_ids or None,
+    )
+    # Mark accounts in use (with lock to avoid race with concurrent ops)
+    async with _accounts_lock:
+        accounts = [a for a in accounts_raw if a["id"] not in _accounts_in_use]
+        used_acc_ids = [a["id"] for a in accounts]
+        _accounts_in_use.update(used_acc_ids)
+
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Bulk Leave: все аккаунты заняты другой операцией"}
+
+    ok_count = 0
+    fail_count = 0
+    step = 0
+    skipped_by_limit = 0
+    failed_channels: list[str] = []
+    delay_mode = params.get("delay_mode", "smart")
+    _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
+    day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
 
     for acc_idx, acc in enumerate(accounts):
         acc_dict = dict(acc)
@@ -1299,6 +1322,7 @@ async def _exec_bulk_leave(
             continue
         for i, channel in enumerate(channels):
             if await _is_cancelled(pool, op_id):
+                await release_accounts(used_acc_ids)
                 return {
                     "status": "cancelled",
                     "ok": ok_count,
@@ -1424,6 +1448,7 @@ async def _exec_bulk_leave(
         if acc_idx < len(accounts) - 1:
             await session_simulator.between_accounts_pause(acc_idx)
 
+    await release_accounts(used_acc_ids)
     parts = [f"Вышли: {ok_count}", f"ошибок: {fail_count}"]
     if skipped_by_limit:
         parts.append(f"пропущено (лимит): {skipped_by_limit}")
