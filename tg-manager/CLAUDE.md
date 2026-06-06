@@ -157,3 +157,13 @@ Final response format:
 ### Изменённые файлы
 ### Проверки
 ### Следующие дефекты
+
+## Release Survival Contract
+
+When working on release readiness, account safety, proxy safety, STRIKE, mass operations,
+operation engine, warmup, factories, or any production-critical feature:
+
+**Read first:** `/docs/mission/RELEASE_SURVIVAL_CONTRACT.md`
+
+It defines the engineering contract that governs all production-survival work.
+Violation of its rules = session failure.
