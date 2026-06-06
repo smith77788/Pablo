@@ -932,37 +932,60 @@ async def _exec_mass_publish(
                 "summary": f"Отменено. Опубликовано: {ok_count}, ошибок: {fail_count}",
             }
         flood_wait = 0
-        try:
-            result = await account_manager.post_to_channel(
-                acc["session_str"],
-                dialog["id"],
-                mp_text,
-                access_hash=dialog["access_hash"],
-                _acc=acc,
-            )
-            if "error" in result or result.get("banned"):
-                raise Exception(str(result.get("error", "publish error")))
-            ok_count += 1
-            _infra_mem.record_account_op(acc["id"], "publish", success=True)
-            await _audit(
-                pool,
-                owner_id,
-                "publish",
-                "success",
-                operation_id=op_id,
-                account_id=acc["id"],
-                target=str(dialog.get("title") or dialog["id"])[:100],
-            )
+        _published = False
+        for _attempt in range(2):  # per-item retry: 1 initial + 1 retry on FloodWait
             try:
-                from services.flood_engine import record_success
+                result = await account_manager.post_to_channel(
+                    acc["session_str"],
+                    dialog["id"],
+                    mp_text,
+                    access_hash=dialog["access_hash"],
+                    _acc=acc,
+                )
+                if "error" in result or result.get("banned"):
+                    raise Exception(str(result.get("error", "publish error")))
+                ok_count += 1
+                _published = True
+                _infra_mem.record_account_op(acc["id"], "publish", success=True)
+                await _audit(
+                    pool,
+                    owner_id,
+                    "publish",
+                    "success",
+                    operation_id=op_id,
+                    account_id=acc["id"],
+                    target=str(dialog.get("title") or dialog["id"])[:100],
+                )
+                try:
+                    from services.flood_engine import record_success
 
-                await record_success(acc["id"], "publish")
-            except Exception:
-                log_exc_swallow(log, "mass_publish: record_success failed")
-        except Exception as e:
+                    await record_success(acc["id"], "publish")
+                except Exception:
+                    log_exc_swallow(log, "mass_publish: record_success failed")
+                break  # success — stop retry loop
+            except Exception as e:
+                err_str = str(e)[:200]
+                flood_wait = extract_flood_wait(e, err_str)
+                if flood_wait and _attempt == 0:
+                    # FloodWait on first attempt — sleep and retry once
+                    log.warning(
+                        "mass_publish: FloodWait %ds on %s, retrying once",
+                        flood_wait,
+                        dialog.get("title") or dialog["id"],
+                    )
+                    try:
+                        from services.flood_engine import record_flood
+                        await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
+                    except Exception:
+                        log_exc_swallow(log, "mass_publish: record_flood failed")
+                    await asyncio.sleep(flood_wait + random.uniform(2, 8))
+                    continue  # retry
+                # Non-retryable failure or second attempt failed
+                break
+
+        if not _published:
             fail_count += 1
-            err_str = str(e)[:200]
-            flood_wait = extract_flood_wait(e, err_str)
+            err_str = locals().get("err_str", "unknown error")[:200]
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
