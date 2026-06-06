@@ -28,7 +28,7 @@ async def _record_reentry_safe(pool, uid: int, days_absent: float) -> None:
         log.debug("record_reentry failed: %s", e)
 
 
-BUILD_VERSION = "2026.06.03-r35"
+BUILD_VERSION = "2026.06.06-r36"
 
 
 @router.message(Command("version"))

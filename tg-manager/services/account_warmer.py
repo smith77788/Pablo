@@ -1249,6 +1249,28 @@ async def _run_daily_warmup_impl(
             account_id,
         )
 
+    # Записываем итог дня в operation_audit → виден в "TG-операции" логе
+    try:
+        from services.op_worker import write_op_audit as _write_op_audit
+        total = actions_ok + actions_fail
+        if actions_ok == 0:
+            _wu_result, _wu_err = "error", f"all {total} actions failed"
+        elif actions_fail > 0:
+            _wu_result, _wu_err = "partial", f"{actions_fail}/{total} failed"
+        else:
+            _wu_result, _wu_err = "success", None
+        await _write_op_audit(
+            pool,
+            owner_id=owner_id,
+            action="warmup",
+            result=_wu_result,
+            target=f"day {current_day}",
+            account_id=account_id,
+            error_msg=_wu_err,
+        )
+    except Exception:
+        pass
+
     return {
         "actions_done": actions_ok + actions_fail,
         "actions_ok": actions_ok,

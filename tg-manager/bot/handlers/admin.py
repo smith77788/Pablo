@@ -2649,6 +2649,13 @@ async def _adm_logs(
                     lines.append(
                         f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ✅{dur_str}"
                     )
+                elif result == "partial":
+                    err = r.get("error_msg") or ""
+                    lines.append(
+                        f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ⚡{dur_str}"
+                    )
+                    if err:
+                        lines.append(f"  └ <code>{_html.escape(err[:70])}</code>")
                 elif result == "flood_wait":
                     lines.append(
                         f"<code>{dt}</code> ⚙️ uid:{uid} {action}{target_str} ⚠️{flood_str}"
