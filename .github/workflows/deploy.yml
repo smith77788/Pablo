@@ -2,11 +2,12 @@ name: Deploy TG Manager to Railway
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/telegram-bot-services-xfAh6, claude/ai-agents-business-LCLnI]
     paths:
       - 'tg-manager/**'
       - 'Dockerfile'
       - 'railway.json'
+  workflow_dispatch:
 
 jobs:
   deploy:
