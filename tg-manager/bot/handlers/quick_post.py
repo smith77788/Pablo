@@ -81,13 +81,16 @@ async def _save_post_template(
     pool: asyncpg.Pool, user_id: int, name: str, text: str
 ) -> int:
     """Сохраняет текст поста как шаблон. Возвращает id нового шаблона."""
-    row = await pool.fetchrow(
-        "INSERT INTO asset_templates (owner_id, asset_type, name, template) "
-        "VALUES ($1, 'post', $2, $3) RETURNING id",
-        user_id,
-        name,
-        json.dumps({"text": text}),
-    )
+    try:
+        row = await pool.fetchrow(
+            "INSERT INTO asset_templates (owner_id, asset_type, name, template) "
+            "VALUES ($1, 'post', $2, $3) RETURNING id",
+            user_id,
+            name,
+            json.dumps({"text": text}),
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to create post template: {e}") from e
     if not row:
         raise RuntimeError("Failed to create post template")
     return row["id"]

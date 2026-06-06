@@ -142,14 +142,17 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive,
-                  latency_avg_ms, geo_country, geo_city, success_rate
-           FROM user_proxies
-           WHERE owner_id=$1
-           ORDER BY COALESCE(success_rate, 100) DESC, created_at DESC""",
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT id, label, proxy_url, proxy_type, is_active, last_check, is_alive,
+                      latency_avg_ms, geo_country, geo_city, success_rate
+               FROM user_proxies
+               WHERE owner_id=$1
+               ORDER BY COALESCE(success_rate, 100) DESC, created_at DESC""",
+            user_id,
+        )
+    except Exception:
+        rows = []
 
     lines = ["📋 <b>Мои прокси</b>\n"]
     kb = InlineKeyboardBuilder()

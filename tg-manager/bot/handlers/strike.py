@@ -118,8 +118,11 @@ async def _ensure_table(pool: asyncpg.Pool) -> None:
     global _table_ok
     if _table_ok:
         return
-    await pool.execute(_CREATE_TABLE)
-    _table_ok = True
+    try:
+        await pool.execute(_CREATE_TABLE)
+        _table_ok = True
+    except Exception as e:
+        log.warning("_ensure_table failed: %s", e)
 
 
 async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
@@ -131,7 +134,10 @@ async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
     if plan == "enterprise":
         return True
     await _ensure_table(pool)
-    row = await pool.fetchrow("SELECT 1 FROM strike_access WHERE user_id=$1", user_id)
+    try:
+        row = await pool.fetchrow("SELECT 1 FROM strike_access WHERE user_id=$1", user_id)
+    except Exception:
+        row = None
     result = row is not None
     if result:
         log.debug("strike access: user=%s has_access=%s", user_id, result)
@@ -652,12 +658,16 @@ async def cb_strike_admin_grant(
         return
     target_id = callback_data.page  # page поле используется как target_user_id
     await _ensure_table(pool)
-    await pool.execute(
-        "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
-        "ON CONFLICT (user_id) DO NOTHING",
-        target_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO NOTHING",
+            target_id,
+            callback.from_user.id,
+        )
+    except Exception as exc:
+        await callback.answer(f"❌ Ошибка: {exc}", show_alert=True)
+        return
     await callback.answer(f"✅ Strike активирован для {target_id}", show_alert=True)
 
 
