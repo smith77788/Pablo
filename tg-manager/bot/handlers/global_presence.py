@@ -55,7 +55,16 @@ async def _edit(cb: CallbackQuery, text: str, markup=None) -> None:
         err_str = str(e).lower()
         if "message is not modified" in err_str:
             return
-        await cb.message.answer(text, reply_markup=markup, parse_mode="HTML")
+        if "there is no text in the message to edit" in err_str:
+            try:
+                await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+                return
+            except Exception:
+                pass
+        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+            await cb.bot.send_message(cb.from_user.id, text, reply_markup=markup, parse_mode="HTML")
+        else:
+            log.warning("global_presence _edit error: %s", e)
 
 
 async def _reply(msg: Message, text: str, markup=None) -> None:
@@ -927,10 +936,15 @@ async def _show_accounts_step(
                 await callback.message.edit_text(
                     no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
                 )
-            except Exception:
-                await callback.message.answer(
-                    no_acc_text, reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
-                )
+            except Exception as _ea:
+                _eas = str(_ea).lower()
+                if "message to edit not found" in _eas or "message can't be edited" in _eas:
+                    await callback.bot.send_message(
+                        callback.from_user.id, no_acc_text,
+                        reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
+                    )
+                elif "message is not modified" not in _eas:
+                    log.warning("global_presence acc fallback edit error: %s", _ea)
         return
 
     kb = InlineKeyboardBuilder()
@@ -996,10 +1010,14 @@ async def _show_accounts_step(
             await callback.message.edit_text(
                 text, reply_markup=kb.as_markup(), parse_mode="HTML"
             )
-        except Exception:
-            await callback.message.answer(
-                text, reply_markup=kb.as_markup(), parse_mode="HTML"
-            )
+        except Exception as _e2:
+            _e2s = str(_e2).lower()
+            if "message to edit not found" in _e2s or "message can't be edited" in _e2s:
+                await callback.bot.send_message(
+                    callback.from_user.id, text, reply_markup=kb.as_markup(), parse_mode="HTML"
+                )
+            else:
+                log.warning("global_presence inline edit error: %s", _e2)
 
 
 @router.callback_query(

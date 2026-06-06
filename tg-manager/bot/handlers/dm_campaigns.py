@@ -50,9 +50,17 @@ async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
     except Exception as e:
         err_str = str(e).lower()
         if "message is not modified" in err_str:
-            await callback.answer()
             return
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=markup)
+        if "there is no text in the message to edit" in err_str:
+            try:
+                await callback.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+                return
+            except Exception:
+                pass
+        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+            await callback.bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=markup)
+        else:
+            log.warning("dm_campaigns _edit error: %s", e)
 
 
 # ── Menu ──────────────────────────────────────────────────────────────────────

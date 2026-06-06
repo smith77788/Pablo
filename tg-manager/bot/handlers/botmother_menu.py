@@ -261,7 +261,7 @@ async def cmd_menu(message: Message) -> None:
 
 
 async def _edit(callback: CallbackQuery, text: str, markup) -> None:
-    """Edit existing message or send new one if message is unavailable."""
+    """Edit existing message or send new one only if message is truly gone."""
     try:
         if callback.message:
             await callback.message.edit_text(
@@ -274,18 +274,24 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
     except Exception as e:
         err_str = str(e).lower()
         if "message is not modified" in err_str:
-            # Same content - just acknowledge silently
-            await callback.answer()
             return
-        log.warning("BotMother _edit error: %s", e)
-        try:
-            await callback.bot.send_message(
-                callback.from_user.id, text, parse_mode="HTML", reply_markup=markup
-            )
-        except Exception:
-            log_exc_swallow(
-                log, "Не удалось отправить fallback-сообщение при ошибке _edit"
-            )
+        if "there is no text in the message to edit" in err_str:
+            try:
+                await callback.message.edit_caption(
+                    caption=text, parse_mode="HTML", reply_markup=markup
+                )
+                return
+            except Exception:
+                pass
+        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+            try:
+                await callback.bot.send_message(
+                    callback.from_user.id, text, parse_mode="HTML", reply_markup=markup
+                )
+            except Exception:
+                log_exc_swallow(log, "Не удалось отправить fallback-сообщение при ошибке _edit")
+        else:
+            log.warning("BotMother _edit error (no fallback): %s", e)
 
 
 # ── Main menu callback ────────────────────────────────────────────────────

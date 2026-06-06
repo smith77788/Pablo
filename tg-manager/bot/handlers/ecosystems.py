@@ -65,7 +65,16 @@ async def _edit(cb: CallbackQuery, text: str, markup=None, **kw) -> None:
         err_str = str(e).lower()
         if "message is not modified" in err_str:
             return
-        await cb.message.answer(text, parse_mode="HTML", reply_markup=markup, **kw)
+        if "there is no text in the message to edit" in err_str:
+            try:
+                await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+                return
+            except Exception:
+                pass
+        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+            await cb.bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=markup, **kw)
+        else:
+            log.warning("ecosystems _edit error: %s", e)
 
 
 # ── Main ecosystem list ───────────────────────────────────────────────────────
@@ -369,10 +378,12 @@ async def cb_eco_factory(
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        await callback.message.answer(
-            text, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=kb.as_markup())
+        elif "message is not modified" not in _es:
+            log.warning("ecosystems edit error: %s", _e)
 
 
 # ── Health detail ─────────────────────────────────────────────────────────────
@@ -1381,10 +1392,12 @@ async def cb_eco_sync(
         await callback.message.edit_text(
             "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        await callback.message.answer(
-            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.bot.send_message(callback.from_user.id, "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+        elif "message is not modified" not in _es:
+            log.warning("ecosystems sync edit error: %s", _e)
 
 
 # ── Sync: Execute ─────────────────────────────────────────────────────────────
@@ -1438,10 +1451,12 @@ async def cb_eco_sync_exec(
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        await callback.message.answer(
-            text, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=kb.as_markup())
+        elif "message is not modified" not in _es:
+            log.warning("ecosystems health edit error: %s", _e)
 
 
 # ── Clone ─────────────────────────────────────────────────────────────────────
@@ -1894,10 +1909,12 @@ async def cb_eco_recs(
         await callback.message.edit_text(
             "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        await callback.message.answer(
-            "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.bot.send_message(callback.from_user.id, "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup())
+        elif "message is not modified" not in _es:
+            log.warning("ecosystems recs edit error: %s", _e)
 
 
 # ── EcoPickCb: добавить объект в экосистему (из фабрик) ──────────────────────
@@ -1961,10 +1978,12 @@ async def cb_ecopick_list(
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        await callback.message.answer(
-            text, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=kb.as_markup())
+        elif "message is not modified" not in _es:
+            log.warning("ecosystems autodiscover edit error: %s", _e)
 
 
 @router.callback_query(EcoPickCb.filter(F.action == "add"))

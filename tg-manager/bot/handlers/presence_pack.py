@@ -45,9 +45,17 @@ async def _edit(cb: CallbackQuery, text: str, markup=None):
     except Exception as e:
         err_str = str(e).lower()
         if "message is not modified" in err_str:
-            await cb.answer()
             return
-        await cb.message.answer(text, parse_mode="HTML", reply_markup=markup)
+        if "there is no text in the message to edit" in err_str:
+            try:
+                await cb.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+                return
+            except Exception:
+                pass
+        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+            await cb.bot.send_message(cb.from_user.id, text, parse_mode="HTML", reply_markup=markup)
+        else:
+            log.warning("presence_pack _edit error: %s", e)
 
 
 # ── Pack List ──────────────────────────────────────────────────────────────
