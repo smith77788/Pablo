@@ -159,8 +159,19 @@ async def _show_step1(target, edit: bool = True, char_count: int = 0) -> None:
     if edit:
         try:
             await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
-        except Exception:
-            await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        except Exception as _e:
+            _es = str(_e).lower()
+            if "message is not modified" in _es:
+                pass
+            elif "message to edit not found" in _es or "message can't be edited" in _es:
+                await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            elif "there is no text in the message to edit" in _es:
+                try:
+                    await target.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb.as_markup())
+                except Exception:
+                    await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            else:
+                log.warning("quick_post _show_step1 edit error: %s", _e)
     else:
         await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -271,8 +282,15 @@ async def _show_step2(
         try:
             await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
             return
-        except Exception:
-            pass
+        except Exception as _e:
+            _es = str(_e).lower()
+            if "message is not modified" in _es:
+                return
+            if "message to edit not found" in _es or "message can't be edited" in _es:
+                pass  # fall through to answer below
+            else:
+                log.warning("quick_post _show_step2 edit error: %s", _e)
+                return
     await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 

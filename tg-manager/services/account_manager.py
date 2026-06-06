@@ -1218,15 +1218,22 @@ async def check_account_status_full(
             if msgs:
                 reply_text = msgs[0].text or ""
                 reply_lower = reply_text.lower()
+                # "Good" patterns checked FIRST — prevent false positives
+                # SpamBot Russian: "Ваш аккаунт свободен от каких-либо ограничений"
+                # SpamBot English: "Good news, no limits are applied to your account!"
                 if any(
                     kw in reply_lower
                     for kw in (
                         "no limits",
                         "no complaints",
                         "good standing",
+                        "good news",
                         "нет ограничений",
                         "нет жалоб",
                         "не было жалоб",
+                        "свободен",          # "свободен от каких-либо ограничений"
+                        "not limited",
+                        "no reports",
                     )
                 ):
                     return {
@@ -1240,9 +1247,12 @@ async def check_account_status_full(
                         "limited",
                         "spam",
                         "restricted",
-                        "ограничен",
+                        "ограничен,",        # "ограничен," — с запятой, не подстрока "ограничений"
+                        "ограничен.",        # "ограничен." — с точкой
+                        "ограничен\n",       # конец строки
+                        "ограничен ",        # с пробелом после
                         "спам",
-                        "ограничения",
+                        "ваш аккаунт ограничен",
                     )
                 ):
                     return {
