@@ -854,6 +854,21 @@ async def _exec_mass_publish(
     if not accounts_rows:
         return {"status": "failed", "summary": "⚠️ Mass Publish: все аккаунты заняты другой операцией"}
 
+    # Account health awareness: filter out banned/restricted accounts before publishing
+    try:
+        from services import account_health as _ah
+        healthy_acc_ids: set[int] = set()
+        for _acc in accounts_rows:
+            _h = _ah.get_health(_acc["id"])
+            if _h.health_score >= 10.0:  # exclude only completely dead accounts
+                healthy_acc_ids.add(_acc["id"])
+        if healthy_acc_ids != {a["id"] for a in accounts_rows}:
+            excluded = len(accounts_rows) - len(healthy_acc_ids)
+            log.warning("_exec_mass_publish op=%d: excluded %d unhealthy accounts", op_id, excluded)
+            accounts_rows = [a for a in accounts_rows if a["id"] in healthy_acc_ids]
+    except Exception:
+        log_exc_swallow(log, f"_exec_mass_publish op={op_id}: health check failed, using all accounts")
+
     acc_ids = [a["id"] for a in accounts_rows]
     chan_filter = (
         "AND mc.channel_id = ANY($3::bigint[])" if explicit_channel_ids else ""

@@ -374,12 +374,15 @@ async def cb_admin(
             reply_markup=_back_kb(),
         )
         # set FSM flag via message text — simple approach: store in temp table
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id, state, data) "
-            "VALUES($1,'broadcast','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='broadcast',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id, state, data) "
+                "VALUES($1,'broadcast','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='broadcast',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for broadcast")
 
     elif action == "notify_toggle":
         global _NOTIFY_NEW_USERS
@@ -400,11 +403,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'block','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='block',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'block','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='block',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for block")
 
     elif action == "unblock_ask":
         await callback.message.edit_text(
@@ -412,11 +418,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'unblock','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='unblock',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'unblock','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='unblock',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for unblock")
 
     elif action == "delete_ask":
         await callback.message.edit_text(
@@ -425,11 +434,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'delete_user','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='delete_user',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'delete_user','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='delete_user',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for delete_user")
 
     elif action == "grant_ask":
         await callback.message.edit_text(
@@ -441,11 +453,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'grant','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='grant',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'grant','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='grant',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for grant")
 
     elif action == "revoke_ask":
         await callback.message.edit_text(
@@ -457,11 +472,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'revoke','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='revoke',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'revoke','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='revoke',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for revoke")
 
     elif action == "tokens_file":
         await _adm_send_tokens_file(callback, pool)
@@ -475,11 +493,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'find','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='find',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'find','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='find',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for find")
 
     elif action == "prices":
         await _adm_prices(callback)
@@ -521,11 +542,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'env_add','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='env_add',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'env_add','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='env_add',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for env_add")
 
     elif action.startswith("env_del:"):
         key = action.split(":", 1)[1]
@@ -546,11 +570,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_grant','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='strike_grant',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_grant','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='strike_grant',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for strike_grant")
 
     elif action == "strike_revoke_ask":
         await callback.message.edit_text(
@@ -562,11 +589,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_revoke','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='strike_revoke',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'strike_revoke','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='strike_revoke',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for strike_revoke")
 
     elif action == "bulk_grant_ask":
         await callback.message.edit_text(
@@ -579,11 +609,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'bulk_grant','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='bulk_grant',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'bulk_grant','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='bulk_grant',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for bulk_grant")
 
     elif action == "logs":
         await _adm_logs(callback, pool, source="ui", status_filter=None, page=0)
@@ -659,11 +692,14 @@ async def cb_admin(
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
-        await pool.execute(
-            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'cleanup','') "
-            "ON CONFLICT(admin_id) DO UPDATE SET state='cleanup',data=''",
-            callback.from_user.id,
-        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id,state,data) VALUES($1,'cleanup','') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='cleanup',data=''",
+                callback.from_user.id,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for cleanup")
 
     elif action == "error_reports":
         await _adm_error_reports(callback, pool, page=0, status="new")
@@ -1071,16 +1107,24 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 async def _adm_subscriptions(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    active = await pool.fetch(
-        "SELECT user_id, plan, expires_at FROM subscriptions "
-        "WHERE is_active=true AND expires_at > now() ORDER BY expires_at DESC LIMIT 20"
-    )
-    expired = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM subscriptions WHERE is_active=false OR expires_at <= now()"
+    try:
+        active = await pool.fetch(
+            "SELECT user_id, plan, expires_at FROM subscriptions "
+            "WHERE is_active=true AND expires_at > now() ORDER BY expires_at DESC LIMIT 20"
         )
-        or 0
-    )
+    except Exception:
+        active = []
+        log_exc_swallow(log, "_adm_subscriptions fetch active failed")
+    try:
+        expired = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM subscriptions WHERE is_active=false OR expires_at <= now()"
+            )
+            or 0
+        )
+    except Exception:
+        expired = 0
+        log_exc_swallow(log, "_adm_subscriptions fetchval expired failed")
     lines = []
     for s in active:
         lines.append(
@@ -1096,10 +1140,14 @@ async def _adm_subscriptions(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 
 async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    bots = await pool.fetch(
-        "SELECT bot_id, username, first_name, added_by, added_at "
-        "FROM managed_bots ORDER BY added_at DESC LIMIT 20"
-    )
+    try:
+        bots = await pool.fetch(
+            "SELECT bot_id, username, first_name, added_by, added_at "
+            "FROM managed_bots ORDER BY added_at DESC LIMIT 20"
+        )
+    except Exception:
+        bots = []
+        log_exc_swallow(log, "_adm_bots_summary fetch failed")
     lines = []
     for b in bots:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
@@ -1116,19 +1164,37 @@ async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 
 async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    total_msgs = (
-        await pool.fetchval("SELECT COALESCE(SUM(sent_count),0) FROM broadcasts") or 0
-    )
-    total_bc = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
-    total_relay = await pool.fetchval("SELECT COUNT(*) FROM relay_sessions") or 0
-    total_funnels = await pool.fetchval("SELECT COUNT(*) FROM funnels") or 0
-    total_schedules = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM scheduled_broadcasts WHERE status='pending'"
+    try:
+        total_msgs = (
+            await pool.fetchval("SELECT COALESCE(SUM(sent_count),0) FROM broadcasts") or 0
         )
-        or 0
-    )
-    db_users = await pool.fetchval("SELECT COUNT(*) FROM bot_users") or 0
+    except Exception:
+        total_msgs = 0
+    try:
+        total_bc = await pool.fetchval("SELECT COUNT(*) FROM broadcasts") or 0
+    except Exception:
+        total_bc = 0
+    try:
+        total_relay = await pool.fetchval("SELECT COUNT(*) FROM relay_sessions") or 0
+    except Exception:
+        total_relay = 0
+    try:
+        total_funnels = await pool.fetchval("SELECT COUNT(*) FROM funnels") or 0
+    except Exception:
+        total_funnels = 0
+    try:
+        total_schedules = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM scheduled_broadcasts WHERE status='pending'"
+            )
+            or 0
+        )
+    except Exception:
+        total_schedules = 0
+    try:
+        db_users = await pool.fetchval("SELECT COUNT(*) FROM bot_users") or 0
+    except Exception:
+        db_users = 0
     mode = await db.get_system_mode(pool)
 
     await callback.message.edit_text(
@@ -1146,10 +1212,18 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 
 async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    bots = await pool.fetch(
-        "SELECT bot_id, username, first_name, token, added_by, added_at "
-        "FROM managed_bots ORDER BY added_by, added_at"
-    )
+    try:
+        bots = await pool.fetch(
+            "SELECT bot_id, username, first_name, token, added_by, added_at "
+            "FROM managed_bots ORDER BY added_by, added_at"
+        )
+    except Exception as e:
+        log_exc_swallow(log, "_adm_send_tokens_file fetch failed")
+        await callback.message.answer(
+            f"❌ Ошибка получения токенов: <code>{_html.escape(str(e)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
     lines = ["BOT_ID\tUSERNAME\tNAME\tOWNER_ID\tCREATED\tTOKEN"]
     for b in bots:
         label = b["username"] or b["first_name"] or "unknown"
@@ -1169,14 +1243,22 @@ async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> 
 
 
 async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    rows = await pool.fetch(
-        """SELECT mb.added_by, COUNT(DISTINCT mb.bot_id) as bots,
-                  s.plan, s.expires_at
-           FROM managed_bots mb
-           LEFT JOIN subscriptions s ON s.user_id=mb.added_by AND s.is_active=true
-           GROUP BY mb.added_by, s.plan, s.expires_at
-           ORDER BY mb.added_by"""
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT mb.added_by, COUNT(DISTINCT mb.bot_id) as bots,
+                      s.plan, s.expires_at
+               FROM managed_bots mb
+               LEFT JOIN subscriptions s ON s.user_id=mb.added_by AND s.is_active=true
+               GROUP BY mb.added_by, s.plan, s.expires_at
+               ORDER BY mb.added_by"""
+        )
+    except Exception as e:
+        log_exc_swallow(log, "_adm_send_users_csv fetch failed")
+        await callback.message.answer(
+            f"❌ Ошибка получения данных: <code>{_html.escape(str(e)[:200])}</code>",
+            parse_mode="HTML",
+        )
+        return
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["user_id", "bots_count", "plan", "expires_at"])
@@ -1314,12 +1396,15 @@ async def _adm_price_edit_ask(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await pool.execute(
-        "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
-        "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
-        callback.from_user.id,
-        f"price_edit:{plan}",
-    )
+    try:
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
+            callback.from_user.id,
+            f"price_edit:{plan}",
+        )
+    except Exception:
+        log_exc_swallow(log, "admin_state insert failed for price_edit")
 
 
 _SWARM_MODE_DESCRIPTIONS = {
@@ -1380,12 +1465,19 @@ async def handle_admin_message(
     state = state_row["state"]
     text = message.text.strip()
 
-    await pool.execute(
-        "DELETE FROM admin_state WHERE admin_id=$1", message.from_user.id
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM admin_state WHERE admin_id=$1", message.from_user.id
+        )
+    except Exception:
+        log_exc_swallow(log, "admin_state delete failed")
 
     if state == "broadcast":
-        users = await pool.fetch("SELECT DISTINCT added_by FROM managed_bots")
+        try:
+            users = await pool.fetch("SELECT DISTINCT added_by FROM managed_bots")
+        except Exception:
+            users = []
+            log_exc_swallow(log, "broadcast fetch users failed")
         sent = 0
         for u in users:
             try:
@@ -1407,50 +1499,86 @@ async def handle_admin_message(
     elif state == "block":
         try:
             uid = int(text)
-            await pool.execute(
-                "INSERT INTO blocked_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",
-                uid,
-            )
-            await message.answer(
-                f"🚫 Пользователь <code>{uid}</code> заблокирован.",
-                parse_mode="HTML",
-                reply_markup=_admin_main_kb(),
-            )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+        else:
+            try:
+                await pool.execute(
+                    "INSERT INTO blocked_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+                    uid,
+                )
+                await message.answer(
+                    f"🚫 Пользователь <code>{uid}</code> заблокирован.",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
+            except Exception as e:
+                log.warning("block execute failed: %s", e)
+                await message.answer(
+                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
 
     elif state == "unblock":
         try:
             uid = int(text)
-            await pool.execute("DELETE FROM blocked_users WHERE user_id=$1", uid)
-            await message.answer(
-                f"✅ Пользователь <code>{uid}</code> разблокирован.",
-                parse_mode="HTML",
-                reply_markup=_admin_main_kb(),
-            )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+        else:
+            try:
+                await pool.execute("DELETE FROM blocked_users WHERE user_id=$1", uid)
+                await message.answer(
+                    f"✅ Пользователь <code>{uid}</code> разблокирован.",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
+            except Exception as e:
+                log.warning("unblock execute failed: %s", e)
+                await message.answer(
+                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
 
     elif state == "delete_user":
         try:
             uid = int(text)
-            bot_ids = await pool.fetch(
-                "SELECT bot_id FROM managed_bots WHERE added_by=$1", uid
-            )
-            for b in bot_ids:
-                await pool.execute(
-                    "DELETE FROM managed_bots WHERE bot_id=$1", b["bot_id"]
-                )
-            await pool.execute("DELETE FROM subscriptions WHERE user_id=$1", uid)
-            await pool.execute("DELETE FROM payments WHERE user_id=$1", uid)
-            await message.answer(
-                f"🗑 Данные пользователя <code>{uid}</code> удалены "
-                f"({len(bot_ids)} ботов).",
-                parse_mode="HTML",
-                reply_markup=_admin_main_kb(),
-            )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+        else:
+            try:
+                bot_ids = await pool.fetch(
+                    "SELECT bot_id FROM managed_bots WHERE added_by=$1", uid
+                )
+                for b in bot_ids:
+                    try:
+                        await pool.execute(
+                            "DELETE FROM managed_bots WHERE bot_id=$1", b["bot_id"]
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "delete managed_bot failed", user_id=uid)
+                try:
+                    await pool.execute("DELETE FROM subscriptions WHERE user_id=$1", uid)
+                except Exception:
+                    log_exc_swallow(log, "delete subscriptions failed", user_id=uid)
+                try:
+                    await pool.execute("DELETE FROM payments WHERE user_id=$1", uid)
+                except Exception:
+                    log_exc_swallow(log, "delete payments failed", user_id=uid)
+                await message.answer(
+                    f"🗑 Данные пользователя <code>{uid}</code> удалены "
+                    f"({len(bot_ids)} ботов).",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
+            except Exception as e:
+                log.warning("delete_user fetch failed: %s", e)
+                await message.answer(
+                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
 
     elif state == "grant":
         try:
@@ -1461,45 +1589,6 @@ async def handle_admin_message(
             months = max(1, min(months, 1200))  # cap: 1–1200 месяцев (100 лет)
             if plan not in ("starter", "pro", "enterprise"):
                 raise ValueError("bad plan")
-            await pool.execute(
-                """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-                   VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-                   ON CONFLICT(user_id) DO UPDATE
-                   SET plan      = EXCLUDED.plan,
-                       is_active = true,
-                       expires_at = CASE
-                           WHEN subscriptions.expires_at > now()
-                               THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                           ELSE now() + ($3 || ' months')::INTERVAL
-                       END""",
-                uid,
-                plan,
-                str(months),
-            )
-            row = await pool.fetchrow(
-                "SELECT expires_at FROM subscriptions WHERE user_id=$1", uid
-            )
-            expires = row["expires_at"]
-            await message.answer(
-                f"✅ Подписка <b>{plan.upper()}</b> выдана пользователю "
-                f"<code>{uid}</code> на {months} мес.",
-                parse_mode="HTML",
-                reply_markup=_admin_main_kb(),
-            )
-            try:
-                await message.bot.send_message(
-                    uid,
-                    f"🎁 <b>Подарок!</b>\n\nВам активирована подписка "
-                    f"<b>{plan.upper()}</b> на {months} месяц(ев).\n"
-                    f"Действует до {expires.strftime('%d.%m.%Y')}.",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(
-                    log,
-                    "Не удалось уведомить пользователя о выдаче подписки",
-                    user_id=uid,
-                )
         except (ValueError, IndexError):
             await message.answer(
                 "❌ Формат: <code>USER_ID план месяцев</code>\n"
@@ -1507,19 +1596,83 @@ async def handle_admin_message(
                 parse_mode="HTML",
                 reply_markup=_admin_main_kb(),
             )
+        else:
+            try:
+                await pool.execute(
+                    """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
+                       VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
+                       ON CONFLICT(user_id) DO UPDATE
+                       SET plan      = EXCLUDED.plan,
+                           is_active = true,
+                           expires_at = CASE
+                               WHEN subscriptions.expires_at > now()
+                                   THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
+                               ELSE now() + ($3 || ' months')::INTERVAL
+                           END""",
+                    uid,
+                    plan,
+                    str(months),
+                )
+            except Exception as e:
+                log.warning("grant execute failed: %s", e)
+                await message.answer(
+                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
+            else:
+                try:
+                    row = await pool.fetchrow(
+                        "SELECT expires_at FROM subscriptions WHERE user_id=$1", uid
+                    )
+                    expires = row["expires_at"] if row else None
+                except Exception:
+                    expires = None
+                    log_exc_swallow(log, "grant fetchrow expires failed")
+                await message.answer(
+                    f"✅ Подписка <b>{plan.upper()}</b> выдана пользователю "
+                    f"<code>{uid}</code> на {months} мес.",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
+                try:
+                    await message.bot.send_message(
+                        uid,
+                        f"🎁 <b>Подарок!</b>\n\nВам активирована подписка "
+                        f"<b>{plan.upper()}</b> на {months} месяц(ев).\n"
+                        + (f"Действует до {expires.strftime('%d.%m.%Y')}." if expires else ""),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log,
+                        "Не удалось уведомить пользователя о выдаче подписки",
+                        user_id=uid,
+                    )
 
     elif state == "find":
         try:
             uid = int(text)
-            bots = await pool.fetch(
-                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1",
-                uid,
-            )
-            sub = await pool.fetchrow(
-                "SELECT plan, expires_at FROM subscriptions "
-                "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
-                uid,
-            )
+        except ValueError:
+            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+        else:
+            try:
+                bots = await pool.fetch(
+                    "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1",
+                    uid,
+                )
+            except Exception:
+                bots = []
+                log_exc_swallow(log, "find fetch bots failed", user_id=uid)
+            try:
+                sub = await pool.fetchrow(
+                    "SELECT plan, expires_at FROM subscriptions "
+                    "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
+                    uid,
+                )
+            except Exception:
+                sub = None
+                log_exc_swallow(log, "find fetchrow sub failed", user_id=uid)
             plan_info = (
                 f"{sub['plan'].upper()} до {sub['expires_at'].strftime('%d.%m.%Y')}"
                 if sub
@@ -1538,8 +1691,6 @@ async def handle_admin_message(
                 parse_mode="HTML",
                 reply_markup=_admin_main_kb(),
             )
-        except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
 
     elif state == "bulk_grant":
         lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -1556,6 +1707,10 @@ async def handle_admin_message(
                 months = max(1, min(months, 1200))
                 if plan not in ("starter", "pro", "enterprise"):
                     raise ValueError("bad plan")
+            except (ValueError, IndexError) as e:
+                fail_list.append(f"❌ {line[:30]}: {e}")
+                continue
+            try:
                 await pool.execute(
                     """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
                        VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
@@ -1585,8 +1740,9 @@ async def handle_admin_message(
                         "Не удалось уведомить пользователя о массовой выдаче подписки",
                         user_id=uid,
                     )
-            except (ValueError, IndexError) as e:
-                fail_list.append(f"❌ {line[:30]}: {e}")
+            except Exception as e:
+                log.warning("bulk_grant execute failed for uid=%s: %s", uid, e)
+                fail_list.append(f"❌ {line[:30]}: DB error")
         result_lines = ok_list[:20] + fail_list[:10]
         await message.answer(
             f"💰 <b>Массовая выдача завершена</b>\n\n"
@@ -1626,37 +1782,46 @@ async def handle_admin_message(
     elif state == "strike_grant":
         try:
             target_uid = int(text.strip())
-            from bot.handlers.strike import _ensure_table
-
-            await _ensure_table(pool)
-            await pool.execute(
-                "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
-                "ON CONFLICT (user_id) DO NOTHING",
-                target_uid,
-                message.from_user.id,
-            )
-            await message.answer(
-                f"⚔️ <b>Strike доступ активирован</b>\n\n"
-                f"Пользователь <code>{target_uid}</code> теперь имеет доступ к Strike Module.",
-                parse_mode="HTML",
-                reply_markup=_admin_main_kb(),
-            )
-            try:
-                await message.bot.send_message(
-                    target_uid,
-                    "⚔️ <b>Strike Module активирован!</b>\n\n"
-                    "Администратор предоставил вам доступ к Strike Module.\n"
-                    "Откройте меню для использования.",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(
-                    log,
-                    "Не удалось уведомить пользователя о выдаче Strike доступа",
-                    user_id=target_uid,
-                )
         except ValueError:
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+        else:
+            try:
+                from bot.handlers.strike import _ensure_table
+
+                await _ensure_table(pool)
+                await pool.execute(
+                    "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
+                    "ON CONFLICT (user_id) DO NOTHING",
+                    target_uid,
+                    message.from_user.id,
+                )
+                await message.answer(
+                    f"⚔️ <b>Strike доступ активирован</b>\n\n"
+                    f"Пользователь <code>{target_uid}</code> теперь имеет доступ к Strike Module.",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
+                try:
+                    await message.bot.send_message(
+                        target_uid,
+                        "⚔️ <b>Strike Module активирован!</b>\n\n"
+                        "Администратор предоставил вам доступ к Strike Module.\n"
+                        "Откройте меню для использования.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log,
+                        "Не удалось уведомить пользователя о выдаче Strike доступа",
+                        user_id=target_uid,
+                    )
+            except Exception as e:
+                log.warning("strike_grant execute failed: %s", e)
+                await message.answer(
+                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    parse_mode="HTML",
+                    reply_markup=_admin_main_kb(),
+                )
 
     elif state == "strike_revoke":
         try:
@@ -1933,12 +2098,15 @@ async def _adm_env_edit_ask(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
-    await pool.execute(
-        "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
-        "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
-        callback.from_user.id,
-        f"env_edit:{key}",
-    )
+    try:
+        await pool.execute(
+            "INSERT INTO admin_state(admin_id,state,data) VALUES($1,$2,'') "
+            "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
+            callback.from_user.id,
+            f"env_edit:{key}",
+        )
+    except Exception:
+        log_exc_swallow(log, "admin_state insert failed for env_edit")
 
 
 async def _adm_env_delete(
@@ -2278,10 +2446,13 @@ async def notify_new_platform_user(
     try:
         total = await pool.fetchval("SELECT COUNT(*) FROM platform_users") or 0
     except Exception:
-        total = (
-            await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots")
-            or 0
-        )
+        try:
+            total = (
+                await pool.fetchval("SELECT COUNT(DISTINCT added_by) FROM managed_bots")
+                or 0
+            )
+        except Exception:
+            total = 0
     label = f"@{username}" if username else first_name
     for admin_id in admin_ids:
         try:

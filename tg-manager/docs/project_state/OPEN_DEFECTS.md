@@ -15,8 +15,8 @@ Last updated: 2026-06-06
 ## HIGH
 
 - [HIGH] account_warmup — warmup logic correctness unverified; schedules and pacing may cause account bans
-- [HIGH] STRIKE — staggered_strike safety hardening incomplete; may cause account damage on weak accounts
-- [HIGH] Mass Operations — parallel operations may exceed rate limits and harm accounts
+- [FIXED-2026-06-06] STRIKE — ban/PeerFlood detection + warmup overlap guard added
+- [FIXED-2026-06-06] Mass Operations — account double-use in concurrent ops fixed (mark/release lock)
 - [HIGH] Private Channels — channel reading may fail silently for private/restricted channels
 - [HIGH] Channel/Group/Bot Creation — creation operations unstable; BotFather dialog automation brittle
 - [HIGH] Factories — created objects may be incomplete (missing username, no admin, no description)
