@@ -1206,6 +1206,19 @@ def is_verified_account_restriction(status: str, *, has_session: bool = True) ->
     return status == "session_expired" and has_session
 
 
+def should_persist_account_status(
+    status: str,
+    *,
+    auth_error: bool = False,
+    has_session: bool = True,
+) -> bool:
+    if status in {"active", "cooldown", "spamblock"}:
+        return True
+    if not is_verified_account_restriction(status, has_session=has_session):
+        return False
+    return status != "session_expired" or auth_error
+
+
 async def check_account_status_full(
     session_string: str,
     _acc: dict | None = None,

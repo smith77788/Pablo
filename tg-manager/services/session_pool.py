@@ -124,12 +124,14 @@ async def warm_session(account_id: int, pool: asyncpg.Pool) -> SessionState:
                     result.get("reason", ""),
                     account_id,
                 )
-            elif status == "session_expired":
+            elif status == "session_expired" and result.get("auth_error"):
                 entry.state = SessionState.EXPIRED
                 await pool.execute(
                     "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired' WHERE id=$1",
                     account_id,
                 )
+            elif status == "session_expired":
+                entry.state = SessionState.INVALID
             elif status == "cooldown":
                 entry.state = SessionState.COOLING
             else:

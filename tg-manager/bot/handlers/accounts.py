@@ -51,6 +51,7 @@ from services.account_manager import (
     scan_owned_assets,
     send_message,
     send_message_via_account,
+    should_persist_account_status,
     start_login,
     start_qr_login,
     wait_qr_login,
@@ -78,6 +79,18 @@ _STATUS_EMOJI: dict[str, str] = {
 }
 
 # ── FSM States ─────────────────────────────────────────────────────────────────
+
+
+def _display_acc_status(acc: dict) -> str:
+    if not acc.get("is_active", True):
+        return "archived"
+    status = acc.get("acc_status") or "active"
+    has_session = bool(acc.get("has_session")) or bool(
+        acc.get("session_str") or acc.get("session_string")
+    )
+    if status == "session_expired" and has_session:
+        return "active"
+    return status
 
 
 class AccountLogin(StatesGroup):
@@ -294,15 +307,13 @@ async def _show_accounts_menu(
         shown = [
             a
             for a in (all_accounts or [])
-            if (a.get("acc_status") or "active") == "active"
-            and a.get("is_active", True)
+            if _display_acc_status(a) == "active" and a.get("is_active", True)
         ]
     elif status_filter == "problem":
         shown = [
             a
             for a in (all_accounts or [])
-            if (a.get("acc_status") or "active") != "active"
-            or not a.get("is_active", True)
+            if _display_acc_status(a) != "active" or not a.get("is_active", True)
         ]
     else:
         shown = list(all_accounts or [])
@@ -312,9 +323,7 @@ async def _show_accounts_menu(
     # Count by status for header badge
     _cnt = {}
     for a in all_accounts or []:
-        s = a.get("acc_status") or "active"
-        if not a.get("is_active", True):
-            s = "archived"
+        s = _display_acc_status(a)
         _cnt[s] = _cnt.get(s, 0) + 1
     active_cnt = _cnt.get("active", 0)
     expired_cnt = _cnt.get("session_expired", 0)
@@ -339,9 +348,7 @@ async def _show_accounts_menu(
             phone = escape(acc.get("phone", ""))
             label = name or uname or phone or f"ID {acc['id']}"
             display = f"{label} ({phone})" if phone and name else label
-            acc_status = acc.get("acc_status") or "active"
-            if not acc.get("is_active", True):
-                acc_status = "archived"
+            acc_status = _display_acc_status(acc)
             st_emoji = _STATUS_EMOJI.get(acc_status, "✅")
             pool_str = f" · 🏊 {escape(acc['pool'])}" if acc.get("pool") else ""
             trust_score = acc.get("trust_score")
@@ -1984,7 +1991,13 @@ async def cb_check_all_accounts(
             status = "active"
             reason = f"Ошибка: {str(exc)[:80]}"
 
-        await db.update_acc_status(pool, acc["id"], status, reason)
+        has_session = bool(session_str)
+        if should_persist_account_status(
+            status,
+            auth_error=bool(result.get("auth_error", False)),
+            has_session=has_session,
+        ):
+            await db.update_acc_status(pool, acc["id"], status, reason)
         results.append((name, status, reason))
 
         # Update progress every 3 accounts
@@ -2084,9 +2097,7 @@ async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             name = escape(acc.get("first_name") or "")
             phone = escape(acc.get("phone") or "")
             label = name or phone or f"ID {acc['id']}"
-            acc_status = acc.get("acc_status") or "active"
-            if not acc.get("is_active", True):
-                acc_status = "archived"
+            acc_status = _display_acc_status(acc)
             st = _STATUS_EMOJI.get(acc_status, "✅")
             trust = acc.get("trust_score")
             trust_str = f" · {float(trust):.2f}" if trust is not None else ""
@@ -2350,7 +2361,7 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             result = await account_manager.check_account_status_full(
                 session_str, _acc=dict(acc), check_spambot=False
             )
-            if result.get("status") == "session_expired":
+            if result.get("status") == "session_expired" and result.get("auth_error"):
                 dead_ids.append(acc["id"])
         except Exception as e:
             if any(

@@ -15,7 +15,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 from services.account_manager import (
     classify_spambot_reply,
     is_verified_account_restriction,
+    should_persist_account_status,
 )
+from bot.handlers.accounts import _display_acc_status
 from services.flood_engine import (
     _flood_state,
     get_account_state,
@@ -39,6 +41,40 @@ def test_verified_restriction_requires_real_status() -> None:
     assert is_verified_account_restriction("session_expired", has_session=True)
     assert not is_verified_account_restriction("session_expired", has_session=False)
     assert not is_verified_account_restriction("cooldown")
+
+
+def test_session_expired_persists_only_on_auth_error() -> None:
+    assert should_persist_account_status("active")
+    assert should_persist_account_status("spamblock")
+    assert not should_persist_account_status("session_expired", has_session=True)
+    assert should_persist_account_status(
+        "session_expired",
+        auth_error=True,
+        has_session=True,
+    )
+
+
+def test_display_status_hides_stale_session_expired_for_active_session() -> None:
+    assert (
+        _display_acc_status(
+            {
+                "acc_status": "session_expired",
+                "is_active": True,
+                "has_session": True,
+            }
+        )
+        == "active"
+    )
+    assert (
+        _display_acc_status(
+            {
+                "acc_status": "session_expired",
+                "is_active": False,
+                "has_session": True,
+            }
+        )
+        == "archived"
+    )
 
 
 def test_recommended_delay_uses_safe_action_baseline() -> None:
