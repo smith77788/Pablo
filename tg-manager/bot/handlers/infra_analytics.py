@@ -184,14 +184,17 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         lines.append(f"\n<i>...и ещё {len(accounts) - 15} аккаунтов</i>")
 
     # Per-pool breakdown
-    pool_rows = await pool.fetch(
-        """SELECT pool, COUNT(*) AS cnt, AVG(trust_score) AS avg_trust
-           FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=TRUE
-           GROUP BY pool
-           ORDER BY pool""",
-        uid,
-    )
+    try:
+        pool_rows = await pool.fetch(
+            """SELECT pool, COUNT(*) AS cnt, AVG(trust_score) AS avg_trust
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               GROUP BY pool
+               ORDER BY pool""",
+            uid,
+        )
+    except Exception:
+        pool_rows = []
     if pool_rows:
         lines.append("\n<b>📊 По пулам:</b>")
         for pr in pool_rows:
@@ -282,26 +285,32 @@ async def cb_infra_audit(
     page = callback_data.page
     uid = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT oa.action, oa.target, oa.result, oa.error_msg,
-                  oa.flood_wait_s, oa.duration_ms, oa.occurred_at,
-                  a.first_name, a.phone
-           FROM operation_audit oa
-           LEFT JOIN tg_accounts a ON a.id=oa.account_id
-           WHERE oa.owner_id=$1
-           ORDER BY oa.occurred_at DESC
-           OFFSET $2 LIMIT $3""",
-        uid,
-        page * _PAGE,
-        _PAGE,
-    )
-
-    total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1", uid
+    try:
+        rows = await pool.fetch(
+            """SELECT oa.action, oa.target, oa.result, oa.error_msg,
+                      oa.flood_wait_s, oa.duration_ms, oa.occurred_at,
+                      a.first_name, a.phone
+               FROM operation_audit oa
+               LEFT JOIN tg_accounts a ON a.id=oa.account_id
+               WHERE oa.owner_id=$1
+               ORDER BY oa.occurred_at DESC
+               OFFSET $2 LIMIT $3""",
+            uid,
+            page * _PAGE,
+            _PAGE,
         )
-        or 0
-    )
+    except Exception:
+        rows = []
+
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1", uid
+            )
+            or 0
+        )
+    except Exception:
+        total = 0
 
     # Bad proxies (success_rate < 50%)
     bad_proxy_count = 0
@@ -491,10 +500,13 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
     await callback.answer("🔄 Обновляю...")
     uid = callback.from_user.id
 
-    accounts = await pool.fetch(
-        "SELECT id, acc_status, trust_score FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, acc_status, trust_score FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     updated = 0
     for acc in accounts:
