@@ -4,7 +4,7 @@ Format: [SEVERITY] MODULE — Description
 
 Severities: CRITICAL | HIGH | MEDIUM | LOW
 
-Last updated: 2026-06-06
+Last updated: 2026-06-06 (session 2)
 
 ---
 
@@ -25,7 +25,7 @@ Last updated: 2026-06-06
 ## MEDIUM
 
 - [MEDIUM] username/name uniqueness — no dedicated engine; collisions possible across accounts
-- [MEDIUM] proxy safety — failover behavior on proxy death unverified
+- [FIXED-2026-06-06] proxy safety — proxy failure now recorded in infra_memory on TimeoutError/OSError; score degrades immediately so future ops rank dead-proxy accounts lower
 - [MEDIUM] reports — activity_log shows "no records" for users due to ok-only logging (FIXED in middleware, pending deploy)
 - [FIXED-2026-06-06] admin.py — all 66 pool calls wrapped
 - [FIXED-2026-06-06] botmother_menu.py — all 29 pool calls wrapped
@@ -39,10 +39,10 @@ Last updated: 2026-06-06
 ## LOW
 
 - [FIXED-2026-06-06] funnels.py — 8 pool calls wrapped
-- [LOW] channel_factory.py — 12 unprotected calls
-- [LOW] group_factory.py — 8 unprotected calls
-- [LOW] gift_transfer.py — 8 unprotected calls
-- [LOW] account_cleaner.py — 7 unprotected calls
+- [FIXED-2026-06-06] channel_factory.py — 11 pool calls wrapped
+- [FIXED-2026-06-06] group_factory.py — 8 pool calls wrapped
+- [FIXED-2026-06-06] gift_transfer.py — 8 pool calls wrapped
+- [FIXED-2026-06-06] account_cleaner.py — 7 pool calls wrapped
 - [FIXED-2026-06-06] cluster_manager.py — 5 pool calls wrapped
 - [FIXED-2026-06-06] crm.py — 1 pool call wrapped
 - [FIXED-2026-06-06] net_broadcast.py — 2 pool calls wrapped
