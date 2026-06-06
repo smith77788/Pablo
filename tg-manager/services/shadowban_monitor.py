@@ -2,7 +2,7 @@
 
 Checks:
 1. Search visibility drop — bot disappears from search rankings (was visible, now not)
-2. Account flood rate — accounts with high flood_count_7d flagged as restricted
+2. Account flood rate — accounts with high flood_count_7d flagged as risk
 3. Search position collapse — position drops > 10 places vs 7-day average
 """
 
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 _INTERVAL = 1800  # check every 30 minutes
 _ALERT_COOLDOWN_HOURS = 24  # don't re-alert same event within 24h
-_FLOOD_THRESHOLD = 3  # accounts with flood_count_7d >= this are "restricted"
+_FLOOD_THRESHOLD = 3  # accounts with flood_count_7d >= this are high-risk
 _POSITION_DROP_THRESHOLD = 10  # position drop > this = alert
 
 
@@ -175,7 +175,7 @@ async def _check_search_visibility(pool: asyncpg.Pool, bot: Bot) -> None:
 
 
 async def _check_account_restrictions(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Detect accounts with high flood rate — likely restricted by Telegram."""
+    """Detect accounts with high flood rate without claiming a verified restriction."""
     rows = await pool.fetch(
         """SELECT ta.id, ta.owner_id, ta.phone, ta.flood_count_7d, ta.last_flood_at
            FROM tg_accounts ta
@@ -188,28 +188,30 @@ async def _check_account_restrictions(pool: asyncpg.Pool, bot: Bot) -> None:
         owner_id = row["owner_id"]
         account_id = row["id"]
 
-        if await _is_on_cooldown(pool, owner_id, "account_restricted", account_id):
+        event_type = "account_flood_risk"
+        if await _is_on_cooldown(pool, owner_id, event_type, account_id):
             continue
 
         severity = "critical" if row["flood_count_7d"] >= 5 else "warning"
         message = (
-            f"{'🚨' if severity == 'critical' else '⚠️'} <b>Аккаунт под ограничением</b>\n\n"
+            f"{'🚨' if severity == 'critical' else '⚠️'} <b>Высокий риск лимитов аккаунта</b>\n\n"
             f"Аккаунт <code>{row['phone']}</code> получил "
             f"<b>{row['flood_count_7d']}</b> FloodWait за последние 7 дней.\n\n"
-            f"Рекомендуется снизить активность этого аккаунта или заменить его."
+            f"Это не подтверждённый спамблок. Система снизит нагрузку на аккаунт "
+            f"и будет ждать явной проверки через @SpamBot для статуса ограничения."
         )
 
         await _record_event(
             pool,
             owner_id,
-            "account_restricted",
+            event_type,
             severity,
             {"account_id": account_id, "flood_count_7d": row["flood_count_7d"]},
             account_id=account_id,
         )
         try:
             await notify_if_enabled(pool, bot, owner_id, "restriction", message)
-            await _mark_alerted(pool, owner_id, "account_restricted", account_id)
+            await _mark_alerted(pool, owner_id, event_type, account_id)
         except Exception as exc:
             log.warning(
                 "shadowban_monitor: failed to alert owner=%s: %s", owner_id, exc
