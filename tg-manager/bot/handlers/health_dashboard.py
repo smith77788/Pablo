@@ -116,20 +116,23 @@ def _make_comparison_chart(
 
 
 async def _fetch_account_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
-    row = await pool.fetchrow(
-        """
-        SELECT
-            COUNT(*) AS total,
-            COUNT(CASE WHEN is_active THEN 1 END) AS active,
-            COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
-            ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust,
-            COUNT(CASE WHEN trust_score < 0.3 AND is_active THEN 1 END) AS critical,
-            COUNT(CASE WHEN trust_score >= 0.3 AND trust_score < 0.6 AND is_active THEN 1 END) AS low_trust
-        FROM tg_accounts
-        WHERE owner_id=$1
-        """,
-        owner_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
+                ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust,
+                COUNT(CASE WHEN trust_score < 0.3 AND is_active THEN 1 END) AS critical,
+                COUNT(CASE WHEN trust_score >= 0.3 AND trust_score < 0.6 AND is_active THEN 1 END) AS low_trust
+            FROM tg_accounts
+            WHERE owner_id=$1
+            """,
+            owner_id,
+        )
+    except Exception:
+        row = None
     result = (
         dict(row)
         if row
@@ -411,24 +414,27 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.answer()
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        """
-        SELECT a.id, a.phone, a.first_name, a.username, a.trust_score, a.cooldown_until,
-               COALESCE(a.flood_count_7d, 0) AS flood_count_7d, a.is_active,
-               a.pool, a.tags,
-               COALESCE(a.acc_status, 'active') AS acc_status,
-               a.last_real_check_at,
-               (a.session_str IS NOT NULL AND a.session_str != '') AS has_session,
-               (SELECT ROUND(h.health_score::numeric, 1)
-                FROM account_health_history h
-                WHERE h.account_id = a.id
-                ORDER BY h.recorded_at DESC LIMIT 1) AS health_score
-        FROM tg_accounts a
-        WHERE a.owner_id=$1
-        ORDER BY a.trust_score DESC NULLS LAST
-        """,
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT a.id, a.phone, a.first_name, a.username, a.trust_score, a.cooldown_until,
+                   COALESCE(a.flood_count_7d, 0) AS flood_count_7d, a.is_active,
+                   a.pool, a.tags,
+                   COALESCE(a.acc_status, 'active') AS acc_status,
+                   a.last_real_check_at,
+                   (a.session_str IS NOT NULL AND a.session_str != '') AS has_session,
+                   (SELECT ROUND(h.health_score::numeric, 1)
+                    FROM account_health_history h
+                    WHERE h.account_id = a.id
+                    ORDER BY h.recorded_at DESC LIMIT 1) AS health_score
+            FROM tg_accounts a
+            WHERE a.owner_id=$1
+            ORDER BY a.trust_score DESC NULLS LAST
+            """,
+            user_id,
+        )
+    except Exception:
+        rows = []
 
     _STATUS_EMOJI = {
         "active": "✅",
@@ -614,12 +620,15 @@ async def cb_health_real_check(
     await callback.answer()
     user_id = callback.from_user.id
 
-    accounts = await pool.fetch(
-        "SELECT id, session_str, phone, first_name, username, trust_score, device_model, "
-        "system_version, app_version, proxy_id FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY id",
-        user_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, phone, first_name, username, trust_score, device_model, "
+            "system_version, app_version, proxy_id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY id",
+            user_id,
+        )
+    except Exception:
+        accounts = []
     if not accounts:
         await safe_edit(
             callback,
@@ -778,20 +787,23 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
 
-    bots = await pool.fetch(
-        """
-        SELECT b.bot_id, b.username, b.first_name, b.token,
-               COALESCE(aud.cnt, 0) AS user_count
-        FROM managed_bots b
-        LEFT JOIN (
-            SELECT bot_id, COUNT(*) AS cnt
-            FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-        ) aud ON aud.bot_id = b.bot_id
-        WHERE b.added_by=$1 AND b.is_active=TRUE
-        ORDER BY b.added_at DESC
-        """,
-        user_id,
-    )
+    try:
+        bots = await pool.fetch(
+            """
+            SELECT b.bot_id, b.username, b.first_name, b.token,
+                   COALESCE(aud.cnt, 0) AS user_count
+            FROM managed_bots b
+            LEFT JOIN (
+                SELECT bot_id, COUNT(*) AS cnt
+                FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+            ) aud ON aud.bot_id = b.bot_id
+            WHERE b.added_by=$1 AND b.is_active=TRUE
+            ORDER BY b.added_at DESC
+            """,
+            user_id,
+        )
+    except Exception:
+        bots = []
 
     lines = ["🤖 <b>Здоровье ботов</b>\n"]
     if not bots:
@@ -1171,12 +1183,15 @@ async def cb_health_recommendations(
     user_id = callback.from_user.id
     now = datetime.now(timezone.utc)
 
-    accounts = await pool.fetch(
-        "SELECT id, phone, first_name, username, trust_score, cooldown_until, "
-        "flood_count_7d, is_active, added_at "
-        "FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score ASC NULLS LAST LIMIT 20",
-        user_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, phone, first_name, username, trust_score, cooldown_until, "
+            "flood_count_7d, is_active, added_at "
+            "FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score ASC NULLS LAST LIMIT 20",
+            user_id,
+        )
+    except Exception:
+        accounts = []
     # Fetch health scores from history
     try:
         health_rows = await pool.fetch(
@@ -1378,30 +1393,39 @@ async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) ->
     user_id = callback.from_user.id
     datetime.now(timezone.utc)
 
-    critical = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND trust_score < 0.3",
-            user_id,
+    try:
+        critical = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND trust_score < 0.3",
+                user_id,
+            )
+            or 0
         )
-        or 0
-    )
-    low = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6",
-            user_id,
+    except Exception:
+        critical = 0
+    try:
+        low = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6",
+                user_id,
+            )
+            or 0
         )
-        or 0
-    )
-    cooldown = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > now()",
-            user_id,
+    except Exception:
+        low = 0
+    try:
+        cooldown = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > now()",
+                user_id,
+            )
+            or 0
         )
-        or 0
-    )
+    except Exception:
+        cooldown = 0
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -1435,21 +1459,29 @@ async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     now = datetime.now(timezone.utc)
 
     # Critical: trust < 0.3 → 72h cooldown
-    critical_updated = await pool.execute(
-        "UPDATE tg_accounts SET cooldown_until = $1 "
-        "WHERE owner_id=$2 AND is_active=TRUE AND trust_score < 0.3 "
-        "AND (cooldown_until IS NULL OR cooldown_until < now())",
-        now + timedelta(hours=72),
-        user_id,
-    )
+    try:
+        critical_updated = await pool.execute(
+            "UPDATE tg_accounts SET cooldown_until = $1 "
+            "WHERE owner_id=$2 AND is_active=TRUE AND trust_score < 0.3 "
+            "AND (cooldown_until IS NULL OR cooldown_until < now())",
+            now + timedelta(hours=72),
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, f"auto_rotate: critical update failed user_id={user_id}")
+        critical_updated = "UPDATE 0"
     # Low: trust 0.3–0.6 → 24h cooldown
-    low_updated = await pool.execute(
-        "UPDATE tg_accounts SET cooldown_until = $1 "
-        "WHERE owner_id=$2 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6 "
-        "AND (cooldown_until IS NULL OR cooldown_until < now())",
-        now + timedelta(hours=24),
-        user_id,
-    )
+    try:
+        low_updated = await pool.execute(
+            "UPDATE tg_accounts SET cooldown_until = $1 "
+            "WHERE owner_id=$2 AND is_active=TRUE AND trust_score >= 0.3 AND trust_score < 0.6 "
+            "AND (cooldown_until IS NULL OR cooldown_until < now())",
+            now + timedelta(hours=24),
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, f"auto_rotate: low update failed user_id={user_id}")
+        low_updated = "UPDATE 0"
 
     def _count(pg_result: str) -> int:
         try:
@@ -1483,12 +1515,15 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     user_id = callback.from_user.id
     now = datetime.now(timezone.utc)
 
-    accounts = await pool.fetch(
-        """SELECT phone, first_name, username, trust_score, is_active,
-                  cooldown_until, flood_count_7d, device_model, added_at
-           FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score DESC NULLS LAST""",
-        user_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT phone, first_name, username, trust_score, is_active,
+                      cooldown_until, flood_count_7d, device_model, added_at
+               FROM tg_accounts WHERE owner_id=$1 ORDER BY trust_score DESC NULLS LAST""",
+            user_id,
+        )
+    except Exception:
+        accounts = []
     if not accounts:
         await callback.answer("Нет аккаунтов для экспорта", show_alert=True)
         return
@@ -1637,13 +1672,16 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     await callback.answer()
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT id, phone, first_name, username,
-                  COALESCE(acc_status, 'active') AS acc_status, is_active
-           FROM tg_accounts WHERE owner_id=$1
-           ORDER BY is_active ASC, acc_status DESC""",
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT id, phone, first_name, username,
+                      COALESCE(acc_status, 'active') AS acc_status, is_active
+               FROM tg_accounts WHERE owner_id=$1
+               ORDER BY is_active ASC, acc_status DESC""",
+            user_id,
+        )
+    except Exception:
+        rows = []
     if not rows:
         kb = _back_kb()
         await safe_edit(
@@ -1692,12 +1730,15 @@ async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     await callback.answer()
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT id, phone, first_name, username, cooldown_until, is_active
-           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE
-           ORDER BY phone""",
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT id, phone, first_name, username, cooldown_until, is_active
+               FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY phone""",
+            user_id,
+        )
+    except Exception:
+        rows = []
     if not rows:
         kb = _back_kb()
         await safe_edit(
@@ -1754,18 +1795,24 @@ async def cb_set_cooldown_confirm(
     now = datetime.now(timezone.utc)
     cd_until = now + timedelta(hours=24)
 
-    await pool.execute(
-        "UPDATE tg_accounts SET cooldown_until=$1 WHERE id=$2 AND owner_id=$3",
-        cd_until,
-        acc_id,
-        user_id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET cooldown_until=$1 WHERE id=$2 AND owner_id=$3",
+            cd_until,
+            acc_id,
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, f"set_cooldown_confirm: execute failed acc_id={acc_id}")
 
-    acc = await pool.fetchrow(
-        "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        user_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+    except Exception:
+        acc = None
     name = "—"
     if acc:
         name = (
@@ -1801,13 +1848,16 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
     user_id = callback.from_user.id
 
     now = datetime.now(timezone.utc)
-    rows = await pool.fetch(
-        """SELECT id, phone, first_name, username, cooldown_until
-           FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > NOW()
-           ORDER BY cooldown_until""",
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT id, phone, first_name, username, cooldown_until
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE AND cooldown_until > NOW()
+               ORDER BY cooldown_until""",
+            user_id,
+        )
+    except Exception:
+        rows = []
 
     kb = InlineKeyboardBuilder()
 
@@ -1861,17 +1911,23 @@ async def cb_reset_cooldown_one(
     user_id = callback.from_user.id
     acc_id = callback_data.page
 
-    await pool.execute(
-        "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        user_id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, f"reset_cooldown_one: execute failed acc_id={acc_id}")
 
-    acc = await pool.fetchrow(
-        "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        user_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name, username FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            user_id,
+        )
+    except Exception:
+        acc = None
     name = f"id{acc_id}"
     if acc:
         name = acc.get("username") or acc.get("first_name") or acc.get("phone") or name
@@ -1897,10 +1953,14 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     await callback.answer()
     user_id = callback.from_user.id
 
-    result = await pool.execute(
-        "UPDATE tg_accounts SET cooldown_until=NULL WHERE owner_id=$1 AND cooldown_until > NOW()",
-        user_id,
-    )
+    try:
+        result = await pool.execute(
+            "UPDATE tg_accounts SET cooldown_until=NULL WHERE owner_id=$1 AND cooldown_until > NOW()",
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, f"reset_cooldown_all: execute failed user_id={user_id}")
+        result = "UPDATE 0"
     # result is like "UPDATE N"
     try:
         count = int(str(result).split()[-1])

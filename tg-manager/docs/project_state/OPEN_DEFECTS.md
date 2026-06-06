@@ -27,11 +27,11 @@ Last updated: 2026-06-06
 - [MEDIUM] username/name uniqueness — no dedicated engine; collisions possible across accounts
 - [MEDIUM] proxy safety — failover behavior on proxy death unverified
 - [MEDIUM] reports — activity_log shows "no records" for users due to ok-only logging (FIXED in middleware, pending deploy)
-- [MEDIUM] admin.py — 34 unprotected pool calls; admin dashboard may crash on DB errors
-- [MEDIUM] botmother_menu.py — 29 unprotected pool calls (fix in progress)
+- [FIXED-2026-06-06] admin.py — all 66 pool calls wrapped
+- [FIXED-2026-06-06] botmother_menu.py — all 29 pool calls wrapped
 - [MEDIUM] health_dashboard.py — 21 unprotected pool calls
-- [MEDIUM] infra_analytics.py — 11 unprotected pool calls
-- [MEDIUM] subscription.py — 6 unprotected pool calls; subscription gates may crash
+- [FIXED-2026-06-06] infra_analytics.py — all pool calls wrapped
+- [FIXED-2026-06-06] subscription.py — all 6 pool calls wrapped
 - [MEDIUM] seo.py — 23 unprotected calls
 - [MEDIUM] ecosystems.py — 18 unprotected calls
 - [MEDIUM] presence_pack.py — 18 unprotected calls

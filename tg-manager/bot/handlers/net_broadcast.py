@@ -367,9 +367,13 @@ async def cb_net_bc_confirm(
 
     if segment in ("all_each", "selected_bots"):
         for bot in bots:
-            user_ids = await pool.fetch(
-                "SELECT user_id FROM bot_users WHERE bot_id=$1", bot["bot_id"]
-            )
+            try:
+                user_ids = await pool.fetch(
+                    "SELECT user_id FROM bot_users WHERE bot_id=$1", bot["bot_id"]
+                )
+            except Exception:
+                log.warning("net_broadcast: fetch user_ids failed bot=%s", bot.get("bot_id"), exc_info=True)
+                user_ids = []
             ids = [r["user_id"] for r in user_ids]
             if ids:
                 bc_id = await db.create_broadcast(
@@ -441,11 +445,15 @@ async def cb_net_bc_confirm(
 
     elif segment == "lang":
         for bot in bots:
-            user_ids = await pool.fetch(
-                "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2",
-                bot["bot_id"],
-                lang,
-            )
+            try:
+                user_ids = await pool.fetch(
+                    "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2",
+                    bot["bot_id"],
+                    lang,
+                )
+            except Exception:
+                log.warning("net_broadcast: fetch user_ids (lang) failed bot=%s", bot.get("bot_id"), exc_info=True)
+                user_ids = []
             ids = [r["user_id"] for r in user_ids]
             if ids:
                 bc_id = await db.create_broadcast(

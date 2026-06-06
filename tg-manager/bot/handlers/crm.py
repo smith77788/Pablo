@@ -192,11 +192,14 @@ async def cb_delete_tag_all(
         return
     tag = callback_data.tag or ""
     await callback.answer(f"🗑 Тег «{tag}» удалён.")
-    await pool.execute(
-        "DELETE FROM user_tags WHERE bot_id=$1 AND tag=$2",
-        callback_data.bot_id,
-        tag,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM user_tags WHERE bot_id=$1 AND tag=$2",
+            callback_data.bot_id,
+            tag,
+        )
+    except Exception:
+        log.warning("crm: tag delete DB error", exc_info=True)
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     tags = await db.get_tag_names(pool, callback_data.bot_id)
     await callback.message.edit_text(

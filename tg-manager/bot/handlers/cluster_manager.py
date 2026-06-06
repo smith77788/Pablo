@@ -16,6 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ClustMCb, BotCb, NetBcCb
 from bot.keyboards import subscription_locked_markup
+from services.logger import log_exc_swallow
 from bot.states import CreateClusterFSM
 from bot.utils.subscription import require_plan, locked_text
 
@@ -78,16 +79,20 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        """
-        SELECT cluster, COUNT(*) AS bot_count
-        FROM managed_bots
-        WHERE added_by=$1 AND cluster IS NOT NULL AND is_active=TRUE
-        GROUP BY cluster
-        ORDER BY cluster
-        """,
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT cluster, COUNT(*) AS bot_count
+            FROM managed_bots
+            WHERE added_by=$1 AND cluster IS NOT NULL AND is_active=TRUE
+            GROUP BY cluster
+            ORDER BY cluster
+            """,
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_list: DB fetch failed")
+        rows = []
 
     lines = ["📋 <b>Мои кластеры</b>\n"]
     kb = InlineKeyboardBuilder()
@@ -126,23 +131,27 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        """
-        SELECT
-            cluster,
-            COUNT(*) AS bot_count,
-            COALESCE(SUM(aud.cnt), 0) AS total_users
-        FROM managed_bots m
-        LEFT JOIN (
-            SELECT bot_id, COUNT(*) AS cnt
-            FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-        ) aud ON aud.bot_id = m.bot_id
-        WHERE m.added_by=$1 AND m.cluster IS NOT NULL AND m.is_active=TRUE
-        GROUP BY cluster
-        ORDER BY total_users DESC
-        """,
-        user_id,
-    )
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT
+                cluster,
+                COUNT(*) AS bot_count,
+                COALESCE(SUM(aud.cnt), 0) AS total_users
+            FROM managed_bots m
+            LEFT JOIN (
+                SELECT bot_id, COUNT(*) AS cnt
+                FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+            ) aud ON aud.bot_id = m.bot_id
+            WHERE m.added_by=$1 AND m.cluster IS NOT NULL AND m.is_active=TRUE
+            GROUP BY cluster
+            ORDER BY total_users DESC
+            """,
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_stats: DB fetch failed")
+        rows = []
 
     lines = ["📊 <b>Статистика кластеров</b>\n"]
     if not rows:
@@ -260,16 +269,20 @@ async def cb_cluster_view(
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
 
-    rows = await pool.fetch(
-        """
-        SELECT id, bot_id, username, first_name
-        FROM managed_bots
-        WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE
-        ORDER BY first_name
-        """,
-        user_id,
-        cluster_name,
-    )
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT id, bot_id, username, first_name
+            FROM managed_bots
+            WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE
+            ORDER BY first_name
+            """,
+            user_id,
+            cluster_name,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_detail: DB fetch failed")
+        rows = []
 
     lines = [f"🔗 <b>Кластер: {_html.escape(cluster_name)}</b>\n"]
     kb = InlineKeyboardBuilder()
@@ -336,11 +349,15 @@ async def cb_cluster_delete_confirm(
     cluster_name = callback_data.cluster_name or ""
 
     # Count bots assigned to this cluster
-    bot_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
-        user_id,
-        cluster_name,
-    )
+    try:
+        bot_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
+            user_id,
+            cluster_name,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_delete_confirm: DB fetchval failed")
+        bot_count = 0
 
     warning = ""
     if bot_count:
@@ -380,11 +397,14 @@ async def cb_cluster_delete(
     cluster_name = callback_data.cluster_name or ""
 
     # Detach bots from cluster before deleting
-    await pool.execute(
-        "UPDATE managed_bots SET cluster=NULL WHERE added_by=$1 AND cluster=$2",
-        user_id,
-        cluster_name,
-    )
+    try:
+        await pool.execute(
+            "UPDATE managed_bots SET cluster=NULL WHERE added_by=$1 AND cluster=$2",
+            user_id,
+            cluster_name,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_delete: DB execute failed")
 
     await callback.message.edit_text(
         f"✅ Кластер <b>{_html.escape(cluster_name)}</b> удалён.",

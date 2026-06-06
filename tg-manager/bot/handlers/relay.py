@@ -100,11 +100,15 @@ async def handle_operator_reply(
         http, session["token"], session["user_id"], message.text
     )
     if ok:
-        sess_row = await pool.fetchrow(
-            "SELECT id FROM relay_sessions WHERE bot_id=$1 AND user_id=$2",
-            session["bot_id"],
-            session["user_id"],
-        )
+        try:
+            sess_row = await pool.fetchrow(
+                "SELECT id FROM relay_sessions WHERE bot_id=$1 AND user_id=$2",
+                session["bot_id"],
+                session["user_id"],
+            )
+        except Exception:
+            log.warning("relay: sess_row fetchrow failed", exc_info=True)
+            sess_row = None
         if sess_row:
             await db.save_relay_message(pool, sess_row["id"], "out", message.text)
         await message.reply("✅ Ответ доставлен пользователю.")
@@ -121,14 +125,18 @@ async def cb_relay_session(
     """View message history for a specific relay session."""
     session_id = callback_data.session_id
     # Get session info
-    sess = await pool.fetchrow(
-        """SELECT rs.*, mb.username as bot_username, mb.first_name as bot_name
-           FROM relay_sessions rs
-           JOIN managed_bots mb ON mb.bot_id=rs.bot_id
-           WHERE rs.id=$1 AND mb.added_by=$2""",
-        session_id,
-        callback.from_user.id,
-    )
+    try:
+        sess = await pool.fetchrow(
+            """SELECT rs.*, mb.username as bot_username, mb.first_name as bot_name
+               FROM relay_sessions rs
+               JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+               WHERE rs.id=$1 AND mb.added_by=$2""",
+            session_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log.warning("relay: cb_relay_session fetchrow failed", exc_info=True)
+        sess = None
     if not sess:
         await callback.answer("Диалог не найден.", show_alert=True)
         return
@@ -201,14 +209,18 @@ async def cb_relay_quick_reply(
         return
 
     # Get session details
-    sess = await pool.fetchrow(
-        """SELECT rs.*, mb.token
-           FROM relay_sessions rs
-           JOIN managed_bots mb ON mb.bot_id=rs.bot_id
-           WHERE rs.id=$1 AND mb.added_by=$2""",
-        callback_data.session_id,
-        callback.from_user.id,
-    )
+    try:
+        sess = await pool.fetchrow(
+            """SELECT rs.*, mb.token
+               FROM relay_sessions rs
+               JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+               WHERE rs.id=$1 AND mb.added_by=$2""",
+            callback_data.session_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log.warning("relay: send_template sess fetchrow failed", exc_info=True)
+        sess = None
     if not sess:
         await callback.answer("Диалог не найден.", show_alert=True)
         return
@@ -234,13 +246,17 @@ async def cb_relay_close_session(
 ) -> None:
     """Delete a relay session (and its messages via CASCADE)."""
     # Verify ownership
-    sess = await pool.fetchrow(
-        """SELECT rs.id FROM relay_sessions rs
-           JOIN managed_bots mb ON mb.bot_id=rs.bot_id
-           WHERE rs.id=$1 AND mb.added_by=$2""",
-        callback_data.session_id,
-        callback.from_user.id,
-    )
+    try:
+        sess = await pool.fetchrow(
+            """SELECT rs.id FROM relay_sessions rs
+               JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+               WHERE rs.id=$1 AND mb.added_by=$2""",
+            callback_data.session_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log.warning("relay: close_session sess fetchrow failed", exc_info=True)
+        sess = None
     if not sess:
         await callback.answer("Диалог не найден.", show_alert=True)
         return
