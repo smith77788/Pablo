@@ -260,7 +260,7 @@ async def main() -> None:
         [
             BotCommand(command="start", description="Главное меню"),
             BotCommand(command="menu", description="🏠 BotMother OS"),
-            BotCommand(command="intent", description="🎯 Навигатор целей (Эпоха IV)"),
+            BotCommand(command="intent", description="🎯 Навигатор целей"),
             BotCommand(command="ai", description="AI-ассистент"),
             BotCommand(command="accounts", description="Мои аккаунты"),
             BotCommand(command="ops", description="Операции с аккаунтами"),

@@ -103,3 +103,22 @@ def test_status_persistence_uses_shared_helper() -> None:
 
     assert "should_persist_account_status(" in account_health_source
     assert "should_persist_account_status(" in dashboard_source
+
+
+def test_accounts_handler_reloads_real_session_string_before_checks() -> None:
+    accounts_source = (PROJECT_ROOT / "tg-manager/bot/handlers/accounts.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        'session_str = (\n                (acc_dict.get("session_str") if acc_dict else None)'
+        in accounts_source
+    )
+    assert (
+        "result = await check_account_status_full(\n                session_str,"
+        in accounts_source
+    )
+    assert (
+        "result = await account_manager.scan_owned_assets(\n                session_str,"
+        in accounts_source
+    )

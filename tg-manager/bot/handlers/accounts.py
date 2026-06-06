@@ -1976,7 +1976,6 @@ async def cb_check_all_accounts(
 
     results: list[tuple[str, str, str]] = []
     for idx, acc in enumerate(accounts):
-        session_str = acc.get("session_str") or ""
         name_raw = (
             acc.get("first_name")
             or acc.get("username")
@@ -1984,11 +1983,18 @@ async def cb_check_all_accounts(
             or f"ID {acc['id']}"
         )
         name = escape(str(name_raw))
+        acc_dict = None
+        result: dict = {"auth_error": False}
         try:
             acc_dict = await pool.fetchrow(
                 "SELECT id, session_str, device_model, system_version, app_version "
                 "FROM tg_accounts WHERE id=$1",
                 acc["id"],
+            )
+            session_str = (
+                (acc_dict.get("session_str") if acc_dict else None)
+                or acc.get("session_str")
+                or ""
             )
             result = await check_account_status_full(
                 session_str,
@@ -2005,7 +2011,11 @@ async def cb_check_all_accounts(
             status = "active"
             reason = f"Ошибка: {str(exc)[:80]}"
 
-        has_session = bool(session_str)
+        has_session = bool(
+            (acc_dict.get("session_str") if acc_dict else None)
+            or acc.get("session_str")
+            or ""
+        )
         if should_persist_account_status(
             status,
             auth_error=bool(result.get("auth_error", False)),
@@ -2165,7 +2175,6 @@ async def cb_scan_all_resources(
     dead_acc_ids: list[int] = []
 
     for acc in accounts:
-        session_str = acc.get("session_str") or ""
         name = escape(
             str(
                 acc.get("first_name")
@@ -2179,6 +2188,11 @@ async def cb_scan_all_resources(
                 "SELECT id, session_str, device_model, system_version, app_version "
                 "FROM tg_accounts WHERE id=$1",
                 acc["id"],
+            )
+            session_str = (
+                (acc_dict.get("session_str") if acc_dict else None)
+                or acc.get("session_str")
+                or ""
             )
             result = await account_manager.scan_owned_assets(
                 session_str, _acc=dict(acc_dict) if acc_dict else None
@@ -2367,13 +2381,23 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
     dead_ids: list[int] = []
     for acc in accounts:
-        session_str = acc.get("session_str") or ""
-        if not session_str:
-            dead_ids.append(acc["id"])
-            continue
         try:
+            acc_dict = await pool.fetchrow(
+                "SELECT id, session_str, device_model, system_version, app_version "
+                "FROM tg_accounts WHERE id=$1",
+                acc["id"],
+            )
+            session_str = (
+                (acc_dict.get("session_str") if acc_dict else None)
+                or acc.get("session_str")
+                or ""
+            )
+            if not session_str:
+                continue
             result = await account_manager.check_account_status_full(
-                session_str, _acc=dict(acc), check_spambot=False
+                session_str,
+                _acc=dict(acc_dict) if acc_dict else None,
+                check_spambot=False,
             )
             if result.get("status") == "session_expired" and result.get("auth_error"):
                 dead_ids.append(acc["id"])
