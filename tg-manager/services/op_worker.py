@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 import aiohttp
@@ -878,11 +879,15 @@ async def _exec_mass_publish(
         _accounts_in_use.update(mp_used_acc_ids)
 
     if not accounts_rows:
-        return {"status": "failed", "summary": "⚠️ Mass Publish: все аккаунты заняты другой операцией"}
+        return {
+            "status": "failed",
+            "summary": "⚠️ Mass Publish: все аккаунты заняты другой операцией",
+        }
 
     # Account health awareness: filter out banned/restricted accounts before publishing
     try:
         from services import account_health as _ah
+
         healthy_acc_ids: set[int] = set()
         for _acc in accounts_rows:
             _h = _ah.get_health(_acc["id"])
@@ -890,10 +895,17 @@ async def _exec_mass_publish(
                 healthy_acc_ids.add(_acc["id"])
         if healthy_acc_ids != {a["id"] for a in accounts_rows}:
             excluded = len(accounts_rows) - len(healthy_acc_ids)
-            log.warning("_exec_mass_publish op=%d: excluded %d unhealthy accounts", op_id, excluded)
+            log.warning(
+                "_exec_mass_publish op=%d: excluded %d unhealthy accounts",
+                op_id,
+                excluded,
+            )
             accounts_rows = [a for a in accounts_rows if a["id"] in healthy_acc_ids]
     except Exception:
-        log_exc_swallow(log, f"_exec_mass_publish op={op_id}: health check failed, using all accounts")
+        log_exc_swallow(
+            log,
+            f"_exec_mass_publish op={op_id}: health check failed, using all accounts",
+        )
 
     acc_ids = [a["id"] for a in accounts_rows]
     chan_filter = (
@@ -1001,7 +1013,10 @@ async def _exec_mass_publish(
                     )
                     try:
                         from services.flood_engine import record_flood
-                        await record_flood(pool, acc["id"], flood_wait, "publish", op_id)
+
+                        await record_flood(
+                            pool, acc["id"], flood_wait, "publish", op_id
+                        )
                     except Exception:
                         log_exc_swallow(log, "mass_publish: record_flood failed")
                     await asyncio.sleep(flood_wait + random.uniform(2, 8))
@@ -1082,7 +1097,10 @@ async def _exec_bulk_join(
         _accounts_in_use.update(used_acc_ids)
 
     if not accounts:
-        return {"status": "failed", "summary": "⚠️ Bulk Join: все аккаунты заняты другой операцией"}
+        return {
+            "status": "failed",
+            "summary": "⚠️ Bulk Join: все аккаунты заняты другой операцией",
+        }
 
     try:
         return await _exec_bulk_join_inner(pool, bot, op_id, owner_id, params, accounts)
@@ -1094,6 +1112,7 @@ async def _exec_bulk_join_inner(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict, accounts
 ) -> dict:
     from services import account_manager, session_simulator
+    from services.flood_engine import recommended_delay
     import random
 
     links = params.get("links") or params.get("targets") or []
@@ -1303,6 +1322,7 @@ async def _exec_bulk_join_inner(
                 else:
                     pause = random.uniform(45, 120) * chaos
                 pause *= tod
+            pause = max(pause, recommended_delay(acc["id"], "join"))
             if flood_wait:
                 pause = max(pause, float(flood_wait) + random.uniform(10, 30))
             await asyncio.sleep(pause)
@@ -1329,6 +1349,7 @@ async def _exec_bulk_leave(
 ) -> dict:
     """Выйти из списка каналов/групп несколькими аккаунтами."""
     from services import account_manager, session_simulator
+    from services.flood_engine import recommended_delay
     import random
 
     channels = params.get("channels", [])
@@ -1345,7 +1366,9 @@ async def _exec_bulk_leave(
         }
 
     accounts_raw = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=account_ids or None,
+        pool,
+        owner_id,
+        include_ids=account_ids or None,
     )
     # Mark accounts in use (with lock to avoid race with concurrent ops)
     async with _accounts_lock:
@@ -1354,7 +1377,10 @@ async def _exec_bulk_leave(
         _accounts_in_use.update(used_acc_ids)
 
     if not accounts:
-        return {"status": "failed", "summary": "⚠️ Bulk Leave: все аккаунты заняты другой операцией"}
+        return {
+            "status": "failed",
+            "summary": "⚠️ Bulk Leave: все аккаунты заняты другой операцией",
+        }
 
     ok_count = 0
     fail_count = 0
@@ -1504,6 +1530,7 @@ async def _exec_bulk_leave(
                 else:
                     pause = random.uniform(45, 90) * chaos
                 pause *= tod
+            pause = max(pause, recommended_delay(acc["id"], "leave"))
             if flood_wait:
                 pause = max(pause, float(flood_wait) + random.uniform(10, 30))
             await asyncio.sleep(pause)
@@ -2603,7 +2630,8 @@ async def _exec_strike(
             if excluded:
                 log.warning(
                     "_exec_strike op=%d: excluded %d warmup accounts from strike",
-                    op_id, excluded,
+                    op_id,
+                    excluded,
                 )
     except Exception:
         log_exc_swallow(log, f"_exec_strike op={op_id}: warmup overlap check failed")

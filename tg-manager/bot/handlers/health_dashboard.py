@@ -27,6 +27,7 @@ from bot.callbacks import (
     InfraCb,
 )
 from bot.utils.op_helpers import safe_edit
+from services.account_manager import is_verified_account_restriction
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -473,12 +474,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             # session_expired у аккаунта без session_str — не истекшая сессия, а не импортированный аккаунт
             if acc_status == "session_expired" and not has_session:
                 grp_no_session.append(acc)
-            elif acc_status in (
-                "spamblock",
-                "banned",
-                "deactivated",
-                "session_expired",
-            ):
+            elif is_verified_account_restriction(acc_status, has_session=has_session):
                 grp_restricted.append(acc)
             elif flood_until and flood_until.replace(tzinfo=timezone.utc) > now:
                 grp_cooldown.append(acc)

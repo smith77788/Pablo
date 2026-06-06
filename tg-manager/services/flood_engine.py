@@ -20,6 +20,14 @@ log = logging.getLogger(__name__)
 
 # In-memory per-account flood state (supplements DB for hot-path queries)
 _flood_state: dict[int, "_AccountFloodState"] = {}
+_ACTION_BASELINES: dict[str, float] = {
+    "default": 6.0,
+    "join": 55.0,
+    "leave": 35.0,
+    "invite": 90.0,
+    "message": 12.0,
+    "mass_publish": 14.0,
+}
 
 
 @dataclass
@@ -55,10 +63,19 @@ def seconds_until_ready(account_id: int) -> float:
 def recommended_delay(account_id: int, action_type: str = "default") -> float:
     """Return recommended delay in seconds before next action for this account."""
     state = get_account_state(account_id)
-    base = state.action_delays.get(action_type, state.action_delays.get("default", 0.0))
-    # Risk multiplier: double delay when risk_score > 0.5
-    multiplier = 1.0 + state.risk_score
-    return base * multiplier
+    baseline = _ACTION_BASELINES.get(action_type, _ACTION_BASELINES["default"])
+    learned = state.action_delays.get(
+        action_type,
+        state.action_delays.get("default", baseline),
+    )
+    base = max(baseline, learned)
+    cooldown_tail = max(0.0, seconds_until_ready(account_id))
+    if cooldown_tail > 0:
+        base = max(base, min(cooldown_tail + 15.0, cooldown_tail * 1.15))
+    multiplier = 1.0 + (state.risk_score * 1.5)
+    if state.consecutive_floods >= 2:
+        multiplier += min(1.5, state.consecutive_floods * 0.25)
+    return min(base * multiplier, 900.0)
 
 
 async def record_flood(

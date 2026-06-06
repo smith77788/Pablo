@@ -118,6 +118,7 @@ def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
         return
     try:
         from services import infra_memory
+
         infra_memory.record_proxy_op(proxy_url, action_type, success=False)
     except Exception:
         pass
@@ -975,6 +976,7 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
 
         async def _collect():
             from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
+
             _ch, _gr = [], []
             async for dialog in client.iter_dialogs(limit=300):
                 try:
@@ -1153,9 +1155,55 @@ async def check_account_health(session_string: str, _acc: dict | None = None) ->
     Возвращает {"ok": bool, "reason": str}.
     """
     result = await check_account_status_full(
-        session_string, _acc=_acc, check_spambot=False
+        session_string, _acc=_acc, check_spambot=True
     )
-    return {"ok": result["status"] == "active", "reason": result["reason"]}
+    return {
+        "ok": result["status"] == "active",
+        "status": result["status"],
+        "reason": result["reason"],
+        "display_name": result.get("display_name", ""),
+    }
+
+
+_SPAMBOT_OK_PATTERNS = (
+    "no limits",
+    "no complaints",
+    "good standing",
+    "good news",
+    "РЅРµС‚ РѕРіСЂР°РЅРёС‡РµРЅРёР№",
+    "РЅРµС‚ Р¶Р°Р»РѕР±",
+    "РЅРµ Р±С‹Р»Рѕ Р¶Р°Р»РѕР±",
+    "СЃРІРѕР±РѕРґРµРЅ",
+    "not limited",
+    "no reports",
+)
+_SPAMBOT_LIMIT_PATTERNS = (
+    "limited",
+    "spam",
+    "restricted",
+    "РѕРіСЂР°РЅРёС‡РµРЅ,",
+    "РѕРіСЂР°РЅРёС‡РµРЅ.",
+    "РѕРіСЂР°РЅРёС‡РµРЅ\n",
+    "РѕРіСЂР°РЅРёС‡РµРЅ ",
+    "СЃРїР°Рј",
+    "РІР°С€ Р°РєРєР°СѓРЅС‚ РѕРіСЂР°РЅРёС‡РµРЅ",
+)
+_VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"})
+
+
+def classify_spambot_reply(reply_text: str) -> str | None:
+    reply_lower = reply_text.lower()
+    if any(pattern in reply_lower for pattern in _SPAMBOT_OK_PATTERNS):
+        return "active"
+    if any(pattern in reply_lower for pattern in _SPAMBOT_LIMIT_PATTERNS):
+        return "spamblock"
+    return None
+
+
+def is_verified_account_restriction(status: str, *, has_session: bool = True) -> bool:
+    if status in _VERIFIED_RESTRICTION_STATUSES:
+        return True
+    return status == "session_expired" and has_session
 
 
 async def check_account_status_full(
@@ -1217,7 +1265,20 @@ async def check_account_status_full(
             )
             if msgs:
                 reply_text = msgs[0].text or ""
-                reply_lower = reply_text.lower()
+                spambot_status = classify_spambot_reply(reply_text)
+                if spambot_status == "active":
+                    return {
+                        "status": "active",
+                        "reason": "РђРєРєР°СѓРЅС‚ Р°РєС‚РёРІРµРЅ, РѕРіСЂР°РЅРёС‡РµРЅРёР№ РЅРµС‚",
+                        "display_name": display_name,
+                    }
+                if spambot_status == "spamblock":
+                    return {
+                        "status": "spamblock",
+                        "reason": f"SpamBot: {reply_text[:120]}",
+                        "display_name": display_name,
+                    }
+                reply_lower = ""
                 # "Good" patterns checked FIRST — prevent false positives
                 # SpamBot Russian: "Ваш аккаунт свободен от каких-либо ограничений"
                 # SpamBot English: "Good news, no limits are applied to your account!"
@@ -1231,7 +1292,7 @@ async def check_account_status_full(
                         "нет ограничений",
                         "нет жалоб",
                         "не было жалоб",
-                        "свободен",          # "свободен от каких-либо ограничений"
+                        "свободен",  # "свободен от каких-либо ограничений"
                         "not limited",
                         "no reports",
                     )
@@ -1247,10 +1308,10 @@ async def check_account_status_full(
                         "limited",
                         "spam",
                         "restricted",
-                        "ограничен,",        # "ограничен," — с запятой, не подстрока "ограничений"
-                        "ограничен.",        # "ограничен." — с точкой
-                        "ограничен\n",       # конец строки
-                        "ограничен ",        # с пробелом после
+                        "ограничен,",  # "ограничен," — с запятой, не подстрока "ограничений"
+                        "ограничен.",  # "ограничен." — с точкой
+                        "ограничен\n",  # конец строки
+                        "ограничен ",  # с пробелом после
                         "спам",
                         "ваш аккаунт ограничен",
                     )
@@ -1564,7 +1625,10 @@ async def join_channel(
         }
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "join")
-        return {"error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
+        return {
+            "error": "Timeout при подключении — прокси недоступен",
+            "proxy_error": True,
+        }
     except (OSError, ConnectionError) as e:
         _record_proxy_fail(_acc, "join")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
@@ -2330,7 +2394,10 @@ async def post_to_channel(
         return {"error": "Аккаунт не является участником канала"}
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "post")
-        return {"error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
+        return {
+            "error": "Timeout при подключении — прокси недоступен",
+            "proxy_error": True,
+        }
     except (OSError, ConnectionError) as e:
         _record_proxy_fail(_acc, "post")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
@@ -4158,13 +4225,46 @@ async def update_account_username(
 _BOTFATHER_USERNAME = "BotFather"
 
 # Phrases BotFather uses at each step of /newbot (English + Russian variants)
-_BF_STEP_NAME = ("name", "alright", "good name", "few words", "how are you going",
-                 "название", "имя", "назовите", "хорошо", "отлично")
-_BF_STEP_USERNAME = ("username", "юзернейм", "пользователь", "логин", "choose a username",
-                     "must end in", "должен заканчиваться", "choose")
-_BF_STEP_SUCCESS = ("congratulations", "done!", "t.me/", "token", "use this token",
-                    "поздравляем", "готово", "используйте")
-_BF_RATE_LIMIT = ("too many", "try again", "slow down", "attempts", "подождите", "попробуй")
+_BF_STEP_NAME = (
+    "name",
+    "alright",
+    "good name",
+    "few words",
+    "how are you going",
+    "название",
+    "имя",
+    "назовите",
+    "хорошо",
+    "отлично",
+)
+_BF_STEP_USERNAME = (
+    "username",
+    "юзернейм",
+    "пользователь",
+    "логин",
+    "choose a username",
+    "must end in",
+    "должен заканчиваться",
+    "choose",
+)
+_BF_STEP_SUCCESS = (
+    "congratulations",
+    "done!",
+    "t.me/",
+    "token",
+    "use this token",
+    "поздравляем",
+    "готово",
+    "используйте",
+)
+_BF_RATE_LIMIT = (
+    "too many",
+    "try again",
+    "slow down",
+    "attempts",
+    "подождите",
+    "попробуй",
+)
 _BF_USERNAME_TAKEN = ("already", "taken", "занят", "sorry", "exists")
 
 
@@ -4259,7 +4359,9 @@ async def create_bot_via_botfather(
         if not uname.lower().endswith("bot"):
             uname = uname + "_bot"
         if len(uname) < 5 or len(uname) > 32:
-            return {"error": f"Username @{uname} слишком короткий или длинный (5-32 символа)"}
+            return {
+                "error": f"Username @{uname} слишком короткий или длинный (5-32 символа)"
+            }
 
         # Step 1: /newbot — may land in an incomplete previous flow
         resp = await _bf_send_with_retry("/newbot")
@@ -4267,16 +4369,24 @@ async def create_bot_via_botfather(
 
         wait = _parse_flood_wait(resp)
         if wait is not None:
-            return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
+            return {
+                "error": f"BotFather: слишком много попыток, подождите {wait}с",
+                "flood_wait": wait,
+            }
 
         # Detect incomplete previous flow (BotFather asks for username without asking for name first)
-        if any(k in resp_low for k in _BF_STEP_USERNAME) and not any(k in resp_low for k in _BF_STEP_NAME):
+        if any(k in resp_low for k in _BF_STEP_USERNAME) and not any(
+            k in resp_low for k in _BF_STEP_NAME
+        ):
             await _bf_cancel()
             resp = await _bf_send_with_retry("/newbot")
             resp_low = resp.lower()
             wait = _parse_flood_wait(resp)
             if wait is not None:
-                return {"error": f"BotFather: слишком много попыток, подождите {wait}с", "flood_wait": wait}
+                return {
+                    "error": f"BotFather: слишком много попыток, подождите {wait}с",
+                    "flood_wait": wait,
+                }
 
         if not resp or not any(k in resp_low for k in _BF_STEP_NAME):
             await _bf_cancel()
@@ -4289,7 +4399,10 @@ async def create_bot_via_botfather(
             wait = _parse_flood_wait(resp)
             if wait is not None:
                 await _bf_cancel()
-                return {"error": f"BotFather rate limit после имени: {wait}с", "flood_wait": wait}
+                return {
+                    "error": f"BotFather rate limit после имени: {wait}с",
+                    "flood_wait": wait,
+                }
             await _bf_cancel()
             return {"error": f"Неожиданный ответ после имени бота: {resp[:200]}"}
 
@@ -4298,7 +4411,9 @@ async def create_bot_via_botfather(
         resp_low = resp.lower()
 
         # Check for username taken
-        if any(k in resp_low for k in _BF_USERNAME_TAKEN) and not any(k in resp_low for k in _BF_STEP_SUCCESS):
+        if any(k in resp_low for k in _BF_USERNAME_TAKEN) and not any(
+            k in resp_low for k in _BF_STEP_SUCCESS
+        ):
             await _bf_cancel()
             return {"error": f"Username @{uname} уже занят — выберите другой"}
 
@@ -4306,7 +4421,10 @@ async def create_bot_via_botfather(
         wait = _parse_flood_wait(resp)
         if wait is not None:
             await _bf_cancel()
-            return {"error": f"BotFather rate limit при создании: {wait}с", "flood_wait": wait}
+            return {
+                "error": f"BotFather rate limit при создании: {wait}с",
+                "flood_wait": wait,
+            }
 
         # Extract token
         token_match = re.search(r"\b(\d{8,12}:[A-Za-z0-9_-]{35,})\b", resp)
@@ -4325,7 +4443,10 @@ async def create_bot_via_botfather(
         from telethon.errors import FloodWaitError
 
         if isinstance(e, FloodWaitError):
-            return {"error": f"FloodWait {e.seconds}с — Telegram ограничил создание", "flood_wait": e.seconds}
+            return {
+                "error": f"FloodWait {e.seconds}с — Telegram ограничил создание",
+                "flood_wait": e.seconds,
+            }
         log.exception("create_bot_via_botfather error: %s", e)
         return {"error": str(e)[:200]}
     finally:
