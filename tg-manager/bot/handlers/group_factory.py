@@ -125,11 +125,15 @@ async def cb_group_create_acc_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_create_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -287,11 +291,15 @@ async def cb_group_do_create(
         )
         return
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_confirm_create fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.",
@@ -384,11 +392,15 @@ async def cb_group_list_start(
 async def cb_group_list_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_list_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -472,11 +484,15 @@ async def cb_group_members(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_group_members_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_members_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -536,11 +552,15 @@ async def cb_group_members_acc(
 async def cb_group_members_list(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_members_list fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -628,13 +648,17 @@ async def cb_group_import_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     """Загрузить группы аккаунта и сохранить в managed_channels."""
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, phone, first_name, username, "
-        "device_model, system_version, app_version FROM tg_accounts "
-        "WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, phone, first_name, username, "
+            "device_model, system_version, app_version FROM tg_accounts "
+            "WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_import_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -832,11 +856,15 @@ async def cb_group_announce_acc(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_announce_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -978,11 +1006,15 @@ async def cb_group_do_announce(
         )
         return
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "group_do_announce fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.",

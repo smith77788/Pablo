@@ -108,6 +108,21 @@ def _get_pool_proxy_url() -> str:
     return url
 
 
+def _record_proxy_fail(acc: dict | None, action_type: str) -> None:
+    """Record proxy failure in infra_memory when connect/op fails with a network error.
+    Non-blocking — no pool needed. Degrades proxy score so future ops avoid it."""
+    if not acc:
+        return
+    proxy_url = acc.get("proxy_url") or ""
+    if not proxy_url:
+        return
+    try:
+        from services import infra_memory
+        infra_memory.record_proxy_op(proxy_url, action_type, success=False)
+    except Exception:
+        pass
+
+
 _TG_PUBLIC_RE = re.compile(
     r"^(?:https?://)?(?:t|telegram)\.(?:me|dog)/(?:s/)?([A-Za-z0-9_]{5,32})(?:[/?#].*)?$",
     re.IGNORECASE,
@@ -929,6 +944,14 @@ async def get_dialogs(
                     }
                 )
         return dialogs
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "dialogs")
+        log.warning("get_dialogs: connect timeout — proxy may be dead")
+        return []
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "dialogs")
+        log.warning("get_dialogs: network error (proxy?): %s", e)
+        return []
     finally:
         try:
             await client.disconnect()
@@ -1523,6 +1546,12 @@ async def join_channel(
             "title": ch.title,
             "members": getattr(ch, "participants_count", 0) or 0,
         }
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "join")
+        return {"error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "join")
+        return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
         from telethon.errors import (
             FloodWaitError,
@@ -1574,6 +1603,14 @@ async def leave_channel(
         entity = await client.get_entity(channel_id)
         await client(LeaveChannelRequest(channel=entity))
         return True
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "leave")
+        log.warning("leave_channel: connect timeout — proxy may be dead")
+        return False
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "leave")
+        log.warning("leave_channel: network error (proxy?): %s", e)
+        return False
     except Exception as e:
         from telethon.errors import FloodWaitError
 
@@ -2275,6 +2312,12 @@ async def post_to_channel(
         return {"error": f"Нет прав для публикации в этом канале: {e}", "banned": True}
     except UserNotParticipantError:
         return {"error": "Аккаунт не является участником канала"}
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "post")
+        return {"error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "post")
+        return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
         log.exception("post_to_channel error: %s", e)
         return {"error": str(e)[:150]}

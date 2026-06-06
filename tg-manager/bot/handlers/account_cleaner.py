@@ -58,10 +58,14 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def _pick_account_kb(
     pool: asyncpg.Pool, owner_id: int, action: str
 ) -> InlineKeyboardBuilder:
-    accounts = await pool.fetch(
-        "SELECT id, phone, first_name FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at",
-        owner_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, phone, first_name FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at",
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "_pick_account_kb fetch failed")
+        accounts = []
     kb = InlineKeyboardBuilder()
     for acc in accounts:
         label = acc.get("first_name") or acc["phone"]
@@ -127,9 +131,13 @@ async def cb_do_leave_all(
     kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
     kb.adjust(1)
 
-    acc = await pool.fetchrow(
-        "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+        )
+    except Exception:
+        log_exc_swallow(log, "do_leave_all fetchrow failed")
+        acc = None
     label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
 
     await callback.message.edit_text(
@@ -149,11 +157,15 @@ async def cb_dry_leave(
     await callback.answer("⏳ Загружаю список чатов...")
     acc_id = callback_data.account_id
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-        "FROM tg_accounts WHERE id=$1",
-        acc_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+            "FROM tg_accounts WHERE id=$1",
+            acc_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "dry_leave fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
@@ -189,11 +201,15 @@ async def cb_confirm_leave(
     await callback.answer("⏳ Запускаю...")
     acc_id = callback_data.account_id
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-        "FROM tg_accounts WHERE id=$1",
-        acc_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+            "FROM tg_accounts WHERE id=$1",
+            acc_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "confirm_leave fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
@@ -301,11 +317,15 @@ async def cb_force_leave(
     await callback.answer("⏳ Принудительная очистка...")
     acc_id = callback_data.account_id
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-        "FROM tg_accounts WHERE id=$1",
-        acc_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+            "FROM tg_accounts WHERE id=$1",
+            acc_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "force_leave fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
@@ -322,11 +342,15 @@ async def cb_do_del_contacts(
     await callback.answer("⏳ Удаляю контакты...")
     acc_id = callback_data.account_id
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-        "FROM tg_accounts WHERE id=$1",
-        acc_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+            "FROM tg_accounts WHERE id=$1",
+            acc_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "do_del_contacts fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()
@@ -354,11 +378,15 @@ async def cb_show_chats(
     await callback.answer("⏳ Загружаю...")
     acc_id = callback_data.account_id
 
-    acc = await pool.fetchrow(
-        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-        "FROM tg_accounts WHERE id=$1",
-        acc_id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+            "FROM tg_accounts WHERE id=$1",
+            acc_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "show_chats fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.", reply_markup=_back_kb().as_markup()

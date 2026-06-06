@@ -802,12 +802,16 @@ async def cb_chanf_bulk_create_acc(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT id, phone, first_name, username, session_str "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, phone, first_name, username, session_str "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "bulk_create_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -941,11 +945,15 @@ async def cb_chanf_do_bulk_create(
     about = data.get("about", "")
     username_pattern = data.get("username_pattern", "")
 
-    acc = await pool.fetchrow(
-        "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "bulk_create_confirm fetchrow failed")
+        acc = None
     if not acc:
         await callback.message.edit_text(
             "⚠️ Аккаунт не найден.",
@@ -1210,12 +1218,16 @@ async def cb_chanf_be_confirm(
         )
         return
 
-    accounts = await pool.fetch(
-        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
-        "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
-        callback.from_user.id,
-        acc_ids,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            callback.from_user.id,
+            acc_ids,
+        )
+    except Exception:
+        log_exc_swallow(log, "bulk_edit fetch accounts failed")
+        accounts = []
 
     progress_msg = await callback.message.edit_text(
         "⏳ <b>Загружаю каналы и применяю изменения...</b>\n\n"
@@ -1270,11 +1282,15 @@ async def cb_chanf_gen_links(
 async def cb_chanf_gen_links_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "gen_links_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1333,11 +1349,15 @@ async def cb_chanf_gen_links_acc(
 async def cb_chanf_gen_link(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
-    acc = await pool.fetchrow(
-        "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "gen_link fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1407,13 +1427,17 @@ async def cb_chanf_stats_acc(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     """Step 2: load channel list for chosen account."""
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, first_name, phone, username, "
-        "device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, first_name, phone, username, "
+            "device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "stats_acc fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1475,13 +1499,17 @@ async def cb_chanf_stats_chan(
     callback: CallbackQuery, callback_data: ChanFactCb, pool: asyncpg.Pool
 ) -> None:
     """Step 3: show basic stats for the chosen channel."""
-    acc = await pool.fetchrow(
-        "SELECT id, session_str, first_name, phone, username, "
-        "device_model, system_version, app_version "
-        "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-        callback_data.acc_id,
-        callback.from_user.id,
-    )
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, session_str, first_name, phone, username, "
+            "device_model, system_version, app_version "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+            callback_data.acc_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "stats_chan fetchrow failed")
+        acc = None
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
@@ -1622,14 +1650,18 @@ async def _show_seo_chan_picker(
     callback: CallbackQuery, pool: asyncpg.Pool, acc_id: int, user_id: int, page: int
 ) -> None:
     offset = page * _SEO_PAGE
-    channels = await pool.fetch(
-        "SELECT id, title, username FROM managed_channels "
-        "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title LIMIT $3 OFFSET $4",
-        user_id,
-        acc_id,
-        _SEO_PAGE + 1,
-        offset,
-    )
+    try:
+        channels = await pool.fetch(
+            "SELECT id, title, username FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id=$2 ORDER BY title LIMIT $3 OFFSET $4",
+            user_id,
+            acc_id,
+            _SEO_PAGE + 1,
+            offset,
+        )
+    except Exception:
+        log_exc_swallow(log, "_show_seo_chan_picker fetch failed")
+        channels = []
     if not channels and page == 0:
         kb = InlineKeyboardBuilder()
         kb.button(

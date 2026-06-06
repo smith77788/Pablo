@@ -127,14 +127,18 @@ async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
     user_id = callback.from_user.id
 
     # Get accounts with gifts capability
-    accounts = await pool.fetch(
-        """
+    try:
+        accounts = await pool.fetch(
+            """
         SELECT id, phone, is_active FROM tg_accounts
         WHERE owner_id=$1 AND session_str IS NOT NULL
         ORDER BY phone
     """,
-        user_id,
-    )
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "scan_gifts fetch accounts failed")
+        accounts = []
 
     if not accounts:
         await callback.answer("Нет аккаунтов", show_alert=True)
@@ -195,10 +199,14 @@ async def cb_scan_all(callback: CallbackQuery, state: FSMContext, pool):
     await callback.answer()
 
     user_id = callback.from_user.id
-    accounts = await pool.fetch(
-        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND session_str IS NOT NULL",
-        user_id,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND session_str IS NOT NULL",
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "scan_all fetch accounts failed")
+        accounts = []
     await state.update_data(scan_accounts=[a["id"] for a in accounts])
     await callback.answer(f"Все аккаунты выбраны ({len(accounts)})")
 
@@ -323,8 +331,9 @@ async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
     user_id = callback.from_user.id
 
     # Get accounts that have gifts
-    accounts_with_gifts = await pool.fetch(
-        """
+    try:
+        accounts_with_gifts = await pool.fetch(
+            """
         SELECT a.id, a.phone, COUNT(g.id) as gift_count,
                SUM(CASE WHEN g.is_transferable THEN 1 ELSE 0 END) as transfer_count
         FROM tg_accounts a
@@ -334,8 +343,11 @@ async def cb_start_transfer(callback: CallbackQuery, state: FSMContext, pool):
         HAVING COUNT(g.id) > 0
         ORDER BY gift_count DESC
     """,
-        user_id,
-    )
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "start_transfer fetch accounts_with_gifts failed")
+        accounts_with_gifts = []
 
     if not accounts_with_gifts:
         await callback.answer(
@@ -394,15 +406,19 @@ async def cb_transfer_all(callback: CallbackQuery, state: FSMContext, pool):
     await callback.answer()
 
     user_id = callback.from_user.id
-    accounts = await pool.fetch(
-        """
+    try:
+        accounts = await pool.fetch(
+            """
         SELECT a.id FROM tg_accounts a
         JOIN gift_inventory g ON g.account_id = a.id
         WHERE a.owner_id=$1 AND g.is_transferable=true
         GROUP BY a.id
     """,
-        user_id,
-    )
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "transfer_all fetch accounts failed")
+        accounts = []
 
     await state.update_data(transfer_accounts=[a["id"] for a in accounts])
     await callback.answer(f"Выбрано аккаунтов: {len(accounts)}")
@@ -530,9 +546,13 @@ async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
     await callback.answer()
 
     recipient_id = int(callback.data.split(":")[2])
-    recipient = await pool.fetchrow(
-        "SELECT * FROM gift_recipients WHERE id=$1", recipient_id
-    )
+    try:
+        recipient = await pool.fetchrow(
+            "SELECT * FROM gift_recipients WHERE id=$1", recipient_id
+        )
+    except Exception:
+        log_exc_swallow(log, "use_recipient fetchrow failed")
+        recipient = None
 
     if not recipient:
         await callback.answer("Получатель не найден", show_alert=True)
@@ -590,15 +610,19 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
 
     # Get selected gifts
     account_ids = data.get("transfer_accounts", [])
-    gifts = await pool.fetch(
-        """
+    try:
+        gifts = await pool.fetch(
+            """
         SELECT g.*, a.phone FROM gift_inventory g
         JOIN tg_accounts a ON a.id = g.account_id
         WHERE g.owner_id=$1 AND g.account_id = ANY($2) AND g.is_transferable=true
     """,
-        user_id,
-        account_ids,
-    )
+            user_id,
+            account_ids,
+        )
+    except Exception:
+        log_exc_swallow(log, "confirm_transfer fetch gifts failed")
+        gifts = []
 
     if not gifts:
         await callback.answer("Передаваемых подарков не найдено", show_alert=True)
@@ -645,9 +669,12 @@ async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
 
     # Link plan to operation
     await db.update_gift_transfer_plan(pool, plan_id, status="queued")
-    await pool.execute(
-        "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1", plan_id
-    )
+    try:
+        await pool.execute(
+            "UPDATE gift_transfer_plans SET status='queued' WHERE id=$1", plan_id
+        )
+    except Exception:
+        log_exc_swallow(log, "confirm_transfer execute update plan failed")
 
     # Update state
     await state.update_data(plan_id=plan_id, op_id=op_id)
@@ -678,14 +705,18 @@ async def _show_transfer_preview(message, state, user_id, pool):
     account_ids = data.get("transfer_accounts", [])
 
     # Get gift stats
-    gifts = await pool.fetch(
-        """
+    try:
+        gifts = await pool.fetch(
+            """
         SELECT g.* FROM gift_inventory g
         WHERE g.owner_id=$1 AND g.account_id = ANY($2) AND g.is_transferable=true
     """,
-        user_id,
-        account_ids,
-    )
+            user_id,
+            account_ids,
+        )
+    except Exception:
+        log_exc_swallow(log, "_show_transfer_preview fetch gifts failed")
+        gifts = []
 
     total_cost = sum(g.get("stars_cost", 0) or 0 for g in gifts)
     total_gifts = len(gifts)
