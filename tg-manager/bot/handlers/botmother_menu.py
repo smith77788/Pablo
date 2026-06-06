@@ -744,20 +744,26 @@ async def cb_alerts(
     offset = page * limit
     user_id = callback.from_user.id
 
-    rows = await pool.fetch(
-        "SELECT severity, event_type, details, created_at, account_id, bot_id "
-        "FROM restriction_events WHERE owner_id=$1 "
-        "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-        user_id,
-        limit,
-        offset,
-    )
-    total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM restriction_events WHERE owner_id=$1", user_id
+    try:
+        rows = await pool.fetch(
+            "SELECT severity, event_type, details, created_at, account_id, bot_id "
+            "FROM restriction_events WHERE owner_id=$1 "
+            "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            user_id,
+            limit,
+            offset,
         )
-        or 0
-    )
+    except Exception:
+        rows = []
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM restriction_events WHERE owner_id=$1", user_id
+            )
+            or 0
+        )
+    except Exception:
+        total = 0
 
     if not rows and page == 0:
         kb = InlineKeyboardBuilder()
@@ -777,17 +783,23 @@ async def cb_alerts(
     acc_names: dict[int, str] = {}
     bot_names_a: dict[int, str] = {}
     if acc_ids:
-        for a in await pool.fetch(
-            "SELECT id, COALESCE(phone, username, id::text) AS nm FROM tg_accounts WHERE id=ANY($1)",
-            acc_ids,
-        ):
-            acc_names[a["id"]] = a["nm"]
+        try:
+            for a in await pool.fetch(
+                "SELECT id, COALESCE(phone, username, id::text) AS nm FROM tg_accounts WHERE id=ANY($1)",
+                acc_ids,
+            ):
+                acc_names[a["id"]] = a["nm"]
+        except Exception:
+            pass
     if bot_ids_a:
-        for b in await pool.fetch(
-            "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm FROM managed_bots WHERE bot_id=ANY($1)",
-            bot_ids_a,
-        ):
-            bot_names_a[b["bot_id"]] = b["nm"]
+        try:
+            for b in await pool.fetch(
+                "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm FROM managed_bots WHERE bot_id=ANY($1)",
+                bot_ids_a,
+            ):
+                bot_names_a[b["bot_id"]] = b["nm"]
+        except Exception:
+            pass
 
     sev_emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
     lines = []
@@ -956,16 +968,19 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     import io
     from aiogram.types import BufferedInputFile
 
-    rows = await pool.fetch(
-        """SELECT k.keyword, b.username AS bot_username, sr.position, sr.checked_at
-           FROM search_rankings sr
-           JOIN tracked_keywords k ON k.id = sr.keyword_id
-           JOIN managed_bots b ON b.bot_id = k.bot_id
-           WHERE k.owner_id = $1
-           ORDER BY sr.checked_at DESC
-           LIMIT 500""",
-        callback.from_user.id,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT k.keyword, b.username AS bot_username, sr.position, sr.checked_at
+               FROM search_rankings sr
+               JOIN tracked_keywords k ON k.id = sr.keyword_id
+               JOIN managed_bots b ON b.bot_id = k.bot_id
+               WHERE k.owner_id = $1
+               ORDER BY sr.checked_at DESC
+               LIMIT 500""",
+            callback.from_user.id,
+        )
+    except Exception:
+        rows = []
 
     if not rows:
         await callback.answer("Нет данных для экспорта", show_alert=True)
@@ -1372,13 +1387,16 @@ async def cb_plan_cancel(
         return
 
     uid = callback.from_user.id
-    updated = await pool.fetchval(
-        """UPDATE operation_queue SET status='cancelled'
-           WHERE id=$1 AND owner_id=$2 AND status='pending'
-           RETURNING id""",
-        op_id,
-        uid,
-    )
+    try:
+        updated = await pool.fetchval(
+            """UPDATE operation_queue SET status='cancelled'
+               WHERE id=$1 AND owner_id=$2 AND status='pending'
+               RETURNING id""",
+            op_id,
+            uid,
+        )
+    except Exception:
+        updated = None
     if updated:
         await callback.answer(f"✅ Операция #{op_id} отменена", show_alert=True)
     else:
@@ -1556,20 +1574,26 @@ async def cb_op_reports(
     offset = page * limit
     user_id = callback.from_user.id
 
-    ops = await pool.fetch(
-        "SELECT id, op_type, status, total_items, done_items, created_at, finished_at "
-        "FROM operation_queue WHERE owner_id=$1 "
-        "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-        user_id,
-        limit,
-        offset,
-    )
-    total = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", user_id
+    try:
+        ops = await pool.fetch(
+            "SELECT id, op_type, status, total_items, done_items, created_at, finished_at "
+            "FROM operation_queue WHERE owner_id=$1 "
+            "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            user_id,
+            limit,
+            offset,
         )
-        or 0
-    )
+    except Exception:
+        ops = []
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", user_id
+            )
+            or 0
+        )
+    except Exception:
+        total = 0
 
     if not ops and page == 0:
         kb = InlineKeyboardBuilder()
@@ -1699,13 +1723,16 @@ async def cb_op_detail(
     user_id = callback.from_user.id
     op_id = callback_data.op_id
 
-    op = await pool.fetchrow(
-        "SELECT id, op_type, status, params, result, error_msg, "
-        "total_items, done_items, created_at, started_at, finished_at "
-        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
-    )
+    try:
+        op = await pool.fetchrow(
+            "SELECT id, op_type, status, params, result, error_msg, "
+            "total_items, done_items, created_at, started_at, finished_at "
+            "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+    except Exception:
+        op = None
     if not op:
         await callback.answer("Операция не найдена.", show_alert=True)
         return
@@ -1813,11 +1840,14 @@ async def cb_op_detail(
             log_exc_swallow(log, "Не удалось распарсить result JSON операции")
 
     # Last 5 steps from operation_log
-    steps = await pool.fetch(
-        "SELECT step_num, target, status, message FROM operation_log "
-        "WHERE op_id=$1 ORDER BY step_num DESC LIMIT 5",
-        op_id,
-    )
+    try:
+        steps = await pool.fetch(
+            "SELECT step_num, target, status, message FROM operation_log "
+            "WHERE op_id=$1 ORDER BY step_num DESC LIMIT 5",
+            op_id,
+        )
+    except Exception:
+        steps = []
     if steps:
         lines.append("\n<b>Последние шаги:</b>")
         for s in reversed(steps):
@@ -1865,11 +1895,14 @@ async def cb_op_retry(
     op_id = callback_data.op_id
     user_id = callback.from_user.id
 
-    row = await pool.fetchrow(
-        "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+    except Exception:
+        row = None
     if not row or row["status"] != "failed":
         await callback.answer(
             "Операция не найдена или не в статусе failed.", show_alert=True
@@ -1914,11 +1947,14 @@ async def cb_op_cancel(
     op_id = callback_data.op_id
     user_id = callback.from_user.id
 
-    row = await pool.fetchrow(
-        "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+    except Exception:
+        row = None
     if not row:
         await callback.answer("Операция не найдена.", show_alert=True)
         return
@@ -1952,22 +1988,28 @@ async def cb_op_csv(
     user_id = callback.from_user.id
     op_id = callback_data.op_id
 
-    op = await pool.fetchrow(
-        "SELECT id, op_type, status, total_items, done_items, created_at "
-        "FROM operation_queue WHERE id=$1 AND owner_id=$2",
-        op_id,
-        user_id,
-    )
+    try:
+        op = await pool.fetchrow(
+            "SELECT id, op_type, status, total_items, done_items, created_at "
+            "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            op_id,
+            user_id,
+        )
+    except Exception:
+        op = None
     if not op:
         await callback.answer("Операция не найдена", show_alert=True)
         return
     await callback.answer("⏳ Генерирую CSV…")
 
-    steps = await pool.fetch(
-        "SELECT step_num, target, status, message FROM operation_log "
-        "WHERE op_id=$1 ORDER BY step_num",
-        op_id,
-    )
+    try:
+        steps = await pool.fetch(
+            "SELECT step_num, target, status, message FROM operation_log "
+            "WHERE op_id=$1 ORDER BY step_num",
+            op_id,
+        )
+    except Exception:
+        steps = []
 
     import csv
     import io
@@ -2108,14 +2150,23 @@ async def cb_notif_toggle(
     if not toggle_expr:
         return
 
-    await pool.execute(
-        f"INSERT INTO notification_settings(user_id) VALUES($1) "
-        f"ON CONFLICT(user_id) DO UPDATE SET {toggle_expr}, updated_at=now()",
-        callback.from_user.id,
-    )
-    row = await pool.fetchrow(
-        "SELECT * FROM notification_settings WHERE user_id=$1", callback.from_user.id
-    )
+    try:
+        await pool.execute(
+            f"INSERT INTO notification_settings(user_id) VALUES($1) "
+            f"ON CONFLICT(user_id) DO UPDATE SET {toggle_expr}, updated_at=now()",
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
+    try:
+        row = await pool.fetchrow(
+            "SELECT * FROM notification_settings WHERE user_id=$1", callback.from_user.id
+        )
+    except Exception:
+        row = None
+    if row is None:
+        await callback.answer("Ошибка чтения настроек", show_alert=True)
+        return
     await _edit(callback, _notif_text(row), _notif_kb(row))
 
 
@@ -2168,13 +2219,16 @@ async def cb_behavioral(
     if sub == "anomalies":
         import json as _json
 
-        rows = await pool.fetch(
-            "SELECT entity_type, entity_id, meta, occurred_at "
-            "FROM behavioral_events "
-            "WHERE owner_id=$1 AND event_type='anomaly' "
-            "ORDER BY occurred_at DESC LIMIT 20",
-            user_id,
-        )
+        try:
+            rows = await pool.fetch(
+                "SELECT entity_type, entity_id, meta, occurred_at "
+                "FROM behavioral_events "
+                "WHERE owner_id=$1 AND event_type='anomaly' "
+                "ORDER BY occurred_at DESC LIMIT 20",
+                user_id,
+            )
+        except Exception:
+            rows = []
         if not rows:
             text = "<b>⚠️ Аномалии</b>\n\nАномалий не обнаружено.\n<i>Сканирование каждые 15 минут.</i>"
         else:
@@ -2188,22 +2242,34 @@ async def cb_behavioral(
             ]
             _anom_names: dict[tuple, str] = {}
             if _anom_bot_ids:
-                for b in await pool.fetch(
-                    "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm FROM managed_bots WHERE bot_id = ANY($1)",
-                    _anom_bot_ids,
-                ):
+                try:
+                    _anom_b_rows = await pool.fetch(
+                        "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm FROM managed_bots WHERE bot_id = ANY($1)",
+                        _anom_bot_ids,
+                    )
+                except Exception:
+                    _anom_b_rows = []
+                for b in _anom_b_rows:
                     _anom_names[("bot", b["bot_id"])] = f"@{b['nm']}"
             if _anom_chan_ids:
-                for c in await pool.fetch(
-                    "SELECT channel_id, COALESCE(username, title, channel_id::text) AS nm FROM managed_channels WHERE channel_id = ANY($1)",
-                    _anom_chan_ids,
-                ):
+                try:
+                    _anom_c_rows = await pool.fetch(
+                        "SELECT channel_id, COALESCE(username, title, channel_id::text) AS nm FROM managed_channels WHERE channel_id = ANY($1)",
+                        _anom_chan_ids,
+                    )
+                except Exception:
+                    _anom_c_rows = []
+                for c in _anom_c_rows:
                     _anom_names[("channel", c["channel_id"])] = c["nm"]
             if _anom_kw_ids:
-                for k in await pool.fetch(
-                    "SELECT id, keyword FROM tracked_keywords WHERE id = ANY($1)",
-                    _anom_kw_ids,
-                ):
+                try:
+                    _anom_k_rows = await pool.fetch(
+                        "SELECT id, keyword FROM tracked_keywords WHERE id = ANY($1)",
+                        _anom_kw_ids,
+                    )
+                except Exception:
+                    _anom_k_rows = []
+                for k in _anom_k_rows:
                     _anom_names[("keyword", k["id"])] = k["keyword"]
 
             _ETYPE_RU = {
@@ -2333,33 +2399,42 @@ async def cb_behavioral(
         score_field = score_map.get(sub, "attention_score")
 
         if sub == "decay":
-            rows = await pool.fetch(
-                "SELECT entity_type, entity_id, decay_rate, updated_at "
-                "FROM entity_behavioral_score "
-                "WHERE owner_id=$1 AND decay_rate > 0.3 "
-                "ORDER BY decay_rate DESC LIMIT 10",
-                user_id,
-            )
+            try:
+                rows = await pool.fetch(
+                    "SELECT entity_type, entity_id, decay_rate, updated_at "
+                    "FROM entity_behavioral_score "
+                    "WHERE owner_id=$1 AND decay_rate > 0.3 "
+                    "ORDER BY decay_rate DESC LIMIT 10",
+                    user_id,
+                )
+            except Exception:
+                rows = []
             title = "📉 Угасающие ресурсы"
             label = "decay"
         elif sub == "habit":
-            rows = await pool.fetch(
-                "SELECT entity_type, entity_id, habit_score, updated_at "
-                "FROM entity_behavioral_score "
-                "WHERE owner_id=$1 AND habit_score > 60 "
-                "ORDER BY habit_score DESC LIMIT 10",
-                user_id,
-            )
+            try:
+                rows = await pool.fetch(
+                    "SELECT entity_type, entity_id, habit_score, updated_at "
+                    "FROM entity_behavioral_score "
+                    "WHERE owner_id=$1 AND habit_score > 60 "
+                    "ORDER BY habit_score DESC LIMIT 10",
+                    user_id,
+                )
+            except Exception:
+                rows = []
             title = "🔄 Активные привычки"
             label = "habit_score"
         elif sub == "ecosystem":
-            rows = await pool.fetch(
-                "SELECT entity_type, entity_id, ecosystem_score, updated_at "
-                "FROM entity_behavioral_score "
-                "WHERE owner_id=$1 AND ecosystem_score > 0 "
-                "ORDER BY ecosystem_score DESC LIMIT 10",
-                user_id,
-            )
+            try:
+                rows = await pool.fetch(
+                    "SELECT entity_type, entity_id, ecosystem_score, updated_at "
+                    "FROM entity_behavioral_score "
+                    "WHERE owner_id=$1 AND ecosystem_score > 0 "
+                    "ORDER BY ecosystem_score DESC LIMIT 10",
+                    user_id,
+                )
+            except Exception:
+                rows = []
             title = "🌐 Экосистемные узлы"
             label = "ecosystem_score"
         else:
@@ -2376,26 +2451,35 @@ async def cb_behavioral(
             kw_ids = [r["entity_id"] for r in rows if r["entity_type"] == "keyword"]
             names: dict[tuple, str] = {}
             if bot_ids:
-                bname_rows = await pool.fetch(
-                    "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm "
-                    "FROM managed_bots WHERE bot_id = ANY($1)",
-                    bot_ids,
-                )
+                try:
+                    bname_rows = await pool.fetch(
+                        "SELECT bot_id, COALESCE(username, first_name, bot_id::text) AS nm "
+                        "FROM managed_bots WHERE bot_id = ANY($1)",
+                        bot_ids,
+                    )
+                except Exception:
+                    bname_rows = []
                 for b in bname_rows:
                     names[("bot", b["bot_id"])] = f"@{b['nm']}"
             if chan_ids:
-                cname_rows = await pool.fetch(
-                    "SELECT channel_id, COALESCE(username, title, channel_id::text) AS nm "
-                    "FROM managed_channels WHERE channel_id = ANY($1)",
-                    chan_ids,
-                )
+                try:
+                    cname_rows = await pool.fetch(
+                        "SELECT channel_id, COALESCE(username, title, channel_id::text) AS nm "
+                        "FROM managed_channels WHERE channel_id = ANY($1)",
+                        chan_ids,
+                    )
+                except Exception:
+                    cname_rows = []
                 for c in cname_rows:
                     names[("channel", c["channel_id"])] = c["nm"]
             if kw_ids:
-                kwname_rows = await pool.fetch(
-                    "SELECT id, keyword FROM tracked_keywords WHERE id = ANY($1)",
-                    kw_ids,
-                )
+                try:
+                    kwname_rows = await pool.fetch(
+                        "SELECT id, keyword FROM tracked_keywords WHERE id = ANY($1)",
+                        kw_ids,
+                    )
+                except Exception:
+                    kwname_rows = []
                 for k in kwname_rows:
                     names[("keyword", k["id"])] = k["keyword"]
 
@@ -2446,37 +2530,46 @@ async def cb_mem_keyword_drilldown(
     user_id = callback.from_user.id
 
     # Данные из search_memory
-    mem_row = await pool.fetchrow(
-        """SELECT search_count, affinity_score, last_searched, first_searched
-           FROM search_memory
-           WHERE owner_id = $1 AND keyword = $2""",
-        user_id,
-        keyword,
-    )
+    try:
+        mem_row = await pool.fetchrow(
+            """SELECT search_count, affinity_score, last_searched, first_searched
+               FROM search_memory
+               WHERE owner_id = $1 AND keyword = $2""",
+            user_id,
+            keyword,
+        )
+    except Exception:
+        mem_row = None
 
     # Поведенческие события (последние 10)
-    behav_rows = await pool.fetch(
-        """SELECT event_type, occurred_at, meta
-           FROM behavioral_events
-           WHERE owner_id = $1
-             AND meta::text ILIKE $2
-           ORDER BY occurred_at DESC
-           LIMIT 10""",
-        user_id,
-        f"%{keyword}%",
-    )
+    try:
+        behav_rows = await pool.fetch(
+            """SELECT event_type, occurred_at, meta
+               FROM behavioral_events
+               WHERE owner_id = $1
+                 AND meta::text ILIKE $2
+               ORDER BY occurred_at DESC
+               LIMIT 10""",
+            user_id,
+            f"%{keyword}%",
+        )
+    except Exception:
+        behav_rows = []
 
     # История позиций из search_rankings
-    rank_rows = await pool.fetch(
-        """SELECT sr.position, sr.checked_at
-           FROM search_rankings sr
-           JOIN tracked_keywords tk ON tk.id = sr.keyword_id
-           WHERE tk.owner_id = $1 AND tk.keyword = $2
-           ORDER BY sr.checked_at DESC
-           LIMIT 15""",
-        user_id,
-        keyword,
-    )
+    try:
+        rank_rows = await pool.fetch(
+            """SELECT sr.position, sr.checked_at
+               FROM search_rankings sr
+               JOIN tracked_keywords tk ON tk.id = sr.keyword_id
+               WHERE tk.owner_id = $1 AND tk.keyword = $2
+               ORDER BY sr.checked_at DESC
+               LIMIT 15""",
+            user_id,
+            keyword,
+        )
+    except Exception:
+        rank_rows = []
 
     kb = InlineKeyboardBuilder()
     kb.button(
