@@ -36,8 +36,22 @@ async def _apply_all(
         return 0, 0, 0
     if not bots:
         return 0, 0, 0
+
+    # Rate limiting: max 5 concurrent API calls (Bot API limit ~30/sec global)
+    semaphore = asyncio.Semaphore(5)
+
+    async def _throttled_call(http, token, *args):
+        async with semaphore:
+            try:
+                result = await method(http, token, *args)
+                # Small delay to respect rate limits
+                await asyncio.sleep(0.1)
+                return result
+            except Exception as e:
+                return e
+
     results = await asyncio.gather(
-        *(method(http, b["token"], *args) for b in bots),
+        *(_throttled_call(http, b["token"], *args) for b in bots),
         return_exceptions=True,
     )
     ok = 0
