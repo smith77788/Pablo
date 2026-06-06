@@ -122,3 +122,24 @@ def test_accounts_handler_reloads_real_session_string_before_checks() -> None:
         "result = await account_manager.scan_owned_assets(\n                session_str,"
         in accounts_source
     )
+
+
+def test_spambot_status_flow_has_no_legacy_fallback_block() -> None:
+    manager_source = (
+        PROJECT_ROOT / "tg-manager/services/account_manager.py"
+    ).read_text(encoding="utf-8")
+
+    assert "spambot_status = classify_spambot_reply(reply_text)" in manager_source
+    assert 'reply_lower = ""' not in manager_source
+
+
+def test_missing_session_wording_is_neutral_not_misleading() -> None:
+    manager_source = (
+        PROJECT_ROOT / "tg-manager/services/account_manager.py"
+    ).read_text(encoding="utf-8")
+    dashboard_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/health_dashboard.py"
+    ).read_text(encoding="utf-8")
+
+    assert "Сессия недоступна для проверки — session_str отсутствует." in manager_source
+    assert "сессия недоступна для реальной проверки" in dashboard_source

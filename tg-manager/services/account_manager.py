@@ -913,7 +913,7 @@ async def get_dialogs(
 ) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
     if not session_string:
-        log.warning("get_dialogs: session_str отсутствует — аккаунт не импортирован")
+        log.warning("get_dialogs: session_str отсутствует — сессия недоступна")
         return []
     from telethon.tl.types import Channel, Chat
 
@@ -1235,7 +1235,7 @@ async def check_account_status_full(
     if not session_string or len(session_string.strip()) < 10:
         return {
             "status": "no_session",
-            "reason": "Аккаунт не импортирован — session_str отсутствует.",
+            "reason": "Сессия недоступна для проверки — session_str отсутствует.",
             "display_name": "",
             "auth_error": False,
             "no_session": True,
@@ -1286,49 +1286,6 @@ async def check_account_status_full(
                         "display_name": display_name,
                     }
                 if spambot_status == "spamblock":
-                    return {
-                        "status": "spamblock",
-                        "reason": f"SpamBot: {reply_text[:120]}",
-                        "display_name": display_name,
-                    }
-                reply_lower = ""
-                # "Good" patterns checked FIRST — prevent false positives
-                # SpamBot Russian: "Ваш аккаунт свободен от каких-либо ограничений"
-                # SpamBot English: "Good news, no limits are applied to your account!"
-                if any(
-                    kw in reply_lower
-                    for kw in (
-                        "no limits",
-                        "no complaints",
-                        "good standing",
-                        "good news",
-                        "нет ограничений",
-                        "нет жалоб",
-                        "не было жалоб",
-                        "свободен",  # "свободен от каких-либо ограничений"
-                        "not limited",
-                        "no reports",
-                    )
-                ):
-                    return {
-                        "status": "active",
-                        "reason": "Аккаунт активен, ограничений нет",
-                        "display_name": display_name,
-                    }
-                if any(
-                    kw in reply_lower
-                    for kw in (
-                        "limited",
-                        "spam",
-                        "restricted",
-                        "ограничен,",  # "ограничен," — с запятой, не подстрока "ограничений"
-                        "ограничен.",  # "ограничен." — с точкой
-                        "ограничен\n",  # конец строки
-                        "ограничен ",  # с пробелом после
-                        "спам",
-                        "ваш аккаунт ограничен",
-                    )
-                ):
                     return {
                         "status": "spamblock",
                         "reason": f"SpamBot: {reply_text[:120]}",
@@ -1557,7 +1514,7 @@ async def create_channel(
     Returns dict: {channel_id, title, username, type, invite_link, error?}
     """
     if not session_string:
-        return {"error": "session_str отсутствует — аккаунт не импортирован"}
+        return {"error": "session_str отсутствует — сессия недоступна"}
     from telethon.tl.functions.channels import CreateChannelRequest
 
     client = _make_client(session_string, _acc)
@@ -1612,7 +1569,7 @@ async def join_channel(
     Returns dict: {title, members, channel_id, error?}
     """
     if not session_string:
-        return {"error": "session_str отсутствует — аккаунт не импортирован"}
+        return {"error": "session_str отсутствует — сессия недоступна"}
     from telethon.tl.functions.channels import JoinChannelRequest
     from telethon.tl.functions.messages import ImportChatInviteRequest
 
@@ -1686,7 +1643,7 @@ async def leave_channel(
 ) -> bool:
     """Leave a channel/group by internal Telegram channel_id."""
     if not session_string:
-        log.warning("leave_channel: session_str отсутствует — аккаунт не импортирован")
+        log.warning("leave_channel: session_str отсутствует — сессия недоступна")
         return False
     from telethon.tl.functions.channels import LeaveChannelRequest
 
@@ -2360,7 +2317,7 @@ async def post_to_channel(
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
     """
     if not session_string:
-        return {"error": "session_str отсутствует — аккаунт не импортирован"}
+        return {"error": "session_str отсутствует — сессия недоступна"}
     from telethon.tl.types import InputPeerChannel
     from telethon.errors import (
         FloodWaitError,

@@ -484,7 +484,8 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             has_session = acc.get("has_session", True)
             flood_until = acc["cooldown_until"]
             trust = float(acc["trust_score"] or 1.0)
-            # session_expired у аккаунта без session_str — не истекшая сессия, а не импортированный аккаунт
+            # session_expired у аккаунта без session_str — это недоступная session-материя,
+            # а не подтверждённо истекшая авторизация
             if acc_status == "session_expired" and not has_session:
                 grp_no_session.append(acc)
             elif is_verified_account_restriction(acc_status, has_session=has_session):
@@ -515,7 +516,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
         # Аккаунты без session_str — отдельная группа
         if grp_no_session:
-            lines.append("<b>📵 Не импортированы (нет сессии):</b>")
+            lines.append("<b>📵 Нет доступной сессии для проверок:</b>")
             for acc in grp_no_session:
                 name = html.escape(
                     acc["username"]
@@ -525,7 +526,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
                 )
                 phone = acc["phone"] or ""
                 lines.append(
-                    f"  📵 <b>{name}</b> ({phone}) | <i>добавьте сессию через «Добавить аккаунт»</i>"
+                    f"  📵 <b>{name}</b> ({phone}) | <i>сессия недоступна в текущей записи — переподключите или синхронизируйте аккаунт</i>"
                 )
             lines.append("")
 
@@ -681,9 +682,12 @@ async def cb_health_real_check(
         )
         session_str = acc.get("session_str") or ""
 
-        # Аккаунты без session_str — не проверяем, показываем отдельно
+        # Аккаунты без session_str не объявляем "не импортированными" — это лишь отсутствие
+        # доступной session-материи в текущей записи для реальной проверки.
         if not session_str or len(session_str.strip()) < 10:
-            results.append(f"📵 <b>{name}</b> — нет сессии (аккаунт не импортирован)")
+            results.append(
+                f"📵 <b>{name}</b> — сессия недоступна для реальной проверки"
+            )
             continue
 
         res: dict = {}
