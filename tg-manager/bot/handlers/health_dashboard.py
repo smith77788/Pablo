@@ -27,11 +27,24 @@ from bot.callbacks import (
     InfraCb,
 )
 from bot.utils.op_helpers import safe_edit
-from services.account_manager import is_verified_account_restriction
+from services.account_manager import (
+    is_verified_account_restriction,
+    should_persist_account_status,
+)
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
+
+
+def _effective_acc_status(acc: dict) -> str:
+    status = acc.get("acc_status") or "active"
+    has_session = bool(acc.get("has_session"))
+    if status == "session_expired" and has_session and acc.get("is_active", True):
+        return "active"
+    if not acc.get("is_active", True):
+        return "archived"
+    return status
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -520,7 +533,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         if grp_restricted:
             lines.append("<b>🚨 Ограничения:</b>")
             for acc in grp_restricted:
-                acc_status = acc["acc_status"] or "active"
+                acc_status = _effective_acc_status(acc)
                 status_emoji = _STATUS_EMOJI.get(acc_status, "⛔")
                 trust = float(acc["trust_score"] or 0)
                 name = html.escape(
@@ -691,25 +704,23 @@ async def cb_health_real_check(
 
         # Update acc_status in DB — только подтверждённые статусы
         try:
-            if status in ("active", "cooldown", "spamblock"):
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
-                    status,
-                    acc["id"],
-                )
-            elif is_verified_account_restriction(
+            if should_persist_account_status(
                 status,
+                auth_error=bool(res.get("auth_error")),
                 has_session=not res.get("no_session", False),
-            ) and (status != "session_expired" or res.get("auth_error")):
+            ):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now(), real_check_status=$1 WHERE id=$2",
                     status,
                     acc["id"],
                 )
-                await pool.execute(
-                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
-                    acc["id"],
-                )
+                if status in ("session_expired", "banned", "deactivated") and bool(
+                    res.get("auth_error")
+                ):
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
+                        acc["id"],
+                    )
             elif status not in ("error",):
                 # Обновляем только время, не меняем acc_status
                 await pool.execute(
@@ -1695,7 +1706,7 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     from bot.callbacks import AccCb
 
     for acc in rows:
-        st = acc["acc_status"]
+        st = _effective_acc_status(acc)
         active = acc["is_active"]
         name = (
             acc.get("username")

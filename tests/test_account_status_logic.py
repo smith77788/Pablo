@@ -93,7 +93,7 @@ def test_recommended_delay_grows_with_risk_and_cooldown() -> None:
     assert recommended_delay(202, "join") > 140.0
 
 
-def test_status_persistence_uses_shared_verified_restriction_helper() -> None:
+def test_status_persistence_uses_shared_helper() -> None:
     account_health_source = (
         PROJECT_ROOT / "tg-manager/services/account_health.py"
     ).read_text(encoding="utf-8")
@@ -101,5 +101,5 @@ def test_status_persistence_uses_shared_verified_restriction_helper() -> None:
         PROJECT_ROOT / "tg-manager/bot/handlers/health_dashboard.py"
     ).read_text(encoding="utf-8")
 
-    assert "is_verified_account_restriction(" in account_health_source
-    assert "is_verified_account_restriction(" in dashboard_source
+    assert "should_persist_account_status(" in account_health_source
+    assert "should_persist_account_status(" in dashboard_source

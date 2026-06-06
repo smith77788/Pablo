@@ -22,7 +22,7 @@ from enum import Enum
 
 import asyncpg
 
-from services.account_manager import is_verified_account_restriction
+from services.account_manager import should_persist_account_status
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -393,16 +393,11 @@ async def _run_spambot_check_cycle(pool: asyncpg.Pool) -> None:
                 continue
 
             # Только подтверждённые статусы пишем в БД — session_expired без auth_error игнорируем
-            if status in ("active", "cooldown", "spamblock"):
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
-                    status,
-                    acc["id"],
-                )
-            elif is_verified_account_restriction(
+            if should_persist_account_status(
                 status,
+                auth_error=auth_error,
                 has_session=not result.get("no_session", False),
-            ) and (status != "session_expired" or auth_error):
+            ):
                 await pool.execute(
                     "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
                     status,
