@@ -2499,6 +2499,32 @@ async def _exec_strike(
             "summary": "⚠️ Strike: все аккаунты в cooldown или неактивны",
         }
 
+    # ── Warmup overlap guard: exclude accounts with active warmup plans ───────
+    try:
+        warming_ids: set[int] = set()
+        _warmup_rows = await pool.fetch(
+            "SELECT account_id FROM account_warmup_plans WHERE owner_id=$1 AND status='active'",
+            owner_id,
+        )
+        warming_ids = {r["account_id"] for r in _warmup_rows}
+        if warming_ids:
+            before_count = len(viable)
+            viable = [a for a in viable if a.get("id") not in warming_ids]
+            excluded = before_count - len(viable)
+            if excluded:
+                log.warning(
+                    "_exec_strike op=%d: excluded %d warmup accounts from strike",
+                    op_id, excluded,
+                )
+    except Exception:
+        log_exc_swallow(log, f"_exec_strike op={op_id}: warmup overlap check failed")
+
+    if not viable:
+        return {
+            "status": "failed",
+            "summary": "⚠️ Strike: все аккаунты на прогреве или в cooldown",
+        }
+
     # ── Волны ─────────────────────────────────────────────────────────────────
     waves = plan_waves(viable, num_waves=num_waves)
 

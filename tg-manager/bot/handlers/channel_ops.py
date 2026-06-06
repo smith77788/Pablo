@@ -4291,10 +4291,35 @@ async def cb_br_confirm(
         )
         return
 
+    # Warmup overlap guard: exclude accounts with active warmup plans
+    try:
+        _warmup_rows = await pool.fetch(
+            "SELECT account_id FROM account_warmup_plans WHERE owner_id=$1 AND status='active'",
+            callback.from_user.id,
+        )
+        _warming_ids = {r["account_id"] for r in _warmup_rows}
+        if _warming_ids:
+            _before = len(viable)
+            viable = [a for a in viable if a.get("id") not in _warming_ids]
+            if len(viable) < _before:
+                log.warning("channel_ops strike: excluded %d warmup accounts", _before - len(viable))
+    except Exception:
+        pass
+
+    if not viable:
+        await callback.message.edit_text(
+            "⚠️ <b>Нет доступных аккаунтов.</b>\n\n"
+            "Все аккаунты на прогреве или в кулдауне.\n"
+            "Завершите прогрев или добавьте новые аккаунты.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
     skipped = len(chosen) - len(viable)
     preflight_note = ""
     if skipped > 0:
-        preflight_note = f"\n⚠️ Пропущено аккаунтов в кулдауне: <b>{skipped}</b>"
+        preflight_note = f"\n⚠️ Пропущено аккаунтов в кулдауне/прогреве: <b>{skipped}</b>"
 
     # ═══════════════════════════════════════════════════════════════════════
     # ФАЗА 1: РАЗВЕДКА — лучшим аккаунтом карту цели
@@ -4565,6 +4590,7 @@ async def _strike_bg(
     viable = strike_engine.preflight_accounts(chosen)
     if not viable:
         viable = chosen
+    # Warmup overlap guard (best-effort, no pool available in legacy path)
     waves = strike_engine.plan_waves(viable, num_waves=3)
     await _strike_bg_v2(
         pool=pool,

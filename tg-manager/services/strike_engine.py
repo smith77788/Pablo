@@ -640,6 +640,47 @@ async def _one_account_strike(
                             )
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
+                # Fatal account errors — mark inactive in DB, stop immediately
+                _FATAL = ("USER_DEACTIVATED_BAN", "USER_DEACTIVATED", "AUTH_KEY_UNREGISTERED", "SESSION_REVOKED")
+                if any(p in err_str.upper() for p in _FATAL):
+                    log.warning(
+                        "strike acc %s wave %d: fatal account error, marking inactive: %s",
+                        acc.get("id"), wave_num, err_str,
+                    )
+                    if pool is not None and acc.get("id"):
+                        try:
+                            await pool.execute(
+                                "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
+                                acc["id"],
+                            )
+                        except Exception:
+                            log_exc_swallow(log, f"strike: mark_inactive failed acc={acc.get('id')}")
+                    return {
+                        "peer_reported": False,
+                        "error": err_str,
+                        "_acc_id": acc.get("id"),
+                        "_wave": wave_num,
+                        "_fatal": True,
+                    }
+                # PeerFlood — severe account-level rate limit, apply 1h cooldown, stop
+                if "PEER_FLOOD" in err_str.upper():
+                    log.warning(
+                        "strike acc %s wave %d: PeerFlood, applying 1h cooldown",
+                        acc.get("id"), wave_num,
+                    )
+                    if pool is not None and acc.get("id"):
+                        try:
+                            from services.flood_engine import record_flood
+                            await record_flood(pool, acc["id"], 3600, "strike_peer_flood")
+                        except Exception:
+                            log_exc_swallow(log, f"strike: record_peer_flood failed acc={acc.get('id')}")
+                    return {
+                        "peer_reported": False,
+                        "error": err_str,
+                        "_acc_id": acc.get("id"),
+                        "_wave": wave_num,
+                        "_peer_flood": True,
+                    }
                 log.warning(
                     "strike acc %s wave %d: %s", acc.get("id"), wave_num, err_str
                 )
@@ -2410,6 +2451,27 @@ async def execute_mini_strike(
                 await record_flood(pool, acc["id"], flood_wait, "strike")
             except Exception:
                 log_exc_swallow(log, "mini_strike: record_flood flood_engine failed")
+        # Fatal account errors — mark is_active=False immediately
+        _FATAL = ("USER_DEACTIVATED_BAN", "USER_DEACTIVATED", "AUTH_KEY_UNREGISTERED", "SESSION_REVOKED")
+        if any(p in err_str.upper() for p in _FATAL):
+            log.warning("mini_strike: fatal account error for acc=%s, marking inactive", acc.get("id"))
+            if acc.get("id"):
+                try:
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
+                        acc["id"],
+                    )
+                except Exception:
+                    log_exc_swallow(log, "mini_strike: mark_inactive failed")
+        # PeerFlood — apply 1h cooldown via flood_engine
+        elif "PEER_FLOOD" in err_str.upper():
+            log.warning("mini_strike: PeerFlood for acc=%s, applying 1h cooldown", acc.get("id"))
+            if acc.get("id"):
+                try:
+                    from services.flood_engine import record_flood
+                    await record_flood(pool, acc["id"], 3600, "mini_strike_peer_flood")
+                except Exception:
+                    log_exc_swallow(log, "mini_strike: record_peer_flood failed")
         log.exception("mini_strike: telethon failed target=%s", target_clean)
 
     # ── Phase 2+3: Email из всех настроенных ящиков → все 4 адреса Telegram ──
