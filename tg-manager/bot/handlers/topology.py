@@ -23,6 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AccCb, BotCb, TopoCb
 from database import db
+from services.account_manager import effective_account_status
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -110,7 +111,11 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             or f"acc#{a['id']}",
             "phone": a.get("phone", ""),
             "channels": [],
-            "status": a.get("acc_status", "active"),
+            "status": effective_account_status(
+                a.get("acc_status"),
+                has_session=bool(a.get("has_session")),
+                is_active=bool(a.get("is_active", True)),
+            ),
         }
     for ch in channels:
         aid = ch.get("acc_id")
@@ -132,7 +137,7 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "deactivated": "💀",
     }
     for i, (aid, data) in enumerate(acc_map.items()):
-        si = status_icons.get(data["status"], "❓")
+        si = status_icons.get(data["status"], "вќ“")
         name = data["name"][:22]
         lines.append(f"\n{si} <b>{escape(name)}</b>")
         if data["phone"]:
@@ -224,7 +229,14 @@ async def cb_topo_acc_list(
 
     lines = ["📱 <b>Топология — по аккаунтам</b>\n"]
     for acc in chunk:
-        si = status_icons.get(acc.get("acc_status", "active"), "❓")
+        si = status_icons.get(
+            effective_account_status(
+                acc.get("acc_status"),
+                has_session=bool(acc.get("has_session")),
+                is_active=bool(acc.get("is_active", True)),
+            ),
+            "вќ“",
+        )
         name = (
             acc.get("first_name")
             or acc.get("username")
@@ -293,7 +305,11 @@ async def cb_topo_acc_view(
         or f"acc#{acc_id}"
     )
     phone = acc.get("phone", "")
-    status = acc.get("acc_status", "active")
+    status = effective_account_status(
+        acc.get("acc_status"),
+        has_session=bool(acc.get("session_str")),
+        is_active=bool(acc.get("is_active", True)),
+    )
 
     st_icons = {
         "active": "✅",

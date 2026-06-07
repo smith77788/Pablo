@@ -1219,6 +1219,20 @@ def should_persist_account_status(
     return status != "session_expired" or auth_error
 
 
+def effective_account_status(
+    status: str | None,
+    *,
+    has_session: bool = True,
+    is_active: bool = True,
+) -> str:
+    if not is_active:
+        return "archived"
+    normalized = status or "active"
+    if normalized == "session_expired":
+        return "active" if has_session else "no_session"
+    return normalized
+
+
 async def check_account_status_full(
     session_string: str,
     _acc: dict | None = None,

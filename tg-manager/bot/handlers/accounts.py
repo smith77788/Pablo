@@ -51,6 +51,7 @@ from services.account_manager import (
     scan_owned_assets,
     send_message,
     send_message_via_account,
+    effective_account_status,
     should_persist_account_status,
     start_login,
     start_qr_login,
@@ -82,15 +83,14 @@ _STATUS_EMOJI: dict[str, str] = {
 
 
 def _display_acc_status(acc: dict) -> str:
-    if not acc.get("is_active", True):
-        return "archived"
-    status = acc.get("acc_status") or "active"
     has_session = bool(acc.get("has_session")) or bool(
         acc.get("session_str") or acc.get("session_string")
     )
-    if status == "session_expired" and has_session:
-        return "active"
-    return status
+    return effective_account_status(
+        acc.get("acc_status"),
+        has_session=has_session,
+        is_active=bool(acc.get("is_active", True)),
+    )
 
 
 def _display_acc_status_label(acc: dict) -> str:

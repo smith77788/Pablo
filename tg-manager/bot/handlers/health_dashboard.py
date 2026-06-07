@@ -28,6 +28,7 @@ from bot.callbacks import (
 )
 from bot.utils.op_helpers import safe_edit
 from services.account_manager import (
+    effective_account_status,
     is_verified_account_restriction,
     should_persist_account_status,
 )
@@ -38,13 +39,11 @@ router = Router()
 
 
 def _effective_acc_status(acc: dict) -> str:
-    status = acc.get("acc_status") or "active"
-    has_session = bool(acc.get("has_session"))
-    if status == "session_expired" and has_session and acc.get("is_active", True):
-        return "active"
-    if not acc.get("is_active", True):
-        return "archived"
-    return status
+    return effective_account_status(
+        acc.get("acc_status"),
+        has_session=bool(acc.get("has_session")),
+        is_active=bool(acc.get("is_active", True)),
+    )
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

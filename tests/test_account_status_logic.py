@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 from services.account_manager import (
     classify_spambot_reply,
+    effective_account_status,
     is_verified_account_restriction,
     should_persist_account_status,
 )
@@ -75,6 +76,14 @@ def test_display_status_hides_stale_session_expired_for_active_session() -> None
         )
         == "archived"
     )
+
+
+def test_effective_account_status_normalizes_stale_and_missing_sessions() -> None:
+    assert effective_account_status("session_expired", has_session=True) == "active"
+    assert (
+        effective_account_status("session_expired", has_session=False) == "no_session"
+    )
+    assert effective_account_status("active", is_active=False) == "archived"
 
 
 def test_recommended_delay_uses_safe_action_baseline() -> None:
@@ -152,6 +161,22 @@ def test_health_dashboard_groups_accounts_by_effective_status() -> None:
     ).read_text(encoding="utf-8")
 
     assert "acc_status = _effective_acc_status(acc)" in dashboard_source
+
+
+def test_topology_uses_shared_effective_account_status() -> None:
+    topology_source = (PROJECT_ROOT / "tg-manager/bot/handlers/topology.py").read_text(
+        encoding="utf-8"
+    )
+    health_source = (PROJECT_ROOT / "tg-manager/services/account_health.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "from services.account_manager import effective_account_status"
+        in topology_source
+    )
+    assert "effective_account_status(" in topology_source
+    assert "effective_account_status(" in health_source
 
 
 def test_purge_expired_revalidates_accounts_before_delete() -> None:

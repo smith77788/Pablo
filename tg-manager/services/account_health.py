@@ -22,7 +22,10 @@ from enum import Enum
 
 import asyncpg
 
-from services.account_manager import should_persist_account_status
+from services.account_manager import (
+    effective_account_status,
+    should_persist_account_status,
+)
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -220,6 +223,8 @@ async def get_sorted_accounts(
     """Возвращает аккаунты отсортированные по пригодности для action_type."""
     rows = await pool.fetch(
         """SELECT a.id, a.session_str, a.phone, a.first_name, a.trust_score,
+                  COALESCE(a.acc_status, 'active') AS acc_status, a.is_active,
+                  (a.session_str IS NOT NULL AND a.session_str != '') AS has_session,
                   a.device_model, a.system_version, a.app_version,
                   p.proxy_url
            FROM tg_accounts a
@@ -227,7 +232,6 @@ async def get_sorted_accounts(
            WHERE a.owner_id = $1
              AND a.is_active = TRUE
              AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW())
-             AND COALESCE(a.acc_status, 'active') NOT IN ('banned', 'deactivated', 'session_expired')
            ORDER BY a.trust_score DESC NULLS LAST
            LIMIT $2""",
         owner_id,
@@ -236,6 +240,19 @@ async def get_sorted_accounts(
 
     scored = []
     for row in rows:
+        effective_status = effective_account_status(
+            row.get("acc_status"),
+            has_session=bool(row.get("has_session")),
+            is_active=bool(row.get("is_active", True)),
+        )
+        if effective_status in {
+            "archived",
+            "banned",
+            "deactivated",
+            "spamblock",
+            "no_session",
+        }:
+            continue
         health = get_health(row["id"])
         # Проверяем пригодность для данного типа действия
         if action_type in health.suitability and not health.suitability[action_type]:
