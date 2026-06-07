@@ -800,6 +800,8 @@ async def _qr_wait_task(
             device_model=info.get("device_model"),
             system_version=info.get("system_version"),
             app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
         )
     except Exception as exc:
         try:
@@ -901,6 +903,8 @@ async def handle_qr_2fa(
             device_model=info.get("device_model"),
             system_version=info.get("system_version"),
             app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
         )
     except Exception as exc:
         await message.answer(
@@ -1064,6 +1068,8 @@ async def _finalize_login(
             device_model=info.get("device_model"),
             system_version=info.get("system_version"),
             app_version=info.get("app_version"),
+            lang_code=info.get("lang_code"),
+            system_lang_code=info.get("system_lang_code"),
         )
     except Exception as exc:
         await message.answer(
@@ -3236,7 +3242,15 @@ async def _finalize_import(
         return
 
     phone = info.get("phone") or f"id:{info.get('tg_user_id', 'unknown')}"
-    device = generate_device_fingerprint()
+    device = {
+        "device_model": info.get("device_model"),
+        "system_version": info.get("system_version"),
+        "app_version": info.get("app_version"),
+        "lang_code": info.get("lang_code"),
+        "system_lang_code": info.get("system_lang_code"),
+    }
+    if not device["device_model"]:
+        device = generate_device_fingerprint()
     try:
         await db.add_tg_account(
             pool,
@@ -3249,6 +3263,8 @@ async def _finalize_import(
             device_model=device["device_model"],
             system_version=device["system_version"],
             app_version=device["app_version"],
+            lang_code=device.get("lang_code"),
+            system_lang_code=device.get("system_lang_code"),
         )
     except Exception as exc:
         await message.answer(
@@ -3427,7 +3443,15 @@ async def _do_batch_import(
                 raise ValueError("invalid session or expired")
 
             phone = info.get("phone", "") or ""
-            device = generate_device_fingerprint()
+            device = {
+                "device_model": info.get("device_model"),
+                "system_version": info.get("system_version"),
+                "app_version": info.get("app_version"),
+                "lang_code": info.get("lang_code"),
+                "system_lang_code": info.get("system_lang_code"),
+            }
+            if not device["device_model"]:
+                device = generate_device_fingerprint()
             acc_id = await db.add_tg_account(
                 pool,
                 owner_id=user_id,
@@ -3439,6 +3463,8 @@ async def _do_batch_import(
                 device_model=device["device_model"],
                 system_version=device["system_version"],
                 app_version=device["app_version"],
+                lang_code=device.get("lang_code"),
+                system_lang_code=device.get("system_lang_code"),
             )
             # Assign cluster if provided
             if cluster and acc_id:

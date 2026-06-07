@@ -15,12 +15,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 from services.account_manager import (
     classify_spambot_reply,
     effective_account_status,
+    generate_device_fingerprint,
     is_verified_account_restriction,
     should_persist_account_status,
 )
 from bot.handlers.accounts import _display_acc_status
 from services.flood_engine import (
     _flood_state,
+    gaussian_delay,
     get_account_state,
     recommended_delay,
 )
@@ -100,6 +102,22 @@ def test_recommended_delay_grows_with_risk_and_cooldown() -> None:
     state.cooldown_until = 9999999999.0
 
     assert recommended_delay(202, "join") > 140.0
+
+
+def test_gaussian_delay_respects_bounds() -> None:
+    for _ in range(25):
+        delay = gaussian_delay(10.0, minimum=8.0, maximum=12.0)
+        assert 8.0 <= delay <= 12.0
+
+
+def test_device_fingerprint_binds_locale_to_country() -> None:
+    de = generate_device_fingerprint("DE")
+    ua = generate_device_fingerprint("UA")
+
+    assert de["lang_code"] == "de"
+    assert de["system_lang_code"] == "de-DE"
+    assert ua["lang_code"] == "uk"
+    assert ua["system_lang_code"] == "uk-UA"
 
 
 def test_status_persistence_uses_shared_helper() -> None:
@@ -217,3 +235,53 @@ def test_trust_and_intelligence_do_not_treat_all_session_expired_as_dead() -> No
         "NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')"
         not in intelligence_source
     )
+
+
+def test_mtproto_queries_carry_proxy_and_locale_context() -> None:
+    db_source = (PROJECT_ROOT / "tg-manager/database/db.py").read_text(encoding="utf-8")
+    selector_source = (
+        PROJECT_ROOT / "tg-manager/services/resource_selector.py"
+    ).read_text(encoding="utf-8")
+    pool_source = (PROJECT_ROOT / "tg-manager/services/session_pool.py").read_text(
+        encoding="utf-8"
+    )
+    flood_source = (PROJECT_ROOT / "tg-manager/services/flood_engine.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "lang_code" in db_source
+    assert "system_lang_code" in db_source
+    assert "proxy_id" in db_source
+    assert "geo_country" in db_source
+    assert "lang_code" in selector_source
+    assert "system_lang_code" in selector_source
+    assert "geo_country" in selector_source
+    assert "lang_code" in pool_source
+    assert "system_lang_code" in pool_source
+    assert "geo_country" in pool_source
+    assert "record_peer_flood" in flood_source
+    assert "gaussian_delay" in flood_source
+
+
+def test_account_manager_enforces_proxy_isolation_for_bound_sessions() -> None:
+    manager_source = (
+        PROJECT_ROOT / "tg-manager/services/account_manager.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class ProxyIsolationError(ConnectionError):" in manager_source
+    assert "Account proxy is required for this session" in manager_source
+    assert (
+        "Account proxy is configured, but its URL could not be parsed."
+        in manager_source
+    )
+
+
+def test_op_worker_uses_penalty_requeue_and_long_peer_flood_isolation() -> None:
+    worker_source = (PROJECT_ROOT / "tg-manager/services/op_worker.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "_PEER_FLOOD_PATTERNS" in worker_source
+    assert "_maybe_requeue(pool, op_id, e, params, op_type)" in worker_source
+    assert "record_peer_flood(" in worker_source
+    assert "_peer_flood_wait = 48 * 3600" in worker_source

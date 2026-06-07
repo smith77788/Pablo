@@ -2238,7 +2238,8 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
         return await pool.fetchrow(
             """SELECT a.id, a.session_str, a.phone, a.first_name,
                       a.device_model, a.system_version, a.app_version,
-                      p.proxy_url
+                      a.lang_code, a.system_lang_code,
+                      a.proxy_id, p.proxy_url, p.geo_country
                FROM tg_accounts a
                LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
                WHERE a.id=$1 AND a.owner_id=$2""",
@@ -2248,7 +2249,8 @@ async def get_account_for_telethon(pool, acc_id: int, owner_id: int | None = Non
     return await pool.fetchrow(
         """SELECT a.id, a.session_str, a.phone, a.first_name,
                   a.device_model, a.system_version, a.app_version,
-                  p.proxy_url
+                  a.lang_code, a.system_lang_code,
+                  a.proxy_id, p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
            WHERE a.id=$1""",
@@ -2267,16 +2269,21 @@ async def add_tg_account(
     device_model: str | None = None,
     system_version: str | None = None,
     app_version: str | None = None,
+    lang_code: str | None = None,
+    system_lang_code: str | None = None,
 ) -> int:
     row = await pool.fetchrow(
         """INSERT INTO tg_accounts(owner_id, phone, session_str, tg_user_id,
-               first_name, username, device_model, system_version, app_version)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+               first_name, username, device_model, system_version, app_version,
+               lang_code, system_lang_code)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
            ON CONFLICT (owner_id, phone) DO UPDATE
            SET session_str=$3, tg_user_id=$4, first_name=$5, username=$6,
                device_model=COALESCE($7, tg_accounts.device_model),
                system_version=COALESCE($8, tg_accounts.system_version),
                app_version=COALESCE($9, tg_accounts.app_version),
+               lang_code=COALESCE($10, tg_accounts.lang_code),
+               system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
                is_active=true, last_used=now()
            RETURNING id""",
         owner_id,
@@ -2288,6 +2295,8 @@ async def add_tg_account(
         device_model,
         system_version,
         app_version,
+        lang_code,
+        system_lang_code,
     )
     return row["id"]
 

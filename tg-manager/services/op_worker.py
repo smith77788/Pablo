@@ -64,6 +64,7 @@ _FATAL_ERRORS = {
     "PhoneNumberBanned",
 }
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
+_PEER_FLOOD_PATTERNS = re.compile(r"peer.flood|PEER_FLOOD|PeerFlood", re.IGNORECASE)
 
 
 def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
@@ -106,6 +107,8 @@ def _classify_op_error(exc: Exception) -> str:
     msg = str(exc)
     if name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg:
         return "fatal"
+    if _PEER_FLOOD_PATTERNS.search(msg) or _PEER_FLOOD_PATTERNS.search(name):
+        return "peer_flood"
     if _FLOOD_PATTERNS.search(msg) or _FLOOD_PATTERNS.search(name):
         return "flood"
     if (
@@ -163,7 +166,9 @@ async def _deactivate_dead_session(
             )
 
 
-async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool:
+async def _maybe_requeue(
+    pool: asyncpg.Pool, op_id: int, exc: Exception, params: dict, op_type: str
+) -> bool:
     """
     Если ошибка ретраевая и retry_count < max_retries — сбросить операцию в pending.
     Возвращает True если операция поставлена на повторную попытку.
@@ -183,8 +188,41 @@ async def _maybe_requeue(pool: asyncpg.Pool, op_id: int, exc: Exception) -> bool
     if retry_count > max_retries:
         return False
 
-    # Exponential backoff: 30s, 60s, 120s, ...
-    backoff = min(30 * (2 ** (retry_count - 1)), 600)
+    flood_wait = extract_flood_wait(exc, str(exc))
+    if kind == "peer_flood":
+        backoff = 48 * 3600
+    elif kind == "flood" and flood_wait > 0:
+        backoff = min(flood_wait + 60, 24 * 3600)
+    else:
+        backoff = min(30 * (2 ** (retry_count - 1)), 600)
+
+    account_ids = [int(acc_id) for acc_id in (params.get("account_ids") or [])]
+    try:
+        from services import flood_engine
+
+        for account_id in account_ids:
+            if kind == "peer_flood":
+                await flood_engine.record_peer_flood(
+                    pool,
+                    account_id,
+                    action_type=op_type,
+                    operation_id=op_id,
+                )
+            elif kind == "flood":
+                await flood_engine.record_flood(
+                    pool,
+                    account_id,
+                    flood_wait or 60,
+                    action_type=op_type,
+                    operation_id=op_id,
+                )
+    except Exception as penalty_exc:
+        log.warning(
+            "op_worker: failed to persist %s penalty for op %d: %s",
+            kind,
+            op_id,
+            penalty_exc,
+        )
 
     await pool.execute(
         """UPDATE operation_queue
@@ -691,7 +729,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             except Exception:
                 pass
             # Попытаться поставить на повтор перед тем как помечать как failed
-            requeued = await _maybe_requeue(pool, op_id, e)
+            requeued = await _maybe_requeue(pool, op_id, e, params, op_type)
             if not requeued:
                 await pool.execute(
                     "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 WHERE id=$2",
@@ -1112,8 +1150,11 @@ async def _exec_bulk_join_inner(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict, accounts
 ) -> dict:
     from services import account_manager, session_simulator
-    from services.flood_engine import recommended_delay
-    import random
+    from services.flood_engine import (
+        gaussian_delay,
+        recommended_delay,
+        record_peer_flood,
+    )
 
     links = params.get("links") or params.get("targets") or []
     delay_mode = params.get("delay_mode", "smart")
@@ -1176,7 +1217,7 @@ async def _exec_bulk_join_inner(
                 # links for this account to avoid escalation to a real spamblock.
                 if res.get("peer_flood"):
                     fail_count += 1
-                    _peer_flood_wait = 900  # 15-minute minimum per Telegram guidance
+                    _peer_flood_wait = 48 * 3600
                     err_str = res.get("error", "PeerFlood")[:200]
                     log.warning(
                         "op_worker bulk_join: PEER_FLOOD on acc=%s — cooldown %ds, skipping remaining links",
@@ -1184,10 +1225,12 @@ async def _exec_bulk_join_inner(
                         _peer_flood_wait,
                     )
                     try:
-                        from services.flood_engine import record_flood
-
-                        await record_flood(
-                            pool, acc["id"], _peer_flood_wait, "join", op_id
+                        await record_peer_flood(
+                            pool,
+                            acc["id"],
+                            action_type="join",
+                            operation_id=op_id,
+                            cooldown_seconds=_peer_flood_wait,
                         )
                     except Exception:
                         log_exc_swallow(
@@ -1311,20 +1354,27 @@ async def _exec_bulk_join_inner(
             chaos = session_simulator.chaos_factor()
             tod = session_simulator.time_of_day_factor()
             if delay_mode == "fast":
-                pause = random.uniform(45, 90) * chaos
+                pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
             elif delay_mode == "normal":
-                pause = random.uniform(30, 60) * chaos * tod
+                pause = gaussian_delay(45.0 * chaos * tod, minimum=20.0, maximum=100.0)
             elif delay_mode == "slow":
-                pause = random.uniform(60, 120) * chaos * tod
+                pause = gaussian_delay(90.0 * chaos * tod, minimum=35.0, maximum=180.0)
             else:  # smart — adaptive anti-flood
                 if i % 5 == 4:
-                    pause = random.uniform(180, 360) * chaos
+                    pause = gaussian_delay(270.0 * chaos, minimum=120.0, maximum=420.0)
                 else:
-                    pause = random.uniform(45, 120) * chaos
+                    pause = gaussian_delay(82.5 * chaos, minimum=30.0, maximum=150.0)
                 pause *= tod
             pause = max(pause, recommended_delay(acc["id"], "join"))
             if flood_wait:
-                pause = max(pause, float(flood_wait) + random.uniform(10, 30))
+                pause = max(
+                    pause,
+                    gaussian_delay(
+                        float(flood_wait) + 20.0,
+                        minimum=float(flood_wait) + 5.0,
+                        maximum=float(flood_wait) + 45.0,
+                    ),
+                )
             await asyncio.sleep(pause)
 
         # Пауза при смене аккаунта — защита от account-hopping detection
@@ -1349,8 +1399,7 @@ async def _exec_bulk_leave(
 ) -> dict:
     """Выйти из списка каналов/групп несколькими аккаунтами."""
     from services import account_manager, session_simulator
-    from services.flood_engine import recommended_delay
-    import random
+    from services.flood_engine import gaussian_delay, recommended_delay
 
     channels = params.get("channels", [])
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
@@ -1519,20 +1568,27 @@ async def _exec_bulk_leave(
             chaos = session_simulator.chaos_factor()
             tod = session_simulator.time_of_day_factor()
             if delay_mode == "fast":
-                pause = random.uniform(45, 90) * chaos
+                pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
             elif delay_mode == "normal":
-                pause = random.uniform(30, 75) * chaos * tod
+                pause = gaussian_delay(52.5 * chaos * tod, minimum=20.0, maximum=120.0)
             elif delay_mode == "slow":
-                pause = random.uniform(60, 120) * chaos * tod
+                pause = gaussian_delay(90.0 * chaos * tod, minimum=35.0, maximum=180.0)
             else:  # smart — адаптивный с cooldown каждые 5
                 if i % 5 == 4:
-                    pause = random.uniform(120, 240) * chaos
+                    pause = gaussian_delay(180.0 * chaos, minimum=90.0, maximum=300.0)
                 else:
-                    pause = random.uniform(45, 90) * chaos
+                    pause = gaussian_delay(67.5 * chaos, minimum=25.0, maximum=120.0)
                 pause *= tod
             pause = max(pause, recommended_delay(acc["id"], "leave"))
             if flood_wait:
-                pause = max(pause, float(flood_wait) + random.uniform(10, 30))
+                pause = max(
+                    pause,
+                    gaussian_delay(
+                        float(flood_wait) + 20.0,
+                        minimum=float(flood_wait) + 5.0,
+                        maximum=float(flood_wait) + 45.0,
+                    ),
+                )
             await asyncio.sleep(pause)
 
         # Пауза при смене аккаунта — защита от account-hopping detection

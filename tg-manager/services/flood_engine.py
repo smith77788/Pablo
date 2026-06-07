@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -78,6 +79,22 @@ def recommended_delay(account_id: int, action_type: str = "default") -> float:
     return min(base * multiplier, 900.0)
 
 
+def gaussian_delay(
+    mean_seconds: float,
+    *,
+    spread: float = 0.18,
+    minimum: float = 0.5,
+    maximum: float | None = None,
+) -> float:
+    """Return a bounded Gaussian delay for conservative load smoothing."""
+    stddev = max(mean_seconds * spread, 0.05)
+    sampled = random.gauss(mean_seconds, stddev)
+    bounded = max(sampled, minimum)
+    if maximum is not None:
+        bounded = min(bounded, maximum)
+    return bounded
+
+
 async def record_flood(
     pool: Optional[asyncpg.Pool],
     account_id: int,
@@ -129,10 +146,17 @@ async def record_flood(
             await pool.execute(
                 """UPDATE tg_accounts
                    SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'),
-                       last_flood_at = NOW()
+                       last_flood_at = NOW(),
+                       acc_status = CASE
+                           WHEN COALESCE(acc_status, 'active') IN ('spamblock', 'banned', 'deactivated')
+                               THEN acc_status
+                           ELSE 'cooldown'
+                       END,
+                       status_reason = $3
                    WHERE id = $2""",
                 actual_wait,
                 account_id,
+                f"{action_type} cooldown after FloodWait ({wait_seconds}s)",
             )
         except Exception as e:
             log.warning("flood_engine DB write failed: %s", e)
@@ -152,6 +176,36 @@ async def record_success(account_id: int, action_type: str = "default") -> None:
         state.action_delays[action_type] = max(
             state.action_delays[action_type] * 0.9, 0.5
         )
+
+
+async def record_peer_flood(
+    pool: Optional[asyncpg.Pool],
+    account_id: int,
+    action_type: str = "default",
+    operation_id: Optional[int] = None,
+    cooldown_seconds: int = 48 * 3600,
+) -> float:
+    """Isolate outbound workflows for an account after a peer flood penalty."""
+    applied = await record_flood(
+        pool=pool,
+        account_id=account_id,
+        wait_seconds=cooldown_seconds,
+        action_type=action_type,
+        operation_id=operation_id,
+    )
+    if pool is not None:
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                   SET acc_status = 'spamblock',
+                       status_reason = $2
+                   WHERE id = $1""",
+                account_id,
+                f"{action_type} blocked after PeerFlood; outbound workflows paused for 48h",
+            )
+        except Exception as e:
+            log.warning("peer_flood DB write failed: %s", e)
+    return applied
 
 
 async def get_best_account(
@@ -191,8 +245,9 @@ async def get_best_account(
     rows = await pool.fetch(
         f"""SELECT a.id, a.session_str, a.first_name, a.phone,
                    a.device_model, a.system_version, a.app_version,
+                   a.lang_code, a.system_lang_code, a.proxy_id,
                    a.trust_score, a.cooldown_until, a.tags, a.pool,
-                   p.proxy_url
+                   p.proxy_url, p.geo_country
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
             WHERE {where}
@@ -254,8 +309,9 @@ async def get_active_accounts(
     rows = await pool.fetch(
         f"""SELECT a.id, a.session_str, a.first_name, a.phone,
                    a.device_model, a.system_version, a.app_version,
+                   a.lang_code, a.system_lang_code, a.proxy_id,
                    a.trust_score, a.cooldown_until, a.tags, a.pool,
-                   p.proxy_url
+                   p.proxy_url, p.geo_country
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
             WHERE {where}
@@ -287,10 +343,9 @@ async def wait_if_cooling(account_id: int, action_type: str = "default") -> None
 
     delay = recommended_delay(account_id, action_type)
     if delay > 0.1:
-        import random
-
-        jitter = random.uniform(0.8, 1.2)
-        await asyncio.sleep(delay * jitter)
+        await asyncio.sleep(
+            gaussian_delay(delay, spread=0.12, minimum=0.25, maximum=delay * 1.35)
+        )
 
 
 async def load_state_from_db(pool: asyncpg.Pool, owner_id: int) -> None:

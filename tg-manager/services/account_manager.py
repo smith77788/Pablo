@@ -294,16 +294,84 @@ _APP_VERSIONS: list[str] = [
     "10.14.3",
 ]
 
+_COUNTRY_LOCALES: dict[str, tuple[str, str]] = {
+    "RU": ("ru", "ru-RU"),
+    "UA": ("uk", "uk-UA"),
+    "BY": ("be", "be-BY"),
+    "KZ": ("ru", "ru-KZ"),
+    "DE": ("de", "de-DE"),
+    "AT": ("de", "de-AT"),
+    "CH": ("de", "de-CH"),
+    "FR": ("fr", "fr-FR"),
+    "BE": ("fr", "fr-BE"),
+    "IT": ("it", "it-IT"),
+    "ES": ("es", "es-ES"),
+    "PL": ("pl", "pl-PL"),
+    "TR": ("tr", "tr-TR"),
+    "GB": ("en", "en-GB"),
+    "IE": ("en", "en-IE"),
+    "US": ("en", "en-US"),
+    "CA": ("en", "en-CA"),
+}
 
-def generate_device_fingerprint() -> dict:
-    """Return a random realistic Android device fingerprint."""
-    import random
 
+class ProxyIsolationError(ConnectionError):
+    """Raised when an account-bound proxy is missing, invalid, or unavailable."""
+
+
+def _locale_for_country(country_code: str | None) -> tuple[str, str]:
+    if not country_code:
+        return ("ru", "ru-RU")
+    return _COUNTRY_LOCALES.get(country_code.strip().upper(), ("en", "en-US"))
+
+
+def _normalize_device_profile(device: dict | None = None) -> dict[str, Any]:
+    payload = dict(device or {})
+    lang_code = payload.get("lang_code")
+    system_lang_code = payload.get("system_lang_code")
+    if not lang_code or not system_lang_code:
+        locale_lang, locale_system = _locale_for_country(payload.get("geo_country"))
+        payload.setdefault("lang_code", locale_lang)
+        payload.setdefault("system_lang_code", locale_system)
+    payload.setdefault("device_model", "Samsung SM-S911B")
+    payload.setdefault("system_version", "Android 14")
+    payload.setdefault("app_version", "11.5.3")
+    return payload
+
+
+def _resolve_client_proxy(device: dict[str, Any]) -> Any:
+    acc_proxy_url = str(device.get("proxy_url") or "").strip()
+    proxy_id = device.get("proxy_id")
+    strict_account_proxy = bool(device) and (
+        bool(acc_proxy_url) or proxy_id is not None or bool(device.get("enforce_proxy"))
+    )
+    if strict_account_proxy:
+        if not acc_proxy_url:
+            raise ProxyIsolationError(
+                "Account proxy is required for this session, but proxy_url is missing."
+            )
+        proxy = _parse_proxy(acc_proxy_url)
+        if proxy is None:
+            raise ProxyIsolationError(
+                "Account proxy is configured, but its URL could not be parsed."
+            )
+        return proxy
+    if TG_PROXY:
+        return _parse_proxy(TG_PROXY)
+    pool_url = _get_pool_proxy_url()
+    return _parse_proxy(pool_url) if pool_url else None
+
+
+def generate_device_fingerprint(country_code: str | None = None) -> dict[str, str]:
+    """Return a realistic Android device fingerprint with a locale binding."""
     device_model, system_version = random.choice(_ANDROID_DEVICES)
+    lang_code, system_lang_code = _locale_for_country(country_code)
     return {
         "device_model": device_model,
         "system_version": system_version,
         "app_version": random.choice(_APP_VERSIONS),
+        "lang_code": lang_code,
+        "system_lang_code": system_lang_code,
     }
 
 
@@ -311,30 +379,21 @@ def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
 
-    d = device or {}
-    # Proxy priority: 1) account's personal proxy  2) global TG_PROXY  3) free pool
-    acc_proxy_url = d.get("proxy_url") or ""
-    if acc_proxy_url:
-        proxy = _parse_proxy(acc_proxy_url)
-    elif TG_PROXY:
-        proxy = _parse_proxy(TG_PROXY)
-    else:
-        # Use round-robin proxy from the free pool (populated by proxy_scraper)
-        pool_url = _get_pool_proxy_url()
-        proxy = _parse_proxy(pool_url) if pool_url else None
+    d = _normalize_device_profile(device)
+    proxy = _resolve_client_proxy(d)
     return TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),
         TG_API_HASH,
-        device_model=d.get("device_model") or "Samsung SM-S911B",
-        system_version=d.get("system_version") or "Android 14",
-        app_version=d.get("app_version") or "11.5.3",
-        lang_code=d.get("lang_code") or "ru",
-        system_lang_code=d.get("system_lang_code") or "ru-RU",
+        device_model=d["device_model"],
+        system_version=d["system_version"],
+        app_version=d["app_version"],
+        lang_code=d["lang_code"],
+        system_lang_code=d["system_lang_code"],
         connection_retries=1,
         request_retries=1,
         timeout=_CONNECT_TIMEOUT,
-        flood_sleep_threshold=120,  # Auto-sleep on flood wait up to 2 min
+        flood_sleep_threshold=0,
         proxy=proxy,
     )
 
@@ -472,7 +531,8 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
     # Use a realistic Android fingerprint during import validation.
     # Telethon's bare default ("PC 64bit" / version string) is a known
     # Telegram anti-abuse signal — it must never reach Telegram servers.
-    client = _make_client(session_string, generate_device_fingerprint())
+    device = generate_device_fingerprint()
+    client = _make_client(session_string, device)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         if not await client.is_user_authorized():
@@ -483,6 +543,7 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
             "phone": getattr(me, "phone", "") or f"id:{me.id}",
             "first_name": getattr(me, "first_name", "") or "",
             "username": getattr(me, "username", "") or "",
+            **device,
         }
         return session_string, info
     finally:
@@ -735,7 +796,8 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
     session_str = sessions[0]["session_str"]
 
     # Use a realistic Android fingerprint — same reason as import_from_session_string.
-    client = _make_client(session_str, generate_device_fingerprint())
+    device = generate_device_fingerprint()
+    client = _make_client(session_str, device)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
@@ -750,6 +812,7 @@ async def import_from_tdata(tdata_path: str) -> tuple[str, dict]:
             "phone": getattr(me, "phone", "") or f"id:{me.id}",
             "first_name": getattr(me, "first_name", "") or "",
             "username": getattr(me, "username", "") or "",
+            **device,
         }
         return session_str, info
     except asyncio.TimeoutError:

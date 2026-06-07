@@ -148,7 +148,9 @@ async def warm_session(account_id: int, pool: asyncpg.Pool) -> SessionState:
 async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
     """Load all active accounts for owner into the session pool."""
     rows = await pool.fetch(
-        """SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
+        """SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version,
+                  a.lang_code, a.system_lang_code, a.proxy_id,
+                  p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
            WHERE a.owner_id = $1 AND a.is_active = TRUE AND a.session_str IS NOT NULL""",
@@ -156,16 +158,16 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
     )
     loaded = 0
     for row in rows:
-        device = (
-            {
-                "device_model": row["device_model"],
-                "system_version": row["system_version"],
-                "app_version": row["app_version"],
-                "proxy_url": row["proxy_url"],
-            }
-            if row["device_model"]
-            else None
-        )
+        device = {
+            "device_model": row["device_model"],
+            "system_version": row["system_version"],
+            "app_version": row["app_version"],
+            "lang_code": row["lang_code"],
+            "system_lang_code": row["system_lang_code"],
+            "proxy_id": row["proxy_id"],
+            "proxy_url": row["proxy_url"],
+            "geo_country": row["geo_country"],
+        }
         register_session(row["id"], row["session_str"], owner_id, device)
         loaded += 1
     log.info("session_pool: loaded %d sessions for owner=%d", loaded, owner_id)
@@ -174,6 +176,8 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
 
 async def bulk_warm(pool: asyncpg.Pool, owner_id: int, concurrency: int = 3) -> dict:
     """Warm up all registered sessions for owner with limited concurrency."""
+    from services.flood_engine import gaussian_delay
+
     entries = [e for e in _registry.values() if e.owner_id == owner_id]
     if not entries:
         await load_from_db(pool, owner_id)
@@ -186,7 +190,9 @@ async def bulk_warm(pool: asyncpg.Pool, owner_id: int, concurrency: int = 3) -> 
         async with semaphore:
             state = await warm_session(entry.account_id, pool)
             results[entry.account_id] = state
-            await asyncio.sleep(0.5)  # Spread connections
+            await asyncio.sleep(
+                gaussian_delay(0.6, spread=0.2, minimum=0.2, maximum=1.2)
+            )
 
     await asyncio.gather(*[_warm_one(e) for e in entries], return_exceptions=True)
 
