@@ -24,6 +24,7 @@ from typing import Optional
 
 import asyncpg
 
+from services.account_manager import effective_account_status
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -441,6 +442,7 @@ async def _analyze_accounts_impl(
         rows = await pool.fetch(
             """SELECT id, phone, first_name, trust_score, flood_count_7d,
                       cooldown_until, pool, tags, acc_status,
+                      (session_str IS NOT NULL AND session_str <> '') AS has_session,
                       COALESCE(health_score, 0.5) AS health_score
                FROM tg_accounts
                WHERE owner_id=$1 AND is_active=TRUE AND id=ANY($2)
@@ -452,6 +454,7 @@ async def _analyze_accounts_impl(
         rows = await pool.fetch(
             """SELECT id, phone, first_name, trust_score, flood_count_7d,
                       cooldown_until, pool, tags, acc_status,
+                      (session_str IS NOT NULL AND session_str <> '') AS has_session,
                       COALESCE(health_score, 0.5) AS health_score
                FROM tg_accounts
                WHERE owner_id=$1 AND is_active=TRUE
@@ -467,7 +470,11 @@ async def _analyze_accounts_impl(
         trust = float(row["trust_score"] or 1.0)
         flood_7d = int(row["flood_count_7d"] or 0)
         cooldown = row["cooldown_until"]
-        acc_status = row["acc_status"] or "active"
+        acc_status = effective_account_status(
+            row["acc_status"],
+            has_session=bool(row["has_session"]),
+            is_active=True,
+        )
         tags = list(row["tags"] or [])
         pool_name = row["pool"]
         health = float(row["health_score"])
@@ -658,7 +665,12 @@ async def _assess_risk_impl(
                COUNT(*) FILTER (WHERE is_active) AS total,
                COUNT(*) FILTER (WHERE is_active
                    AND (cooldown_until IS NULL OR cooldown_until < NOW())
-                   AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')
+                   AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated')
+                   AND NOT (
+                       COALESCE(acc_status, 'active') = 'session_expired'
+                       AND session_str IS NOT NULL
+                       AND session_str <> ''
+                   )
                ) AS available,
                COUNT(*) FILTER (WHERE is_active AND COALESCE(trust_score,1.0) < 0.4) AS low_trust,
                AVG(COALESCE(trust_score,1.0)) FILTER (WHERE is_active) AS avg_trust,
@@ -998,7 +1010,9 @@ async def _pre_launch_impl(
                     intel.warning_text = _eco_warn
                 break
     except Exception as e:
-        log.warning("intelligence_engine: ecosystem check failed owner=%d: %s", owner_id, e)
+        log.warning(
+            "intelligence_engine: ecosystem check failed owner=%d: %s", owner_id, e
+        )
 
     return intel
 

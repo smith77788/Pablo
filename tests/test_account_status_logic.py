@@ -193,3 +193,27 @@ def test_purge_expired_revalidates_accounts_before_delete() -> None:
         "result = await check_account_status_full(\n                session_str,"
         in accounts_source
     )
+
+
+def test_trust_and_intelligence_do_not_treat_all_session_expired_as_dead() -> None:
+    trust_source = (PROJECT_ROOT / "tg-manager/services/trust_engine.py").read_text(
+        encoding="utf-8"
+    )
+    intelligence_source = (
+        PROJECT_ROOT / "tg-manager/services/intelligence_engine.py"
+    ).read_text(encoding="utf-8")
+    advisor_source = (PROJECT_ROOT / "tg-manager/services/infra_advisor.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "effective_account_status(" in trust_source
+    assert "effective_account_status(" in intelligence_source
+    assert "effective_account_status(" in advisor_source
+    assert (
+        "NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')"
+        not in trust_source
+    )
+    assert (
+        "NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')"
+        not in intelligence_source
+    )

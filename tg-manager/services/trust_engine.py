@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 
+from services.account_manager import effective_account_status
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -38,13 +39,20 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
         SELECT id, owner_id,
                EXTRACT(EPOCH FROM (NOW() - added_at))/86400 AS age_days,
                flood_count_7d,
-               cooldown_until
+               cooldown_until,
+               COALESCE(acc_status, 'active') AS acc_status,
+               (session_str IS NOT NULL AND session_str <> '') AS has_session
         FROM tg_accounts
         WHERE is_active = true
-          AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')
     """)
     history_batch = []
     for row in rows:
+        if effective_account_status(
+            row.get("acc_status"),
+            has_session=bool(row.get("has_session")),
+            is_active=True,
+        ) in {"spamblock", "banned", "deactivated", "no_session", "archived"}:
+            continue
         age_bonus = min(
             _AGE_BONUS_CAP, float(row["age_days"] or 0) * _AGE_BONUS_PER_DAY
         )

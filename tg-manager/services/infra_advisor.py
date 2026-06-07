@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import asyncpg
 
+from services.account_manager import effective_account_status
+
 log = logging.getLogger(__name__)
 
 
@@ -93,14 +95,25 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
         )
 
     # 4. Restricted/banned accounts not cleaned up
-    restricted = await pool.fetch(
-        """SELECT id, phone, first_name, acc_status
+    restricted_rows = await pool.fetch(
+        """SELECT id, phone, first_name, acc_status,
+                  (session_str IS NOT NULL AND session_str <> '') AS has_session,
+                  is_active
            FROM tg_accounts
            WHERE owner_id=$1 AND is_active=TRUE
-             AND COALESCE(acc_status,'active') IN ('spamblock','banned','deactivated','session_expired')
            ORDER BY added_at LIMIT 10""",
         owner_id,
     )
+    restricted = [
+        row
+        for row in restricted_rows
+        if effective_account_status(
+            row["acc_status"],
+            has_session=bool(row["has_session"]),
+            is_active=bool(row["is_active"]),
+        )
+        in {"spamblock", "banned", "deactivated"}
+    ]
     if restricted:
         recs.append(
             {
