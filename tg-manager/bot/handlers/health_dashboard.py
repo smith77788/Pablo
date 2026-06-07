@@ -480,7 +480,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         grp_ok: list = []
 
         for acc in rows:
-            acc_status = acc["acc_status"] or "active"
+            acc_status = _effective_acc_status(acc)
             has_session = acc.get("has_session", True)
             flood_until = acc["cooldown_until"]
             trust = float(acc["trust_score"] or 1.0)

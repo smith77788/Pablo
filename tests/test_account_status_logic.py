@@ -141,5 +141,14 @@ def test_missing_session_wording_is_neutral_not_misleading() -> None:
         PROJECT_ROOT / "tg-manager/bot/handlers/health_dashboard.py"
     ).read_text(encoding="utf-8")
 
-    assert "Сессия недоступна для проверки — session_str отсутствует." in manager_source
+    assert "session_str отсутствует" in manager_source
+    assert "аккаунт не импортирован" not in manager_source
     assert "сессия недоступна для реальной проверки" in dashboard_source
+
+
+def test_health_dashboard_groups_accounts_by_effective_status() -> None:
+    dashboard_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/health_dashboard.py"
+    ).read_text(encoding="utf-8")
+
+    assert "acc_status = _effective_acc_status(acc)" in dashboard_source
