@@ -243,12 +243,17 @@ def test_trust_and_intelligence_do_not_treat_all_session_expired_as_dead() -> No
     assert "effective_account_status(" in trust_source
     assert "effective_account_status(" in intelligence_source
     assert "effective_account_status(" in advisor_source
+    assert '("spamblock", "banned", "deactivated", "no_session")' in intelligence_source
     assert (
         "NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')"
         not in trust_source
     )
     assert (
         "NOT IN ('spamblock', 'banned', 'deactivated', 'session_expired')"
+        not in intelligence_source
+    )
+    assert (
+        '("spamblock", "banned", "deactivated", "session_expired")'
         not in intelligence_source
     )
 

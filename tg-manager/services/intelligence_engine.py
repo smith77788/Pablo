@@ -513,7 +513,7 @@ async def _analyze_accounts_impl(
 
         # Проблемный статус
         status_risk = 0.0
-        if acc_status in ("spamblock", "banned"):
+        if acc_status in ("spamblock", "banned", "no_session"):
             status_risk = 1.0
         elif acc_status in ("restricted", "deactivated"):
             status_risk = 0.7
@@ -537,7 +537,7 @@ async def _analyze_accounts_impl(
 
         # Решение — рекомендовать или нет
         skip_reason = ""
-        if acc_status in ("spamblock", "banned", "deactivated", "session_expired"):
+        if acc_status in ("spamblock", "banned", "deactivated", "no_session"):
             skip_reason = f"статус: {acc_status}"
         elif is_cooling:
             skip_reason = f"кулдаун ещё {cooldown_minutes} мин"
