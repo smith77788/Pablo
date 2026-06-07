@@ -85,6 +85,8 @@ def test_effective_account_status_normalizes_stale_and_missing_sessions() -> Non
     assert (
         effective_account_status("session_expired", has_session=False) == "no_session"
     )
+    assert effective_account_status("no_session", has_session=True) == "active"
+    assert effective_account_status("no_session", has_session=False) == "no_session"
     assert effective_account_status("active", is_active=False) == "archived"
 
 
@@ -180,6 +182,14 @@ def test_health_dashboard_groups_accounts_by_effective_status() -> None:
     ).read_text(encoding="utf-8")
 
     assert "acc_status = _effective_acc_status(acc)" in dashboard_source
+    assert 'if acc_status == "no_session" or not has_session:' in dashboard_source
+
+
+def test_successful_account_login_resets_stale_session_status() -> None:
+    db_source = (PROJECT_ROOT / "tg-manager/database/db.py").read_text(encoding="utf-8")
+
+    assert "acc_status='active'" in db_source
+    assert "status_reason=NULL" in db_source
 
 
 def test_topology_uses_shared_effective_account_status() -> None:

@@ -1303,6 +1303,8 @@ def effective_account_status(
     normalized = status or "active"
     if normalized == "session_expired":
         return "active" if has_session else "no_session"
+    if normalized == "no_session":
+        return "no_session" if not has_session else "active"
     return normalized
 
 

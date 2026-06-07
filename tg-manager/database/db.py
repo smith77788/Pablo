@@ -2284,7 +2284,11 @@ async def add_tg_account(
                app_version=COALESCE($9, tg_accounts.app_version),
                lang_code=COALESCE($10, tg_accounts.lang_code),
                system_lang_code=COALESCE($11, tg_accounts.system_lang_code),
-               is_active=true, last_used=now()
+               acc_status='active',
+               status_reason=NULL,
+               status_checked_at=now(),
+               is_active=true,
+               last_used=now()
            RETURNING id""",
         owner_id,
         phone,

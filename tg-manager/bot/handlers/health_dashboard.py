@@ -485,7 +485,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             trust = float(acc["trust_score"] or 1.0)
             # session_expired у аккаунта без session_str — это недоступная session-материя,
             # а не подтверждённо истекшая авторизация
-            if acc_status == "session_expired" and not has_session:
+            if acc_status == "no_session" or not has_session:
                 grp_no_session.append(acc)
             elif is_verified_account_restriction(acc_status, has_session=has_session):
                 grp_restricted.append(acc)
