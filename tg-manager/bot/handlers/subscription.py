@@ -14,7 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import SubCb
 from bot.states import PaymentSettingsFSM
-from bot.utils.subscription import get_plan, PLAN_EMOJIS, BOT_LIMITS, is_platform_admin
+from bot.utils import subscription as sub_utils
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 from services.logger import log_exc_swallow
 
@@ -129,7 +129,7 @@ def _mask(val: str) -> str:
 
 async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
     """Возвращает (plan, expires_at) или (plan, None) для бесплатного плана."""
-    if is_platform_admin(user_id):
+    if sub_utils.is_platform_admin(user_id):
         return "enterprise", None
     try:
         row = await pool.fetchrow(
@@ -149,9 +149,9 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     from datetime import datetime, timezone
 
     plan, expires_at = await _get_plan_expiry(pool, user_id)
-    lim = BOT_LIMITS.get(plan, 3)
+    lim = sub_utils.BOT_LIMITS.get(plan, 3)
     lim_label = "∞" if lim >= 9999 else str(lim)
-    emoji = PLAN_EMOJIS.get(plan, "🆓")
+    emoji = sub_utils.PLAN_EMOJIS.get(plan, "🆓")
     ton_ok = "✅" if _ton_wallet() else "❌"
     tron_ok = "✅" if _tron_wallet() else "❌"
     pay_status = f"TON {ton_ok}  USDT {tron_ok}"
@@ -160,7 +160,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     if plan == "free":
         plan_info = f"Текущий план: <b>{emoji} FREE</b> · до {lim_label} ботов"
     else:
-        if is_platform_admin(user_id):
+        if sub_utils.is_platform_admin(user_id):
             plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · ∞ ботов\n🔑 <i>Администратор платформы</i>"
         elif expires_at:
             now_utc = datetime.now(timezone.utc)
@@ -206,7 +206,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     kb = InlineKeyboardBuilder()
     for p in ("starter", "pro", "enterprise"):
         price = PLAN_PRICES_USD[p]
-        em = PLAN_EMOJIS[p]
+        em = sub_utils.PLAN_EMOJIS[p]
         prefix = "✅ " if plan == p else ""
         kb.button(
             text=f"{prefix}{em} {p.upper()} — ${price}/мес",
@@ -218,7 +218,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
         )
     from bot.callbacks import BotCb
 
-    if is_platform_admin(user_id):
+    if sub_utils.is_platform_admin(user_id):
         kb.button(
             text="⚙️ Настройка оплаты", callback_data=SubCb(action="payment_settings")
         )
@@ -283,16 +283,16 @@ async def cb_plan_features(
         await callback.answer("Неизвестный план.", show_alert=True)
         return
     await callback.answer()
-    em = PLAN_EMOJIS.get(plan, "")
+    em = sub_utils.PLAN_EMOJIS.get(plan, "")
     price = PLAN_PRICES_USD.get(plan, 0)
-    bot_limit = BOT_LIMITS.get(plan, 0)
+    bot_limit = sub_utils.BOT_LIMITS.get(plan, 0)
     limit_label = "∞" if bot_limit >= 9999 else str(bot_limit)
     features_text = "\n".join(f"  {f}" for f in PLAN_DETAILED_FEATURES[plan])
     highlight = _PLAN_HIGHLIGHTS.get(plan, "")
     savings = _PLAN_ANNUAL_SAVINGS.get(plan, "")
 
     # Показываем текущий план пользователя
-    current_plan = await get_plan(pool, callback.from_user.id)
+    current_plan = await sub_utils.get_plan(pool, callback.from_user.id)
     is_current = current_plan == plan
     status_line = "✅ <i>Это ваш текущий план</i>\n\n" if is_current else ""
 
@@ -326,7 +326,7 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
         return
     await callback.answer()
     base = PLAN_PRICES_USD[plan]
-    em = PLAN_EMOJIS.get(plan, "")
+    em = sub_utils.PLAN_EMOJIS.get(plan, "")
     kb = InlineKeyboardBuilder()
     for months, disc in [(1, 0), (3, 10), (6, 15), (12, 20)]:
         total = round(base * months * (1 - disc / 100), 2)
@@ -358,7 +358,7 @@ async def cb_choose_period(
         # No wallets configured
         usd, _ = _calc(plan, months, "TON")
         kb = InlineKeyboardBuilder()
-        if is_platform_admin(callback.from_user.id):
+        if sub_utils.is_platform_admin(callback.from_user.id):
             kb.button(
                 text="🎁 Активировать себе (Admin)",
                 callback_data=SubCb(action="admin_grant", plan=plan, months=months),
@@ -375,7 +375,7 @@ async def cb_choose_period(
         kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
         kb.adjust(1)
         await callback.message.edit_text(
-            f"💳 <b>{PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b> — <b>${usd}</b>\n\n"
+            f"💳 <b>{sub_utils.PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b> — <b>${usd}</b>\n\n"
             f"⚠️ Автоматическая оплата не настроена.\n\n"
             f"Нажмите <b>«📩 Запросить подписку»</b> — администратор активирует вручную после оплаты.",
             parse_mode="HTML",
@@ -403,7 +403,7 @@ async def cb_choose_period(
     kb.adjust(1)
     usd_show, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20")
     await callback.message.edit_text(
-        f"💳 <b>{PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b>\n\n"
+        f"💳 <b>{sub_utils.PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b>\n\n"
         f"Итого: <b>${usd_show}</b>\n\nВыберите способ оплаты:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -435,7 +435,9 @@ async def cb_pay(
     ref = _gen_ref()
     for _ in range(5):
         try:
-            existing = await pool.fetchrow("SELECT id FROM payments WHERE reference=$1", ref)
+            existing = await pool.fetchrow(
+                "SELECT id FROM payments WHERE reference=$1", ref
+            )
         except Exception:
             log.warning("cb_pay: DB error checking reference uniqueness", exc_info=True)
             existing = None
@@ -504,7 +506,11 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             callback.from_user.id,
         )
     except Exception:
-        log.warning("cb_check_status: DB error for user_id=%s", callback.from_user.id, exc_info=True)
+        log.warning(
+            "cb_check_status: DB error for user_id=%s",
+            callback.from_user.id,
+            exc_info=True,
+        )
         row = None
     if not row:
         kb = InlineKeyboardBuilder()
@@ -545,7 +551,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.answer()
     plan, months = callback_data.plan or "", callback_data.months
     usd, _ = _calc(plan, months, "TON")
-    em = PLAN_EMOJIS.get(plan, "")
+    em = sub_utils.PLAN_EMOJIS.get(plan, "")
     uid = callback.from_user.id
     user_label = (
         f"@{callback.from_user.username}"
@@ -594,7 +600,7 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
 async def cb_admin_grant(
     callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
 ) -> None:
-    if not is_platform_admin(callback.from_user.id):
+    if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
     await callback.answer()
@@ -621,7 +627,8 @@ async def cb_admin_grant(
         log_exc_swallow(log, "cb_admin_grant: failed to upsert subscription")
     try:
         row = await pool.fetchrow(
-            "SELECT expires_at FROM subscriptions WHERE user_id=$1", callback.from_user.id
+            "SELECT expires_at FROM subscriptions WHERE user_id=$1",
+            callback.from_user.id,
         )
     except Exception:
         log.warning("cb_admin_grant: DB error fetching expires_at", exc_info=True)
@@ -690,7 +697,7 @@ def _payment_settings_text() -> str:
 
 @router.callback_query(SubCb.filter(F.action == "payment_settings"))
 async def cb_payment_settings(callback: CallbackQuery, state: FSMContext) -> None:
-    if not is_platform_admin(callback.from_user.id):
+    if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
     await callback.answer()
@@ -706,7 +713,7 @@ async def cb_payment_settings(callback: CallbackQuery, state: FSMContext) -> Non
 async def cb_pay_edit(
     callback: CallbackQuery, callback_data: SubCb, state: FSMContext
 ) -> None:
-    if not is_platform_admin(callback.from_user.id):
+    if not sub_utils.is_platform_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
     key = callback_data.plan or ""  # reused field for the setting key

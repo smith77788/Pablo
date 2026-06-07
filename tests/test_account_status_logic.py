@@ -369,3 +369,13 @@ def test_mass_publish_isolates_network_failed_accounts() -> None:
     assert "isolated_accounts: set[int] = set()" in worker_source
     assert 'if acc["id"] in isolated_accounts:' in worker_source
     assert "await release_accounts(mp_used_acc_ids)" in worker_source
+
+
+def test_subscription_handler_uses_module_admin_lookup() -> None:
+    source = (PROJECT_ROOT / "tg-manager/bot/handlers/subscription.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from bot.utils import subscription as sub_utils" in source
+    assert "sub_utils.is_platform_admin(" in source
+    assert "sub_utils.get_plan(" in source
