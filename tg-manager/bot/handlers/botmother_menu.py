@@ -283,13 +283,18 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
                 return
             except Exception:
                 pass
-        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+        if (
+            "message to edit not found" in err_str
+            or "message can't be edited" in err_str
+        ):
             try:
                 await callback.bot.send_message(
                     callback.from_user.id, text, parse_mode="HTML", reply_markup=markup
                 )
             except Exception:
-                log_exc_swallow(log, "Не удалось отправить fallback-сообщение при ошибке _edit")
+                log_exc_swallow(
+                    log, "Не удалось отправить fallback-сообщение при ошибке _edit"
+                )
         else:
             log.warning("BotMother _edit error (no fallback): %s", e)
 
@@ -520,8 +525,17 @@ async def cb_operations(
 
 
 @router.callback_query(BmCb.filter(F.action == "comms"))
-async def cb_comms(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_comms(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await _edit(
+            callback,
+            locked_text("Рассылки и связь", "starter"),
+            subscription_locked_markup("starter"),
+        )
+        return
     await _edit(
         callback,
         "📢 <b>Рассылки & Связь</b>\n\n"
@@ -540,8 +554,17 @@ async def cb_comms(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "broadcasts"))
-async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_broadcasts(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await _edit(
+            callback,
+            locked_text("Рассылки и связь", "starter"),
+            subscription_locked_markup("starter"),
+        )
+        return
     await _edit(
         callback,
         "📢 <b>Рассылки & Связь</b>\n\n"
@@ -560,8 +583,17 @@ async def cb_broadcasts(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "inbox"))
-async def cb_inbox(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_inbox(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await _edit(
+            callback,
+            locked_text("Inbox и диалоги", "starter"),
+            subscription_locked_markup("starter"),
+        )
+        return
     await _edit(
         callback,
         "📢 <b>Рассылки & Связь</b>\n\n"
@@ -595,8 +627,17 @@ async def cb_monitoring(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "ai_assistant"))
-async def cb_ai_assistant(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_ai_assistant(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await _edit(
+            callback,
+            locked_text("AI-помощник", "enterprise"),
+            subscription_locked_markup("enterprise"),
+        )
+        return
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Открыть AI-ассистент", callback_data=AiCb(action="start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
@@ -2102,7 +2143,9 @@ _NOTIF_LABELS = {
 }
 
 
-async def _get_or_create_notif(pool: asyncpg.Pool, user_id: int) -> asyncpg.Record | None:
+async def _get_or_create_notif(
+    pool: asyncpg.Pool, user_id: int
+) -> asyncpg.Record | None:
     try:
         await pool.execute(
             "INSERT INTO notification_settings(user_id) VALUES($1) ON CONFLICT DO NOTHING",
@@ -2166,7 +2209,8 @@ async def cb_notif_toggle(
         pass
     try:
         row = await pool.fetchrow(
-            "SELECT * FROM notification_settings WHERE user_id=$1", callback.from_user.id
+            "SELECT * FROM notification_settings WHERE user_id=$1",
+            callback.from_user.id,
         )
     except Exception:
         row = None

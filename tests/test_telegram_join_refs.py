@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
 
 from services.account_manager import (
     _select_report_option_for_reason,
+    format_telegram_join_ref_display,
     normalize_telegram_join_ref,
 )
 
@@ -47,6 +48,14 @@ def test_normalize_public_channel_refs() -> None:
         "public",
         "telegram",
     )
+
+
+def test_format_private_invite_display_never_uses_public_at_prefix() -> None:
+    assert format_telegram_join_ref_display("https://t.me/+AbC-123") == (
+        "https://t.me/+AbC-123"
+    )
+    assert format_telegram_join_ref_display("+AbC-123") == "https://t.me/+AbC-123"
+    assert format_telegram_join_ref_display("@telegram") == "@telegram"
 
 
 def test_select_report_option_for_reason_prefers_matching_text() -> None:

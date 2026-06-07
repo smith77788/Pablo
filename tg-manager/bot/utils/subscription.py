@@ -19,9 +19,22 @@ def get_free_mode() -> bool:
     return _FREE_MODE
 
 
+def _global_free_mode_allowed() -> bool:
+    return os.getenv("ALLOW_GLOBAL_FREE_MODE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def set_free_mode(enabled: bool) -> None:
     global _FREE_MODE
-    _FREE_MODE = enabled
+    _FREE_MODE = bool(enabled and _global_free_mode_allowed())
+    if enabled and not _FREE_MODE:
+        log.warning(
+            "free_mode requested but ignored: set ALLOW_GLOBAL_FREE_MODE=true to enable it"
+        )
 
 
 def invalidate_plan_cache(user_id: int) -> None:
@@ -30,7 +43,7 @@ def invalidate_plan_cache(user_id: int) -> None:
 
 
 PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
-BOT_LIMITS: dict[str, int] = {"free": 3, "starter": 10, "pro": 30, "enterprise": 9999}
+BOT_LIMITS: dict[str, int] = {"free": 1, "starter": 10, "pro": 30, "enterprise": 9999}
 PLAN_PRICES = {"starter": "$9", "pro": "$25", "enterprise": "$69"}
 PLAN_EMOJIS = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
 PLAN_FEATURES = {
@@ -42,7 +55,7 @@ PLAN_FEATURES = {
 PLAN_ALIASES: dict[str, str] = {"max": "enterprise", "maximum": "enterprise"}
 FEATURE_PLAN: dict[str, str] = {
     "basic_bots": "free",
-    "basic_broadcast": "free",
+    "basic_broadcast": "starter",
     "inbox": "starter",
     "funnels": "starter",
     "crm": "starter",

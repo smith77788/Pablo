@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import random
@@ -23,6 +24,10 @@ from bot.states import MiniStrikeFSM, StrikeEmailFSM
 from bot.utils.subscription import require_feature
 from bot.utils.event_status import mark_handled_error
 from services import email_oauth
+from services.account_manager import (
+    format_telegram_join_ref_display,
+    normalize_telegram_join_ref,
+)
 from services.logger import log_exc_swallow
 
 # SMTP авто-определение по домену почты
@@ -135,7 +140,9 @@ async def _has_access(pool: asyncpg.Pool, user_id: int) -> bool:
         return True
     await _ensure_table(pool)
     try:
-        row = await pool.fetchrow("SELECT 1 FROM strike_access WHERE user_id=$1", user_id)
+        row = await pool.fetchrow(
+            "SELECT 1 FROM strike_access WHERE user_id=$1", user_id
+        )
     except Exception:
         row = None
     result = row is not None
@@ -765,21 +772,9 @@ async def msg_mini_strike_target(
         return
 
     # Нормализация — обрабатываем публичные username и приватные invite-ссылки (+HASH)
-    normalized = (
-        raw.replace("https://t.me/", "")
-        .replace("http://t.me/", "")
-        .split("?")[0]
-        .split("/")[0]
-        .strip()
-    )
-    # Если начинается с '+' — это invite hash (приватная ссылка), сохраняем как есть
-    if normalized.startswith("+"):
-        target = normalized  # "+HASH"
-        target_display = f"<code>{normalized}</code>"
-    else:
-        target = normalized.lstrip("@")
-        target_display = f"<code>@{target}</code>"
-
+    ref_kind, ref_value = normalize_telegram_join_ref(raw)
+    target = f"+{ref_value}" if ref_kind == "invite" else ref_value.lstrip("@")
+    target_display = html.escape(format_telegram_join_ref_display(target))
     if not target or len(target) < 4:
         await message.answer("⚠️ Некорректный username или ссылка. Попробуйте ещё раз.")
         return
@@ -788,7 +783,7 @@ async def msg_mini_strike_target(
     await state.set_state(MiniStrikeFSM.awaiting_category)
 
     await message.answer(
-        f"🎯 Цель: {target_display}\n\nВыберите категорию нарушения:",
+        f"🎯 Цель: <code>{target_display}</code>\n\nВыберите категорию нарушения:",
         parse_mode="HTML",
         reply_markup=_category_kb(target).as_markup(),
     )
@@ -919,7 +914,7 @@ async def cb_mini_strike_category(
 
     await callback.message.edit_text(
         f"⚡ <b>Мини-страйк — подтверждение</b>\n\n"
-        f"🎯 Цель: <code>@{target}</code>\n"
+        f"🎯 Цель: <code>{html.escape(format_telegram_join_ref_display(str(target)))}</code>\n"
         f"📂 Категория: {cat['label']}\n"
         f"🔴 Уровень: <b>{cat['severity']}</b>\n"
         f"📱 Аккаунт: <b>{acc_label}</b> (trust: {trust:.2f})\n\n"
@@ -1000,7 +995,7 @@ async def cb_mini_strike_run(
             pass
 
     await progress(
-        f"🎯 Цель: <code>@{target}</code>\n📂 Категория: {category}\n\n⚙️ Запуск..."
+        f"🎯 Цель: <code>{html.escape(format_telegram_join_ref_display(str(target)))}</code>\n📂 Категория: {category}\n\n⚙️ Запуск..."
     )
 
     from services.strike_engine import execute_mini_strike, format_mini_result

@@ -153,6 +153,16 @@ def normalize_telegram_join_ref(value: str) -> tuple[str, str]:
     return ("public", raw_no_fragment.split("?", 1)[0])
 
 
+def format_telegram_join_ref_display(value: str) -> str:
+    """Return a user-facing Telegram target without mixing invite links and @names."""
+    ref_kind, ref_value = normalize_telegram_join_ref(value)
+    if not ref_value:
+        return ""
+    if ref_kind == "invite":
+        return f"https://t.me/+{ref_value}"
+    return f"@{ref_value}"
+
+
 def _select_report_option_for_reason(options: list, reason: str) -> bytes | None:
     """Pick the best report option Telegram offered for the requested reason."""
     hints = {
