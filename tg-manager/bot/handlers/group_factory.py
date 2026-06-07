@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AccCb, BmCb, GroupFCb, EcoPickCb
+from database import db
 from bot.keyboards import subscription_locked_markup
 from bot.states import AnnounceGroupFSM, CreateGroupFSM
 from bot.utils.op_helpers import _acc_label, _get_active_accounts
@@ -126,10 +127,8 @@ async def cb_group_create_acc_chosen(
     state: FSMContext,
 ) -> None:
     try:
-        acc = await pool.fetchrow(
-            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.acc_id,
-            callback.from_user.id,
+        acc = await db.get_account_for_telethon(
+            pool, callback_data.acc_id, callback.from_user.id
         )
     except Exception:
         log_exc_swallow(log, "group_create_acc fetchrow failed")
@@ -485,10 +484,8 @@ async def cb_group_members_acc(
     callback: CallbackQuery, callback_data: GroupFCb, pool: asyncpg.Pool
 ) -> None:
     try:
-        acc = await pool.fetchrow(
-            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.acc_id,
-            callback.from_user.id,
+        acc = await db.get_account_for_telethon(
+            pool, callback_data.acc_id, callback.from_user.id
         )
     except Exception:
         log_exc_swallow(log, "group_members_acc fetchrow failed")
@@ -857,10 +854,8 @@ async def cb_group_announce_acc(
     state: FSMContext,
 ) -> None:
     try:
-        acc = await pool.fetchrow(
-            "SELECT id, session_str, device_model, system_version, app_version FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            callback_data.acc_id,
-            callback.from_user.id,
+        acc = await db.get_account_for_telethon(
+            pool, callback_data.acc_id, callback.from_user.id
         )
     except Exception:
         log_exc_swallow(log, "group_announce_acc fetchrow failed")

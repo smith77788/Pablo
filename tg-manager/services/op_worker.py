@@ -65,6 +65,10 @@ _FATAL_ERRORS = {
 }
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 _PEER_FLOOD_PATTERNS = re.compile(r"peer.flood|PEER_FLOOD|PeerFlood", re.IGNORECASE)
+_NETWORK_PATTERNS = re.compile(
+    r"connection to telegram failed|general socks server failure|proxy недоступен|timeout при подключении|ошибка сети",
+    re.IGNORECASE,
+)
 
 
 def _normalize_result(result: dict, op_type: str, duration_s: float) -> dict:
@@ -124,6 +128,48 @@ def _classify_op_error(exc: Exception) -> str:
     ):
         return "skip"
     return "retry"
+
+
+def _is_network_or_proxy_error(error_text: str) -> bool:
+    return bool(_NETWORK_PATTERNS.search(error_text))
+
+
+async def _record_network_isolation(
+    pool: asyncpg.Pool,
+    account_id: int,
+    action_type: str,
+    operation_id: int,
+    error_text: str,
+    cooldown_s: int = 15 * 60,
+) -> None:
+    await pool.execute(
+        """UPDATE tg_accounts
+           SET cooldown_until = GREATEST(
+                   COALESCE(cooldown_until, NOW()),
+                   NOW() + ($2 * INTERVAL '1 second')
+               ),
+               acc_status = 'cooldown',
+               status_reason = $3
+           WHERE id = $1""",
+        account_id,
+        cooldown_s,
+        f"network/proxy failure ({action_type}): {error_text[:180]}",
+    )
+    try:
+        from services import account_health
+
+        account_health.update_after_failure(account_id, action_type, is_flood=False)
+    except Exception:
+        log_exc_swallow(
+            log,
+            f"op_worker: account_health network isolation failed for account_id={account_id}",
+        )
+    await pool.execute(
+        "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,0,$2,'error',$3)",
+        operation_id,
+        str(account_id),
+        f"Аккаунт изолирован на {cooldown_s}s из-за сетевого/прокси сбоя: {error_text[:160]}",
+    )
 
 
 async def _deactivate_dead_session(
@@ -956,15 +1002,18 @@ async def _exec_mass_publish(
         f"SELECT DISTINCT ON (mc.channel_id) "
         f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
-        f"a.device_model, a.system_version, a.app_version "
+        f"a.device_model, a.system_version, a.app_version, "
+        f"a.lang_code, a.system_lang_code, a.proxy_id, p.proxy_url, p.geo_country "
         f"FROM managed_channels mc "
         f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
+        f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
         f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) AND {type_filter} {chan_filter} "
         f"ORDER BY mc.channel_id, a.id",
         *fetch_params,
     )
 
     if not db_pairs:
+        await release_accounts(mp_used_acc_ids)
         return {
             "status": "done",
             "ok": 0,
@@ -997,9 +1046,11 @@ async def _exec_mass_publish(
     ok_count = 0
     fail_count = 0
     failed_channels: list[str] = []
+    isolated_accounts: set[int] = set()
 
     for idx, (acc, dialog) in enumerate(targets, 1):
         if await _is_cancelled(pool, op_id):
+            await release_accounts(mp_used_acc_ids)
             return {
                 "status": "cancelled",
                 "ok": ok_count,
@@ -1007,6 +1058,23 @@ async def _exec_mass_publish(
                 "failed_channels": failed_channels[:50],
                 "summary": f"Отменено. Опубликовано: {ok_count}, ошибок: {fail_count}",
             }
+        if acc["id"] in isolated_accounts:
+            fail_count += 1
+            ch_label = str(dialog.get("title") or dialog["id"])[:60]
+            if ch_label not in failed_channels:
+                failed_channels.append(ch_label)
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id,
+                idx,
+                str(dialog["id"]),
+                "Аккаунт временно изолирован после сетевого/прокси сбоя",
+            )
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            continue
         flood_wait = 0
         _published = False
         for _attempt in range(2):  # per-item retry: 1 initial + 1 retry on FloodWait
@@ -1018,6 +1086,10 @@ async def _exec_mass_publish(
                     access_hash=dialog["access_hash"],
                     _acc=acc,
                 )
+                if result.get("proxy_error"):
+                    raise ConnectionError(
+                        str(result.get("error", "proxy/network error"))
+                    )
                 if "error" in result or result.get("banned"):
                     raise Exception(str(result.get("error", "publish error")))
                 ok_count += 1
@@ -1042,6 +1114,19 @@ async def _exec_mass_publish(
             except Exception as e:
                 err_str = str(e)[:200]
                 flood_wait = extract_flood_wait(e, err_str)
+                if _is_network_or_proxy_error(err_str):
+                    isolated_accounts.add(acc["id"])
+                    try:
+                        await _record_network_isolation(
+                            pool,
+                            acc["id"],
+                            "publish",
+                            op_id,
+                            err_str,
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "mass_publish: network isolation failed")
+                    break
                 if flood_wait and _attempt == 0:
                     # FloodWait on first attempt — sleep and retry once
                     log.warning(

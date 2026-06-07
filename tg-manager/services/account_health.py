@@ -226,7 +226,8 @@ async def get_sorted_accounts(
                   COALESCE(a.acc_status, 'active') AS acc_status, a.is_active,
                   (a.session_str IS NOT NULL AND a.session_str != '') AS has_session,
                   a.device_model, a.system_version, a.app_version,
-                  p.proxy_url
+                  a.lang_code, a.system_lang_code, a.proxy_id,
+                  p.proxy_url, p.geo_country
            FROM tg_accounts a
            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
            WHERE a.owner_id = $1

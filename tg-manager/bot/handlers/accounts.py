@@ -1992,11 +1992,7 @@ async def cb_check_all_accounts(
         acc_dict = None
         result: dict = {"auth_error": False}
         try:
-            acc_dict = await pool.fetchrow(
-                "SELECT id, session_str, device_model, system_version, app_version "
-                "FROM tg_accounts WHERE id=$1",
-                acc["id"],
-            )
+            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
             session_str = (
                 (acc_dict.get("session_str") if acc_dict else None)
                 or acc.get("session_str")
@@ -2190,11 +2186,7 @@ async def cb_scan_all_resources(
             )
         )
         try:
-            acc_dict = await pool.fetchrow(
-                "SELECT id, session_str, device_model, system_version, app_version "
-                "FROM tg_accounts WHERE id=$1",
-                acc["id"],
-            )
+            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
             session_str = (
                 (acc_dict.get("session_str") if acc_dict else None)
                 or acc.get("session_str")
@@ -2336,20 +2328,24 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
     await callback.answer("🧹 Удаляю...")
 
     try:
-        candidates = await pool.fetch(
-            """SELECT id, session_str, device_model, system_version, app_version
-               FROM tg_accounts
-               WHERE owner_id=$1 AND acc_status='session_expired'""",
-            uid,
-        )
+        candidates = [
+            acc
+            for acc in await db.get_tg_accounts(pool, uid)
+            if acc.get("acc_status") == "session_expired"
+        ]
         delete_ids: list[int] = []
         for acc in candidates:
-            session_str = acc.get("session_str") or ""
+            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
+            session_str = (
+                (acc_dict.get("session_str") if acc_dict else None)
+                or acc.get("session_str")
+                or ""
+            )
             if not session_str:
                 continue
             result = await check_account_status_full(
                 session_str,
-                _acc=dict(acc),
+                _acc=dict(acc_dict) if acc_dict else None,
                 check_spambot=False,
             )
             if result.get("status") == "session_expired" and result.get("auth_error"):
@@ -2416,11 +2412,7 @@ async def cb_del_dead_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     dead_ids: list[int] = []
     for acc in accounts:
         try:
-            acc_dict = await pool.fetchrow(
-                "SELECT id, session_str, device_model, system_version, app_version "
-                "FROM tg_accounts WHERE id=$1",
-                acc["id"],
-            )
+            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
             session_str = (
                 (acc_dict.get("session_str") if acc_dict else None)
                 or acc.get("session_str")

@@ -24,6 +24,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import AccCb, ChanFactCb, SeoCb, EcoPickCb
+from database import db
 from services.logger import log_exc_swallow
 from bot.states import (
     BulkChannelCreateFSM,
@@ -653,12 +654,7 @@ async def cb_chanf_do_create(
         )
         return
     try:
-        acc = await pool.fetchrow(
-            "SELECT id, session_str, device_model, system_version, app_version "
-            "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-            acc_id,
-            callback.from_user.id,
-        )
+        acc = await db.get_account_for_telethon(pool, acc_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "confirm_create fetchrow failed")
         acc = None
@@ -702,7 +698,9 @@ async def cb_chanf_do_create(
                 acc["session_str"], uname, _acc=acc
             )
             if not available:
-                uname_result = f"\n⚠️ Username @{html.escape(uname)} уже занят — установите вручную"
+                uname_result = (
+                    f"\n⚠️ Username @{html.escape(uname)} уже занят — установите вручную"
+                )
             else:
                 err_u = await account_manager.set_channel_username(
                     acc["session_str"], channel_id, uname, _acc=acc

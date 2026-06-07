@@ -334,7 +334,9 @@ async def _get_accounts(pool: asyncpg.Pool, owner_id: int) -> list[asyncpg.Recor
         return await pool.fetch(
             "SELECT a.id, a.session_str, a.phone, a.first_name, a.username, a.is_active, "
             "a.trust_score, a.flood_count_7d, a.cooldown_until, a.tg_user_id, "
-            "a.device_model, a.system_version, a.app_version, p.proxy_url "
+            "a.device_model, a.system_version, a.app_version, "
+            "a.lang_code, a.system_lang_code, a.proxy_id, "
+            "p.proxy_url, p.geo_country "
             "FROM tg_accounts a "
             "LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
             "WHERE a.owner_id=$1 ORDER BY a.added_at",
@@ -3522,7 +3524,9 @@ async def fsm_botfather_username(
         )
     except Exception as exc:
         mark_handled_error(f"botfather_create accounts: {exc}")
-        await message.answer(f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>")
+        await message.answer(
+            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>"
+        )
         return
     if not accounts:
         await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
@@ -4302,7 +4306,10 @@ async def cb_br_confirm(
             _before = len(viable)
             viable = [a for a in viable if a.get("id") not in _warming_ids]
             if len(viable) < _before:
-                log.warning("channel_ops strike: excluded %d warmup accounts", _before - len(viable))
+                log.warning(
+                    "channel_ops strike: excluded %d warmup accounts",
+                    _before - len(viable),
+                )
     except Exception:
         pass
 
@@ -4319,7 +4326,9 @@ async def cb_br_confirm(
     skipped = len(chosen) - len(viable)
     preflight_note = ""
     if skipped > 0:
-        preflight_note = f"\n⚠️ Пропущено аккаунтов в кулдауне/прогреве: <b>{skipped}</b>"
+        preflight_note = (
+            f"\n⚠️ Пропущено аккаунтов в кулдауне/прогреве: <b>{skipped}</b>"
+        )
 
     # ═══════════════════════════════════════════════════════════════════════
     # ФАЗА 1: РАЗВЕДКА — лучшим аккаунтом карту цели
@@ -4997,32 +5006,62 @@ async def _bulk_leave_channel_bg(
                 )
             except Exception as e:
                 err_list.append(f"❌ {label}: {str(e)[:50]}")
-                await _op_audit(pool, user_id, "leave", "error",
-                                target=str(channel_ref), account_id=acc["id"],
-                                error_msg=str(e)[:200])
+                await _op_audit(
+                    pool,
+                    user_id,
+                    "leave",
+                    "error",
+                    target=str(channel_ref),
+                    account_id=acc["id"],
+                    error_msg=str(e)[:200],
+                )
             if result is not None:
                 if isinstance(result, dict) and result.get("banned"):
                     await _db.deactivate_account(
                         pool, acc["id"], "banned detected in bulk op"
                     )
                     err_list.append(f"❌ {label}: забанен")
-                    await _op_audit(pool, user_id, "leave", "error",
-                                    target=str(channel_ref), account_id=acc["id"],
-                                    error_msg="banned")
+                    await _op_audit(
+                        pool,
+                        user_id,
+                        "leave",
+                        "error",
+                        target=str(channel_ref),
+                        account_id=acc["id"],
+                        error_msg="banned",
+                    )
                 elif isinstance(result, dict) and result.get("flood_wait"):
                     err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                    await _op_audit(pool, user_id, "leave", "flood_wait",
-                                    target=str(channel_ref), account_id=acc["id"],
-                                    flood_wait_s=result.get("flood_wait"))
+                    await _op_audit(
+                        pool,
+                        user_id,
+                        "leave",
+                        "flood_wait",
+                        target=str(channel_ref),
+                        account_id=acc["id"],
+                        flood_wait_s=result.get("flood_wait"),
+                    )
                 elif result:
                     ok_list.append(f"✅ {label}")
-                    await _op_audit(pool, user_id, "leave", "success",
-                                    target=str(channel_ref), account_id=acc["id"])
+                    await _op_audit(
+                        pool,
+                        user_id,
+                        "leave",
+                        "success",
+                        target=str(channel_ref),
+                        account_id=acc["id"],
+                    )
                 else:
                     err_list.append(f"❌ {label}: не удалось")
-                    await _op_audit(pool, user_id, "leave", "error",
-                                    target=str(channel_ref), account_id=acc["id"],
-                                    error_msg="leave returned False")
+                    await _op_audit(
+                        pool,
+                        user_id,
+                        "leave",
+                        "error",
+                        target=str(channel_ref),
+                        account_id=acc["id"],
+                        error_msg="leave returned False",
+                    )
             try:
                 await msg.edit_text(
                     _progress_text(
@@ -5342,6 +5381,7 @@ async def fsm_join_invite_combined(
         active_accounts = list(accounts)
         attempt = 0
         from services.op_worker import write_op_audit as _op_audit
+
         # Round-robin: distribute join attempts across accounts
         for idx, acc in enumerate(active_accounts):
             label = html.escape(acc["first_name"] or acc["phone"])
@@ -5353,14 +5393,26 @@ async def fsm_join_invite_combined(
                     pool, acc["id"], "banned detected in bulk op"
                 )
                 err_list.append(f"❌ {label}: забанен")
-                await _op_audit(pool, message.from_user.id, "join", "error",
-                                target=invite, account_id=acc["id"],
-                                error_msg="banned_in_channel")
+                await _op_audit(
+                    pool,
+                    message.from_user.id,
+                    "join",
+                    "error",
+                    target=invite,
+                    account_id=acc["id"],
+                    error_msg="banned_in_channel",
+                )
             elif result.get("flood_wait"):
                 err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                await _op_audit(pool, message.from_user.id, "join", "flood_wait",
-                                target=invite, account_id=acc["id"],
-                                flood_wait_s=result.get("flood_wait"))
+                await _op_audit(
+                    pool,
+                    message.from_user.id,
+                    "join",
+                    "flood_wait",
+                    target=invite,
+                    account_id=acc["id"],
+                    flood_wait_s=result.get("flood_wait"),
+                )
             elif "error" in result:
                 err_raw = result["error"]
                 err_e = err_raw.lower()
@@ -5380,13 +5432,25 @@ async def fsm_join_invite_combined(
                     err_list.append(f"❌ {label}: недействительная ссылка-приглашение")
                 else:
                     err_list.append(f"❌ {label}: {html.escape(err_raw[:60])}")
-                await _op_audit(pool, message.from_user.id, "join", "error",
-                                target=invite, account_id=acc["id"],
-                                error_msg=err_raw[:200])
+                await _op_audit(
+                    pool,
+                    message.from_user.id,
+                    "join",
+                    "error",
+                    target=invite,
+                    account_id=acc["id"],
+                    error_msg=err_raw[:200],
+                )
             else:
                 ok_list.append(f"✅ {label}: вступил")
-                await _op_audit(pool, message.from_user.id, "join", "success",
-                                target=invite, account_id=acc["id"])
+                await _op_audit(
+                    pool,
+                    message.from_user.id,
+                    "join",
+                    "success",
+                    target=invite,
+                    account_id=acc["id"],
+                )
             try:
                 await msg.edit_text(
                     _progress_text(
@@ -5422,12 +5486,19 @@ async def fsm_join_invite_combined(
         return
     msg = await message.answer("⏳ Вступаю...")
     from services.op_worker import write_op_audit as _op_audit
+
     result = await account_manager.join_channel(acc["session_str"], invite, _acc=acc)
     kb = _back_kb()
     if "error" in result:
-        await _op_audit(pool, message.from_user.id, "join", "error",
-                        target=invite, account_id=acc.get("id"),
-                        error_msg=result["error"][:200])
+        await _op_audit(
+            pool,
+            message.from_user.id,
+            "join",
+            "error",
+            target=invite,
+            account_id=acc.get("id"),
+            error_msg=result["error"][:200],
+        )
         friendly_msg = _friendly_join_error(result["error"])
         await msg.edit_text(
             friendly_msg,
@@ -5435,8 +5506,14 @@ async def fsm_join_invite_combined(
             reply_markup=kb.as_markup(),
         )
     else:
-        await _op_audit(pool, message.from_user.id, "join", "success",
-                        target=invite, account_id=acc.get("id"))
+        await _op_audit(
+            pool,
+            message.from_user.id,
+            "join",
+            "success",
+            target=invite,
+            account_id=acc.get("id"),
+        )
         title = html.escape(result.get("title", ""))
         members = result.get("members", 0)
         await msg.edit_text(
@@ -6469,11 +6546,8 @@ async def cb_my_chans_leave(
     session = data.get("my_chans_session")
     if not session:
         try:
-            acc = await pool.fetchrow(
-                "SELECT id, session_str, device_model, system_version, app_version "
-                "FROM tg_accounts WHERE id=$1 AND owner_id=$2",
-                callback_data.acc_id,
-                callback.from_user.id,
+            acc = await db.get_account_for_telethon(
+                pool, callback_data.acc_id, callback.from_user.id
             )
         except Exception:
             acc = None

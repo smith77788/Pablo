@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import asyncpg
+from database import db
 from services.logger import log_exc_swallow
 from services import infra_memory
 
@@ -910,13 +911,7 @@ async def _run_daily_warmup_impl(
     from services import account_manager
 
     # Получаем сессию аккаунта
-    acc_row = await pool.fetchrow(
-        """SELECT a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
-           FROM tg_accounts a
-           LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-           WHERE a.id=$1 AND a.is_active=TRUE""",
-        account_id,
-    )
+    acc_row = await db.get_account_for_telethon(pool, account_id)
     if not acc_row:
         log.warning("warmup: account %d not found or inactive", account_id)
         return {
@@ -1127,7 +1122,9 @@ async def _run_daily_warmup_impl(
                     fw_secs = getattr(e, "seconds", 60)
                     log.warning(
                         "warmup: FloodWait %ds on action %s acc=%d — sleeping",
-                        fw_secs, action, account_id,
+                        fw_secs,
+                        action,
+                        account_id,
                     )
                     await asyncio.sleep(min(fw_secs + random.uniform(5, 15), 600))
 
@@ -1252,6 +1249,7 @@ async def _run_daily_warmup_impl(
     # Записываем итог дня в operation_audit → виден в "TG-операции" логе
     try:
         from services.op_worker import write_op_audit as _write_op_audit
+
         total = actions_ok + actions_fail
         if actions_ok == 0:
             _wu_result, _wu_err = "error", f"all {total} actions failed"
@@ -1355,16 +1353,12 @@ async def _run_warmup_session_impl(
                 )
                 continue
         except Exception as e:
-            log.warning("warmup_session: is_account_in_use check failed acc=%d: %s", acc_id, e)
+            log.warning(
+                "warmup_session: is_account_in_use check failed acc=%d: %s", acc_id, e
+            )
             # Proceed with warmup if check fails - better than skipping
 
-        acc_row = await pool.fetchrow(
-            """SELECT a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
-               FROM tg_accounts a
-               LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-               WHERE a.id=$1 AND a.is_active=TRUE""",
-            acc_id,
-        )
+        acc_row = await db.get_account_for_telethon(pool, acc_id)
         if not acc_row or not acc_row["session_str"]:
             continue
 
@@ -1419,7 +1413,11 @@ async def _run_warmup_session_impl(
                             acc_id, "warmup_session", success, duration_s=dur_s
                         )
                     except Exception as e:
-                        log.warning("warmup_session: infra_memory record failed acc=%d: %s", acc_id, e)
+                        log.warning(
+                            "warmup_session: infra_memory record failed acc=%d: %s",
+                            acc_id,
+                            e,
+                        )
                 except Exception as exc:
                     error_str = str(exc)[:200]
                     success = False
@@ -1442,7 +1440,9 @@ async def _run_warmup_session_impl(
                         error_str,
                     )
                 except Exception as e:
-                    log.warning("warmup_session: DB log insert failed acc=%d: %s", acc_id, e)
+                    log.warning(
+                        "warmup_session: DB log insert failed acc=%d: %s", acc_id, e
+                    )
 
                 await asyncio.sleep(random.uniform(8, 25))
 

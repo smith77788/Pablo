@@ -665,12 +665,9 @@ async def _assess_risk_impl(
                COUNT(*) FILTER (WHERE is_active) AS total,
                COUNT(*) FILTER (WHERE is_active
                    AND (cooldown_until IS NULL OR cooldown_until < NOW())
+                   AND session_str IS NOT NULL
+                   AND session_str <> ''
                    AND COALESCE(acc_status, 'active') NOT IN ('spamblock', 'banned', 'deactivated')
-                   AND NOT (
-                       COALESCE(acc_status, 'active') = 'session_expired'
-                       AND session_str IS NOT NULL
-                       AND session_str <> ''
-                   )
                ) AS available,
                COUNT(*) FILTER (WHERE is_active AND COALESCE(trust_score,1.0) < 0.4) AS low_trust,
                AVG(COALESCE(trust_score,1.0)) FILTER (WHERE is_active) AS avg_trust,

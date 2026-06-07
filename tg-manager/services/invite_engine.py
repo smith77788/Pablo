@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 import asyncpg
+from database import db
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ async def _generate_links(
 
     # Аккаунты-администраторы канала (владелец, высокий trust_score)
     accounts = await pool.fetch(
-        """SELECT a.id, a.session_str, a.device_model, a.system_version, a.app_version
+        """SELECT a.id
            FROM tg_accounts a
            JOIN managed_channels mc ON mc.acc_id = a.id AND mc.channel_id = $1
            WHERE a.owner_id = $2 AND a.is_active = true AND a.session_str IS NOT NULL
@@ -99,9 +100,12 @@ async def _generate_links(
     )
 
     results = []
-    for acc in accounts:
+    for acc_ref in accounts:
         if len(results) >= count:
             break
+        acc = await db.get_account_for_telethon(pool, acc_ref["id"], owner_id)
+        if not acc or not acc["session_str"]:
+            continue
         try:
             link = await account_manager.get_channel_invite_link(
                 acc["session_str"], channel_id, _acc=dict(acc)

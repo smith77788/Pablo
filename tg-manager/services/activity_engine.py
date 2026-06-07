@@ -26,6 +26,7 @@ from typing import Optional
 
 import asyncpg
 
+from database import db
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -354,13 +355,7 @@ async def run_resource_activity_session(pool: asyncpg.Pool, session: dict) -> di
     total_fail = 0
 
     for acc_id in acc_ids:
-        acc_row = await pool.fetchrow(
-            """SELECT a.session_str, a.device_model, a.system_version, a.app_version, p.proxy_url
-               FROM tg_accounts a
-               LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE
-               WHERE a.id=$1 AND a.is_active=TRUE""",
-            acc_id,
-        )
+        acc_row = await db.get_account_for_telethon(pool, acc_id)
         if not acc_row or not acc_row["session_str"]:
             continue
 

@@ -137,6 +137,7 @@ def test_accounts_handler_reloads_real_session_string_before_checks() -> None:
         encoding="utf-8"
     )
 
+    assert 'db.get_account_for_telethon(pool, acc["id"], uid)' in accounts_source
     assert (
         'session_str = (\n                (acc_dict.get("session_str") if acc_dict else None)'
         in accounts_source
@@ -206,7 +207,12 @@ def test_purge_expired_revalidates_accounts_before_delete() -> None:
         "DELETE FROM tg_accounts WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE"
         not in accounts_source
     )
-    assert "WHERE owner_id=$1 AND acc_status='session_expired'\"" in accounts_source
+    assert "await db.get_tg_accounts(pool, uid)" in accounts_source
+    assert 'if acc.get("acc_status") == "session_expired"' in accounts_source
+    assert (
+        'acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)'
+        in accounts_source
+    )
     assert (
         "result = await check_account_status_full(\n                session_str,"
         in accounts_source
@@ -248,6 +254,15 @@ def test_mtproto_queries_carry_proxy_and_locale_context() -> None:
     flood_source = (PROJECT_ROOT / "tg-manager/services/flood_engine.py").read_text(
         encoding="utf-8"
     )
+    geo_router_source = (PROJECT_ROOT / "tg-manager/services/geo_router.py").read_text(
+        encoding="utf-8"
+    )
+    health_source = (PROJECT_ROOT / "tg-manager/services/account_health.py").read_text(
+        encoding="utf-8"
+    )
+    channel_ops_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/channel_ops.py"
+    ).read_text(encoding="utf-8")
 
     assert "lang_code" in db_source
     assert "system_lang_code" in db_source
@@ -259,6 +274,17 @@ def test_mtproto_queries_carry_proxy_and_locale_context() -> None:
     assert "lang_code" in pool_source
     assert "system_lang_code" in pool_source
     assert "geo_country" in pool_source
+    assert "lang_code" in geo_router_source
+    assert "system_lang_code" in geo_router_source
+    assert "proxy_id" in geo_router_source
+    assert "lang_code" in health_source
+    assert "system_lang_code" in health_source
+    assert "proxy_id" in health_source
+    assert "lang_code" in channel_ops_source
+    assert "system_lang_code" in channel_ops_source
+    assert "proxy_id" in channel_ops_source
+    assert "proxy_url" in channel_ops_source
+    assert "geo_country" in channel_ops_source
     assert "record_peer_flood" in flood_source
     assert "gaussian_delay" in flood_source
 
@@ -285,3 +311,61 @@ def test_op_worker_uses_penalty_requeue_and_long_peer_flood_isolation() -> None:
     assert "_maybe_requeue(pool, op_id, e, params, op_type)" in worker_source
     assert "record_peer_flood(" in worker_source
     assert "_peer_flood_wait = 48 * 3600" in worker_source
+
+
+def test_account_cleaner_reloads_full_account_context() -> None:
+    cleaner_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/account_cleaner.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from database import db" in cleaner_source
+    assert "async def _get_telethon_account(" in cleaner_source
+    assert "db.get_account_for_telethon(pool, account_id, owner_id)" in cleaner_source
+    assert (
+        "SELECT session_str, device_model, system_version, app_version, phone, first_name "
+        not in cleaner_source
+    )
+
+
+def test_more_handlers_reload_full_telethon_account_context() -> None:
+    channel_factory_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/channel_factory.py"
+    ).read_text(encoding="utf-8")
+    group_factory_source = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/group_factory.py"
+    ).read_text(encoding="utf-8")
+    activity_engine_source = (
+        PROJECT_ROOT / "tg-manager/services/activity_engine.py"
+    ).read_text(encoding="utf-8")
+    account_warmer_source = (
+        PROJECT_ROOT / "tg-manager/services/account_warmer.py"
+    ).read_text(encoding="utf-8")
+    invite_engine_source = (
+        PROJECT_ROOT / "tg-manager/services/invite_engine.py"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "db.get_account_for_telethon(pool, acc_id, callback.from_user.id)"
+        in channel_factory_source
+    )
+    assert group_factory_source.count("db.get_account_for_telethon(") >= 3
+    assert "db.get_account_for_telethon(pool, acc_id)" in activity_engine_source
+    assert "db.get_account_for_telethon(pool, account_id)" in account_warmer_source
+    assert account_warmer_source.count("db.get_account_for_telethon(pool, acc_id)") >= 1
+    assert (
+        'db.get_account_for_telethon(pool, acc_ref["id"], owner_id)'
+        in invite_engine_source
+    )
+
+
+def test_mass_publish_isolates_network_failed_accounts() -> None:
+    worker_source = (PROJECT_ROOT / "tg-manager/services/op_worker.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "_NETWORK_PATTERNS" in worker_source
+    assert "_record_network_isolation(" in worker_source
+    assert 'if result.get("proxy_error"):' in worker_source
+    assert "isolated_accounts: set[int] = set()" in worker_source
+    assert 'if acc["id"] in isolated_accounts:' in worker_source
+    assert "await release_accounts(mp_used_acc_ids)" in worker_source

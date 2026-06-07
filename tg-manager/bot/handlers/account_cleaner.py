@@ -15,10 +15,21 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import CleanerCb, BmCb
+from database import db
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 router = Router()
+
+
+async def _get_telethon_account(
+    pool: asyncpg.Pool,
+    account_id: int | None,
+    owner_id: int,
+) -> asyncpg.Record | None:
+    if account_id is None:
+        return None
+    return await db.get_account_for_telethon(pool, account_id, owner_id)
 
 
 def _back_kb() -> InlineKeyboardBuilder:
@@ -158,11 +169,7 @@ async def cb_dry_leave(
     acc_id = callback_data.account_id
 
     try:
-        acc = await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-            "FROM tg_accounts WHERE id=$1",
-            acc_id,
-        )
+        acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "dry_leave fetchrow failed")
         acc = None
@@ -202,11 +209,7 @@ async def cb_confirm_leave(
     acc_id = callback_data.account_id
 
     try:
-        acc = await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-            "FROM tg_accounts WHERE id=$1",
-            acc_id,
-        )
+        acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "confirm_leave fetchrow failed")
         acc = None
@@ -318,11 +321,7 @@ async def cb_force_leave(
     acc_id = callback_data.account_id
 
     try:
-        acc = await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-            "FROM tg_accounts WHERE id=$1",
-            acc_id,
-        )
+        acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "force_leave fetchrow failed")
         acc = None
@@ -343,11 +342,7 @@ async def cb_do_del_contacts(
     acc_id = callback_data.account_id
 
     try:
-        acc = await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-            "FROM tg_accounts WHERE id=$1",
-            acc_id,
-        )
+        acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "do_del_contacts fetchrow failed")
         acc = None
@@ -379,11 +374,7 @@ async def cb_show_chats(
     acc_id = callback_data.account_id
 
     try:
-        acc = await pool.fetchrow(
-            "SELECT session_str, device_model, system_version, app_version, phone, first_name "
-            "FROM tg_accounts WHERE id=$1",
-            acc_id,
-        )
+        acc = await _get_telethon_account(pool, acc_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "show_chats fetchrow failed")
         acc = None

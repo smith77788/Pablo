@@ -31,6 +31,7 @@ async def get_accounts_by_geo(
     rows = await pool.fetch(
         """SELECT a.id, a.session_str, a.phone, a.first_name,
                   a.device_model, a.system_version, a.app_version,
+                  a.lang_code, a.system_lang_code, a.proxy_id,
                   p.proxy_url, p.geo_country
            FROM tg_accounts a
            JOIN user_proxies p ON p.id = a.proxy_id
