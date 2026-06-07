@@ -2285,7 +2285,7 @@ async def cb_purge_expired_sessions(
     try:
         expired = await pool.fetch(
             """SELECT id, first_name, phone FROM tg_accounts
-               WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE
+               WHERE owner_id=$1 AND acc_status='session_expired'
                ORDER BY added_at DESC""",
             uid,
         )
@@ -2293,7 +2293,7 @@ async def cb_purge_expired_sessions(
         expired = []
     if not expired:
         await callback.message.edit_text(
-            "✅ <b>Нет аккаунтов с истёкшей сессией</b>",
+            "✅ <b>Нет кандидатов на очистку по истёкшей сессии</b>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardBuilder()
             .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
@@ -2301,17 +2301,19 @@ async def cb_purge_expired_sessions(
         )
         return
 
-    lines = [f"🧹 <b>Удалить {len(expired)} аккаунтов с истёкшей сессией?</b>\n"]
+    lines = [f"🧹 <b>Перепроверить и удалить {len(expired)} кандидатов?</b>\n"]
     for a in expired[:10]:
         label = escape(a.get("first_name") or a.get("phone") or f"id{a['id']}")
         lines.append(f"• 🔑 {label}")
     if len(expired) > 10:
         lines.append(f"<i>... и ещё {len(expired) - 10}</i>")
-    lines.append("\n<i>Эти аккаунты больше не могут подключиться к Telegram.</i>")
+    lines.append(
+        "\n<i>Перед удалением каждый аккаунт будет перепроверен через Telegram ещё раз.</i>"
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=f"✅ Удалить {len(expired)} аккаунтов",
+        text=f"✅ Перепроверить и удалить {len(expired)}",
         callback_data=AccCb(action="purge_expired_confirm"),
     )
     kb.button(text="❌ Отмена", callback_data=AccCb(action="menu"))
@@ -2328,14 +2330,31 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
     await callback.answer("🧹 Удаляю...")
 
     try:
-        result = await pool.execute(
-            "DELETE FROM tg_accounts WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE",
+        candidates = await pool.fetch(
+            """SELECT id, session_str, device_model, system_version, app_version
+               FROM tg_accounts
+               WHERE owner_id=$1 AND acc_status='session_expired'""",
             uid,
         )
-        try:
-            deleted = int(str(result).split()[-1])
-        except (ValueError, IndexError):
-            deleted = 0
+        delete_ids: list[int] = []
+        for acc in candidates:
+            session_str = acc.get("session_str") or ""
+            if not session_str:
+                continue
+            result = await check_account_status_full(
+                session_str,
+                _acc=dict(acc),
+                check_spambot=False,
+            )
+            if result.get("status") == "session_expired" and result.get("auth_error"):
+                delete_ids.append(acc["id"])
+
+        deleted = 0
+        for acc_id in delete_ids:
+            await pool.execute(
+                "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid
+            )
+            deleted += 1
     except Exception as exc:
         mark_handled_error(f"purge_expired_confirm: {exc}")
         await callback.message.edit_text(
@@ -2352,8 +2371,17 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
     kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
+    if deleted == 0:
+        await callback.message.edit_text(
+            "✅ <b>Подтверждённо мёртвых сессий не найдено</b>\n\n"
+            "Старые статусы не подтвердились повторной проверкой, поэтому ничего не удалено.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     await callback.message.edit_text(
-        f"✅ <b>Удалено {deleted} аккаунтов с истёкшей сессией</b>\n\n"
+        f"✅ <b>Удалено {deleted} аккаунтов с подтверждённо мёртвой сессией</b>\n\n"
         "Добавьте аккаунты заново через QR-код или номер телефона.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

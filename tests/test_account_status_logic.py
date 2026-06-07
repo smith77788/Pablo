@@ -152,3 +152,19 @@ def test_health_dashboard_groups_accounts_by_effective_status() -> None:
     ).read_text(encoding="utf-8")
 
     assert "acc_status = _effective_acc_status(acc)" in dashboard_source
+
+
+def test_purge_expired_revalidates_accounts_before_delete() -> None:
+    accounts_source = (PROJECT_ROOT / "tg-manager/bot/handlers/accounts.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "DELETE FROM tg_accounts WHERE owner_id=$1 AND acc_status='session_expired' AND is_active=TRUE"
+        not in accounts_source
+    )
+    assert "WHERE owner_id=$1 AND acc_status='session_expired'\"" in accounts_source
+    assert (
+        "result = await check_account_status_full(\n                session_str,"
+        in accounts_source
+    )
