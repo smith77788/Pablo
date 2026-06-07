@@ -382,8 +382,28 @@ def test_mass_publish_isolates_network_failed_accounts() -> None:
     assert "_record_network_isolation(" in worker_source
     assert 'if result.get("proxy_error"):' in worker_source
     assert "isolated_accounts: set[int] = set()" in worker_source
-    assert 'if acc["id"] in isolated_accounts:' in worker_source
+    assert "if acc is None:" in worker_source
     assert "await release_accounts(mp_used_acc_ids)" in worker_source
+
+
+def test_mass_publish_can_fallback_between_candidate_accounts() -> None:
+    worker_source = (PROJECT_ROOT / "tg-manager/services/op_worker.py").read_text(
+        encoding="utf-8"
+    )
+
+    mass_publish_source = worker_source[
+        worker_source.index("async def _exec_mass_publish") : worker_source.index(
+            "async def _exec_bulk_join"
+        )
+    ]
+    assert "SELECT DISTINCT ON (mc.channel_id)" not in mass_publish_source
+    assert "target_map: dict[int, dict] = {}" in mass_publish_source
+    assert 'target_map[channel_id]["accounts"].append(acc)' in mass_publish_source
+    assert "for fallback_acc in candidate_accounts[1:]" in mass_publish_source
+    assert (
+        "fallback_result = await account_manager.post_to_channel("
+        in mass_publish_source
+    )
 
 
 def test_subscription_handler_uses_module_admin_lookup() -> None:

@@ -999,7 +999,7 @@ async def _exec_mass_publish(
     if explicit_channel_ids:
         fetch_params.append(explicit_channel_ids)
     db_pairs = await pool.fetch(
-        f"SELECT DISTINCT ON (mc.channel_id) "
+        f"SELECT "
         f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
         f"a.device_model, a.system_version, a.app_version, "
@@ -1022,22 +1022,25 @@ async def _exec_mass_publish(
         }
 
     acc_map = {a["id"]: dict(a) for a in accounts_rows}
-    targets = []
+    target_map: dict[int, dict] = {}
     for row in db_pairs:
         acc = acc_map.get(row["acc_id"])
-        if acc:
-            targets.append(
-                (
-                    acc,
-                    {
-                        "id": row["id"],
-                        "title": row["title"],
-                        "access_hash": row["access_hash"] or 0,
-                        "type": row["type"] or "channel",
-                    },
-                )
-            )
+        if not acc:
+            continue
+        channel_id = int(row["id"])
+        if channel_id not in target_map:
+            target_map[channel_id] = {
+                "dialog": {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "access_hash": row["access_hash"] or 0,
+                    "type": row["type"] or "channel",
+                },
+                "accounts": [],
+            }
+        target_map[channel_id]["accounts"].append(acc)
 
+    targets = list(target_map.values())
     total = len(targets)
     await pool.execute(
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
@@ -1048,7 +1051,14 @@ async def _exec_mass_publish(
     failed_channels: list[str] = []
     isolated_accounts: set[int] = set()
 
-    for idx, (acc, dialog) in enumerate(targets, 1):
+    for idx, target_entry in enumerate(targets, 1):
+        dialog = target_entry["dialog"]
+        candidate_accounts = [
+            _acc
+            for _acc in target_entry["accounts"]
+            if _acc["id"] not in isolated_accounts
+        ]
+        acc = candidate_accounts[0] if candidate_accounts else None
         if await _is_cancelled(pool, op_id):
             await release_accounts(mp_used_acc_ids)
             return {
@@ -1058,7 +1068,7 @@ async def _exec_mass_publish(
                 "failed_channels": failed_channels[:50],
                 "summary": f"Отменено. Опубликовано: {ok_count}, ошибок: {fail_count}",
             }
-        if acc["id"] in isolated_accounts:
+        if acc is None:
             fail_count += 1
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
@@ -1126,6 +1136,79 @@ async def _exec_mass_publish(
                         )
                     except Exception:
                         log_exc_swallow(log, "mass_publish: network isolation failed")
+                    for fallback_acc in candidate_accounts[1:]:
+                        if fallback_acc["id"] in isolated_accounts:
+                            continue
+                        acc = fallback_acc
+                        try:
+                            fallback_result = await account_manager.post_to_channel(
+                                fallback_acc["session_str"],
+                                dialog["id"],
+                                mp_text,
+                                access_hash=dialog["access_hash"],
+                                _acc=fallback_acc,
+                            )
+                            if fallback_result.get("proxy_error"):
+                                raise ConnectionError(
+                                    str(
+                                        fallback_result.get(
+                                            "error", "proxy/network error"
+                                        )
+                                    )
+                                )
+                            if "error" in fallback_result or fallback_result.get(
+                                "banned"
+                            ):
+                                raise Exception(
+                                    str(
+                                        fallback_result.get(
+                                            "error", "publish fallback error"
+                                        )
+                                    )
+                                )
+                            acc = fallback_acc
+                            ok_count += 1
+                            _published = True
+                            _infra_mem.record_account_op(
+                                acc["id"], "publish", success=True
+                            )
+                            await _audit(
+                                pool,
+                                owner_id,
+                                "publish",
+                                "success",
+                                operation_id=op_id,
+                                account_id=acc["id"],
+                                target=str(dialog.get("title") or dialog["id"])[:100],
+                            )
+                            try:
+                                from services.flood_engine import record_success
+
+                                await record_success(acc["id"], "publish")
+                            except Exception:
+                                log_exc_swallow(
+                                    log, "mass_publish: record_success failed"
+                                )
+                            break
+                        except Exception as fallback_exc:
+                            err_str = str(fallback_exc)[:200]
+                            if _is_network_or_proxy_error(err_str):
+                                isolated_accounts.add(fallback_acc["id"])
+                                try:
+                                    await _record_network_isolation(
+                                        pool,
+                                        fallback_acc["id"],
+                                        "publish",
+                                        op_id,
+                                        err_str,
+                                    )
+                                except Exception:
+                                    log_exc_swallow(
+                                        log,
+                                        "mass_publish: fallback network isolation failed",
+                                    )
+                                continue
+                            break
                     break
                 if flood_wait and _attempt == 0:
                     # FloodWait on first attempt — sleep and retry once
