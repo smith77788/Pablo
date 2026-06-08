@@ -293,6 +293,21 @@ def test_purge_expired_revalidates_accounts_before_delete() -> None:
     )
 
 
+def test_get_tg_accounts_returns_full_session_material() -> None:
+    db_source = (PROJECT_ROOT / "tg-manager/database/db.py").read_text(encoding="utf-8")
+    get_accounts_block = db_source[
+        db_source.index("async def get_tg_accounts") : db_source.index(
+            "async def update_acc_status"
+        )
+    ]
+
+    assert "session_str, " in get_accounts_block
+    assert (
+        "(session_str IS NOT NULL AND session_str <> '') AS has_session"
+        in get_accounts_block
+    )
+
+
 def test_trust_and_intelligence_do_not_treat_all_session_expired_as_dead() -> None:
     trust_source = (PROJECT_ROOT / "tg-manager/services/trust_engine.py").read_text(
         encoding="utf-8"
