@@ -392,6 +392,16 @@ def test_op_worker_uses_penalty_requeue_and_long_peer_flood_isolation() -> None:
     assert 'action_type="mass_publish"' in worker_source
 
 
+def test_legacy_active_account_helper_uses_resource_selector() -> None:
+    helper_source = (PROJECT_ROOT / "tg-manager/bot/utils/op_helpers.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from services import resource_selector" in helper_source
+    assert "resource_selector.select_all_active(" in helper_source
+    assert "FROM tg_accounts a" not in helper_source
+
+
 def test_warmup_supplements_actions_with_readiness_refresh() -> None:
     warmer_source = (PROJECT_ROOT / "tg-manager/services/account_warmer.py").read_text(
         encoding="utf-8"

@@ -50,30 +50,19 @@ async def _get_active_accounts(
     *,
     pool_name: str | None = None,
     tags: list[str] | None = None,
+    action_type: str = "default",
+    respect_cooldown: bool = True,
 ) -> list[asyncpg.Record]:
-    """Return active accounts, optionally filtered by pool name or tags (ALL tags must match)."""
-    conditions = ["a.owner_id=$1", "a.is_active=TRUE", "a.session_str IS NOT NULL"]
-    params: list = [owner_id]
+    """Return active accounts through the central resource selector."""
+    from services import resource_selector
 
-    if pool_name is not None:
-        params.append(pool_name)
-        conditions.append(f"a.pool=${len(params)}")
-
-    if tags:
-        params.append(tags)
-        conditions.append(f"a.tags @> ${len(params)}::text[]")
-
-    where = " AND ".join(conditions)
-    return await pool.fetch(
-        f"""SELECT a.id, a.phone, a.first_name, a.username, a.session_str, a.is_active,
-                   a.device_model, a.system_version, a.app_version,
-                   a.tags, a.pool, a.labels, a.warnings, a.project,
-                   p.proxy_url
-            FROM tg_accounts a
-            LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-            WHERE {where}
-            ORDER BY a.trust_score DESC NULLS LAST, a.added_at""",
-        *params,
+    return await resource_selector.select_all_active(
+        pool,
+        owner_id,
+        pool_name=pool_name,
+        tags=tags,
+        action_type=action_type,
+        respect_cooldown=respect_cooldown,
     )
 
 
