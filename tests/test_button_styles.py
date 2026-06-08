@@ -85,6 +85,34 @@ def test_direct_reply_keyboard_markup_dump_is_styled() -> None:
     assert dumped["keyboard"][0][1]["style"] == "primary"
 
 
+def test_direct_inline_keyboard_markup_dump_is_styled() -> None:
+    install_button_style_patch()
+    markup = InlineKeyboardBuilder()
+    markup.row(InlineKeyboardButton(text="✅ Запустить", callback_data="task:start"))
+    dumped = markup.as_markup().model_dump(exclude_none=True)
+
+    assert dumped["inline_keyboard"][0][0]["style"] == "success"
+
+
+def test_direct_inline_keyboard_markup_constructor_is_styled() -> None:
+    install_button_style_patch()
+    from aiogram.types import InlineKeyboardMarkup
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📁 Реестр ассетов", callback_data="assets"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
+            ]
+        ]
+    )
+
+    dumped = markup.model_dump(exclude_none=True)
+
+    assert dumped["inline_keyboard"][0][0]["style"] == "primary"
+    assert dumped["inline_keyboard"][0][1]["style"] == "danger"
+
+
 def test_markup_json_dump_is_styled() -> None:
     install_button_style_patch()
     kb = InlineKeyboardBuilder()

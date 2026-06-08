@@ -192,6 +192,34 @@ def install_button_style_patch() -> None:
     original_reply_model_dump_json = ReplyKeyboardMarkup.model_dump_json
     original_button_model_dump_json = InlineKeyboardButton.model_dump_json
     original_keyboard_button_model_dump_json = KeyboardButton.model_dump_json
+    original_markup_init = InlineKeyboardMarkup.__init__
+    original_reply_markup_init = ReplyKeyboardMarkup.__init__
+    original_button_init = InlineKeyboardButton.__init__
+    original_keyboard_button_init = KeyboardButton.__init__
+
+    def styled_markup_init(
+        self: InlineKeyboardMarkup, *args: Any, **kwargs: Any
+    ) -> None:
+        original_markup_init(self, *args, **kwargs)
+        apply_button_styles(self)
+
+    def styled_reply_markup_init(
+        self: ReplyKeyboardMarkup, *args: Any, **kwargs: Any
+    ) -> None:
+        original_reply_markup_init(self, *args, **kwargs)
+        apply_button_styles(self)
+
+    def styled_button_init(
+        self: InlineKeyboardButton, *args: Any, **kwargs: Any
+    ) -> None:
+        original_button_init(self, *args, **kwargs)
+        _apply_button_style(self)
+
+    def styled_keyboard_button_init(
+        self: KeyboardButton, *args: Any, **kwargs: Any
+    ) -> None:
+        original_keyboard_button_init(self, *args, **kwargs)
+        _apply_button_style(self)
 
     def styled_as_markup(
         self: InlineKeyboardBuilder,
@@ -283,6 +311,10 @@ def install_button_style_patch() -> None:
     reply_markup_cls = cast(Any, ReplyKeyboardMarkup)
     button_cls = cast(Any, InlineKeyboardButton)
     keyboard_button_cls = cast(Any, KeyboardButton)
+    markup_cls.__init__ = styled_markup_init
+    reply_markup_cls.__init__ = styled_reply_markup_init
+    button_cls.__init__ = styled_button_init
+    keyboard_button_cls.__init__ = styled_keyboard_button_init
     builder_cls.as_markup = styled_as_markup
     reply_builder_cls.as_markup = styled_reply_as_markup
     markup_cls.model_dump = styled_model_dump
