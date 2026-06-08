@@ -16,6 +16,7 @@ from services.account_manager import (
     format_telegram_join_ref_display,
     normalize_telegram_join_ref,
 )
+from services.strike_engine import format_mini_result
 
 
 def test_normalize_private_invite_links() -> None:
@@ -65,3 +66,23 @@ def test_select_report_option_for_reason_prefers_matching_text() -> None:
     ]
 
     assert _select_report_option_for_reason(options, "spam") == b"spam"
+
+
+def test_mini_result_formats_private_invite_as_link_not_username() -> None:
+    text = format_mini_result(
+        {
+            "target": "+QiQsOVYBgE1kMjli",
+            "category_label": "Content",
+            "severity": "normal",
+            "tg": {},
+            "emails": [],
+            "abuse_form": {},
+            "email_accounts_used": [],
+            "total_tg_reports": 0,
+            "total_emails": 0,
+            "errors": [],
+        }
+    )
+
+    assert "https://t.me/+QiQsOVYBgE1kMjli" in text
+    assert "@+QiQsOVYBgE1kMjli" not in text

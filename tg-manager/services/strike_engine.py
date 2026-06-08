@@ -51,6 +51,22 @@ _FLOOD_CAP = 65.0  # кап exponential backoff
 _STAGGER_BASE = (60, 120)
 
 
+def _telegram_target_display(target: str) -> str:
+    try:
+        from services.account_manager import format_telegram_join_ref_display
+
+        return format_telegram_join_ref_display(str(target))
+    except Exception:
+        raw = str(target).strip()
+        if not raw:
+            return ""
+        if raw.startswith(("http://", "https://", "@")):
+            return raw
+        if raw.startswith("+"):
+            return f"https://t.me/{raw}"
+        return f"@{raw}"
+
+
 # ── Уникальные тексты жалоб ───────────────────────────────────────────────────
 # Каждый аккаунт получает СВОЙ уникальный текст, на случайном языке.
 # Расширенный пул: 25+ текстов на категорию, 7+ языков.
@@ -592,7 +608,11 @@ async def _one_account_strike(
                         duration_s=time.monotonic() - t0_strike,
                     )
                 except Exception as e:
-                    log.warning("strike: record_account_op success failed acc=%s: %s", acc.get("id"), e)
+                    log.warning(
+                        "strike: record_account_op success failed acc=%s: %s",
+                        acc.get("id"),
+                        e,
+                    )
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
@@ -641,11 +661,18 @@ async def _one_account_strike(
                     await asyncio.sleep(wait_s + random.uniform(2, 8))
                     continue
                 # Fatal account errors — mark inactive in DB, stop immediately
-                _FATAL = ("USER_DEACTIVATED_BAN", "USER_DEACTIVATED", "AUTH_KEY_UNREGISTERED", "SESSION_REVOKED")
+                _FATAL = (
+                    "USER_DEACTIVATED_BAN",
+                    "USER_DEACTIVATED",
+                    "AUTH_KEY_UNREGISTERED",
+                    "SESSION_REVOKED",
+                )
                 if any(p in err_str.upper() for p in _FATAL):
                     log.warning(
                         "strike acc %s wave %d: fatal account error, marking inactive: %s",
-                        acc.get("id"), wave_num, err_str,
+                        acc.get("id"),
+                        wave_num,
+                        err_str,
                     )
                     if pool is not None and acc.get("id"):
                         try:
@@ -654,7 +681,9 @@ async def _one_account_strike(
                                 acc["id"],
                             )
                         except Exception:
-                            log_exc_swallow(log, f"strike: mark_inactive failed acc={acc.get('id')}")
+                            log_exc_swallow(
+                                log, f"strike: mark_inactive failed acc={acc.get('id')}"
+                            )
                     return {
                         "peer_reported": False,
                         "error": err_str,
@@ -666,14 +695,21 @@ async def _one_account_strike(
                 if "PEER_FLOOD" in err_str.upper():
                     log.warning(
                         "strike acc %s wave %d: PeerFlood, applying 1h cooldown",
-                        acc.get("id"), wave_num,
+                        acc.get("id"),
+                        wave_num,
                     )
                     if pool is not None and acc.get("id"):
                         try:
                             from services.flood_engine import record_flood
-                            await record_flood(pool, acc["id"], 3600, "strike_peer_flood")
+
+                            await record_flood(
+                                pool, acc["id"], 3600, "strike_peer_flood"
+                            )
                         except Exception:
-                            log_exc_swallow(log, f"strike: record_peer_flood failed acc={acc.get('id')}")
+                            log_exc_swallow(
+                                log,
+                                f"strike: record_peer_flood failed acc={acc.get('id')}",
+                            )
                     return {
                         "peer_reported": False,
                         "error": err_str,
@@ -690,7 +726,9 @@ async def _one_account_strike(
 
                     record_account_op(acc["id"], "strike", success=False, error=err_str)
                 except Exception as e:
-                    log.warning("strike: record_account_op failed acc=%s: %s", acc.get("id"), e)
+                    log.warning(
+                        "strike: record_account_op failed acc=%s: %s", acc.get("id"), e
+                    )
                 return {
                     "peer_reported": False,
                     "error": err_str,
@@ -1061,7 +1099,7 @@ async def staggered_strike(
         if progress_cb:
             await progress_cb(
                 "strike_wave1",
-                f"🎯 {target}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов",
+                f"🎯 {_telegram_target_display(target)}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов",
             )
 
         # ═══ Волна 1: ReportPeer + ReportSpam + Join + Internal ═══
@@ -1102,7 +1140,7 @@ async def staggered_strike(
             if progress_cb:
                 await progress_cb(
                     "strike_wave2",
-                    f"🎯 {target}: Волна 2 — {len(plan.waves[1])} аккаунтов",
+                    f"🎯 {_telegram_target_display(target)}: Волна 2 — {len(plan.waves[1])} аккаунтов",
                 )
             texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
             tasks = [
@@ -1140,7 +1178,7 @@ async def staggered_strike(
             if progress_cb:
                 await progress_cb(
                     "strike_wave3",
-                    f"🎯 {target}: Волна 3 (финал) — {len(plan.waves[2])} аккаунтов",
+                    f"🎯 {_telegram_target_display(target)}: Волна 3 (финал) — {len(plan.waves[2])} аккаунтов",
                 )
             texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
             tasks = [
@@ -1217,7 +1255,10 @@ async def staggered_strike(
 
         # ═══ Фаза: Network nodes (параллельно) ═══
         if progress_cb:
-            await progress_cb("strike_network", f"🌐 {target}: Атака сетевых узлов...")
+            await progress_cb(
+                "strike_network",
+                f"🌐 {_telegram_target_display(target)}: Атака сетевых узлов...",
+            )
         net = await strike_network_nodes_v2(
             plan.accounts, intel, plan.reason, plan.preset
         )
@@ -1226,7 +1267,10 @@ async def staggered_strike(
 
         # ═══ Фаза: External escalation ═══
         if progress_cb:
-            await progress_cb("strike_escalation", f"📤 {target}: Внешняя эскалация...")
+            await progress_cb(
+                "strike_escalation",
+                f"📤 {_telegram_target_display(target)}: Внешняя эскалация...",
+            )
         abuse_res = await submit_abuse_form(
             target,
             plan.preset or plan.reason,
@@ -1264,7 +1308,7 @@ async def staggered_strike(
             if progress_cb:
                 await progress_cb(
                     "strike_email",
-                    f"📧 {target}: Email-эскалация (abuse/dmca/dpo/security)...",
+                    f"📧 {_telegram_target_display(target)}: Email-эскалация (abuse/dmca/dpo/security)...",
                 )
             try:
                 email_res = await _run_email_escalation(
@@ -2452,9 +2496,17 @@ async def execute_mini_strike(
             except Exception:
                 log_exc_swallow(log, "mini_strike: record_flood flood_engine failed")
         # Fatal account errors — mark is_active=False immediately
-        _FATAL = ("USER_DEACTIVATED_BAN", "USER_DEACTIVATED", "AUTH_KEY_UNREGISTERED", "SESSION_REVOKED")
+        _FATAL = (
+            "USER_DEACTIVATED_BAN",
+            "USER_DEACTIVATED",
+            "AUTH_KEY_UNREGISTERED",
+            "SESSION_REVOKED",
+        )
         if any(p in err_str.upper() for p in _FATAL):
-            log.warning("mini_strike: fatal account error for acc=%s, marking inactive", acc.get("id"))
+            log.warning(
+                "mini_strike: fatal account error for acc=%s, marking inactive",
+                acc.get("id"),
+            )
             if acc.get("id"):
                 try:
                     await pool.execute(
@@ -2465,10 +2517,13 @@ async def execute_mini_strike(
                     log_exc_swallow(log, "mini_strike: mark_inactive failed")
         # PeerFlood — apply 1h cooldown via flood_engine
         elif "PEER_FLOOD" in err_str.upper():
-            log.warning("mini_strike: PeerFlood for acc=%s, applying 1h cooldown", acc.get("id"))
+            log.warning(
+                "mini_strike: PeerFlood for acc=%s, applying 1h cooldown", acc.get("id")
+            )
             if acc.get("id"):
                 try:
                     from services.flood_engine import record_flood
+
                     await record_flood(pool, acc["id"], 3600, "mini_strike_peer_flood")
                 except Exception:
                     log_exc_swallow(log, "mini_strike: record_peer_flood failed")
@@ -2770,7 +2825,7 @@ def format_mini_result(r: dict) -> str:
         )
 
     lines = [
-        f"{header_emoji} <b>Мини-страйк завершён — @{_html.escape(r['target'])}</b>",
+        f"{header_emoji} <b>Мини-страйк завершён — {_html.escape(_telegram_target_display(str(r['target'])))}</b>",
         f"<b>{verdict}</b>  <i>{verdict_detail}</i>",
         f"Категория: {_html.escape(r.get('category_label', ''))} · Уровень: <b>{r.get('severity', '?')}</b>",
         f"MTProto-векторов: <b>{vectors_ok}/{vectors_total}</b>",
