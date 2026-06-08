@@ -102,6 +102,13 @@ def _gen_ref() -> str:
     return "PAY-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 
+def _usdt_reference_offset(reference: str) -> float:
+    """Small deterministic cents suffix so TRC-20 payments can be matched by amount."""
+    checksum = sum(ord(ch) for ch in reference)
+    cents = checksum % 49 + 1
+    return round(cents / 100, 2)
+
+
 def _calc(plan: str, months: int, currency: str) -> tuple[float, float]:
     """Returns (usd_total, crypto_amount)."""
     base = PLAN_PRICES_USD.get(plan, 0)
@@ -441,6 +448,8 @@ async def cb_pay(
         if not existing:
             break
         ref = _gen_ref()
+    if currency == "USDT_TRC20":
+        crypto = round(crypto + _usdt_reference_offset(ref), 2)
 
     try:
         await pool.execute(

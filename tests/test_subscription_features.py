@@ -3,7 +3,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import asyncio
+import os
 
+
+os.environ.setdefault("MANAGER_BOT_TOKEN", "test-token")
+os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
+os.environ.setdefault("TG_API_ID", "1")
+os.environ.setdefault("TG_API_HASH", "test-hash")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
 
@@ -20,6 +26,7 @@ from bot.utils.subscription import (
     require_plan,
     set_free_mode,
 )
+from bot.handlers.subscription import _usdt_reference_offset
 
 
 class FakePlanPool:
@@ -183,3 +190,19 @@ def test_subscription_purchase_flow_does_not_fake_delivery() -> None:
     assert "if plan not in PLAN_PRICES_USD:" in request_block
     assert "if not admin_ids:" in request_block
     assert "subscription request cannot be delivered" in request_block
+
+
+def test_usdt_payments_get_reference_amount_suffix() -> None:
+    source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("tg-manager/bot/handlers/subscription.py")
+        .read_text(encoding="utf-8")
+    )
+
+    assert 0.01 <= _usdt_reference_offset("PAY-ABC123") <= 0.49
+    assert _usdt_reference_offset("PAY-ABC123") == _usdt_reference_offset("PAY-ABC123")
+    assert _usdt_reference_offset("PAY-ABC123") != _usdt_reference_offset("PAY-XYZ789")
+    assert 'if currency == "USDT_TRC20":' in source
+    assert "crypto = round(crypto + _usdt_reference_offset(ref), 2)" in source
