@@ -14,6 +14,7 @@ from bot.keyboards import (
     template_actions,
     broadcast_confirm,
     back_to_bot,
+    subscription_locked_markup,
 )
 from bot.states import AddTemplate, Broadcast, AiTemplateGenFSM
 from bot.utils.template_validator import (
@@ -22,6 +23,7 @@ from bot.utils.template_validator import (
     replace_placeholders,
 )
 from database import db
+from bot.utils.subscription import locked_text, require_plan
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -407,9 +409,19 @@ async def msg_placeholders(
 
 @router.callback_query(TemplateCb.filter(F.action == "ai_gen"))
 async def cb_template_ai_gen(
-    callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: TemplateCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.message.edit_text(
+            locked_text("AI-генерация шаблонов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     bot_id = callback_data.bot_id
     await state.set_state(AiTemplateGenFSM.waiting_prompt)
     await state.update_data(bot_id=bot_id)
@@ -429,10 +441,20 @@ async def cb_template_ai_gen(
 
 
 @router.message(AiTemplateGenFSM.waiting_prompt, F.text)
-async def msg_ai_template_prompt(message: Message, state: FSMContext) -> None:
+async def msg_ai_template_prompt(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     prompt = (message.text or "").strip()
     if not prompt:
         await message.answer("❌ Описание не может быть пустым. Попробуйте снова:")
+        return
+    if not await require_plan(pool, message.from_user.id, "starter"):
+        await state.clear()
+        await message.answer(
+            locked_text("AI-генерация шаблонов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
         return
 
     data = await state.get_data()
@@ -470,9 +492,20 @@ async def msg_ai_template_prompt(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(TemplateCb.filter(F.action == "ai_regen"))
 async def cb_template_ai_regen(
-    callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: TemplateCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
 ) -> None:
     await callback.answer("⏳ Генерирую…")
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await state.clear()
+        await callback.message.edit_text(
+            locked_text("AI-генерация шаблонов", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     data = await state.get_data()
     prompt = data.get("prompt", "")
     bot_id = callback_data.bot_id

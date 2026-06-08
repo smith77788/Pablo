@@ -143,6 +143,32 @@ def test_proxy_manager_actions_require_pro_plan() -> None:
         assert "_require_proxy_manager(callback, pool)" in body
 
 
+def test_ai_template_generation_requires_starter_plan() -> None:
+    source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("tg-manager/bot/handlers/templates.py")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "from bot.utils.subscription import locked_text, require_plan" in source
+    assert "subscription_locked_markup" in source
+    for handler in (
+        "async def cb_template_ai_gen",
+        "async def msg_ai_template_prompt",
+        "async def cb_template_ai_regen",
+    ):
+        start = source.index(handler)
+        next_route = source.find("@router.", start + 1)
+        body = source[start:] if next_route == -1 else source[start:next_route]
+        assert 'require_plan(pool, callback.from_user.id, "starter")' in body or (
+            handler == "async def msg_ai_template_prompt"
+            and 'require_plan(pool, message.from_user.id, "starter")' in body
+        )
+        assert 'locked_text("AI-генерация шаблонов", "starter")' in body
+
+
 def test_unknown_features_default_to_enterprise() -> None:
     assert feature_required_plan("new_unclassified_feature") == "enterprise"
 
