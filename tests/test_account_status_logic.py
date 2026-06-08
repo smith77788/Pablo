@@ -22,10 +22,14 @@ from services.account_manager import (
 from bot.handlers.accounts import _display_acc_status
 from services.flood_engine import (
     _flood_state,
+    account_rank_score,
     gaussian_delay,
     get_account_state,
+    min_trust_for_action,
+    normalize_trust_score,
     recommended_delay,
 )
+from services.account_readiness import calculate_readiness, is_ready_for_action
 
 
 def test_classify_spambot_reply_detects_healthy_account() -> None:
@@ -110,6 +114,56 @@ def test_gaussian_delay_respects_bounds() -> None:
     for _ in range(25):
         delay = gaussian_delay(10.0, minimum=8.0, maximum=12.0)
         assert 8.0 <= delay <= 12.0
+
+
+def test_trust_score_is_normalized_to_zero_one_range() -> None:
+    assert normalize_trust_score(None) == 0.0
+    assert normalize_trust_score(0.73) == 0.73
+    assert normalize_trust_score(73) == 0.73
+    assert normalize_trust_score(150) == 1.0
+
+
+def test_account_ranking_uses_full_normalized_trust_weight() -> None:
+    _flood_state.clear()
+    get_account_state(1).risk_score = 0.10
+    get_account_state(2).risk_score = 0.10
+
+    assert account_rank_score(1, 0.90) < account_rank_score(2, 0.20)
+    assert account_rank_score(1, 90) == account_rank_score(1, 0.90)
+
+
+def test_outbound_actions_require_readiness_thresholds() -> None:
+    assert min_trust_for_action("invite") >= 0.50
+    assert min_trust_for_action("dm_campaign") >= 0.50
+    assert min_trust_for_action("join") >= 0.35
+    assert min_trust_for_action("mass_publish") >= 0.25
+
+
+def test_readiness_blocks_missing_sessions_and_low_quality_outbound() -> None:
+    missing = {
+        "id": 1,
+        "is_active": True,
+        "session_str": None,
+        "acc_status": "active",
+        "trust_score": 1.0,
+    }
+    assert calculate_readiness(missing).level == "blocked"
+    assert not is_ready_for_action(missing, "invite")
+
+    ready = {
+        "id": 2,
+        "is_active": True,
+        "session_str": "session",
+        "acc_status": "active",
+        "trust_score": 0.72,
+        "proxy_id": 10,
+        "proxy_url": "socks5://127.0.0.1:1080",
+    }
+    assert calculate_readiness(ready, successes_7d=8, failures_7d=0).level in {
+        "ready",
+        "veteran",
+    }
+    assert is_ready_for_action(ready, "invite", successes_7d=8, failures_7d=0)
 
 
 def test_device_fingerprint_binds_locale_to_country() -> None:
@@ -321,11 +375,34 @@ def test_op_worker_uses_penalty_requeue_and_long_peer_flood_isolation() -> None:
     worker_source = (PROJECT_ROOT / "tg-manager/services/op_worker.py").read_text(
         encoding="utf-8"
     )
+    selector_source = (
+        PROJECT_ROOT / "tg-manager/services/resource_selector.py"
+    ).read_text(encoding="utf-8")
+    flood_source = (PROJECT_ROOT / "tg-manager/services/flood_engine.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "_PEER_FLOOD_PATTERNS" in worker_source
     assert "_maybe_requeue(pool, op_id, e, params, op_type)" in worker_source
     assert "record_peer_flood(" in worker_source
     assert "_peer_flood_wait = 48 * 3600" in worker_source
+    assert "min_trust_for_action(action_type)" in selector_source
+    assert "account_rank_score(" in flood_source
+    assert 'action_type="join"' in worker_source
+    assert 'action_type="mass_publish"' in worker_source
+
+
+def test_warmup_supplements_actions_with_readiness_refresh() -> None:
+    warmer_source = (PROJECT_ROOT / "tg-manager/services/account_warmer.py").read_text(
+        encoding="utf-8"
+    )
+    readiness_source = (
+        PROJECT_ROOT / "tg-manager/services/account_readiness.py"
+    ).read_text(encoding="utf-8")
+
+    assert "refresh_account_readiness(pool, account_id, owner_id)" in warmer_source
+    assert "ReadinessResult" in readiness_source
+    assert "It does not create artificial Telegram activity." in readiness_source
 
 
 def test_account_cleaner_reloads_full_account_context() -> None:

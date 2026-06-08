@@ -1246,6 +1246,23 @@ async def _run_daily_warmup_impl(
             account_id,
         )
 
+    readiness_score = None
+    readiness_level = warmup_level
+    try:
+        from services.account_readiness import refresh_account_readiness
+
+        readiness = await refresh_account_readiness(pool, account_id, owner_id)
+        if readiness is not None:
+            readiness_score = readiness.score
+            readiness_level = readiness.level
+    except Exception:
+        log_exc_swallow(
+            log,
+            "warmup readiness refresh failed",
+            account_id=account_id,
+            owner_id=owner_id,
+        )
+
     # Записываем итог дня в operation_audit → виден в "TG-операции" логе
     try:
         from services.op_worker import write_op_audit as _write_op_audit
@@ -1275,6 +1292,8 @@ async def _run_daily_warmup_impl(
         "actions_fail": actions_fail,
         "completed": completed,
         "warmup_level": warmup_level,
+        "readiness_score": readiness_score,
+        "readiness_level": readiness_level,
     }
 
 

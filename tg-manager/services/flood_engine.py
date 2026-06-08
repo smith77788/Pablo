@@ -29,6 +29,19 @@ _ACTION_BASELINES: dict[str, float] = {
     "message": 12.0,
     "mass_publish": 14.0,
 }
+_ACTION_MIN_TRUST: dict[str, float] = {
+    "invite": 0.50,
+    "dm": 0.50,
+    "dm_campaign": 0.50,
+    "message": 0.50,
+    "join": 0.35,
+    "create_channel": 0.35,
+    "create_bot": 0.35,
+    "mass_publish": 0.25,
+    "post": 0.25,
+    "parse": 0.20,
+    "default": 0.0,
+}
 
 
 @dataclass
@@ -93,6 +106,26 @@ def gaussian_delay(
     if maximum is not None:
         bounded = min(bounded, maximum)
     return bounded
+
+
+def normalize_trust_score(value: object) -> float:
+    """Normalize DB trust values to the canonical 0..1 range."""
+    try:
+        score = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if score > 1.0:
+        score = score / 100.0
+    return max(0.0, min(1.0, score))
+
+
+def min_trust_for_action(action_type: str = "default") -> float:
+    return _ACTION_MIN_TRUST.get(action_type, _ACTION_MIN_TRUST["default"])
+
+
+def account_rank_score(account_id: int, trust_score: object) -> float:
+    """Lower is better: in-memory risk minus normalized trust weight."""
+    return get_account_state(account_id).risk_score - normalize_trust_score(trust_score)
 
 
 async def record_flood(
@@ -215,6 +248,7 @@ async def get_best_account(
     exclude_ids: list[int] | None = None,
     pool_name: str | None = None,
     tags: list[str] | None = None,
+    min_trust_score: float | None = None,
 ) -> dict | None:
     """Select the best available account for an action, considering flood state and risk.
 
@@ -241,6 +275,15 @@ async def get_best_account(
         params.append(tags)
         conditions.append(f"a.tags @> ${len(params)}::text[]")
 
+    min_trust = (
+        min_trust_for_action(action_type)
+        if min_trust_score is None
+        else min_trust_score
+    )
+    if min_trust > 0:
+        params.append(min_trust)
+        conditions.append(f"COALESCE(a.trust_score, 0) >= ${len(params)}")
+
     where = " AND ".join(conditions)
     rows = await pool.fetch(
         f"""SELECT a.id, a.session_str, a.first_name, a.phone,
@@ -262,10 +305,9 @@ async def get_best_account(
     best = None
     best_score = float("inf")
     for row in rows:
-        state = get_account_state(row["id"])
         if is_account_cooling(row["id"]):
             continue
-        combined = state.risk_score - (row["trust_score"] or 0) / 100.0
+        combined = account_rank_score(row["id"], row["trust_score"])
         if combined < best_score:
             best_score = combined
             best = dict(row)
@@ -279,6 +321,8 @@ async def get_active_accounts(
     account_ids: list[int] | None = None,
     pool_name: str | None = None,
     tags: list[str] | None = None,
+    action_type: str = "default",
+    min_trust_score: float | None = None,
 ) -> list[dict]:
     """Return all active, non-cooling accounts ranked by combined trust/risk score.
 
@@ -305,6 +349,15 @@ async def get_active_accounts(
         params.append(tags)
         conditions.append(f"a.tags @> ${len(params)}::text[]")
 
+    min_trust = (
+        min_trust_for_action(action_type)
+        if min_trust_score is None
+        else min_trust_score
+    )
+    if min_trust > 0:
+        params.append(min_trust)
+        conditions.append(f"COALESCE(a.trust_score, 0) >= ${len(params)}")
+
     where = " AND ".join(conditions)
     rows = await pool.fetch(
         f"""SELECT a.id, a.session_str, a.first_name, a.phone,
@@ -321,11 +374,7 @@ async def get_active_accounts(
 
     # Exclude in-memory cooling accounts, then re-sort by combined score
     result = [dict(r) for r in rows if not is_account_cooling(r["id"])]
-    result.sort(
-        key=lambda r: (
-            get_account_state(r["id"]).risk_score - (r.get("trust_score") or 0) / 100.0
-        )
-    )
+    result.sort(key=lambda r: account_rank_score(r["id"], r.get("trust_score")))
     return result
 
 

@@ -73,6 +73,7 @@ FEATURE_PLAN: dict[str, str] = {
     "strike": "enterprise",
     "email_oauth": "enterprise",
     "infra_intelligence": "enterprise",
+    "account_readiness": "enterprise",
 }
 
 

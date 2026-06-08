@@ -951,7 +951,10 @@ async def _exec_mass_publish(
 
     explicit_acc_ids = [int(i) for i in (params.get("account_ids") or [])]
     accounts_raw = await resource_selector.select_all_active(
-        pool, owner_id, include_ids=explicit_acc_ids or None
+        pool,
+        owner_id,
+        include_ids=explicit_acc_ids or None,
+        action_type="mass_publish",
     )
     if not accounts_raw:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
@@ -1294,6 +1297,7 @@ async def _exec_bulk_join(
         pool,
         owner_id,
         include_ids=account_ids or None,
+        action_type="join",
     )
 
     # Filter accounts already in use by another concurrent op (under lock to avoid race)
@@ -1586,6 +1590,7 @@ async def _exec_bulk_leave(
         pool,
         owner_id,
         include_ids=account_ids or None,
+        action_type="leave",
     )
     # Mark accounts in use (with lock to avoid race with concurrent ops)
     async with _accounts_lock:
@@ -2310,6 +2315,7 @@ async def _exec_global_presence_bot(
         owner_id,
         include_ids=selected_acc_ids or None,
         respect_cooldown=False,
+        action_type="create_bot",
     )
 
     if not accounts:
@@ -2824,6 +2830,7 @@ async def _exec_strike(
         owner_id,
         include_ids=account_ids or None,
         respect_cooldown=False,  # preflight_accounts делает свою cooldown проверку
+        action_type="invite",
     )
 
     if not raw_accounts:

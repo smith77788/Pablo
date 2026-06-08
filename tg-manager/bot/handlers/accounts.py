@@ -63,11 +63,20 @@ router = Router()
 # ── Plan limits ────────────────────────────────────────────────────────────────
 
 ACC_LIMITS: dict[str, int] = {
-    "free": 2,
-    "starter": 5,
-    "pro": 15,
+    "free": 0,
+    "starter": 1,
+    "pro": 3,
     "enterprise": 9999,
 }
+
+
+def _next_account_plan(plan: str) -> str:
+    if plan == "free":
+        return "starter"
+    if plan == "starter":
+        return "pro"
+    return "enterprise"
+
 
 _STATUS_EMOJI: dict[str, str] = {
     "active": "✅",
@@ -316,6 +325,16 @@ async def _show_accounts_menu(
     all_accounts = await db.get_tg_accounts(pool, user_id)
     total = len(all_accounts) if all_accounts else 0
 
+    if limit == 0 and total == 0:
+        await message.edit_text(
+            locked_text("Личные Telegram-аккаунты", "starter"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BotCb(action="main")
+            ),
+        )
+        return
+
     # Filter display
     if status_filter == "active":
         shown = [
@@ -508,12 +527,13 @@ async def cb_add_account(
     accounts = await db.get_tg_accounts(pool, callback.from_user.id)
     if len(accounts) >= limit:
         limit_label = "∞" if limit >= 9999 else str(limit)
+        upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
             f"⚠️ Достигнут лимит аккаунтов для вашего плана "
             f"(<b>{plan.upper()}</b>: {limit_label} аккаунт{'ов' if limit != 1 else ''}).\n\n"
             f"Обновите подписку, чтобы добавить больше аккаунтов.",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup(plan),
+            reply_markup=subscription_locked_markup(upgrade_plan),
         )
         return
 
@@ -2827,11 +2847,12 @@ async def cb_import_menu(
     accounts = await db.get_tg_accounts(pool, callback.from_user.id)
     if len(accounts) >= limit:
         limit_label = "∞" if limit >= 9999 else str(limit)
+        upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
             f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
             "Обновите подписку для добавления новых аккаунтов.",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup(plan),
+            reply_markup=subscription_locked_markup(upgrade_plan),
         )
         return
 
@@ -3226,10 +3247,12 @@ async def _finalize_import(
     accounts = await db.get_tg_accounts(pool, message.from_user.id)
     if len(accounts) >= limit:
         limit_label = "∞" if limit >= 9999 else str(limit)
+        upgrade_plan = _next_account_plan(plan)
         await message.answer(
             f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
             "Обновите подписку для добавления новых аккаунтов.",
             parse_mode="HTML",
+            reply_markup=subscription_locked_markup(upgrade_plan),
         )
         return
 

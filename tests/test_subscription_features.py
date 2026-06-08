@@ -39,6 +39,18 @@ def test_free_plan_is_demo_not_full_product() -> None:
     assert BOT_LIMITS["free"] == 1
     assert feature_required_plan("basic_broadcast") == "starter"
 
+    accounts_source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("tg-manager/bot/handlers/accounts.py")
+        .read_text(encoding="utf-8")
+    )
+    assert '"free": 0' in accounts_source
+    assert '"starter": 1' in accounts_source
+    assert '"pro": 3' in accounts_source
+    assert "def _next_account_plan" in accounts_source
+
 
 def test_global_free_mode_requires_explicit_env_opt_in(monkeypatch) -> None:
     monkeypatch.delenv("ALLOW_GLOBAL_FREE_MODE", raising=False)

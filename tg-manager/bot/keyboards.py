@@ -99,7 +99,11 @@ def subscription_locked_markup(
 ) -> InlineKeyboardMarkup:
     """Lock screen markup. Pass back_callback to add a working Back button."""
     kb = InlineKeyboardBuilder()
-    kb.button(text="💳 Оформить подписку", callback_data=SubCb(action="menu"))
+    kb.button(
+        text=f"💳 Оформить {required_plan.upper()}",
+        callback_data=SubCb(action="choose_plan", plan=required_plan),
+    )
+    kb.button(text="📋 Все тарифы", callback_data=SubCb(action="menu"))
     if back_callback is not None:
         kb.button(text="◀️ Назад", callback_data=back_callback)
     kb.adjust(1)

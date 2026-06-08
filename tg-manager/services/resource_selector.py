@@ -29,6 +29,7 @@ async def select_account(
     exclude_ids: list[int] | None = None,
     pool_name: str | None = None,
     tags: list[str] | None = None,
+    min_trust_score: float | None = None,
 ) -> dict | None:
     """Выбрать один лучший аккаунт с учётом flood-состояния и risk score.
 
@@ -43,6 +44,7 @@ async def select_account(
         exclude_ids=exclude_ids,
         pool_name=pool_name,
         tags=tags,
+        min_trust_score=min_trust_score,
     )
 
 
@@ -55,6 +57,7 @@ async def select_accounts(
     exclude_ids: list[int] | None = None,
     pool_name: str | None = None,
     tags: list[str] | None = None,
+    min_trust_score: float | None = None,
 ) -> list[dict]:
     """Выбрать N лучших аккаунтов для операции (например, для нескольких волн Strike).
 
@@ -72,6 +75,7 @@ async def select_accounts(
             exclude_ids=excluded,
             pool_name=pool_name,
             tags=tags,
+            min_trust_score=min_trust_score,
         )
         if acc is None:
             break
@@ -98,6 +102,7 @@ async def select_for_wave(
     exclude_ids: list[int] | None = None,
     pool_name: str | None = None,
     tags: list[str] | None = None,
+    min_trust_score: float | None = None,
 ) -> list[dict]:
     """Выбрать аккаунты для конкретной волны операции.
 
@@ -111,6 +116,7 @@ async def select_for_wave(
         exclude_ids=exclude_ids,
         pool_name=pool_name,
         tags=tags,
+        min_trust_score=min_trust_score,
     )
     log.info(
         "resource_selector: wave=%d size=%d got=%d accs action=%s owner=%d",
@@ -131,6 +137,8 @@ async def select_all_active(
     pool_name: str | None = None,
     tags: list[str] | None = None,
     respect_cooldown: bool = True,
+    action_type: str = "default",
+    min_trust_score: float | None = None,
 ) -> list[asyncpg.Record]:
     """Вернуть все активные аккаунты (аналог _get_active_accounts, но с опцией фильтра cooldown).
 
@@ -156,6 +164,15 @@ async def select_all_active(
     if tags:
         params.append(tags)
         conditions.append(f"a.tags @> ${len(params)}::text[]")
+
+    min_trust = (
+        flood_engine.min_trust_for_action(action_type)
+        if min_trust_score is None
+        else min_trust_score
+    )
+    if min_trust > 0:
+        params.append(min_trust)
+        conditions.append(f"COALESCE(a.trust_score, 0) >= ${len(params)}")
 
     where = " AND ".join(conditions)
     return await pool.fetch(
