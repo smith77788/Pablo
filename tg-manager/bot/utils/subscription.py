@@ -82,6 +82,14 @@ def normalize_plan(plan: str) -> str:
     return PLAN_ALIASES.get(normalized, normalized)
 
 
+def coerce_plan(plan: str | None) -> str:
+    normalized = normalize_plan(plan or "free")
+    if normalized in PLAN_LEVELS:
+        return normalized
+    log.warning("unknown subscription plan %r coerced to free", plan)
+    return "free"
+
+
 def feature_required_plan(feature_key: str) -> str:
     return FEATURE_PLAN.get(feature_key, "enterprise")
 
@@ -123,7 +131,7 @@ async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
         "WHERE user_id=$1 AND is_active=true AND expires_at > now()",
         user_id,
     )
-    plan = row["plan"] if row else "free"
+    plan = coerce_plan(row["plan"] if row else "free")
     _plan_cache[user_id] = (plan, now)
     return plan
 
@@ -133,8 +141,8 @@ async def require_plan(pool: asyncpg.Pool, user_id: int, min_plan: str) -> bool:
         return True
     if is_platform_admin(user_id):
         return True
-    plan = normalize_plan(await get_plan(pool, user_id))
-    min_plan = normalize_plan(min_plan)
+    plan = coerce_plan(await get_plan(pool, user_id))
+    min_plan = coerce_plan(min_plan)
     return PLAN_LEVELS.get(plan, 0) >= PLAN_LEVELS.get(min_plan, 0)
 
 
@@ -146,7 +154,7 @@ async def get_bot_limit(pool: asyncpg.Pool, user_id: int) -> int:
     if is_platform_admin(user_id):
         return 9999
     plan = await get_plan(pool, user_id)
-    return BOT_LIMITS.get(plan, 3)
+    return BOT_LIMITS[coerce_plan(plan)]
 
 
 def locked_text(feature: str, required_plan: str) -> str:

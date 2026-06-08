@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import asyncio
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
@@ -9,16 +10,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tg-manager"))
 from bot.utils.subscription import (
     BOT_LIMITS,
     PLAN_LEVELS,
+    coerce_plan,
     feature_required_plan,
+    get_bot_limit,
     get_free_mode,
+    get_plan,
+    invalidate_plan_cache,
     normalize_plan,
+    require_plan,
     set_free_mode,
 )
+
+
+class FakePlanPool:
+    def __init__(self, plan: str | None) -> None:
+        self.plan = plan
+
+    async def fetchrow(self, _query: str, _user_id: int) -> dict[str, str] | None:
+        if self.plan is None:
+            return None
+        return {"plan": self.plan}
 
 
 def test_max_alias_maps_to_enterprise() -> None:
     assert normalize_plan("max") == "enterprise"
     assert normalize_plan("maximum") == "enterprise"
+
+
+def test_unknown_plan_is_never_promoted() -> None:
+    assert coerce_plan("vip") == "free"
+    assert coerce_plan("enterprise_plus") == "free"
 
 
 def test_core_revenue_features_require_highest_plan() -> None:
@@ -92,3 +113,14 @@ def test_plan_levels_are_monotonic() -> None:
     assert PLAN_LEVELS["free"] < PLAN_LEVELS["starter"]
     assert PLAN_LEVELS["starter"] < PLAN_LEVELS["pro"]
     assert PLAN_LEVELS["pro"] < PLAN_LEVELS["enterprise"]
+
+
+def test_unknown_db_plan_gets_free_limits(monkeypatch) -> None:
+    user_id = 490001
+    monkeypatch.delenv("ADMIN_IDS", raising=False)
+    invalidate_plan_cache(user_id)
+    pool = FakePlanPool("vip")
+
+    assert asyncio.run(get_plan(pool, user_id)) == "free"
+    assert asyncio.run(get_bot_limit(pool, user_id)) == BOT_LIMITS["free"]
+    assert asyncio.run(require_plan(pool, user_id, "starter")) is False
