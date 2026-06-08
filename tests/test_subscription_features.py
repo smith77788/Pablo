@@ -91,6 +91,26 @@ def test_global_free_mode_requires_explicit_env_opt_in(monkeypatch) -> None:
     set_free_mode(False)
 
 
+def test_admin_free_mode_persists_actual_guarded_state() -> None:
+    source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("tg-manager/bot/handlers/admin.py")
+        .read_text(encoding="utf-8")
+    )
+    block = source[
+        source.index('elif action == "free_mode_toggle"') : source.index(
+            'elif action == "block_ask"'
+        )
+    ]
+
+    assert "actual_state = get_free_mode()" in block
+    assert '"true" if actual_state else "false"' in block
+    assert '"true" if new_state else "false"' not in block
+    assert "ALLOW_GLOBAL_FREE_MODE=true" in block
+
+
 def test_revenue_entrypoints_have_plan_gates() -> None:
     source = (
         Path(__file__)

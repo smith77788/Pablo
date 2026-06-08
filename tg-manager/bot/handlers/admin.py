@@ -392,9 +392,15 @@ async def cb_admin(
     elif action == "free_mode_toggle":
         new_state = not get_free_mode()
         set_free_mode(new_state)
+        actual_state = get_free_mode()
         await db.set_platform_setting(
-            pool, "free_mode", "true" if new_state else "false"
+            pool, "free_mode", "true" if actual_state else "false"
         )
+        if new_state and not actual_state:
+            await callback.answer(
+                "Free Mode заблокирован: включите ALLOW_GLOBAL_FREE_MODE=true на сервере.",
+                show_alert=True,
+            )
         await _show_admin_main(callback, pool, edit=True)
 
     elif action == "block_ask":
