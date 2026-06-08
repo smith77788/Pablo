@@ -6,18 +6,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 _MOJIBAKE_MARKERS = (
-    "\ufffd",
-    "Рџ",
-    "Рќ",
-    "Рў",
-    "Рћ",
-    "Р”",
-    "Р§",
-    "Р—",
-    "вќ",
-    "в†",
-    "в”",
-    "рџ",
+    chr(0xFFFD),
+    chr(0x0420) + chr(0x045F),
+    chr(0x0420) + chr(0x045C),
+    chr(0x0420) + chr(0x045E),
+    chr(0x0420) + chr(0x045B),
+    chr(0x0420) + chr(0x201D),
+    chr(0x0420) + chr(0x00A7),
+    chr(0x0420) + chr(0x2014),
+    chr(0x0432) + chr(0x045C),
+    chr(0x0432) + chr(0x2020),
+    chr(0x0432) + chr(0x201D),
+    chr(0x0440) + chr(0x045F),
 )
 
 

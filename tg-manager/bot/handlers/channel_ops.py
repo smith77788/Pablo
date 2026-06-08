@@ -4138,7 +4138,7 @@ async def _show_bulk_report_account_picker(
     for acc in accounts:
         acc_id = acc["id"]
         is_sel = acc_id in selected
-        phone = acc.get("phone", "")[-4:] if acc.get("phone") else "????"
+        phone = acc.get("phone", "")[-4:] if acc.get("phone") else "----"
         name = acc.get("first_name") or f"acc{acc_id}"
         mark = "✅" if is_sel else "☐"
         kb.button(

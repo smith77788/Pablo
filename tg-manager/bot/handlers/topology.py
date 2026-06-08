@@ -137,7 +137,7 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "deactivated": "💀",
     }
     for i, (aid, data) in enumerate(acc_map.items()):
-        si = status_icons.get(data["status"], "вќ“")
+        si = status_icons.get(data["status"], "❓")
         name = data["name"][:22]
         lines.append(f"\n{si} <b>{escape(name)}</b>")
         if data["phone"]:
@@ -235,7 +235,7 @@ async def cb_topo_acc_list(
                 has_session=bool(acc.get("has_session")),
                 is_active=bool(acc.get("is_active", True)),
             ),
-            "вќ“",
+            "❓",
         )
         name = (
             acc.get("first_name")

@@ -1243,10 +1243,10 @@ _SPAMBOT_OK_PATTERNS = (
     "no complaints",
     "good standing",
     "good news",
-    "РЅРµС‚ РѕРіСЂР°РЅРёС‡РµРЅРёР№",
-    "РЅРµС‚ Р¶Р°Р»РѕР±",
-    "РЅРµ Р±С‹Р»Рѕ Р¶Р°Р»РѕР±",
-    "СЃРІРѕР±РѕРґРµРЅ",
+    "нет ограничений",
+    "нет жалоб",
+    "не было жалоб",
+    "свободен",
     "not limited",
     "no reports",
 )
@@ -1254,12 +1254,12 @@ _SPAMBOT_LIMIT_PATTERNS = (
     "limited",
     "spam",
     "restricted",
-    "РѕРіСЂР°РЅРёС‡РµРЅ,",
-    "РѕРіСЂР°РЅРёС‡РµРЅ.",
-    "РѕРіСЂР°РЅРёС‡РµРЅ\n",
-    "РѕРіСЂР°РЅРёС‡РµРЅ ",
-    "СЃРїР°Рј",
-    "РІР°С€ Р°РєРєР°СѓРЅС‚ РѕРіСЂР°РЅРёС‡РµРЅ",
+    "ограничен,",
+    "ограничен.",
+    "ограничен\n",
+    "ограничен ",
+    "спам",
+    "ваш аккаунт ограничен",
 )
 _VERIFIED_RESTRICTION_STATUSES = frozenset({"spamblock", "banned", "deactivated"})
 
@@ -1371,7 +1371,7 @@ async def check_account_status_full(
                 if spambot_status == "active":
                     return {
                         "status": "active",
-                        "reason": "РђРєРєР°СѓРЅС‚ Р°РєС‚РёРІРµРЅ, РѕРіСЂР°РЅРёС‡РµРЅРёР№ РЅРµС‚",
+                        "reason": "Аккаунт активен, ограничений нет",
                         "display_name": display_name,
                     }
                 if spambot_status == "spamblock":

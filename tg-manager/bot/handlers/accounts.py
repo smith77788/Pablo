@@ -105,15 +105,15 @@ def _display_acc_status(acc: dict) -> str:
 def _display_acc_status_label(acc: dict) -> str:
     status = _display_acc_status(acc)
     labels = {
-        "active": "вњ… РђРєС‚РёРІРµРЅ",
-        "cooldown": "вЏі FloodWait / cooldown",
-        "spamblock": "вљ пёЏ РЎРїР°Рј-РѕРіСЂР°РЅРёС‡РµРЅРёСЏ",
-        "banned": "вќЊ Р—Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ",
-        "deactivated": "рџ’Ђ Р”РµР°РєС‚РёРІРёСЂРѕРІР°РЅ",
-        "session_expired": "рџ”‘ РЎРµСЃСЃРёСЏ РёСЃС‚РµРєР»Р°",
-        "archived": "вЏё РћС‚РєР»СЋС‡С‘РЅ",
+        "active": "✅ Активен",
+        "cooldown": "⏳ FloodWait / cooldown",
+        "spamblock": "⚠️ Спам-ограничения",
+        "banned": "❌ Заблокирован",
+        "deactivated": "💀 Деактивирован",
+        "session_expired": "🔑 Сессия истекла",
+        "archived": "⏸ Отключён",
     }
-    return labels.get(status, f"вљ пёЏ {status}")
+    return labels.get(status, f"⚠️ {status}")
 
 
 class AccountLogin(StatesGroup):
@@ -1281,7 +1281,7 @@ async def cb_view_account(
         lines.append(f"Телефон: <code>{phone}</code>")
     if tg_id:
         lines.append(f"Telegram ID: <code>{tg_id}</code>")
-    lines.append(f"РЎС‚Р°С‚СѓСЃ: {_display_acc_status_label(acc)}")
+    lines.append(f"Статус: {_display_acc_status_label(acc)}")
     lines.append("")
     lines.append(trust_line)
     lines.append(health_score_line)
@@ -1577,7 +1577,7 @@ async def cb_assign_proxy(
         lines = ["👤 <b>Аккаунт</b>\n"]
         if name:
             lines.append(f"Имя: <b>{name}</b>")
-        lines.append(f"РЎС‚Р°С‚СѓСЃ: {_display_acc_status_label(acc)}")
+        lines.append(f"Статус: {_display_acc_status_label(acc)}")
         lines.append(f"Прокси: {proxy_line}")
         await callback.message.edit_text(
             "\n".join(lines),
