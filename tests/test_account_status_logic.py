@@ -132,6 +132,16 @@ def test_account_ranking_uses_full_normalized_trust_weight() -> None:
     assert account_rank_score(1, 90) == account_rank_score(1, 0.90)
 
 
+def test_capacity_planner_uses_normalized_trust_scores() -> None:
+    capacity_source = (
+        PROJECT_ROOT / "tg-manager/services/capacity_planner.py"
+    ).read_text(encoding="utf-8")
+
+    assert "normalize_trust_score(" in capacity_source
+    assert "avg_trust / 100.0" not in capacity_source
+    assert "or 50" not in capacity_source
+
+
 def test_outbound_actions_require_readiness_thresholds() -> None:
     assert min_trust_for_action("invite") >= 0.50
     assert min_trust_for_action("dm_campaign") >= 0.50

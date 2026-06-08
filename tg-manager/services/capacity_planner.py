@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import asyncpg
+from services.flood_engine import normalize_trust_score
 
 log = logging.getLogger(__name__)
 
@@ -149,10 +150,10 @@ async def plan_operation(
         warnings.append(f"{len(high_flood)} аккаунт(ов) с высокой частотой флуд-вейтов")
 
     # Снизить effective rate для аккаунтов с флудами
-    avg_trust = sum(float(a.get("trust_score") or 50) for a in accounts) / max(
-        1, account_count
-    )
-    trust_factor = avg_trust / 100.0  # 0.0 - 1.0
+    avg_trust = sum(
+        normalize_trust_score(a.get("trust_score")) or 0.5 for a in accounts
+    ) / max(1, account_count)
+    trust_factor = avg_trust  # canonical 0.0 - 1.0
 
     effective_per_hour = safe_per_hour * (0.5 + 0.5 * trust_factor)
     total_capacity_per_hour = effective_per_hour * available
