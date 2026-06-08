@@ -160,6 +160,17 @@ def test_readiness_blocks_missing_sessions_and_low_quality_outbound() -> None:
     assert calculate_readiness(missing).level == "blocked"
     assert not is_ready_for_action(missing, "invite")
 
+    listed_active = {
+        "id": 3,
+        "is_active": True,
+        "has_session": True,
+        "acc_status": "session_expired",
+        "trust_score": 0.72,
+        "proxy_id": 10,
+        "proxy_url": "socks5://127.0.0.1:1080",
+    }
+    assert calculate_readiness(listed_active, successes_7d=8, failures_7d=0).allowed
+
     ready = {
         "id": 2,
         "is_active": True,
@@ -269,6 +280,8 @@ def test_topology_uses_shared_effective_account_status() -> None:
         in topology_source
     )
     assert "effective_account_status(" in topology_source
+    assert "_has_account_session(" in topology_source
+    assert 'has_session=bool(acc.get("session_str"))' not in topology_source
     assert "effective_account_status(" in health_source
 
 

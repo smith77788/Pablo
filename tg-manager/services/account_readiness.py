@@ -50,7 +50,9 @@ def calculate_readiness(
     floods_7d: int = 0,
 ) -> ReadinessResult:
     account_id = int(account.get("id") or 0)
-    has_session = bool(account.get("session_str"))
+    has_session = bool(account.get("has_session")) or bool(
+        account.get("session_str") or account.get("session_string")
+    )
     is_active = bool(account.get("is_active", True))
     if not has_session:
         return ReadinessResult(account_id, 0.0, "blocked", False, ("no_session",))

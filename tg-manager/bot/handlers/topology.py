@@ -31,6 +31,12 @@ router = Router()
 _PAGE_SIZE = 8
 
 
+def _has_account_session(acc: dict) -> bool:
+    return bool(acc.get("has_session")) or bool(
+        acc.get("session_str") or acc.get("session_string")
+    )
+
+
 # ── Main menu ──────────────────────────────────────────────────────────────────
 
 
@@ -113,7 +119,7 @@ async def cb_topo_overview(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "channels": [],
             "status": effective_account_status(
                 a.get("acc_status"),
-                has_session=bool(a.get("has_session")),
+                has_session=_has_account_session(a),
                 is_active=bool(a.get("is_active", True)),
             ),
         }
@@ -232,7 +238,7 @@ async def cb_topo_acc_list(
         si = status_icons.get(
             effective_account_status(
                 acc.get("acc_status"),
-                has_session=bool(acc.get("has_session")),
+                has_session=_has_account_session(acc),
                 is_active=bool(acc.get("is_active", True)),
             ),
             "❓",
@@ -307,7 +313,7 @@ async def cb_topo_acc_view(
     phone = acc.get("phone", "")
     status = effective_account_status(
         acc.get("acc_status"),
-        has_session=bool(acc.get("session_str")),
+        has_session=_has_account_session(acc),
         is_active=bool(acc.get("is_active", True)),
     )
 
