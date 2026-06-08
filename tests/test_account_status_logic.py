@@ -523,6 +523,13 @@ def test_mass_publish_isolates_network_failed_accounts() -> None:
     assert 'if result.get("proxy_error"):' in worker_source
     assert "isolated_accounts: set[int] = set()" in worker_source
     assert "if acc is None:" in worker_source
+    assert "remaining = total - idx + 1" in worker_source
+    assert (
+        "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1"
+        in worker_source
+    )
+    assert 'last_error = ""' in worker_source
+    assert 'locals().get("err_str"' not in worker_source
     assert "await release_accounts(mp_used_acc_ids)" in worker_source
 
 

@@ -1092,7 +1092,8 @@ async def _exec_mass_publish(
                 "summary": f"Отменено. Опубликовано: {ok_count}, ошибок: {fail_count}",
             }
         if acc is None:
-            fail_count += 1
+            remaining = total - idx + 1
+            fail_count += remaining
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
@@ -1105,11 +1106,14 @@ async def _exec_mass_publish(
                 "Аккаунт временно изолирован после сетевого/прокси сбоя",
             )
             await pool.execute(
-                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                op_id,
+                remaining,
             )
-            continue
+            break
         flood_wait = 0
         _published = False
+        last_error = ""
         for _attempt in range(2):  # per-item retry: 1 initial + 1 retry on FloodWait
             try:
                 result = await account_manager.post_to_channel(
@@ -1146,6 +1150,7 @@ async def _exec_mass_publish(
                 break  # success — stop retry loop
             except Exception as e:
                 err_str = str(e)[:200]
+                last_error = err_str
                 flood_wait = extract_flood_wait(e, err_str)
                 if _is_network_or_proxy_error(err_str):
                     isolated_accounts.add(acc["id"])
@@ -1215,6 +1220,7 @@ async def _exec_mass_publish(
                             break
                         except Exception as fallback_exc:
                             err_str = str(fallback_exc)[:200]
+                            last_error = err_str
                             if _is_network_or_proxy_error(err_str):
                                 isolated_accounts.add(fallback_acc["id"])
                                 try:
@@ -1255,7 +1261,7 @@ async def _exec_mass_publish(
 
         if not _published:
             fail_count += 1
-            err_str = locals().get("err_str", "unknown error")[:200]
+            err_str = (last_error or "unknown error")[:200]
             ch_label = str(dialog.get("title") or dialog["id"])[:60]
             if ch_label not in failed_channels:
                 failed_channels.append(ch_label)
