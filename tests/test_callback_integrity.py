@@ -57,3 +57,21 @@ def test_admin_buttons_are_covered_by_admin_dispatcher() -> None:
         missing.append(raw_action)
 
     assert missing == []
+
+
+def test_botmother_buttons_are_covered_by_botmother_dispatcher() -> None:
+    project_files = (PROJECT_ROOT / "tg-manager").rglob("*.py")
+    callbacks: set[str] = set()
+    for path in project_files:
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"BmCb\(action=[\"']([^\"']+)[\"']", source):
+            callbacks.add(match.group(1))
+
+    dispatcher = (
+        PROJECT_ROOT / "tg-manager/bot/handlers/botmother_menu.py"
+    ).read_text(encoding="utf-8")
+    handlers = set(
+        re.findall(r"BmCb\.filter\(F\.action == [\"']([^\"']+)[\"']", dispatcher)
+    )
+
+    assert sorted(callbacks - handlers) == []

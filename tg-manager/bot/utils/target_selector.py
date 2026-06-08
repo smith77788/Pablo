@@ -16,7 +16,7 @@ Usage example (pick a bot):
     kb = TargetSelector.single_pick_kb(
         targets,
         callback_factory=lambda t: MyCb(action="chosen", target_id=t.id),
-        back_callback=BmCb(action="menu"),
+        back_callback=BmCb(action="main"),
         page=0,
     )
     await message.answer("Выберите бота:", reply_markup=kb)
