@@ -1,6 +1,9 @@
 """Network Broadcast v2 — send to each bot's own audience with segment filters."""
 
 from __future__ import annotations
+
+import logging
+
 import asyncpg
 import aiohttp
 from aiogram import Router, F
@@ -16,6 +19,7 @@ from database import db
 from services import broadcaster
 
 router = Router()
+log = logging.getLogger(__name__)
 
 
 @router.callback_query(NetBcCb.filter(F.action == "menu"))
@@ -372,7 +376,11 @@ async def cb_net_bc_confirm(
                     "SELECT user_id FROM bot_users WHERE bot_id=$1", bot["bot_id"]
                 )
             except Exception:
-                log.warning("net_broadcast: fetch user_ids failed bot=%s", bot.get("bot_id"), exc_info=True)
+                log.warning(
+                    "net_broadcast: fetch user_ids failed bot=%s",
+                    bot.get("bot_id"),
+                    exc_info=True,
+                )
                 user_ids = []
             ids = [r["user_id"] for r in user_ids]
             if ids:
@@ -452,7 +460,11 @@ async def cb_net_bc_confirm(
                     lang,
                 )
             except Exception:
-                log.warning("net_broadcast: fetch user_ids (lang) failed bot=%s", bot.get("bot_id"), exc_info=True)
+                log.warning(
+                    "net_broadcast: fetch user_ids (lang) failed bot=%s",
+                    bot.get("bot_id"),
+                    exc_info=True,
+                )
                 user_ids = []
             ids = [r["user_id"] for r in user_ids]
             if ids:

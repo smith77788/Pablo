@@ -8,7 +8,6 @@ from tools.database_tools import (
     get_recent_orders,
     update_order_status,
     set_tracking_number,
-    search_customers,
     add_customer_note,
 )
 from tools.telegram_tools import send_message

@@ -11,7 +11,6 @@ from tools.database_tools import (
     add_customer_note,
     get_customer_notes,
     mark_message_resolved,
-    update_customer,
     search_products,
 )
 from tools.telegram_tools import send_message

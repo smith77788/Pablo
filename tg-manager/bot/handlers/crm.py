@@ -1,5 +1,7 @@
 """CRM tags and automation rules management."""
 
+import logging
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -21,6 +23,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 
 router = Router()
+log = logging.getLogger(__name__)
 
 
 class AddAutoRule(StatesGroup):

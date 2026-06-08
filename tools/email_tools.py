@@ -6,9 +6,7 @@ import email as email_lib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header
-from datetime import datetime
 import os
-from typing import Any
 
 from tools.database_tools import save_message, get_customer_by_email
 

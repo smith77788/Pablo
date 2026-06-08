@@ -3,7 +3,6 @@
 from __future__ import annotations
 import logging
 import time
-from typing import Any
 
 from agents.customer_support import CustomerSupportAgent
 from agents.order_manager import OrderManagerAgent
