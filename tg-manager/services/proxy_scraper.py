@@ -30,6 +30,7 @@ _PROXY_SOURCES: list[str] = [
 _VALIDATE_URL = "https://api.telegram.org/"
 _VALIDATE_TIMEOUT = 10.0
 _VALIDATE_CONCURRENCY = 40  # max simultaneous validation connections
+_MAX_VALIDATE_CANDIDATES = 800
 _REFRESH_INTERVAL_H = 6
 _MAX_FAIL_COUNT = 3  # remove proxy after this many consecutive failures
 _MIN_POOL_SIZE = 20  # warn if valid pool drops below this
@@ -125,24 +126,43 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
         # Record the attempt time so UI shows when last check ran
         try:
             from database import db as _db
+            import datetime
 
-            await _db.set_platform_setting(pool, "proxy_scraper_last_run", "0/0")
+            now_str = datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            await _db.set_platform_setting(
+                pool, "proxy_scraper_last_run", f"0/0@{now_str}"
+            )
         except Exception:
             pass
+        async with _pool_lock:
+            _valid_pool = []
+            _pool_updated_at = _time.monotonic()
         return {
             "fetched": 0,
             "valid": 0,
+            "validated": 0,
             "duration_s": int(_time.monotonic() - t_start),
         }
 
     # 2. Validate concurrently (limited semaphore)
+    candidates = list(raw)
+    random.shuffle(candidates)
+    candidates = candidates[:_MAX_VALIDATE_CANDIDATES]
+    if len(raw) > len(candidates):
+        log.info(
+            "proxy_scraper: validating capped sample %d/%d",
+            len(candidates),
+            len(raw),
+        )
     sem = asyncio.Semaphore(_VALIDATE_CONCURRENCY)
-    validation_tasks = [_validate_one(url, sem) for url in raw]
+    validation_tasks = [_validate_one(url, sem) for url in candidates]
     validation_results = await asyncio.gather(*validation_tasks)
 
     valid = [(url, lat) for url, ok, lat in validation_results if ok]
     valid.sort(key=lambda x: x[1] or 9999)  # sort by latency asc
-    log.info("proxy_scraper: %d/%d proxies valid", len(valid), len(raw))
+    log.info("proxy_scraper: %d/%d proxies valid", len(valid), len(candidates))
 
     # 3. Upsert into DB
     if valid:
@@ -207,7 +227,12 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
     except Exception:
         pass
 
-    return {"fetched": len(raw), "valid": len(valid), "duration_s": duration_s}
+    return {
+        "fetched": len(raw),
+        "validated": len(candidates),
+        "valid": len(valid),
+        "duration_s": duration_s,
+    }
 
 
 async def get_pool_proxy(pool: asyncpg.Pool) -> Optional[str]:
@@ -299,8 +324,8 @@ async def run_scraper_loop(pool: asyncpg.Pool) -> None:
     log.info(
         "proxy_scraper: background loop started (interval=%dh)", _REFRESH_INTERVAL_H
     )
-    # Initial refresh after 30s startup delay (let other services initialize first)
-    await asyncio.sleep(30)
+    # Initial refresh after a short startup delay (let DB/bot initialize first).
+    await asyncio.sleep(3)
     while True:
         try:
             await scrape_and_refresh(pool)

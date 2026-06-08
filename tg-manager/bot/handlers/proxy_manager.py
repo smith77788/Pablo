@@ -620,11 +620,13 @@ async def cb_free_pool_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             result = await _ps.scrape_and_refresh(pool)
             valid = result.get("valid", 0)
             fetched = result.get("fetched", 0)
+            validated = result.get("validated", fetched)
             duration = result.get("duration_s", 0)
             icon = "🟢" if valid >= 50 else ("🟡" if valid >= 20 else "🔴")
             text = (
                 f"{icon} <b>Пул обновлён!</b>\n\n"
                 f"📥 Получено из источников: {fetched}\n"
+                f"🔎 Проверено: {validated}\n"
                 f"✅ Прошли проверку: <b>{valid}</b>\n"
                 f"⏱ Время: {duration}с"
             )
