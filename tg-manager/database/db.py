@@ -2197,6 +2197,7 @@ async def get_tg_accounts(
     base = (
         "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active, "
         "session_str, "
+        "session_str AS session_string, "
         "COALESCE(acc_status, 'active') AS acc_status, status_checked_at, status_reason, "
         "(session_str IS NOT NULL AND session_str <> '') AS has_session, "
         "trust_score, cooldown_until, pool, tags, warnings "

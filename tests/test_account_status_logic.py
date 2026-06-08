@@ -330,6 +330,7 @@ def test_get_tg_accounts_returns_full_session_material() -> None:
     ]
 
     assert "session_str, " in get_accounts_block
+    assert "session_str AS session_string" in get_accounts_block
     assert (
         "(session_str IS NOT NULL AND session_str <> '') AS has_session"
         in get_accounts_block
