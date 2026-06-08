@@ -89,6 +89,14 @@ async def _fire_cross_nav(
 # ── Keyboard builders ─────────────────────────────────────────────────────
 
 
+def _format_progress_bar(done: int, total: int, width: int = 10) -> str:
+    if total <= 0:
+        return "-" * width
+    pct = max(0.0, min(1.0, done / total))
+    filled = min(width, round(width * pct))
+    return "#" * filled + "-" * (width - filled)
+
+
 def _main_menu_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🎯 Навигатор целей", callback_data=IntentCb(action="menu"))
@@ -1824,8 +1832,7 @@ async def cb_op_detail(
         total = op["total_items"]
         done = op["done_items"] or 0
         pct = round(100 * done / total) if total else 0
-        bar_filled = pct // 10
-        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        bar = _format_progress_bar(done, total)
         progress_line = f"Прогресс: [{bar}] {done}/{total} ({pct}%)"
         # ETA for running operations
         if op["status"] == "running" and op["started_at"] and done > 0:
