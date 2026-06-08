@@ -145,7 +145,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     from datetime import datetime, timezone
 
     plan, expires_at = await _get_plan_expiry(pool, user_id)
-    lim = sub_utils.BOT_LIMITS.get(plan, 3)
+    plan = sub_utils.coerce_plan(plan)
+    lim = sub_utils.BOT_LIMITS[plan]
     lim_label = "∞" if lim >= 9999 else str(lim)
     emoji = sub_utils.PLAN_EMOJIS.get(plan, "🆓")
     ton_ok = "✅" if _ton_wallet() else "❌"
@@ -546,6 +547,15 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.answer()
     plan, months = callback_data.plan or "", callback_data.months
+    if plan not in PLAN_PRICES_USD:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="💳 К тарифам", callback_data=SubCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "❌ Неизвестный тариф. Вернитесь к выбору подписки.",
+            reply_markup=kb.as_markup(),
+        )
+        return
     usd, _ = _calc(plan, months, "TON")
     em = sub_utils.PLAN_EMOJIS.get(plan, "")
     uid = callback.from_user.id
@@ -560,6 +570,25 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
         for x in os.getenv("ADMIN_IDS", "").split(",")
         if x.strip().isdigit()
     ]
+    if not admin_ids:
+        log.warning(
+            "subscription request cannot be delivered: ADMIN_IDS is empty user_id=%s plan=%s months=%s",
+            uid,
+            plan,
+            months,
+        )
+        kb = InlineKeyboardBuilder()
+        kb.button(text="💳 К тарифам", callback_data=SubCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "⚠️ <b>Оплата пока не настроена</b>\n\n"
+            "Администратор ещё не указал канал для заявок на подписку. "
+            "Попробуйте позже или напишите владельцу сервиса напрямую.\n\n"
+            f"Вы выбрали: <b>{em} {plan.upper()}</b> × {months} мес. — <b>${usd}</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     notify = (
         f"💳 <b>Запрос на подписку</b>\n\n"
         f"Пользователь: {user_label} (<code>{uid}</code>)\n"

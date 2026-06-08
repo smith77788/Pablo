@@ -155,3 +155,31 @@ def test_unknown_db_plan_gets_free_limits(monkeypatch) -> None:
     assert asyncio.run(get_plan(pool, user_id)) == "free"
     assert asyncio.run(get_bot_limit(pool, user_id)) == BOT_LIMITS["free"]
     assert asyncio.run(require_plan(pool, user_id, "starter")) is False
+
+
+def test_subscription_purchase_flow_does_not_fake_delivery() -> None:
+    source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("tg-manager/bot/handlers/subscription.py")
+        .read_text(encoding="utf-8")
+    )
+
+    menu_block = source[
+        source.index("async def _build_menu_text_and_kb") : source.index(
+            '@router.message(Command("subscription"))'
+        )
+    ]
+    request_block = source[
+        source.index("async def cb_request_sub") : source.index(
+            '@router.callback_query(SubCb.filter(F.action == "admin_grant"))',
+            source.index("async def cb_request_sub"),
+        )
+    ]
+
+    assert "plan = sub_utils.coerce_plan(plan)" in menu_block
+    assert "lim = sub_utils.BOT_LIMITS[plan]" in menu_block
+    assert "if plan not in PLAN_PRICES_USD:" in request_block
+    assert "if not admin_ids:" in request_block
+    assert "subscription request cannot be delivered" in request_block
