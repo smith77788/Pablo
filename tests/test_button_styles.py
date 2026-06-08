@@ -59,6 +59,29 @@ def test_neutral_interactive_buttons_fallback_to_primary() -> None:
     )
 
 
+def test_infra_dashboard_buttons_are_primary() -> None:
+    labels = (
+        "🗂️ Реестр ассетов",
+        "❤️ Здоровье аккаунтов",
+        "⚡ Флуд-защита и лимиты",
+        "📋 Лог операций",
+        "📊 Статистика за сегодня",
+        "🎯 Возможности аккаунтов",
+        "🔄 Авто-балансировка пулов",
+        "🎯 Советник",
+        "🧠 Copilot",
+        "🔬 Intelligence Report",
+    )
+
+    for label in labels:
+        assert (
+            infer_button_style(
+                InlineKeyboardButton(text=label, callback_data="infra:menu")
+            )
+            == "primary"
+        )
+
+
 def test_reply_keyboard_buttons_receive_styles() -> None:
     install_button_style_patch()
     kb = ReplyKeyboardBuilder()
