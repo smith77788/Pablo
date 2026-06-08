@@ -55,8 +55,7 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
-    await state.clear()
+async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     uid = message.from_user.id
     admin = is_platform_admin(uid)
 
