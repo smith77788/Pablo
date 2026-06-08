@@ -23,6 +23,7 @@ _MAX_PARALLEL_PER_OWNER = 3  # максимум на одного владель
 # Реестр аккаунтов, занятых активными операциями op_worker.
 # account_warmer проверяет этот реестр перед использованием аккаунта.
 _accounts_in_use: set[int] = set()
+_operation_account_locks: dict[int, set[int]] = {}
 _accounts_lock = asyncio.Lock()
 
 
@@ -37,6 +38,27 @@ async def release_accounts(acc_ids: list[int]) -> None:
     async with _accounts_lock:
         for aid in acc_ids:
             _accounts_in_use.discard(aid)
+            for locked_acc_ids in _operation_account_locks.values():
+                locked_acc_ids.discard(aid)
+
+
+async def release_operation_accounts(op_id: int) -> None:
+    """Release every account claimed by an operation after executor errors."""
+    async with _accounts_lock:
+        acc_ids = _operation_account_locks.pop(op_id, set())
+        for aid in acc_ids:
+            _accounts_in_use.discard(aid)
+
+
+async def _claim_available_accounts(op_id: int, accounts: list) -> list:
+    """Atomically claim free accounts and bind them to operation cleanup."""
+    async with _accounts_lock:
+        claimed = [a for a in accounts if int(a["id"]) not in _accounts_in_use]
+        acc_ids = [int(a["id"]) for a in claimed]
+        _accounts_in_use.update(acc_ids)
+        if acc_ids:
+            _operation_account_locks.setdefault(op_id, set()).update(acc_ids)
+        return claimed
 
 
 def is_account_in_use(acc_id: int) -> bool:
@@ -809,6 +831,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         finally:
             if progress_task and not progress_task.done():
                 progress_task.cancel()
+            await release_operation_accounts(op_id)
             elapsed_total = time.monotonic() - _t_start
             duration_seconds_total = round(elapsed_total, 1)
             log.info(
@@ -959,11 +982,8 @@ async def _exec_mass_publish(
     if not accounts_raw:
         return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов"}
 
-    # Mark accounts in use to prevent double-use in concurrent ops
-    async with _accounts_lock:
-        accounts_rows = [a for a in accounts_raw if a["id"] not in _accounts_in_use]
-        mp_used_acc_ids = [a["id"] for a in accounts_rows]
-        _accounts_in_use.update(mp_used_acc_ids)
+    accounts_rows = await _claim_available_accounts(op_id, accounts_raw)
+    mp_used_acc_ids = [int(a["id"]) for a in accounts_rows]
 
     if not accounts_rows:
         return {
@@ -1300,11 +1320,8 @@ async def _exec_bulk_join(
         action_type="join",
     )
 
-    # Filter accounts already in use by another concurrent op (under lock to avoid race)
-    async with _accounts_lock:
-        accounts = [a for a in accounts if a["id"] not in _accounts_in_use]
-        used_acc_ids = [a["id"] for a in accounts]
-        _accounts_in_use.update(used_acc_ids)
+    accounts = await _claim_available_accounts(op_id, accounts)
+    used_acc_ids = [int(a["id"]) for a in accounts]
 
     if not accounts:
         return {
@@ -1592,11 +1609,8 @@ async def _exec_bulk_leave(
         include_ids=account_ids or None,
         action_type="leave",
     )
-    # Mark accounts in use (with lock to avoid race with concurrent ops)
-    async with _accounts_lock:
-        accounts = [a for a in accounts_raw if a["id"] not in _accounts_in_use]
-        used_acc_ids = [a["id"] for a in accounts]
-        _accounts_in_use.update(used_acc_ids)
+    accounts = await _claim_available_accounts(op_id, accounts_raw)
+    used_acc_ids = [int(a["id"]) for a in accounts]
 
     if not accounts:
         return {

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import sys
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "tg-manager"))
 
 
 def test_start_command_does_not_cancel_queued_operations() -> None:
@@ -38,3 +42,31 @@ def test_running_operation_replay_is_owned_by_worker_only() -> None:
 
     assert reset_sql not in main_source
     assert reset_sql in worker_source
+
+
+def test_operation_account_locks_release_after_executor_error() -> None:
+    os.environ.setdefault("MANAGER_BOT_TOKEN", "123:dummy")
+    os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost/db")
+
+    from services import op_worker
+
+    async def exercise() -> None:
+        async with op_worker._accounts_lock:
+            op_worker._accounts_in_use.clear()
+            op_worker._operation_account_locks.clear()
+
+        claimed = await op_worker._claim_available_accounts(
+            777,
+            [{"id": 101}, {"id": 102}],
+        )
+
+        assert [acc["id"] for acc in claimed] == [101, 102]
+        assert op_worker.is_account_in_use(101)
+        assert op_worker.is_account_in_use(102)
+
+        await op_worker.release_operation_accounts(777)
+
+        assert not op_worker.is_account_in_use(101)
+        assert not op_worker.is_account_in_use(102)
+
+    asyncio.run(exercise())
