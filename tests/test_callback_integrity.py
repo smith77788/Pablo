@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -26,3 +27,33 @@ def test_intent_navigation_uses_registered_targets() -> None:
     assert 'BmCb(action="visibility")' not in source
     assert 'AccCb(action="menu")' in source
     assert 'VisCb(action="dashboard")' in source
+
+
+def test_admin_buttons_are_covered_by_admin_dispatcher() -> None:
+    project_files = (PROJECT_ROOT / "tg-manager").rglob("*.py")
+    admin_callbacks: set[str] = set()
+    for path in project_files:
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"callback_data=f?[\"']adm:([^\"']+)[\"']", source):
+            admin_callbacks.add(match.group(1))
+
+    dispatcher = (PROJECT_ROOT / "tg-manager/bot/handlers/admin.py").read_text(
+        encoding="utf-8"
+    )
+    exact_actions = set(re.findall(r'action == "([^"]+)"', dispatcher))
+    prefix_actions = set(re.findall(r'action\.startswith\("([^"]+)"\)', dispatcher))
+
+    missing: list[str] = []
+    for raw_action in sorted(admin_callbacks):
+        if "{" in raw_action:
+            action = raw_action.split("{", 1)[0]
+            if action and action not in prefix_actions:
+                missing.append(raw_action)
+            continue
+        if raw_action in exact_actions:
+            continue
+        if any(raw_action.startswith(prefix) for prefix in prefix_actions):
+            continue
+        missing.append(raw_action)
+
+    assert missing == []
