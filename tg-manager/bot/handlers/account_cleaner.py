@@ -71,13 +71,24 @@ async def _pick_account_kb(
 ) -> InlineKeyboardBuilder:
     try:
         accounts = await pool.fetch(
-            "SELECT id, phone, first_name FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE ORDER BY added_at",
+            """SELECT id, phone, first_name
+               FROM tg_accounts
+               WHERE owner_id=$1
+                 AND is_active=TRUE
+                 AND session_str IS NOT NULL
+                 AND session_str <> ''
+               ORDER BY added_at""",
             owner_id,
         )
     except Exception:
         log_exc_swallow(log, "_pick_account_kb fetch failed")
         accounts = []
     kb = InlineKeyboardBuilder()
+    if not accounts:
+        kb.button(
+            text="📵 Нет аккаунтов с доступной сессией",
+            callback_data=CleanerCb(action="menu"),
+        )
     for acc in accounts:
         label = acc.get("first_name") or acc["phone"]
         kb.button(

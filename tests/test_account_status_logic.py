@@ -481,6 +481,9 @@ def test_account_cleaner_reloads_full_account_context() -> None:
         "SELECT session_str, device_model, system_version, app_version, phone, first_name "
         not in cleaner_source
     )
+    assert "AND session_str IS NOT NULL" in cleaner_source
+    assert "AND session_str <> ''" in cleaner_source
+    assert "Нет аккаунтов с доступной сессией" in cleaner_source
 
 
 def test_more_handlers_reload_full_telethon_account_context() -> None:
