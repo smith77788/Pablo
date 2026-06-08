@@ -34,6 +34,7 @@ _PROXY_RE = re.compile(
     r"^(socks5|socks4|http)://([^@/]+:[^@/]+@)?[A-Za-z0-9.\-]+:\d+$",
     re.IGNORECASE,
 )
+_PROXY_PLAN = "pro"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -61,6 +62,18 @@ def _cancel_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ProxyCb(action="menu"))
     return kb
+
+
+async def _require_proxy_manager(callback: CallbackQuery, pool: asyncpg.Pool) -> bool:
+    if await require_plan(pool, callback.from_user.id, _PROXY_PLAN):
+        return True
+    await callback.answer()
+    await callback.message.edit_text(
+        locked_text("Управление прокси", _PROXY_PLAN),
+        parse_mode="HTML",
+        reply_markup=subscription_locked_markup(_PROXY_PLAN),
+    )
+    return False
 
 
 async def _check_proxy_alive(proxy_url: str) -> dict:
@@ -124,7 +137,9 @@ async def _detect_proxy_geo(proxy_url: str) -> dict:
 
 
 @router.callback_query(ProxyCb.filter(F.action == "menu"))
-async def cb_proxy_menu(callback: CallbackQuery) -> None:
+async def cb_proxy_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer()
     await callback.message.edit_text(
         "🌐 <b>Менеджер прокси</b>\n\n"
@@ -139,6 +154,8 @@ async def cb_proxy_menu(callback: CallbackQuery) -> None:
 
 @router.callback_query(ProxyCb.filter(F.action == "list"))
 async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer()
     user_id = callback.from_user.id
 
@@ -214,13 +231,7 @@ async def cb_proxy_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_proxy_add(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
-        await callback.message.edit_text(
-            locked_text("Управление прокси", "starter"),
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
-        )
+    if not await _require_proxy_manager(callback, pool):
         return
     await callback.answer()
     await state.set_state(AddProxyFSM.waiting_url)
@@ -272,6 +283,8 @@ async def fsm_proxy_url(
 async def cb_skip_label(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer()
     data = await state.get_data()
     proxy_url = data.get("proxy_url", "")
@@ -336,6 +349,8 @@ async def _save_proxy(
 
 @router.callback_query(ProxyCb.filter(F.action == "check_all"))
 async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer("Проверяем прокси…")
     user_id = callback.from_user.id
 
@@ -437,6 +452,8 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(ProxyCb.filter(F.action == "detect_geo"))
 async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer("🌍 Определяю гео прокси...")
     user_id = callback.from_user.id
     try:
@@ -469,7 +486,9 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     row["id"],
                 )
             except Exception:
-                log_exc_swallow(log, f"Не удалось сохранить гео для прокси id={row['id']}")
+                log_exc_swallow(
+                    log, f"Не удалось сохранить гео для прокси id={row['id']}"
+                )
             updated += 1
         else:
             lines.append(f"• {label} → ❓ не определено")
@@ -487,13 +506,7 @@ async def cb_detect_geo(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_proxy_delete(
     callback: CallbackQuery, callback_data: ProxyCb, pool: asyncpg.Pool
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
-        await callback.message.edit_text(
-            locked_text("Управление прокси", "starter"),
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
-        )
+    if not await _require_proxy_manager(callback, pool):
         return
     user_id = callback.from_user.id
     proxy_id = callback_data.proxy_id
@@ -542,6 +555,8 @@ async def cb_proxy_delete(
 @router.callback_query(ProxyCb.filter(F.action == "free_pool"))
 async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Show free proxy pool stats and trigger manual refresh."""
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer()
     from services import proxy_scraper as _ps
 
@@ -590,6 +605,8 @@ async def cb_free_pool(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(ProxyCb.filter(F.action == "free_pool_refresh"))
 async def cb_free_pool_refresh(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Trigger manual proxy pool refresh (background task)."""
+    if not await _require_proxy_manager(callback, pool):
+        return
     await callback.answer("🔄 Запускаю обновление пула...", show_alert=False)
     from services import proxy_scraper as _ps
 

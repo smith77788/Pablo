@@ -105,6 +105,37 @@ def test_revenue_entrypoints_have_plan_gates() -> None:
         assert "subscription_locked_markup(" in body
 
 
+def test_proxy_manager_actions_require_pro_plan() -> None:
+    source = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath("tg-manager/bot/handlers/proxy_manager.py")
+        .read_text(encoding="utf-8")
+    )
+
+    assert '_PROXY_PLAN = "pro"' in source
+    assert 'locked_text("Управление прокси", _PROXY_PLAN)' in source
+    assert "subscription_locked_markup(_PROXY_PLAN)" in source
+    assert 'require_plan(pool, callback.from_user.id, "starter")' not in source
+
+    for handler in (
+        "async def cb_proxy_menu",
+        "async def cb_proxy_list",
+        "async def cb_proxy_add",
+        "async def cb_skip_label",
+        "async def cb_check_all",
+        "async def cb_detect_geo",
+        "async def cb_proxy_delete",
+        "async def cb_free_pool",
+        "async def cb_free_pool_refresh",
+    ):
+        start = source.index(handler)
+        next_route = source.find("@router.callback_query", start + 1)
+        body = source[start:] if next_route == -1 else source[start:next_route]
+        assert "_require_proxy_manager(callback, pool)" in body
+
+
 def test_unknown_features_default_to_enterprise() -> None:
     assert feature_required_plan("new_unclassified_feature") == "enterprise"
 
