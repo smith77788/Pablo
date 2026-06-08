@@ -39,9 +39,12 @@ router = Router()
 
 
 def _effective_acc_status(acc: dict) -> str:
+    has_session = bool(acc.get("has_session")) or bool(
+        acc.get("session_str") or acc.get("session_string")
+    )
     return effective_account_status(
         acc.get("acc_status"),
-        has_session=bool(acc.get("has_session")),
+        has_session=has_session,
         is_active=bool(acc.get("is_active", True)),
     )
 

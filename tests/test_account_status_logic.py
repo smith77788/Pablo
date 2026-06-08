@@ -20,6 +20,7 @@ from services.account_manager import (
     should_persist_account_status,
 )
 from bot.handlers.accounts import _display_acc_status
+from bot.handlers.health_dashboard import _effective_acc_status as _dashboard_status
 from services.flood_engine import (
     _flood_state,
     account_rank_score,
@@ -92,6 +93,20 @@ def test_effective_account_status_normalizes_stale_and_missing_sessions() -> Non
     assert effective_account_status("no_session", has_session=True) == "active"
     assert effective_account_status("no_session", has_session=False) == "no_session"
     assert effective_account_status("active", is_active=False) == "archived"
+
+
+def test_health_dashboard_accepts_session_string_material() -> None:
+    assert (
+        _dashboard_status(
+            {
+                "acc_status": "no_session",
+                "is_active": True,
+                "has_session": False,
+                "session_string": "1AQ_fake_session_material",
+            }
+        )
+        == "active"
+    )
 
 
 def test_recommended_delay_uses_safe_action_baseline() -> None:
