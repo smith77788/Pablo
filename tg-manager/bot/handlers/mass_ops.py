@@ -1587,21 +1587,67 @@ async def _count_targets(
         return 0
     acc_ids = [a["id"] for a in accounts]
     # Use managed_channels count filtered by matching accounts where possible
-    # One query: filtered count + total count simultaneously
     try:
-        if target in ("channels", "groups", "both"):
-            cnt_row = await pool.fetchrow(
-                """SELECT
-                    COUNT(*) FILTER (WHERE acc_id = ANY($2::bigint[])) AS filtered_count,
-                    COUNT(*) AS total_count
-                   FROM managed_channels WHERE owner_id=$1""",
-                owner_id,
-                acc_ids,
+        if target == "channels":
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                    owner_id,
+                    acc_ids,
+                )
+                or 0
             )
-            db_count = (cnt_row["filtered_count"] or 0) if cnt_row else 0
             if db_count > 0:
                 return db_count
-            db_count = (cnt_row["total_count"] or 0) if cnt_row else 0
+            # Fallback: all channels for owner regardless of account filter
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    owner_id,
+                )
+                or 0
+            )
+            if db_count > 0:
+                return db_count
+        elif target == "groups":
+            # managed_channels stores both channels and groups — use same table
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                    owner_id,
+                    acc_ids,
+                )
+                or 0
+            )
+            if db_count > 0:
+                return db_count
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    owner_id,
+                )
+                or 0
+            )
+            if db_count > 0:
+                return db_count
+        elif target == "both":
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND acc_id = ANY($2::bigint[])",
+                    owner_id,
+                    acc_ids,
+                )
+                or 0
+            )
+            if db_count > 0:
+                return db_count
+            db_count = (
+                await pool.fetchval(
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+                    owner_id,
+                )
+                or 0
+            )
             if db_count > 0:
                 return db_count
     except Exception:

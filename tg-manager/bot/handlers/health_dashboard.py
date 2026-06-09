@@ -233,64 +233,8 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     user_id = callback.from_user.id
     datetime.now(timezone.utc)
 
-    from services import infra_pressure
-    from database import db as _db
-
-    # Все независимые запросы — параллельно
-    (
-        stats,
-        flood_7d,
-        pressure_data,
-        _pools_result,
-        _tags_result,
-        top3_rows,
-        alert_row,
-        re_rows,
-    ) = await asyncio.gather(
-        _fetch_account_stats(pool, user_id),
-        _fetch_flood_events_7d(pool, user_id),
-        infra_pressure.compute_pressure(pool, user_id),
-        _db.get_distinct_pools(pool, user_id),
-        _db.get_distinct_tags(pool, user_id),
-        pool.fetch(
-            """SELECT first_name, username, phone, trust_score
-               FROM tg_accounts
-               WHERE owner_id=$1 AND is_active=TRUE AND trust_score IS NOT NULL
-               ORDER BY trust_score DESC NULLS LAST LIMIT 3""",
-            user_id,
-        ),
-        pool.fetchrow(
-            """SELECT
-                COUNT(*) FILTER (WHERE cooldown_until > now()) AS cooldown_cnt,
-                COUNT(*) FILTER (WHERE is_active=TRUE
-                    AND COALESCE(acc_status,'active') IN ('banned','spamblock')) AS problem_cnt
-               FROM tg_accounts WHERE owner_id=$1""",
-            user_id,
-        ),
-        pool.fetch(
-            """SELECT severity, event_type, created_at
-               FROM restriction_events WHERE owner_id=$1
-               ORDER BY created_at DESC LIMIT 3""",
-            user_id,
-        ),
-        return_exceptions=True,
-    )
-
-    # Обработка ошибок для отдельных компонентов
-    if isinstance(stats, BaseException):
-        stats = {}
-    if isinstance(flood_7d, BaseException):
-        flood_7d = 0
-    if isinstance(pressure_data, BaseException):
-        pressure_data = {}
-    pool_count = len(_pools_result) if not isinstance(_pools_result, BaseException) else 0
-    tag_count  = len(_tags_result)  if not isinstance(_tags_result, BaseException) else 0
-    if isinstance(top3_rows, BaseException):
-        top3_rows = []
-    if isinstance(alert_row, BaseException):
-        alert_row = None
-    if isinstance(re_rows, BaseException):
-        re_rows = []
+    stats = await _fetch_account_stats(pool, user_id)
+    flood_7d = await _fetch_flood_events_7d(pool, user_id)
 
     # Health score bar + trend vs yesterday
     avg_health = stats.get("avg_health", 0.0)
@@ -311,50 +255,113 @@ async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     else:
         health_trend = ""
 
+    # Infrastructure Pressure Score
+    from services import infra_pressure
+
+    pressure_data = await infra_pressure.compute_pressure(pool, user_id)
     p_score = pressure_data.get("score", 0)
     p_emoji = pressure_data.get("level_emoji", "🟢")
     p_label = pressure_data.get("level_label", "Норма")
     p_bar_filled = round(p_score / 10)
     p_bar = "█" * p_bar_filled + "░" * (10 - p_bar_filled)
-    pressure_tip = "\n💡 <i>Добавьте аккаунты или снизьте нагрузку</i>" if p_score > 70 else ""
+    # Рекомендация при высоком давлении
+    pressure_tip = ""
+    if p_score > 70:
+        pressure_tip = "\n💡 <i>Добавьте аккаунты или снизьте нагрузку</i>"
+
+    # Pool and tag diversity
+    from database import db as _db
+
+    try:
+        distinct_pools = await _db.get_distinct_pools(pool, user_id)
+        pool_count = len(distinct_pools)
+    except Exception:
+        pool_count = 0
+    try:
+        distinct_tags = await _db.get_distinct_tags(pool, user_id)
+        tag_count = len(distinct_tags)
+    except Exception:
+        tag_count = 0
 
     # Top-3 accounts by trust score
     top3_line = ""
-    if top3_rows:
-        def _acc_short(r) -> str:
-            return html.escape(
-                r["username"] or r["first_name"] or (r["phone"] or "")[-4:] or "?"
-            )
-        labels = ", ".join(
-            f"{_acc_short(r)} ({float(r['trust_score']):.2f})" for r in top3_rows
+    try:
+        top3_rows = await pool.fetch(
+            """SELECT first_name, username, phone, trust_score
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE AND trust_score IS NOT NULL
+               ORDER BY trust_score DESC NULLS LAST LIMIT 3""",
+            user_id,
         )
-        top3_line = f"\n📊 Топ по надёжности: {labels}"
+        if top3_rows:
+
+            def _acc_short(r) -> str:
+                return html.escape(
+                    r["username"] or r["first_name"] or (r["phone"] or "")[-4:] or "?"
+                )
+
+            labels = ", ".join(
+                f"{_acc_short(r)} ({float(r['trust_score']):.2f})" for r in top3_rows
+            )
+            top3_line = f"\n📊 Топ по надёжности: {labels}"
+    except Exception:
+        log_exc_swallow(
+            log, f"health_dashboard: top3 trust fetch failed user_id={user_id}"
+        )
 
     # Cooldown and problem accounts summary
     extra_alerts: list[str] = []
-    if alert_row:
-        cooldown_cnt = alert_row["cooldown_cnt"] or 0
-        problem_cnt  = alert_row["problem_cnt"] or 0
-        if cooldown_cnt > 0:
+    try:
+        cooldown_cnt = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND cooldown_until > now()",
+            user_id,
+        )
+        if (cooldown_cnt or 0) > 0:
             extra_alerts.append(
                 f"⚠️ {cooldown_cnt} аккаунт{'а' if cooldown_cnt < 5 else 'ов'} на кулдауне"
             )
-        if problem_cnt > 0:
+    except Exception:
+        log_exc_swallow(
+            log, f"health_dashboard: cooldown_cnt fetch failed user_id={user_id}"
+        )
+    try:
+        problem_cnt = await pool.fetchval(
+            """SELECT COUNT(*) FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+                 AND COALESCE(acc_status,'active') IN ('banned','spamblock')""",
+            user_id,
+        )
+        if (problem_cnt or 0) > 0:
             extra_alerts.append(f"🚨 {problem_cnt} проблемных аккаунта")
+    except Exception:
+        log_exc_swallow(
+            log, f"health_dashboard: problem_cnt fetch failed user_id={user_id}"
+        )
 
     # Last restriction events (top-3) with severity icons
     restriction_lines: list[str] = []
-    _sev_icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
-    for re_row in (re_rows or []):
-        sev = re_row.get("severity") or "info"
-        sev_icon = _sev_icons.get(sev, "🔔")
-        etype = html.escape(re_row.get("event_type") or "event")
-        dt_str = (
-            re_row["created_at"].strftime("%d.%m %H:%M")
-            if re_row.get("created_at")
-            else ""
+    try:
+        re_rows = await pool.fetch(
+            """SELECT severity, event_type, created_at
+               FROM restriction_events WHERE owner_id=$1
+               ORDER BY created_at DESC LIMIT 3""",
+            user_id,
         )
-        restriction_lines.append(f"  {sev_icon} <code>{dt_str}</code> {etype}")
+        _sev_icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
+        for re_row in re_rows:
+            sev = re_row.get("severity") or "info"
+            sev_icon = _sev_icons.get(sev, "🔔")
+            etype = html.escape(re_row.get("event_type") or "event")
+            dt_str = (
+                re_row["created_at"].strftime("%d.%m %H:%M")
+                if re_row.get("created_at")
+                else ""
+            )
+            restriction_lines.append(f"  {sev_icon} <code>{dt_str}</code> {etype}")
+    except Exception:
+        log_exc_swallow(
+            log, f"health_dashboard: restriction_events fetch failed user_id={user_id}"
+        )
 
     text = (
         "❤️ <b>Здоровье инфраструктуры</b>\n\n"

@@ -23,6 +23,7 @@ from services import task_registry as _treg, intelligence_engine
 from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
+from bot.utils.event_status import mark_handled_error
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -46,8 +47,20 @@ _STATUS_LABELS = {
 async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=markup)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "message is not modified" in err_str:
+            return
+        if "there is no text in the message to edit" in err_str:
+            try:
+                await callback.message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+                return
+            except Exception:
+                pass
+        if "message to edit not found" in err_str or "message can't be edited" in err_str:
+            await callback.bot.send_message(callback.from_user.id, text, parse_mode="HTML", reply_markup=markup)
+        else:
+            log.warning("dm_campaigns _edit error: %s", e)
 
 
 # ── Menu ──────────────────────────────────────────────────────────────────────
@@ -69,11 +82,14 @@ async def cb_dm_menu(
         return
     await callback.answer()
 
-    campaigns = await pool.fetch(
-        "SELECT id, name, status, sent_count, fail_count, total_targets, created_at "
-        "FROM dm_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 10",
-        callback.from_user.id,
-    )
+    try:
+        campaigns = await pool.fetch(
+            "SELECT id, name, status, sent_count, fail_count, total_targets, created_at "
+            "FROM dm_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 10",
+            callback.from_user.id,
+        )
+    except Exception:
+        campaigns = []
 
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Новая кампания", callback_data=DmCb(action="new"))
@@ -140,7 +156,17 @@ async def cb_dm_menu(
 
 
 @router.callback_query(DmCb.filter(F.action == "new"))
-async def cb_dm_new(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_dm_new(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("DM-кампании", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     await state.set_state(DmCampaignFSM.waiting_name)
     kb = InlineKeyboardBuilder()
@@ -224,11 +250,14 @@ async def cb_dm_target_bot(
     await state.update_data(dm_target_type="bot_users")
     await state.set_state(DmCampaignFSM.choosing_bot)
 
-    bots = await pool.fetch(
-        "SELECT bot_id, first_name, username FROM managed_bots "
-        "WHERE added_by=$1 AND is_active=true ORDER BY first_name LIMIT 20",
-        callback.from_user.id,
-    )
+    try:
+        bots = await pool.fetch(
+            "SELECT bot_id, first_name, username FROM managed_bots "
+            "WHERE added_by=$1 AND is_active=true ORDER BY first_name LIMIT 20",
+            callback.from_user.id,
+        )
+    except Exception:
+        bots = []
 
     kb = InlineKeyboardBuilder()
     for b in bots:
@@ -270,11 +299,14 @@ async def cb_dm_target_cohort_bot(
 ) -> None:
     """Step 1: pick bot for cohort targeting."""
     await callback.answer()
-    bots = await pool.fetch(
-        "SELECT bot_id, first_name, username FROM managed_bots "
-        "WHERE added_by=$1 AND is_active=true ORDER BY first_name LIMIT 20",
-        callback.from_user.id,
-    )
+    try:
+        bots = await pool.fetch(
+            "SELECT bot_id, first_name, username FROM managed_bots "
+            "WHERE added_by=$1 AND is_active=true ORDER BY first_name LIMIT 20",
+            callback.from_user.id,
+        )
+    except Exception:
+        bots = []
     if not bots:
         _no_bots_kb = InlineKeyboardBuilder()
         _no_bots_kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
@@ -342,9 +374,14 @@ async def cb_dm_target_cohort_pick(
     kb.button(text="◀️ Назад", callback_data=DmCb(action="target_cohort_bot"))
     kb.adjust(1)
 
-    bot_row = await pool.fetchrow(
-        "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", bot_id
-    )
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        bot_row = None
     bot_label = (
         (bot_row.get("first_name") or bot_row.get("username") or str(bot_id))
         if bot_row
@@ -414,22 +451,27 @@ async def _show_dm_preview(
     # Подсчитать аудиторию
     recipients_count = 0
     if target_type == "bot_users" and target_id:
-        count_row, bot_row = await asyncio.gather(
-            pool.fetchrow(
+        try:
+            count_row = await pool.fetchrow(
                 "SELECT COUNT(DISTINCT user_id) AS cnt FROM bot_users WHERE bot_id=$1 AND user_id > 0",
                 target_id,
-            ),
-            pool.fetchrow(
-                "SELECT first_name, username FROM managed_bots WHERE bot_id=$1",
+            )
+        except Exception:
+            count_row = None
+        try:
+            bot_row = await pool.fetchrow(
+                "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
                 target_id,
-            ),
-        )
+                callback.from_user.id,
+            )
+        except Exception:
+            bot_row = None
         bot_label = (
             (bot_row.get("first_name") or bot_row.get("username") or str(target_id))
             if bot_row
             else str(target_id)
         )
-        recipients_count = int(count_row["cnt"] or 0) if count_row else 0
+        recipients_count = int((count_row["cnt"] if count_row else None) or 0)
         audience_str = f"Все подписчики @{bot_label}: <b>{recipients_count}</b>"
     elif target_type == "cohort" and target_id:
         cohort_sql = {
@@ -439,22 +481,23 @@ async def _show_dm_preview(
             "lost": "last_seen < now() - INTERVAL '30 days'",
         }.get(cohort_type, "last_seen >= now() - INTERVAL '7 days'")
         try:
-            _cnt_res, bot_row = await asyncio.gather(
-                pool.fetchval(
+            cnt = (
+                await pool.fetchval(
                     f"SELECT COUNT(*) FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
                     target_id,
-                ),
-                pool.fetchrow(
-                    "SELECT first_name, username FROM managed_bots WHERE bot_id=$1", target_id
-                ),
-                return_exceptions=True,
+                )
+                or 0
             )
-            cnt = (_cnt_res or 0) if not isinstance(_cnt_res, BaseException) else 0
-            if isinstance(bot_row, BaseException):
-                bot_row = None
         except Exception:
             log_exc_swallow(log, "Ошибка подсчёта размера когорты для DM-кампании")
             cnt = 0
+        try:
+            bot_row = await pool.fetchrow(
+                "SELECT first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                target_id,
+                callback.from_user.id,
+            )
+        except Exception:
             bot_row = None
         bot_label = (
             (bot_row.get("first_name") or bot_row.get("username") or str(target_id))
@@ -465,11 +508,14 @@ async def _show_dm_preview(
         recipients_count = int(cnt)
         audience_str = f"{cohort_label} когорта @{bot_label}: <b>{cnt}</b>"
     else:
-        count_row = await pool.fetchrow(
-            "SELECT COUNT(DISTINCT tg_user_id) AS cnt FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
-            callback.from_user.id,
-        )
-        recipients_count = int(count_row["cnt"] or 0) if count_row else 0
+        try:
+            count_row = await pool.fetchrow(
+                "SELECT COUNT(DISTINCT tg_user_id) AS cnt FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
+                callback.from_user.id,
+            )
+        except Exception:
+            count_row = None
+        recipients_count = int((count_row["cnt"] if count_row else None) or 0)
         audience_str = f"CRM-контакты: <b>{recipients_count}</b>"
 
     from services.dm_engine import expand_spintax
@@ -513,6 +559,14 @@ async def cb_dm_launch_or_draft(
     state: FSMContext,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("DM-кампании", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer()
     sd = await state.get_data()
     name = sd.get("dm_name", "")
@@ -582,17 +636,28 @@ async def cb_dm_launch_or_draft(
         params_dict["cohort_type"] = cohort_type
 
     initial_status = "draft"  # всегда создаём как draft, потом меняем
-    campaign_id = await pool.fetchval(
-        "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, params) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id",
-        callback.from_user.id,
-        name,
-        text,
-        target_type,
-        target_id,
-        initial_status,
-        _json.dumps(params_dict, ensure_ascii=False) if params_dict else "{}",
-    )
+    try:
+        campaign_id = await pool.fetchval(
+            "INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, params) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id",
+            callback.from_user.id,
+            name,
+            text,
+            target_type,
+            target_id,
+            initial_status,
+            _json.dumps(params_dict, ensure_ascii=False) if params_dict else "{}",
+        )
+    except Exception as exc:
+        mark_handled_error(f"dm_launch insert: {exc}")
+        await _edit(
+            callback,
+            f"❌ Ошибка создания кампании: <code>{html.escape(str(exc)[:200])}</code>",
+            InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+            .as_markup(),
+        )
+        return
     await state.clear()
 
     if status == "running":
@@ -602,7 +667,10 @@ async def cb_dm_launch_or_draft(
             pool, callback.from_user.id
         )
         if not ready:
-            await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
+            try:
+                await pool.execute("DELETE FROM dm_campaigns WHERE id=$1", campaign_id)
+            except Exception:
+                pass
             await _edit(
                 callback,
                 f"⚠️ {reason}\n\nКампания не запущена.",
@@ -611,10 +679,20 @@ async def cb_dm_launch_or_draft(
                 .as_markup(),
             )
             return
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
-            campaign_id,
-        )
+        try:
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
+                campaign_id,
+            )
+        except Exception as exc:
+            await _edit(
+                callback,
+                f"❌ Ошибка запуска кампании: <code>{html.escape(str(exc)[:200])}</code>",
+                InlineKeyboardBuilder()
+                .button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+                .as_markup(),
+            )
+            return
         # Запустить асинхронно уже после установки статуса
         _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
         _treg.register(
@@ -678,11 +756,14 @@ async def cb_dm_detail(
     callback_data: DmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    c = await pool.fetchrow(
-        "SELECT * FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
-        callback_data.campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        c = await pool.fetchrow(
+            "SELECT * FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            callback_data.campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        c = None
     if not c:
         await callback.answer("Кампания не найдена", show_alert=True)
         return
@@ -755,11 +836,14 @@ async def cb_dm_pause(
         if entry.kind == "dm_campaign" and f"#{campaign_id}" in entry.label:
             entry.task.cancel()
             break
-    await pool.execute(
-        "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
-        campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
+            campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
     await cb_dm_detail(callback, callback_data, pool)
 
 
@@ -769,14 +853,25 @@ async def cb_dm_resume(
     callback_data: DmCb,
     pool: asyncpg.Pool,
 ) -> None:
+    if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await callback.answer()
+        await callback.message.edit_text(
+            locked_text("DM-кампании", "enterprise"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("enterprise"),
+        )
+        return
     await callback.answer("▶️ Запущена")
     campaign_id = callback_data.campaign_id
     # Update DB status before creating task (same ordering as initial launch)
-    await pool.execute(
-        "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
-        campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
+            campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
     _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
     _treg.register(
         callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t
@@ -792,9 +887,12 @@ async def cb_dm_delete(
     state: FSMContext,
 ) -> None:
     await callback.answer("🗑️ Удалено")
-    await pool.execute(
-        "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
-        callback_data.campaign_id,
-        callback.from_user.id,
-    )
+    try:
+        await pool.execute(
+            "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            callback_data.campaign_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        pass
     await cb_dm_menu(callback, pool, state)

@@ -10,12 +10,13 @@ Infrastructure Analytics — аналитика Telegram-инфраструкт�
 
 Entry point: InfraCb(action="menu")
 """
+
 from __future__ import annotations
 
 import asyncio
 import html
 import logging
-from datetime import date, timedelta
+from datetime import date
 
 import asyncpg
 from aiogram import F, Router
@@ -25,14 +26,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb
 from services import infra_pressure
 from services.logger import log_exc_swallow
-from database import db as _db
 
 _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
-    "accounts": ("📱 Аккаунты",  AccCb(action="menu")),
-    "warmup":   ("🌡 Разогрев",  WarmupCb(action="menu")),
-    "cleaner":  ("🧹 Очистка",   CleanerCb(action="menu")),
-    "proxies":  ("🌐 Прокси",    ProxyCb(action="menu")),
-    "tasks":    ("⚡ Задачи",    TaskCb(action="list")),
+    "accounts": ("📱 Аккаунты", AccCb(action="menu")),
+    "warmup": ("🌡 Разогрев", WarmupCb(action="menu")),
+    "cleaner": ("🧹 Очистка", CleanerCb(action="menu")),
+    "proxies": ("🌐 Прокси", ProxyCb(action="menu")),
+    "tasks": ("⚡ Задачи", TaskCb(action="list")),
 }
 
 log = logging.getLogger(__name__)
@@ -49,52 +49,81 @@ def _back_kb() -> InlineKeyboardBuilder:
 
 # ── Главное меню аналитики ────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "menu"))
 async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
 
-    # Быстрые метрики + pressure — параллельно
-    row, pressure = await asyncio.gather(
-        pool.fetchrow(
-            """SELECT
-                (SELECT COUNT(*) FROM tg_accounts
-                    WHERE owner_id=$1 AND is_active=TRUE) AS acc_total,
-                (SELECT COUNT(*) FROM account_flood_log fl
-                    JOIN tg_accounts a ON a.id=fl.account_id
-                    WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '24h') AS floods_24h,
-                (SELECT COUNT(*) FROM operation_queue
-                    WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24h') AS ops_today,
-                (SELECT COUNT(*) FROM account_warmup_plans wp
-                    JOIN tg_accounts a ON a.id=wp.account_id
-                    WHERE a.owner_id=$1 AND wp.status='active') AS warmup_active,
-                (SELECT COUNT(DISTINCT pool) FROM tg_accounts
-                    WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL) AS pool_count""",
-            uid,
-        ),
-        infra_pressure.compute_pressure(pool, uid),
-    )
-    acc_total   = row["acc_total"] or 0
-    floods_24h  = row["floods_24h"] or 0
-    ops_today   = row["ops_today"] or 0
-    warmup_active = row["warmup_active"] or 0
-    pool_count  = row["pool_count"] or 0
+    # Быстрые метрики
+    try:
+        acc_total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
+            )
+            or 0
+        )
+        floods_24h = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM account_flood_log fl
+               JOIN tg_accounts a ON a.id=fl.account_id
+               WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '24h'""",
+                uid,
+            )
+            or 0
+        )
+        ops_today = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24h'",
+                uid,
+            )
+            or 0
+        )
+        warmup_active = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM account_warmup_plans wp
+               JOIN tg_accounts a ON a.id=wp.account_id
+               WHERE a.owner_id=$1 AND wp.status='active'""",
+                uid,
+            )
+            or 0
+        )
+        pool_count = (
+            await pool.fetchval(
+                "SELECT COUNT(DISTINCT pool) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL",
+                uid,
+            )
+            or 0
+        )
+    except Exception:
+        acc_total = floods_24h = ops_today = warmup_active = pool_count = 0
 
+    # Infrastructure Pressure Score
+    pressure = await infra_pressure.compute_pressure(pool, uid)
     p_emoji = pressure.get("level_emoji", "🟢")
     p_score = pressure.get("score", 0)
     p_label = pressure.get("level_label", "Норма")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🗂️ Реестр ассетов",         callback_data=InfraCb(action="asset_registry"))
-    kb.button(text="❤️ Здоровье аккаунтов",    callback_data=InfraCb(action="health"))
-    kb.button(text="⚡ Флуд-защита и лимиты",    callback_data=InfraCb(action="flood"))
-    kb.button(text="📋 Лог операций",            callback_data=InfraCb(action="audit"))
-    kb.button(text="📊 Статистика за сегодня",   callback_data=InfraCb(action="daily_stats"))
-    kb.button(text="🎯 Возможности аккаунтов",   callback_data=InfraCb(action="capabilities"))
-    kb.button(text="🔄 Авто-балансировка пулов", callback_data=InfraCb(action="rebalance_preview"))
-    kb.button(text="🎯 Советник",                callback_data=InfraCb(action="advisor"))
-    kb.button(text="🧠 Copilot",                 callback_data=InfraCb(action="copilot"))
-    kb.button(text="🔬 Intelligence Report",     callback_data=InfraCb(action="intelligence"))
+    kb.button(text="🗂️ Реестр ассетов", callback_data=InfraCb(action="asset_registry"))
+    kb.button(text="❤️ Здоровье аккаунтов", callback_data=InfraCb(action="health"))
+    kb.button(text="⚡ Флуд-защита и лимиты", callback_data=InfraCb(action="flood"))
+    kb.button(text="📋 Лог операций", callback_data=InfraCb(action="audit"))
+    kb.button(
+        text="📊 Статистика за сегодня", callback_data=InfraCb(action="daily_stats")
+    )
+    kb.button(
+        text="🎯 Возможности аккаунтов", callback_data=InfraCb(action="capabilities")
+    )
+    kb.button(
+        text="🔄 Авто-балансировка пулов",
+        callback_data=InfraCb(action="rebalance_preview"),
+    )
+    kb.button(text="🎯 Советник", callback_data=InfraCb(action="advisor"))
+    kb.button(text="🧠 Copilot", callback_data=InfraCb(action="copilot"))
+    kb.button(
+        text="🔬 Intelligence Report", callback_data=InfraCb(action="intelligence")
+    )
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -113,6 +142,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Здоровье аккаунтов ────────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "health"))
 async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
@@ -121,11 +151,14 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     uid = callback.from_user.id
     await load_from_db(pool, uid)
 
-    accounts = await pool.fetch(
-        "SELECT id, first_name, phone, trust_score, acc_status FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, first_name, phone, trust_score, acc_status FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE ORDER BY trust_score DESC NULLS LAST",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     if not accounts:
         await callback.message.edit_text(
@@ -148,17 +181,20 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             f"{icon} <b>{label}</b>: {score}% | {warmup} | trust={float(acc['trust_score'] or 0):.1f}"
         )
     if len(accounts) > 15:
-        lines.append(f"\n<i>...и ещё {len(accounts)-15} аккаунтов</i>")
+        lines.append(f"\n<i>...и ещё {len(accounts) - 15} аккаунтов</i>")
 
     # Per-pool breakdown
-    pool_rows = await pool.fetch(
-        """SELECT pool, COUNT(*) AS cnt, AVG(trust_score) AS avg_trust
-           FROM tg_accounts
-           WHERE owner_id=$1 AND is_active=TRUE
-           GROUP BY pool
-           ORDER BY pool""",
-        uid,
-    )
+    try:
+        pool_rows = await pool.fetch(
+            """SELECT pool, COUNT(*) AS cnt, AVG(trust_score) AS avg_trust
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               GROUP BY pool
+               ORDER BY pool""",
+            uid,
+        )
+    except Exception:
+        pool_rows = []
     if pool_rows:
         lines.append("\n<b>📊 По пулам:</b>")
         for pr in pool_rows:
@@ -175,25 +211,29 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Flood Intelligence ────────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "flood"))
 async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     from services.flood_engine import get_risk_summary
 
     uid = callback.from_user.id
-    rows = await pool.fetch(
-        """SELECT a.id, a.first_name, a.phone,
-                  COUNT(fl.id) AS floods_total,
-                  COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '24h') AS floods_24h,
-                  COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '7d') AS floods_7d,
-                  MAX(fl.created_at) AS last_flood
-           FROM tg_accounts a
-           LEFT JOIN account_flood_log fl ON fl.account_id=a.id
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           GROUP BY a.id, a.first_name, a.phone
-           ORDER BY floods_24h DESC, floods_7d DESC""",
-        uid,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT a.id, a.first_name, a.phone,
+                      COUNT(fl.id) AS floods_total,
+                      COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '24h') AS floods_24h,
+                      COUNT(fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '7d') AS floods_7d,
+                      MAX(fl.created_at) AS last_flood
+               FROM tg_accounts a
+               LEFT JOIN account_flood_log fl ON fl.account_id=a.id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               GROUP BY a.id, a.first_name, a.phone
+               ORDER BY floods_24h DESC, floods_7d DESC""",
+            uid,
+        )
+    except Exception:
+        rows = []
 
     lines = ["⚡ <b>Flood Intelligence</b>\n"]
     risk_summary = get_risk_summary([r["id"] for r in rows])
@@ -211,14 +251,17 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
 
     # Топ action-типов
-    action_stats = await pool.fetch(
-        """SELECT action_type, COUNT(*) as cnt
-           FROM account_flood_log fl
-           JOIN tg_accounts a ON a.id=fl.account_id
-           WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '7d'
-           GROUP BY action_type ORDER BY cnt DESC LIMIT 5""",
-        uid,
-    )
+    try:
+        action_stats = await pool.fetch(
+            """SELECT action_type, COUNT(*) as cnt
+               FROM account_flood_log fl
+               JOIN tg_accounts a ON a.id=fl.account_id
+               WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '7d'
+               GROUP BY action_type ORDER BY cnt DESC LIMIT 5""",
+            uid,
+        )
+    except Exception:
+        action_stats = []
     if action_stats:
         lines.append("\n<b>Топ действий с flood (7 дней):</b>")
         for s in action_stats:
@@ -233,6 +276,7 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 # ── Operation Audit Log ───────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "audit"))
 async def cb_infra_audit(
     callback: CallbackQuery, callback_data: InfraCb, pool: asyncpg.Pool
@@ -241,27 +285,39 @@ async def cb_infra_audit(
     page = callback_data.page
     uid = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT oa.action, oa.target, oa.result, oa.error_msg,
-                  oa.flood_wait_s, oa.duration_ms, oa.occurred_at,
-                  a.first_name, a.phone
-           FROM operation_audit oa
-           LEFT JOIN tg_accounts a ON a.id=oa.account_id
-           WHERE oa.owner_id=$1
-           ORDER BY oa.occurred_at DESC
-           OFFSET $2 LIMIT $3""",
-        uid, page * _PAGE, _PAGE,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT oa.action, oa.target, oa.result, oa.error_msg,
+                      oa.flood_wait_s, oa.duration_ms, oa.occurred_at,
+                      a.first_name, a.phone
+               FROM operation_audit oa
+               LEFT JOIN tg_accounts a ON a.id=oa.account_id
+               WHERE oa.owner_id=$1
+               ORDER BY oa.occurred_at DESC
+               OFFSET $2 LIMIT $3""",
+            uid,
+            page * _PAGE,
+            _PAGE,
+        )
+    except Exception:
+        rows = []
 
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1", uid
-    ) or 0
+    try:
+        total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1", uid
+            )
+            or 0
+        )
+    except Exception:
+        total = 0
 
     # Bad proxies (success_rate < 50%)
     bad_proxy_count = 0
     try:
-        bad_proxy_count = await pool.fetchval(
-            """SELECT COUNT(DISTINCT up.id)
+        bad_proxy_count = (
+            await pool.fetchval(
+                """SELECT COUNT(DISTINCT up.id)
                FROM user_proxies up
                JOIN (
                    SELECT proxy_id,
@@ -270,13 +326,19 @@ async def cb_infra_audit(
                    GROUP BY proxy_id
                ) q ON q.proxy_id = up.id
                WHERE up.owner_id=$1 AND q.success_rate < 0.5""",
-            uid,
-        ) or 0
+                uid,
+            )
+            or 0
+        )
     except Exception:
         log_exc_swallow(log, f"infra_analytics: bad_proxy_count fetch failed uid={uid}")
 
     if not rows:
-        proxy_warn = f"\n⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>" if bad_proxy_count > 0 else ""
+        proxy_warn = (
+            f"\n⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>"
+            if bad_proxy_count > 0
+            else ""
+        )
         await callback.message.edit_text(
             f"📋 <b>Лог операций пуст</b>{proxy_warn}",
             parse_mode="HTML",
@@ -288,18 +350,22 @@ async def cb_infra_audit(
     if bad_proxy_count > 0:
         lines.append(f"⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>\n")
     for r in rows:
-        icon = {"success": "✅", "error": "❌", "flood_wait": "⏳", "banned": "🚫"}.get(r["result"], "❓")
+        icon = {"success": "✅", "error": "❌", "flood_wait": "⏳", "banned": "🚫"}.get(
+            r["result"], "❓"
+        )
         acc_label = html.escape(r.get("first_name") or r.get("phone") or "?")
         target = html.escape((r.get("target") or "")[:20])
         t = r["occurred_at"].strftime("%m-%d %H:%M") if r["occurred_at"] else "?"
         dur = f" {r['duration_ms']}ms" if r.get("duration_ms") else ""
-        lines.append(f"{icon} [{t}] <code>{r['action']}</code> {target} [{acc_label}]{dur}")
+        lines.append(
+            f"{icon} [{t}] <code>{r['action']}</code> {target} [{acc_label}]{dur}"
+        )
 
     kb = InlineKeyboardBuilder()
     if page > 0:
-        kb.button(text="◀️", callback_data=InfraCb(action="audit", page=page-1))
+        kb.button(text="◀️", callback_data=InfraCb(action="audit", page=page - 1))
     if (page + 1) * _PAGE < total:
-        kb.button(text="▶️", callback_data=InfraCb(action="audit", page=page+1))
+        kb.button(text="▶️", callback_data=InfraCb(action="audit", page=page + 1))
     kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
     kb.adjust(2, 1)
 
@@ -312,24 +378,29 @@ async def cb_infra_audit(
 
 # ── Daily Stats ────────────────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "daily_stats"))
 async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
     today = date.today()
 
-    rows = await pool.fetch(
-        """SELECT a.first_name, a.phone,
-                  COALESCE(ds.actions_ok, 0) AS actions_ok,
-                  COALESCE(ds.actions_fail, 0) AS actions_fail,
-                  COALESCE(ds.flood_events, 0) AS flood_events,
-                  COALESCE(ds.messages_sent, 0) AS messages_sent
-           FROM tg_accounts a
-           LEFT JOIN account_daily_stats ds ON ds.account_id=a.id AND ds.stat_date=$2
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           ORDER BY (COALESCE(ds.actions_ok,0) + COALESCE(ds.messages_sent,0)) DESC""",
-        uid, today,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT a.first_name, a.phone,
+                      COALESCE(ds.actions_ok, 0) AS actions_ok,
+                      COALESCE(ds.actions_fail, 0) AS actions_fail,
+                      COALESCE(ds.flood_events, 0) AS flood_events,
+                      COALESCE(ds.messages_sent, 0) AS messages_sent
+               FROM tg_accounts a
+               LEFT JOIN account_daily_stats ds ON ds.account_id=a.id AND ds.stat_date=$2
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               ORDER BY (COALESCE(ds.actions_ok,0) + COALESCE(ds.messages_sent,0)) DESC""",
+            uid,
+            today,
+        )
+    except Exception:
+        rows = []
 
     lines = [f"📊 <b>Статистика за {today.strftime('%d.%m.%Y')}</b>\n"]
     total_ok = total_fail = total_floods = total_msgs = 0
@@ -340,7 +411,10 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         fail = r["actions_fail"]
         floods = r["flood_events"]
         msgs = r["messages_sent"]
-        total_ok += ok; total_fail += fail; total_floods += floods; total_msgs += msgs
+        total_ok += ok
+        total_fail += fail
+        total_floods += floods
+        total_msgs += msgs
         if ok + fail + msgs > 0:
             lines.append(f"• <b>{label}</b>: ✅{ok} ❌{fail} ⚡{floods} ✉️{msgs}")
 
@@ -357,25 +431,29 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 # ── Account Capabilities ──────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "capabilities"))
 async def cb_infra_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
 
-    rows = await pool.fetch(
-        """SELECT a.first_name, a.phone, a.trust_score,
-                  COALESCE(ac.can_invite, TRUE) AS can_invite,
-                  COALESCE(ac.can_dm, TRUE) AS can_dm,
-                  COALESCE(ac.can_create_channel, TRUE) AS can_create,
-                  COALESCE(ac.is_premium, FALSE) AS is_premium,
-                  COALESCE(ac.daily_dm_limit, 50) AS dm_limit,
-                  ac.last_discovery
-           FROM tg_accounts a
-           LEFT JOIN account_capabilities ac ON ac.account_id=a.id
-           WHERE a.owner_id=$1 AND a.is_active=TRUE
-           ORDER BY a.trust_score DESC NULLS LAST""",
-        uid,
-    )
+    try:
+        rows = await pool.fetch(
+            """SELECT a.first_name, a.phone, a.trust_score,
+                      COALESCE(ac.can_invite, TRUE) AS can_invite,
+                      COALESCE(ac.can_dm, TRUE) AS can_dm,
+                      COALESCE(ac.can_create_channel, TRUE) AS can_create,
+                      COALESCE(ac.is_premium, FALSE) AS is_premium,
+                      COALESCE(ac.daily_dm_limit, 50) AS dm_limit,
+                      ac.last_discovery
+               FROM tg_accounts a
+               LEFT JOIN account_capabilities ac ON ac.account_id=a.id
+               WHERE a.owner_id=$1 AND a.is_active=TRUE
+               ORDER BY a.trust_score DESC NULLS LAST""",
+            uid,
+        )
+    except Exception:
+        rows = []
 
     if not rows:
         await callback.message.edit_text(
@@ -389,16 +467,24 @@ async def cb_infra_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     for r in rows[:15]:
         label = html.escape(r.get("first_name") or r["phone"])
         caps = []
-        if r["can_invite"]:  caps.append("📨inv")
-        if r["can_dm"]:      caps.append("✉️dm")
-        if r["can_create"]:  caps.append("📡crt")
-        if r["is_premium"]:  caps.append("⭐prm")
+        if r["can_invite"]:
+            caps.append("📨inv")
+        if r["can_dm"]:
+            caps.append("✉️dm")
+        if r["can_create"]:
+            caps.append("📡crt")
+        if r["is_premium"]:
+            caps.append("⭐prm")
         discovered = "❓" if not r["last_discovery"] else "✅"
-        lines.append(f"{discovered} <b>{label}</b>: {' '.join(caps) or 'нет данных'} DM-лимит:{r['dm_limit']}")
+        lines.append(
+            f"{discovered} <b>{label}</b>: {' '.join(caps) or 'нет данных'} DM-лимит:{r['dm_limit']}"
+        )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить возможности", callback_data=InfraCb(action="discover_caps"))
-    kb.button(text="◀️ Назад",                callback_data=InfraCb(action="menu"))
+    kb.button(
+        text="🔄 Обновить возможности", callback_data=InfraCb(action="discover_caps")
+    )
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -414,10 +500,13 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
     await callback.answer("🔄 Обновляю...")
     uid = callback.from_user.id
 
-    accounts = await pool.fetch(
-        "SELECT id, acc_status, trust_score FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            "SELECT id, acc_status, trust_score FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     updated = 0
     for acc in accounts:
@@ -425,10 +514,10 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
         trust = float(acc.get("trust_score") or 1.0)
 
         # Логика на основе статуса и trust_score
-        can_dm     = status in ("active",) and trust >= 0.3
+        can_dm = status in ("active",) and trust >= 0.3
         can_invite = status in ("active",) and trust >= 0.5
         can_create = status in ("active",) and trust >= 0.2
-        dm_limit   = 50 if trust >= 0.7 else (20 if trust >= 0.4 else 5)
+        dm_limit = 50 if trust >= 0.7 else (20 if trust >= 0.4 else 5)
 
         try:
             await pool.execute(
@@ -439,7 +528,12 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
                    ON CONFLICT(account_id) DO UPDATE
                    SET can_invite=$3, can_dm=$4, can_create_channel=$5,
                        daily_dm_limit=$6, last_discovery=NOW()""",
-                acc["id"], uid, can_invite, can_dm, can_create, dm_limit,
+                acc["id"],
+                uid,
+                can_invite,
+                can_dm,
+                can_create,
+                dm_limit,
             )
             updated += 1
         except Exception as e:
@@ -457,13 +551,15 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
 
 # ── Unified Asset Registry ─────────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "asset_registry"))
 async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Единый реестр всех ассетов пользователя с агрегированной статистикой."""
     from bot.utils.subscription import require_plan
     from bot.keyboards import subscription_locked_markup
+
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
+        await callback.answer("🔒 Реестр ассетов — Starter+", show_alert=True)
         await callback.message.edit_text(
             "🔒 <b>Реестр ассетов — Starter+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
@@ -474,76 +570,101 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     uid = callback.from_user.id
 
     # Parallel aggregation queries
-    acc_row = await pool.fetchrow(
-        """SELECT COUNT(*) AS total,
-                  COUNT(CASE WHEN is_active THEN 1 END) AS active,
-                  COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
-                  ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust
-           FROM tg_accounts WHERE owner_id=$1""",
-        uid,
-    )
-    bot_row = await pool.fetchrow(
-        """SELECT COUNT(*) AS total,
-                  COUNT(CASE WHEN is_active THEN 1 END) AS active,
-                  COALESCE(SUM(u.cnt), 0) AS total_users
-           FROM managed_bots b
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) u ON u.bot_id = b.bot_id
-           WHERE b.added_by=$1""",
-        uid,
-    )
+    try:
+        acc_row = await pool.fetchrow(
+            """SELECT COUNT(*) AS total,
+                      COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                      COUNT(CASE WHEN cooldown_until > now() THEN 1 END) AS in_cooldown,
+                      ROUND(AVG(COALESCE(trust_score, 1.0))::numeric, 2) AS avg_trust
+               FROM tg_accounts WHERE owner_id=$1""",
+            uid,
+        )
+    except Exception:
+        acc_row = None
+    try:
+        bot_row = await pool.fetchrow(
+            """SELECT COUNT(*) AS total,
+                      COUNT(CASE WHEN is_active THEN 1 END) AS active,
+                      COALESCE(SUM(u.cnt), 0) AS total_users
+               FROM managed_bots b
+               LEFT JOIN (
+                   SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+               ) u ON u.bot_id = b.bot_id
+               WHERE b.added_by=$1""",
+            uid,
+        )
+    except Exception:
+        bot_row = None
 
     # Channels and groups via managed_channels
     try:
-        chan_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
-        ) or 0
+        chan_total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+            )
+            or 0
+        )
     except Exception:
         chan_total = 0
 
     try:
-        group_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND type IN ('megagroup','supergroup','group')", uid
-        ) or 0
+        group_total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND type IN ('megagroup','supergroup','group')",
+                uid,
+            )
+            or 0
+        )
     except Exception:
         group_total = 0
 
     try:
-        cluster_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM clusters WHERE owner_id=$1", uid
-        ) or 0
+        cluster_total = (
+            await pool.fetchval("SELECT COUNT(*) FROM clusters WHERE owner_id=$1", uid)
+            or 0
+        )
     except Exception:
         cluster_total = 0
 
     try:
-        funnel_total = await pool.fetchval(
-            """SELECT COUNT(*) FROM funnels f
+        funnel_total = (
+            await pool.fetchval(
+                """SELECT COUNT(*) FROM funnels f
                JOIN managed_bots b ON b.bot_id=f.bot_id
                WHERE b.added_by=$1 AND f.is_active=TRUE""",
-            uid,
-        ) or 0
+                uid,
+            )
+            or 0
+        )
     except Exception:
         funnel_total = 0
 
     try:
-        keyword_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE", uid
-        ) or 0
+        keyword_total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM tracked_keywords WHERE owner_id=$1 AND is_active=TRUE",
+                uid,
+            )
+            or 0
+        )
     except Exception:
         keyword_total = 0
 
     try:
-        proxy_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM proxies WHERE owner_id=$1", uid
-        ) or 0
+        proxy_total = (
+            await pool.fetchval("SELECT COUNT(*) FROM proxies WHERE owner_id=$1", uid)
+            or 0
+        )
     except Exception:
         proxy_total = 0
 
     try:
-        template_total = await pool.fetchval(
-            "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1", uid
-        ) or 0
+        template_total = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM asset_templates WHERE owner_id=$1", uid
+            )
+            or 0
+        )
     except Exception:
         template_total = 0
 
@@ -570,26 +691,30 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         f"   Активных: <b>{group_total}</b>",
         "",
         "<b>📊 Другие активы</b>",
-        f"   🔗 Кластеры: <b>{cluster_total}</b>  |  "
-        f"🌐 Прокси: <b>{proxy_total}</b>",
-        f"   🔄 Воронки: <b>{funnel_total}</b>  |  "
-        f"📋 Шаблоны: <b>{template_total}</b>",
+        f"   🔗 Кластеры: <b>{cluster_total}</b>  |  🌐 Прокси: <b>{proxy_total}</b>",
+        f"   🔄 Воронки: <b>{funnel_total}</b>  |  📋 Шаблоны: <b>{template_total}</b>",
         f"   🔍 Ключевых слов: <b>{keyword_total}</b>",
     ]
 
     from bot.callbacks import (
-        AccCb, BotCb, ChanCb, GroupFCb,
-        ClustMCb, ProxyCb, FunnelCb, AssetTplCb,
+        AccCb,
+        BotCb,
+        ChanCb,
+        GroupFCb,
+        ClustMCb,
+        ProxyCb,
+        AssetTplCb,
     )
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="📱 Аккаунты",     callback_data=AccCb(action="menu"))
-    kb.button(text="🤖 Боты",         callback_data=BotCb(action="list", page=0))
-    kb.button(text="📡 Каналы",       callback_data=ChanCb(action="menu"))
-    kb.button(text="👥 Группы",       callback_data=GroupFCb(action="menu"))
-    kb.button(text="🔗 Кластеры",     callback_data=ClustMCb(action="menu"))
-    kb.button(text="🌐 Прокси",       callback_data=ProxyCb(action="menu"))
-    kb.button(text="📋 Шаблоны",      callback_data=AssetTplCb(action="menu"))
-    kb.button(text="◀️ Назад",        callback_data=InfraCb(action="menu"))
+    kb.button(text="📱 Аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="🤖 Боты", callback_data=BotCb(action="list", page=0))
+    kb.button(text="📡 Каналы", callback_data=ChanCb(action="menu"))
+    kb.button(text="👥 Группы", callback_data=GroupFCb(action="menu"))
+    kb.button(text="🔗 Кластеры", callback_data=ClustMCb(action="menu"))
+    kb.button(text="🌐 Прокси", callback_data=ProxyCb(action="menu"))
+    kb.button(text="📋 Шаблоны", callback_data=AssetTplCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
     kb.adjust(2, 2, 2, 1, 1)
 
     await callback.message.edit_text(
@@ -600,6 +725,7 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 
 # ── Авто-балансировка пулов ───────────────────────────────────────────────
+
 
 def _classify_account(acc: dict) -> str | None:
     """Определить целевой пул для аккаунта на основе его состояния."""
@@ -621,12 +747,15 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     await callback.answer()
     uid = callback.from_user.id
 
-    accounts = await pool.fetch(
-        """SELECT id, first_name, phone, trust_score, pool, warnings,
-                  (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
-           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, first_name, phone, trust_score, pool, warnings,
+                      (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
+               FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     if not accounts:
         await callback.message.edit_text(
@@ -639,12 +768,14 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     for acc in accounts:
         target_pool = _classify_account(dict(acc))
         if target_pool and acc["pool"] != target_pool:
-            changes.append({
-                "id": acc["id"],
-                "label": acc.get("first_name") or acc["phone"] or f"id{acc['id']}",
-                "from_pool": acc["pool"] or "(нет)",
-                "to_pool": target_pool,
-            })
+            changes.append(
+                {
+                    "id": acc["id"],
+                    "label": acc.get("first_name") or acc["phone"] or f"id{acc['id']}",
+                    "from_pool": acc["pool"] or "(нет)",
+                    "to_pool": target_pool,
+                }
+            )
 
     if not changes:
         kb = InlineKeyboardBuilder()
@@ -656,7 +787,9 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         )
         return
 
-    lines = [f"🔄 <b>Авто-балансировка пулов</b>\n\nБудет изменено: <b>{len(changes)}</b> аккаунтов\n"]
+    lines = [
+        f"🔄 <b>Авто-балансировка пулов</b>\n\nБудет изменено: <b>{len(changes)}</b> аккаунтов\n"
+    ]
     for c in changes[:15]:
         lines.append(
             f"• <b>{html.escape(c['label'])}</b>: "
@@ -671,7 +804,10 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     lines.append("• на cooldown → <code>cooldown</code>")
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Применить балансировку", callback_data=InfraCb(action="rebalance_apply"))
+    kb.button(
+        text="✅ Применить балансировку",
+        callback_data=InfraCb(action="rebalance_apply"),
+    )
     kb.button(text="❌ Отмена", callback_data=InfraCb(action="menu"))
     kb.adjust(1)
 
@@ -686,6 +822,7 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 async def cb_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     from services import infra_advisor
+
     recs = await infra_advisor.get_recommendations(pool, callback.from_user.id)
     text = infra_advisor.format_recommendations(recs)
     kb = InlineKeyboardBuilder()
@@ -704,9 +841,11 @@ async def cb_advisor(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if action_cbs:
         kb.adjust(min(len(action_cbs), 3))
     kb.button(text="🔄 Обновить", callback_data=InfraCb(action="advisor"))
-    kb.button(text="◀️ Назад",   callback_data=InfraCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
     kb.adjust(*([min(len(action_cbs), 3)] if action_cbs else []), 2)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(InfraCb.filter(F.action == "copilot"))
@@ -715,9 +854,12 @@ async def cb_infra_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     owner_id = callback.from_user.id
     try:
         from services import infra_copilot
+
         insights = await infra_copilot.run_full_analysis(pool, owner_id)
         if not insights:
-            text = "✅ <b>Copilot: всё в норме</b>\n\nКритических проблем не обнаружено."
+            text = (
+                "✅ <b>Copilot: всё в норме</b>\n\nКритических проблем не обнаружено."
+            )
         else:
             text = infra_copilot.format_copilot_report(insights)
     except Exception as e:
@@ -725,9 +867,11 @@ async def cb_infra_copilot(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data=InfraCb(action="copilot"))
-    kb.button(text="◀️ Назад",   callback_data=InfraCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
     kb.adjust(2)
-    await callback.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await callback.message.edit_text(
+        text, reply_markup=kb.as_markup(), parse_mode="HTML"
+    )
 
 
 @router.callback_query(InfraCb.filter(F.action == "intelligence"))
@@ -771,7 +915,9 @@ async def cb_intelligence_report(callback: CallbackQuery, pool: asyncpg.Pool) ->
             lines.append("")
             lines.append("🏆 <b>Топ-3 лучших прямо сейчас:</b>")
             for acc in available_accs[:3]:
-                bar = "█" * round(acc.suitability_score * 5) + "░" * (5 - round(acc.suitability_score * 5))
+                bar = "█" * round(acc.suitability_score * 5) + "░" * (
+                    5 - round(acc.suitability_score * 5)
+                )
                 lines.append(
                     f"  [{bar}] {_html.escape(acc.label())} — "
                     f"fit {int(acc.suitability_score * 100)}% · "
@@ -803,46 +949,72 @@ async def cb_intelligence_report(callback: CallbackQuery, pool: asyncpg.Pool) ->
             med_prx = [p for p in proxies if 0.40 <= p.quality_score < 0.65]
             lines.append("")
             lines.append(f"🌐 <b>Прокси ({len(proxies)} всего):</b>")
-            lines.append(f"  🟢 Хорошие: {len(good_prx)}  🟡 Средние: {len(med_prx)}  🔴 Плохие: {len(bad_prx)}")
+            lines.append(
+                f"  🟢 Хорошие: {len(good_prx)}  🟡 Средние: {len(med_prx)}  🔴 Плохие: {len(bad_prx)}"
+            )
             if bad_prx:
-                bad_list = ", ".join(_html.escape(p.proxy_url[:25]) for p in bad_prx[:2])
+                bad_list = ", ".join(
+                    _html.escape(p.proxy_url[:25]) for p in bad_prx[:2]
+                )
                 lines.append(f"  ⚠️ Рекомендуется замена: {bad_list}")
 
         text = "\n".join(lines)
 
     except Exception as e:
         import html as _html
+
         text = f"⚠️ Intelligence временно недоступен: {_html.escape(str(e)[:200])}"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить",  callback_data=InfraCb(action="intelligence"))
-    kb.button(text="🎯 Советник",  callback_data=InfraCb(action="advisor"))
-    kb.button(text="◀️ Назад",     callback_data=InfraCb(action="menu"))
+    kb.button(text="🔄 Обновить", callback_data=InfraCb(action="intelligence"))
+    kb.button(text="🎯 Советник", callback_data=InfraCb(action="advisor"))
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
     kb.adjust(2, 1)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
 
 
 @router.callback_query(InfraCb.filter(F.action == "rebalance_apply"))
 async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    from bot.utils.subscription import require_plan
+    from bot.keyboards import subscription_locked_markup
+
+    if not await require_plan(pool, callback.from_user.id, "starter"):
+        await callback.answer()
+        await callback.message.edit_text(
+            "🔒 <b>Авто-балансировка — Starter+</b>\n\nОформите подписку: /subscription",
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("starter"),
+        )
+        return
     await callback.answer("⏳ Применяю...")
     uid = callback.from_user.id
 
-    accounts = await pool.fetch(
-        """SELECT id, first_name, phone, trust_score, pool, warnings,
-                  (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
-           FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
-        uid,
-    )
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, first_name, phone, trust_score, pool, warnings,
+                      (cooldown_until IS NOT NULL AND cooldown_until > now()) AS on_cooldown
+               FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""",
+            uid,
+        )
+    except Exception:
+        accounts = []
 
     changed = 0
     for acc in accounts:
         target_pool = _classify_account(dict(acc))
         if target_pool and acc["pool"] != target_pool:
-            await pool.execute(
-                "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
-                target_pool, acc["id"], uid,
-            )
-            changed += 1
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
+                    target_pool,
+                    acc["id"],
+                    uid,
+                )
+                changed += 1
+            except Exception:
+                log.warning("rebalance_apply: failed to update pool for acc=%d uid=%d", acc["id"], uid)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К аналитике", callback_data=InfraCb(action="menu"))
@@ -859,12 +1031,12 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 
 # ── Copilot snooze ────────────────────────────────────────────────────────────
 
+
 @router.callback_query(InfraCb.filter(F.action == "snooze"))
 async def cb_copilot_snooze(
     callback: CallbackQuery, callback_data: InfraCb, pool: asyncpg.Pool
 ) -> None:
     """Отложить уведомления Infrastructure Copilot на N часов."""
-    import time
     from services import infra_copilot as _cop
     from database import db as _db
 
@@ -872,13 +1044,15 @@ async def cb_copilot_snooze(
     _cop.snooze_alerts(callback.from_user.id, float(hours))
     exp = _cop._snooze_until.get(callback.from_user.id, 0.0)
     try:
-        await _db.set_platform_setting(pool, f"copilot_snooze_{callback.from_user.id}", str(exp))
+        await _db.set_platform_setting(
+            pool, f"copilot_snooze_{callback.from_user.id}", str(exp)
+        )
     except Exception:
         pass
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Снять снуз", callback_data=InfraCb(action="snooze_clear"))
-    kb.button(text="🔍 Copilot",    callback_data=InfraCb(action="copilot"))
+    kb.button(text="🔍 Copilot", callback_data=InfraCb(action="copilot"))
     kb.adjust(2)
 
     await callback.answer(f"😴 Уведомления отложены на {hours}ч", show_alert=False)
@@ -896,13 +1070,15 @@ async def cb_copilot_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
 
     _cop._snooze_until.pop(callback.from_user.id, None)
     try:
-        await _db.set_platform_setting(pool, f"copilot_snooze_{callback.from_user.id}", "0")
+        await _db.set_platform_setting(
+            pool, f"copilot_snooze_{callback.from_user.id}", "0"
+        )
     except Exception:
         pass
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="😴 1ч",  callback_data=InfraCb(action="snooze", page=1))
-    kb.button(text="😴 6ч",  callback_data=InfraCb(action="snooze", page=6))
+    kb.button(text="😴 1ч", callback_data=InfraCb(action="snooze", page=1))
+    kb.button(text="😴 6ч", callback_data=InfraCb(action="snooze", page=6))
     kb.button(text="😴 24ч", callback_data=InfraCb(action="snooze", page=24))
     kb.button(text="🔍 Copilot", callback_data=InfraCb(action="copilot"))
     kb.adjust(3, 1)
