@@ -102,7 +102,8 @@ async def cb_approval_cancel(
             op_id,
         )
     except Exception:
-        pass
+        await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
+        return
     from bot.callbacks import BmCb
 
     _kb = InlineKeyboardBuilder()
