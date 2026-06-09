@@ -211,8 +211,12 @@ _ENV_KEYS = {k for k, _ in _ENV_VARS}
 def _env_list_kb(vars_online: dict[str, str] | None = None):
     kb = InlineKeyboardBuilder()
     for key, label in _ENV_VARS:
-        val = (vars_online or {}).get(key, "")
-        status = "✅" if val else "❌"
+        if vars_online is not None:
+            val = vars_online.get(key, "")
+            status = "✅" if val else "❌"
+        else:
+            # No Railway API data — fall back to local os.environ
+            status = "✅" if os.getenv(key) else "❌"
         kb.button(text=f"{status} {label}", callback_data=f"adm:env_edit:{key}")
     kb.button(text="➕ Добавить переменную", callback_data="adm:env_add")
     kb.button(text="🔄 Обновить список", callback_data="adm:env_list")
@@ -2078,13 +2082,33 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
         )
         return
 
+    vars_online: dict[str, str] | None = None
+    api_error: str = ""
     try:
         vars_online = await railway_api.list_variables(http)
     except Exception as e:
+        api_error = str(e)
+
+    if api_error:
+        is_auth_error = any(
+            x in api_error for x in ("Not Authorized", "Unauthorized", "401", "403")
+        )
+        if is_auth_error:
+            hint = (
+                "⚠️ <b>RAILWAY_TOKEN недействителен.</b>\n\n"
+                "Редактирование переменных через бот недоступно до обновления токена.\n\n"
+                "<b>Как исправить:</b>\n"
+                "1. railway.com → Account → Tokens → Create Token\n"
+                "2. Railway Dashboard → Variables → обновите <code>RAILWAY_TOKEN</code>\n"
+                "3. После перезапуска сервиса (~1 мин) всё заработает.\n\n"
+                "⬇️ Кнопки ниже работают — нажмите нужную переменную:"
+            )
+        else:
+            hint = f"⚠️ Ошибка Railway API: <code>{api_error}</code>\n\nПоказаны локальные значения:"
         await callback.message.edit_text(
-            f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
+            f"🔑 <b>Переменные Railway</b>\n\n{hint}",
             parse_mode="HTML",
-            reply_markup=_back_kb(),
+            reply_markup=_env_list_kb(None),
         )
         return
 
