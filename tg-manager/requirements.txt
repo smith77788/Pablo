@@ -11,7 +11,4 @@ pypdf>=4.3.1
 python-docx>=1.1.2
 openpyxl>=3.1.5
 pycryptodome>=3.19.0
-# Redis — optional; enables distributed flood state + IP-lock across workers
-# Set REDIS_URL env var to activate. Falls back to in-memory / PG advisory locks.
-redis[asyncio]>=5.0.0
 # opentele>=1.15.1  # не работает на Python 3.12 (зависимость pyaes не собирается)

@@ -28,17 +28,6 @@ TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 # Format: socks5://user:pass@host:port  or  socks5://host:port
 TG_PROXY: str = os.getenv("TG_PROXY", "")
 
-# Redis URL for distributed flood state + IP-lock (optional)
-# Format: redis://[:password@]host[:port][/db]
-REDIS_URL: str = os.getenv("REDIS_URL", "")
-
-# Proxy kill-switch: if True, refuse to start Telethon sessions without proxy on Railway
-# Defaults to True when RAILWAY_ENVIRONMENT is set
-PROXY_KILLSWITCH: bool = os.getenv("PROXY_KILLSWITCH", "").lower() not in ("0", "false", "off")
-
-# Staggered worker start: seconds between spinning up each background service
-STAGGER_INTERVAL: float = float(os.getenv("STAGGER_INTERVAL", "2.0"))
-
 # SMTP for email reporting (abuse@telegram.org, NCMEC, etc.)
 SMTP_HOST: str = os.getenv("SMTP_HOST", "")
 SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))

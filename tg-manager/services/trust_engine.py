@@ -32,19 +32,6 @@ _ROTATE_CRITICAL_HOURS = 72
 _ROTATE_LOW_HOURS = 24
 _ROTATE_INTERVAL_CYCLES = 12  # every 12 cycles (6 hours)
 
-# Trust level thresholds (NEW < 0.35, WARMED 0.35–0.75, ELITE ≥ 0.75)
-_LEVEL_WARMED = 0.35
-_LEVEL_ELITE = 0.75
-
-
-def score_to_level(score: float, in_cooldown: bool = False) -> str:
-    """Map trust_score + cooldown state to trust_level string."""
-    if in_cooldown or score < _LEVEL_WARMED:
-        return "NEW"
-    if score >= _LEVEL_ELITE:
-        return "ELITE"
-    return "WARMED"
-
 
 async def _recalculate_scores(pool: asyncpg.Pool) -> None:
     """Recalculate trust_score for all active accounts and persist history snapshot."""
@@ -71,15 +58,12 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
         )
         penalty = _FLOOD_PENALTY * (row["flood_count_7d"] or 0)
         score = max(0.1, min(1.0, 1.0 + age_bonus - penalty))
-        in_cooldown = bool(row["cooldown_until"])
         # In cooldown → cap score at 0.2
-        if in_cooldown:
+        if row["cooldown_until"]:
             score = min(score, 0.2)
-        level = score_to_level(score, in_cooldown)
         await pool.execute(
-            "UPDATE tg_accounts SET trust_score=$1, trust_level=$2 WHERE id=$3",
+            "UPDATE tg_accounts SET trust_score=$1 WHERE id=$2",
             score,
-            level,
             row["id"],
         )
         history_batch.append((row["id"], row["owner_id"], score))

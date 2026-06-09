@@ -162,30 +162,6 @@ async def _global_error_handler(event: ErrorEvent) -> None:
         log_exc_swallow(log, "Double-fault in error handler")
 
 
-async def _startup_preflight(pool) -> None:
-    """
-    Non-blocking startup task: warm proxy guard + Redis for flood/ip_lock.
-    Runs after pool is created so proxies can be fetched from DB.
-    """
-    try:
-        from services import proxy_guard, ip_lock, flood_engine
-        # Touch Redis clients so they initialise (logs backend selection)
-        await ip_lock._get_redis()
-        await flood_engine._get_redis()
-        # Pre-flight all active proxies from DB
-        try:
-            rows = await pool.fetch(
-                "SELECT DISTINCT proxy_url FROM user_proxies WHERE is_active=TRUE AND proxy_url IS NOT NULL LIMIT 50"
-            )
-            urls = [r["proxy_url"] for r in rows if r["proxy_url"]]
-            if urls:
-                await proxy_guard.warmup_proxies(urls, concurrency=8)
-        except Exception as exc:
-            log.warning("startup_preflight: proxy warmup failed — %s", exc)
-    except Exception as exc:
-        log.warning("startup_preflight error: %s", exc)
-
-
 async def main() -> None:
     install_button_style_patch()
 
@@ -272,14 +248,10 @@ async def main() -> None:
     # Load persistent platform settings
     from database import db as _db
     from bot.utils.subscription import set_free_mode
-    from config import STAGGER_INTERVAL
 
     _fm = await _db.get_platform_setting(pool, "free_mode", "false")
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
-
-    # Pre-flight: warm up proxy guard + Redis (non-blocking, best-effort)
-    asyncio.create_task(_startup_preflight(pool))
 
     # Send deployment notification to admins on startup (detects new deploys)
     asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
@@ -324,86 +296,73 @@ async def main() -> None:
                 )
                 await asyncio.sleep(30)
 
-    async def _staggered(name: str, fn, *args, delay: float = 0.0):
-        """Like _resilient but waits `delay` seconds before first start."""
-        if delay > 0:
-            log.debug("staggered_start: waiting %.1fs before %s", delay, name)
-            await asyncio.sleep(delay)
-        await _resilient(name, fn, *args)
-
     try:
-        # ── Staggered start: critical services first, heavy workers after ────
-        # Tier 0 (immediate): core bot infrastructure
         asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
         asyncio.create_task(
-            _staggered("auto_responder", auto_responder.run, pool, http, bot, delay=STAGGER_INTERVAL * 1)
+            _resilient("auto_responder", auto_responder.run, pool, http, bot)
         )
-        asyncio.create_task(_staggered("relay", relay_service.run, pool, http, delay=STAGGER_INTERVAL * 2))
-        asyncio.create_task(_staggered("funnel_runner", funnel_runner.run, pool, http, delay=STAGGER_INTERVAL * 3))
+        asyncio.create_task(_resilient("relay", relay_service.run, pool, http))
+        asyncio.create_task(_resilient("funnel_runner", funnel_runner.run, pool, http))
         asyncio.create_task(
-            _staggered("payment_checker", payment_checker.run, pool, http, bot, delay=STAGGER_INTERVAL * 4)
-        )
-        asyncio.create_task(
-            _staggered("ranking_checker", ranking_checker.run, pool, bot, delay=STAGGER_INTERVAL * 5)
+            _resilient("payment_checker", payment_checker.run, pool, http, bot)
         )
         asyncio.create_task(
-            _staggered(
-                "search_observer", search_observer.run_confirmation_loop, pool, bot,
-                delay=STAGGER_INTERVAL * 6,
+            _resilient("ranking_checker", ranking_checker.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient(
+                "search_observer", search_observer.run_confirmation_loop, pool, bot
             )
         )
-        # Tier 1 (light): monitoring and trust services
         asyncio.create_task(
-            _staggered("account_monitor", account_monitor.run, pool, bot, delay=STAGGER_INTERVAL * 7)
+            _resilient("account_monitor", account_monitor.run, pool, bot)
         )
-        asyncio.create_task(_staggered("trust_engine", trust_engine.run, pool, bot, delay=STAGGER_INTERVAL * 8))
+        asyncio.create_task(_resilient("trust_engine", trust_engine.run, pool, bot))
         asyncio.create_task(
-            _staggered("shadowban_monitor", shadowban_monitor.run, pool, bot, delay=STAGGER_INTERVAL * 9)
+            _resilient("shadowban_monitor", shadowban_monitor.run, pool, bot)
         )
-        # Tier 2 (heavy): operation worker and engines — start last
-        asyncio.create_task(_staggered("op_worker", op_worker.run, pool, bot, delay=STAGGER_INTERVAL * 10))
+        asyncio.create_task(_resilient("op_worker", op_worker.run, pool, bot))
         asyncio.create_task(
-            _staggered("behavioral_engine", behavioral_engine.run, pool, bot, delay=STAGGER_INTERVAL * 11)
+            _resilient("behavioral_engine", behavioral_engine.run, pool, bot)
         )
         asyncio.create_task(
-            _staggered("account_warmer", account_warmer.run_warmup_loop, pool, delay=STAGGER_INTERVAL * 12)
+            _resilient("account_warmer", account_warmer.run_warmup_loop, pool)
         )
         asyncio.create_task(
-            _staggered("account_health", account_health.run_health_check_loop, pool, delay=STAGGER_INTERVAL * 13)
+            _resilient("account_health", account_health.run_health_check_loop, pool)
         )
         asyncio.create_task(
-            _staggered("activity_engine", activity_engine.run_activity_loop, pool, delay=STAGGER_INTERVAL * 14)
+            _resilient("activity_engine", activity_engine.run_activity_loop, pool)
         )
         asyncio.create_task(
-            _staggered("payment_webhook", payment_webhook.run, pool, bot, delay=STAGGER_INTERVAL * 15)
+            _resilient("payment_webhook", payment_webhook.run, pool, bot)
         )
-        asyncio.create_task(_staggered("task_registry", task_registry.run_cleanup_loop, delay=STAGGER_INTERVAL * 16))
+        asyncio.create_task(_resilient("task_registry", task_registry.run_cleanup_loop))
         asyncio.create_task(
-            _staggered("proxy_scraper", proxy_scraper.run_scraper_loop, pool, delay=STAGGER_INTERVAL * 17)
+            _resilient("proxy_scraper", proxy_scraper.run_scraper_loop, pool)
         )
-        asyncio.create_task(_staggered("activity_logger", activity_logger.run, pool, delay=STAGGER_INTERVAL * 18))
-        asyncio.create_task(_staggered("drift_detector", drift_detector.run, pool, bot, delay=STAGGER_INTERVAL * 19))
+        asyncio.create_task(_resilient("activity_logger", activity_logger.run, pool))
+        asyncio.create_task(_resilient("drift_detector", drift_detector.run, pool, bot))
         asyncio.create_task(
-            _staggered("infra_memory", infra_memory.run_flush_loop, pool, delay=STAGGER_INTERVAL * 20)
-        )
-        asyncio.create_task(
-            _staggered("infra_copilot", infra_copilot.run_copilot_loop, pool, bot, delay=STAGGER_INTERVAL * 21)
+            _resilient("infra_memory", infra_memory.run_flush_loop, pool)
         )
         asyncio.create_task(
-            _staggered(
+            _resilient("infra_copilot", infra_copilot.run_copilot_loop, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient(
                 "ecosystem_copilot",
                 ecosystem_copilot.run_ecosystem_copilot_loop,
                 pool,
                 bot,
-                delay=STAGGER_INTERVAL * 22,
             )
         )
-        asyncio.create_task(_staggered("db_maintenance", db_maintenance.run, pool, delay=STAGGER_INTERVAL * 23))
+        asyncio.create_task(_resilient("db_maintenance", db_maintenance.run, pool))
         asyncio.create_task(
-            _staggered("recovery_engine", recovery_engine.run_recovery_loop, pool, bot, delay=STAGGER_INTERVAL * 24)
+            _resilient("recovery_engine", recovery_engine.run_recovery_loop, pool, bot)
         )
         asyncio.create_task(
-            _staggered("anomaly_detector", anomaly_detector.run_anomaly_loop, pool, bot, delay=STAGGER_INTERVAL * 25)
+            _resilient("anomaly_detector", anomaly_detector.run_anomaly_loop, pool, bot)
         )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)

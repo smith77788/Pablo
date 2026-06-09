@@ -21,37 +21,6 @@ log = logging.getLogger(__name__)
 
 # In-memory per-account flood state (supplements DB for hot-path queries)
 _flood_state: dict[int, "_AccountFloodState"] = {}
-
-# ── Optional Redis backend for distributed flood state ────────────────────────
-_redis = None
-_redis_checked: bool = False
-_redis_lock = asyncio.Lock()
-_REDIS_KEY = "flood:"          # flood:{account_id} → seconds remaining
-_REDIS_TTL_BUFFER = 60         # extra seconds on top of actual cooldown
-
-
-async def _get_redis():
-    """Lazy-init Redis client. Returns None if REDIS_URL not configured."""
-    global _redis, _redis_checked
-    if _redis_checked:
-        return _redis
-    async with _redis_lock:
-        if _redis_checked:
-            return _redis
-        _redis_checked = True
-        try:
-            import config  # type: ignore
-            url = getattr(config, "REDIS_URL", "") or ""
-            if not url:
-                return None
-            import redis.asyncio as aioredis  # type: ignore
-            client = aioredis.from_url(url, decode_responses=True, socket_timeout=3)
-            await client.ping()
-            _redis = client
-            log.info("flood_engine: Redis backend ready")
-        except Exception as exc:
-            log.debug("flood_engine: Redis unavailable (%s) — in-memory only", exc)
-        return _redis
 _ACTION_BASELINES: dict[str, float] = {
     "default": 6.0,
     "join": 55.0,
@@ -95,34 +64,8 @@ def get_account_state(account_id: int) -> _AccountFloodState:
 
 
 def is_account_cooling(account_id: int) -> bool:
-    """Check in-memory cooldown state (fast path, no I/O)."""
     state = get_account_state(account_id)
     return state.cooldown_until > time.monotonic()
-
-
-async def is_account_cooling_distributed(account_id: int) -> bool:
-    """
-    Check cooldown across all workers via Redis (if available).
-    Falls back to in-memory check. Use before starting an operation.
-    """
-    if is_account_cooling(account_id):
-        return True
-    r = await _get_redis()
-    if r is None:
-        return False
-    try:
-        val = await r.get(f"{_REDIS_KEY}{account_id}")
-        if val is not None:
-            # Another worker recorded a flood for this account
-            remaining = float(val)
-            if remaining > 0:
-                # Sync local state so hot-path is consistent
-                state = get_account_state(account_id)
-                state.cooldown_until = time.monotonic() + remaining
-                return True
-    except Exception as e:
-        log.debug("flood_engine Redis cooling check failed: %s", e)
-    return False
 
 
 def seconds_until_ready(account_id: int) -> float:
@@ -250,15 +193,6 @@ async def record_flood(
             )
         except Exception as e:
             log.warning("flood_engine DB write failed: %s", e)
-
-    # Mirror cooldown to Redis so other workers see it immediately
-    r = await _get_redis()
-    if r is not None:
-        try:
-            key = f"{_REDIS_KEY}{account_id}"
-            await r.setex(key, int(actual_wait) + _REDIS_TTL_BUFFER, str(actual_wait))
-        except Exception as e:
-            log.debug("flood_engine Redis write failed: %s", e)
 
     return actual_wait
 
