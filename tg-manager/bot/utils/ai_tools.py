@@ -687,16 +687,11 @@ async def execute_action(
             return "❌ Аккаунт не найден или не активен"
         from services import account_manager
 
-        if is_group:
-            result = await account_manager.create_group(
-                acc_row["session_str"], title, about=about, _acc=dict(acc_row)
-            )
-        else:
-            result = await account_manager.create_channel(
-                acc_row["session_str"], title, about=about, _acc=dict(acc_row)
-            )
-        if isinstance(result, dict) and result.get("id"):
-            ch_id = result["id"]
+        result = await account_manager.create_channel(
+            acc_row["session_str"], title, about=about, megagroup=is_group, _acc=dict(acc_row)
+        )
+        if isinstance(result, dict) and result.get("channel_id"):
+            ch_id = result["channel_id"]
             # Save to managed_channels
             await pool.execute(
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
@@ -784,11 +779,11 @@ async def execute_action(
             return "❌ Аккаунт не найден или не активен"
         from services import account_manager
 
-        result = await account_manager.create_group(
-            acc_row["session_str"], title, about=about, _acc=dict(acc_row)
+        result = await account_manager.create_channel(
+            acc_row["session_str"], title, about=about, megagroup=True, _acc=dict(acc_row)
         )
-        if isinstance(result, dict) and result.get("id"):
-            ch_id = result["id"]
+        if isinstance(result, dict) and result.get("channel_id"):
+            ch_id = result["channel_id"]
             # Save to managed_channels
             await pool.execute(
                 """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username)
