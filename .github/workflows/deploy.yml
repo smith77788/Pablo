@@ -7,6 +7,7 @@ on:
       - 'tg-manager/**'
       - 'Dockerfile'
       - 'railway.json'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 jobs:
