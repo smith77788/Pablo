@@ -195,8 +195,8 @@ _DISCLAIMER = (
 # Store active background tasks for cancellation: (user_id, task_type) → Task
 _active_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
-_STARTER = "starter"
-_PRO = "pro"
+_STARTER = "paid"
+_PRO = "paid"
 
 REPORT_REASONS = {
     "spam": "🚫 Спам",

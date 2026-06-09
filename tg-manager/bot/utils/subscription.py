@@ -42,38 +42,43 @@ def invalidate_plan_cache(user_id: int) -> None:
     _plan_cache.pop(user_id, None)
 
 
-PLAN_LEVELS: dict[str, int] = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
-BOT_LIMITS: dict[str, int] = {"free": 1, "starter": 10, "pro": 30, "enterprise": 9999}
-PLAN_PRICES = {"starter": "$9", "pro": "$25", "enterprise": "$69"}
-PLAN_EMOJIS = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
+PLAN_LEVELS: dict[str, int] = {"free": 0, "paid": 1}
+BOT_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
+CHANNEL_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
+PLAN_PRICES = {"paid": "$29"}
+PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
 PLAN_FEATURES = {
-    "starter": "10 ботов, CRM, воронки, диплинки, SEO, трекер позиций, 1 аккаунт",
-    "pro": "30 ботов, Фабрики каналов/групп, парсер, A/B тесты, мультигео, 3 аккаунта",
-    "enterprise": "∞ ботов+аккаунтов, AI-ассистент, DM-кампании, Global Presence, сеть ботов, Swarm",
+    "paid": "∞ ботов и каналов, CRM, воронки, аккаунты, AI-ассистент, рассылки, аналитика, все функции",
 }
 
-PLAN_ALIASES: dict[str, str] = {"max": "enterprise", "maximum": "enterprise"}
+PLAN_ALIASES: dict[str, str] = {
+    "max": "paid",
+    "maximum": "paid",
+    "starter": "paid",
+    "pro": "paid",
+    "enterprise": "paid",
+}
 FEATURE_PLAN: dict[str, str] = {
     "basic_bots": "free",
-    "basic_broadcast": "starter",
-    "inbox": "starter",
-    "funnels": "starter",
-    "crm": "starter",
-    "seo": "starter",
-    "account_ops": "pro",
-    "channel_factory": "pro",
-    "audience_parser": "pro",
-    "bulk_operations": "pro",
-    "proxy_manager": "pro",
-    "ai_assistant": "enterprise",
-    "autonomous_engine": "enterprise",
-    "global_presence": "enterprise",
-    "swarm": "enterprise",
-    "workspaces": "enterprise",
-    "strike": "enterprise",
-    "email_oauth": "enterprise",
-    "infra_intelligence": "enterprise",
-    "account_readiness": "enterprise",
+    "basic_broadcast": "free",
+    "inbox": "paid",
+    "funnels": "paid",
+    "crm": "paid",
+    "seo": "paid",
+    "account_ops": "paid",
+    "channel_factory": "paid",
+    "audience_parser": "paid",
+    "bulk_operations": "paid",
+    "proxy_manager": "paid",
+    "ai_assistant": "paid",
+    "autonomous_engine": "paid",
+    "global_presence": "paid",
+    "swarm": "paid",
+    "workspaces": "paid",
+    "strike": "paid",
+    "email_oauth": "paid",
+    "infra_intelligence": "paid",
+    "account_readiness": "paid",
 }
 
 
@@ -157,22 +162,24 @@ async def get_bot_limit(pool: asyncpg.Pool, user_id: int) -> int:
     return BOT_LIMITS[coerce_plan(plan)]
 
 
+async def get_channel_limit(pool: asyncpg.Pool, user_id: int) -> int:
+    if is_platform_admin(user_id):
+        return 9999
+    plan = await get_plan(pool, user_id)
+    return CHANNEL_LIMITS[coerce_plan(plan)]
+
+
 def locked_text(feature: str, required_plan: str) -> str:
-    emoji = PLAN_EMOJIS.get(required_plan, "🔒")
-    price = PLAN_PRICES.get(required_plan, "")
+    required_plan = coerce_plan(required_plan)
+    emoji = PLAN_EMOJIS.get(required_plan, "💎")
+    price = PLAN_PRICES.get(required_plan, "$29")
     features = PLAN_FEATURES.get(required_plan, "")
-    upsell = ""
-    if required_plan == "enterprise":
-        upsell = "\n\n💡 <b>Enterprise — лучший выбор:</b> все функции без исключения, без лимитов на ботов и аккаунты."
-    elif required_plan == "pro":
-        upsell = "\n\n💡 <i>PRO: 30 ботов, Фабрики каналов/групп, A/B тесты, мультигео, парсер аудитории, 3 аккаунта</i>"
-    elif required_plan == "starter":
-        upsell = "\n\n💡 <i>STARTER: за $9/мес — CRM, воронки, диплинки, SEO, трекер позиций и многое другое</i>"
     return (
         f"🔒 <b>{feature}</b>\n\n"
-        f"Эта функция доступна с планом {emoji} <b>{required_plan.upper()}</b>.\n\n"
-        f"{emoji} {required_plan.upper()} — {price}/мес\n"
-        f"<i>{features}</i>"
-        f"{upsell}\n\n"
+        f"Эта функция доступна только с платной подпиской.\n\n"
+        f"{emoji} <b>Подписка</b> — {price}/мес\n"
+        f"<i>{features}</i>\n\n"
+        f"Бесплатно: до 5 ботов и 5 каналов, изменение описания, приветствие и рассылка.\n"
+        f"Все остальные функции — только с подпиской.\n\n"
         f"Оформить подписку: /subscription"
     )

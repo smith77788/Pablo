@@ -22,15 +22,17 @@ log = logging.getLogger(__name__)
 
 PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
     "free": [
-        "🤖 1 бот для теста",
-        "↩️ Базовые авто-ответы",
-        "🤖 Команды бота",
-        "📊 Базовая статистика",
-        "🔒 Рассылки, Inbox, CRM, шаблоны, вебхуки и расписание — со STARTER",
+        "🤖 До 5 ботов",
+        "📺 До 5 каналов/чатов",
+        "✏️ Изменение описания бота",
+        "👋 Приветственное сообщение",
+        "📢 Рассылка по боту",
+        "🔒 Все остальные функции — только с подпиской",
     ],
-    "starter": [
-        "🤖 До 10 ботов",
-        "✅ Всё из FREE +",
+    "paid": [
+        "🤖 ∞ ботов — без ограничений",
+        "📺 ∞ каналов и чатов",
+        "✅ Всё из бесплатного плана +",
         "🏷 CRM и теги (сегментация аудитории)",
         "🤖 Автоматизация (правила и триггеры)",
         "🔗 Цепочки сообщений (воронки)",
@@ -39,35 +41,25 @@ PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
         "👥 Экспорт аудитории (CSV)",
         "🏆 Трекер позиций в поиске Telegram",
         "📊 Отчёты по видимости и позициям",
-        "📱 1 личный Telegram-аккаунт",
-    ],
-    "pro": [
-        "🤖 До 30 ботов",
-        "✅ Всё из STARTER +",
         "📺 Фабрика каналов (создание, управление, публикация)",
         "👥 Фабрика групп",
         "🔍 Парсер аудитории из каналов и групп",
         "🌐 Массовые операции (bulk join/leave/edit)",
         "🧪 A/B тесты сообщений",
-        "🎯 Аналитика активности (горячие/холодные/потерянные)",
         "🌍 Мультигео (имена/описания по языку)",
-        "📱 До 3 личных Telegram-аккаунтов",
-    ],
-    "enterprise": [
-        "🤖 ∞ ботов — без ограничений",
-        "✅ Всё из PRO + эксклюзивные функции:",
-        "📱 ∞ личных Telegram-аккаунтов",
+        "📱 Личные Telegram-аккаунты — без ограничений",
         "🤖 AI-ассистент для анализа и генерации контента",
         "📩 DM-кампании (личные сообщения в масштабе)",
         "🌐 Global Presence (массовое присутствие)",
-        "📡 Сетевые операции и аналитика сети ботов",
-        "📢 Сетевые рассылки (несколько ботов одновременно)",
+        "📡 Сетевые рассылки (несколько ботов одновременно)",
         "🧬 Swarm — умный роутинг и балансировка нагрузки",
-        "🌐 Кластеры ботов и управление сетью",
-        "📢 Сетевая рассылка v2 (дедупликация, сегментация)",
         "📊 Поведенческая аналитика и метрики вовлечённости",
-        "👑 Приоритетная поддержка 24/7",
+        "👑 Приоритетная поддержка",
     ],
+    # backward compat aliases — redirect to paid features view
+    "starter": [],
+    "pro": [],
+    "enterprise": [],
 }
 
 _PAY_SETTING_LABELS: dict[str, str] = {
@@ -161,11 +153,16 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     pay_status = f"TON {ton_ok}  USDT {tron_ok}"
 
     # Блок информации о текущем плане
+    is_paid = plan == "paid"
     if plan == "free":
-        plan_info = f"Текущий план: <b>{emoji} FREE</b> · до {lim_label} ботов"
+        plan_info = (
+            f"Текущий план: <b>{emoji} БЕСПЛАТНЫЙ</b>\n"
+            f"До {lim_label} ботов · До 5 каналов\n"
+            f"Доступно: описание, приветствие, рассылка"
+        )
     else:
         if sub_utils.is_platform_admin(user_id):
-            plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · ∞ ботов\n🔑 <i>Администратор платформы</i>"
+            plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов\n🔑 <i>Администратор платформы</i>"
         elif expires_at:
             now_utc = datetime.now(timezone.utc)
             if expires_at.tzinfo is None:
@@ -184,42 +181,36 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
                 days_badge = f"⏳ Осталось <b>{days_left} дн.</b> (до {expire_str})"
             else:
                 days_badge = f"✅ Активен до <b>{expire_str}</b> ({days_left} дн.)"
-            plan_info = f"Текущий план: <b>{emoji} {plan.upper()}</b> · до {lim_label} ботов\n{days_badge}"
+            plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов\n{days_badge}"
         else:
-            plan_info = (
-                f"Текущий план: <b>{emoji} {plan.upper()}</b> · до {lim_label} ботов"
-            )
+            plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов"
 
+    price_paid = PLAN_PRICES_USD["paid"]
     text = (
         f"💳 <b>Подписка</b>\n\n"
         f"{plan_info}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⭐ <b>STARTER</b> — $9/мес · 10 ботов\n"
-        f"<i>CRM, воронки, диплинки, SEO, трекер позиций, 1 аккаунт</i>\n\n"
-        f"🚀 <b>PRO</b> — $25/мес · 30 ботов\n"
-        f"<i>Фабрики каналов/групп, парсер, A/B тесты, мультигео, 3 аккаунта</i>\n\n"
-        f"👑 <b>ENTERPRISE</b> — $69/мес · ∞ без лимитов\n"
-        f"⭐ <b>ЛУЧШИЙ ВЫБОР — весь топовый функционал</b>\n"
-        f"<i>AI-ассистент, DM-кампании, Global Presence, сетевые операции,\n"
-        f"Swarm, кластеры, поведенческая аналитика, ∞ ботов и аккаунтов</i>\n"
-        f"<i>При годовой оплате: экономия $165/год (скидка 20%)</i>\n"
+        f"🆓 <b>БЕСПЛАТНО</b> — навсегда\n"
+        f"<i>До 5 ботов · До 5 каналов/чатов\n"
+        f"Описание, приветствие, рассылка по боту</i>\n\n"
+        f"💎 <b>ПОДПИСКА</b> — ${price_paid}/мес\n"
+        f"<i>∞ ботов и каналов, все функции без ограничений:\n"
+        f"CRM, воронки, аккаунты, AI-ассистент, рассылки,\n"
+        f"аналитика, фабрики каналов и групп, парсер, и многое другое</i>\n"
+        f"<i>При годовой оплате: скидка 20%</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 Выберите план → период → оплатите\n"
         f"<i>Оплата: {pay_status}</i>"
     )
     kb = InlineKeyboardBuilder()
-    for p in ("starter", "pro", "enterprise"):
-        price = PLAN_PRICES_USD[p]
-        em = sub_utils.PLAN_EMOJIS[p]
-        prefix = "✅ " if plan == p else ""
-        kb.button(
-            text=f"{prefix}{em} {p.upper()} — ${price}/мес",
-            callback_data=SubCb(action="choose_plan", plan=p),
-        )
-        kb.button(
-            text="❓ Что входит",
-            callback_data=SubCb(action="plan_features", plan=p),
-        )
+    prefix = "✅ " if is_paid else ""
+    kb.button(
+        text=f"{prefix}💎 Оформить подписку — ${price_paid}/мес",
+        callback_data=SubCb(action="choose_plan", plan="paid"),
+    )
+    kb.button(
+        text="❓ Что входит в подписку",
+        callback_data=SubCb(action="plan_features", plan="paid"),
+    )
     from bot.callbacks import BotCb
 
     if sub_utils.is_platform_admin(user_id):
@@ -227,10 +218,10 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             text="⚙️ Настройка оплаты", callback_data=SubCb(action="payment_settings")
         )
         kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
-        kb.adjust(2, 2, 2, 2)
+        kb.adjust(1, 1, 2)
     else:
         kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
-        kb.adjust(2, 2, 2, 1)
+        kb.adjust(1, 1, 1)
     return text, kb.as_markup()
 
 
@@ -254,27 +245,16 @@ async def cb_sub_menu(
 
 
 _PLAN_HIGHLIGHTS: dict[str, str] = {
-    "starter": (
-        "Идеально для начинающих: управляйте несколькими ботами, "
-        "сегментируйте аудиторию по тегам, автоматизируйте общение через воронки "
-        "и отслеживайте позиции в поиске Telegram."
-    ),
-    "pro": (
-        "Для растущего бизнеса: создавайте каналы и группы прямо из бота, "
-        "парсите аудиторию конкурентов, запускайте A/B тесты и управляйте "
-        "несколькими Telegram-аккаунтами из одного интерфейса."
-    ),
-    "enterprise": (
-        "Максимум возможностей: AI-ассистент для анализа и управления, "
-        "неограниченное число ботов и аккаунтов, DM-кампании в масштабе, "
-        "поведенческая аналитика, Swarm-роутинг и глобальное присутствие."
+    "paid": (
+        "Полный доступ ко всем функциям BotMother: "
+        "неограниченное число ботов и каналов, CRM, воронки, фабрики каналов и групп, "
+        "парсер аудитории, AI-ассистент, DM-кампании, Global Presence, "
+        "поведенческая аналитика, Swarm-роутинг и многое другое."
     ),
 }
 
 _PLAN_ANNUAL_SAVINGS: dict[str, str] = {
-    "starter": "При оплате на год: экономия $21.6 (скидка 20%)",
-    "pro": "При оплате на год: экономия $60 (скидка 20%)",
-    "enterprise": "При оплате на год: экономия $165.6 (скидка 20%)",
+    "paid": f"При оплате на год: скидка 20%",
 }
 
 
@@ -282,37 +262,46 @@ _PLAN_ANNUAL_SAVINGS: dict[str, str] = {
 async def cb_plan_features(
     callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
 ) -> None:
-    plan = callback_data.plan or ""
-    if plan not in PLAN_DETAILED_FEATURES:
-        await callback.answer("Неизвестный план.", show_alert=True)
-        return
+    plan = sub_utils.coerce_plan(callback_data.plan or "paid")
+    # Redirect old plan names to paid features
+    if plan not in ("free", "paid"):
+        plan = "paid"
+    features = PLAN_DETAILED_FEATURES.get(plan)
+    if not features:
+        plan = "paid"
+        features = PLAN_DETAILED_FEATURES.get("paid", [])
     await callback.answer()
-    em = sub_utils.PLAN_EMOJIS.get(plan, "")
-    price = PLAN_PRICES_USD.get(plan, 0)
-    bot_limit = sub_utils.BOT_LIMITS.get(plan, 0)
+    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
+    price = PLAN_PRICES_USD.get(plan, PLAN_PRICES_USD["paid"])
+    bot_limit = sub_utils.BOT_LIMITS.get(plan, 9999)
     limit_label = "∞" if bot_limit >= 9999 else str(bot_limit)
-    features_text = "\n".join(f"  {f}" for f in PLAN_DETAILED_FEATURES[plan])
+    features_text = "\n".join(f"  {f}" for f in features)
     highlight = _PLAN_HIGHLIGHTS.get(plan, "")
     savings = _PLAN_ANNUAL_SAVINGS.get(plan, "")
 
-    # Показываем текущий план пользователя
     current_plan = await sub_utils.get_plan(pool, callback.from_user.id)
     is_current = current_plan == plan
     status_line = "✅ <i>Это ваш текущий план</i>\n\n" if is_current else ""
 
     kb = InlineKeyboardBuilder()
-    if not is_current:
+    if plan == "paid" and not is_current:
         kb.button(
-            text=f"💳 Оформить {plan.upper()} — ${price}/мес",
+            text=f"💳 Оформить подписку — ${price}/мес",
             callback_data=SubCb(action="choose_plan", plan=plan),
         )
-    kb.button(text="◀️ Назад к планам", callback_data=SubCb(action="menu"))
+    kb.button(text="◀️ Назад к подписке", callback_data=SubCb(action="menu"))
     kb.adjust(1)
+
+    if plan == "paid":
+        header = f"💎 <b>ПОДПИСКА</b> — ${price}/мес · ∞ ботов и каналов"
+    else:
+        header = f"🆓 <b>БЕСПЛАТНЫЙ план</b> · до {limit_label} ботов"
+
     await callback.message.edit_text(
-        f"{em} <b>{plan.upper()}</b> — ${price}/мес · до {limit_label} ботов\n\n"
+        f"{header}\n\n"
         f"{status_line}"
         f"<i>{highlight}</i>\n\n"
-        f"<b>Что входит в план:</b>\n\n{features_text}\n\n"
+        f"<b>Что входит:</b>\n\n{features_text}\n\n"
         f"<i>💰 {savings}</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

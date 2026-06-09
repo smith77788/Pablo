@@ -15,10 +15,8 @@ from bot.keyboards import (
     broadcast_history,
     broadcast_detail,
     broadcast_segment_menu,
-    subscription_locked_markup,
 )
 from bot.states import Broadcast
-from bot.utils.subscription import require_plan, locked_text
 from services import bot_api as _bot_api
 from database import db
 from services import broadcaster
@@ -38,15 +36,6 @@ def _bc_cancel_kb(bot_id: int) -> object:
 async def cb_bc_menu(
     callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
-        await callback.message.edit_text(
-            locked_text("Рассылка по боту", "starter"),
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
-        )
-        return
-
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -174,15 +163,6 @@ async def cb_confirm(
     pool: asyncpg.Pool,
     http: aiohttp.ClientSession,
 ) -> None:
-    if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
-        await callback.message.edit_text(
-            locked_text("Рассылка по боту", "starter"),
-            parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
-        )
-        return
-
     data = await state.get_data()
     text = data.get("text", "")
     photo_file_id = data.get("photo_file_id")

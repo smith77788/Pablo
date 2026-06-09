@@ -52,8 +52,10 @@ def _price(plan: str, default: int) -> int:
 
 
 PLAN_PRICES_USD: dict[str, int] = {
-    "starter": _price("starter", 9),
-    "pro": _price("pro", 25),
-    "enterprise": _price("enterprise", 69),
+    "paid": _price("paid", 29),
+    # backward compat: existing subscriptions may store old plan names
+    "starter": _price("paid", 29),
+    "pro": _price("paid", 29),
+    "enterprise": _price("paid", 29),
 }
 PERIOD_DISCOUNTS: dict[int, int] = {1: 0, 3: 10, 6: 15, 12: 20}
