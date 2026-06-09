@@ -3417,12 +3417,8 @@ async def _botfather_create_bg(
             acc_idx = global_i % len(active_accounts)
             acc = active_accounts[acc_idx]
             acc_label = html.escape(acc["first_name"] or acc["phone"])
-            suffix = str(global_i + 1) if (total > 1) else ""
-            username = (
-                (base_username.rstrip("bot") + (suffix if suffix else "") + "bot")
-                if base_username.endswith("bot")
-                else (base_username + suffix)
-            )
+            from services.username_engine import unique_bot_username
+            username = unique_bot_username(base_username, global_i)
 
             tried_accs: set[int] = set()
             result = None
@@ -6062,24 +6058,44 @@ async def _bulk_chan_exec_bg(
                 continue
 
             if op == "chan_uname":
-                candidate = f"{base_uname}{uname_counter}"
-                uname_counter += 1
-                err = await account_manager.set_channel_username(
-                    acc["session_str"], chan["channel_id"], candidate, _acc=acc
-                )
-                if err:
-                    err_list.append(f"❌ {chan_title}: {html.escape(err[:60])}")
-                else:
-                    ok_list.append(f"✅ {chan_title}: @{candidate}")
+                from services.username_engine import unique_channel_username, generate_username_variants, _short_suffix
+
+                # Generate unique starting candidate for this slot, then fall back to variants
+                initial = unique_channel_username(base_uname, idx)
+                variants_to_try = [initial]
+                # Add more fallbacks from generator (starting from slot-specific base)
+                for v in generate_username_variants(f"{base_uname}{_short_suffix(idx, 2)}"):
+                    if v not in variants_to_try:
+                        variants_to_try.append(v)
+
+                assigned = None
+                last_err = ""
+                for variant in variants_to_try[:12]:
+                    err = await account_manager.set_channel_username(
+                        acc["session_str"], chan["channel_id"], variant, _acc=acc
+                    )
+                    if not err:
+                        assigned = variant
+                        break
+                    last_err = err
+                    # Only retry on "taken" errors, not on other failures
+                    if not any(k in err.lower() for k in ("taken", "occupied", "username_occupied", "занят", "already")):
+                        break
+                    await asyncio.sleep(2.0)
+
+                if assigned:
+                    ok_list.append(f"✅ {chan_title}: @{assigned}")
                     try:
                         await pool.execute(
                             "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
-                            candidate,
+                            assigned,
                             owner_id,
                             chan["channel_id"],
                         )
                     except Exception:
                         pass
+                else:
+                    err_list.append(f"❌ {chan_title}: {html.escape(last_err[:60])}")
 
             elif op == "chan_about":
                 ok = await account_manager.edit_channel_about(

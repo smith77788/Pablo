@@ -4472,16 +4472,42 @@ async def create_bot_via_botfather(
             await _bf_cancel()
             return {"error": f"Неожиданный ответ после имени бота: {resp[:200]}"}
 
-        # Step 3: send username
-        resp = await _bf_send_with_retry(uname)
-        resp_low = resp.lower()
+        # Step 3: send username — retry with variants if taken
+        from services.username_engine import generate_username_variants, unique_bot_username
 
-        # Check for username taken
-        if any(k in resp_low for k in _BF_USERNAME_TAKEN) and not any(
-            k in resp_low for k in _BF_STEP_SUCCESS
-        ):
+        uname_variants = [uname]
+        for v in generate_username_variants(uname):
+            if v not in uname_variants and v.endswith("bot") or not v.endswith("bot"):
+                # For bots, prefer bot-suffixed variants but include all
+                uname_variants.append(v if v.endswith("bot") else f"{v}bot")
+        # Add short-suffix variants
+        for i in range(20):
+            candidate = unique_bot_username(uname, i)
+            if candidate not in uname_variants:
+                uname_variants.append(candidate)
+
+        actual_uname = None
+        resp = ""
+        for attempt_uname in uname_variants[:15]:
+            if not (5 <= len(attempt_uname) <= 32):
+                continue
+            resp = await _bf_send_with_retry(attempt_uname)
+            resp_low = resp.lower()
+            if any(k in resp_low for k in _BF_STEP_SUCCESS):
+                actual_uname = attempt_uname
+                break
+            if any(k in resp_low for k in _BF_USERNAME_TAKEN) and not any(
+                k in resp_low for k in _BF_STEP_SUCCESS
+            ):
+                # BotFather stays in username step — just send next variant
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+                continue
+            # Non-taken error or rate limit — stop
+            break
+
+        if actual_uname is None:
             await _bf_cancel()
-            return {"error": f"Username @{uname} уже занят — выберите другой"}
+            return {"error": f"Не удалось найти свободный username (попробовано {min(len(uname_variants), 15)}). Последний ответ: {resp[:100]}"}
 
         # Check for rate limit
         wait = _parse_flood_wait(resp)
@@ -4501,7 +4527,7 @@ async def create_bot_via_botfather(
         token = token_match.group(1)
         return {
             "token": token,
-            "username": uname,
+            "username": actual_uname,
             "display_name": bot_display_name,
         }
 

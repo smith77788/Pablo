@@ -196,3 +196,63 @@ def generate_username_variants(base: str, geo: dict | None = None) -> list[str]:
             valid.append(c)
 
     return valid
+
+
+_SUFFIX_CHARS = "abcdefghjkmnpqrstuvwxyz23456789"  # no i,l,o,1,0 to avoid confusion
+
+
+def _short_suffix(n: int, length: int = 2) -> str:
+    """Convert integer n to a short alphanumeric suffix (base-28 style)."""
+    base = len(_SUFFIX_CHARS)
+    result = []
+    for _ in range(length):
+        result.append(_SUFFIX_CHARS[n % base])
+        n //= base
+    return "".join(reversed(result))
+
+
+def unique_channel_username(base: str, slot_idx: int) -> str:
+    """Generate a unique username for a bulk-create slot.
+
+    Uses a mix of slot-derived char + random char so parallel operations
+    don't collide: base + slotchar + randomchar (e.g. myproject3k, myproject7m).
+    """
+    import random
+
+    slug = slugify(base)
+    if not slug:
+        slug = "channel"
+    slug = slug[:28]
+    # First char from slot (deterministic), second char random
+    c1 = _SUFFIX_CHARS[slot_idx % len(_SUFFIX_CHARS)]
+    c2 = random.choice(_SUFFIX_CHARS)
+    candidate = f"{slug}{c1}{c2}"
+    if _valid_username(candidate):
+        return candidate
+    # Fallback: 3 random chars
+    r = "".join(random.choices(_SUFFIX_CHARS, k=3))
+    candidate = f"{slug[:27]}{r}"
+    return candidate if _valid_username(candidate) else f"ch{slot_idx:03d}xx"
+
+
+def unique_bot_username(base: str, slot_idx: int) -> str:
+    """Generate a unique bot username (@...bot) for a bulk-create slot.
+
+    Example: base="mysales", slot 0 → mysales3kbot, slot 1 → mysales7mbot
+    """
+    import random
+
+    slug = slugify(base)
+    if not slug:
+        slug = "mybot"
+    if slug.endswith("bot"):
+        slug = slug[:-3]
+    slug = slug[:24]
+    c1 = _SUFFIX_CHARS[slot_idx % len(_SUFFIX_CHARS)]
+    c2 = random.choice(_SUFFIX_CHARS)
+    candidate = f"{slug}{c1}{c2}bot"
+    if _valid_username(candidate):
+        return candidate
+    r = "".join(random.choices(_SUFFIX_CHARS, k=3))
+    candidate = f"{slug[:23]}{r}bot"
+    return candidate if _valid_username(candidate) else f"b{slot_idx:03d}xxbot"

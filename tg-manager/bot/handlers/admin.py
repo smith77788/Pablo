@@ -1480,24 +1480,44 @@ async def handle_admin_message(
 
     if state == "broadcast":
         try:
-            users = await pool.fetch("SELECT DISTINCT added_by FROM managed_bots")
+            users = await pool.fetch(
+                "SELECT user_id FROM platform_users WHERE COALESCE(is_banned, false) = false ORDER BY user_id"
+            )
         except Exception:
             users = []
             log_exc_swallow(log, "broadcast fetch users failed")
         sent = 0
-        for u in users:
+        failed = 0
+        progress_msg = await message.answer(
+            f"📨 <b>Рассылка по платформе</b>\n\nВсего пользователей: <b>{len(users)}</b>\nОтправляю...",
+            parse_mode="HTML",
+        )
+        for i, u in enumerate(users):
+            uid = u["user_id"]
             try:
-                await message.bot.send_message(u["added_by"], text)
+                await message.bot.send_message(uid, text, parse_mode="HTML")
                 sent += 1
-                await asyncio.sleep(0.3)
             except Exception:
-                log_exc_swallow(
-                    log,
-                    "Не удалось отправить сообщение рассылки пользователю",
-                    user_id=u["added_by"],
-                )
+                failed += 1
+                log_exc_swallow(log, "admin broadcast: failed to send", user_id=uid)
+            # Rate-limit safe delay
+            await asyncio.sleep(0.05)
+            # Update progress every 50 users
+            if (i + 1) % 50 == 0:
+                try:
+                    await progress_msg.edit_text(
+                        f"📨 <b>Рассылка по платформе</b>\n\n"
+                        f"Прогресс: <b>{i + 1}</b> / {len(users)}\n"
+                        f"✅ Отправлено: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
         await message.answer(
-            f"✅ Рассылка завершена\n\nОтправлено: <b>{sent}</b> / {len(users)}",
+            f"✅ <b>Рассылка завершена</b>\n\n"
+            f"Всего: <b>{len(users)}</b>\n"
+            f"✅ Отправлено: <b>{sent}</b>\n"
+            f"❌ Ошибок (заблокировали бота и т.п.): <b>{failed}</b>",
             parse_mode="HTML",
             reply_markup=_admin_main_kb(),
         )
