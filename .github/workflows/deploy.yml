@@ -17,8 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
       - name: Deploy to Railway
-        uses: railwayapp/railway-deploy@v1
-        with:
-          railway-token: ${{ secrets.RAILWAY_SECRET }}
-          service: tg-manager
+        run: |
+          cd tg-manager
+          railway up --service tg-manager --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_SECRET }}
