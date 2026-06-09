@@ -1,4 +1,10 @@
-"""Session Realism utilities — human-like delays and behavioral timing variation."""
+"""Session Realism utilities — human-like delays and behavioral timing variation.
+
+Trust-aware timeouts:
+  • NEW    — wide Normal distribution (high σ): conservative, unpredictable timing
+  • WARMED — medium σ: balanced speed/safety
+  • ELITE  — narrow σ: efficient but still varied
+"""
 
 from __future__ import annotations
 
@@ -7,6 +13,55 @@ import datetime
 import math
 import random
 from typing import Optional
+
+# ── Trust-level timing profiles ───────────────────────────────────────────────
+# Each level: (base_multiplier, sigma_fraction, min_delay)
+_TRUST_PROFILES: dict[str, tuple[float, float, float]] = {
+    "NEW":    (2.0, 0.40, 1.0),   # slow + wide spread
+    "WARMED": (1.3, 0.22, 0.5),   # moderate
+    "ELITE":  (0.9, 0.12, 0.3),   # fast + tight spread
+}
+
+
+def trust_delay(
+    base_seconds: float,
+    trust_level: str = "WARMED",
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    """
+    Sample a delay from Normal(μ, σ) parameterised by trust_level.
+
+    μ = base_seconds × multiplier
+    σ = μ × sigma_fraction   (Normal distribution — arrhythmic timing)
+
+    ELITE accounts are faster and more consistent.
+    NEW accounts are slower and less predictable (looks more human to Telegram).
+    """
+    mult, sigma_frac, min_floor = _TRUST_PROFILES.get(
+        trust_level, _TRUST_PROFILES["WARMED"]
+    )
+    mu = base_seconds * mult
+    sigma = max(mu * sigma_frac, 0.05)
+    sampled = random.gauss(mu, sigma)
+    result = max(sampled, minimum if minimum is not None else min_floor)
+    if maximum is not None:
+        result = min(result, maximum)
+    return result
+
+
+async def trust_sleep(
+    base_seconds: float,
+    trust_level: str = "WARMED",
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> None:
+    """Async sleep with trust-aware Normal-distribution timing."""
+    await asyncio.sleep(
+        trust_delay(base_seconds, trust_level, minimum=minimum, maximum=maximum)
+    )
 
 
 # ── Core primitives ──────────────────────────────────────────────────────────
