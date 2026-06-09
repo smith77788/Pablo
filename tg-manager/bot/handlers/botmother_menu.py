@@ -1004,7 +1004,7 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(BmCb.filter(F.action == "vis_reports_csv"))
 async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer("🔒 Требуется план STARTER", show_alert=True)
+        await callback.answer("🔒 Требуется 💎 подписка", show_alert=True)
         return
     import csv
     import io

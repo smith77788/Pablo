@@ -349,7 +349,7 @@ async def cb_chanf_create_start(
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Создание каналов — PRO</b>\n\nОформите: /subscription",
+            "🔒 <b>Создание каналов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -769,7 +769,7 @@ async def cb_chanf_bulk_create_start(
 
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовое создание — PRO</b>\n\nОформите: /subscription",
+            "🔒 <b>Массовое создание — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

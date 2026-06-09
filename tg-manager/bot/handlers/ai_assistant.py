@@ -970,7 +970,7 @@ async def cb_ai_start(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            "🔒 <b>AI-ассистент — ENTERPRISE</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>AI-ассистент — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
         )
         return

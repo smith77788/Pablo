@@ -536,8 +536,8 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         _lock_kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
         _lock_kb.adjust(1)
         await callback.message.edit_text(
-            "🔒 <b>Операции с аккаунтами — STARTER</b>\n\n"
-            "Для доступа нужна подписка STARTER или выше.\n\n"
+            "🔒 <b>Операции с аккаунтами — 💎 ПОДПИСКА</b>\n\n"
+            "Для доступа нужна 💎 подписка.\n\n"
             "Оформить: /subscription",
             parse_mode="HTML",
             reply_markup=_lock_kb.as_markup(),
@@ -576,7 +576,7 @@ async def cb_create_pick_account(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Создание каналов/групп — PRO</b>\n\n"
+            "🔒 <b>Создание каналов/групп — 💎 ПОДПИСКА</b>\n\n"
             "Оформите подписку PRO: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
@@ -793,7 +793,7 @@ async def cb_bulk_create_start(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовое создание — PRO</b>\n\nОформите: /subscription",
+            "🔒 <b>Массовое создание — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1341,7 +1341,7 @@ async def cb_bulk_post_chans_start(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Пост в каналы — STARTER</b>\n\nОформите: /subscription",
+            "🔒 <b>Пост в каналы — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1633,7 +1633,7 @@ async def cb_join_pick_account(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Вступление в каналы — STARTER</b>\n\nОформить: /subscription",
+            "🔒 <b>Вступление в каналы — 💎 ПОДПИСКА</b>\n\nОформить: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -2499,7 +2499,7 @@ async def cb_members_pick_account(callback: CallbackQuery, pool: asyncpg.Pool) -
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Управление участниками — STARTER</b>\n\nОформите: /subscription",
+            "🔒 <b>Управление участниками — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -3391,7 +3391,7 @@ async def cb_botfather_pick_account(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Создание бота — PRO</b>\n\nОформите: /subscription",
+            "🔒 <b>Создание бота — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -4684,7 +4684,7 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _PRO):
         await callback.message.edit_text(
-            "🔒 <b>Массовые операции — PRO</b>\n\nОформите: /subscription",
+            "🔒 <b>Массовые операции — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -6323,7 +6323,7 @@ async def cb_my_chans(
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Мои каналы — STARTER</b>\n\nОформить: /subscription",
+            "🔒 <b>Мои каналы — 💎 ПОДПИСКА</b>\n\nОформить: /subscription",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )

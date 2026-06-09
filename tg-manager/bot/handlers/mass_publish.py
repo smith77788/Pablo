@@ -123,7 +123,7 @@ async def cb_mpub_start(
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Массовая публикация — STARTER</b>\n\nОформите: /subscription",
+            "🔒 <b>Массовая публикация — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -532,7 +532,7 @@ async def cb_mpub_dry_run(
 
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         await callback.message.edit_text(
-            "🔒 <b>Сухой прогон — STARTER</b>\n\nОформите: /subscription",
+            "🔒 <b>Сухой прогон — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

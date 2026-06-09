@@ -85,13 +85,13 @@ async def cb_net_menu(
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
         f"👤 Уникальных юзеров: <b>{ov['unique_users']:,}</b>\n"
         f"📢 Сообщений отправлено: <b>{ov['total_sent']:,}</b>\n\n"
-        "── <b>Управление сетью (PRO+)</b> ──\n"
+        "── <b>Управление сетью (💎 подписка)</b> ──\n"
         "📊 Аналитика — сводка по всей сети ботов\n"
         "🏆 Рейтинг — боты по размеру аудитории\n"
         "❤️ Здоровье — проверка доступности ботов\n"
         "👥 Пересечение — общие юзеры между ботами\n"
-        "⚖️ Роутинг — распределение нагрузки (ENTERPRISE)\n"
-        "🌐 Кластеры — группировка ботов (ENTERPRISE)\n\n"
+        "⚖️ Роутинг — распределение нагрузки (💎 подписка)\n"
+        "🌐 Кластеры — группировка ботов (💎 подписка)\n\n"
         "── <b>Массовые правки</b> ──\n"
         "Изменить имя/описание/команды сразу для всех ботов\n\n"
         "💡 Кнопки с замком 🔒 откроются при повышении плана (/subscription)",
@@ -152,7 +152,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     )
 
 
-# ── Clusters (ENTERPRISE) ────────────────────────────────────────────────────
+# ── Clusters (💎 подписка) ────────────────────────────────────────────────────
 
 
 @router.callback_query(NetworkCb.filter(F.action == "clusters"))
@@ -576,7 +576,7 @@ async def cb_net_health(
     )
 
 
-# ── Cross-bot Broadcast (ENTERPRISE) ─────────────────────────────────────────
+# ── Cross-bot Broadcast (💎 подписка) ─────────────────────────────────────────
 
 
 @router.callback_query(NetworkCb.filter(F.action == "broadcast"))
@@ -703,7 +703,7 @@ async def cb_net_broadcast_cancel(callback: CallbackQuery, state: FSMContext) ->
     )
 
 
-# ── Clone Settings (ENTERPRISE) ───────────────────────────────────────────────
+# ── Clone Settings (💎 подписка) ───────────────────────────────────────────────
 
 
 @router.callback_query(NetworkCb.filter(F.action == "clone"))

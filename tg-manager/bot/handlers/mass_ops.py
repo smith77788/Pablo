@@ -245,7 +245,7 @@ async def cb_mass_publish_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовая публикация — PRO+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовая публикация — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -1341,7 +1341,7 @@ async def cb_bulk_bot_edit_start(
         await callback.answer()
         await safe_edit(
             callback,
-            "🔒 <b>Массовое редактирование ботов — PRO</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовое редактирование ботов — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
             reply_markup=subscription_locked_markup(
                 "pro", back_callback=BmCb(action="operations")
             ),
@@ -1719,7 +1719,7 @@ async def cb_bulk_join_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовый join — PRO+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовый join — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -2101,7 +2101,7 @@ async def cb_bulk_leave_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            "🔒 <b>Массовый leave — PRO+</b>\n\nОформите подписку: /subscription",
+            "🔒 <b>Массовый leave — 💎 ПОДПИСКА</b>\n\nОформите подписку: /subscription",
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -2507,8 +2507,8 @@ async def cb_build_start(
         "🛠️ <b>Построитель операций</b>\n\n"
         "Шаг 1/4: Выберите тип операции\n\n"
         "📤 <b>Публикация</b> — разослать пост по каналам\n"
-        "🔗 <b>Join</b> — вступить в каналы (STARTER+)\n"
-        "🚪 <b>Leave</b> — выйти из каналов (STARTER+)\n"
+        "🔗 <b>Join</b> — вступить в каналы (💎 подписка)\n"
+        "🚪 <b>Leave</b> — выйти из каналов (💎 подписка)\n"
         "✏️ <b>Редактирование ботов</b> — обновить профиль ботов (PRO)\n",
         reply_markup=kb.as_markup(),
     )
@@ -2537,7 +2537,7 @@ async def cb_ob_type_chosen(
     required_plan = meta["plan"]
     if not await require_plan(pool, callback.from_user.id, required_plan):
         await callback.answer()
-        plan_label = "PRO" if required_plan == "pro" else "STARTER+"
+        plan_label = "💎 ПОДПИСКА"
         await safe_edit(
             callback,
             f"🔒 <b>{meta['label']} — {plan_label}</b>\n\nОформите подписку: /subscription",
