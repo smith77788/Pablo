@@ -26,3 +26,4 @@ jobs:
           railway up --service tg-manager --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_SECRET }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
