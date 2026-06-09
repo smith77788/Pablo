@@ -1968,10 +1968,12 @@ async def handle_admin_message(
 
     elif state.startswith("env_edit:"):
         key = state.split(":", 1)[1]
+        # Bootstrap fix: update in-process FIRST so API call uses the new token
+        old_val = os.environ.get(key)
+        os.environ[key] = text
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, text)
-                os.environ[key] = text  # update in-process immediately
                 await message.answer(
                     f"✅ <b>Переменная обновлена</b>\n\n"
                     f"<code>{key}</code> = <code>{text[:80]}{'...' if len(text) > 80 else ''}</code>\n\n"
@@ -1980,8 +1982,31 @@ async def handle_admin_message(
                     reply_markup=_admin_main_kb(),
                 )
             except Exception as e:
+                err_str = str(e)
+                # Keep in-process value for RAILWAY_TOKEN bootstrap (so next call works),
+                # but revert everything else on failure to avoid inconsistent state
+                if key != "RAILWAY_TOKEN":
+                    if old_val is not None:
+                        os.environ[key] = old_val
+                    else:
+                        os.environ.pop(key, None)
+                hint = ""
+                if "Not Authorized" in err_str or "Unauthorized" in err_str or "401" in err_str:
+                    hint = (
+                        "\n\n<b>Причина:</b> RAILWAY_TOKEN не задан или недействителен.\n\n"
+                        "<b>Как исправить:</b>\n"
+                        "1. railway.com → Account Settings → Tokens → Create Token\n"
+                        "2. Railway Dashboard → Variables → добавьте <code>RAILWAY_TOKEN</code>\n"
+                        "3. Также добавьте <code>RAILWAY_PROJECT_ID</code> (UUID из URL проекта)\n\n"
+                        "⚠️ После добавления Railway перезапустит сервис (~1 мин)"
+                    )
+                    if key == "RAILWAY_TOKEN":
+                        hint += (
+                            "\n\n💡 Токен сохранён локально до перезапуска. "
+                            "Добавьте его вручную в Railway Dashboard → Variables чтобы зафиксировать."
+                        )
                 await message.answer(
-                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
+                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{err_str}</code>{hint}",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -1996,10 +2021,11 @@ async def handle_admin_message(
             )
             return
         key, val = parts[0].upper(), parts[1]
+        old_env_val = os.environ.get(key)
+        os.environ[key] = val
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, val)
-                os.environ[key] = val
                 await message.answer(
                     f"✅ <b>Переменная добавлена</b>\n\n"
                     f"<code>{key}</code> = <code>{val[:80]}{'...' if len(val) > 80 else ''}</code>\n\n"
@@ -2008,8 +2034,24 @@ async def handle_admin_message(
                     reply_markup=_admin_main_kb(),
                 )
             except Exception as e:
+                err_str = str(e)
+                if key != "RAILWAY_TOKEN":
+                    if old_env_val is not None:
+                        os.environ[key] = old_env_val
+                    else:
+                        os.environ.pop(key, None)
+                hint = ""
+                if "Not Authorized" in err_str or "Unauthorized" in err_str or "401" in err_str:
+                    hint = (
+                        "\n\n<b>Причина:</b> RAILWAY_TOKEN не задан или недействителен.\n\n"
+                        "<b>Как исправить:</b>\n"
+                        "1. railway.com → Account Settings → Tokens → Create Token\n"
+                        "2. Railway Dashboard → Variables → добавьте <code>RAILWAY_TOKEN</code>\n"
+                        "3. Также добавьте <code>RAILWAY_PROJECT_ID</code> (UUID из URL проекта)\n\n"
+                        "⚠️ После добавления Railway перезапустит сервис (~1 мин)"
+                    )
                 await message.answer(
-                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{e}</code>",
+                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{err_str}</code>{hint}",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
