@@ -895,7 +895,8 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id
         )
     except Exception:
-        pass
+        await callback.answer("❌ Ошибка при очистке алертов", show_alert=True)
+        return
     await callback.answer("Алерты очищены", show_alert=True)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
@@ -2025,7 +2026,8 @@ async def cb_op_cancel(
             user_id,
         )
     except Exception:
-        pass
+        await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
+        return
     await callback.answer("🛑 Операция отменена", show_alert=False)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад к отчётам", callback_data=BmCb(action="op_reports"))
@@ -2213,7 +2215,8 @@ async def cb_notif_toggle(
             callback.from_user.id,
         )
     except Exception:
-        pass
+        await callback.answer("❌ Ошибка обновления настроек", show_alert=True)
+        return
     try:
         row = await pool.fetchrow(
             "SELECT * FROM notification_settings WHERE user_id=$1",
