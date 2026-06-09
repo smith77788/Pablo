@@ -122,7 +122,7 @@ def is_platform_admin(user_id: int) -> bool:
 
 async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
     if is_platform_admin(user_id):
-        return "enterprise"
+        return "paid"
 
     now = time.monotonic()
     cached = _plan_cache.get(user_id)

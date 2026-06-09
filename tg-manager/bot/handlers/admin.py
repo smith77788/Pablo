@@ -458,8 +458,8 @@ async def cb_admin(
             "💰 <b>Выдать подписку</b>\n\n"
             "Отправьте в формате:\n"
             "<code>USER_ID план месяцев</code>\n\n"
-            "Пример: <code>123456789 pro 3</code>\n"
-            "Планы: starter, pro, enterprise",
+            "Пример: <code>123456789 paid 3</code>\n"
+            "Планы: <code>paid</code> (или старые: starter, pro, enterprise)",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -614,8 +614,8 @@ async def cb_admin(
             "Отправьте список пользователей и план:\n\n"
             "<code>USER_ID план месяцев</code> — по одному на строку\n\n"
             "Пример:\n"
-            "<code>123456 pro 3\n789012 starter 1\n345678 enterprise 6</code>\n\n"
-            "Планы: <code>starter</code>, <code>pro</code>, <code>enterprise</code>",
+            "<code>123456 paid 3\n789012 paid 1\n345678 paid 6</code>\n\n"
+            "Планы: <code>paid</code> (или старые: starter, pro, enterprise)",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1061,7 +1061,7 @@ async def _adm_section_system(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     from bot.handlers.admin_users import AdminUserCb
 
-    _PLAN_EMO = {"free": "🆓", "starter": "⭐", "pro": "🚀", "enterprise": "👑"}
+    _PLAN_EMO = {"free": "🆓", "paid": "💎", "starter": "💎", "pro": "💎", "enterprise": "💎"}
     try:
         rows, total_row = await asyncio.gather(
             pool.fetch(
@@ -1368,22 +1368,18 @@ async def _adm_logs_csv(
 async def _adm_prices(callback: CallbackQuery) -> None:
     import config
 
+    price = config.PLAN_PRICES_USD.get("paid", 29)
     kb = InlineKeyboardBuilder()
-    for plan, price in config.PLAN_PRICES_USD.items():
-        emo = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(plan, "")
-        kb.button(
-            text=f"✏️ {emo} {plan.upper()} — ${price}/мес",
-            callback_data=f"adm:price_edit:{plan}",
-        )
+    kb.button(
+        text=f"✏️ 💎 ПОДПИСКА — ${price}/мес",
+        callback_data="adm:price_edit:paid",
+    )
     kb.button(text="◀️ Назад", callback_data="adm:main")
     kb.adjust(1)
-    s = config.PLAN_PRICES_USD
     await callback.message.edit_text(
         "💰 <b>Цены на подписки</b>\n\n"
-        f"⭐ STARTER — <b>${s['starter']}/мес</b>\n"
-        f"🚀 PRO — <b>${s['pro']}/мес</b>\n"
-        f"👑 ENTERPRISE — <b>${s['enterprise']}/мес</b>\n\n"
-        "Нажмите на план чтобы изменить цену.\n"
+        f"💎 Подписка — <b>${price}/мес</b>\n\n"
+        "Нажмите чтобы изменить цену.\n"
         "Новая цена применится сразу и сохранится в Railway.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1395,8 +1391,8 @@ async def _adm_price_edit_ask(
 ) -> None:
     import config
 
-    emo = {"starter": "⭐", "pro": "🚀", "enterprise": "👑"}.get(plan, "")
-    cur = config.PLAN_PRICES_USD.get(plan, 0)
+    emo = {"free": "🆓", "paid": "💎"}.get(plan, "💎")
+    cur = config.PLAN_PRICES_USD.get(plan, config.PLAN_PRICES_USD.get("paid", 29))
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Отмена", callback_data="adm:prices")
     await callback.message.edit_text(
@@ -1592,17 +1588,19 @@ async def handle_admin_message(
 
     elif state == "grant":
         try:
+            from bot.utils.subscription import coerce_plan as _coerce_plan
+
             parts = text.split()
             uid = int(parts[0])
-            plan = parts[1].lower()
+            plan = _coerce_plan(parts[1].lower())
+            if plan == "free":
+                raise ValueError("bad plan")
             months = int(parts[2]) if len(parts) > 2 else 1
             months = max(1, min(months, 1200))  # cap: 1–1200 месяцев (100 лет)
-            if plan not in ("starter", "pro", "enterprise"):
-                raise ValueError("bad plan")
         except (ValueError, IndexError):
             await message.answer(
                 "❌ Формат: <code>USER_ID план месяцев</code>\n"
-                "Пример: <code>123456 pro 3</code>",
+                "Пример: <code>123456 paid 3</code>",
                 parse_mode="HTML",
                 reply_markup=_admin_main_kb(),
             )
@@ -1715,7 +1713,10 @@ async def handle_admin_message(
                 plan = parts[1].lower()
                 months = int(parts[2]) if len(parts) > 2 else 1
                 months = max(1, min(months, 1200))
-                if plan not in ("starter", "pro", "enterprise"):
+                from bot.utils.subscription import coerce_plan as _coerce_plan2
+
+                plan = _coerce_plan2(plan)
+                if plan == "free":
                     raise ValueError("bad plan")
             except (ValueError, IndexError) as e:
                 fail_list.append(f"❌ {line[:30]}: {e}")

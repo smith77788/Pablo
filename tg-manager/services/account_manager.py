@@ -1579,11 +1579,18 @@ async def search_in_telegram(
         from telethon.errors import FloodWaitError
 
         if isinstance(e, FloodWaitError):
+            try:
+                await client.disconnect()
+            except Exception:
+                log_exc_swallow(log, "search_in_telegram flood disconnect")
             raise
         log.exception("search_in_telegram error: %s", e)
         return []
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "search_in_telegram disconnect")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

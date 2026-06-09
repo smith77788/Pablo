@@ -17,6 +17,7 @@ from services import infra_memory as _infra_mem
 
 log = logging.getLogger(__name__)
 _POLL_INTERVAL = 10  # секунд между проверками очереди
+_STALE_RUNNING_TIMEOUT_MIN = 60  # операции в running > N минут → reset в pending
 _MAX_PARALLEL = 8  # максимум параллельных операций глобально
 _MAX_PARALLEL_PER_OWNER = 3  # максимум на одного владельца (далее в коде)
 
@@ -487,15 +488,36 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
         log.info("op_worker startup: no stale running operations found")
 
 
+async def _watchdog_stale(pool: asyncpg.Pool) -> None:
+    """Периодически сбрасывает 'running' операции, которые висят дольше N минут."""
+    try:
+        result = await pool.execute(
+            f"""UPDATE operation_queue
+                SET status = 'pending', started_at = NULL
+                WHERE status = 'running'
+                  AND started_at < now() - INTERVAL '{_STALE_RUNNING_TIMEOUT_MIN} minutes'""",
+        )
+        count = int((result or "UPDATE 0").split()[-1])
+        if count:
+            log.warning("op_worker watchdog: reset %d stale running ops → pending", count)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker watchdog error: {e}")
+
+
 async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     """Запускается как asyncio.create_task(op_worker.run(pool, bot)) в main.py."""
     log.info("Operation worker started (parallel mode, max=%d)", _MAX_PARALLEL)
     await _reset_stale_running(pool)
+    _watchdog_tick = 0
     while True:
         try:
             await _process_pending(pool, bot)
         except Exception as e:
             log.exception("op_worker error: %s", e)
+        _watchdog_tick += 1
+        # Run stale-running watchdog every 6 poll cycles (~1 minute)
+        if _watchdog_tick % 6 == 0:
+            await _watchdog_stale(pool)
         await asyncio.sleep(_POLL_INTERVAL)
 
 

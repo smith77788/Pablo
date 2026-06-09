@@ -125,7 +125,7 @@ def _mask(val: str) -> str:
 async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
     """Возвращает (plan, expires_at) или (plan, None) для бесплатного плана."""
     if sub_utils.is_platform_admin(user_id):
-        return "enterprise", None
+        return "paid", None
     try:
         row = await pool.fetchrow(
             "SELECT plan, expires_at FROM subscriptions "
@@ -313,13 +313,12 @@ async def cb_plan_features(
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))
 async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
-    plan = callback_data.plan or ""
+    plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
-        await callback.answer("Неизвестный план.", show_alert=True)
-        return
+        plan = "paid"
     await callback.answer()
     base = PLAN_PRICES_USD[plan]
-    em = sub_utils.PLAN_EMOJIS.get(plan, "")
+    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     kb = InlineKeyboardBuilder()
     for months, disc in [(1, 0), (3, 10), (6, 15), (12, 20)]:
         total = round(base * months * (1 - disc / 100), 2)
@@ -342,7 +341,11 @@ async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
 async def cb_choose_period(
     callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
 ) -> None:
-    plan, months = callback_data.plan or "", callback_data.months
+    plan = sub_utils.coerce_plan(callback_data.plan or "paid")
+    if plan not in PLAN_PRICES_USD:
+        plan = "paid"
+    months = callback_data.months
+    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     ton = _ton_wallet()
     tron = _tron_wallet()
     await callback.answer()
@@ -368,7 +371,7 @@ async def cb_choose_period(
         kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
         kb.adjust(1)
         await callback.message.edit_text(
-            f"💳 <b>{sub_utils.PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b> — <b>${usd}</b>\n\n"
+            f"💳 <b>{em} Подписка × {months} мес.</b> — <b>${usd}</b>\n\n"
             f"⚠️ Автоматическая оплата не настроена.\n\n"
             f"Нажмите <b>«📩 Запросить подписку»</b> — администратор активирует вручную после оплаты.",
             parse_mode="HTML",
@@ -396,7 +399,7 @@ async def cb_choose_period(
     kb.adjust(1)
     usd_show, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20")
     await callback.message.edit_text(
-        f"💳 <b>{sub_utils.PLAN_EMOJIS.get(plan, '')} {plan.upper()} × {months} мес.</b>\n\n"
+        f"💳 <b>{em} Подписка × {months} мес.</b>\n\n"
         f"Итого: <b>${usd_show}</b>\n\nВыберите способ оплаты:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -410,11 +413,11 @@ async def cb_choose_period(
 async def cb_pay(
     callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool
 ) -> None:
-    plan, months, currency = (
-        callback_data.plan or "",
-        callback_data.months,
-        callback_data.currency or "",
-    )
+    plan = sub_utils.coerce_plan(callback_data.plan or "paid")
+    if plan not in PLAN_PRICES_USD:
+        plan = "paid"
+    months = callback_data.months
+    currency = callback_data.currency or ""
     wallet = _ton_wallet() if currency == "TON" else _tron_wallet()
     if not wallet:
         await callback.answer(
@@ -544,18 +547,12 @@ async def cb_check_status(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(SubCb.filter(F.action == "request_sub"))
 async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
     await callback.answer()
-    plan, months = callback_data.plan or "", callback_data.months
+    plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="💳 К тарифам", callback_data=SubCb(action="menu"))
-        kb.adjust(1)
-        await callback.message.edit_text(
-            "❌ Неизвестный тариф. Вернитесь к выбору подписки.",
-            reply_markup=kb.as_markup(),
-        )
-        return
+        plan = "paid"
+    months = callback_data.months
     usd, _ = _calc(plan, months, "TON")
-    em = sub_utils.PLAN_EMOJIS.get(plan, "")
+    em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     uid = callback.from_user.id
     user_label = (
         f"@{callback.from_user.username}"
@@ -627,7 +624,10 @@ async def cb_admin_grant(
         await callback.answer("⛔️ Только для администратора.", show_alert=True)
         return
     await callback.answer()
-    plan, months = callback_data.plan or "", max(1, callback_data.months)
+    plan = sub_utils.coerce_plan(callback_data.plan or "paid")
+    if plan not in PLAN_PRICES_USD:
+        plan = "paid"
+    months = max(1, callback_data.months)
     from datetime import datetime, timedelta, timezone
 
     try:

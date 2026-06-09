@@ -98,12 +98,16 @@ def subscription_locked_markup(
     back_callback=None,
 ) -> InlineKeyboardMarkup:
     """Lock screen markup. Pass back_callback to add a working Back button."""
+    from bot.utils.subscription import coerce_plan
+
+    # Normalize plan so button always routes to a valid plan (e.g. "enterprise" → "paid")
+    effective_plan = coerce_plan(required_plan)
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=f"💳 Оформить {required_plan.upper()}",
-        callback_data=SubCb(action="choose_plan", plan=required_plan),
+        text="💳 Оформить подписку",
+        callback_data=SubCb(action="choose_plan", plan=effective_plan),
     )
-    kb.button(text="📋 Все тарифы", callback_data=SubCb(action="menu"))
+    kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
     if back_callback is not None:
         kb.button(text="◀️ Назад", callback_data=back_callback)
     kb.adjust(1)
