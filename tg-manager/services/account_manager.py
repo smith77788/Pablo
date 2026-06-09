@@ -130,6 +130,25 @@ _TG_PUBLIC_RE = re.compile(
 )
 
 
+_DEAD_SESSION_MARKERS = (
+    "auth_key_unregistered",
+    "key is not registered",
+    "registered in the system",
+    "session_revoked",
+    "session_expired",
+    "user_deactivated",
+)
+
+
+def is_dead_session_error(error_text: str | None) -> bool:
+    """True if an operation error indicates the account session is dead or the
+    account is banned/deleted — callers should deactivate the account in DB."""
+    if not error_text:
+        return False
+    low = str(error_text).lower()
+    return any(m in low for m in _DEAD_SESSION_MARKERS)
+
+
 def normalize_telegram_join_ref(value: str) -> tuple[str, str]:
     """Normalize Telegram join targets to official invite/public URL shapes."""
     raw = value.strip()

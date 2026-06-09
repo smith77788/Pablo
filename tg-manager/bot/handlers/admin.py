@@ -370,20 +370,57 @@ async def cb_admin(
         await _adm_system_stats(callback, pool)
 
     elif action == "broadcast":
+        kb = InlineKeyboardBuilder()
+        kb.button(text="👥 Юзерам платформы", callback_data="adm:bc_platform")
+        kb.button(text="🤖 Аудиториям всех ботов", callback_data="adm:bc_botusers")
+        kb.button(text="📢 Во все каналы/группы", callback_data="adm:bc_channels")
+        kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
+        kb.adjust(1)
         await callback.message.edit_text(
-            "📨 <b>Рассылка по всем пользователям платформы</b>\n\n"
-            "Отправьте текст сообщения следующим сообщением.\n"
-            "Сообщение получат все зарегистрированные пользователи.",
+            "📨 <b>Рассылка владельца сервиса</b>\n\n"
+            "Выберите область рассылки:\n\n"
+            "👥 <b>Юзерам платформы</b> — всем, кто запускал manager-бот\n"
+            "🤖 <b>Аудиториям ботов</b> — подписчикам каждого управляемого бота "
+            "(от имени самих ботов)\n"
+            "📢 <b>В каналы/группы</b> — пост во все подключённые каналы "
+            "через их аккаунты",
             parse_mode="HTML",
-            reply_markup=_back_kb(),
+            reply_markup=kb.as_markup(),
         )
-        # set FSM flag via message text — simple approach: store in temp table
+
+    elif action in ("bc_platform", "bc_botusers", "bc_channels"):
+        _bc_states = {
+            "bc_platform": (
+                "broadcast",
+                "📨 <b>Рассылка юзерам платформы</b>\n\n"
+                "Отправьте текст сообщения следующим сообщением.\n"
+                "Его получат все зарегистрированные пользователи платформы.",
+            ),
+            "bc_botusers": (
+                "broadcast_bots",
+                "🤖 <b>Рассылка аудиториям ботов</b>\n\n"
+                "Отправьте текст сообщения следующим сообщением.\n"
+                "Каждый управляемый бот отправит его своим подписчикам.",
+            ),
+            "bc_channels": (
+                "broadcast_channels",
+                "📢 <b>Рассылка в каналы/группы</b>\n\n"
+                "Отправьте текст поста следующим сообщением.\n"
+                "Он будет опубликован во всех подключённых каналах и группах "
+                "через привязанные аккаунты.",
+            ),
+        }
+        _bc_state, _bc_text = _bc_states[action]
+        await callback.message.edit_text(
+            _bc_text, parse_mode="HTML", reply_markup=_back_kb()
+        )
         try:
             await pool.execute(
                 "INSERT INTO admin_state(admin_id, state, data) "
-                "VALUES($1,'broadcast','') "
-                "ON CONFLICT(admin_id) DO UPDATE SET state='broadcast',data=''",
+                "VALUES($1,$2,'') "
+                "ON CONFLICT(admin_id) DO UPDATE SET state=$2,data=''",
                 callback.from_user.id,
+                _bc_state,
             )
         except Exception:
             log_exc_swallow(log, "admin_state insert failed for broadcast")
@@ -1518,6 +1555,153 @@ async def handle_admin_message(
             f"Всего: <b>{len(users)}</b>\n"
             f"✅ Отправлено: <b>{sent}</b>\n"
             f"❌ Ошибок (заблокировали бота и т.п.): <b>{failed}</b>",
+            parse_mode="HTML",
+            reply_markup=_admin_main_kb(),
+        )
+
+    elif state == "broadcast_bots":
+        from services import bot_api
+
+        try:
+            bots = await pool.fetch(
+                "SELECT bot_id, token, username, first_name FROM managed_bots "
+                "WHERE token IS NOT NULL AND token <> '' ORDER BY bot_id"
+            )
+        except Exception:
+            bots = []
+            log_exc_swallow(log, "broadcast_bots fetch bots failed")
+        if not bots:
+            await message.answer(
+                "🤖 Нет управляемых ботов с токенами — рассылать некому.",
+                reply_markup=_admin_main_kb(),
+            )
+            return
+        progress_msg = await message.answer(
+            f"🤖 <b>Рассылка через ботов</b>\n\nБотов: <b>{len(bots)}</b>\nОтправляю...",
+            parse_mode="HTML",
+        )
+        sent = 0
+        failed = 0
+        bots_done = 0
+        for b in bots:
+            try:
+                audience = await pool.fetch(
+                    "SELECT user_id FROM bot_users "
+                    "WHERE bot_id=$1 AND COALESCE(is_active,true)=true "
+                    "AND COALESCE(is_blocked,false)=false ORDER BY user_id",
+                    b["bot_id"],
+                )
+            except Exception:
+                audience = []
+                log_exc_swallow(log, "broadcast_bots fetch audience failed")
+            for u in audience:
+                ok, retry = await bot_api.send_message(
+                    http, b["token"], u["user_id"], text
+                )
+                if not ok and retry:
+                    await asyncio.sleep(min(retry, 30))
+                    ok, _ = await bot_api.send_message(
+                        http, b["token"], u["user_id"], text
+                    )
+                if ok:
+                    sent += 1
+                else:
+                    failed += 1
+                await asyncio.sleep(0.05)
+            bots_done += 1
+            try:
+                await progress_msg.edit_text(
+                    f"🤖 <b>Рассылка через ботов</b>\n\n"
+                    f"Ботов обработано: <b>{bots_done}</b> / {len(bots)}\n"
+                    f"✅ Отправлено: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        await message.answer(
+            f"✅ <b>Рассылка через ботов завершена</b>\n\n"
+            f"Ботов: <b>{len(bots)}</b>\n"
+            f"✅ Отправлено: <b>{sent}</b>\n"
+            f"❌ Ошибок: <b>{failed}</b>",
+            parse_mode="HTML",
+            reply_markup=_admin_main_kb(),
+        )
+
+    elif state == "broadcast_channels":
+        from services import account_manager
+
+        try:
+            channels = await pool.fetch(
+                "SELECT DISTINCT ON (mc.channel_id) "
+                "mc.channel_id, mc.title, mc.access_hash, "
+                "a.session_str, a.device_model, a.system_version, a.app_version, "
+                "a.lang_code, a.system_lang_code, a.proxy_id, p.proxy_url "
+                "FROM managed_channels mc "
+                "JOIN tg_accounts a ON a.id = mc.acc_id "
+                "LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
+                "WHERE a.is_active = TRUE AND a.session_str IS NOT NULL "
+                "AND a.session_str <> '' "
+                "ORDER BY mc.channel_id, a.id"
+            )
+        except Exception:
+            channels = []
+            log_exc_swallow(log, "broadcast_channels fetch failed")
+        if not channels:
+            await message.answer(
+                "📢 Нет подключённых каналов с живыми аккаунтами — публиковать некуда.",
+                reply_markup=_admin_main_kb(),
+            )
+            return
+        progress_msg = await message.answer(
+            f"📢 <b>Публикация в каналы</b>\n\nКаналов: <b>{len(channels)}</b>\nПубликую...",
+            parse_mode="HTML",
+        )
+        sent = 0
+        failed = 0
+        fail_lines: list[str] = []
+        for i, ch in enumerate(channels):
+            acc = dict(ch)
+            res = await account_manager.post_to_channel(
+                ch["session_str"],
+                ch["channel_id"],
+                text,
+                access_hash=int(ch["access_hash"] or 0),
+                _acc=acc,
+            )
+            if res.get("flood_wait"):
+                await asyncio.sleep(min(int(res["flood_wait"]), 60))
+                res = await account_manager.post_to_channel(
+                    ch["session_str"],
+                    ch["channel_id"],
+                    text,
+                    access_hash=int(ch["access_hash"] or 0),
+                    _acc=acc,
+                )
+            if res.get("msg_id"):
+                sent += 1
+            else:
+                failed += 1
+                if len(fail_lines) < 10:
+                    title = _html.escape((ch["title"] or str(ch["channel_id"]))[:30])
+                    err = _html.escape(str(res.get("error", "?"))[:60])
+                    fail_lines.append(f"• {title}: <code>{err}</code>")
+            await asyncio.sleep(1.5)
+            if (i + 1) % 5 == 0:
+                try:
+                    await progress_msg.edit_text(
+                        f"📢 <b>Публикация в каналы</b>\n\n"
+                        f"Прогресс: <b>{i + 1}</b> / {len(channels)}\n"
+                        f"✅ Опубликовано: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+        fail_block = ("\n\n" + "\n".join(fail_lines)) if fail_lines else ""
+        await message.answer(
+            f"✅ <b>Публикация в каналы завершена</b>\n\n"
+            f"Каналов: <b>{len(channels)}</b>\n"
+            f"✅ Опубликовано: <b>{sent}</b>\n"
+            f"❌ Ошибок: <b>{failed}</b>{fail_block}",
             parse_mode="HTML",
             reply_markup=_admin_main_kb(),
         )

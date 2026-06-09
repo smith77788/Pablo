@@ -1080,6 +1080,14 @@ async def _bulk_create_bg(
                         a for a in active_accounts if a["id"] != candidate["id"]
                     ]
                     continue
+                if account_manager.is_dead_session_error(result.get("error")):
+                    await _db.deactivate_account(
+                        pool, candidate["id"], "dead session detected in bulk op"
+                    )
+                    active_accounts = [
+                        a for a in active_accounts if a["id"] != candidate["id"]
+                    ]
+                    continue
                 if result.get("flood_wait"):
                     continue
                 break
@@ -1220,6 +1228,40 @@ async def cb_do_bulk_create(
             "⚠️ Нет доступных аккаунтов для создания каналов.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    # ── Pre-flight: лимит каналов по тарифу ──────────────────────────────────
+    from bot.utils.subscription import get_channel_limit
+
+    try:
+        chan_limit = await get_channel_limit(pool, user_id)
+        current_chans = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
+            )
+            or 0
+        )
+    except Exception:
+        chan_limit, current_chans = 9999, 0
+        log_exc_swallow(log, "bulk_create channel limit check failed")
+    if current_chans + total_ops > chan_limit:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
+
+        _kb = _IKB()
+        _kb.button(
+            text="💳 Оформить подписку",
+            callback_data=SubCb(action="choose_plan", plan="paid"),
+        )
+        _kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
+        _kb.adjust(1)
+        await callback.message.edit_text(
+            "⛔️ <b>Лимит каналов по тарифу</b>\n\n"
+            f"Сейчас каналов: <b>{current_chans}</b> из <b>{chan_limit}</b>\n"
+            f"Запрошено создать: <b>{total_ops}</b>\n\n"
+            "💎 Оформите подписку — без ограничений на каналы и боты.",
+            parse_mode="HTML",
+            reply_markup=_kb.as_markup(),
         )
         return
 
@@ -3435,6 +3477,14 @@ async def _botfather_create_bg(
                 if result.get("banned"):
                     await _db.deactivate_account(
                         pool, candidate["id"], "banned detected in bulk op"
+                    )
+                    active_accounts = [
+                        a for a in active_accounts if a["id"] != candidate["id"]
+                    ]
+                    continue
+                if account_manager.is_dead_session_error(result.get("error")):
+                    await _db.deactivate_account(
+                        pool, candidate["id"], "dead session detected in bulk op"
                     )
                     active_accounts = [
                         a for a in active_accounts if a["id"] != candidate["id"]
