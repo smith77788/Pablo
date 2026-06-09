@@ -1030,7 +1030,7 @@ async def _bulk_create_bg(
     user_id: int,
 ) -> None:
     """Фоновое выполнение массового создания каналов с round-robin по аккаунтам."""
-    from services import account_manager
+    from services import account_manager, op_worker
     from database import db as _db
 
     channel_count = data.get("channel_count", 1)
@@ -1041,6 +1041,10 @@ async def _bulk_create_bg(
     done_ops = 0
     global_idx = 1
     attempt = 0
+
+    # Claim accounts so op_worker/warmup don't use the same sessions in parallel
+    _claimed_ids = [int(a["id"]) for a in accounts]
+    await op_worker.mark_accounts_in_use(_claimed_ids)
 
     active_accounts = list(accounts)
     task_list = [
@@ -1171,6 +1175,8 @@ async def _bulk_create_bg(
         except Exception:
             pass
         return
+    finally:
+        await op_worker.release_accounts(_claimed_ids)
 
     lines = ["🔁 <b>Результаты массового создания</b>\n"]
     lines += results_ok + results_err
@@ -3442,13 +3448,17 @@ async def _botfather_create_bg(
     bot_name: str,
     total: int,
 ) -> None:
-    from services import account_manager
+    from services import account_manager, op_worker
     from database import db as _db
 
     results_ok, results_err = [], []
     done_ops = 0
     attempt = 0
     active_accounts = list(accounts)
+
+    # Claim accounts so op_worker/warmup don't use the same sessions in parallel
+    _claimed_ids = [int(a["id"]) for a in accounts]
+    await op_worker.mark_accounts_in_use(_claimed_ids)
 
     try:
         for global_i in range(total):
@@ -3531,6 +3541,8 @@ async def _botfather_create_bg(
         raise
     except Exception:
         log_exc_swallow(log, "_botfather_create_bg: неожиданная ошибка")
+    finally:
+        await op_worker.release_accounts(_claimed_ids)
 
     lines = [f"🤖 <b>Результаты создания ботов</b> ({len(results_ok)}/{total})\n"]
     lines += results_ok + results_err
@@ -6093,11 +6105,15 @@ async def _bulk_chan_exec_bg(
     op_label: str,
     total: int,
 ) -> None:
-    from services import account_manager
+    from services import account_manager, op_worker
 
     ok_list: list[str] = []
     err_list: list[str] = []
     uname_counter = 1
+
+    # Claim accounts so op_worker/warmup don't use the same sessions in parallel
+    _claimed_ids = [int(aid) for aid in acc_by_id]
+    await op_worker.mark_accounts_in_use(_claimed_ids)
 
     try:
         for idx, chan in enumerate(channels):
@@ -6177,6 +6193,8 @@ async def _bulk_chan_exec_bg(
         raise
     except Exception:
         log_exc_swallow(log, "_bulk_chan_exec_bg: неожиданная ошибка")
+    finally:
+        await op_worker.release_accounts(_claimed_ids)
 
     header = (
         f"📊 <b>{op_label} каналам — завершено</b>\n\n"
