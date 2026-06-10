@@ -4361,6 +4361,26 @@ async def cb_br_confirm(
 
     from services import strike_engine
 
+    # Infra-pressure gate (как в mini-strike): не запускать тяжёлый bulk-страйк,
+    # когда инфраструктура уже под давлением (когорта во флуде) — иначе массовый
+    # удар добьёт аккаунты. Это самый ban-prone путь, гейт обязателен.
+    try:
+        from services import infra_orchestrator
+
+        _ready, _reason = await infra_orchestrator.is_ready_for_op(
+            pool, callback.from_user.id
+        )
+        if not _ready:
+            await callback.message.edit_text(
+                f"🚫 <b>Strike отложен</b>\n\n{_reason}\n\n"
+                "Инфраструктура под нагрузкой — подождите и попробуйте снова.",
+                parse_mode="HTML",
+                reply_markup=_back_kb().as_markup(),
+            )
+            return
+    except Exception:
+        log_exc_swallow(log, "br_confirm: infra readiness check failed")
+
     # ═══════════════════════════════════════════════════════════════════════
     # ФАЗА 0: PRE-FLIGHT — проверка аккаунтов перед атакой
     # ═══════════════════════════════════════════════════════════════════════

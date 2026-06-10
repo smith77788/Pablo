@@ -1697,6 +1697,21 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
     # Официальные боты приёма жалоб: SpamBot + anti-scam инстанции
     escalation_bots = ["SpamBot", "notoscam", "stopCA"]
     results: dict[str, str] = {}
+
+    def _is_stop_error(err_text: str) -> bool:
+        up = err_text.upper()
+        return (
+            "PEER_FLOOD" in up
+            or "FLOOD_WAIT" in up
+            or "USER_DEACTIVATED" in up
+            or "AUTH_KEY_UNREGISTERED" in up
+            or "SESSION_REVOKED" in up
+        )
+
+    # Аккаунт только что отработал полный страйк — даём ему остыть перед
+    # эскалацией, иначе серия forward сразу после рейда = риск PEER_FLOOD.
+    await asyncio.sleep(random.uniform(20, 45))
+
     client = account_manager._make_client(acc["session_str"], acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
@@ -1716,13 +1731,25 @@ async def _escalate_to_spambot(acc: dict | None, target_username: str) -> dict:
                 await client.send_message(bot_entity, "/start")
                 await asyncio.sleep(random.uniform(1.5, 3.0))
                 fwd_count = 0
+                _stop = False
                 for m in msgs[:3]:
                     try:
                         await client.forward_messages(bot_entity, m)
                         fwd_count += 1
                         await asyncio.sleep(random.uniform(0.8, 1.8))
-                    except Exception:
-                        pass
+                    except Exception as _fe2:
+                        # PEER_FLOOD/FloodWait/ban during forward → прекратить эскалацию
+                        if _is_stop_error(str(_fe2)):
+                            log.warning(
+                                "escalate_spambot: stop signal acc=%s: %s",
+                                acc.get("id"),
+                                str(_fe2)[:80],
+                            )
+                            _stop = True
+                            break
+                if _stop:
+                    results[bot_name] = "stopped_flood"
+                    break
                 # SpamBot принимает /report после пересылки
                 if bot_name == "SpamBot" and fwd_count > 0:
                     try:
@@ -1812,6 +1839,27 @@ async def verify_target_takedown(
             except Exception:
                 log_exc_swallow(log, "Сбой disconnect клиента в verify_target_takedown")
             err_str = str(e).lower()
+            # СНАЧАЛА исключаем ошибки НАШЕГО аккаунта/рейтлимита — это НЕ признак
+            # удаления цели. Иначе FloodWait или бан нашей сессии ложно зачтётся
+            # как "канал удалён" (фейковый успех, Survival Contract §24).
+            if any(
+                kw in err_str
+                for kw in (
+                    "flood",
+                    "wait of",
+                    "too many",
+                    "auth_key",
+                    "session_revoked",
+                    "session_expired",
+                    "user_deactivated",
+                    "phone_number_banned",
+                )
+            ):
+                log.info(
+                    "verify_takedown: own-account/flood error, not a takedown: %s",
+                    err_str[:80],
+                )
+                continue
             # Эти ошибки означают что канал удалён/недоступен
             if any(
                 kw in err_str
@@ -1819,10 +1867,9 @@ async def verify_target_takedown(
                     "not found",
                     "no user",
                     "channel private",
-                    "banned",
-                    "deactivated",
-                    "invalid",
                     "username not found",
+                    "username_invalid",
+                    "username_not_occupied",
                     "cannot get entity",
                     "peer not found",
                 )
