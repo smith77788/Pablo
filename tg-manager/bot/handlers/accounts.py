@@ -2191,6 +2191,13 @@ async def cb_scan_all_resources(
     )
 
     from services import account_manager
+    from bot.utils.subscription import get_channel_limit
+
+    chan_limit = await get_channel_limit(pool, uid)
+    current_chan_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+    ) or 0
+    chan_slots_remaining = chan_limit - current_chan_count
 
     total_imported = 0
     acc_results: list[str] = []
@@ -2218,10 +2225,17 @@ async def cb_scan_all_resources(
             err = result.get("error")
             owned = result.get("channels", []) + result.get("groups", [])
             if owned:
-                imported = await db.upsert_managed_channels(pool, uid, acc["id"], owned)
+                if chan_slots_remaining <= 0:
+                    acc_results.append(f"⛔️ {name}: лимит каналов исчерпан")
+                    continue
+                to_import = owned[:chan_slots_remaining]
+                imported = await db.upsert_managed_channels(pool, uid, acc["id"], to_import)
                 total_imported += imported
+                chan_slots_remaining -= imported
+                skipped = len(owned) - len(to_import)
+                extra = f", пропущено {skipped} (лимит)" if skipped else ""
                 acc_results.append(
-                    f"✅ {name}: {len(owned)} ресурсов ({imported} новых)"
+                    f"✅ {name}: {len(to_import)} ресурсов ({imported} новых{extra})"
                 )
             elif err:
                 _err_low = err.lower()
@@ -3890,11 +3904,37 @@ async def cb_scan_connect(
     if not to_connect:
         await callback.answer("Нечего подключать.", show_alert=True)
         return
+
+    user_id = callback.from_user.id
+    acc_id = callback_data.acc_id
+
+    # Check channel limit before importing
+    from bot.utils.subscription import get_channel_limit
+    chan_limit = await get_channel_limit(pool, user_id)
+    current_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
+    ) or 0
+    slots_free = chan_limit - current_count
+    if slots_free <= 0:
+        from bot.callbacks import SubCb
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as _IKB
+        kb2 = _IKB()
+        kb2.button(text="💳 Оформить подписку", callback_data=SubCb(action="choose_plan", plan="paid"))
+        kb2.adjust(1)
+        await callback.message.edit_text(
+            f"⛔️ <b>Лимит каналов достигнут</b>\n\n"
+            f"У вас {current_count} каналов из {chan_limit} доступных.\n"
+            "Оформите подписку для неограниченного числа каналов.",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+        return
+    if len(to_connect) > slots_free:
+        to_connect = to_connect[:slots_free]
+
     await callback.answer("⏳ Подключаю…")
 
     # Insert all selected into managed_channels (no delete, just upsert)
-    user_id = callback.from_user.id
-    acc_id = callback_data.acc_id
     async with pool.acquire() as conn:
         await conn.executemany(
             """INSERT INTO managed_channels(owner_id, acc_id, channel_id, title, username, access_hash)
