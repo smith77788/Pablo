@@ -146,12 +146,12 @@ async def cb_export(
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.answer("⏳ Генерирую CSV…")
 
     rows = await db.get_audience_full(pool, row["bot_id"])
     if not rows:
-        await callback.message.answer("📤 Аудитория пуста — нечего экспортировать.")
+        await callback.answer("📤 Аудитория пуста — нечего экспортировать.", show_alert=True)
         return
+    await callback.answer("⏳ Генерирую CSV…")
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -483,12 +483,11 @@ async def cb_bot_export_audience(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    await callback.answer("⏳ Генерирую CSV…")
-
     rows = await db.get_audience_full(pool, callback_data.bot_id)
     if not rows:
-        await callback.message.answer("📤 Аудитория пуста — нечего экспортировать.")
+        await callback.answer("📤 Аудитория пуста — нечего экспортировать.", show_alert=True)
         return
+    await callback.answer("⏳ Генерирую CSV…")
 
     buf = io.StringIO()
     writer = csv.writer(buf)

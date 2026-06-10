@@ -380,10 +380,14 @@ async def _show_preview(
         await callback.message.edit_text(
             preview_msg, parse_mode="HTML", reply_markup=kb.as_markup()
         )
-    except Exception:
-        await callback.message.answer(
-            preview_msg, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+    except Exception as _e:
+        _es = str(_e).lower()
+        if "message is not modified" in _es:
+            pass
+        elif "message to edit not found" in _es or "message can't be edited" in _es:
+            await callback.message.answer(preview_msg, parse_mode="HTML", reply_markup=kb.as_markup())
+        else:
+            log.warning("mass_publish preview edit error: %s", _e)
 
 
 @router.callback_query(MassPubCb.filter(F.action == "confirm_send"))

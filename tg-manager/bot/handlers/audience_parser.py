@@ -486,7 +486,6 @@ async def cb_parser_audience(
 async def cb_parser_export(
     callback: CallbackQuery, callback_data: ParserCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer("⏳ Готовлю файл...")
     from services.parser import get_parsed_audience
 
     run_id = callback_data.run_id or None
@@ -498,8 +497,9 @@ async def cb_parser_export(
     )
 
     if not users:
-        await callback.message.answer("⚠️ Нет данных для экспорта.")
+        await callback.answer("⚠️ Нет данных для экспорта.", show_alert=True)
         return
+    await callback.answer("⏳ Готовлю файл...")
 
     buf = io.StringIO()
     writer = csv.writer(buf)
