@@ -537,6 +537,13 @@ async def cb_comms(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "paid"):
+        await _edit(
+            callback,
+            locked_text("Рассылки и связь", "paid"),
+            subscription_locked_markup("paid"),
+        )
+        return
     await _edit(
         callback,
         "📢 <b>Рассылки & Связь</b>\n\n"
@@ -559,6 +566,13 @@ async def cb_broadcasts(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    if not await require_plan(pool, callback.from_user.id, "paid"):
+        await _edit(
+            callback,
+            locked_text("Рассылки и связь", "paid"),
+            subscription_locked_markup("paid"),
+        )
+        return
     await _edit(
         callback,
         "📢 <b>Рассылки & Связь</b>\n\n"

@@ -43,8 +43,8 @@ def invalidate_plan_cache(user_id: int) -> None:
 
 
 PLAN_LEVELS: dict[str, int] = {"free": 0, "paid": 1}
-BOT_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
-CHANNEL_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
+BOT_LIMITS: dict[str, int] = {"free": 1, "paid": 9999}
+CHANNEL_LIMITS: dict[str, int] = {"free": 1, "paid": 9999}
 PLAN_PRICES = {"paid": "$29"}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
 PLAN_FEATURES = {
@@ -60,7 +60,7 @@ PLAN_ALIASES: dict[str, str] = {
 }
 FEATURE_PLAN: dict[str, str] = {
     "basic_bots": "free",
-    "basic_broadcast": "free",
+    "basic_broadcast": "paid",
     "inbox": "paid",
     "funnels": "paid",
     "crm": "paid",
@@ -96,7 +96,7 @@ def coerce_plan(plan: str | None) -> str:
 
 
 def feature_required_plan(feature_key: str) -> str:
-    return FEATURE_PLAN.get(feature_key, "enterprise")
+    return FEATURE_PLAN.get(feature_key, "paid")
 
 
 def _admin_ids() -> set[int]:
@@ -179,7 +179,7 @@ def locked_text(feature: str, required_plan: str) -> str:
         f"Эта функция доступна только с платной подпиской.\n\n"
         f"{emoji} <b>Подписка</b> — {price}/мес\n"
         f"<i>{features}</i>\n\n"
-        f"Бесплатно: до 5 ботов и 5 каналов, изменение описания, приветствие и рассылка.\n"
+        f"Бесплатно: 1 бот и 1 канал для демо-проверки.\n"
         f"Все остальные функции — только с подпиской.\n\n"
         f"Оформить подписку: /subscription"
     )

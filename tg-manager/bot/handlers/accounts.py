@@ -64,18 +64,12 @@ router = Router()
 
 ACC_LIMITS: dict[str, int] = {
     "free": 0,
-    "starter": 1,
-    "pro": 3,
-    "enterprise": 9999,
+    "paid": 9999,
 }
 
 
 def _next_account_plan(plan: str) -> str:
-    if plan == "free":
-        return "starter"
-    if plan == "starter":
-        return "pro"
-    return "enterprise"
+    return "paid"
 
 
 _STATUS_EMOJI: dict[str, str] = {

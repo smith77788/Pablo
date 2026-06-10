@@ -39,9 +39,12 @@ class FakePlanPool:
         return {"plan": self.plan}
 
 
-def test_max_alias_maps_to_enterprise() -> None:
-    assert normalize_plan("max") == "enterprise"
-    assert normalize_plan("maximum") == "enterprise"
+def test_legacy_plan_aliases_map_to_paid() -> None:
+    assert normalize_plan("max") == "paid"
+    assert normalize_plan("maximum") == "paid"
+    assert normalize_plan("starter") == "paid"
+    assert normalize_plan("pro") == "paid"
+    assert normalize_plan("enterprise") == "paid"
 
 
 def test_unknown_plan_is_never_promoted() -> None:
@@ -49,7 +52,7 @@ def test_unknown_plan_is_never_promoted() -> None:
     assert coerce_plan("enterprise_plus") == "free"
 
 
-def test_core_revenue_features_require_highest_plan() -> None:
+def test_core_revenue_features_require_paid_plan() -> None:
     for feature in (
         "ai_assistant",
         "autonomous_engine",
@@ -60,12 +63,12 @@ def test_core_revenue_features_require_highest_plan() -> None:
         "email_oauth",
         "infra_intelligence",
     ):
-        assert feature_required_plan(feature) == "enterprise"
+        assert feature_required_plan(feature) == "paid"
 
 
 def test_free_plan_is_demo_not_full_product() -> None:
     assert BOT_LIMITS["free"] == 1
-    assert feature_required_plan("basic_broadcast") == "starter"
+    assert feature_required_plan("basic_broadcast") == "paid"
 
     accounts_source = (
         Path(__file__)
@@ -75,8 +78,7 @@ def test_free_plan_is_demo_not_full_product() -> None:
         .read_text(encoding="utf-8")
     )
     assert '"free": 0' in accounts_source
-    assert '"starter": 1' in accounts_source
-    assert '"pro": 3' in accounts_source
+    assert '"paid": 9999' in accounts_source
     assert "def _next_account_plan" in accounts_source
 
 
@@ -189,14 +191,12 @@ def test_ai_template_generation_requires_starter_plan() -> None:
         assert 'locked_text("AI-генерация шаблонов", "starter")' in body
 
 
-def test_unknown_features_default_to_enterprise() -> None:
-    assert feature_required_plan("new_unclassified_feature") == "enterprise"
+def test_unknown_features_default_to_paid() -> None:
+    assert feature_required_plan("new_unclassified_feature") == "paid"
 
 
 def test_plan_levels_are_monotonic() -> None:
-    assert PLAN_LEVELS["free"] < PLAN_LEVELS["starter"]
-    assert PLAN_LEVELS["starter"] < PLAN_LEVELS["pro"]
-    assert PLAN_LEVELS["pro"] < PLAN_LEVELS["enterprise"]
+    assert PLAN_LEVELS["free"] < PLAN_LEVELS["paid"]
 
 
 def test_unknown_db_plan_gets_free_limits(monkeypatch) -> None:
@@ -207,7 +207,7 @@ def test_unknown_db_plan_gets_free_limits(monkeypatch) -> None:
 
     assert asyncio.run(get_plan(pool, user_id)) == "free"
     assert asyncio.run(get_bot_limit(pool, user_id)) == BOT_LIMITS["free"]
-    assert asyncio.run(require_plan(pool, user_id, "starter")) is False
+    assert asyncio.run(require_plan(pool, user_id, "paid")) is False
 
 
 def test_subscription_purchase_flow_does_not_fake_delivery() -> None:
