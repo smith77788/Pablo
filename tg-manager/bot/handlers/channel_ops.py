@@ -3511,10 +3511,27 @@ async def _botfather_create_bg(
                     f"❌ {acc_label} [{username}]: {html.escape(result['error'][:60])}"
                 )
             else:
-                token = result.get("token") or "—"
-                bot_username = result.get("username") or "?"
+                token = result.get("token") or ""
+                bot_username = result.get("username") or ""
+                display_name = result.get("display_name") or bot_name
+                # Auto-save to managed_bots so bot appears in "Мои боты" immediately
+                saved = False
+                if token:
+                    try:
+                        raw_id = int(token.split(":")[0])
+                        saved = await _db.add_bot(
+                            pool,
+                            token=token,
+                            bot_id=raw_id,
+                            username=bot_username,
+                            first_name=display_name,
+                            added_by=user_id,
+                        )
+                    except Exception:
+                        pass
+                saved_icon = "💾" if saved else "⚠️"
                 results_ok.append(
-                    f"✅ {acc_label}: @{html.escape(bot_username)} — <code>{token}</code>"
+                    f"✅ {acc_label}: @{html.escape(bot_username)} {saved_icon}"
                 )
             done_ops += 1
             try:
