@@ -1653,7 +1653,10 @@ async def create_channel(
             "invite_link": "",
         }
     except Exception as e:
-        from telethon.errors import FloodWaitError, PeerFloodError
+        from telethon.errors import (
+            FloodWaitError, PeerFloodError,
+            UserDeactivatedBanError, UserDeactivatedError,
+        )
 
         if isinstance(e, FloodWaitError):
             return {
@@ -1661,12 +1664,15 @@ async def create_channel(
                 "flood_wait": e.seconds,
             }
         if isinstance(e, PeerFloodError):
-            # PeerFloodError has NO .seconds attribute — never use e.seconds here.
-            # Return peer_flood=True so callers distinguish it from a FloodWaitError.
             return {
                 "error": f"PeerFlood: аккаунт ограничен — {e}",
                 "peer_flood": True,
             }
+        if isinstance(e, (UserDeactivatedBanError, UserDeactivatedError)):
+            return {"error": f"Аккаунт заблокирован Telegram: {e}", "banned": True}
+        err_str = str(e).lower()
+        if "user_deactivated" in err_str or "auth_key" in err_str or "session_revoked" in err_str:
+            return {"error": str(e)[:200], "banned": True}
         log.exception("create_channel error: %s", e)
         return {"error": str(e)[:200]}
     finally:

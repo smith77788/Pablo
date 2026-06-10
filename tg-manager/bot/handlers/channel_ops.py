@@ -1078,7 +1078,7 @@ async def _bulk_create_bg(
                 )
                 if result.get("banned"):
                     await _db.deactivate_account(
-                        pool, candidate["id"], "banned detected in bulk op"
+                        pool, candidate["id"], "banned/deactivated in bulk op"
                     )
                     active_accounts = [
                         a for a in active_accounts if a["id"] != candidate["id"]
@@ -1091,6 +1091,9 @@ async def _bulk_create_bg(
                     active_accounts = [
                         a for a in active_accounts if a["id"] != candidate["id"]
                     ]
+                    continue
+                if result.get("peer_flood"):
+                    # PeerFlood: account is restricted by Telegram, skip it this round
                     continue
                 if result.get("flood_wait"):
                     continue
@@ -3486,7 +3489,7 @@ async def _botfather_create_bg(
                 )
                 if result.get("banned"):
                     await _db.deactivate_account(
-                        pool, candidate["id"], "banned detected in bulk op"
+                        pool, candidate["id"], "banned/deactivated in bulk bot op"
                     )
                     active_accounts = [
                         a for a in active_accounts if a["id"] != candidate["id"]
@@ -3494,11 +3497,13 @@ async def _botfather_create_bg(
                     continue
                 if account_manager.is_dead_session_error(result.get("error")):
                     await _db.deactivate_account(
-                        pool, candidate["id"], "dead session detected in bulk op"
+                        pool, candidate["id"], "dead session detected in bulk bot op"
                     )
                     active_accounts = [
                         a for a in active_accounts if a["id"] != candidate["id"]
                     ]
+                    continue
+                if result.get("peer_flood"):
                     continue
                 if result.get("flood_wait"):
                     continue
