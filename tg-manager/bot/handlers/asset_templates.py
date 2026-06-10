@@ -1014,8 +1014,11 @@ async def cb_apply_bot_exec(
         ok_count = 0
         for ar in ar_list:
             try:
+                kw = ar["keyword"]
+                # /start → trigger_type "start"; everything else → "keyword"
+                trigger_type = "start" if kw.strip().lower() in ("/start", "start") else "keyword"
                 await db.add_auto_reply(
-                    pool, bot_id, "keyword", ar["keyword"], ar["response"]
+                    pool, bot_id, trigger_type, kw, ar["response"]
                 )
                 ok_count += 1
             except Exception as e:
@@ -1024,15 +1027,31 @@ async def cb_apply_bot_exec(
             f"💬 Авто-ответы на команды ({ok_count}/{len(ar_list)} шт.): {'✅' if ok_count == len(ar_list) else '⚠️'}"
         )
 
+    # Apply welcome_message as a /start auto-reply (if not already covered above)
+    if data.get("welcome_message") and not any(
+        ar.get("keyword", "").strip().lower() in ("/start", "start")
+        for ar in (data.get("auto_replies") or [])
+    ):
+        try:
+            await db.add_auto_reply(
+                pool, bot_id, "start", "/start", data["welcome_message"]
+            )
+            results.append("👋 Приветственное сообщение: ✅")
+        except Exception as e:
+            log.warning("Failed to create welcome auto_reply for bot %s: %s", bot_id, e)
+            results.append("👋 Приветственное сообщение: ⚠️")
+
     # Create funnel if template has funnel_steps
     if data.get("funnel_steps"):
         steps = data["funnel_steps"]
+        # Use template's funnel_trigger field; default to "start"
+        funnel_trigger = data.get("funnel_trigger", "start")
         try:
             funnel_id = await db.create_funnel(
                 pool,
                 bot_id,
                 f"{tpl_name} — Автоворонка",
-                "join",
+                funnel_trigger,
                 None,
             )
             for i, step in enumerate(steps):
@@ -1040,7 +1059,7 @@ async def cb_apply_bot_exec(
                 await db.add_funnel_step(
                     pool, funnel_id, i, step["message"], delay_minutes
                 )
-            results.append(f"🔄 Воронка: ✅ ({len(steps)} шагов)")
+            results.append(f"🔄 Воронка ({funnel_trigger}): ✅ ({len(steps)} шагов)")
         except Exception as e:
             log.warning("Failed to create funnel from template: %s", e)
             results.append("🔄 Воронка: ⚠️ не удалось создать")
