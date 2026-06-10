@@ -41,6 +41,8 @@ def test_admin_buttons_are_covered_by_admin_dispatcher() -> None:
         encoding="utf-8"
     )
     exact_actions = set(re.findall(r'action == "([^"]+)"', dispatcher))
+    for tuple_body in re.findall(r"action in \(([^)]*)\)", dispatcher):
+        exact_actions.update(re.findall(r'"([^"]+)"', tuple_body))
     prefix_actions = set(re.findall(r'action\.startswith\("([^"]+)"\)', dispatcher))
 
     missing: list[str] = []
