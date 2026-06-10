@@ -197,6 +197,46 @@ async def record_flood(
     return actual_wait
 
 
+async def apply_post_action_cooldown(
+    pool: Optional[asyncpg.Pool],
+    account_id: int,
+    cooldown_seconds: int,
+    action_type: str = "default",
+) -> None:
+    """Apply a protective cooldown after a heavy but SUCCESSFUL action (e.g. a strike).
+
+    Unlike record_flood this does NOT inflate flood/risk counters — it just
+    parks the account so it can't be re-used for another heavy op too soon.
+    This is the per-account rate-limit (Survival Contract §4/§6): a strike does
+    100+ write actions, so the same account must rest before the next one.
+    """
+    now = time.monotonic()
+    state = get_account_state(account_id)
+    # Only extend the cooldown, never shorten an existing (e.g. flood) cooldown.
+    state.cooldown_until = max(state.cooldown_until, now + cooldown_seconds)
+    if pool is not None:
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                   SET cooldown_until = GREATEST(
+                           COALESCE(cooldown_until, NOW()),
+                           NOW() + ($1 * INTERVAL '1 second')
+                       ),
+                       acc_status = CASE
+                           WHEN COALESCE(acc_status, 'active')
+                               IN ('spamblock', 'banned', 'deactivated') THEN acc_status
+                           ELSE 'cooldown'
+                       END,
+                       status_reason = $3
+                   WHERE id = $2""",
+                cooldown_seconds,
+                account_id,
+                f"rest after {action_type}",
+            )
+        except Exception as e:
+            log.warning("flood_engine apply_post_action_cooldown DB write failed: %s", e)
+
+
 async def record_success(account_id: int, action_type: str = "default") -> None:
     """Record a successful action — gradually reduce risk score and action delay."""
     state = get_account_state(account_id)

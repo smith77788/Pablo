@@ -686,6 +686,19 @@ async def _one_account_strike(
                         acc.get("id"),
                         e,
                     )
+                # Protective rest cooldown so the same account isn't driven into
+                # another wave/strike too soon (per-account rate limit, §4/§6).
+                if pool is not None and acc.get("id"):
+                    try:
+                        from services.flood_engine import apply_post_action_cooldown
+
+                        await apply_post_action_cooldown(
+                            pool, acc["id"], 4 * 3600, "strike"
+                        )
+                    except Exception:
+                        log_exc_swallow(
+                            log, f"strike: post-strike cooldown failed acc={acc.get('id')}"
+                        )
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
@@ -2663,13 +2676,21 @@ async def execute_mini_strike(
                     log_exc_swallow(log, "mini_strike: record peer_flood failed")
             result["errors"].append("Аккаунт получил PEER_FLOOD — поставлен на остывание 1ч")
         else:
-            # Register success so flood_engine can decay risk_score
+            # Register success so flood_engine can decay risk_score, then park the
+            # account on a protective rest cooldown — a strike is 100+ write actions,
+            # re-striking the same account immediately is a direct ban path.
             try:
-                from services.flood_engine import record_success
+                from services.flood_engine import (
+                    record_success,
+                    apply_post_action_cooldown,
+                )
 
                 await record_success(acc["id"], "strike")
+                await apply_post_action_cooldown(
+                    pool, acc["id"], 4 * 3600, "strike"
+                )
             except Exception:
-                log_exc_swallow(log, "mini_strike: record_success flood_engine failed")
+                log_exc_swallow(log, "mini_strike: post-strike cooldown failed")
         log.info("mini_strike: telethon done tg_total=%d", result["total_tg_reports"])
     except Exception as e:
         err_str = str(e)
