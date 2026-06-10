@@ -597,6 +597,63 @@ async def _one_account_strike(
                 result["_acc_id"] = acc.get("id")
                 result["_acc_trust"] = acc.get("trust_score", 0)
                 result["_wave"] = wave_num
+
+                # ── Account hit PEER_FLOOD / ban MID-RUN (surfaced in result flags).
+                # report_peer_deep_v2 stops early and flags it instead of raising.
+                # Treat as a restriction, NOT success: cool/deactivate, don't reuse. ──
+                if result.get("_fatal"):
+                    log.warning(
+                        "strike acc %s wave %d: fatal signal in result — marking inactive",
+                        acc.get("id"),
+                        wave_num,
+                    )
+                    if pool is not None and acc.get("id"):
+                        try:
+                            await pool.execute(
+                                "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1",
+                                acc["id"],
+                            )
+                        except Exception:
+                            log_exc_swallow(
+                                log, f"strike: mark_inactive failed acc={acc.get('id')}"
+                            )
+                    try:
+                        from services.infra_memory import record_account_op
+
+                        record_account_op(
+                            acc["id"], "strike", success=False, error="fatal"
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "strike: record fatal failed")
+                    return result
+                if result.get("_peer_flood"):
+                    log.warning(
+                        "strike acc %s wave %d: PEER_FLOOD in result — 1h cooldown",
+                        acc.get("id"),
+                        wave_num,
+                    )
+                    if pool is not None and acc.get("id"):
+                        try:
+                            from services.flood_engine import record_flood
+
+                            await record_flood(
+                                pool, acc["id"], 3600, "strike_peer_flood"
+                            )
+                        except Exception:
+                            log_exc_swallow(
+                                log,
+                                f"strike: record_peer_flood failed acc={acc.get('id')}",
+                            )
+                    try:
+                        from services.infra_memory import record_account_op
+
+                        record_account_op(
+                            acc["id"], "strike", success=False, error="peer_flood"
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "strike: record peer_flood failed")
+                    return result
+
                 # Фиксируем успех в Infrastructure Memory
                 try:
                     from services.infra_memory import record_account_op
@@ -616,27 +673,30 @@ async def _one_account_strike(
                 return result
             except Exception as e:
                 err_str = str(e)[:150]
-                # Если FloodWait — записываем в flood_engine, ждём и ретраим
+                # Если FloodWait — записываем РЕАЛЬНОЕ значение в flood_engine,
+                # затем коротко ждём+ретрай, либо (длинный flood) останавливаемся.
                 if "FLOOD_WAIT" in err_str.upper() or "flood" in err_str.lower():
                     import re as _re
 
                     wait_match = _re.search(r"(\d+)", err_str)
-                    wait_s = min(
-                        _FLOOD_CAP, float(wait_match.group(1)) if wait_match else 30.0
-                    )
+                    real_wait = float(wait_match.group(1)) if wait_match else 30.0
                     log.warning(
-                        "strike acc %s wave %d: FloodWait %ss, retry %d/%d",
+                        "strike acc %s wave %d: FloodWait %ss (real), retry %d/%d",
                         acc.get("id"),
                         wave_num,
-                        wait_s,
+                        real_wait,
                         attempt + 1,
                         _MAX_RETRIES,
                     )
+                    # Cool by the REAL duration. Recording a capped 65s let the account
+                    # resume while Telegram still enforced a longer wait → ban escalation.
                     if pool is not None:
                         try:
                             from services.flood_engine import record_flood
 
-                            await record_flood(pool, acc["id"], int(wait_s), "strike")
+                            await record_flood(
+                                pool, acc["id"], int(real_wait), "strike"
+                            )
                         except Exception:
                             log_exc_swallow(
                                 log, f"strike: record_flood failed acc={acc.get('id')}"
@@ -650,15 +710,29 @@ async def _one_account_strike(
 
                             state.consecutive_floods += 1
                             state.last_flood_at = _time.monotonic()
-                            state.cooldown_until = _time.monotonic() + wait_s + 10
+                            state.cooldown_until = _time.monotonic() + real_wait + 10
                             state.risk_score = min(1.0, state.risk_score + 0.15)
                         except Exception:
                             log.warning(
                                 "strike: in-memory flood state update failed acc=%s wait=%s",
                                 acc.get("id"),
-                                wait_s,
+                                real_wait,
                             )
-                    await asyncio.sleep(wait_s + random.uniform(2, 8))
+                    # Long flood → stop this account now (already cooled), don't busy-retry.
+                    if real_wait > _FLOOD_CAP:
+                        log.warning(
+                            "strike acc %s: long FloodWait %ss — stopping account (cooled)",
+                            acc.get("id"),
+                            real_wait,
+                        )
+                        return {
+                            "peer_reported": False,
+                            "error": err_str,
+                            "_acc_id": acc.get("id"),
+                            "_wave": wave_num,
+                            "rate_limited": True,
+                        }
+                    await asyncio.sleep(real_wait + random.uniform(2, 8))
                     continue
                 # Fatal account errors — mark inactive in DB, stop immediately
                 _FATAL = (

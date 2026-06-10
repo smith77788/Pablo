@@ -3092,6 +3092,9 @@ async def report_peer_deep_v2(  # noqa: C901
         "blocked": False,
         "joined": False,
         "rate_limited": False,
+        "_peer_flood": False,
+        "_fatal": False,
+        "_long_flood": False,
         "errors": [],
     }
 
@@ -3160,12 +3163,44 @@ async def report_peer_deep_v2(  # noqa: C901
     def _record_error(stage: str, err: object) -> None:
         text = str(err)[:120]
         R["errors"].append(f"{stage}: {text}")
-        if "FLOOD" in text.upper() or "TOO_MUCH" in text.upper():
+        up = text.upper()
+        if "FLOOD" in up or "TOO_MUCH" in up:
             R["rate_limited"] = True
+        # PEER_FLOOD — account-level spam signal: must STOP, not keep reporting.
+        # Continuing write actions after PEER_FLOOD escalates to a hard ban.
+        if "PEER_FLOOD" in up:
+            R["_peer_flood"] = True
+        # Fatal: session revoked / account banned → stop immediately.
+        if any(
+            m in up
+            for m in (
+                "AUTH_KEY_UNREGISTERED",
+                "SESSION_REVOKED",
+                "USER_DEACTIVATED",
+                "PHONE_NUMBER_BANNED",
+            )
+        ):
+            R["_fatal"] = True
+
+    def _abort_signal() -> bool:
+        """True if account hit PEER_FLOOD/ban/long-flood — skip remaining vectors."""
+        return bool(R["_peer_flood"] or R["_fatal"] or R["_long_flood"])
+
+    # Floods longer than this within a single strike are not worth blocking on —
+    # we cool the account (via flood_engine at the caller) and abort the rest.
+    _MAX_INLINE_FLOOD = 180.0
 
     def _flood(err: str, default: float = 30.0) -> float:
+        # Return the real wait the loop should sleep. For waits the strike can
+        # absorb (≤ _MAX_INLINE_FLOOD) sleep exactly; for longer ones, flag
+        # rate-limited + long-flood so vectors abort instead of blocking for hours.
         m = _re.search(r"(\d+)", err)
-        return min(120.0, float(m.group(1))) if m else default
+        real = float(m.group(1)) if m else default
+        if real > _MAX_INLINE_FLOOD:
+            R["rate_limited"] = True
+            R["_long_flood"] = True
+            return _MAX_INLINE_FLOOD
+        return real
 
     async def _timed(coro, timeout: float = 15.0):
         return await asyncio.wait_for(coro, timeout=timeout)
@@ -3721,6 +3756,9 @@ async def report_peer_deep_v2(  # noqa: C901
                     _record_error("peer", err)
                     break
                 else:
+                    _record_error("peer", err)
+                    if _abort_signal():
+                        break
                     log.warning(
                         "rpv2[7/peer idx=%d] acc=%s: %s", idx, acc_id, err[:100]
                     )
@@ -3733,7 +3771,9 @@ async def report_peer_deep_v2(  # noqa: C901
         await asyncio.sleep(random.uniform(0.8, 2.0))
 
         # ── 8. Фото профиля ───────────────────────────────────────────
-        if report_photo and _RPP:
+        # Abort all remaining write vectors if the account hit PEER_FLOOD / ban —
+        # continuing to report after that signal escalates to a hard ban.
+        if report_photo and _RPP and not _abort_signal():
             try:
                 photos = await _timed(client.get_profile_photos(entity, limit=1), 10.0)
                 if photos:
@@ -3760,7 +3800,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[8/photo] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 9. Pinned messages ────────────────────────────────────────
-        if report_pinned and is_channel:
+        if report_pinned and is_channel and not _abort_signal():
             try:
                 from telethon.tl.types import InputPeerChannel as _IPC5
 
@@ -3788,6 +3828,9 @@ async def report_peer_deep_v2(  # noqa: C901
                         elif "REPORT_TOO_MUCH" in err.upper():
                             break
                         else:
+                            _record_error("pin", err)
+                            if _abort_signal():
+                                break
                             log.warning(
                                 "rpv2[9/pin] acc=%s pid=%d: %s", acc_id, pid, err[:80]
                             )
@@ -3795,7 +3838,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[9/get_pinned] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 10. Message chunk reports (MsgReport BFS) ─────────────────
-        if msgs and is_channel and _ipeer6 is not None:
+        if msgs and is_channel and _ipeer6 is not None and not _abort_signal():
             msg_ids = [m.id for m in msgs if m and m.id]
             chunks = [msg_ids[i : i + 5] for i in range(0, len(msg_ids), 5)]
             random.shuffle(chunks)
@@ -3823,6 +3866,9 @@ async def report_peer_deep_v2(  # noqa: C901
                         log.info("rpv2[10] REPORT_TOO_MUCH ci=%d, stopping", ci)
                         break
                     else:
+                        _record_error("msg_chunk", err)
+                        if _abort_signal():
+                            break
                         log.warning(
                             "rpv2[10/chunk ci=%d] acc=%s: %s", ci, acc_id, err[:100]
                         )
@@ -3830,7 +3876,7 @@ async def report_peer_deep_v2(  # noqa: C901
             log.info("rpv2[10] msg_reported=%d acc=%s", R["msg_reported"], acc_id)
 
         # ── 11. channels.ReportSpam ────────────────────────────────────
-        if _CSR and msgs and is_channel:
+        if _CSR and msgs and is_channel and not _abort_signal():
             spam_ids = [m.id for m in msgs[:15] if m and m.id]
             _spam_participant = None
             for _sm in msgs[:10]:
@@ -3874,7 +3920,7 @@ async def report_peer_deep_v2(  # noqa: C901
                     log.warning("rpv2[11/spam] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 12. Report admins ─────────────────────────────────────────
-        if report_admins and is_channel:
+        if report_admins and is_channel and not _abort_signal():
             try:
                 adm = await _timed(
                     client(
@@ -3915,7 +3961,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 log.warning("rpv2[12/get_admins] acc=%s: %s", acc_id, str(e)[:80])
 
         # ── 13. Linked discussion group ───────────────────────────────
-        if report_linked_group and full_chat:
+        if report_linked_group and full_chat and not _abort_signal():
             linked_id = getattr(full_chat, "linked_chat_id", None)
             if linked_id:
                 try:
@@ -3944,7 +3990,7 @@ async def report_peer_deep_v2(  # noqa: C901
         # ── 11. Linked bots ────────────────────────────────────────────
         # ── 14. Linked bots (report) ──────────────────────────────────
         _service_bots = {"stopca", "notoscam", "spambot", "spam_bot", "officialscambot"}
-        if report_linked_bots and is_channel:
+        if report_linked_bots and is_channel and not _abort_signal():
             bot_re = _re.compile(r"@([A-Za-z]\w{4,31}[Bb]ot)\b")
             scan = (getattr(full_chat, "about", "") or "") if full_chat else ""
             for m in msgs[:10]:
@@ -3971,7 +4017,7 @@ async def report_peer_deep_v2(  # noqa: C901
                     )
 
         # ── 15. Forward evidence → anti-abuse bots ────────────────────
-        if forward_to_bot and msgs:
+        if forward_to_bot and msgs and not _abort_signal():
             target_bots = _fwd_bots_multi.get(reason, ["notoscam"])
             fwd_msgs = [m for m in msgs[:6] if m and not m.service]
             for bot_uname in target_bots:
