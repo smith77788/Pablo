@@ -29,9 +29,9 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _PLAN_LABELS = {
-    "gentle": "🌱 Gentle (21 день, 5 действий/день)",
-    "standard": "🌿 Standard (14 дней, 10 действий/день)",
-    "aggressive": "🔥 Aggressive (7 дней, 20 действий/день)",
+    "gentle": "🌱 Gentle (21 день, до 5 действий/день)",
+    "standard": "🌿 Standard (14 дней, до 10 действий/день)",
+    "aggressive": "🔥 Intensive (10 дней, до 12 действий/день)",
 }
 
 
@@ -281,7 +281,7 @@ async def cb_warmup_create_all_plans(
                 f"✅ <b>Планы разогрева созданы!</b>\n\n"
                 f"Аккаунтов: <b>{created}/{total}</b>\n"
                 f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n\n"
-                "Разогрев запускается автоматически каждые 6 часов.\n"
+                "Разогрев запускается автоматически раз в сутки.\n"
                 "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
                 parse_mode="HTML",
                 reply_markup=_back_kb().as_markup(),
@@ -319,7 +319,7 @@ async def cb_warmup_create_plan(
         f"Аккаунт: <b>{html.escape(label)}</b>\n"
         f"Режим: <b>{_PLAN_LABELS.get(plan_type, plan_type)}</b>\n"
         f"ID плана: <code>{plan_id}</code>\n\n"
-        "Разогрев запускается автоматически каждые 6 часов.\n"
+        "Разогрев запускается автоматически раз в сутки.\n"
         "Или используйте «▶️ Запустить сейчас» для немедленного старта.",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
@@ -685,17 +685,19 @@ async def cb_warmup_plan_log(
 # WARMUP SESSION WIZARD — новый подход: N аккаунтов → M целей
 # ══════════════════════════════════════════════════════════════════════════════
 
+# daily — это ПОТОЛОК действий на финальных днях; реальный объём растёт по рампе
+# (низкий→средний→высокий), поэтому свежий аккаунт не получает максимум сразу.
 _SESSION_PLAN_CONFIG = {
-    "gentle": {"days": 21, "daily": 5, "label": "🌱 Gentle (21 дн, 5 действий/день)"},
+    "gentle": {"days": 21, "daily": 5, "label": "🌱 Gentle (21 дн, до 5 действий/день)"},
     "standard": {
         "days": 14,
         "daily": 10,
-        "label": "🌿 Standard (14 дн, 10 действий/день)",
+        "label": "🌿 Standard (14 дн, до 10 действий/день)",
     },
     "aggressive": {
-        "days": 7,
-        "daily": 20,
-        "label": "🔥 Aggressive (7 дн, 20 действий/день)",
+        "days": 10,
+        "daily": 12,
+        "label": "🔥 Intensive (10 дн, до 12 действий/день)",
     },
 }
 

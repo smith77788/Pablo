@@ -355,9 +355,16 @@ async def create_warmup_plan(
     account_id: int,
     plan_type: str = "standard",  # standard / gentle / aggressive
 ) -> int:
-    """Создаёт план разогрева для аккаунта. Возвращает plan_id."""
-    daily_map = {"gentle": 5, "standard": 10, "aggressive": 20}
-    days_map = {"gentle": 21, "standard": 14, "aggressive": 7}
+    """Создаёт план разогрева для аккаунта. Возвращает plan_id.
+
+    daily_actions здесь — это ПОТОЛОК (target) на финальных днях. Реальное число
+    действий в день рассчитывается через _actions_for_day_count() с рампой
+    low→medium→high, поэтому свежий аккаунт никогда не получает максимум сразу.
+    """
+    # Note: "aggressive" capped at 12/day (was 20) — 20 actions/day on a fresh
+    # low-trust account is the #1 ban trigger. target_days lengthened accordingly.
+    daily_map = {"gentle": 5, "standard": 10, "aggressive": 12}
+    days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
 
     row = await pool.fetchrow(
         """INSERT INTO account_warmup_plans(
@@ -402,11 +409,68 @@ def _get_actions_for_day(day: int) -> list[str]:
 _FATAL_ERRORS = frozenset(
     {
         "UserDeactivatedBanError",
+        "UserDeactivatedError",
         "AuthKeyUnregisteredError",
         "PhoneNumberBannedError",
         "SessionRevokedError",
+        "SessionExpiredError",
     }
 )
+
+# Restriction signals: account is rate-limited/spam-flagged → must STOP warming it,
+# not keep hammering. Distinct from fatal (ban) — account is alive but throttled.
+_RESTRICTION_ERRORS = frozenset(
+    {
+        "PeerFloodError",
+        "UserRestrictedError",
+    }
+)
+
+
+def _is_fatal_error(etype: str, error_text: str = "") -> bool:
+    if etype in _FATAL_ERRORS:
+        return True
+    low = (error_text or "").lower()
+    return any(
+        m in low
+        for m in (
+            "auth_key_unregistered",
+            "session_revoked",
+            "session_expired",
+            "user_deactivated",
+            "phone_number_banned",
+            "key is not registered",
+            "registered in the system",
+        )
+    )
+
+
+def _is_restriction_error(etype: str, error_text: str = "") -> bool:
+    if etype in _RESTRICTION_ERRORS:
+        return True
+    low = (error_text or "").lower()
+    return "peer_flood" in low or "spam" in low or "too many requests" in low
+
+
+# FloodWait longer than this (seconds) is treated as a stop-the-session signal:
+# we pause the plan rather than blocking a task for hours. Telegram escalates if
+# you keep issuing calls while a long flood-wait is active.
+_MAX_FLOOD_WAIT_INLINE = 1800  # 30 min
+
+
+def _actions_for_day_count(day: int, target_daily: int) -> int:
+    """Ramp action volume low→medium→high so fresh accounts are never hit at max.
+
+    A brand-new (day 0) account does only a few actions; volume rises with age.
+    This is the single most important ban-avoidance control for warmup.
+    """
+    if day <= 1:
+        return max(2, target_daily // 4)
+    if day <= 4:
+        return max(3, target_daily // 2)
+    if day <= 9:
+        return max(4, (target_daily * 3) // 4)
+    return target_daily
 
 # In-memory guards: предотвращают одновременный запуск прогрева одного и того же плана/сессии
 _active_plan_ids: set[int] = set()
@@ -592,13 +656,18 @@ async def _perform_mark_read(client, channel_ref: str) -> bool:
 
 
 async def _perform_update_presence(client) -> bool:
-    """UpdateStatusRequest — симулируем онлайн-присутствие."""
-    try:
-        from telethon.tl.functions.account import UpdateStatusRequest
+    """UpdateStatusRequest — симулируем онлайн-присутствие.
 
+    offline=True всегда выставляется в finally: иначе при ошибке между
+    online и offline аккаунт остаётся «вечно онлайн» — антифингерпринт-сигнал.
+    """
+    from telethon.tl.functions.account import UpdateStatusRequest
+
+    went_online = False
+    try:
         await client(UpdateStatusRequest(offline=False))
-        await asyncio.sleep(random.uniform(15, 45))
-        await client(UpdateStatusRequest(offline=True))
+        went_online = True
+        await asyncio.sleep(random.uniform(10, 30))
         return True
     except Exception as e:
         etype = type(e).__name__
@@ -606,6 +675,12 @@ async def _perform_update_presence(client) -> bool:
             raise
         log_exc_swallow(log, "warmup update_presence")
         return False
+    finally:
+        if went_online:
+            try:
+                await client(UpdateStatusRequest(offline=True))
+            except Exception:
+                log_exc_swallow(log, "warmup update_presence offline reset")
 
 
 async def _perform_browse_dialogs(client) -> bool:
@@ -932,6 +1007,75 @@ async def _run_daily_warmup_impl(
             "warmup_level": "light",
         }
 
+    _skip_result = {
+        "actions_done": 0,
+        "actions_ok": 0,
+        "actions_fail": 0,
+        "completed": False,
+        "warmup_level": "light",
+    }
+
+    # Не запускать прогрев на аккаунте, занятом активной операцией (op_worker).
+    # Параллельное использование одной сессии двумя клиентами — прямой путь к бану.
+    try:
+        from services import op_worker as _opw
+
+        if _opw.is_account_in_use(account_id):
+            log.info(
+                "warmup: acc=%d занят активной операцией — пропуск цикла", account_id
+            )
+            return _skip_result
+    except Exception:
+        log_exc_swallow(log, "warmup: is_account_in_use check failed")
+
+    # Health/freshness gate: не разгоняем забаненные/неактивные аккаунты,
+    # а очень свежие (< 24ч) держим на минимальной интенсивности (день 0).
+    acc_health = await pool.fetchrow(
+        "SELECT is_active, acc_status, trust_score, added_at FROM tg_accounts WHERE id=$1",
+        account_id,
+    )
+    if acc_health:
+        if acc_health["is_active"] is False:
+            log.info("warmup: acc=%d неактивен — пропуск", account_id)
+            return _skip_result
+        if (acc_health["acc_status"] or "active") in (
+            "banned",
+            "spamblock",
+            "deactivated",
+        ):
+            log.info(
+                "warmup: acc=%d статус=%s — пропуск разогрева",
+                account_id,
+                acc_health["acc_status"],
+            )
+            return _skip_result
+        # Очень свежий аккаунт: форсируем поведение дня 0 (минимум действий, read-only)
+        added_at = acc_health["added_at"]
+        if added_at is not None:
+            try:
+                from datetime import datetime, timezone
+
+                age_h = (
+                    datetime.now(timezone.utc) - added_at.replace(tzinfo=timezone.utc)
+                ).total_seconds() / 3600.0
+                if age_h < 24 and current_day > 0:
+                    log.info(
+                        "warmup: acc=%d возраст %.1fч < 24ч — день 0 интенсивность",
+                        account_id,
+                        age_h,
+                    )
+                    current_day = 0
+            except (TypeError, ValueError, AttributeError):
+                pass
+
+    # Claim the account so op_worker/parallel warmup won't touch the same session.
+    try:
+        from services import op_worker as _opw
+
+        await _opw.mark_accounts_in_use([account_id])
+    except Exception:
+        log_exc_swallow(log, "warmup: mark_accounts_in_use failed")
+
     # Профиль аккаунта из таблицы niche_profiles (если есть)
     niche_row = await pool.fetchrow(
         "SELECT niche, profile_type FROM account_niche_profiles WHERE account_id=$1",
@@ -978,10 +1122,14 @@ async def _run_daily_warmup_impl(
         "check_notifications": "🔔 проверяю уведомления",
     }
 
+    # Рампа объёма действий: свежий аккаунт (день 0-1) делает мало действий,
+    # объём растёт с возрастом. Это ключевая защита от бана.
+    day_actions_n = _actions_for_day_count(current_day, daily_actions)
+
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
 
-        for i in range(daily_actions):
+        for i in range(day_actions_n):
             # Профильно-взвешенный выбор действия
             action = _profile_weighted_action(acc_profile, available_actions)
             target = channels[i % len(channels)]
@@ -1117,16 +1265,83 @@ async def _run_daily_warmup_impl(
                 etype = type(e).__name__
                 error = str(e)[:100]
                 success = False
-                # FloodWait for any action — sleep and let the loop handle consecutive_fails
-                if etype == "FloodWaitError":
-                    fw_secs = getattr(e, "seconds", 60)
+
+                # ── Ban / dead-session: НЕМЕДЛЕННО остановить и деактивировать ──
+                # Продолжать слать запросы с отозванной сессии = эскалация к
+                # жёсткому бану и риск для прокси/IP всей когорты.
+                if _is_fatal_error(etype, error):
                     log.warning(
-                        "warmup: FloodWait %ds on action %s acc=%d — sleeping",
+                        "warmup: FATAL %s acc=%d — деактивация и остановка сессии",
+                        etype,
+                        account_id,
+                    )
+                    try:
+                        await pool.execute(
+                            "UPDATE tg_accounts SET is_active=FALSE, acc_status='banned' WHERE id=$1",
+                            account_id,
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "warmup: deactivate on fatal failed")
+                    try:
+                        await pool.execute(
+                            "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
+                            plan_id,
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "warmup: pause plan on fatal failed")
+                    await _log_warmup_action(
+                        pool, account_id, action, target, False, error
+                    )
+                    break
+
+                # ── PEER_FLOOD / spam-restriction: аккаунт жив, но ограничен →
+                # СТОП разогрева, пауза плана. Не добивать флагнутый аккаунт. ──
+                if _is_restriction_error(etype, error):
+                    log.warning(
+                        "warmup: RESTRICTION %s acc=%d — пауза плана, стоп сессии",
+                        etype,
+                        account_id,
+                    )
+                    try:
+                        await pool.execute(
+                            "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
+                            plan_id,
+                        )
+                    except Exception:
+                        log_exc_swallow(log, "warmup: pause plan on restriction failed")
+                    await _log_warmup_action(
+                        pool, account_id, action, target, False, error
+                    )
+                    break
+
+                # ── FloodWait: спим РОВНО столько, сколько просит Telegram (+jitter).
+                # Очень длинный flood (>30 мин) → пауза плана, не блокируем задачу. ──
+                if etype == "FloodWaitError":
+                    fw_secs = int(getattr(e, "seconds", 60) or 60)
+                    if fw_secs > _MAX_FLOOD_WAIT_INLINE:
+                        log.warning(
+                            "warmup: длинный FloodWait %ds acc=%d — пауза плана, стоп",
+                            fw_secs,
+                            account_id,
+                        )
+                        try:
+                            await pool.execute(
+                                "UPDATE account_warmup_plans SET status='paused' WHERE id=$1",
+                                plan_id,
+                            )
+                        except Exception:
+                            log_exc_swallow(log, "warmup: pause on long flood failed")
+                        await _log_warmup_action(
+                            pool, account_id, action, target, False, error
+                        )
+                        break
+                    log.warning(
+                        "warmup: FloodWait %ds on action %s acc=%d — sleeping exact",
                         fw_secs,
                         action,
                         account_id,
                     )
-                    await asyncio.sleep(min(fw_secs + random.uniform(5, 15), 600))
+                    await asyncio.sleep(fw_secs + random.uniform(5, 15))
 
             await _log_warmup_action(pool, account_id, action, target, success, error)
             _action_dur = time.monotonic() - t0_action
@@ -1155,12 +1370,12 @@ async def _run_daily_warmup_impl(
                 step_desc = _action_descriptions.get(action, action)
                 status_icon = "✅" if success else "❌"
                 try:
-                    update_callback(i + 1, daily_actions, f"{status_icon} {step_desc}")
+                    update_callback(i + 1, day_actions_n, f"{status_icon} {step_desc}")
                 except Exception as cb_exc:
                     log.debug("warmup update_callback error: %s", cb_exc)
 
             # Адаптивная пауза: учитываем серию ошибок
-            if i < daily_actions - 1:
+            if i < day_actions_n - 1:
                 if consecutive_fails >= 3:
                     base_pause = random.uniform(120, 300)
                     log.info(
@@ -1198,6 +1413,13 @@ async def _run_daily_warmup_impl(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "сбой disconnect при разогреве аккаунта")
+        # Освобождаем claim аккаунта, чтобы op_worker мог снова его использовать
+        try:
+            from services import op_worker as _opw
+
+            await _opw.release_accounts([account_id])
+        except Exception:
+            log_exc_swallow(log, "warmup: release_accounts failed")
 
     # Вычисляем уровень прогрева по числу успешных действий
     warmup_level = _compute_warmup_level(actions_ok)
@@ -1356,12 +1578,16 @@ async def _run_warmup_session_impl(
     if not targets:
         targets = _WARMUP_PUBLIC_CHANNELS[:8]
 
-    actions_per_acc = max(1, daily_actions // len(account_ids))
+    # Рампа: на ранних днях каждый аккаунт делает меньше действий
+    _target_per_acc = max(1, daily_actions // len(account_ids))
+    actions_per_acc = _actions_for_day_count(current_day, _target_per_acc)
     total_ok = 0
     total_fail = 0
 
     for acc_id in account_ids:
-        # Пропускаем аккаунт если он сейчас занят op_worker-операцией
+        # Пропускаем аккаунт если он сейчас занят op_worker-операцией,
+        # затем СРАЗУ клеймим его, чтобы op_worker не начал операцию во время разогрева.
+        _claimed = False
         try:
             from services import op_worker as _opw
 
@@ -1371,14 +1597,42 @@ async def _run_warmup_session_impl(
                     acc_id,
                 )
                 continue
+            await _opw.mark_accounts_in_use([acc_id])
+            _claimed = True
         except Exception as e:
             log.warning(
-                "warmup_session: is_account_in_use check failed acc=%d: %s", acc_id, e
+                "warmup_session: claim check failed acc=%d: %s", acc_id, e
             )
             # Proceed with warmup if check fails - better than skipping
 
+        # Health/ban gate: не разгоняем забаненные/неактивные аккаунты
+        _acc_h = await pool.fetchrow(
+            "SELECT is_active, acc_status FROM tg_accounts WHERE id=$1", acc_id
+        )
+        if _acc_h and (
+            _acc_h["is_active"] is False
+            or (_acc_h["acc_status"] or "active")
+            in ("banned", "spamblock", "deactivated")
+        ):
+            log.info("warmup_session: acc=%d неактивен/забанен — пропуск", acc_id)
+            if _claimed:
+                try:
+                    from services import op_worker as _opw
+
+                    await _opw.release_accounts([acc_id])
+                except Exception:
+                    log_exc_swallow(log, "warmup_session: release on skip failed")
+            continue
+
         acc_row = await db.get_account_for_telethon(pool, acc_id)
         if not acc_row or not acc_row["session_str"]:
+            if _claimed:
+                try:
+                    from services import op_worker as _opw
+
+                    await _opw.release_accounts([acc_id])
+                except Exception:
+                    log_exc_swallow(log, "warmup_session: release on no-session failed")
             continue
 
         device = dict(acc_row) if acc_row["device_model"] else None
@@ -1440,6 +1694,50 @@ async def _run_warmup_session_impl(
                 except Exception as exc:
                     error_str = str(exc)[:200]
                     success = False
+                    _etype = type(exc).__name__
+
+                    # Ban / dead session → деактивировать и прекратить этот аккаунт
+                    if _is_fatal_error(_etype, error_str):
+                        log.warning(
+                            "warmup_session: FATAL %s acc=%d — деактивация, стоп",
+                            _etype,
+                            acc_id,
+                        )
+                        try:
+                            await pool.execute(
+                                "UPDATE tg_accounts SET is_active=FALSE, acc_status='banned' WHERE id=$1",
+                                acc_id,
+                            )
+                        except Exception:
+                            log_exc_swallow(log, "warmup_session: deactivate failed")
+                        total_fail += 1
+                        break
+                    # PEER_FLOOD / spam → стоп этого аккаунта (не добивать)
+                    if _is_restriction_error(_etype, error_str):
+                        log.warning(
+                            "warmup_session: RESTRICTION %s acc=%d — стоп аккаунта",
+                            _etype,
+                            acc_id,
+                        )
+                        total_fail += 1
+                        break
+                    # FloodWait → спим ровно столько, сколько просит Telegram
+                    if _etype == "FloodWaitError":
+                        _fw = int(getattr(exc, "seconds", 60) or 60)
+                        if _fw > _MAX_FLOOD_WAIT_INLINE:
+                            log.warning(
+                                "warmup_session: длинный FloodWait %ds acc=%d — стоп",
+                                _fw,
+                                acc_id,
+                            )
+                            total_fail += 1
+                            break
+                        log.warning(
+                            "warmup_session: FloodWait %ds acc=%d — sleeping exact",
+                            _fw,
+                            acc_id,
+                        )
+                        await asyncio.sleep(_fw + random.uniform(5, 15))
 
                 if success:
                     total_ok += 1
@@ -1472,6 +1770,14 @@ async def _run_warmup_session_impl(
                 await asyncio.wait_for(client.disconnect(), timeout=5)
             except Exception:
                 pass
+            # Освобождаем claim аккаунта
+            if _claimed:
+                try:
+                    from services import op_worker as _opw
+
+                    await _opw.release_accounts([acc_id])
+                except Exception:
+                    log_exc_swallow(log, "warmup_session: release_accounts failed")
 
         await asyncio.sleep(random.uniform(15, 45))
 
