@@ -418,6 +418,8 @@ async def cb_confirm_grant(
     months = callback_data.months
 
     await db.grant_plan_to_user(pool, user_id, callback.from_user.id, plan, months)
+    from bot.utils.subscription import invalidate_plan_cache
+    invalidate_plan_cache(user_id)
     await callback.answer(f"✅ План {plan} выдан на {months} мес.", show_alert=True)
     await state.clear()
 
@@ -439,6 +441,8 @@ async def cb_revoke_plan(
 
     user_id = callback_data.user_id
     await db.revoke_plan_from_user(pool, user_id, callback.from_user.id)
+    from bot.utils.subscription import invalidate_plan_cache
+    invalidate_plan_cache(user_id)
     await callback.answer(
         "✅ Подписка отменена. Пользователь вернулся на free.", show_alert=True
     )

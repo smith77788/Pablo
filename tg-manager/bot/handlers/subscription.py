@@ -648,6 +648,7 @@ async def cb_admin_grant(
         )
     except Exception:
         log_exc_swallow(log, "cb_admin_grant: failed to upsert subscription")
+    sub_utils.invalidate_plan_cache(callback.from_user.id)
     try:
         row = await pool.fetchrow(
             "SELECT expires_at FROM subscriptions WHERE user_id=$1",

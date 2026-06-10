@@ -287,3 +287,8 @@ async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> 
         plan,
         str(months),
     )
+    try:
+        from bot.utils.subscription import invalidate_plan_cache
+        invalidate_plan_cache(user_id)
+    except Exception:
+        pass

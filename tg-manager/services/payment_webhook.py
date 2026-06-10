@@ -112,6 +112,12 @@ async def _activate_subscription(
     expires = datetime.now(timezone.utc) + timedelta(days=30 * months)
 
     try:
+        from bot.utils.subscription import invalidate_plan_cache
+        invalidate_plan_cache(user_id)
+    except Exception:
+        pass
+
+    try:
         await bot.send_message(
             user_id,
             f"✅ <b>Оплата подтверждена!</b>\n\n"
