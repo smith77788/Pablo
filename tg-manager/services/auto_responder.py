@@ -9,6 +9,7 @@ import aiohttp
 import asyncpg
 from database import db
 from services import bot_api
+from services import brand_injection
 from services import routing_engine
 from services.logger import log_exc_swallow
 
@@ -99,6 +100,12 @@ async def _process_bot(
             bot_id,
         )
         active_exp = await db.get_active_experiment(pool, bot_id, "start_message")
+
+        # Brand injection: cache free-tier status once per polling cycle
+        try:
+            _is_free = await brand_injection.is_free_tier(pool, bot_id)
+        except Exception:
+            _is_free = False
 
         max_update_id = offset
 
@@ -238,6 +245,8 @@ async def _process_bot(
             for rule in rules:
                 if _match_rule(rule, text):
                     rendered = _render_text(rule["response_text"], from_user, bot_row)
+                    if _is_free:
+                        rendered = brand_injection.add_promo(rendered, html=True)
                     ok, retry = await bot_api.send_message(
                         http, token, chat_id, rendered
                     )
@@ -283,6 +292,8 @@ async def _process_bot(
                         rendered = _render_text(
                             arule["action_value"], from_user, bot_row
                         )
+                        if _is_free:
+                            rendered = brand_injection.add_promo(rendered, html=True)
                         ok, _ = await bot_api.send_message(
                             http, token, chat_id, rendered
                         )
@@ -497,7 +508,10 @@ async def _process_bot(
                     pool, bot_id, chat_id, active_exp["id"]
                 )
                 if variant and variant.get("content"):
-                    await bot_api.send_message(http, token, chat_id, variant["content"])
+                    exp_content = variant["content"]
+                    if _is_free:
+                        exp_content = brand_injection.add_promo(exp_content, html=True)
+                    await bot_api.send_message(http, token, chat_id, exp_content)
             elif not is_start and active_exp:
                 # Conversion: any subsequent message from an assigned user counts
                 try:
@@ -586,12 +600,21 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
             rule["id"],
         )
 
+        _rule_is_free = False
+        try:
+            _rule_is_free = await brand_injection.is_free_tier(pool, rule["bot_id"])
+        except Exception:
+            pass
+
         for user in inactive_users:
             chat_id = user["user_id"]
             try:
                 if rule["action_type"] == "send_message":
+                    _inact_text = rule["action_value"]
+                    if _rule_is_free:
+                        _inact_text = brand_injection.add_promo(_inact_text, html=True)
                     await bot_api.send_message(
-                        http, rule["token"], chat_id, rule["action_value"]
+                        http, rule["token"], chat_id, _inact_text
                     )
                 elif rule["action_type"] == "webhook":
                     url = (rule["action_value"] or "").strip()

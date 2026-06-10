@@ -9,6 +9,7 @@ import aiohttp
 import asyncpg
 from database import db
 from services import bot_api
+from services import brand_injection
 from config import BROADCAST_DELAY
 
 from bot.utils.template_validator import replace_placeholders
@@ -93,6 +94,13 @@ async def run(
         await db.update_broadcast(pool, broadcast_id, sent, 0, "running")
     except Exception as _e:
         logger.warning("Broadcast %d: failed to mark running: %s", broadcast_id, _e)
+
+    # Brand injection: append @MEXAHI3MBOT promo for free-tier bots
+    try:
+        if await brand_injection.is_free_tier(pool, bot_id):
+            text = brand_injection.add_promo(text, html=True)
+    except Exception as _bi_err:
+        logger.debug("Broadcast %d: brand_injection check failed: %s", broadcast_id, _bi_err)
 
     # Pre-load user data for placeholder rendering if needed
     has_placeholders = "{{" in text
