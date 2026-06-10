@@ -100,10 +100,15 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
 
 
 async def _release_expired_cooldowns(pool: asyncpg.Pool) -> None:
-    """Clear cooldown_until for accounts whose cooldown has expired."""
+    """Clear cooldown_until for accounts whose cooldown has expired.
+
+    Sets cooldown_cleared_at = NOW() so auto-rotate can apply a grace period
+    before re-cooling the same account (preventing perpetual cooldown cycles).
+    """
     await pool.execute("""
         UPDATE tg_accounts
-        SET cooldown_until = NULL
+        SET cooldown_until = NULL,
+            cooldown_cleared_at = NOW()
         WHERE cooldown_until IS NOT NULL AND cooldown_until <= NOW()
     """)
 
@@ -143,21 +148,37 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
     now = datetime.now(timezone.utc)
     result = {"critical": 0, "low": 0, "notified_owners": set()}
 
-    # Аккаунты с критически низким trust — 72h кулдаун
+    # Аккаунты с критически низким trust — 72h кулдаун.
+    # Grace-period condition: не переназначать кулдаун аккаунтам у которых кулдаун
+    # только что истёк (cooldown_cleared_at < 7 дней назад), ЕСЛИ у них нет новых
+    # флудов ПОСЛЕ того как кулдаун был снят. Это ломает цикл perpetual cooldown.
     critical_updated = await pool.execute(
         """UPDATE tg_accounts SET cooldown_until = $1
            WHERE is_active = TRUE
              AND trust_score < $2
-             AND (cooldown_until IS NULL OR cooldown_until < now())""",
+             AND cooldown_until IS NULL
+             AND (
+                 -- Никогда не был в кулдауне — применяем
+                 cooldown_cleared_at IS NULL
+                 -- Флуды появились ПОСЛЕ того как кулдаун был снят — новый инцидент
+                 OR (last_flood_at IS NOT NULL AND last_flood_at > cooldown_cleared_at)
+                 -- Прошло достаточно времени для восстановления (7 дней = окно декея флудов)
+                 OR cooldown_cleared_at < now() - INTERVAL '7 days'
+             )""",
         now + timedelta(hours=_ROTATE_CRITICAL_HOURS),
         _ROTATE_CRITICAL_THRESHOLD,
     )
-    # Аккаунты с низким trust — 24h кулдаун
+    # Аккаунты с низким trust — 24h кулдаун (те же grace-period условия)
     low_updated = await pool.execute(
         """UPDATE tg_accounts SET cooldown_until = $1
            WHERE is_active = TRUE
              AND trust_score >= $2 AND trust_score < $3
-             AND (cooldown_until IS NULL OR cooldown_until < now())""",
+             AND cooldown_until IS NULL
+             AND (
+                 cooldown_cleared_at IS NULL
+                 OR (last_flood_at IS NOT NULL AND last_flood_at > cooldown_cleared_at)
+                 OR cooldown_cleared_at < now() - INTERVAL '7 days'
+             )""",
         now + timedelta(hours=_ROTATE_LOW_HOURS),
         _ROTATE_CRITICAL_THRESHOLD,
         _ROTATE_LOW_THRESHOLD,
