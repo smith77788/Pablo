@@ -980,6 +980,42 @@ async def cb_mini_strike_run(
 
     acc = dict(acc_row)
 
+    # ── Pre-flight health gate (Survival Contract §6): не запускать страйк на
+    # неактивном/забаненном/остывающем/низкодоверенном аккаунте. ──
+    from services import flood_engine as _fe
+
+    if acc.get("is_active") is False:
+        await callback.message.edit_text(
+            "⛔️ Аккаунт неактивен (возможно, забанен). Выберите другой."
+        )
+        return
+    try:
+        _min_trust = _fe.min_trust_for_action("strike")
+        _ts = float(acc.get("trust_score") or 0)
+        if _ts < _min_trust:
+            await callback.message.edit_text(
+                f"⛔️ Низкий trust_score аккаунта ({_ts:.2f} < {_min_trust:.2f}).\n"
+                "Сначала прогрейте аккаунт через 🌱 Разогрев — иначе он улетит в бан."
+            )
+            return
+    except (TypeError, ValueError):
+        pass
+    if _fe.is_account_cooling(acc["id"]):
+        await callback.message.edit_text(
+            "⏳ Аккаунт на остывании после флуда/страйка. Попробуйте позже."
+        )
+        return
+
+    # Claim the account so warmup/op_worker won't drive the same session in parallel.
+    from services import op_worker as _opw
+
+    if _opw.is_account_in_use(acc["id"]):
+        await callback.message.edit_text(
+            "⏳ Аккаунт сейчас занят другой операцией. Попробуйте позже."
+        )
+        return
+    await _opw.mark_accounts_in_use([acc["id"]])
+
     # Live-обновления в сообщение
     msg = callback.message
     last_text = [""]
@@ -1018,6 +1054,12 @@ async def cb_mini_strike_run(
             parse_mode="HTML",
         )
         return
+    finally:
+        # Всегда освобождаем claim аккаунта
+        try:
+            await _opw.release_accounts([acc["id"]])
+        except Exception:
+            log_exc_swallow(log, "cb_mini_strike_run: release_accounts failed")
 
     report_text = format_mini_result(result)
     kb = InlineKeyboardBuilder()

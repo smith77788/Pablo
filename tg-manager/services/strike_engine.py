@@ -419,8 +419,25 @@ def preflight_accounts(accounts: list[dict], min_trust: float = 0.0) -> list[dic
     except Exception:
         mem_available = False
 
+    try:
+        from services import op_worker as _opw
+
+        opw_available = True
+    except Exception:
+        opw_available = False
+
     for acc in accounts:
         if not acc.get("is_active", False):
+            continue
+        # Забаненные/спамблок/деактивированные — никогда не в страйк
+        if (acc.get("acc_status") or "active") in (
+            "banned",
+            "spamblock",
+            "deactivated",
+        ):
+            continue
+        # Аккаунт занят другой операцией/разогревом → не трогаем (одна сессия = один клиент)
+        if opw_available and acc.get("id") and _opw.is_account_in_use(acc["id"]):
             continue
         # Проверка кулдауна из БД
         cooldown = acc.get("cooldown_until")
@@ -520,14 +537,13 @@ async def _one_account_strike(
     from services import account_manager
 
     # Staggered start: каждый аккаунт ждёт acc_index * 25-45с.
-    # acc_0 стартует сразу, acc_1 через ~35с, acc_2 через ~70с и т.д.
-    # Это предотвращает одновременный GetHistory на один канал от нескольких аккаунтов
-    # и защищает от FLOOD_WAIT, который иначе убивает всю волну за раз.
-    stagger_delay = (
-        random.uniform(*_STAGGER_BASE) * acc_index
-        if acc_index > 0
-        else random.uniform(1.5, 4.0)
-    )
+    # acc_0 тоже получает базовую задержку (не 1.5-4с): при _CONCURRENCY>1
+    # несколько acc_index==0 из разных волн иначе стартуют почти одновременно
+    # и делают GetHistory+join+report по одному каналу в одном окне → FLOOD_WAIT.
+    if acc_index > 0:
+        stagger_delay = random.uniform(*_STAGGER_BASE) * acc_index
+    else:
+        stagger_delay = random.uniform(*_STAGGER_BASE)
     await asyncio.sleep(stagger_delay)
 
     text = texts[acc_index % len(texts)]
@@ -1155,266 +1171,295 @@ async def staggered_strike(
     all_results: list[StrikeResult] = []
     sem = asyncio.Semaphore(_CONCURRENCY)
 
-    for target in plan.targets:
-        intel = plan.intel.get(target, {})
-        result = StrikeResult(target=target, unique_accounts=len(plan.accounts))
-        result.phase_results["recon"] = {
-            "msgs": len(intel.get("latest_msg_ids", []) or []),
-            "pinned": len(intel.get("pinned_msg_ids", []) or []),
-            "admins": len(intel.get("admin_ids", []) or []),
-            "nodes": (
-                len(intel.get("mentioned_usernames", []) or [])
-                + len(intel.get("bot_usernames", []) or [])
-                + (1 if intel.get("linked_group_id") else 0)
-            ),
-        }
-        t_start = time.time()
+    # Claim every account for the whole strike so warmup/op_worker won't drive
+    # the same sessions in parallel (concurrent clients on one auth_key = ban).
+    _claimed_ids = [int(a["id"]) for a in plan.accounts if a.get("id")]
+    try:
+        from services import op_worker as _opw
 
-        if progress_cb:
-            await progress_cb(
-                "strike_wave1",
-                f"🎯 {_telegram_target_display(target)}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов",
-            )
+        await _opw.mark_accounts_in_use(_claimed_ids)
+    except Exception:
+        log_exc_swallow(log, "staggered_strike: mark_accounts_in_use failed")
 
-        # ═══ Волна 1: ReportPeer + ReportSpam + Join + Internal ═══
-        wave_results: list[dict] = []
-        if plan.waves:
-            texts_w1 = assign_texts(plan.preset or plan.reason, len(plan.waves[0]))
-            tasks = [
-                _one_account_strike(
-                    acc,
-                    target,
-                    intel,
-                    plan.reason,
-                    plan.preset,
-                    texts_w1,
-                    i,
-                    0,
-                    sem,
-                    mode=plan.mode,
-                    pool=pool,
-                )
-                for i, acc in enumerate(plan.waves[0])
-            ]
-            wave_results = _safe_gather_results(
-                await asyncio.gather(*tasks, return_exceptions=True)
-            )
+    try:
+        for _target_idx, target in enumerate(plan.targets):
+            # Inter-target cooldown: не бить по следующей цели сразу — это копит
+            # per-account объём далеко за безопасный предел и провоцирует флуд.
+            if _target_idx > 0:
+                _tc = random.uniform(120, 300)
+                if progress_cb:
+                    await progress_cb(
+                        "strike_target_cooldown",
+                        f"⏳ Пауза {_tc:.0f}с перед следующей целью...",
+                    )
+                await asyncio.sleep(_tc)
+            intel = plan.intel.get(target, {})
+            result = StrikeResult(target=target, unique_accounts=len(plan.accounts))
+            result.phase_results["recon"] = {
+                "msgs": len(intel.get("latest_msg_ids", []) or []),
+                "pinned": len(intel.get("pinned_msg_ids", []) or []),
+                "admins": len(intel.get("admin_ids", []) or []),
+                "nodes": (
+                    len(intel.get("mentioned_usernames", []) or [])
+                    + len(intel.get("bot_usernames", []) or [])
+                    + (1 if intel.get("linked_group_id") else 0)
+                ),
+            }
+            t_start = time.time()
 
-        # Пауза между волнами
-        if len(plan.waves) > 1:
-            wc = random.uniform(*_WAVE_COOLDOWN)
             if progress_cb:
                 await progress_cb(
-                    "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2..."
+                    "strike_wave1",
+                    f"🎯 {_telegram_target_display(target)}: Волна 1 — {len(plan.waves[0]) if plan.waves else 0} аккаунтов",
                 )
-            await asyncio.sleep(wc)
 
-        # ═══ Волна 2: Поддержка — другие причины, админы, боты ═══
-        if len(plan.waves) > 1 and plan.waves[1]:
-            if progress_cb:
-                await progress_cb(
-                    "strike_wave2",
-                    f"🎯 {_telegram_target_display(target)}: Волна 2 — {len(plan.waves[1])} аккаунтов",
+            # ═══ Волна 1: ReportPeer + ReportSpam + Join + Internal ═══
+            wave_results: list[dict] = []
+            if plan.waves:
+                texts_w1 = assign_texts(plan.preset or plan.reason, len(plan.waves[0]))
+                tasks = [
+                    _one_account_strike(
+                        acc,
+                        target,
+                        intel,
+                        plan.reason,
+                        plan.preset,
+                        texts_w1,
+                        i,
+                        0,
+                        sem,
+                        mode=plan.mode,
+                        pool=pool,
+                    )
+                    for i, acc in enumerate(plan.waves[0])
+                ]
+                wave_results = _safe_gather_results(
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 )
-            texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
-            tasks = [
-                _one_account_strike(
-                    acc,
-                    target,
-                    intel,
-                    plan.reason,
-                    plan.preset,
-                    texts_w2,
-                    i,
-                    1,
-                    sem,
-                    mode=plan.mode,
-                    pool=pool,
+
+            # Пауза между волнами
+            if len(plan.waves) > 1:
+                wc = random.uniform(*_WAVE_COOLDOWN)
+                if progress_cb:
+                    await progress_cb(
+                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 2..."
+                    )
+                await asyncio.sleep(wc)
+
+            # ═══ Волна 2: Поддержка — другие причины, админы, боты ═══
+            if len(plan.waves) > 1 and plan.waves[1]:
+                if progress_cb:
+                    await progress_cb(
+                        "strike_wave2",
+                        f"🎯 {_telegram_target_display(target)}: Волна 2 — {len(plan.waves[1])} аккаунтов",
+                    )
+                texts_w2 = assign_texts(plan.preset or plan.reason, len(plan.waves[1]))
+                tasks = [
+                    _one_account_strike(
+                        acc,
+                        target,
+                        intel,
+                        plan.reason,
+                        plan.preset,
+                        texts_w2,
+                        i,
+                        1,
+                        sem,
+                        mode=plan.mode,
+                        pool=pool,
+                    )
+                    for i, acc in enumerate(plan.waves[1])
+                ]
+                w2_results = _safe_gather_results(
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 )
-                for i, acc in enumerate(plan.waves[1])
-            ]
-            w2_results = _safe_gather_results(
-                await asyncio.gather(*tasks, return_exceptions=True)
+                wave_results.extend(w2_results)
+
+            # Пауза перед финальной волной
+            if len(plan.waves) > 2:
+                wc = random.uniform(*_WAVE_COOLDOWN)
+                if progress_cb:
+                    await progress_cb(
+                        "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3..."
+                    )
+                await asyncio.sleep(wc)
+
+            # ═══ Волна 3: Завершение — блокировка, финальные жалобы ═══
+            if len(plan.waves) > 2 and plan.waves[2]:
+                if progress_cb:
+                    await progress_cb(
+                        "strike_wave3",
+                        f"🎯 {_telegram_target_display(target)}: Волна 3 (финал) — {len(plan.waves[2])} аккаунтов",
+                    )
+                texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
+                tasks = [
+                    _one_account_strike(
+                        acc,
+                        target,
+                        intel,
+                        plan.reason,
+                        plan.preset,
+                        texts_w3,
+                        i,
+                        2,
+                        sem,
+                        mode=plan.mode,
+                        pool=pool,
+                    )
+                    for i, acc in enumerate(plan.waves[2])
+                ]
+                w3_results = _safe_gather_results(
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                )
+                wave_results.extend(w3_results)
+
+            # Агрегация — явный маппинг ключей aggregate_results → поля StrikeResult
+            agg = aggregate_results(wave_results)
+            result.peer_reported += agg.get("peer", 0)
+            result.multi_reason += agg.get("multi", 0)
+            result.photo_reported = result.photo_reported or bool(agg.get("photo", 0))
+            result.pinned_reported += agg.get("pinned", 0)
+            result.msgs_reported += agg.get("msgs", 0)
+            result.msgs_fetched += agg.get("msgs_fetched", 0)
+            result.spam_signaled += agg.get("spam", 0)
+            result.reactions += agg.get("reacts", 0)
+            result.admins_reported += agg.get("admins", 0)
+            result.linked_group_reported = result.linked_group_reported or bool(
+                agg.get("linked_grp", 0)
             )
-            wave_results.extend(w2_results)
+            result.bots_reported += agg.get("bots", 0)
+            result.forwarded += agg.get("fwd", 0)
+            result.blocked += agg.get("blocked", 0)
+            result.errors = [r.get("error") for r in wave_results if r.get("error")]
+            for wave_result in wave_results:
+                result.errors.extend(wave_result.get("errors", [])[:3])
+                if wave_result.get("rate_limited"):
+                    result.errors.append(
+                        f"account {wave_result.get('_acc_id', '?')}: Telegram rate limit"
+                    )
 
-        # Пауза перед финальной волной
-        if len(plan.waves) > 2:
-            wc = random.uniform(*_WAVE_COOLDOWN)
-            if progress_cb:
-                await progress_cb(
-                    "strike_cooldown", f"⏳ Пауза {wc:.0f}с перед волной 3..."
-                )
-            await asyncio.sleep(wc)
-
-        # ═══ Волна 3: Завершение — блокировка, финальные жалобы ═══
-        if len(plan.waves) > 2 and plan.waves[2]:
-            if progress_cb:
-                await progress_cb(
-                    "strike_wave3",
-                    f"🎯 {_telegram_target_display(target)}: Волна 3 (финал) — {len(plan.waves[2])} аккаунтов",
-                )
-            texts_w3 = assign_texts(plan.preset or plan.reason, len(plan.waves[2]))
-            tasks = [
-                _one_account_strike(
-                    acc,
-                    target,
-                    intel,
-                    plan.reason,
-                    plan.preset,
-                    texts_w3,
-                    i,
-                    2,
-                    sem,
-                    mode=plan.mode,
-                    pool=pool,
-                )
-                for i, acc in enumerate(plan.waves[2])
-            ]
-            w3_results = _safe_gather_results(
-                await asyncio.gather(*tasks, return_exceptions=True)
-            )
-            wave_results.extend(w3_results)
-
-        # Агрегация — явный маппинг ключей aggregate_results → поля StrikeResult
-        agg = aggregate_results(wave_results)
-        result.peer_reported += agg.get("peer", 0)
-        result.multi_reason += agg.get("multi", 0)
-        result.photo_reported = result.photo_reported or bool(agg.get("photo", 0))
-        result.pinned_reported += agg.get("pinned", 0)
-        result.msgs_reported += agg.get("msgs", 0)
-        result.msgs_fetched += agg.get("msgs_fetched", 0)
-        result.spam_signaled += agg.get("spam", 0)
-        result.reactions += agg.get("reacts", 0)
-        result.admins_reported += agg.get("admins", 0)
-        result.linked_group_reported = result.linked_group_reported or bool(
-            agg.get("linked_grp", 0)
-        )
-        result.bots_reported += agg.get("bots", 0)
-        result.forwarded += agg.get("fwd", 0)
-        result.blocked += agg.get("blocked", 0)
-        result.errors = [r.get("error") for r in wave_results if r.get("error")]
-        for wave_result in wave_results:
-            result.errors.extend(wave_result.get("errors", [])[:3])
-            if wave_result.get("rate_limited"):
-                result.errors.append(
-                    f"account {wave_result.get('_acc_id', '?')}: Telegram rate limit"
-                )
-
-        # Логирование итогов векторов
-        failed_accounts = agg.get("failed", 0)
-        total_accounts = len(wave_results)
-        if result.peer_reported > 0:
-            log.info(
-                "strike_engine: target=%s peer_reports=%d multi=%d msgs=%d "
-                "spam=%d admins=%d accounts=%d/%d",
-                target,
-                result.peer_reported,
-                result.multi_reason,
-                result.msgs_reported,
-                result.spam_signaled,
-                result.admins_reported,
-                result.peer_reported,
-                total_accounts,
-            )
-        else:
-            log.warning(
-                "strike_engine: target=%s NO peer_reports — %d/%d accounts failed, "
-                "errors=%s",
-                target,
-                failed_accounts,
-                total_accounts,
-                "; ".join(result.errors[:2])[:120] if result.errors else "none",
-            )
-
-        # ═══ Фаза: Network nodes (параллельно) ═══
-        if progress_cb:
-            await progress_cb(
-                "strike_network",
-                f"🌐 {_telegram_target_display(target)}: Атака сетевых узлов...",
-            )
-        net = await strike_network_nodes_v2(
-            plan.accounts, intel, plan.reason, plan.preset
-        )
-        result.network_nodes = net.get("nodes_attacked", 0)
-        result.network_reports = net.get("total_reports", 0)
-
-        # ═══ Фаза: External escalation ═══
-        if progress_cb:
-            await progress_cb(
-                "strike_escalation",
-                f"📤 {_telegram_target_display(target)}: Внешняя эскалация...",
-            )
-        abuse_res = await submit_abuse_form(
-            target,
-            plan.preset or plan.reason,
-            title=intel.get("title", ""),
-            members=intel.get("members", 0),
-        )
-        result.abuse_form_ok = abuse_res.get("ok", False)
-        log.info(
-            "strike_engine: abuse_forms target=%s submitted=%d/%d ok=%s",
-            target,
-            abuse_res.get("submitted", 0),
-            abuse_res.get("total", 0),
-            result.abuse_form_ok,
-        )
-
-        # ═══ Фаза: SpamBot + anti-scam боты ═══
-        # Используем лучший аккаунт (первый по trust_score после pre-flight сортировки)
-        spambot_result = await _escalate_to_spambot(
-            plan.accounts[0] if plan.accounts else None, target
-        )
-        result.spambot_escalation = (
-            spambot_result.get("status", "unknown")
-            if isinstance(spambot_result, dict)
-            else "skipped"
-        )
-        log.info(
-            "strike_engine: spambot_escalation target=%s status=%s bots=%s",
-            target,
-            result.spambot_escalation,
-            spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {},
-        )
-
-        # ═══ Фаза: Email-эскалация ═══
-        if pool and plan.owner_id:
-            if progress_cb:
-                await progress_cb(
-                    "strike_email",
-                    f"📧 {_telegram_target_display(target)}: Email-эскалация (abuse/dmca/dpo/security)...",
-                )
-            try:
-                email_res = await _run_email_escalation(
-                    pool, plan.owner_id, target, plan.reason, plan.preset
-                )
-                result.emails_sent = email_res.get("total_sent", 0)
-                result.email_escalation = email_res
+            # Логирование итогов векторов
+            failed_accounts = agg.get("failed", 0)
+            total_accounts = len(wave_results)
+            if result.peer_reported > 0:
                 log.info(
-                    "strike_engine: email_escalation target=%s sent=%d ncmec=%s",
+                    "strike_engine: target=%s peer_reports=%d multi=%d msgs=%d "
+                    "spam=%d admins=%d accounts=%d/%d",
                     target,
-                    result.emails_sent,
-                    email_res.get("ncmec", False),
+                    result.peer_reported,
+                    result.multi_reason,
+                    result.msgs_reported,
+                    result.spam_signaled,
+                    result.admins_reported,
+                    result.peer_reported,
+                    total_accounts,
                 )
-            except Exception:
-                log_exc_swallow(
-                    log, f"staggered_strike: email_escalation failed target={target}"
+            else:
+                log.warning(
+                    "strike_engine: target=%s NO peer_reports — %d/%d accounts failed, "
+                    "errors=%s",
+                    target,
+                    failed_accounts,
+                    total_accounts,
+                    "; ".join(result.errors[:2])[:120] if result.errors else "none",
                 )
 
-        result.duration_s = time.time() - t_start
-        log.info(
-            "strike_engine: staggered_strike done target=%s duration=%.1fs "
-            "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d",
-            target,
-            result.duration_s,
-            result.peer_reported,
-            result.msgs_reported,
-            result.network_nodes,
-            result.abuse_form_ok,
-            result.spambot_escalation,
-            result.emails_sent,
-        )
-        all_results.append(result)
+            # ═══ Фаза: Network nodes (параллельно) ═══
+            if progress_cb:
+                await progress_cb(
+                    "strike_network",
+                    f"🌐 {_telegram_target_display(target)}: Атака сетевых узлов...",
+                )
+            net = await strike_network_nodes_v2(
+                plan.accounts, intel, plan.reason, plan.preset
+            )
+            result.network_nodes = net.get("nodes_attacked", 0)
+            result.network_reports = net.get("total_reports", 0)
+
+            # ═══ Фаза: External escalation ═══
+            if progress_cb:
+                await progress_cb(
+                    "strike_escalation",
+                    f"📤 {_telegram_target_display(target)}: Внешняя эскалация...",
+                )
+            abuse_res = await submit_abuse_form(
+                target,
+                plan.preset or plan.reason,
+                title=intel.get("title", ""),
+                members=intel.get("members", 0),
+            )
+            result.abuse_form_ok = abuse_res.get("ok", False)
+            log.info(
+                "strike_engine: abuse_forms target=%s submitted=%d/%d ok=%s",
+                target,
+                abuse_res.get("submitted", 0),
+                abuse_res.get("total", 0),
+                result.abuse_form_ok,
+            )
+
+            # ═══ Фаза: SpamBot + anti-scam боты ═══
+            # Используем лучший аккаунт (первый по trust_score после pre-flight сортировки)
+            spambot_result = await _escalate_to_spambot(
+                plan.accounts[0] if plan.accounts else None, target
+            )
+            result.spambot_escalation = (
+                spambot_result.get("status", "unknown")
+                if isinstance(spambot_result, dict)
+                else "skipped"
+            )
+            log.info(
+                "strike_engine: spambot_escalation target=%s status=%s bots=%s",
+                target,
+                result.spambot_escalation,
+                spambot_result.get("bots", {}) if isinstance(spambot_result, dict) else {},
+            )
+
+            # ═══ Фаза: Email-эскалация ═══
+            if pool and plan.owner_id:
+                if progress_cb:
+                    await progress_cb(
+                        "strike_email",
+                        f"📧 {_telegram_target_display(target)}: Email-эскалация (abuse/dmca/dpo/security)...",
+                    )
+                try:
+                    email_res = await _run_email_escalation(
+                        pool, plan.owner_id, target, plan.reason, plan.preset
+                    )
+                    result.emails_sent = email_res.get("total_sent", 0)
+                    result.email_escalation = email_res
+                    log.info(
+                        "strike_engine: email_escalation target=%s sent=%d ncmec=%s",
+                        target,
+                        result.emails_sent,
+                        email_res.get("ncmec", False),
+                    )
+                except Exception:
+                    log_exc_swallow(
+                        log, f"staggered_strike: email_escalation failed target={target}"
+                    )
+
+            result.duration_s = time.time() - t_start
+            log.info(
+                "strike_engine: staggered_strike done target=%s duration=%.1fs "
+                "peer=%d msgs=%d network_nodes=%d abuse=%s spambot=%s emails=%d",
+                target,
+                result.duration_s,
+                result.peer_reported,
+                result.msgs_reported,
+                result.network_nodes,
+                result.abuse_form_ok,
+                result.spambot_escalation,
+                result.emails_sent,
+            )
+            all_results.append(result)
+    finally:
+        # Release the account claims (success or error).
+        try:
+            from services import op_worker as _opw
+
+            await _opw.release_accounts(_claimed_ids)
+        except Exception:
+            log_exc_swallow(log, "staggered_strike: release_accounts failed")
 
     return all_results
 
@@ -2546,13 +2591,38 @@ async def execute_mini_strike(
             + tg.get("bots_reported", 0)
             + tg.get("forwarded", 0)
         )
-        # Register success so flood_engine can decay risk_score
-        try:
-            from services.flood_engine import record_success
+        # Account hit PEER_FLOOD / ban / long flood mid-run → cool/deactivate,
+        # do NOT record success (would decay risk_score on a flagged account).
+        if tg.get("_fatal"):
+            log.warning("mini_strike: fatal signal in result acc=%s — inactive", acc.get("id"))
+            if acc.get("id"):
+                try:
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
+                    )
+                except Exception:
+                    log_exc_swallow(log, "mini_strike: deactivate on fatal failed")
+            result["errors"].append("Аккаунт заблокирован/сессия отозвана — деактивирован")
+        elif tg.get("_peer_flood") or tg.get("_long_flood"):
+            log.warning(
+                "mini_strike: PEER_FLOOD/long-flood acc=%s — 1h cooldown", acc.get("id")
+            )
+            if acc.get("id"):
+                try:
+                    from services.flood_engine import record_flood
 
-            await record_success(acc["id"], "strike")
-        except Exception:
-            log_exc_swallow(log, "mini_strike: record_success flood_engine failed")
+                    await record_flood(pool, acc["id"], 3600, "mini_strike_peer_flood")
+                except Exception:
+                    log_exc_swallow(log, "mini_strike: record peer_flood failed")
+            result["errors"].append("Аккаунт получил PEER_FLOOD — поставлен на остывание 1ч")
+        else:
+            # Register success so flood_engine can decay risk_score
+            try:
+                from services.flood_engine import record_success
+
+                await record_success(acc["id"], "strike")
+            except Exception:
+                log_exc_swallow(log, "mini_strike: record_success flood_engine failed")
         log.info("mini_strike: telethon done tg_total=%d", result["total_tg_reports"])
     except Exception as e:
         err_str = str(e)
