@@ -209,9 +209,9 @@ async def _show_intent_main(
     )
 
     if edit and isinstance(target, CallbackQuery) and target.message:
-        await target.message.edit_text(text, reply_markup=_intent_main_kb())
+        await target.message.edit_text(text, reply_markup=_intent_main_kb(), parse_mode="HTML")
     elif isinstance(target, Message):
-        await target.answer(text, reply_markup=_intent_main_kb())
+        await target.answer(text, reply_markup=_intent_main_kb(), parse_mode="HTML")
 
 
 @router.message(Command("intent"))
@@ -244,6 +244,7 @@ async def cb_intent_new(callback: CallbackQuery, state: FSMContext) -> None:
             "• проверить видимость в поиске\n\n"
             "Жду описание:",
             reply_markup=kb.as_markup(),
+            parse_mode="HTML",
         )
 
 
@@ -343,9 +344,9 @@ async def _show_plan_card(
     )
     kb = _plan_kb(intent_id, plan, strategy)
     if edit:
-        await message.edit_text(text, reply_markup=kb)
+        await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
-        await message.answer(text, reply_markup=kb)
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(IntentCb.filter(F.action == "strategy"))
@@ -589,8 +590,45 @@ async def _execute_sync_intent(
     plan: dict[str, Any],
     owner_id: int,
 ) -> None:
-    await db.update_intent_status(pool, intent_id, owner_id, "ready")
-    await _navigate_to_tool(callback, plan | {"navigate_to": "mass_ops"})
+    from services import operation_bus
+
+    try:
+        rows = await pool.fetch(
+            "SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1 LIMIT 50",
+            owner_id,
+        )
+    except Exception as exc:
+        log_exc_swallow(log, f"_execute_sync_intent: fetch channels failed: {exc}")
+        rows = []
+
+    channel_ids = [str(row["channel_id"]) for row in rows]
+    if not channel_ids:
+        # No channels — navigate to Mass Ops for manual setup
+        await db.update_intent_status(pool, intent_id, owner_id, "ready")
+        await _navigate_to_tool(callback, plan | {"navigate_to": "mass_ops"})
+        return
+
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            owner_id,
+            "bulk_bot_edit",
+            {"targets": channel_ids, "action": "sync_template", "via_intent": intent_id},
+            total_items=len(channel_ids),
+        )
+        await db.link_intent_operation(pool, intent_id, op_id)
+        await db.update_intent_status(pool, intent_id, owner_id, "executing")
+        await _show_operation_started(
+            callback, op_id, f"Синхронизация {len(channel_ids)} каналов поставлена в очередь."
+        )
+    except Exception as exc:
+        log_exc_swallow(log, f"_execute_sync_intent: submit failed: {exc}")
+        await db.update_intent_status(pool, intent_id, owner_id, "ready")
+        await _show_manual_hint(
+            callback,
+            f"Не удалось поставить синхронизацию в очередь: {type(exc).__name__}",
+            "mass_ops",
+        )
 
 
 async def _execute_visibility_intent(
@@ -619,6 +657,7 @@ async def _execute_visibility_intent(
         await callback.message.edit_text(
             f"🔎 <b>Видимость</b>\n\nАктивных ключевых слов: <b>{keywords_cnt}</b>",
             reply_markup=kb.as_markup(),
+            parse_mode="HTML",
         )
 
 
@@ -633,6 +672,7 @@ async def _show_operation_started(
         await callback.message.edit_text(
             f"✅ <b>Операция #{op_id} запущена</b>\n\n{detail}",
             reply_markup=kb.as_markup(),
+            parse_mode="HTML",
         )
 
 
@@ -647,7 +687,7 @@ async def _show_manual_hint(
     kb.button(text="📍 Навигатор", callback_data=IntentCb(action="menu"))
     kb.adjust(1)
     if callback.message:
-        await callback.message.edit_text(f"⚠️ {text}", reply_markup=kb.as_markup())
+        await callback.message.edit_text(f"⚠️ {text}", reply_markup=kb.as_markup(), parse_mode="HTML")
 
 
 def _nav_callback(nav_key: str) -> object:
@@ -678,6 +718,7 @@ async def _navigate_to_tool(callback: CallbackQuery, plan: dict[str, Any]) -> No
         await callback.message.edit_text(
             f"➡️ <b>Открываю нужный раздел</b>\n\n{plan.get('goal', 'Цель готова к ручному запуску.')}",
             reply_markup=kb.as_markup(),
+            parse_mode="HTML",
         )
 
 
@@ -721,6 +762,7 @@ async def cb_intent_history(
             await callback.message.edit_text(
                 "📜 <b>История целей</b>\n\nПока пусто. Создай первую цель.",
                 reply_markup=_history_kb([]),
+                parse_mode="HTML",
             )
         return
 
@@ -730,7 +772,7 @@ async def cb_intent_history(
         lines.append(f"• {row['status']} — {str(row['description'])[:45]} <i>{ts}</i>")
     if callback.message:
         await callback.message.edit_text(
-            "\n".join(lines), reply_markup=_history_kb(intents)
+            "\n".join(lines), reply_markup=_history_kb(intents), parse_mode="HTML"
         )
 
 

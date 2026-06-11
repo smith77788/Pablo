@@ -449,26 +449,26 @@ async def cb_pack_groups_done(callback: CallbackQuery, state: FSMContext) -> Non
 
 
 @router.message(PresencePackFSM.entering_target)
-async def fsm_pack_target(message: Message, state: FSMContext) -> None:
+async def fsm_pack_target(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     lines = (message.text or "").strip().splitlines()
     target_url = lines[0].strip()[:200] if lines else ""
     target_label = lines[1].strip()[:80] if len(lines) > 1 else ""
     await state.update_data(pack_target_url=target_url, pack_target_label=target_label)
     await state.set_state(PresencePackFSM.previewing)
-    await _render_preview_msg(message, state)
+    await _render_preview_msg(message, state, pool=pool)
 
 
 @router.callback_query(
     PackCb.filter(F.action == "skip_target"), PresencePackFSM.entering_target
 )
-async def cb_pack_skip_target(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_pack_skip_target(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await callback.answer()
     await state.update_data(pack_target_url=None, pack_target_label=None)
     await state.set_state(PresencePackFSM.previewing)
-    await _render_preview_cb(callback, state)
+    await _render_preview_cb(callback, state, pool=pool)
 
 
-async def _build_preview_text(sd: dict) -> str:
+async def _build_preview_text(sd: dict, pool: asyncpg.Pool | None = None) -> str:
     name = sd.get("pack_name") or "—"
     description = sd.get("pack_description") or ""
     bot_username = sd.get("pack_bot_username") or "—"
@@ -482,10 +482,50 @@ async def _build_preview_text(sd: dict) -> str:
     ]
     if description:
         lines.append(f"<b>Описание:</b> {escape(description[:100])}")
+    lines.append(f"<b>Бот:</b> @{escape(str(bot_username))}")
+
+    # Fetch real channel/group titles from DB if pool is available
+    if pool and ch_ids:
+        try:
+            ch_rows = await pool.fetch(
+                "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[]) LIMIT 5",
+                ch_ids,
+            )
+            if ch_rows:
+                ch_names = ", ".join(
+                    r["title"] or (f"@{r['username']}" if r.get("username") else "—")
+                    for r in ch_rows
+                )
+                extra = f" +{len(ch_ids) - len(ch_rows)}" if len(ch_ids) > len(ch_rows) else ""
+                lines.append(f"<b>Каналы ({len(ch_ids)}):</b> {escape(ch_names)}{extra}")
+            else:
+                lines.append(f"<b>Каналов:</b> {len(ch_ids)}")
+        except Exception:
+            lines.append(f"<b>Каналов:</b> {len(ch_ids)}")
+    else:
+        lines.append(f"<b>Каналов:</b> {len(ch_ids)}")
+
+    if pool and gr_ids:
+        try:
+            gr_rows = await pool.fetch(
+                "SELECT title, username FROM managed_channels WHERE id = ANY($1::int[]) LIMIT 3",
+                gr_ids,
+            )
+            if gr_rows:
+                gr_names = ", ".join(
+                    r["title"] or (f"@{r['username']}" if r.get("username") else "—")
+                    for r in gr_rows
+                )
+                extra = f" +{len(gr_ids) - len(gr_rows)}" if len(gr_ids) > len(gr_rows) else ""
+                lines.append(f"<b>Группы ({len(gr_ids)}):</b> {escape(gr_names)}{extra}")
+            else:
+                lines.append(f"<b>Групп:</b> {len(gr_ids)}")
+        except Exception:
+            lines.append(f"<b>Групп:</b> {len(gr_ids)}")
+    else:
+        lines.append(f"<b>Групп:</b> {len(gr_ids)}")
+
     lines += [
-        f"<b>Бот:</b> @{escape(str(bot_username))}",
-        f"<b>Каналов:</b> {len(ch_ids)}",
-        f"<b>Групп:</b> {len(gr_ids)}",
         f"<b>Целевой ресурс:</b> {escape(target_label or target_url)}\n",
         "После создания вы сможете:",
         "• 🌱 Посеять начальные посты с взаимными ссылками",
@@ -503,19 +543,19 @@ def _preview_kb() -> InlineKeyboardBuilder:
     return kb
 
 
-async def _render_preview_msg(message: Message, state: FSMContext) -> None:
+async def _render_preview_msg(message: Message, state: FSMContext, pool: asyncpg.Pool | None = None) -> None:
     sd = await state.get_data()
     await message.answer(
-        await _build_preview_text(sd),
+        await _build_preview_text(sd, pool=pool),
         parse_mode="HTML",
         reply_markup=_preview_kb().as_markup(),
     )
 
 
-async def _render_preview_cb(callback: CallbackQuery, state: FSMContext) -> None:
+async def _render_preview_cb(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool | None = None) -> None:
     sd = await state.get_data()
     await _edit(
-        callback, await _build_preview_text(sd), markup=_preview_kb().as_markup()
+        callback, await _build_preview_text(sd, pool=pool), markup=_preview_kb().as_markup()
     )
 
 
@@ -702,8 +742,10 @@ async def _pack_seed_bg(
     success = 0
     fail = 0
     fail_details: list[str] = []
+    total = len(channels)
+    _last_progress_text = ""
     try:
-        for ch in channels:
+        for idx, ch in enumerate(channels, 1):
             post_text = presence_setup.build_seed_post(
                 channel_title=ch["title"] or ch.get("username") or pack["name"],
                 bot_username=pack.get("bot_username"),
@@ -738,6 +780,19 @@ async def _pack_seed_bg(
             else:
                 fail += 1
                 fail_details.append(chan_name)
+            # Update progress message every 3 channels or on last
+            if idx % 3 == 0 or idx == total:
+                progress_text = (
+                    f"⏳ <b>Посев постов</b> — {idx}/{total}\n\n"
+                    f"✅ Успешно: {success} | ❌ Ошибок: {fail}\n"
+                    f"<i>Текущий: {escape(chan_name[:40])}</i>"
+                )
+                if progress_text != _last_progress_text:
+                    try:
+                        await progress_msg.edit_text(progress_text, parse_mode="HTML")
+                        _last_progress_text = progress_text
+                    except Exception:
+                        pass
             await asyncio.sleep(2)
     except asyncio.CancelledError:
         log.info("_pack_seed_bg: отменено")
@@ -898,8 +953,10 @@ async def _pack_promote_bg(
 ) -> None:
     success = 0
     fail = 0
+    total = len(channels)
+    _last_progress_text = ""
     try:
-        for ch in channels:
+        for idx, ch in enumerate(channels, 1):
             ok = await presence_setup.promote_bot_in_channel(
                 pool, owner_id, ch["channel_id"], ch.get("access_hash") or 0, bot_tg_id
             )
@@ -907,6 +964,18 @@ async def _pack_promote_bg(
                 success += 1
             else:
                 fail += 1
+            # Update progress every 3 channels or on last
+            if idx % 3 == 0 or idx == total:
+                progress_text = (
+                    f"⏳ <b>Назначение администратора</b> — {idx}/{total}\n\n"
+                    f"✅ Успешно: {success} | ❌ Ошибок: {fail}"
+                )
+                if progress_text != _last_progress_text:
+                    try:
+                        await progress_msg.edit_text(progress_text, parse_mode="HTML")
+                        _last_progress_text = progress_text
+                    except Exception:
+                        pass
             await asyncio.sleep(2)
     except asyncio.CancelledError:
         log.info("_pack_promote_bg: отменено")
@@ -914,24 +983,41 @@ async def _pack_promote_bg(
     except Exception:
         log_exc_swallow(log, "_pack_promote_bg: неожиданная ошибка")
 
-    try:
-        await db.mark_presence_pack_promoted(pool, pack_id, owner_id)
-    except Exception:
-        log_exc_swallow(log, "_pack_promote_bg: mark_presence_pack_promoted failed")
+    if success > 0:
+        try:
+            await db.mark_presence_pack_promoted(pool, pack_id, owner_id)
+        except Exception:
+            log_exc_swallow(log, "_pack_promote_bg: mark_presence_pack_promoted failed")
 
     kb = InlineKeyboardBuilder()
+    if fail > 0:
+        kb.button(
+            text="🔁 Повторить назначение",
+            callback_data=PackCb(action="promote", pack_id=pack_id),
+        )
     kb.button(
         text="🌱 Посеять посты", callback_data=PackCb(action="seed", pack_id=pack_id)
     )
     kb.button(text="📋 Детали", callback_data=PackCb(action="view", pack_id=pack_id))
     kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
     kb.adjust(1)
-    try:
-        await progress_msg.edit_text(
+    if success == 0:
+        result_text = (
+            f"❌ <b>Назначение не удалось</b>\n\n"
+            f"Ни один канал не получил бота-администратора.\n"
+            f"💡 Убедитесь что аккаунты являются администраторами каналов.\n\n"
+            f"❌ Ошибок: {fail}"
+        )
+    else:
+        result_text = (
             f"👑 <b>Бот назначен администратором</b>\n\n"
             f"✅ Успешно: {success} | ❌ Ошибок: {fail}\n\n"
             f"Права бота: публикация постов, приглашение пользователей.\n\n"
-            f"💡 Теперь можно посеять посты через Bot API напрямую.",
+            f"💡 Теперь можно посеять посты через Bot API напрямую."
+        )
+    try:
+        await progress_msg.edit_text(
+            result_text,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
