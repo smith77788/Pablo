@@ -795,9 +795,21 @@ async def get_funnel_subscriber_ids(pool: asyncpg.Pool, funnel_id: int) -> list[
 
 
 async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) -> None:
+    """Subscribe user to funnel.
+
+    Idempotent: if user is already active in the funnel (completed=false) the
+    row is left untouched so in-progress users are not reset back to step 0.
+    If the user previously completed the funnel they are re-enrolled from the
+    beginning.
+    """
     await pool.execute(
-        "INSERT INTO funnel_subscriptions(funnel_id,user_id) VALUES($1,$2)"
-        " ON CONFLICT(funnel_id,user_id) DO UPDATE SET current_step=0,completed=false,next_send_at=now()",
+        """INSERT INTO funnel_subscriptions(funnel_id, user_id)
+           VALUES ($1, $2)
+           ON CONFLICT (funnel_id, user_id) DO UPDATE
+               SET current_step  = 0,
+                   completed      = false,
+                   next_send_at   = now()
+               WHERE funnel_subscriptions.completed = true""",
         funnel_id,
         user_id,
     )
