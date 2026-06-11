@@ -491,9 +491,12 @@ async def _process_bot(
                         except Exception as exc:
                             log.warning("send_ai_reply failed: %s", exc)
 
-            # Funnels: subscribe on /start or keyword
+            # Funnels: subscribe on /start, keyword, or new-user join
             for funnel in funnels:
                 if funnel["trigger_type"] == "start" and is_start:
+                    await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
+                elif funnel["trigger_type"] == "join" and is_new_user:
+                    # Fire once for first-ever message from a new user
                     await db.subscribe_to_funnel(pool, funnel["id"], chat_id)
                 elif (
                     funnel["trigger_type"] == "keyword"
