@@ -240,7 +240,7 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         log.warning("Referral paid hook error: %s", e)
 
     try:
-        em = {"starter": "⭐", "pro": "🚀", "enterprise": "👑", "strike": "⚔️"}.get(
+        em = {"paid": "💎", "starter": "💎", "pro": "💎", "enterprise": "💎", "strike": "⚔️"}.get(
             payment["plan"], "💳"
         )
         if payment["plan"] == "strike":

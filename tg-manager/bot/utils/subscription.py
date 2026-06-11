@@ -179,7 +179,7 @@ def locked_text(feature: str, required_plan: str) -> str:
         f"Эта функция доступна только с платной подпиской.\n\n"
         f"{emoji} <b>Подписка</b> — {price}/мес\n"
         f"<i>{features}</i>\n\n"
-        f"Бесплатно: 1 бот и 1 канал для демо-проверки.\n"
+        f"Бесплатно: до {BOT_LIMITS['free']} ботов и до {CHANNEL_LIMITS['free']} каналов.\n"
         f"Все остальные функции — только с подпиской.\n\n"
         f"Оформить подписку: /subscription"
     )

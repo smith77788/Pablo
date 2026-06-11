@@ -154,10 +154,13 @@ Deno.serve(async (req) => {
     const patternKeys = [
       ...new Set(((actions ?? []) as ActionRow[]).map((a) => `${a.agent_id}:${a.action_type}`)),
     ];
-    const { data: memoryRows } = await supabase
-      .from("ai_memory")
-      .select("id, pattern_key, success_count, failure_count, confidence, avg_impact")
-      .in("pattern_key", patternKeys);
+    // Guard: empty .in() returns ALL rows, not zero rows.
+    const { data: memoryRows } = patternKeys.length > 0
+      ? await supabase
+          .from("ai_memory")
+          .select("id, pattern_key, success_count, failure_count, confidence, avg_impact")
+          .in("pattern_key", patternKeys)
+      : { data: [] as any[] };
     const memoryMap = new Map(
       (memoryRows ?? []).map((m: any) => [m.pattern_key, m]),
     );

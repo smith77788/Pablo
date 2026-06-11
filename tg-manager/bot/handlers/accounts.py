@@ -3315,11 +3315,78 @@ async def _finalize_import(
     session_str: str,
     info: dict,
 ) -> None:
-    """Save imported account to DB and report success."""
+    """Save imported account to DB and report success.
+
+    Checks for duplicate by tg_user_id before inserting — if the same Telegram
+    account already exists (even under a different phone key), update the session
+    instead of creating a duplicate record.
+    """
     await state.clear()
 
     plan, limit = await _get_account_limit(pool, message.from_user.id)
     accounts = await db.get_tg_accounts(pool, message.from_user.id)
+
+    tg_user_id = info.get("tg_user_id") or 0
+    phone = info.get("phone") or f"id:{tg_user_id or 'unknown'}"
+
+    # ── Duplicate check by tg_user_id ─────────────────────────────────────────
+    # The DB unique constraint is (owner_id, phone). When the same Telegram account
+    # is imported twice — once with a real phone and once with "id:<n>" — two rows
+    # would be created for the same person. We prevent this by checking tg_user_id.
+    existing_by_uid = None
+    if tg_user_id:
+        try:
+            existing_by_uid = await pool.fetchrow(
+                "SELECT id, phone FROM tg_accounts WHERE owner_id=$1 AND tg_user_id=$2",
+                message.from_user.id,
+                tg_user_id,
+            )
+        except Exception:
+            existing_by_uid = None
+
+    if existing_by_uid:
+        # Account already exists — update the session string instead of inserting.
+        try:
+            await pool.execute(
+                """UPDATE tg_accounts
+                   SET session_str=$1, first_name=$2, username=$3,
+                       acc_status='active', status_reason=NULL,
+                       status_checked_at=now(), is_active=true, last_used=now()
+                   WHERE id=$4""",
+                session_str,
+                info.get("first_name", ""),
+                info.get("username", ""),
+                existing_by_uid["id"],
+            )
+        except Exception as exc:
+            await message.answer(
+                f"❌ Ошибка обновления сессии в БД: <code>{escape(str(exc)[:200])}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        name = info.get("first_name", "") or info.get("username", "") or phone
+        uname = f"@{info['username']}" if info.get("username") else "—"
+        kb = InlineKeyboardBuilder()
+        kb.button(text="➕ Импортировать ещё", callback_data=AccCb(action="import_menu"))
+        kb.button(
+            text="👤 Открыть аккаунт",
+            callback_data=AccCb(action="view", acc_id=existing_by_uid["id"]),
+        )
+        kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            f"🔄 <b>Сессия обновлена</b>\n\n"
+            f"Аккаунт уже существует в системе.\n"
+            f"Имя: <b>{escape(name)}</b>\n"
+            f"Username: {escape(uname)}\n"
+            f"Telegram ID: <code>{tg_user_id}</code>\n\n"
+            f"<i>Сессия обновлена — старая запись перезаписана.</i>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     if len(accounts) >= limit:
         limit_label = "∞" if limit >= 9999 else str(limit)
         upgrade_plan = _next_account_plan(plan)
@@ -3331,7 +3398,6 @@ async def _finalize_import(
         )
         return
 
-    phone = info.get("phone") or f"id:{info.get('tg_user_id', 'unknown')}"
     device = {
         "device_model": info.get("device_model"),
         "system_version": info.get("system_version"),
@@ -3342,12 +3408,12 @@ async def _finalize_import(
     if not device["device_model"]:
         device = generate_device_fingerprint()
     try:
-        await db.add_tg_account(
+        acc_id = await db.add_tg_account(
             pool,
             owner_id=message.from_user.id,
             phone=phone,
             session_str=session_str,
-            tg_user_id=info.get("tg_user_id") or 0,
+            tg_user_id=tg_user_id,
             first_name=info.get("first_name", ""),
             username=info.get("username", ""),
             device_model=device["device_model"],
@@ -3376,7 +3442,7 @@ async def _finalize_import(
         f"Имя: <b>{escape(name)}</b>\n"
         f"Username: {escape(uname)}\n"
         f"Телефон: <code>{escape(phone)}</code>\n"
-        f"Telegram ID: <code>{info.get('tg_user_id', '?')}</code>",
+        f"Telegram ID: <code>{tg_user_id or '?'}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -3533,6 +3599,7 @@ async def _do_batch_import(
                 raise ValueError("invalid session or expired")
 
             phone = info.get("phone", "") or ""
+            tg_uid = info.get("tg_user_id") or 0
             device = {
                 "device_model": info.get("device_model"),
                 "system_version": info.get("system_version"),
@@ -3542,20 +3609,67 @@ async def _do_batch_import(
             }
             if not device["device_model"]:
                 device = generate_device_fingerprint()
-            acc_id = await db.add_tg_account(
-                pool,
-                owner_id=user_id,
-                phone=phone,
-                session_str=validated_str,
-                tg_user_id=info.get("tg_user_id") or 0,
-                first_name=info.get("first_name", ""),
-                username=info.get("username", ""),
-                device_model=device["device_model"],
-                system_version=device["system_version"],
-                app_version=device["app_version"],
-                lang_code=device.get("lang_code"),
-                system_lang_code=device.get("system_lang_code"),
-            )
+
+            # ── Duplicate check by tg_user_id ─────────────────────────────────
+            # Prevents inserting duplicate rows when the same Telegram account
+            # appears in the batch under different phone key formats.
+            acc_id = None
+            existing_uid_row = None
+            if tg_uid:
+                try:
+                    existing_uid_row = await pool.fetchrow(
+                        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND tg_user_id=$2",
+                        user_id,
+                        tg_uid,
+                    )
+                except Exception:
+                    existing_uid_row = None
+
+            if existing_uid_row:
+                acc_id = existing_uid_row["id"]
+                await pool.execute(
+                    """UPDATE tg_accounts
+                       SET session_str=$1, first_name=$2, username=$3,
+                           acc_status='active', status_reason=NULL,
+                           status_checked_at=now(), is_active=true, last_used=now()
+                       WHERE id=$4""",
+                    validated_str,
+                    info.get("first_name", ""),
+                    info.get("username", ""),
+                    acc_id,
+                )
+                name = (
+                    info.get("first_name")
+                    or info.get("username")
+                    or phone
+                    or f"сессия #{i + 1}"
+                )
+                suffix = f" [{cluster}]" if cluster else ""
+                ok_list.append(f"🔄 {escape(name[:35])}{suffix} (обновлена)")
+            else:
+                acc_id = await db.add_tg_account(
+                    pool,
+                    owner_id=user_id,
+                    phone=phone,
+                    session_str=validated_str,
+                    tg_user_id=tg_uid,
+                    first_name=info.get("first_name", ""),
+                    username=info.get("username", ""),
+                    device_model=device["device_model"],
+                    system_version=device["system_version"],
+                    app_version=device["app_version"],
+                    lang_code=device.get("lang_code"),
+                    system_lang_code=device.get("system_lang_code"),
+                )
+                name = (
+                    info.get("first_name")
+                    or info.get("username")
+                    or phone
+                    or f"сессия #{i + 1}"
+                )
+                suffix = f" [{cluster}]" if cluster else ""
+                ok_list.append(f"✅ {escape(name[:35])}{suffix}")
+
             # Assign cluster if provided
             if cluster and acc_id:
                 try:

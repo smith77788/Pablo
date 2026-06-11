@@ -55,9 +55,6 @@ async def cb_list(
     callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    from bot.utils.subscription import is_platform_admin
-
-    is_platform_admin(callback.from_user.id)
     bots = await db.get_bots(pool, callback.from_user.id)
     hint = (
         "\n\n📌 <b>Что это?</b>\n"

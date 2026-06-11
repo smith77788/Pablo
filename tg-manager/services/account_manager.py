@@ -552,6 +552,7 @@ async def get_session_string(client) -> str:
 async def import_from_session_string(session_string: str) -> tuple[str, dict]:
     """Validate a Telethon StringSession and return (session_str, info).
     Raises ValueError if the session is invalid or unauthorized.
+    Error messages are user-friendly and specific to the failure reason.
     """
     session_string = session_string.strip()
     if not session_string or len(session_string) < 20:
@@ -563,10 +564,46 @@ async def import_from_session_string(session_string: str) -> tuple[str, dict]:
     device = generate_device_fingerprint()
     client = _make_client(session_string, device)
     try:
-        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        if not await client.is_user_authorized():
-            raise ValueError("Сессия не авторизована или истекла.")
-        me = await client.get_me()
+        try:
+            await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise ValueError(
+                "Таймаут подключения к Telegram. Проверьте настройки сети/прокси."
+            )
+        except Exception as conn_exc:
+            err = str(conn_exc)
+            if "AuthKeyUnregisteredError" in type(conn_exc).__name__ or "auth_key" in err.lower():
+                raise ValueError(
+                    "Ключ сессии не зарегистрирован в Telegram. Сессия недействительна."
+                )
+            raise ValueError(f"Ошибка подключения к Telegram: {err[:200]}")
+
+        try:
+            is_auth = await asyncio.wait_for(client.is_user_authorized(), timeout=15.0)
+        except Exception:
+            is_auth = False
+
+        if not is_auth:
+            raise ValueError("Сессия не авторизована или истекла. Требуется повторный вход.")
+
+        try:
+            me = await asyncio.wait_for(client.get_me(), timeout=_OP_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise ValueError("Таймаут получения данных аккаунта. Повторите попытку.")
+        except Exception as me_exc:
+            err = str(me_exc)
+            err_type = type(me_exc).__name__
+            if "UserDeactivated" in err_type or "deactivated" in err.lower():
+                raise ValueError("Аккаунт деактивирован (удалён) пользователем.")
+            if "UserBannedInChannel" in err_type or "banned" in err.lower():
+                raise ValueError("Аккаунт заблокирован Telegram.")
+            if "SessionRevoked" in err_type or "revoked" in err.lower():
+                raise ValueError("Сессия отозвана — аккаунт вышел на другом устройстве.")
+            raise ValueError(f"Не удалось получить данные аккаунта: {err[:200]}")
+
+        if me is None:
+            raise ValueError("Сессия не вернула данные аккаунта. Возможно, аккаунт удалён.")
+
         info = {
             "tg_user_id": me.id,
             "phone": getattr(me, "phone", "") or f"id:{me.id}",

@@ -36,14 +36,20 @@ _WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 _WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
 
 _PLAN_MAP = {
-    "starter_1m": ("starter", 1),
-    "starter_3m": ("starter", 3),
-    "pro_1m": ("pro", 1),
-    "pro_3m": ("pro", 3),
-    "pro_6m": ("pro", 6),
-    "enterprise_1m": ("enterprise", 1),
-    "enterprise_6m": ("enterprise", 6),
-    "enterprise_12m": ("enterprise", 12),
+    # Current canonical plan names
+    "paid_1m": ("paid", 1),
+    "paid_3m": ("paid", 3),
+    "paid_6m": ("paid", 6),
+    "paid_12m": ("paid", 12),
+    # Legacy plan name aliases (kept for backward compatibility)
+    "starter_1m": ("paid", 1),
+    "starter_3m": ("paid", 3),
+    "pro_1m": ("paid", 1),
+    "pro_3m": ("paid", 3),
+    "pro_6m": ("paid", 6),
+    "enterprise_1m": ("paid", 1),
+    "enterprise_6m": ("paid", 6),
+    "enterprise_12m": ("paid", 12),
 }
 
 
@@ -66,7 +72,10 @@ async def _activate_subscription(
     amount: float,
 ) -> None:
     """Активировать подписку после успешного платежа."""
-    _VALID_PLANS = {"starter", "pro", "enterprise"}
+    # Normalize legacy plan names to current canonical plan name
+    _PLAN_ALIAS = {"starter": "paid", "pro": "paid", "enterprise": "paid"}
+    plan = _PLAN_ALIAS.get(plan, plan)
+    _VALID_PLANS = {"paid"}
     if plan not in _VALID_PLANS:
         log.warning(
             "payment_webhook: unknown plan %r for user=%d, skipping", plan, user_id
@@ -233,7 +242,10 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         currency = invoice.get("asset", "USDT")
         tx_ref = str(invoice.get("invoice_id", "cp"))
 
-        if plan not in ("starter", "pro", "enterprise"):
+        # Normalize legacy plan names and accept current canonical name
+        _plan_alias = {"starter": "paid", "pro": "paid", "enterprise": "paid"}
+        plan = _plan_alias.get(plan, plan)
+        if plan not in ("paid",):
             return web.Response(status=200, text="OK")
 
         await _activate_subscription(
