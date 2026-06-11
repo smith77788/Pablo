@@ -1045,6 +1045,13 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         max_retries = r["max_retries"] or 0
         last_error = r["last_error"] or ""
 
+        # Determine if this is a permanently failed (dead letter) operation
+        is_dead_letter = (
+            status == "failed"
+            and max_retries > 0
+            and retry_count >= max_retries
+        )
+
         if status == "running":
             bar = _progress_bar(done, total)
             pct = round(100 * done / total) if total else 0
@@ -1064,16 +1071,28 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 pass
             progress = result_summary[:70] if result_summary else f"✓ {done}/{total} · {created}"
         elif status == "failed":
-            progress = f"попытка {retry_count}/{max_retries} · {created}"
+            if is_dead_letter:
+                progress = f"🪦 Все {retry_count}/{max_retries} попыток исчерпаны · {created}"
+            else:
+                progress = f"попытка {retry_count}/{max_retries} · {created}"
         else:
             progress = f"{total} элементов · {created}"
 
-        lines.append(f"{i}. {icon} <b>{op_type}</b> #{r['id']}")
+        if is_dead_letter:
+            lines.append(f"{i}. ☠️ <b>{op_type}</b> #{r['id']} <i>(постоянная ошибка)</i>")
+        else:
+            lines.append(f"{i}. {icon} <b>{op_type}</b> #{r['id']}")
         lines.append(f"   {progress}")
 
         if status == "failed" and last_error:
-            err_preview = html.escape(last_error[:70])
-            lines.append(f"   ⚠️ <i>{err_preview}</i>")
+            # For dead letter ops, show full actionable error; otherwise truncate
+            err_len = 120 if is_dead_letter else 70
+            err_preview = html.escape(last_error[:err_len])
+            if is_dead_letter:
+                lines.append(f"   ❗ <b>Причина:</b> <i>{err_preview}</i>")
+                lines.append(f"   💡 <i>Нажмите «Повторить» после устранения проблемы.</i>")
+            else:
+                lines.append(f"   ⚠️ <i>{err_preview}</i>")
 
         if status in ("pending", "running"):
             kb.button(
@@ -1081,8 +1100,9 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 callback_data=MassOpCb(action="cancel_op", op_id=r["id"]),
             )
         elif status == "failed":
+            btn_label = f"🔄 Перезапустить #{r['id']}" if is_dead_letter else f"🔄 Повторить #{r['id']}"
             kb.button(
-                text=f"🔄 Повторить #{r['id']}",
+                text=btn_label,
                 callback_data=MassOpCb(action="retry_op", op_id=r["id"]),
             )
 

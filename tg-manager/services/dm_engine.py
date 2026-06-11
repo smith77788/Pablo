@@ -92,19 +92,40 @@ async def send_dm(
     user_id: int,
     text: str,
     _acc: dict | None = None,
+    username: str | None = None,
 ) -> dict:
     """
-    Отправить одно личное сообщение.
+    Отправить одно личное сообщение через личный аккаунт Telegram.
+
+    Стратегия адресации (Telethon требует entity с access_hash):
+    1. Если есть username — используем его (@handle), это самый надёжный способ.
+    2. Если username нет — используем числовой user_id. Telethon попробует
+       разрешить его через contacts.GetContacts или по кэшу сессии.
+       Если аккаунт ранее видел этого пользователя — работает. Иначе — retry error.
+
     Возвращает {'status': 'sent'|'flood'|'blocked'|'skip'|'auth'|'retry', 'wait': int, 'error': str}
     """
     from services import account_manager
 
+    # Prefer username for reliable entity resolution in Telethon.
+    # Raw integer user_id requires the session to have seen this user before
+    # (have their access_hash in cache). Username resolves via contacts.Search.
+    target: str | int = username.lstrip("@") if username else user_id
     try:
-        await account_manager.send_message(session_str, user_id, text, _acc=_acc)
+        await account_manager.send_message(session_str, target, text, _acc=_acc)
         return {"status": "sent"}
     except Exception as exc:
         kind = _classify_error(exc)
         wait = _extract_flood_seconds(exc) if kind == "flood" else 0
+        # If username resolution failed and we have user_id, fall back to int
+        if kind == "retry" and username and user_id:
+            try:
+                await account_manager.send_message(session_str, user_id, text, _acc=_acc)
+                return {"status": "sent"}
+            except Exception as exc2:
+                kind2 = _classify_error(exc2)
+                wait2 = _extract_flood_seconds(exc2) if kind2 == "flood" else 0
+                return {"status": kind2, "wait": wait2, "error": str(exc2)[:200]}
         return {"status": kind, "wait": wait, "error": str(exc)[:200]}
 
 
@@ -117,8 +138,12 @@ _MAX_DELAY = 90.0  # максимум секунд между отправкам
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
 
 
-async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[int]:
-    """Получить список tg_user_id для кампании."""
+async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
+    """Получить список получателей для кампании.
+
+    Возвращает list[dict] с ключами: user_id (int), username (str | None).
+    username используется для надёжной адресации через Telethon (get_entity).
+    """
     campaign_id = campaign["id"]
     target_type = campaign["target_type"]
     target_id = campaign["target_id"]
@@ -133,17 +158,28 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[int]:
     }
 
     if target_type == "bot_users" and target_id:
+        # Fetch user_id + username so Telethon can resolve the entity reliably
         rows = await pool.fetch(
-            "SELECT DISTINCT user_id FROM bot_users WHERE bot_id=$1 AND user_id > 0",
+            "SELECT DISTINCT ON (user_id) user_id, username "
+            "FROM bot_users WHERE bot_id=$1 AND user_id > 0",
             target_id,
         )
-        return [r["user_id"] for r in rows if r["user_id"] not in sent_ids]
+        return [
+            {"user_id": r["user_id"], "username": r["username"] or None}
+            for r in rows
+            if r["user_id"] not in sent_ids
+        ]
     elif target_type == "crm":
         rows = await pool.fetch(
-            "SELECT DISTINCT tg_user_id FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
+            "SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
+            "FROM crm_contacts WHERE owner_id=$1 AND tg_user_id > 0",
             campaign["owner_id"],
         )
-        return [r["tg_user_id"] for r in rows if r["tg_user_id"] not in sent_ids]
+        return [
+            {"user_id": r["tg_user_id"], "username": r["username"] or None}
+            for r in rows
+            if r["tg_user_id"] not in sent_ids
+        ]
     elif target_type == "cohort" and target_id:
         # target_id = bot_id, params.cohort_type = hot|warm|cold|lost
         import json as _json
@@ -156,16 +192,24 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[int]:
                 params = {}
         cohort = params.get("cohort_type", "warm")
         cohort_sql = {
-            "hot": "last_seen >= now() - INTERVAL '1 day'",
-            "warm": "last_seen >= now() - INTERVAL '7 days' AND last_seen < now() - INTERVAL '1 day'",
-            "cold": "last_seen >= now() - INTERVAL '30 days' AND last_seen < now() - INTERVAL '7 days'",
-            "lost": "last_seen < now() - INTERVAL '30 days'",
-        }.get(cohort, "last_seen >= now() - INTERVAL '7 days'")
+            "hot": "ua.last_seen >= now() - INTERVAL '1 day'",
+            "warm": "ua.last_seen >= now() - INTERVAL '7 days' AND ua.last_seen < now() - INTERVAL '1 day'",
+            "cold": "ua.last_seen >= now() - INTERVAL '30 days' AND ua.last_seen < now() - INTERVAL '7 days'",
+            "lost": "ua.last_seen < now() - INTERVAL '30 days'",
+        }.get(cohort, "ua.last_seen >= now() - INTERVAL '7 days'")
+        # JOIN bot_users to get username for reliable entity resolution
         rows = await pool.fetch(
-            f"SELECT user_id FROM user_activity WHERE bot_id=$1 AND {cohort_sql}",
+            f"SELECT ua.user_id, bu.username "
+            f"FROM user_activity ua "
+            f"LEFT JOIN bot_users bu ON bu.bot_id = ua.bot_id AND bu.user_id = ua.user_id "
+            f"WHERE ua.bot_id=$1 AND {cohort_sql}",
             target_id,
         )
-        return [r["user_id"] for r in rows if r["user_id"] not in sent_ids]
+        return [
+            {"user_id": r["user_id"], "username": r["username"] or None}
+            for r in rows
+            if r["user_id"] not in sent_ids
+        ]
     return []
 
 
@@ -242,7 +286,11 @@ async def run_campaign(
     failed = 0
     _notified_milestones: set[int] = set()  # 25, 50, 75
 
-    for user_id in targets:
+    for target in targets:
+        # target is a dict: {user_id: int, username: str | None}
+        user_id: int = target["user_id"]
+        username: str | None = target.get("username")
+
         # Проверить не отменена ли кампания
         current = await pool.fetchrow(
             "SELECT status FROM dm_campaigns WHERE id=$1", campaign_id
@@ -256,7 +304,9 @@ async def run_campaign(
 
         text = expand_spintax(template)
         t0_dm = time.monotonic()
-        result = await send_dm(acc["session_str"], user_id, text, _acc=acc)
+        result = await send_dm(
+            acc["session_str"], user_id, text, _acc=acc, username=username
+        )
         status = result["status"]
 
         if status == "sent":

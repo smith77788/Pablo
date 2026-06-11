@@ -805,7 +805,30 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 json.dumps(result, ensure_ascii=False),
                 op_id,
             )
-            summary = result.get("summary", "")
+            # Audit trail: write operation completion to operation_audit
+            _op_summary = result.get("summary", "")
+            _acc_ids_done = params.get("account_ids") or []
+            if _acc_ids_done:
+                for _audit_acc_id in _acc_ids_done:
+                    await _audit(
+                        pool,
+                        owner_id,
+                        op_type,
+                        "success",
+                        operation_id=op_id,
+                        account_id=int(_audit_acc_id),
+                        duration_ms=int(duration_seconds * 1000),
+                    )
+            else:
+                await _audit(
+                    pool,
+                    owner_id,
+                    op_type,
+                    "success",
+                    operation_id=op_id,
+                    duration_ms=int(duration_seconds * 1000),
+                )
+            summary = _op_summary
             from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot.callbacks import BmCb
 
@@ -878,6 +901,30 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     str(e)[:500],
                     op_id,
                 )
+                # Audit trail: write final failure to operation_audit for all related accounts
+                _err_str = str(e)[:400]
+                _acc_ids_for_audit = params.get("account_ids") or []
+                if _acc_ids_for_audit:
+                    for _audit_acc_id in _acc_ids_for_audit:
+                        await _audit(
+                            pool,
+                            owner_id,
+                            op_type,
+                            "failed",
+                            operation_id=op_id,
+                            account_id=int(_audit_acc_id),
+                            error_msg=_err_str,
+                        )
+                else:
+                    # No account_ids — write one audit entry with no account_id
+                    await _audit(
+                        pool,
+                        owner_id,
+                        op_type,
+                        "failed",
+                        operation_id=op_id,
+                        error_msg=_err_str,
+                    )
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 from bot.callbacks import BmCb
 
@@ -887,18 +934,24 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     callback_data=BmCb(action="op_detail", op_id=op_id),
                 )
                 retry_row = await pool.fetchrow(
-                    "SELECT retry_count FROM operation_queue WHERE id=$1", op_id
+                    "SELECT retry_count, max_retries FROM operation_queue WHERE id=$1", op_id
                 )
                 retry_info = ""
-                if retry_row and (retry_row["retry_count"] or 0) > 0:
-                    retry_info = f"\nПопыток: {retry_row['retry_count']}"
+                if retry_row:
+                    rc = retry_row["retry_count"] or 0
+                    mr = retry_row["max_retries"] or 3
+                    if rc > 0:
+                        retry_info = f"\nПопыток: {rc}/{mr} — лимит исчерпан"
+                    else:
+                        retry_info = f"\nОшибка не повторяется (фатальная)"
                 await db.notify_if_enabled(
                     pool,
                     bot,
                     owner_id,
                     "op_complete",
                     f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n"
-                    f"<code>{str(e)[:200]}</code>{retry_info}",
+                    f"<code>{str(e)[:200]}</code>{retry_info}\n\n"
+                    f"💡 Используйте кнопку «Повторить» или проверьте аккаунты.",
                     reply_markup=kb.as_markup(),
                 )
 
@@ -2501,9 +2554,9 @@ async def _exec_global_presence_bot(
                 target["id"],
             )
             await asyncio.sleep(wait_s)
-            # Switch to next account for retry
-            acc_idx += 1
-            acc = dict(accounts[acc_idx % len(accounts)])
+            # Switch to next account for retry (use round-robin index over accounts_list)
+            acc_rr_idx += 1
+            acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
             result = await account_manager.create_bot_via_botfather(
                 acc["session_str"],
                 bot_name,

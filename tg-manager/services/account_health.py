@@ -154,7 +154,13 @@ def update_after_failure(
 
 
 async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
-    """Загружает статистику здоровья всех аккаунтов из БД."""
+    """Загружает статистику здоровья всех аккаунтов из БД.
+
+    Объединяет данные из tg_accounts, account_flood_log, operation_audit
+    и account_warmup_plans для точного определения warmup_state.
+    Аккаунты с активным планом разогрева отображаются как 'warming',
+    а не 'raw'/'ready' (что было неверно без проверки warmup_plans).
+    """
     rows = await pool.fetch(
         """SELECT
                a.id,
@@ -164,7 +170,11 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
                EXTRACT(DAY FROM NOW() - a.added_at)::int AS days_active,
                COUNT(DISTINCT fl.id) FILTER (WHERE fl.created_at > NOW() - INTERVAL '7d') AS floods_7d,
                COUNT(DISTINCT oa.id) FILTER (WHERE oa.result='success') AS ops_ok,
-               COUNT(DISTINCT oa.id) FILTER (WHERE oa.result!='success' AND oa.result IS NOT NULL) AS ops_fail
+               COUNT(DISTINCT oa.id) FILTER (WHERE oa.result!='success' AND oa.result IS NOT NULL) AS ops_fail,
+               EXISTS(
+                   SELECT 1 FROM account_warmup_plans wp
+                   WHERE wp.account_id = a.id AND wp.status = 'active'
+               ) AS has_active_warmup
            FROM tg_accounts a
            LEFT JOIN account_flood_log fl ON fl.account_id = a.id
            LEFT JOIN operation_audit oa ON oa.account_id = a.id
@@ -189,11 +199,16 @@ async def load_from_db(pool: asyncpg.Pool, owner_id: int) -> int:
             days_active=row["days_active"] or 0,
         )
 
-        warmup = estimate_warmup_state(
-            row["days_active"] or 0,
-            total,
-            float(row["trust_score"] or 1.0),
-        )
+        # Если аккаунт имеет активный план разогрева — явно ставим WARMING,
+        # иначе оцениваем по операциям и возрасту.
+        if row["has_active_warmup"]:
+            warmup = WarmupState.WARMING
+        else:
+            warmup = estimate_warmup_state(
+                row["days_active"] or 0,
+                total,
+                float(row["trust_score"] or 1.0),
+            )
 
         health = get_health(acc_id)
         health.health_score = score

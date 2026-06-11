@@ -72,13 +72,23 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-        ops_today = (
+        # Считаем завершённые операции из operation_audit (реальные данные)
+        # и добавляем ожидающие в очереди из operation_queue
+        ops_audit = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1 AND occurred_at > NOW() - INTERVAL '24h'",
+                uid,
+            )
+            or 0
+        )
+        ops_queued = (
             await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24h'",
                 uid,
             )
             or 0
         )
+        ops_today = ops_audit + ops_queued
         warmup_active = (
             await pool.fetchval(
                 """SELECT COUNT(*) FROM account_warmup_plans wp
@@ -381,23 +391,39 @@ async def cb_infra_audit(
 
 @router.callback_query(InfraCb.filter(F.action == "daily_stats"))
 async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Статистика за сегодня — реальные данные из operation_audit и account_flood_log.
+
+    account_daily_stats никогда не заполняется автоматически, поэтому
+    запрос переписан на operation_audit (заполняется op_worker/warmup/etc.)
+    и account_flood_log для подсчёта flood-событий за сегодня.
+    """
     await callback.answer()
     uid = callback.from_user.id
     today = date.today()
 
     try:
         rows = await pool.fetch(
-            """SELECT a.first_name, a.phone,
-                      COALESCE(ds.actions_ok, 0) AS actions_ok,
-                      COALESCE(ds.actions_fail, 0) AS actions_fail,
-                      COALESCE(ds.flood_events, 0) AS flood_events,
-                      COALESCE(ds.messages_sent, 0) AS messages_sent
+            """SELECT a.id, a.first_name, a.phone,
+                      COUNT(oa.id) FILTER (WHERE oa.result = 'success') AS actions_ok,
+                      COUNT(oa.id) FILTER (WHERE oa.result != 'success' AND oa.result IS NOT NULL) AS actions_fail,
+                      COUNT(fl.id) AS flood_events,
+                      COUNT(oa.id) FILTER (
+                          WHERE oa.action IN ('send_message','broadcast','dm','mass_dm')
+                            AND oa.result = 'success'
+                      ) AS messages_sent
                FROM tg_accounts a
-               LEFT JOIN account_daily_stats ds ON ds.account_id=a.id AND ds.stat_date=$2
-               WHERE a.owner_id=$1 AND a.is_active=TRUE
-               ORDER BY (COALESCE(ds.actions_ok,0) + COALESCE(ds.messages_sent,0)) DESC""",
+               LEFT JOIN operation_audit oa
+                   ON oa.account_id = a.id
+                  AND oa.occurred_at >= CURRENT_DATE
+                  AND oa.occurred_at < CURRENT_DATE + INTERVAL '1 day'
+               LEFT JOIN account_flood_log fl
+                   ON fl.account_id = a.id
+                  AND fl.created_at >= CURRENT_DATE
+                  AND fl.created_at < CURRENT_DATE + INTERVAL '1 day'
+               WHERE a.owner_id = $1 AND a.is_active = TRUE
+               GROUP BY a.id, a.first_name, a.phone
+               ORDER BY (COUNT(oa.id) FILTER (WHERE oa.result = 'success') + COUNT(fl.id)) DESC""",
             uid,
-            today,
         )
     except Exception:
         rows = []
@@ -405,19 +431,23 @@ async def cb_infra_daily_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     lines = [f"📊 <b>Статистика за {today.strftime('%d.%m.%Y')}</b>\n"]
     total_ok = total_fail = total_floods = total_msgs = 0
 
+    active_accounts = 0
     for r in rows[:20]:
-        label = html.escape(r.get("first_name") or r["phone"])
-        ok = r["actions_ok"]
-        fail = r["actions_fail"]
-        floods = r["flood_events"]
-        msgs = r["messages_sent"]
+        label = html.escape(r.get("first_name") or r["phone"] or f"id{r['id']}")
+        ok = int(r["actions_ok"] or 0)
+        fail = int(r["actions_fail"] or 0)
+        floods = int(r["flood_events"] or 0)
+        msgs = int(r["messages_sent"] or 0)
         total_ok += ok
         total_fail += fail
         total_floods += floods
         total_msgs += msgs
         if ok + fail + msgs > 0:
+            active_accounts += 1
             lines.append(f"• <b>{label}</b>: ✅{ok} ❌{fail} ⚡{floods} ✉️{msgs}")
 
+    if active_accounts == 0:
+        lines.append("<i>Операций сегодня не выполнялось.</i>")
     lines.append(
         f"\n<b>Итого:</b> ✅{total_ok} ❌{total_fail} ⚡{total_floods} ✉️{total_msgs}"
     )

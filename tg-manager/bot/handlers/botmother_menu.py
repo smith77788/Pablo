@@ -1887,7 +1887,8 @@ async def cb_op_detail(
     try:
         op = await pool.fetchrow(
             "SELECT id, op_type, status, params, result, error_msg, "
-            "total_items, done_items, created_at, started_at, finished_at "
+            "total_items, done_items, created_at, started_at, finished_at, "
+            "retry_count, max_retries "
             "FROM operation_queue WHERE id=$1 AND owner_id=$2",
             op_id,
             user_id,
@@ -1899,6 +1900,14 @@ async def cb_op_detail(
         return
     await callback.answer()
 
+    _retry_count = op["retry_count"] or 0
+    _max_retries = op["max_retries"] or 3
+    _is_dead_letter = (
+        op["status"] == "failed"
+        and _max_retries > 0
+        and _retry_count >= _max_retries
+    )
+
     status_emoji = {
         "pending": "⏳",
         "running": "🔄",
@@ -1906,7 +1915,7 @@ async def cb_op_detail(
         "failed": "❌",
         "cancelled": "🚫",
     }
-    emoji = status_emoji.get(op["status"], "❓")
+    emoji = "☠️" if _is_dead_letter else status_emoji.get(op["status"], "❓")
     dt_created = op["created_at"].strftime("%d.%m.%Y %H:%M")
     dt_finished = (
         op["finished_at"].strftime("%d.%m.%Y %H:%M") if op["finished_at"] else "—"
@@ -1926,10 +1935,16 @@ async def cb_op_detail(
         else:
             elapsed_str = f"{elapsed_s // 3600}ч {(elapsed_s % 3600) // 60}м"
 
+    _status_label = op["status"]
+    if _is_dead_letter:
+        _status_label = f"failed (все {_retry_count}/{_max_retries} попыток исчерпаны)"
+    elif op["status"] == "failed" and _retry_count > 0:
+        _status_label = f"failed (попытка {_retry_count}/{_max_retries})"
+
     lines = [
         f"<b>📋 Операция #{op_id}</b>\n",
         f"Тип: <code>{html.escape(op['op_type'])}</code>",
-        f"Статус: {emoji} {op['status']}"
+        f"Статус: {emoji} {_status_label}"
         + (f" · ⏱ {elapsed_str}" if elapsed_str else ""),
         f"Создана: <code>{dt_created}</code>",
         f"Завершена: <code>{dt_finished}</code>",
@@ -1957,15 +1972,26 @@ async def cb_op_detail(
         lines.append(progress_line)
 
     if op["error_msg"]:
-        lines.append(
-            f"\n❌ <b>Ошибка:</b>\n<code>{html.escape(op['error_msg'][:300])}</code>"
-        )
+        if _is_dead_letter:
+            lines.append(
+                f"\n☠️ <b>Постоянная ошибка ({_retry_count}/{_max_retries} попыток):</b>\n"
+                f"<code>{html.escape(op['error_msg'][:400])}</code>"
+            )
+        else:
+            lines.append(
+                f"\n❌ <b>Ошибка:</b>\n<code>{html.escape(op['error_msg'][:300])}</code>"
+            )
         # Root cause analysis and recommendations
         analysis = _analyze_error(op["error_msg"])
         if analysis["cause"]:
             lines.append(f"\n🔍 <b>Причина:</b> {analysis['cause']}")
         if analysis["recommendation"]:
             lines.append(f"💡 <b>Что делать:</b> {analysis['recommendation']}")
+        if _is_dead_letter:
+            lines.append(
+                "\n⚡ <b>Действие:</b> Устраните проблему (проверьте аккаунты, прокси, "
+                "права доступа), затем нажмите «Перезапустить»."
+            )
 
     if op["result"]:
         import json as _json
@@ -2023,8 +2049,9 @@ async def cb_op_detail(
         text="📥 CSV лог операции", callback_data=BmCb(action="op_csv", op_id=op_id)
     )
     if op["status"] == "failed":
+        btn_label = "🔄 Перезапустить операцию" if _is_dead_letter else "🔄 Повторить операцию"
         kb.button(
-            text="🔄 Повторить операцию",
+            text=btn_label,
             callback_data=BmCb(action="op_retry", op_id=op_id),
         )
     if op["status"] == "running":
@@ -2070,8 +2097,11 @@ async def cb_op_retry(
         return
 
     try:
+        # Reset retry_count and last_error so the operation gets a fresh retry budget
         await pool.execute(
-            "UPDATE operation_queue SET status='pending', error_msg=NULL, started_at=NULL, finished_at=NULL "
+            "UPDATE operation_queue SET status='pending', error_msg=NULL, "
+            "started_at=NULL, finished_at=NULL, retry_count=0, last_error=NULL, "
+            "scheduled_for=NULL "
             "WHERE id=$1 AND owner_id=$2",
             op_id,
             user_id,
@@ -2083,7 +2113,7 @@ async def cb_op_retry(
         )
     except Exception as exc:
         mark_handled_error(f"op_retry update: {exc}")
-        await callback.answer(f"Ошибка: {str(exc)[:80]}", show_alert=True)
+        await callback.answer(f"Ошибка при перезапуске: {str(exc)[:80]}", show_alert=True)
         return
     await callback.answer(
         f"✅ Операция #{op_id} поставлена в очередь повторно.", show_alert=True
@@ -2093,7 +2123,8 @@ async def cb_op_retry(
     await _edit(
         callback,
         f"✅ <b>Операция #{op_id}</b> поставлена в очередь повторно.\n\n"
-        "Она будет выполнена в течение 15 секунд.",
+        "Счётчик попыток сброшен — операция получит полный бюджет повторов.\n"
+        "Выполнение начнётся в течение 15 секунд.",
         kb.as_markup(),
     )
 
