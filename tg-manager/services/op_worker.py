@@ -52,9 +52,10 @@ def _fire_db_flag(acc_ids: list[int], value: bool) -> None:
     if not _db_pool or not acc_ids:
         return
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(_do_db_flag(acc_ids, value))
+        loop = asyncio.get_running_loop()
+        loop.create_task(_do_db_flag(acc_ids, value))
+    except RuntimeError:
+        pass  # No running loop (called from sync context) — skip DB update
     except Exception:
         pass
 
