@@ -352,7 +352,9 @@ async def parse_active_users(
             if total_found >= limit:
                 break
 
-            if total_found % 50 == 0:
+            # Progress: first update at 1 user found, then every 50 after that.
+            # Without this, parses returning <50 users show no progress at all.
+            if total_found == 1 or total_found % 50 == 0:
                 if progress_cb:
                     try:
                         await progress_cb(total_found, limit)

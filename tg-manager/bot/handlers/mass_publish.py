@@ -326,7 +326,7 @@ async def _show_preview(
     preview_text = post_text[:300] + ("..." if len(post_text) > 300 else "")
 
     channels_hint = (
-        "\n⚠️ <i>Каналы не импортированы. При запуске найдём через Telegram.</i>"
+        "\n⚠️ <i>Каналы не найдены в БД. Импортируйте их через «📡 Каналы → 📥 Импорт».</i>"
         if total_channels == 0
         else ""
     )
