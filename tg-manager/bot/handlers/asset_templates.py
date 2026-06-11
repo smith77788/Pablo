@@ -1068,7 +1068,7 @@ async def cb_apply_bot_exec(
     relay_templates = {"support_bot", "intake_bot"}
     if preset_key and any(k in preset_key for k in relay_templates):
         try:
-            await db.set_relay_enabled(pool, bot_id, True, user_id)
+            await db.enable_relay(pool, bot_id, True, user_id)
             results.append("📨 Relay (переадресация оператору): ✅ включён")
         except Exception as e:
             log.warning("Failed to enable relay for bot %s: %s", bot_id, e)
