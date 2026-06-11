@@ -118,11 +118,13 @@ Deno.serve(async (req) => {
       });
     }
 
+    // maybeSingle() returns null data (not an error) when action_id doesn't exist,
+    // so the !action check below handles the 404 case without throwing PGRST116.
     const { data: action, error: aErr } = await sb
       .from("outreach_actions")
       .select("id, channel, action_type, draft_text, draft_alt_text, status, lead_id, promo_code")
       .eq("id", action_id)
-      .single();
+      .maybeSingle();
     if (aErr || !action) {
       return new Response(JSON.stringify({ ok: false, error: "action_not_found", message: "Не знайдено підготовлену дію для відправки. Можливо, її вже видалено або вона ще не створена." }), {
         status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
