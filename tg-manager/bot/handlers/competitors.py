@@ -271,23 +271,48 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         cb, f"🔄 Обновляю данные для {len(rows)} конкурентов..."
     )
 
+    async def _fetch_members(sess: aiohttp.ClientSession, username: str) -> int | None:
+        """Try multiple Telegram public endpoints to get subscriber count."""
+        # 1. Try t.me/<username> — look for tgme_page_extra (contains subscriber count)
+        try:
+            resp = await sess.get(
+                f"https://t.me/{username}",
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=10),
+                headers={"User-Agent": "TelegramBot (like TwitterBot)"},
+            )
+            text = await resp.text()
+            # t.me HTML: <div class="tgme_page_extra">12 345 subscribers</div>
+            m = re.search(
+                r'<div class="tgme_page_extra">([\d\s\xa0,]+)\s*(?:subscriber|member|participant)',
+                text,
+                re.IGNORECASE,
+            )
+            if m:
+                raw = re.sub(r"[\s\xa0,]", "", m.group(1))
+                if raw.isdigit():
+                    return int(raw)
+            # Fallback: any "NNN subscribers/members" near numeric
+            m = re.search(
+                r'([\d\s\xa0]{2,})\s*(?:subscribers|members|participants)',
+                text,
+                re.IGNORECASE,
+            )
+            if m:
+                raw = re.sub(r"[\s\xa0]", "", m.group(1))
+                if raw.isdigit():
+                    return int(raw)
+        except Exception:
+            pass
+        return None
+
     async def _refresh_bg() -> None:
         updated = 0
         async with aiohttp.ClientSession() as sess:
             for r in rows:
                 try:
-                    resp = await sess.get(
-                        f"https://t.me/{r['username']}",
-                        allow_redirects=True,
-                        timeout=aiohttp.ClientTimeout(total=8),
-                        headers={"User-Agent": "Mozilla/5.0"},
-                    )
-                    text = await resp.text()
-                    m = re.search(r'"members_count":(\d+)', text)
-                    if not m:
-                        m = re.search(r"([\d\s]{3,})\s*(?:subscribers|members)", text)
-                    if m:
-                        count = int(m.group(1).replace(" ", "").replace("\xa0", ""))
+                    count = await _fetch_members(sess, r["username"])
+                    if count is not None:
                         await pool.execute(
                             "UPDATE competitors "
                             "SET prev_members = last_members, "

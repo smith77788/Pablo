@@ -598,6 +598,7 @@ async def msg_import_tokens(
                 username=info.get("username", ""),
                 first_name=info.get("first_name", ""),
                 added_by=message.from_user.id,
+                bot=message.bot,
             )
         except Exception:
             ok = False
