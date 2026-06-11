@@ -179,7 +179,7 @@ def _comms_kb():
     return kb.as_markup()
 
 
-def _analytics_kb():
+def _analytics_kb(plan: str = "free"):
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🔍 Ключевые слова", callback_data=BmCb(action="pick_bot_for", sub="rank")
@@ -188,8 +188,8 @@ def _analytics_kb():
     kb.button(text="🏆 Конкуренты", callback_data=CompCb(action="menu"))
     kb.button(text="📈 SEO", callback_data=ChanFactCb(action="seo_pick"))
     kb.button(text="🔔 Алерты", callback_data=BmCb(action="alerts"))
-    kb.button(text="📋 Отчёты", callback_data=BmCb(action="vis_reports"))
-    kb.button(text="🧠 Поведение [PRO]", callback_data=BmCb(action="behavioral"))
+    kb.button(text=f"{_lock(plan,'starter')}📋 Отчёты", callback_data=BmCb(action="vis_reports"))
+    kb.button(text=f"{_lock(plan,'enterprise')}🧠 Поведение", callback_data=BmCb(action="behavioral"))
     kb.button(text="🗺️ Топология", callback_data=TopoCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 2, 1)
@@ -240,13 +240,13 @@ def _visibility_kb():
     return _analytics_kb()
 
 
-def _bulk_ops_kb():
+def _bulk_ops_kb(plan: str = "free"):
     kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Боты (массово)", callback_data=NetworkCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'pro')}🤖 Боты (массово)", callback_data=NetworkCb(action="menu"))
     kb.button(
-        text="📡 Каналы (bulk join/leave)", callback_data=ChanCb(action="bulk_menu")
+        text=f"{_lock(plan,'starter')}📡 Каналы (bulk join/leave)", callback_data=ChanCb(action="bulk_menu")
     )
-    kb.button(text="📤 Публикация в каналы", callback_data=MassPubCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'starter')}📤 Публикация в каналы", callback_data=MassPubCb(action="menu"))
     kb.button(text="📱 Аккаунты (bulk)", callback_data=MassOpCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     kb.adjust(2, 2, 1)
@@ -458,6 +458,7 @@ async def cb_analytics(
     asyncio.create_task(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "analytics", 0)
     )
+    user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
         "📊 <b>Аналитика — видимость и поведение</b>\n\n"
@@ -466,9 +467,9 @@ async def cb_analytics(
         "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
         "📈 <b>SEO</b> — оптимизация каналов под поиск\n"
         "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
-        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [PRO]\n"
+        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [enterprise]\n"
         "🗺️ <b>Топология</b> — граф связей активов",
-        _analytics_kb(),
+        _analytics_kb(user_plan),
     )
 
 
@@ -480,6 +481,7 @@ async def cb_visibility(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
         "📊 <b>Аналитика — видимость и поведение</b>\n\n"
@@ -488,9 +490,9 @@ async def cb_visibility(
         "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
         "📈 <b>SEO</b> — оптимизация каналов под поиск\n"
         "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
-        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [PRO]\n"
+        "🧠 <b>Поведение</b> — attention/habit/ecosystem scoring [enterprise]\n"
         "🗺️ <b>Топология</b> — граф связей активов",
-        _analytics_kb(),
+        _analytics_kb(user_plan),
     )
 
 
@@ -743,8 +745,11 @@ async def cb_settings(
 
 
 @router.callback_query(BmCb.filter(F.action == "bulk_ops"))
-async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_bulk_ops(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
         "⚡ <b>Массовые действия</b>\n\n"
@@ -754,7 +759,7 @@ async def cb_bulk_ops(callback: CallbackQuery, callback_data: BmCb) -> None:
         "📱 <b>Аккаунты</b> — операции через Telegram-аккаунты\n\n"
         "<i>Все операции выполняются с умными задержками для защиты аккаунтов.</i>\n\n"
         "Выберите тип:",
-        _bulk_ops_kb(),
+        _bulk_ops_kb(user_plan),
     )
 
 
@@ -940,104 +945,176 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.answer()
         await _edit(
             callback,
-            locked_text("Отчёты по позициям", "starter"),
+            locked_text("Отчёты", "starter"),
             subscription_locked_markup(
                 "starter", back_callback=BmCb(action="analytics")
             ),
         )
         return
     await callback.answer()
-    kws = await db.get_all_keywords_with_latest_ranking(pool, callback.from_user.id)
+    user_id = callback.from_user.id
+
+    # ── Section 1: Operation audit summary (last 7 days) ──────────────────
+    audit_section = ""
+    try:
+        audit_stats = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE result = 'success') AS success_cnt,
+                   COUNT(*) FILTER (WHERE result != 'success') AS fail_cnt,
+                   COUNT(DISTINCT account_id) AS unique_accounts,
+                   ROUND(AVG(duration_ms) FILTER (WHERE duration_ms IS NOT NULL))::int AS avg_ms
+               FROM operation_audit
+               WHERE owner_id = $1
+                 AND occurred_at > now() - INTERVAL '7 days'""",
+            user_id,
+        )
+        if audit_stats and (audit_stats["total"] or 0) > 0:
+            total_a = audit_stats["total"] or 0
+            succ_a = audit_stats["success_cnt"] or 0
+            fail_a = audit_stats["fail_cnt"] or 0
+            rate_a = round(succ_a / total_a * 100) if total_a else 0
+            accs_a = audit_stats["unique_accounts"] or 0
+            avg_ms = audit_stats["avg_ms"]
+            avg_str = f"{avg_ms} мс" if avg_ms else "—"
+            bar_filled = round(rate_a / 10)
+            bar = "█" * bar_filled + "░" * (10 - bar_filled)
+            audit_section = (
+                "\n\n<b>📊 Операции (7 дней):</b>\n"
+                f"  Всего: <b>{total_a}</b>  ✅ {succ_a}  ❌ {fail_a}\n"
+                f"  <b>Успех: [{bar}] {rate_a}%</b>  ⏱ Среднее: {avg_str}\n"
+                f"  Аккаунтов задействовано: <b>{accs_a}</b>"
+            )
+            # Top 5 actions by count
+            try:
+                top_actions = await pool.fetch(
+                    """SELECT action,
+                              COUNT(*) AS cnt,
+                              COUNT(*) FILTER (WHERE result = 'success') AS ok_cnt
+                       FROM operation_audit
+                       WHERE owner_id = $1
+                         AND occurred_at > now() - INTERVAL '7 days'
+                       GROUP BY action
+                       ORDER BY cnt DESC
+                       LIMIT 5""",
+                    user_id,
+                )
+                if top_actions:
+                    audit_section += "\n  <i>Топ действий:</i>"
+                    for row in top_actions:
+                        ok_pct = (
+                            round(row["ok_cnt"] / row["cnt"] * 100)
+                            if row["cnt"]
+                            else 0
+                        )
+                        audit_section += (
+                            f"\n  • {html.escape(row['action'])}: "
+                            f"{row['cnt']} ({ok_pct}% ок)"
+                        )
+            except Exception:
+                log_exc_swallow(
+                    log, "Не удалось получить топ действий из operation_audit"
+                )
+        else:
+            audit_section = (
+                "\n\n<b>📊 Операции (7 дней):</b>\n"
+                "  <i>Нет данных — операции ещё не выполнялись.</i>"
+            )
+    except Exception:
+        log_exc_swallow(log, "Не удалось загрузить статистику из operation_audit")
+
+    # ── Section 2: Keyword position report ────────────────────────────────
+    kws = await db.get_all_keywords_with_latest_ranking(pool, user_id)
+    kw_section = ""
 
     if not kws:
-        kb = InlineKeyboardBuilder()
-        kb.button(
-            text="➕ Добавить ключевое слово", callback_data=VisCb(action="add_keyword")
+        kw_section = (
+            "\n\n<b>🔍 Позиции в поиске:</b>\n"
+            "  <i>Нет отслеживаемых ключевых слов.</i>\n"
+            "  Добавьте через <b>🔍 Ключевые слова</b>."
         )
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
-        kb.adjust(1)
-        await _edit(
-            callback,
-            "<b>📋 Отчёт по позициям</b>\n\n"
-            "Нет отслеживаемых ключевых слов.\n\n"
-            "💡 Добавьте ключевые слова, чтобы начать отслеживать позиции вашего бота в поиске Telegram.",
-            kb.as_markup(),
-        )
-        return
-
-    # Fetch 7-day position history for trend analysis
-    kw_ids = [kw["keyword_id"] for kw in kws if kw.get("keyword_id")]
-    trend_map: dict[int, dict] = {}
-    if kw_ids:
-        try:
-            hist_rows = await pool.fetch(
-                """SELECT keyword_id,
-                          MAX(position) FILTER (WHERE position IS NOT NULL) AS worst_7d,
-                          MIN(position) FILTER (WHERE position IS NOT NULL) AS best_7d,
-                          (array_agg(position ORDER BY checked_at DESC))[1] AS latest,
-                          (array_agg(position ORDER BY checked_at DESC))[2] AS prev
-                   FROM search_rankings
-                   WHERE keyword_id = ANY($1)
-                     AND checked_at > now() - INTERVAL '7 days'
-                   GROUP BY keyword_id""",
-                kw_ids,
-            )
-            for r in hist_rows:
-                kid = r["keyword_id"]
-                latest = r["latest"]
-                prev = r["prev"]
-                if latest is not None and prev is not None:
-                    if latest < prev:
-                        arrow = "↗️"
-                    elif latest > prev:
-                        arrow = "↘️"
+    else:
+        # Fetch 7-day position history for trend analysis
+        kw_ids = [kw["keyword_id"] for kw in kws if kw.get("keyword_id")]
+        trend_map: dict[int, dict] = {}
+        if kw_ids:
+            try:
+                hist_rows = await pool.fetch(
+                    """SELECT keyword_id,
+                              MAX(position) FILTER (WHERE position IS NOT NULL) AS worst_7d,
+                              MIN(position) FILTER (WHERE position IS NOT NULL) AS best_7d,
+                              (array_agg(position ORDER BY checked_at DESC))[1] AS latest,
+                              (array_agg(position ORDER BY checked_at DESC))[2] AS prev
+                       FROM search_rankings
+                       WHERE keyword_id = ANY($1)
+                         AND checked_at > now() - INTERVAL '7 days'
+                       GROUP BY keyword_id""",
+                    kw_ids,
+                )
+                for r in hist_rows:
+                    kid = r["keyword_id"]
+                    latest = r["latest"]
+                    prev = r["prev"]
+                    if latest is not None and prev is not None:
+                        if latest < prev:
+                            arrow = "↗️"
+                        elif latest > prev:
+                            arrow = "↘️"
+                        else:
+                            arrow = "→"
                     else:
-                        arrow = "→"
+                        arrow = "—"
+                    trend_map[kid] = {
+                        "best": r["best_7d"],
+                        "worst": r["worst_7d"],
+                        "arrow": arrow,
+                    }
+            except Exception:
+                log_exc_swallow(
+                    log, "Не удалось построить данные тренда поисковых позиций"
+                )
+
+        by_bot: dict[str, list] = {}
+        for kw in kws:
+            bot_u = kw["bot_username"] or f"id{kw['bot_id']}"
+            by_bot.setdefault(bot_u, []).append(kw)
+
+        kw_lines: list[str] = ["\n\n<b>🔍 Позиции в поиске:</b>"]
+        for bot_u, items in by_bot.items():
+            kw_lines.append(f"<b>@{html.escape(bot_u)}</b>")
+            for kw in items:
+                pos = kw["position"]
+                kid = kw.get("keyword_id")
+                td = trend_map.get(kid, {})
+                if pos is None:
+                    pos_str = "—"
+                elif pos <= 3:
+                    pos_str = f"🥇 #{pos}"
+                elif pos <= 10:
+                    pos_str = f"🟢 #{pos}"
+                elif pos <= 30:
+                    pos_str = f"🟡 #{pos}"
                 else:
-                    arrow = "—"
-                trend_map[kid] = {
-                    "best": r["best_7d"],
-                    "worst": r["worst_7d"],
-                    "arrow": arrow,
-                }
-        except Exception:
-            log_exc_swallow(log, "Не удалось построить данные тренда поисковых позиций")
+                    pos_str = f"🔴 #{pos}"
+                kw_text = html.escape(kw["keyword"])
+                arrow = td.get("arrow", "")
+                best = td.get("best")
+                trend_suffix = f" {arrow}" if arrow and arrow != "—" else ""
+                best_suffix = (
+                    f" <i>(лучш. #{best})</i>" if best and best != pos else ""
+                )
+                kw_lines.append(
+                    f"  • {kw_text}: {pos_str}{trend_suffix}{best_suffix}"
+                )
+        kw_section = "\n".join(kw_lines)
 
-    by_bot: dict[str, list] = {}
-    for kw in kws:
-        bot_u = kw["bot_username"] or f"id{kw['bot_id']}"
-        by_bot.setdefault(bot_u, []).append(kw)
-
-    lines: list[str] = []
-    for bot_u, items in by_bot.items():
-        lines.append(f"\n<b>@{html.escape(bot_u)}</b>")
-        for kw in items:
-            pos = kw["position"]
-            kid = kw.get("keyword_id")
-            td = trend_map.get(kid, {})
-            if pos is None:
-                pos_str = "—"
-            elif pos <= 3:
-                pos_str = f"🥇 #{pos}"
-            elif pos <= 10:
-                pos_str = f"🟢 #{pos}"
-            elif pos <= 30:
-                pos_str = f"🟡 #{pos}"
-            else:
-                pos_str = f"🔴 #{pos}"
-            kw_text = html.escape(kw["keyword"])
-            arrow = td.get("arrow", "")
-            best = td.get("best")
-            trend_suffix = f" {arrow}" if arrow and arrow != "—" else ""
-            best_suffix = f" <i>(лучш. #{best})</i>" if best and best != pos else ""
-            lines.append(f"  • {kw_text}: {pos_str}{trend_suffix}{best_suffix}")
-
-    text = "<b>📋 Отчёт по позициям в поиске</b>" + "\n".join(lines)
+    text = "<b>📋 Аналитический отчёт</b>" + audit_section + kw_section
     if len(text) > 4000:
         text = text[:3900] + "\n\n<i>... (показаны первые результаты)</i>"
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📥 Скачать CSV", callback_data=BmCb(action="vis_reports_csv"))
+    kb.button(text="📥 Скачать CSV позиций", callback_data=BmCb(action="vis_reports_csv"))
+    kb.button(text="📊 Отчёты по операциям", callback_data=BmCb(action="op_reports"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     await _edit(callback, text, kb.as_markup())
