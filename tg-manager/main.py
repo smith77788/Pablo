@@ -253,6 +253,10 @@ async def main() -> None:
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
 
+    # Init op_worker DB pool and reset stale in_operation flags from previous process
+    op_worker.init_op_worker_pool(pool)
+    await op_worker.reset_stale_in_operation(pool)
+
     # Send deployment notification to admins on startup (detects new deploys)
     asyncio.create_task(deploy_notifier.notify_deploy(pool, bot))
 

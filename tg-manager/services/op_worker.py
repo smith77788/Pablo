@@ -27,11 +27,55 @@ _accounts_in_use: set[int] = set()
 _operation_account_locks: dict[int, set[int]] = {}
 _accounts_lock = asyncio.Lock()
 
+# Опциональный пул БД для персистентных обновлений in_operation.
+# Устанавливается через init_op_worker_pool() при старте.
+_db_pool: "asyncpg.Pool | None" = None
+
+
+def init_op_worker_pool(pool: "asyncpg.Pool") -> None:
+    """Вызывать один раз при старте, чтобы mark/release синхронизировались с БД."""
+    global _db_pool
+    _db_pool = pool
+
+
+async def reset_stale_in_operation(pool: "asyncpg.Pool") -> None:
+    """Сбросить все зависшие in_operation=TRUE после рестарта бота."""
+    try:
+        await pool.execute("UPDATE tg_accounts SET in_operation = FALSE WHERE in_operation = TRUE")
+        log.info("op_worker: stale in_operation flags cleared")
+    except Exception as e:
+        log.warning("op_worker: failed to clear stale in_operation: %s", e)
+
+
+def _fire_db_flag(acc_ids: list[int], value: bool) -> None:
+    """Fire-and-forget DB update for in_operation flag (best-effort)."""
+    if not _db_pool or not acc_ids:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_do_db_flag(acc_ids, value))
+    except Exception:
+        pass
+
+
+async def _do_db_flag(acc_ids: list[int], value: bool) -> None:
+    if not _db_pool:
+        return
+    try:
+        await _db_pool.execute(
+            "UPDATE tg_accounts SET in_operation=$1 WHERE id = ANY($2::int[])",
+            value, acc_ids,
+        )
+    except Exception as e:
+        log.debug("op_worker: db flag update failed: %s", e)
+
 
 async def mark_accounts_in_use(acc_ids: list[int]) -> None:
     """Пометить аккаунты как занятые op_worker-операцией."""
     async with _accounts_lock:
         _accounts_in_use.update(acc_ids)
+    _fire_db_flag(acc_ids, True)
 
 
 async def release_accounts(acc_ids: list[int]) -> None:
@@ -41,14 +85,19 @@ async def release_accounts(acc_ids: list[int]) -> None:
             _accounts_in_use.discard(aid)
             for locked_acc_ids in _operation_account_locks.values():
                 locked_acc_ids.discard(aid)
+    _fire_db_flag(acc_ids, False)
 
 
 async def release_operation_accounts(op_id: int) -> None:
     """Release every account claimed by an operation after executor errors."""
+    freed: list[int] = []
     async with _accounts_lock:
         acc_ids = _operation_account_locks.pop(op_id, set())
         for aid in acc_ids:
             _accounts_in_use.discard(aid)
+            freed.append(aid)
+    if freed:
+        _fire_db_flag(freed, False)
 
 
 async def _claim_available_accounts(op_id: int, accounts: list) -> list:
@@ -59,7 +108,9 @@ async def _claim_available_accounts(op_id: int, accounts: list) -> list:
         _accounts_in_use.update(acc_ids)
         if acc_ids:
             _operation_account_locks.setdefault(op_id, set()).update(acc_ids)
-        return claimed
+    if claimed:
+        _fire_db_flag([int(a["id"]) for a in claimed], True)
+    return claimed
 
 
 def is_account_in_use(acc_id: int) -> bool:

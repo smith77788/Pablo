@@ -1823,17 +1823,49 @@ async def _run_warmup_session_impl(
 _MAX_PARALLEL_WARMUP = 2  # максимум одновременных warmup-планов/сессий; >2 triggers Telegram coordinated-activity detection
 
 
+def _proxy_safe_batches(rows: list, batch_size: int) -> list[list]:
+    """
+    Строит батчи так, чтобы в одном батче не было двух аккаунтов на одном proxy_id.
+    Аккаунты без прокси (proxy_id IS NULL) разрешены параллельно между собой.
+    """
+    result: list[list] = []
+    remaining = list(rows)
+    while remaining:
+        batch: list = []
+        used_proxies: set = set()
+        leftover: list = []
+        for idx, row in enumerate(remaining):
+            pid = None
+            try:
+                pid = row["proxy_id"]
+            except (KeyError, TypeError, IndexError):
+                pass
+            if pid is not None and pid in used_proxies:
+                leftover.append(row)
+                continue
+            batch.append(row)
+            if pid is not None:
+                used_proxies.add(pid)
+            if len(batch) >= batch_size:
+                leftover.extend(remaining[idx + 1:])
+                break
+        result.append(batch)
+        remaining = leftover
+    return result
+
+
 async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
     """
     Фоновый цикл: каждый час проверяет активные планы И сессии разогрева.
     Один запуск в сутки на план/сессию (проверяем last_action_at > 20ч).
-    Планы и сессии запускаются ПАРАЛЛЕЛЬНО (до _MAX_PARALLEL_WARMUP одновременно).
+    Планы и сессии запускаются ПАРАЛЛЕЛЬНО (до _MAX_PARALLEL_WARMUP одновременно),
+    но не более одного аккаунта на один proxy_id в одном батче.
     """
     while True:
         try:
-            # Одиночные планы разогрева
+            # Одиночные планы разогрева — включаем proxy_id для proxy-correlation
             rows = await pool.fetch(
-                """SELECT wp.*, a.owner_id
+                """SELECT wp.*, a.owner_id, a.proxy_id
                    FROM account_warmup_plans wp
                    JOIN tg_accounts a ON a.id = wp.account_id
                    WHERE wp.status = 'active'
@@ -1841,10 +1873,8 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                           OR wp.last_action_at < NOW() - INTERVAL '20 hours')""",
             )
             if rows:
-                log.info("warmup loop: %d single-plans to run (parallel)", len(rows))
-            # Запускаем батчами по _MAX_PARALLEL_WARMUP, не блокируем loop
-            for i in range(0, len(rows), _MAX_PARALLEL_WARMUP):
-                batch = rows[i : i + _MAX_PARALLEL_WARMUP]
+                log.info("warmup loop: %d single-plans to run (proxy-safe batches)", len(rows))
+            for batch in _proxy_safe_batches(list(rows), _MAX_PARALLEL_WARMUP):
                 tasks = [
                     asyncio.create_task(run_daily_warmup(pool, dict(p))) for p in batch
                 ]
