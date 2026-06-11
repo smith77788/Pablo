@@ -82,6 +82,7 @@ async def add_bot(
     username: str,
     first_name: str,
     added_by: int,
+    bot=None,
 ) -> bool:
     """Return True if inserted, False if token already exists."""
     try:
@@ -105,7 +106,13 @@ async def add_bot(
         or 0
     )
     if existing_bots == 1:  # this was the first bot
-        await mark_referral_activated(pool, added_by)
+        referrer_id = await mark_referral_activated(pool, added_by)
+        if referrer_id and bot is not None:
+            # Check and grant tier rewards for the referrer
+            try:
+                await check_and_grant_rewards(pool, referrer_id, bot)
+            except Exception:
+                log_exc_swallow(log, "add_bot: check_and_grant_rewards failed")
     return True
 
 
@@ -1289,16 +1296,23 @@ async def add_experiment_variant(
 async def set_experiment_status(
     pool, exp_id: int, status: str, bot_id: int | None = None
 ) -> None:
+    # Stamp started_at when activating, ended_at when finishing
+    extra_sql = ""
+    if status == "active":
+        extra_sql = ", started_at = COALESCE(started_at, NOW())"
+    elif status in ("completed", "paused"):
+        extra_sql = ", ended_at = NOW()"
+
     if bot_id is not None:
         await pool.execute(
-            "UPDATE experiments SET status=$2 WHERE id=$1 AND bot_id=$3",
+            f"UPDATE experiments SET status=$2{extra_sql} WHERE id=$1 AND bot_id=$3",
             exp_id,
             status,
             bot_id,
         )
     else:
         await pool.execute(
-            "UPDATE experiments SET status=$2 WHERE id=$1", exp_id, status
+            f"UPDATE experiments SET status=$2{extra_sql} WHERE id=$1", exp_id, status
         )
 
 
@@ -1375,7 +1389,7 @@ async def record_experiment_conversion(
     )
     if assignment:
         await pool.execute(
-            "UPDATE experiment_assignments SET converted=TRUE WHERE id=$1",
+            "UPDATE experiment_assignments SET converted=TRUE, converted_at=NOW() WHERE id=$1",
             assignment["id"],
         )
         await pool.execute(
@@ -1402,7 +1416,7 @@ async def check_experiment_winner(pool, exp_id: int) -> int | None:
     ctr = best["conversions"] / best["impressions"] if best["impressions"] else 0
     if ctr > 0:
         await pool.execute(
-            "UPDATE experiments SET status='completed', winner_variant_id=$2 WHERE id=$1",
+            "UPDATE experiments SET status='completed', winner_variant_id=$2, ended_at=NOW() WHERE id=$1",
             exp_id,
             best["id"],
         )

@@ -469,13 +469,10 @@ async def _operation_recovery(
         if terminal_failed:
             # Обновляем notified_at для предотвращения дублей
             ids = [r["id"] for r in terminal_failed]
-            try:
-                await pool.execute(
-                    "UPDATE operation_queue SET notified_at=NOW() WHERE id=ANY($1)",
-                    ids,
-                )
-            except Exception:
-                pass  # notified_at может не существовать
+            await pool.execute(
+                "UPDATE operation_queue SET notified_at=NOW() WHERE id=ANY($1)",
+                ids,
+            )
 
             for op in terminal_failed:
                 action = RecoveryAction(

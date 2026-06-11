@@ -19,11 +19,16 @@ _MISSED_THRESHOLD = timedelta(
     hours=float(os.environ.get("SCHEDULER_MISSED_THRESHOLD_HOURS", "1"))
 )
 
+# Минимальный возраст активного эксперимента до попытки объявить победителя.
+# Предотвращает досрочное завершение при малой выборке сразу после старта.
+_AB_MIN_AGE = timedelta(hours=float(os.environ.get("AB_WINNER_MIN_AGE_HOURS", "24")))
+
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     # Track scheduled IDs currently being processed to prevent duplicate firing
     # within a single scheduler cycle (in case processing takes longer than sleep interval).
     _in_flight: set[int] = set()
+    _ab_sweep_cycle = 0  # run AB winner sweep every 60 cycles (≈1 hour)
 
     while True:
         try:
@@ -153,4 +158,48 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     log.exception("Scheduler failed to fire scheduled #%d", row["id"])
         except Exception:
             log.exception("Scheduler loop error")
+
+        # A/B winner sweep — once per hour
+        _ab_sweep_cycle += 1
+        if _ab_sweep_cycle >= 60:
+            _ab_sweep_cycle = 0
+            asyncio.get_event_loop().create_task(declare_ab_winners(pool))
+
         await asyncio.sleep(60)
+
+
+async def declare_ab_winners(pool: asyncpg.Pool) -> None:
+    """Nightly sweep: evaluate all active A/B experiments and declare winners.
+
+    Runs once per hour from the main scheduler loop.  Only evaluates experiments
+    that have been active for at least _AB_MIN_AGE to avoid premature decisions.
+    """
+    try:
+        cutoff = datetime.now(timezone.utc) - _AB_MIN_AGE
+        active_experiments = await pool.fetch(
+            """SELECT id, bot_id, name
+               FROM experiments
+               WHERE status = 'active'
+                 AND COALESCE(started_at, created_at) <= $1""",
+            cutoff,
+        )
+        if not active_experiments:
+            return
+        log.debug("AB winner sweep: checking %d experiments", len(active_experiments))
+        for exp in active_experiments:
+            try:
+                winner_id = await db.check_experiment_winner(pool, exp["id"])
+                if winner_id:
+                    log.info(
+                        "AB winner declared: experiment %d (bot %d) name=%r winner_variant_id=%d",
+                        exp["id"],
+                        exp["bot_id"],
+                        exp["name"],
+                        winner_id,
+                    )
+            except Exception:
+                log.exception(
+                    "declare_ab_winners: error evaluating experiment %d", exp["id"]
+                )
+    except Exception:
+        log.exception("declare_ab_winners: sweep failed")
