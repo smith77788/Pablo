@@ -438,9 +438,10 @@ async def cb_admin(
             pool, "free_mode", "true" if actual_state else "false"
         )
         if new_state and not actual_state:
-            await callback.answer(
-                "Free Mode заблокирован: включите ALLOW_GLOBAL_FREE_MODE=true на сервере.",
-                show_alert=True,
+            await callback.message.answer(
+                "⚠️ Free Mode заблокирован.\n"
+                "Установите переменную <code>ALLOW_GLOBAL_FREE_MODE=true</code> на сервере.",
+                parse_mode="HTML",
             )
         await _show_admin_main(callback, pool, edit=True)
 
