@@ -118,18 +118,19 @@ Deno.serve(async (req) => {
           await callEdge("tribunal-prosecutor", { case_id: k.id });
           log.steps.push("prosecutor");
         }
-        // re-fetch status
-        const { data: k2 } = await supabase.from("tribunal_cases").select("status").eq("id", k.id).single();
+        // re-fetch status — use maybeSingle() so a deleted/expired case
+        // returns null instead of throwing "no rows returned" PGRST116.
+        const { data: k2 } = await supabase.from("tribunal_cases").select("status").eq("id", k.id).maybeSingle();
         if (k2?.status === "prosecuted") {
           await callEdge("tribunal-advocate", { case_id: k.id });
           log.steps.push("advocate");
         }
-        const { data: k3 } = await supabase.from("tribunal_cases").select("status").eq("id", k.id).single();
+        const { data: k3 } = await supabase.from("tribunal_cases").select("status").eq("id", k.id).maybeSingle();
         if (k3?.status === "defended") {
           await callEdge("tribunal-judge", { case_id: k.id });
           log.steps.push("judge");
         }
-        const { data: k4 } = await supabase.from("tribunal_cases").select("status").eq("id", k.id).single();
+        const { data: k4 } = await supabase.from("tribunal_cases").select("status").eq("id", k.id).maybeSingle();
         if (k4?.status === "judged" || k4?.status === "rejected") {
           await callEdge("tribunal-enforcer", { case_id: k.id });
           log.steps.push("enforcer");

@@ -129,7 +129,8 @@ Deno.serve(async (req) => {
           countEvents(ev.product_id!, "add_to_cart", beforeStart, ev.created_at),
           countEvents(ev.product_id!, "product_viewed", ev.created_at, afterEnd),
           countEvents(ev.product_id!, "add_to_cart", ev.created_at, afterEnd),
-          supabase.from("products").select("name").eq("id", ev.product_id!).single(),
+          // maybeSingle() avoids PGRST116 if the product row was deleted
+          supabase.from("products").select("name").eq("id", ev.product_id!).maybeSingle(),
         ]);
 
         const beforeRate = beforeViews > 0 ? beforeAtc / beforeViews : 0;

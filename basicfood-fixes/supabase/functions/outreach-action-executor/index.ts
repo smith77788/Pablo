@@ -129,9 +129,11 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Use maybeSingle() — lead may have been deleted between action creation
+    // and execution; a missing lead should not crash the function.
     const { data: lead } = await sb.from("outreach_leads")
       .select("source_url, source_platform_id, channel, raw_payload")
-      .eq("id", action.lead_id).single();
+      .eq("id", action.lead_id).maybeSingle();
 
     // Створюємо промокод у БД (якщо ще немає) — щоб ROI міг JOIN'ити по orders.promo_code_id
     if (action.promo_code) {

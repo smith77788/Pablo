@@ -121,13 +121,16 @@ Deno.serve(async (req) => {
 
   // Pre-fetch source experiments for all override page_paths in one batch.
   const ovPaths = (overrides ?? []).map((ov) => (ov as OverrideRow).page_path);
-  const { data: expRows } = await supabase
-    .from("seo_experiments")
-    .select("id, page_path")
-    .in("page_path", ovPaths)
-    .eq("status", "winner_b")
-    .is("rolled_back_at", null)
-    .order("decided_at", { ascending: false });
+  // Guard: empty .in() returns ALL rows rather than zero rows.
+  const { data: expRows } = ovPaths.length
+    ? await supabase
+        .from("seo_experiments")
+        .select("id, page_path")
+        .in("page_path", ovPaths)
+        .eq("status", "winner_b")
+        .is("rolled_back_at", null)
+        .order("decided_at", { ascending: false })
+    : { data: [] as any[] };
   // Keep only the most recent experiment per page (first due to descending order).
   const expMap = new Map<string, { id: string }>();
   for (const e of expRows ?? []) {
