@@ -55,7 +55,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
 
-    # Быстрые метрики
+    # Быстрые метрики — каждый запрос независим, ошибка одного не обнуляет остальные
     try:
         acc_total = (
             await pool.fetchval(
@@ -63,6 +63,9 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
+    except Exception:
+        acc_total = 0
+    try:
         floods_24h = (
             await pool.fetchval(
                 """SELECT COUNT(*) FROM account_flood_log fl
@@ -72,8 +75,10 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-        # Считаем завершённые операции из operation_audit (реальные данные)
-        # и добавляем ожидающие в очереди из operation_queue
+    except Exception:
+        floods_24h = 0
+    try:
+        # Завершённые операции из operation_audit (реальные данные)
         ops_audit = (
             await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_audit WHERE owner_id=$1 AND occurred_at > NOW() - INTERVAL '24h'",
@@ -81,6 +86,9 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
+    except Exception:
+        ops_audit = 0
+    try:
         ops_queued = (
             await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW() - INTERVAL '24h'",
@@ -88,7 +96,10 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
-        ops_today = ops_audit + ops_queued
+    except Exception:
+        ops_queued = 0
+    ops_today = ops_audit + ops_queued
+    try:
         warmup_active = (
             await pool.fetchval(
                 """SELECT COUNT(*) FROM account_warmup_plans wp
@@ -98,6 +109,9 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
             or 0
         )
+    except Exception:
+        warmup_active = 0
+    try:
         pool_count = (
             await pool.fetchval(
                 "SELECT COUNT(DISTINCT pool) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL",
@@ -106,7 +120,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             or 0
         )
     except Exception:
-        acc_total = floods_24h = ops_today = warmup_active = pool_count = 0
+        pool_count = 0
 
     # Infrastructure Pressure Score
     pressure = await infra_pressure.compute_pressure(pool, uid)
