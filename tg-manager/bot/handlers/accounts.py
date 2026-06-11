@@ -3701,14 +3701,6 @@ async def _do_batch_import(
                         "Ошибка привязки кластера при батч-импорте аккаунта",
                         account_id=acc_id,
                     )
-            name = (
-                info.get("first_name")
-                or info.get("username")
-                or phone
-                or f"сессия #{i + 1}"
-            )
-            suffix = f" [{cluster}]" if cluster else ""
-            ok_list.append(f"✅ {escape(name[:35])}{suffix}")
         except Exception as e:
             err_list.append(f"❌ Сессия #{i + 1}: {escape(str(e)[:60])}")
 
