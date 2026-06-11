@@ -215,9 +215,40 @@ async def get_healthy_proxies(
 async def check_proxy_health(proxy_url: str, action_type: str = "default") -> dict:
     """Вернуть сводку состояния конкретного прокси.
 
-    Возвращает: {proxy_url, score, status: 'good'|'degraded'|'bad'|'unknown'}
+    Если in-memory score нейтральный (новый прокси без истории операций),
+    выполняет реальную проверку подключения к api.telegram.org.
+
+    Возвращает: {proxy_url, score, status: 'good'|'degraded'|'bad'|'unknown', latency_ms?}
     """
     score = get_proxy_score(proxy_url, action_type)
+    latency_ms: int | None = None
+
+    # Neutral score (0.5) means no history — do a real connectivity test
+    if score == 0.5 and proxy_url:
+        try:
+            import time as _time
+            import aiohttp
+            import importlib as _il
+
+            socks_module = _il.import_module("aiohttp_socks")
+            ProxyConnector = getattr(socks_module, "ProxyConnector")
+            connector = ProxyConnector.from_url(proxy_url)
+            t0 = _time.monotonic()
+            async with aiohttp.ClientSession(connector=connector) as _sess:
+                async with _sess.get(
+                    "https://api.telegram.org",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                    ssl=False,
+                ) as resp:
+                    latency_ms = int((_time.monotonic() - t0) * 1000)
+                    alive = resp.status < 500
+            # Record real result in infra_memory so future calls use it
+            record_proxy_result(proxy_url, action_type, alive, latency_ms=float(latency_ms))
+            score = get_proxy_score(proxy_url, action_type)
+        except Exception:
+            record_proxy_result(proxy_url, action_type, False)
+            score = get_proxy_score(proxy_url, action_type)
+
     if score >= 0.65:
         status = "good"
     elif score >= 0.4:
@@ -226,4 +257,8 @@ async def check_proxy_health(proxy_url: str, action_type: str = "default") -> di
         status = "bad"
     else:
         status = "unknown"
-    return {"proxy_url": proxy_url, "score": score, "status": status}
+
+    result: dict = {"proxy_url": proxy_url, "score": score, "status": status}
+    if latency_ms is not None:
+        result["latency_ms"] = latency_ms
+    return result

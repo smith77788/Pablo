@@ -1614,6 +1614,23 @@ async def cb_channels(
                 parse_mode="HTML",
                 reply_markup=_acc_menu_markup(callback_data.acc_id),
             )
+        elif any(
+            x in err.upper()
+            for x in ("AUTH_KEY", "SESSION_REVOKED", "USER_DEACTIVATED")
+        ) or any(
+            x in err.lower()
+            for x in ("auth_key", "registered in the system", "key is not registered")
+        ):
+            await db.update_acc_status(
+                pool, callback_data.acc_id, "session_expired",
+                "Ключ сессии отозван Telegram"
+            )
+            await callback.message.edit_text(
+                "🔑 <b>Сессия истекла</b>\n\n"
+                "Ключ аккаунта отозван Telegram — удалите и добавьте заново.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
         else:
             await callback.message.edit_text(
                 f"❌ Не удалось получить список диалогов:\n"
@@ -2529,12 +2546,62 @@ async def cb_dialogs_stats(
                 parse_mode="HTML",
                 reply_markup=_acc_menu_markup(callback_data.acc_id),
             )
+        elif any(
+            x in err.upper()
+            for x in ("AUTH_KEY", "SESSION_REVOKED", "USER_DEACTIVATED")
+        ) or any(
+            x in err.lower()
+            for x in ("auth_key", "registered in the system", "key is not registered")
+        ):
+            await db.update_acc_status(
+                pool, callback_data.acc_id, "session_expired",
+                "Ключ сессии отозван Telegram"
+            )
+            await callback.message.edit_text(
+                "🔑 <b>Сессия истекла</b>\n\n"
+                "Ключ аккаунта отозван Telegram — требуется переавторизация.\n"
+                "Удалите аккаунт и добавьте заново.",
+                parse_mode="HTML",
+                reply_markup=_acc_menu_markup(callback_data.acc_id),
+            )
         else:
             await callback.message.edit_text(
                 f"❌ Не удалось получить статистику:\n<code>{escape(err[:200])}</code>",
                 parse_mode="HTML",
                 reply_markup=_acc_menu_markup(callback_data.acc_id),
             )
+        return
+
+    # Check if the service returned a structured error
+    if stats.get("session_dead"):
+        await db.update_acc_status(
+            pool, callback_data.acc_id, "session_expired",
+            "Ключ сессии отозван Telegram"
+        )
+        await callback.message.edit_text(
+            "🔑 <b>Сессия истекла</b>\n\n"
+            "Ключ аккаунта отозван Telegram — требуется переавторизация.",
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
+        return
+
+    error_key = stats.get("error", "")
+    if error_key and error_key not in ("", None) and stats.get("total", 0) == 0:
+        # Network or timeout error — show friendly message
+        if error_key == "timeout":
+            msg = "⏳ Таймаут подключения — возможно, прокси недоступен."
+        elif error_key == "network":
+            msg = "❌ Ошибка сети — проверьте прокси аккаунта."
+        elif error_key == "no_session":
+            msg = "⚠️ Сессия отсутствует — добавьте аккаунт заново."
+        else:
+            msg = f"❌ Ошибка: <code>{escape(error_key[:100])}</code>"
+        await callback.message.edit_text(
+            msg,
+            parse_mode="HTML",
+            reply_markup=_acc_menu_markup(callback_data.acc_id),
+        )
         return
 
     await callback.message.edit_text(

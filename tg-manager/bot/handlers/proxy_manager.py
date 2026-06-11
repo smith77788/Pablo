@@ -101,26 +101,27 @@ async def _check_proxy_alive(proxy_url: str) -> dict:
 
 
 async def _detect_proxy_geo(proxy_url: str) -> dict:
-    """Attempt to detect geo country/city via ip-api.com through the proxy."""
+    """Attempt to detect geo country/city via ip-api.com through the proxy.
+
+    Works for both auth and no-auth proxy URLs:
+      socks5://user:pass@1.2.3.4:1080
+      socks5://1.2.3.4:1080
+    Uses the proxy's external IP (from ip-api.com) rather than extracting from URL,
+    so the geo reflects actual egress location even for hostname-based proxies.
+    """
     try:
         import aiohttp
 
         socks_module = importlib.import_module("aiohttp_socks")
         ProxyConnector = cast(Any, getattr(socks_module, "ProxyConnector"))
 
-        # Extract IP from proxy URL for geo lookup
-        import re
-
-        m = re.search(r"[@/](\d+\.\d+\.\d+\.\d+)[:$]", proxy_url)
-        if not m:
-            return {}
-        ip = m.group(1)
-
         connector = ProxyConnector.from_url(proxy_url)
         async with aiohttp.ClientSession(connector=connector) as session:
+            # ip-api.com without an IP argument returns geo for the caller's IP,
+            # which — routed through the proxy — is the proxy's egress IP.
             async with session.get(
-                f"http://ip-api.com/json/{ip}?fields=country,city",
-                timeout=aiohttp.ClientTimeout(total=8),
+                "http://ip-api.com/json/?fields=country,city,query",
+                timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()

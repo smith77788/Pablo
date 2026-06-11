@@ -1045,6 +1045,26 @@ async def get_dialogs(
         _record_proxy_fail(_acc, "dialogs")
         log.warning("get_dialogs: network error (proxy?): %s", e)
         return []
+    except Exception as e:
+        from telethon.errors import (
+            AuthKeyUnregisteredError,
+            SessionRevokedError,
+            UserDeactivatedBanError,
+            UserDeactivatedError,
+        )
+        if isinstance(
+            e,
+            (AuthKeyUnregisteredError, SessionRevokedError,
+             UserDeactivatedBanError, UserDeactivatedError),
+        ) or is_dead_session_error(str(e)):
+            log.warning(
+                "get_dialogs: dead session acc=%s — %s",
+                (_acc or {}).get("id", "?"),
+                type(e).__name__,
+            )
+            raise  # re-raise so callers can mark account as session_expired
+        log.exception("get_dialogs error: %s", e)
+        return []
     finally:
         try:
             await client.disconnect()
@@ -1128,13 +1148,44 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
 async def send_message_via_account(
     session_string: str, chat_id: int, text: str, _acc: dict | None = None
 ) -> bool:
-    """Отправляет сообщение через личный аккаунт. Возвращает True при успехе."""
+    """Отправляет сообщение через личный аккаунт. Возвращает True при успехе.
+
+    Raises FloodWaitError, AuthKeyUnregisteredError, SessionRevokedError so callers
+    can apply cooldowns or mark the account dead.  All other errors return False.
+    """
+    from telethon.errors import (
+        FloodWaitError,
+        AuthKeyUnregisteredError,
+        SessionRevokedError,
+        UserDeactivatedBanError,
+        UserDeactivatedError,
+    )
+
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
-        await client.send_message(chat_id, text)
+        await asyncio.wait_for(client.send_message(chat_id, text), timeout=_OP_TIMEOUT)
         return True
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "send_message")
+        log.warning(
+            "send_message_via_account: timeout acc=%s", (_acc or {}).get("id", "?")
+        )
+        return False
+    except FloodWaitError:
+        # Re-raise so the caller can apply a proper cooldown
+        raise
+    except (
+        AuthKeyUnregisteredError,
+        SessionRevokedError,
+        UserDeactivatedBanError,
+        UserDeactivatedError,
+    ):
+        # Re-raise dead-session errors so callers can deactivate the account
+        raise
     except Exception as e:
+        if is_dead_session_error(str(e)):
+            raise AuthKeyUnregisteredError(request=None) from e
         log.exception("send_message error: %s", e)
         return False
     finally:
@@ -1207,6 +1258,8 @@ async def get_account_dialogs_stats(
     session_string: str, _acc: dict | None = None
 ) -> dict:
     """Возвращает статистику диалогов: всего, каналов, групп, личных чатов."""
+    if not session_string:
+        return {"total": 0, "channels": 0, "groups": 0, "personal": 0, "error": "no_session"}
     from telethon.tl.types import Channel, Chat, User
 
     client = _make_client(session_string, _acc)
@@ -1234,6 +1287,38 @@ async def get_account_dialogs_stats(
             "groups": groups,
             "personal": personal,
         }
+    except asyncio.TimeoutError:
+        _record_proxy_fail(_acc, "dialogs_stats")
+        log.warning("get_account_dialogs_stats: connect timeout — proxy may be dead")
+        return {"total": 0, "channels": 0, "groups": 0, "personal": 0, "error": "timeout"}
+    except (OSError, ConnectionError) as e:
+        _record_proxy_fail(_acc, "dialogs_stats")
+        log.warning("get_account_dialogs_stats: network error: %s", e)
+        return {"total": 0, "channels": 0, "groups": 0, "personal": 0, "error": "network"}
+    except Exception as e:
+        from telethon.errors import (
+            AuthKeyUnregisteredError,
+            SessionRevokedError,
+            UserDeactivatedBanError,
+            UserDeactivatedError,
+        )
+        if isinstance(
+            e,
+            (AuthKeyUnregisteredError, SessionRevokedError,
+             UserDeactivatedBanError, UserDeactivatedError),
+        ) or is_dead_session_error(str(e)):
+            log.warning(
+                "get_account_dialogs_stats: dead session acc=%s — %s",
+                (_acc or {}).get("id", "?"),
+                type(e).__name__,
+            )
+            return {
+                "total": 0, "channels": 0, "groups": 0, "personal": 0,
+                "error": "session_dead",
+                "session_dead": True,
+            }
+        log.exception("get_account_dialogs_stats error: %s", e)
+        return {"total": 0, "channels": 0, "groups": 0, "personal": 0, "error": str(e)[:80]}
     finally:
         try:
             await client.disconnect()
