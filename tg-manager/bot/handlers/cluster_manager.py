@@ -229,27 +229,42 @@ async def fsm_cluster_name(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(ClustMCb.filter(F.action == "skip_desc"))
-async def cb_skip_desc(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_skip_desc(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await callback.answer()
     data = await state.get_data()
     name = data.get("cluster_name", "")
-    await _finish_cluster_create(callback.message, name)
+    await _finish_cluster_create(callback.message, name, pool, callback.from_user.id)
     await state.clear()
 
 
 @router.message(CreateClusterFSM.waiting_description)
-async def fsm_cluster_desc(message: Message, state: FSMContext) -> None:
+async def fsm_cluster_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     name = data.get("cluster_name", "")
-    await _finish_cluster_create(message, name)
+    await _finish_cluster_create(message, name, pool, message.from_user.id)
     await state.clear()
 
 
-async def _finish_cluster_create(message: Message, cluster_name: str) -> None:
+async def _finish_cluster_create(
+    message: Message, cluster_name: str, pool: asyncpg.Pool, owner_id: int
+) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="📋 Мои кластеры", callback_data=ClustMCb(action="list"))
     kb.button(text="🏠 Меню кластеров", callback_data=ClustMCb(action="menu"))
     kb.adjust(1)
+
+    # Persist the cluster to the database so it can be listed/used later.
+    try:
+        await pool.execute(
+            """INSERT INTO clusters (owner_id, name)
+               VALUES ($1, $2)
+               ON CONFLICT (owner_id, name) DO NOTHING""",
+            owner_id,
+            cluster_name,
+        )
+    except Exception:
+        log_exc_swallow(log, "_finish_cluster_create: DB insert failed")
+
     await message.answer(
         f"✅ Кластер <b>{cluster_name}</b> создан.\n\n"
         "Назначьте ботов через раздел <b>Мои боты</b>.",
