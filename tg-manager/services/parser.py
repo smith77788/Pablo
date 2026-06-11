@@ -92,7 +92,7 @@ async def _save_users(
                        is_premium, is_bot, parsed_at
                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
                    ON CONFLICT (owner_id, source_id, tg_user_id) DO UPDATE
-                   SET username=$8, first_name=$9, last_name=$10,
+                   SET parse_run_id=$6, username=$8, first_name=$9, last_name=$10,
                        is_premium=$11, parsed_at=NOW()""",
                 owner_id,
                 source_type,
