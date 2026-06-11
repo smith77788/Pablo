@@ -26,6 +26,7 @@ _ACTION_BASELINES: dict[str, float] = {
     "join": 55.0,
     "leave": 35.0,
     "invite": 90.0,
+    "strike": 240.0,  # Strike is the most intensive op — long inter-action baseline
     "message": 12.0,
     "mass_publish": 14.0,
 }
@@ -37,6 +38,7 @@ _ACTION_MIN_TRUST: dict[str, float] = {
     "join": 0.35,
     "create_channel": 0.35,
     "create_bot": 0.35,
+    "strike": 0.30,  # Strike is heavy — require at least basic trust to protect accounts
     "mass_publish": 0.25,
     "post": 0.25,
     "parse": 0.20,
