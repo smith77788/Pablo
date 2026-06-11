@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-import time
 
 import asyncpg
 from aiogram import F, Router
@@ -449,77 +448,9 @@ async def cb_mpub_confirm_send(
         )
 
 
-async def _mpub_bg(
-    bot, user_id: int, progress_msg, pairs: list, post_text: str, delay_s: int
-) -> None:
-    import random
-    from services import account_manager
-
-    ok = 0
-    err = 0
-    forbidden_count = 0
-    total = len(pairs)
-    start_ts = time.monotonic()
-    try:
-        for idx, (acc, ch) in enumerate(pairs, 1):
-            ch_id = ch["id"]
-            access_hash = ch.get("access_hash", 0) or 0
-            result = await account_manager.post_to_channel(
-                acc["session_str"], ch_id, post_text, access_hash=access_hash, _acc=acc
-            )
-            if result.get("banned") or "error" in result:
-                err += 1
-                if result.get("banned"):
-                    forbidden_count += 1
-            else:
-                ok += 1
-
-            try:
-                await progress_msg.edit_text(
-                    _progress_text_base("Публикация...", idx, total, ok, err),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "сбой progress_msg.edit_text в _mpub_bg")
-
-            if idx < total:
-                actual_delay = random.uniform(30, 90) if delay_s < 0 else delay_s
-                await asyncio.sleep(actual_delay)
-
-        elapsed = time.monotonic() - start_ts
-        hint = ""
-        if forbidden_count > 0:
-            hint = f"\n\n⚠️ <i>{forbidden_count} канал(ов) — нет прав публикации.</i>"
-        await progress_msg.edit_text(
-            f"📤 <b>Публикация завершена</b>\n\n"
-            f"✅ Успешно: {ok} каналов\n"
-            f"❌ Ошибки: {err} канал(ов)"
-            f"{hint}\n"
-            f"⏱️ Время: {_format_duration(elapsed)}",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
-    except asyncio.CancelledError as _ce:
-        _is_user = bool(_ce.args and _ce.args[0] == "user_requested")
-        _pub_msg = (
-            f"📤 <b>Публикация отменена</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}"
-            if _is_user
-            else f"📤 <b>Публикация прервана (перезапуск)</b>\n\n✅ Успешно: {ok}  ❌ Ошибок: {err}\n\n<i>Повторите операцию.</i>"
-        )
-        try:
-            await bot.send_message(user_id, _pub_msg, parse_mode="HTML")
-        except Exception:
-            log_exc_swallow(log, "сбой send_message при отмене публикации")
-    except Exception as exc:
-        log.exception("_mpub_bg error user=%s: %s", user_id, exc)
-        try:
-            await bot.send_message(
-                user_id,
-                f"⚠️ Ошибка публикации: {html.escape(str(exc)[:200])}",
-                parse_mode="HTML",
-            )
-        except Exception:
-            log_exc_swallow(log, "сбой send_message при ошибке публикации")
+# NOTE: _mpub_bg was removed — it was dead code.
+# Actual publishing is executed by op_worker._exec_mass_publish via the operation queue.
+# The queue path: confirm_send → operation_bus.submit → op_worker picks up → _exec_mass_publish
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -63,10 +63,18 @@ async def _process_bot(
     operator_id: int,
 ) -> None:
     try:
+        # Absence from _offsets means "not yet initialised for this relay session".
+        # We must NOT use 0 as "not initialised" because 0 is a valid state
+        # (anchor at beginning) and would cause an infinite loop when a bot has
+        # no pending updates: every cycle would re-enter the first-run branch.
+        initialized = bot_id in _offsets
         offset = _offsets.get(bot_id, 0)
 
-        if offset == 0:
-            # First run — skip old updates
+        if not initialized:
+            # First run — anchor at the current update_id so we skip messages that
+            # arrived before relay was enabled.  If the queue is empty we set
+            # offset to 0 (nothing to skip), which is safe: the next call with
+            # offset=1 will ask for updates after id=0, i.e. all new messages.
             data = await bot_api._call(
                 http, token, "getUpdates", offset=-1, limit=1, timeout=0
             )
