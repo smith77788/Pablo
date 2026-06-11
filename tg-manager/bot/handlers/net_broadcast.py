@@ -368,6 +368,8 @@ async def cb_net_bc_confirm(
 
     total_started = 0
     total_users = 0
+    # Stagger per-bot broadcast start by 2 s to avoid thundering-herd on Telegram.
+    _BOT_START_DELAY_S = 2.0
 
     if segment in ("all_each", "selected_bots"):
         for bot in bots:
@@ -399,6 +401,7 @@ async def cb_net_bc_confirm(
                     None,
                     ids,
                     None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
                 )
                 total_started += 1
                 total_users += len(ids)
@@ -419,7 +422,16 @@ async def cb_net_bc_confirm(
             if not bc_id:
                 continue
             broadcaster.start(
-                pool, http, bc_id, token_map[bot_id], bot_id, text, None, ids, None
+                pool,
+                http,
+                bc_id,
+                token_map[bot_id],
+                bot_id,
+                text,
+                None,
+                ids,
+                None,
+                start_delay=total_started * _BOT_START_DELAY_S,
             )
             total_started += 1
             total_users += len(ids)
@@ -447,6 +459,7 @@ async def cb_net_bc_confirm(
                     None,
                     ids,
                     None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
                 )
                 total_started += 1
                 total_users += len(ids)
@@ -483,6 +496,7 @@ async def cb_net_bc_confirm(
                     None,
                     ids,
                     None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
                 )
                 total_started += 1
                 total_users += len(ids)

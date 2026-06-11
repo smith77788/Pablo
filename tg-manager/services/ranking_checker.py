@@ -47,6 +47,7 @@ async def check_bot_keywords(
     pool: asyncpg.Pool,
     bot_id: int,
     owner_id: int,
+    bot: "Bot | None" = None,
 ) -> list[dict[str, Any]]:
     """Check all active keywords for a bot immediately.
 
@@ -179,7 +180,7 @@ async def check_bot_keywords(
                 log.debug("position_history insert skipped: %s", exc)
             # Check visibility alerts
             await _check_visibility_alerts(
-                pool, bot_id, kw["keyword"], ui_position, owner_id
+                pool, bot_id, kw["keyword"], ui_position, owner_id, bot
             )
 
         results_out.append(

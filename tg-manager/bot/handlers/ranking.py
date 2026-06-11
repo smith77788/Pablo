@@ -641,7 +641,7 @@ async def cb_rank_check_all(
     try:
         from services import ranking_checker
 
-        results = await ranking_checker.check_bot_keywords(pool, bot_id, owner_id)
+        results = await ranking_checker.check_bot_keywords(pool, bot_id, owner_id, callback.bot)
     except ImportError:
         log.warning("ranking_checker service not available")
         await safe_edit(

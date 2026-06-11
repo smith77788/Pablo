@@ -43,8 +43,8 @@ def invalidate_plan_cache(user_id: int) -> None:
 
 
 PLAN_LEVELS: dict[str, int] = {"free": 0, "paid": 1}
-BOT_LIMITS: dict[str, int] = {"free": 1, "paid": 9999}
-CHANNEL_LIMITS: dict[str, int] = {"free": 1, "paid": 9999}
+BOT_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
+CHANNEL_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
 PLAN_PRICES = {"paid": "$29"}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
 PLAN_FEATURES = {

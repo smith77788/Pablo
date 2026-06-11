@@ -58,7 +58,13 @@ async def run(
     photo_file_id: str | None = None,
     user_ids: list[int] | None = None,
     buttons: list[dict] | None = None,
+    start_delay: float = 0.0,
 ) -> None:
+    # Stagger start across multiple concurrent broadcasts (e.g. network broadcast)
+    # so they don't all hammer Telegram at the same instant.
+    if start_delay > 0:
+        await asyncio.sleep(start_delay)
+
     if user_ids is None:
         user_ids = await db.get_audience_user_ids(pool, bot_id)
 
@@ -90,6 +96,10 @@ async def run(
 
     sent = len(already_sent)
     failed = 0
+    # How often to flush progress to DB so the UI shows real-time progress.
+    # 50 means every 50 successful sends we update sent_count in broadcasts table.
+    _PROGRESS_FLUSH_INTERVAL = 50
+    _since_last_flush = 0
     try:
         await db.update_broadcast(pool, broadcast_id, sent, 0, "running")
     except Exception as _e:
@@ -143,6 +153,7 @@ async def run(
             )
         if success:
             sent += 1
+            _since_last_flush += 1
             # Log delivery immediately so a crash can resume from here
             try:
                 await db.log_broadcast_delivery(pool, broadcast_id, uid)
@@ -153,6 +164,18 @@ async def run(
                     uid,
                     _e,
                 )
+            # Periodically flush progress to DB so the broadcast history shows
+            # real-time progress instead of staying at 0/N until completion.
+            if _since_last_flush >= _PROGRESS_FLUSH_INTERVAL:
+                _since_last_flush = 0
+                try:
+                    await db.update_broadcast(pool, broadcast_id, sent, failed, "running")
+                except Exception as _fe:
+                    logger.debug(
+                        "Broadcast %d: progress flush failed (non-fatal): %s",
+                        broadcast_id,
+                        _fe,
+                    )
         else:
             failed += 1
             if retry_after:
@@ -173,6 +196,7 @@ async def run(
                 if ok:
                     sent += 1
                     failed -= 1
+                    _since_last_flush += 1
                     try:
                         await db.log_broadcast_delivery(pool, broadcast_id, uid)
                     except Exception as _e:
@@ -242,6 +266,7 @@ def start(
     photo_file_id: str | None = None,
     user_ids: list[int] | None = None,
     buttons: list[dict] | None = None,
+    start_delay: float = 0.0,
 ) -> None:
     task = asyncio.create_task(
         run(
@@ -254,6 +279,7 @@ def start(
             photo_file_id,
             user_ids,
             buttons,
+            start_delay,
         ),
         name=f"broadcast-{broadcast_id}",
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import asyncpg
 from aiogram import F, Router
@@ -100,6 +101,35 @@ async def msg_error_screenshot(
             f"Я проанализирую его и если нужна дополнительная информация — свяжусь с вами."
         )
         await message.answer(text)
+
+        # Notify all admins about the new error report
+        user = message.from_user
+        user_label = (
+            f"@{user.username}" if user.username else user.first_name or str(user.id)
+        )
+        admin_notify = (
+            f"🐛 <b>Новый отчёт об ошибке #{report_id}</b>\n\n"
+            f"От: {user_label} (<code>{user.id}</code>)\n"
+            f"Описание: {description[:300]}"
+        )
+        admin_ids_raw = os.getenv("ADMIN_IDS", "")
+        admin_ids = [
+            int(x.strip()) for x in admin_ids_raw.split(",") if x.strip().isdigit()
+        ]
+        for admin_id in admin_ids:
+            try:
+                # Forward screenshot to admin with caption
+                await message.bot.send_photo(
+                    admin_id,
+                    file_id,
+                    caption=admin_notify,
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log_exc_swallow(
+                    log,
+                    f"error_report: failed to notify admin {admin_id} about report #{report_id}",
+                )
     except Exception as e:
         log_exc_swallow(log, f"Ошибка сохранения отчёта об ошибке: {e}")
         await message.answer(
