@@ -70,6 +70,45 @@ async def run_once(pool: asyncpg.Pool) -> dict[str, int]:
             log.warning("db_maintenance: failed to prune %s: %s", table, e)
             results[table] = -1
 
+    # Orphaned infra_memory rows — rows whose account/proxy no longer exists.
+    # infra_memory_accounts has no FK to tg_accounts, so deleted accounts leave
+    # dangling rows. Clean them up; also prune rows inactive for >90 days.
+    try:
+        deleted = await pool.fetchval(
+            "WITH d AS (DELETE FROM infra_memory_accounts "
+            "WHERE NOT EXISTS (SELECT 1 FROM tg_accounts WHERE id = infra_memory_accounts.account_id) "
+            "   OR updated_at < NOW() - INTERVAL '90 days' "
+            "RETURNING 1) "
+            "SELECT COUNT(*) FROM d"
+        )
+        n = int(deleted or 0)
+        results["infra_memory_accounts(orphan)"] = n
+        if n:
+            log.info(
+                "db_maintenance: pruned %d orphaned/stale rows from infra_memory_accounts", n
+            )
+    except Exception as e:
+        log.warning("db_maintenance: failed to prune infra_memory_accounts: %s", e)
+        results["infra_memory_accounts(orphan)"] = -1
+
+    try:
+        deleted = await pool.fetchval(
+            "WITH d AS (DELETE FROM infra_memory_proxies "
+            "WHERE NOT EXISTS (SELECT 1 FROM user_proxies WHERE proxy_url = infra_memory_proxies.proxy_url) "
+            "   OR updated_at < NOW() - INTERVAL '90 days' "
+            "RETURNING 1) "
+            "SELECT COUNT(*) FROM d"
+        )
+        n = int(deleted or 0)
+        results["infra_memory_proxies(orphan)"] = n
+        if n:
+            log.info(
+                "db_maintenance: pruned %d orphaned/stale rows from infra_memory_proxies", n
+            )
+    except Exception as e:
+        log.warning("db_maintenance: failed to prune infra_memory_proxies: %s", e)
+        results["infra_memory_proxies(orphan)"] = -1
+
     # Completed operation_queue entries — but only if operation_log entries are
     # also gone (FK safety: operation_log.op_id refs operation_queue.id).
     # We prune operation_log first (above), then queue entries.

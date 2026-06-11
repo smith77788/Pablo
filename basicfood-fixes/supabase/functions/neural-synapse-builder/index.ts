@@ -228,15 +228,18 @@ Deno.serve(async (req) => {
 
     let pathwaysCreated = 0;
     if (candidatePaths.length > 0) {
-      const { data: existingPaths } = await sb
+      const pathNames = candidatePaths.map((p) => p.name);
+      const { data: existingPaths, error: pathFetchErr } = await sb
         .from("agent_neural_pathways")
         .select("name")
-        .in("name", candidatePaths.map((p) => p.name));
+        .in("name", pathNames);
+      if (pathFetchErr) console.warn("[synapse-builder] pathway fetch failed:", pathFetchErr.message);
       const existingNames = new Set((existingPaths ?? []).map((p: any) => p.name as string));
       const newPaths = candidatePaths.filter((p) => !existingNames.has(p.name));
       if (newPaths.length > 0) {
-        await sb.from("agent_neural_pathways").insert(newPaths);
-        pathwaysCreated = newPaths.length;
+        const { error: pathInsertErr } = await sb.from("agent_neural_pathways").insert(newPaths);
+        if (pathInsertErr) console.warn("[synapse-builder] pathway insert failed:", pathInsertErr.message);
+        else pathwaysCreated = newPaths.length;
       }
     }
 

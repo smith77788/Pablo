@@ -1529,11 +1529,19 @@ async def sync_ecosystem_members(
                     ok_count += 1
 
             elif otype in ("channel", "group"):
+                # Channels are added from managed_channels (channel_id); check there first,
+                # then fall back to tg_channels so both sources work correctly.
                 row = await pool.fetchrow(
-                    "SELECT id FROM tg_channels WHERE id=$1 AND owner_id=$2",
+                    "SELECT 1 FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
                     oid,
                     owner_id,
                 )
+                if not row:
+                    row = await pool.fetchrow(
+                        "SELECT id FROM tg_channels WHERE id=$1 AND owner_id=$2",
+                        oid,
+                        owner_id,
+                    )
                 if not row:
                     removed_count += 1
                     await pool.execute(

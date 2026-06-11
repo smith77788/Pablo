@@ -422,6 +422,7 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
     чтобы восстановить learned patterns после рестарта бота.
     Не перезаписывает уже накопленные in-memory данные.
     """
+    # --- аккаунты ---
     try:
         rows = await pool.fetch(
             """SELECT account_id, action_type,
@@ -453,10 +454,44 @@ async def load_all_from_db(pool: asyncpg.Pool) -> None:
             )
             _account_memory[key] = rec
             loaded += 1
-        log.info("infra_memory: loaded %d records from DB on startup", loaded)
+        log.info("infra_memory: loaded %d account records from DB on startup", loaded)
     except Exception as e:
         # Таблица может не существовать до первой миграции — это нормально
-        log.info("infra_memory: load_all_from_db skipped (%s)", type(e).__name__)
+        log.info("infra_memory: load_all_from_db accounts skipped (%s)", type(e).__name__)
+
+    # --- прокси ---
+    try:
+        proxy_rows = await pool.fetch(
+            """SELECT proxy_url, action_type,
+                      successes, failures,
+                      avg_latency_ms,
+                      EXTRACT(EPOCH FROM last_success_at) as last_success_ts,
+                      EXTRACT(EPOCH FROM last_failure_at) as last_failure_ts
+               FROM infra_memory_proxies
+               WHERE successes + failures > 0"""
+        )
+        loaded_proxies = 0
+        for row in proxy_rows:
+            key = (row["proxy_url"], row["action_type"])
+            if key in _proxy_memory:
+                continue  # не перетирать свежие in-memory данные
+            rec = _ProxyRecord(
+                proxy_url=row["proxy_url"],
+                action_type=row["action_type"],
+                successes=row["successes"] or 0,
+                failures=row["failures"] or 0,
+                avg_latency_ms=float(row["avg_latency_ms"] or 0),
+                last_success_at=float(row["last_success_ts"] or 0),
+                last_failure_at=float(row["last_failure_ts"] or 0),
+            )
+            _proxy_memory[key] = rec
+            loaded_proxies += 1
+        if loaded_proxies:
+            log.info(
+                "infra_memory: loaded %d proxy records from DB on startup", loaded_proxies
+            )
+    except Exception as e:
+        log.info("infra_memory: load_all_from_db proxies skipped (%s)", type(e).__name__)
 
 
 async def run_flush_loop(pool: asyncpg.Pool) -> None:

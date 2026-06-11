@@ -74,44 +74,50 @@ Deno.serve(async (req) => {
   const title = "Замовлення прибуває завтра 🎉";
   const body = "Підготуйте місце для коробки і смаколики чекатимуть свого героя.";
 
-  // Parallel: insert notification + send push for each qualifying order
-  const results = await Promise.all(toNotify.map(async (o) => {
-    const { error: nErr } = await supabase.from("notifications").insert({
-      user_id: o.user_id,
-      type: "delivery_eta",
-      title,
-      message: body,
-      reference_id: o.id,
-    });
-    if (nErr) return { notified: false, pushed: false };
-
-    let pushOk = false;
-    try {
-      const pushRes = await fetch(`${SUPABASE_URL}/functions/v1/send-web-push`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-cron-secret": CRON_SECRET,
-          Authorization: `Bearer ${SERVICE_ROLE}`,
-        },
-        body: JSON.stringify({
+  // Batch insert all notifications in one query
+  const { error: batchNotifErr } = toNotify.length > 0
+    ? await supabase.from("notifications").insert(
+        toNotify.map((o) => ({
           user_id: o.user_id,
+          type: "delivery_eta",
           title,
-          body,
-          url: `/profile?tab=orders&order=${o.id}`,
-          tag: `delivery-eta-${o.id}`,
-          campaign: "delivery_eta",
+          message: body,
           reference_id: o.id,
-        }),
-      });
-      pushOk = pushRes.ok;
-    } catch {/* ignore */}
+        })),
+      )
+    : { error: null };
 
-    return { notified: true, pushed: pushOk };
-  }));
+  const notified = batchNotifErr ? 0 : toNotify.length;
+  if (batchNotifErr) {
+    console.error("[delivery-eta-reminder] batch notif insert failed:", batchNotifErr.message);
+  }
 
-  const notified = results.filter((r) => r.notified).length;
-  const pushed = results.filter((r) => r.pushed).length;
+  // Parallel best-effort web pushes (non-critical — isolated failures don't block)
+  let pushed = 0;
+  if (!batchNotifErr && toNotify.length > 0) {
+    const pushResults = await Promise.allSettled(
+      toNotify.map((o) =>
+        fetch(`${SUPABASE_URL}/functions/v1/send-web-push`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-cron-secret": CRON_SECRET,
+            Authorization: `Bearer ${SERVICE_ROLE}`,
+          },
+          body: JSON.stringify({
+            user_id: o.user_id,
+            title,
+            body,
+            url: `/profile?tab=orders&order=${o.id}`,
+            tag: `delivery-eta-${o.id}`,
+            campaign: "delivery_eta",
+            reference_id: o.id,
+          }),
+        }).then((r) => r.ok).catch(() => false),
+      ),
+    );
+    pushed = pushResults.filter((r) => r.status === "fulfilled" && r.value).length;
+  }
 
   return new Response(
     JSON.stringify({ ok: true, scanned: orderList.length, notified, pushed, skipped }),

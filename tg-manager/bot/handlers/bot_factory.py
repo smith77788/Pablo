@@ -190,7 +190,7 @@ async def msg_import_tokens(
 
 @router.callback_query(BotFactCb.filter(F.action == "import_save"))
 async def cb_import_save(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -199,6 +199,7 @@ async def cb_import_save(
 
     saved = 0
     skipped = 0
+    saved_bots: list[dict] = []
     for bot_info in valid_bots:
         ok = await db.add_bot(
             pool,
@@ -210,10 +211,31 @@ async def cb_import_save(
         )
         if ok:
             saved += 1
+            saved_bots.append(bot_info)
         else:
             skipped += 1
 
     await state.clear()
+
+    # Configure newly saved bots via Bot API: delete any stale webhook so the
+    # bot works in polling/long-polling mode used by BotMother.  Also apply a
+    # default command list so BotFather's menu is populated.
+    _DEFAULT_COMMANDS = [
+        {"command": "start", "description": "Запустить бота"},
+        {"command": "help", "description": "Помощь"},
+    ]
+    for bot_info in saved_bots:
+        token = bot_info.get("token", "")
+        if not token:
+            continue
+        try:
+            await bot_api.delete_webhook(http, token)
+        except Exception:
+            log.debug("import_save: delete_webhook failed for bot %s", bot_info.get("id"))
+        try:
+            await bot_api.set_my_commands(http, token, _DEFAULT_COMMANDS)
+        except Exception:
+            log.debug("import_save: set_my_commands failed for bot %s", bot_info.get("id"))
 
     # EPOCH III: add saved bots to most recent active ecosystem
     eco_added = 0
@@ -224,14 +246,14 @@ async def cb_import_save(
             ecos = await _eb.list_ecosystems(pool, user_id)
             if ecos:
                 eco_id = ecos[0]["id"]
-                for bot_info in valid_bots:
+                for bot_info in saved_bots:
                     ok = await _eb.add_member(
                         pool, eco_id, user_id, "bot", bot_info["id"]
                     )
                     if ok:
                         eco_added += 1
         except Exception:
-            pass
+            log.debug("import_save: ecosystem auto-add failed", exc_info=True)
 
     kb = InlineKeyboardBuilder()
     eco_note = f"\nДобавлено в экосистему: <b>{eco_added}</b>" if eco_added else ""

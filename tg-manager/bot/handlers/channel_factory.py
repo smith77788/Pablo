@@ -718,6 +718,29 @@ async def cb_chanf_do_create(
     if uname and "не установлен" not in uname_result:
         tme_link = f'\nt.me: <a href="https://t.me/{html.escape(uname)}">t.me/{html.escape(uname)}</a>'
 
+    # Persist new channel to managed_channels so it shows up in stats / publish / SEO.
+    # Resolve the actual username after the set attempt.
+    final_uname = uname if (uname and "не установлен" not in uname_result) else ""
+    try:
+        from database.db import upsert_managed_channels
+
+        await upsert_managed_channels(
+            pool,
+            callback.from_user.id,
+            acc_id,
+            [
+                {
+                    "id": channel_id,
+                    "title": data["title"],
+                    "username": final_uname,
+                    "access_hash": result.get("access_hash", 0),
+                    "type": "channel",
+                }
+            ],
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_chanf_do_create: upsert_managed_channels failed")
+
     # EPOCH III: auto-add channel to most recent active ecosystem
     try:
         from services import ecosystem_brain as _eb
@@ -728,7 +751,7 @@ async def cb_chanf_do_create(
                 pool, ecos[0]["id"], callback.from_user.id, "channel", channel_id
             )
     except Exception:
-        pass
+        log.debug("cb_chanf_do_create: ecosystem auto-add failed", exc_info=True)
 
     kb = InlineKeyboardBuilder()
     if uname and "не установлен" not in uname_result:

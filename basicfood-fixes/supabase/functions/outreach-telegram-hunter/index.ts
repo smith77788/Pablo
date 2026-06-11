@@ -260,8 +260,10 @@ Deno.serve(async (req) => {
     const signalFps = await Promise.all(
       mergedSignals.map((s) => fingerprint("telegram", s.sourceUrl, s.content)),
     );
-    const { data: existingFpRows } = await supabase
-      .from("outreach_leads").select("fingerprint").in("fingerprint", signalFps);
+    // Guard: empty .in() array returns ALL rows — skip dedup fetch if no signals.
+    const { data: existingFpRows } = signalFps.length > 0
+      ? await supabase.from("outreach_leads").select("fingerprint").in("fingerprint", signalFps)
+      : { data: [] };
     const existingFps = new Set((existingFpRows ?? []).map((r: any) => r.fingerprint as string));
 
     const newLeadRows: any[] = [];

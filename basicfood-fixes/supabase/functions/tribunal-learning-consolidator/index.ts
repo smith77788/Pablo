@@ -70,11 +70,15 @@ Deno.serve(async (req) => {
       const [agent, action_type] = key.split("::");
       return `learning:${agent}:${action_type}`.slice(0, 200);
     });
-    const { data: existingMemRows } = await sb
-      .from("ai_memory")
-      .select("id, is_active, pattern_key")
-      .eq("agent", "tribunal")
-      .in("pattern_key", allPatternKeys);
+    // Guard: empty .in() array returns ALL rows — skip fetch if no pattern keys.
+    const { data: existingMemRows, error: memFetchErr } = allPatternKeys.length > 0
+      ? await sb
+          .from("ai_memory")
+          .select("id, is_active, pattern_key")
+          .eq("agent", "tribunal")
+          .in("pattern_key", allPatternKeys)
+      : { data: [], error: null };
+    if (memFetchErr) throw memFetchErr;
     const memMap = new Map(
       (existingMemRows ?? []).map((r: any) => [r.pattern_key as string, r as { id: string; is_active: boolean; pattern_key: string }]),
     );
@@ -129,8 +133,18 @@ Deno.serve(async (req) => {
     }
 
     // Batch apply all writes after the loop.
-    await Promise.all(updateOps.map((u) => sb.from("ai_memory").update(u.payload).eq("id", u.id)));
-    if (insertRows.length > 0) await sb.from("ai_memory").insert(insertRows);
+    if (updateOps.length > 0) {
+      const updateResults = await Promise.all(
+        updateOps.map((u) => sb.from("ai_memory").update(u.payload).eq("id", u.id)),
+      );
+      for (const r of updateResults) {
+        if (r.error) console.warn("[learning-consolidator] memory update failed:", r.error.message);
+      }
+    }
+    if (insertRows.length > 0) {
+      const { error: memInsertErr } = await sb.from("ai_memory").insert(insertRows);
+      if (memInsertErr) console.warn("[learning-consolidator] memory insert failed:", memInsertErr.message);
+    }
 
     // ── Auto-revert: для будь-якого щойно деактивованого токсичного патерну
     // знаходимо ще-не-revoke-нуті ai_actions цього (agent, action_type) у статусі applied
@@ -167,12 +181,13 @@ Deno.serve(async (req) => {
 
       const allStuckIds = stuckResults.flat().map((r) => r.id);
       if (allStuckIds.length > 0) {
-        await sb.from("ai_actions").update({
+        const { error: revertErr } = await sb.from("ai_actions").update({
           status: "reverted",
           reverted_at: new Date().toISOString(),
           reverted_reason: `auto-revert: toxic pattern (success<30%, n≥5)`,
         }).in("id", allStuckIds);
-        auto_reverted = allStuckIds.length;
+        if (revertErr) console.warn("[learning-consolidator] auto-revert update failed:", revertErr.message);
+        else auto_reverted = allStuckIds.length;
       }
     }
 

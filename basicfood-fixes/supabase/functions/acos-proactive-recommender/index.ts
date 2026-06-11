@@ -112,20 +112,43 @@ Deno.serve(async (req) => {
         && rate >= 0.5;
     });
 
-    // 2. For each candidate, count recent uses for the same agent
+    // 2. Batch-prefetch recent ai_actions counts per agent and existing dedup
+    //    insights — avoids N+1 queries inside emit() by doing 2 queries total.
     const since = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
     const dedupBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+
+    const uniqueAgents = [...new Set(all.map((p) => p.agent))];
+    const patternKeys = all.map((p) => p.pattern_key);
+
+    // Fetch all ai_actions counts for relevant agents in one query
+    const { data: actionRows } = uniqueAgents.length > 0
+      ? await sb
+          .from("ai_actions")
+          .select("agent_id")
+          .in("agent_id", uniqueAgents)
+          .in("status", ["applied", "measured"])
+          .gte("created_at", since)
+      : { data: [] as { agent_id: string }[] };
+    const agentUseCounts = new Map<string, number>();
+    for (const row of actionRows ?? []) {
+      agentUseCounts.set(row.agent_id, (agentUseCounts.get(row.agent_id) ?? 0) + 1);
+    }
+
+    // Fetch existing dedup insights for today's bucket in one query
+    const { data: existingInsights } = patternKeys.length > 0
+      ? await sb
+          .from("ai_insights")
+          .select("title")
+          .eq("insight_type", "proactive_recommendation")
+          .eq("dedup_bucket", dedupBucket)
+      : { data: [] as { title: string }[] };
+    const existingTitles = new Set((existingInsights ?? []).map((r) => r.title as string));
+
     let inserted = 0;
     const recommendations: Array<{ pattern: string; track: string; recent_uses: number }> = [];
 
     async function emit(p: MemoryRow, track: "proven" | "emerging") {
-      const { count: recentUses } = await sb
-        .from("ai_actions")
-        .select("*", { count: "exact", head: true })
-        .eq("agent_id", p.agent)
-        .in("status", ["applied", "measured"])
-        .gte("created_at", since);
-      const uses = recentUses ?? 0;
+      const uses = agentUseCounts.get(p.agent) ?? 0;
 
       // Under-utilisation:
       //  - proven: uses < success_count (i.e. we used the winner less than its history suggests)
@@ -145,14 +168,8 @@ Deno.serve(async (req) => {
         : `Early signal: "${p.learned_rule}" — ${p.success_count} success(es), avg impact +${p.avg_impact.toFixed(1)}%. `
           + `Used ${uses}× in 14d. Worth running ${p.agent} again to confirm the pattern (n is still small).`;
 
-      const { data: existing } = await sb
-        .from("ai_insights")
-        .select("id")
-        .eq("insight_type", "proactive_recommendation")
-        .eq("dedup_bucket", dedupBucket)
-        .ilike("title", `%${p.pattern_key}%`)
-        .maybeSingle();
-      if (existing) return;
+      // In-memory dedup check (pattern_key substring match against pre-fetched titles)
+      if ([...existingTitles].some((t) => t.includes(p.pattern_key))) return;
 
       const { error: insErr } = await sb.from("ai_insights").insert({
         insight_type: "proactive_recommendation",
@@ -183,6 +200,8 @@ Deno.serve(async (req) => {
         console.warn("[proactive-recommender] insert failed:", insErr.message);
         return;
       }
+      // Track in memory so concurrent emits don't duplicate
+      existingTitles.add(title);
       inserted++;
       recommendations.push({ pattern: p.pattern_key, track, recent_uses: uses });
     }
