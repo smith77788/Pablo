@@ -1714,15 +1714,21 @@ async def handle_admin_message(
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
         else:
             try:
-                await pool.execute(
-                    "INSERT INTO blocked_users(user_id) VALUES($1) ON CONFLICT DO NOTHING",
-                    uid,
-                )
+                await db.ban_user(pool, uid, message.from_user.id, "Забанен администратором")
                 await message.answer(
                     f"🚫 Пользователь <code>{uid}</code> заблокирован.",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
+                try:
+                    await message.bot.send_message(
+                        uid,
+                        "🚫 <b>Ваш аккаунт был заблокирован администратором.</b>\n\n"
+                        "Если вы считаете это ошибкой, обратитесь в поддержку.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(log, "Не удалось уведомить пользователя о бане", user_id=uid)
             except Exception as e:
                 log.warning("block execute failed: %s", e)
                 await message.answer(
@@ -1738,12 +1744,21 @@ async def handle_admin_message(
             await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
         else:
             try:
-                await pool.execute("DELETE FROM blocked_users WHERE user_id=$1", uid)
+                await db.unban_user(pool, uid, message.from_user.id)
                 await message.answer(
                     f"✅ Пользователь <code>{uid}</code> разблокирован.",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
+                try:
+                    await message.bot.send_message(
+                        uid,
+                        "✅ <b>Ваш аккаунт был разблокирован.</b>\n\n"
+                        "Доступ к платформе восстановлен. Используйте /menu для начала работы.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    log_exc_swallow(log, "Не удалось уведомить пользователя о разбане", user_id=uid)
             except Exception as e:
                 log.warning("unblock execute failed: %s", e)
                 await message.answer(

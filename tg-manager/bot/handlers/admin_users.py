@@ -423,6 +423,18 @@ async def cb_confirm_grant(
     await callback.answer(f"✅ План {plan} выдан на {months} мес.", show_alert=True)
     await state.clear()
 
+    # Уведомить пользователя о выдаче подписки
+    try:
+        await callback.bot.send_message(
+            user_id,
+            f"🎁 <b>Подарок!</b>\n\nВам активирована подписка "
+            f"<b>{plan.upper()}</b> на {months} месяц(ев).\n"
+            "Используйте /menu для доступа ко всем функциям.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        log_exc_swallow(log, "Не удалось уведомить пользователя о выдаче плана", user_id=user_id)
+
     # Вернуться к меню пользователя
     await callback.message.edit_text(
         f"✅ План <b>{plan.upper()}</b> выдан пользователю #{user_id} на {months} месяцев.",
@@ -446,6 +458,18 @@ async def cb_revoke_plan(
     await callback.answer(
         "✅ Подписка отменена. Пользователь вернулся на free.", show_alert=True
     )
+
+    # Уведомить пользователя об отзыве подписки
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "ℹ️ <b>Ваша подписка была отозвана администратором.</b>\n\n"
+            "Вы переведены на план FREE.\n"
+            "Для восстановления доступа оформите подписку: /menu → ⚙️ Настройки → 💳 Подписка",
+            parse_mode="HTML",
+        )
+    except Exception:
+        log_exc_swallow(log, "Не удалось уведомить пользователя об отзыве плана", user_id=user_id)
 
     # Вернуться к меню пользователя
     await callback.message.edit_text(
@@ -531,6 +555,18 @@ async def cb_ban(
     user_id = callback_data.user_id
     await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
     await callback.answer(f"✅ Пользователь #{user_id} забанен.", show_alert=True)
+
+    # Уведомить пользователя о бане
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "🚫 <b>Ваш аккаунт был заблокирован администратором.</b>\n\n"
+            "Если вы считаете это ошибкой, обратитесь в поддержку.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        log_exc_swallow(log, "Не удалось уведомить пользователя о бане", user_id=user_id)
+
     # Обновить экран действий, чтобы кнопки бана/разбана отразили новый статус
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -578,6 +614,18 @@ async def cb_unban(
     user_id = callback_data.user_id
     await db.unban_user(pool, user_id, callback.from_user.id)
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
+
+    # Уведомить пользователя о разбане
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "✅ <b>Ваш аккаунт был разблокирован.</b>\n\n"
+            "Доступ к платформе восстановлен. Используйте /menu для начала работы.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        log_exc_swallow(log, "Не удалось уведомить пользователя о разбане", user_id=user_id)
+
     # Обновить экран действий, чтобы кнопки бана/разбана отразили новый статус
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 

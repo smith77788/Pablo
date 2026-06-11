@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import os
+import time
 from config import DATABASE_URL
 
 from services.logger import log_exc_swallow, timed
@@ -789,7 +790,8 @@ async def copy_funnels(pool: asyncpg.Pool, from_bot_id: int, to_bot_id: int) -> 
 async def get_funnel_subscriber_ids(pool: asyncpg.Pool, funnel_id: int) -> list[int]:
     """Return user_ids of all active (not completed) funnel subscribers."""
     rows = await pool.fetch(
-        "SELECT user_id FROM funnel_subscriptions WHERE funnel_id=$1", funnel_id
+        "SELECT user_id FROM funnel_subscriptions WHERE funnel_id=$1 AND completed=false",
+        funnel_id,
     )
     return [r["user_id"] for r in rows]
 
@@ -839,7 +841,7 @@ async def advance_funnel_step(
 ) -> None:
     if next_step >= total_steps:
         await pool.execute(
-            "UPDATE funnel_subscriptions SET completed=true WHERE id=$1",
+            "UPDATE funnel_subscriptions SET completed=true, completed_at=now() WHERE id=$1",
             sub_id,
         )
     else:
@@ -1183,9 +1185,14 @@ async def get_user_tags(pool, bot_id: int, user_id: int) -> list[str]:
 
 
 async def get_tag_names(pool, bot_id: int) -> list[dict]:
-    """All unique tags for this bot with counts."""
+    """All unique tags for this bot with counts.
+
+    user_id=0 rows are standalone tag definitions (not assigned to any user).
+    We count them as 0 users so the tag appears in the list but shows 0 members.
+    """
     rows = await pool.fetch(
-        """SELECT tag, COUNT(*) as cnt
+        """SELECT tag,
+                  COUNT(*) FILTER (WHERE user_id != 0) AS cnt
            FROM user_tags WHERE bot_id=$1
            GROUP BY tag ORDER BY cnt DESC LIMIT 30""",
         bot_id,
@@ -1194,8 +1201,9 @@ async def get_tag_names(pool, bot_id: int) -> list[dict]:
 
 
 async def get_users_by_tag(pool, bot_id: int, tag: str) -> list[int]:
+    # user_id=0 is the sentinel for a standalone tag definition (no user assigned yet).
     rows = await pool.fetch(
-        "SELECT user_id FROM user_tags WHERE bot_id=$1 AND tag=$2",
+        "SELECT user_id FROM user_tags WHERE bot_id=$1 AND tag=$2 AND user_id != 0",
         bot_id,
         tag,
     )
@@ -2988,6 +2996,12 @@ async def get_notification_settings(pool: asyncpg.Pool, user_id: int) -> dict:
     }
 
 
+# In-memory rate-limit cache: (user_id, pref) -> last_sent_timestamp
+# Prevents notification spam when many events fire simultaneously.
+_notify_cooldown: dict[tuple[int, str], float] = {}
+_NOTIFY_COOLDOWN_SECONDS = 60  # minimum interval between same-type notifications per user
+
+
 async def notify_if_enabled(
     pool: asyncpg.Pool,
     bot,
@@ -2996,8 +3010,20 @@ async def notify_if_enabled(
     text: str,
     reply_markup=None,
 ) -> None:
-    """Send a notification to user only if the given preference flag is True."""
+    """Send a notification to user only if the given preference flag is True.
+
+    Rate-limited: each (user_id, pref) pair can fire at most once per
+    _NOTIFY_COOLDOWN_SECONDS to prevent spam when many events happen at once.
+    """
     try:
+        # Rate-limit check (in-memory, process-scoped)
+        now = time.monotonic()
+        key = (user_id, pref)
+        last_sent = _notify_cooldown.get(key, 0.0)
+        if now - last_sent < _NOTIFY_COOLDOWN_SECONDS:
+            return
+        _notify_cooldown[key] = now
+
         settings = await get_notification_settings(pool, user_id)
         if not settings.get(pref, True):
             return
