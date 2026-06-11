@@ -360,6 +360,9 @@ async def create_warmup_plan(
     daily_actions здесь — это ПОТОЛОК (target) на финальных днях. Реальное число
     действий в день рассчитывается через _actions_for_day_count() с рампой
     low→medium→high, поэтому свежий аккаунт никогда не получает максимум сразу.
+
+    Также выставляет acc_status='warming' чтобы ресурс-селектор и UI
+    могли отличить прогреваемые аккаунты от обычных активных.
     """
     # Note: "aggressive" capped at 12/day (was 20) — 20 actions/day on a fresh
     # low-trust account is the #1 ban trigger. target_days lengthened accordingly.
@@ -380,8 +383,32 @@ async def create_warmup_plan(
         daily_map.get(plan_type, 5),
         days_map.get(plan_type, 14),
     )
-    log.info("warmup: created plan %d for acc=%d", row["id"], account_id)
-    return row["id"]
+    plan_id = row["id"]
+
+    # Mark the account as warming so resource_selector excludes it from
+    # heavy ops and UI shows the correct warming badge.
+    try:
+        await pool.execute(
+            """UPDATE tg_accounts
+               SET acc_status = 'warming'
+               WHERE id = $1
+                 AND is_active = TRUE
+                 AND COALESCE(acc_status, 'active') = 'active'""",
+            account_id,
+        )
+    except Exception as _e:
+        log.warning("warmup: could not set acc_status=warming for acc=%d: %s", account_id, _e)
+
+    # Update in-memory health cache warmup_state immediately
+    try:
+        from services import account_health as _ah
+        health = _ah.get_health(account_id)
+        health.warmup_state = _ah.WarmupState.WARMING
+    except Exception:
+        pass
+
+    log.info("warmup: created plan %d for acc=%d (acc_status → warming)", plan_id, account_id)
+    return plan_id
 
 
 async def get_active_plans(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
@@ -1349,6 +1376,12 @@ async def _run_daily_warmup_impl(
                 infra_memory.record_account_op(
                     account_id, "warmup", True, duration_s=_action_dur
                 )
+                # Update in-memory health score on each successful warmup action
+                try:
+                    from services import account_health as _ah
+                    _ah.update_after_success(account_id, action)
+                except Exception:
+                    pass
             else:
                 infra_memory.record_account_op(
                     account_id,
@@ -1357,6 +1390,13 @@ async def _run_daily_warmup_impl(
                     str(error)[:100] if error else "",
                     duration_s=_action_dur,
                 )
+                # Update in-memory health score on each failed warmup action
+                try:
+                    from services import account_health as _ah
+                    _is_flood = error is not None and "flood" in str(error).lower()
+                    _ah.update_after_failure(account_id, action, is_flood=_is_flood)
+                except Exception:
+                    pass
 
             if success:
                 actions_ok += 1
@@ -1386,11 +1426,12 @@ async def _run_daily_warmup_impl(
                     )
                     consecutive_fails = 0
                 elif consecutive_fails >= 2:
-                    base_pause = random.uniform(45, 120)
+                    base_pause = random.uniform(60, 120)
                 elif (i + 1) % 5 == 0:
                     base_pause = random.uniform(120, 300)
                 else:
-                    base_pause = random.uniform(20, 90)
+                    # Minimum 30s between actions to avoid Telegram automation detection
+                    base_pause = random.uniform(30, 90)
                 await asyncio.sleep(base_pause)
 
     except Exception as e:
@@ -1462,10 +1503,32 @@ async def _run_daily_warmup_impl(
         )
 
     if completed and actions_ok > 0:
-        # После успешного завершения разогрева повышаем trust_score
+        # После успешного завершения разогрева:
+        # 1. Повышаем trust_score
+        # 2. Выпускаем аккаунт из состояния warming → active (graduation)
         await pool.execute(
-            "UPDATE tg_accounts SET trust_score = LEAST(trust_score + 0.3, 1.0) WHERE id=$1",
+            """UPDATE tg_accounts
+               SET trust_score = LEAST(COALESCE(trust_score, 0.5) + 0.3, 1.0),
+                   acc_status = CASE
+                       WHEN COALESCE(acc_status, 'active') = 'warming' THEN 'active'
+                       ELSE COALESCE(acc_status, 'active')
+                   END
+               WHERE id = $1""",
             account_id,
+        )
+        # Update in-memory health cache: warmup_state → READY (graduated)
+        try:
+            from services import account_health as _ah
+            health = _ah.get_health(account_id)
+            health.warmup_state = _ah.WarmupState.READY
+            # Give a final health boost for completing the full warmup plan
+            health.health_score = min(100.0, health.health_score + 5.0)
+        except Exception:
+            pass
+        log.info(
+            "warmup: acc=%d GRADUATED — plan %d completed, acc_status=active, warmup_state=READY",
+            account_id,
+            plan_id,
         )
 
     readiness_score = None
@@ -1741,8 +1804,21 @@ async def _run_warmup_session_impl(
 
                 if success:
                     total_ok += 1
+                    # Update in-memory health score on successful warmup session action
+                    try:
+                        from services import account_health as _ah
+                        _ah.update_after_success(acc_id, action)
+                    except Exception:
+                        pass
                 else:
                     total_fail += 1
+                    # Update in-memory health score on failed warmup session action
+                    try:
+                        from services import account_health as _ah
+                        _is_flood = error_str is not None and "flood" in str(error_str).lower()
+                        _ah.update_after_failure(acc_id, action, is_flood=_is_flood)
+                    except Exception:
+                        pass
 
                 try:
                     await pool.execute(
@@ -1761,7 +1837,9 @@ async def _run_warmup_session_impl(
                         "warmup_session: DB log insert failed acc=%d: %s", acc_id, e
                     )
 
-                await asyncio.sleep(random.uniform(8, 25))
+                # Human-like delay between actions: 30-120s (was 8-25s).
+                # Sub-30s inter-action intervals are a Telegram automation signal.
+                await asyncio.sleep(random.uniform(30, 120))
 
         except Exception as exc:
             log.warning("warmup_session acc=%d: %s", acc_id, exc)
@@ -1802,6 +1880,39 @@ async def _run_warmup_session_impl(
         new_status,
         session_id,
     )
+
+    # Graduate accounts that completed the session: warming → active
+    if completed and total_ok > 0:
+        session_acc_ids = list(account_ids) if account_ids else []
+        for _acc_id in session_acc_ids:
+            try:
+                await pool.execute(
+                    """UPDATE tg_accounts
+                       SET trust_score = LEAST(COALESCE(trust_score, 0.5) + 0.2, 1.0),
+                           acc_status = CASE
+                               WHEN COALESCE(acc_status, 'active') = 'warming' THEN 'active'
+                               ELSE COALESCE(acc_status, 'active')
+                           END
+                       WHERE id = $1""",
+                    _acc_id,
+                )
+                # Update in-memory health cache: warmup_state → READY (graduated)
+                try:
+                    from services import account_health as _ah
+                    health = _ah.get_health(_acc_id)
+                    health.warmup_state = _ah.WarmupState.READY
+                    health.health_score = min(100.0, health.health_score + 3.0)
+                except Exception:
+                    pass
+            except Exception as _ge:
+                log.warning(
+                    "warmup_session: graduation update failed acc=%d: %s", _acc_id, _ge
+                )
+        log.info(
+            "warmup_session %d: GRADUATED %d accounts → acc_status=active, warmup_state=READY",
+            session_id,
+            len(session_acc_ids),
+        )
 
     log.info(
         "warmup_session %d day=%d/%d ok=%d fail=%d completed=%s",
