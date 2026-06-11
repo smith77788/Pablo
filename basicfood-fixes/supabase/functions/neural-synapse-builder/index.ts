@@ -95,9 +95,10 @@ Deno.serve(async (req) => {
     let activated = 0;
 
     // Pre-fetch all existing synapses to avoid per-pair N+1 reads.
-    const { data: allSynapses } = await sb
+    const { data: allSynapses, error: synapseFetchError } = await sb
       .from("agent_synapses")
       .select("id, from_agent, to_agent, status, auto_activate");
+    if (synapseFetchError) throw synapseFetchError;
     const synapseMap = new Map(
       (allSynapses ?? []).map((s: any) => [
         `${s.from_agent}::${s.to_agent}`,
@@ -167,8 +168,18 @@ Deno.serve(async (req) => {
     }
 
     // Batch apply all synapse writes after the loop.
-    await Promise.all(synapseUpdateOps.map((u) => sb.from("agent_synapses").update(u.payload).eq("id", u.id)));
-    if (synapseInsertRows.length > 0) await sb.from("agent_synapses").insert(synapseInsertRows);
+    if (synapseUpdateOps.length > 0) {
+      const updateResults = await Promise.all(
+        synapseUpdateOps.map((u) => sb.from("agent_synapses").update(u.payload).eq("id", u.id)),
+      );
+      for (const r of updateResults) {
+        if (r.error) console.warn("[synapse-builder] synapse update failed:", r.error.message);
+      }
+    }
+    if (synapseInsertRows.length > 0) {
+      const { error: insertErr } = await sb.from("agent_synapses").insert(synapseInsertRows);
+      if (insertErr) console.warn("[synapse-builder] synapse insert failed:", insertErr.message);
+    }
 
     // Discover pathways: 3-step chains, де кожна пара — active synapse
     const { data: activeSyns } = await sb
