@@ -66,6 +66,24 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
+_PLAN_ORDER = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
+
+
+def _lock(user_plan: str, required: str) -> str:
+    if _PLAN_ORDER.get(user_plan, 0) < _PLAN_ORDER.get(required, 0):
+        return "🔒 "
+    return ""
+
+
+async def _get_user_plan(pool: asyncpg.Pool, user_id: int) -> str:
+    try:
+        row = await pool.fetchrow(
+            "SELECT current_plan FROM platform_users WHERE user_id=$1", user_id
+        )
+        return (row["current_plan"] if row else "free") or "free"
+    except Exception:
+        return "free"
+
 
 async def _fire_cross_nav(
     pool: asyncpg.Pool,
@@ -123,20 +141,20 @@ def _assets_kb():
     return kb.as_markup()
 
 
-def _operations_kb():
+def _operations_kb(plan: str = "free"):
     from bot.callbacks import PackCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="⚔️ Strike", callback_data=StrikeCb(action="menu"))
-    kb.button(text="🌍 Присутствие", callback_data=GeoPresenceCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Strike", callback_data=StrikeCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'enterprise')}🌍 Присутствие", callback_data=GeoPresenceCb(action="menu"))
     kb.button(text="🎁 Подарки", callback_data="gt:main")
-    kb.button(text="🗂 Presence Packs", callback_data=PackCb(action="menu"))
-    kb.button(text="📤 Публикация", callback_data=MassPubCb(action="menu"))
-    kb.button(text="✍️ Создать пост", callback_data=QuickPostCb(action="start"))
+    kb.button(text=f"{_lock(plan,'starter')}🗂 Presence Packs", callback_data=PackCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'starter')}📤 Публикация", callback_data=MassPubCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'starter')}✍️ Создать пост", callback_data=QuickPostCb(action="start"))
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
-    kb.button(text="🛠️ Построитель", callback_data=MassOpCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'pro')}🛠️ Построитель", callback_data=MassOpCb(action="menu"))
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
-    kb.button(text="⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
+    kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 1, 2, 2, 1)
     return kb.as_markup()
@@ -191,7 +209,7 @@ def _monitoring_kb():
     return kb.as_markup()
 
 
-def _settings_kb():
+def _settings_kb(plan: str = "free"):
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🤖 Команды бота", callback_data=BmCb(action="pick_bot_for", sub="cmd")
@@ -199,9 +217,9 @@ def _settings_kb():
     kb.button(text="🔔 Уведомления", callback_data=BmCb(action="notifications"))
     kb.button(text="💳 Подписка", callback_data=SubCb(action="menu"))
     kb.button(text="👥 Рефералы", callback_data=RefCb(action="menu"))
-    kb.button(text="🤖 ИИ Помощник", callback_data=AiCb(action="start"))
-    kb.button(text="🏢 Пространства", callback_data=WorkspaceCb(action="menu"))
-    kb.button(text="📄 Шаблоны", callback_data=AssetTplCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'enterprise')}🤖 ИИ Помощник", callback_data=AiCb(action="start"))
+    kb.button(text=f"{_lock(plan,'enterprise')}🏢 Пространства", callback_data=WorkspaceCb(action="menu"))
+    kb.button(text=f"{_lock(plan,'starter')}📄 Шаблоны", callback_data=AssetTplCb(action="menu"))
     kb.button(text="🎁 Передача подарков", callback_data="gt:main")
     kb.button(text="🐛 Исправить ошибку", callback_data=ErrorReportCb(action="start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
@@ -488,6 +506,8 @@ async def cb_operations(
         _fire_cross_nav(pool, callback.from_user.id, "menu", 0, "operations", 0)
     )
 
+    user_plan = await _get_user_plan(pool, callback.from_user.id)
+
     # Unified infrastructure state via orchestrator
     infra_line = ""
     try:
@@ -530,7 +550,7 @@ async def cb_operations(
         "🛠️ <b>Построитель</b> — собрать операцию из блоков\n"
         "📋 <b>Очередь</b> — текущие и завершённые операции\n"
         "⏱️ <b>Планировщик</b> — запустить операцию по расписанию" + infra_line,
-        _operations_kb(),
+        _operations_kb(user_plan),
     )
 
 
@@ -700,8 +720,11 @@ async def cb_referral(callback: CallbackQuery, callback_data: BmCb) -> None:
 
 
 @router.callback_query(BmCb.filter(F.action == "settings"))
-async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
+async def cb_settings(
+    callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    user_plan = await _get_user_plan(pool, callback.from_user.id)
     await _edit(
         callback,
         "⚙️ <b>Настройки</b>\n\n"
@@ -712,7 +735,7 @@ async def cb_settings(callback: CallbackQuery, callback_data: BmCb) -> None:
         "🤖 <b>ИИ Помощник</b> — нейросеть для создания контента\n"
         "🏢 <b>Пространства</b> — работа в команде\n"
         "📄 <b>Шаблоны</b> — сохранённые конфигурации операций",
-        _settings_kb(),
+        _settings_kb(user_plan),
     )
 
 
