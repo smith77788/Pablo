@@ -161,8 +161,13 @@ def _list_kb(templates: list, asset_type: str) -> object:
                 action="delete_confirm", tpl_id=tpl["id"], asset_type=asset_type
             ),
         )
+    if not templates:
+        kb.button(text="➕ Создать шаблон", callback_data=AssetTplCb(action="create"))
     kb.button(text="◀️ Назад", callback_data=AssetTplCb(action="menu"))
-    kb.adjust(1, *([3] * len(templates)), 1)
+    if templates:
+        kb.adjust(1, *([3] * len(templates)), 1)
+    else:
+        kb.adjust(1, 1)
     return kb.as_markup()
 
 
@@ -948,7 +953,6 @@ async def cb_apply_bot_exec(
     if preset_key:
         from services.preset_templates import get_preset_by_key
 
-        preset_key.split("__", 1)
         preset = get_preset_by_key(preset_key)
         data = preset["template"] if preset else {}
         tpl_name = preset["name"] if preset else "preset"
@@ -1047,13 +1051,14 @@ async def cb_apply_bot_exec(
         # Use template's funnel_trigger field; default to "start"
         funnel_trigger = data.get("funnel_trigger", "start")
         try:
-            funnel_id = await db.create_funnel(
+            funnel_row = await db.create_funnel(
                 pool,
                 bot_id,
                 f"{tpl_name} — Автоворонка",
                 funnel_trigger,
                 None,
             )
+            funnel_id = funnel_row["id"]
             for i, step in enumerate(steps):
                 delay_minutes = int(step.get("delay_hours", 0) * 60)
                 await db.add_funnel_step(
@@ -1140,7 +1145,7 @@ async def cb_lib_menu(callback: CallbackQuery) -> None:
         "📚 <b>Библиотека готовых шаблонов</b>\n\n"
         "Готовые шаблоны для быстрого старта. "
         "Выберите категорию, просмотрите шаблон и примените или клонируйте в свои.\n\n"
-        "Доступно шаблонов: 23 (каналы, группы, боты, посты)",
+        "Доступно шаблонов: 24 (каналы, группы, боты, посты)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
