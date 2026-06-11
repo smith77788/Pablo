@@ -2404,7 +2404,7 @@ async def _exec_global_presence_bot(
             account_selection = {}
     selected_acc_ids = account_selection.get("account_ids") or []
 
-    accounts = await resource_selector.select_all_active(
+    accounts_rows = await resource_selector.select_all_active(
         pool,
         owner_id,
         include_ids=selected_acc_ids or None,
@@ -2412,12 +2412,17 @@ async def _exec_global_presence_bot(
         action_type="create_bot",
     )
 
-    if not accounts:
+    if not accounts_rows:
         await pool.execute(
             "UPDATE global_presence_plans SET status='failed', updated_at=now() WHERE id=$1",
             plan_id,
         )
         return {"status": "failed", "reason": "no active accounts found"}
+
+    # Build lookup by id for per-target account assignment (mirrors _exec_global_presence_channel)
+    acc_by_id = {a["id"]: dict(a) for a in accounts_rows}
+    # Fallback list for round-robin when target has no selected_account_id
+    accounts_list = list(accounts_rows)
 
     targets = await pool.fetch(
         "SELECT * FROM global_presence_targets WHERE plan_id=$1 AND status='pending' ORDER BY id",
@@ -2437,23 +2442,29 @@ async def _exec_global_presence_bot(
 
     created_count = 0
     failed_count = 0
-    acc_idx = 0
+    acc_rr_idx = 0  # round-robin index for fallback only
     total = len(targets)
     _gp_bot_eco_id: int | None = None  # lazily loaded from plan
 
     for i, target in enumerate(targets):
-        cancelled = await pool.fetchval(
-            "SELECT status FROM operation_queue WHERE id=$1", op_id
-        )
-        if cancelled == "cancelled":
+        if await _is_cancelled(pool, op_id):
             await pool.execute(
                 "UPDATE global_presence_plans SET status='cancelled', updated_at=now() WHERE id=$1",
                 plan_id,
             )
-            return {"status": "cancelled"}
+            return {
+                "status": "cancelled",
+                "created": created_count,
+                "failed": failed_count,
+                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+            }
 
-        acc = dict(accounts[acc_idx % len(accounts)])
-        acc_idx += 1
+        # Use per-target assigned account; fall back to round-robin if not set
+        acc_id = target["selected_account_id"]
+        acc = acc_by_id.get(acc_id) if acc_id else None
+        if not acc:
+            acc = dict(accounts_list[acc_rr_idx % len(accounts_list)])
+            acc_rr_idx += 1
 
         bot_name = target["planned_name"] or f"Bot {i + 1}"
         bot_username = (target["planned_username"] or "").lstrip("@")
@@ -2924,7 +2935,7 @@ async def _exec_strike(
         owner_id,
         include_ids=account_ids or None,
         respect_cooldown=False,  # preflight_accounts делает свою cooldown проверку
-        action_type="invite",
+        action_type="strike",
     )
 
     if not raw_accounts:
@@ -3039,6 +3050,45 @@ async def _exec_strike(
         op_id,
     )
 
+    # ── Сохранение результатов в strike_history ───────────────────────────────
+    # Queued strike (_exec_strike) не использует _strike_bg_v2, поэтому история
+    # должна быть записана здесь — иначе результаты не видны в UI (History tab).
+    for r in results:
+        try:
+            await pool.execute(
+                """INSERT INTO strike_history(
+                       owner_id, target, reason, preset,
+                       accounts_used, peer_reported, msgs_reported, msgs_fetched,
+                       pinned_reported, admins_reported, network_nodes, network_reports,
+                       blocked, verified_down, duration_s, abuse_form_ok,
+                       spambot_escalation)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
+                owner_id,
+                r.target,
+                reason,
+                preset or None,
+                r.unique_accounts,
+                r.peer_reported,
+                r.msgs_reported,
+                getattr(r, "msgs_fetched", 0),
+                r.pinned_reported,
+                r.admins_reported,
+                r.network_nodes,
+                r.network_reports,
+                r.blocked,
+                r.verified_down,
+                r.duration_s,
+                r.abuse_form_ok,
+                r.spambot_escalation,
+            )
+        except Exception as _he:
+            log.warning(
+                "_exec_strike op=%d: failed to write strike_history for target=%s: %s",
+                op_id,
+                r.target,
+                _he,
+            )
+
     summary_text = format_strike_summary(results)
     total_reported = sum(getattr(r, "peer_reported", 0) for r in results)
 
@@ -3048,9 +3098,5 @@ async def _exec_strike(
         "waves_planned": num_waves,
         "accounts_used": len(viable),
         "total_reported": total_reported,
-        "summary": (
-            summary_text[:500]
-            if summary_text
-            else f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}"
-        ),
+        "summary": summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}",
     }

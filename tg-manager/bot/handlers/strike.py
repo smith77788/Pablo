@@ -1049,9 +1049,14 @@ async def cb_mini_strike_run(
     except Exception as e:
         mark_handled_error(f"mini_strike_run: {e}")
         log_exc_swallow(log, "cb_mini_strike_run: execute failed")
+        _err_kb = InlineKeyboardBuilder()
+        _err_kb.button(text="🔁 Попробовать снова", callback_data=StrikeCb(action="mini"))
+        _err_kb.button(text="◀️ Меню Strike", callback_data=StrikeCb(action="menu"))
+        _err_kb.adjust(1)
         await msg.edit_text(
             f"❌ <b>Ошибка выполнения страйка</b>\n\n<code>{str(e)[:200]}</code>",
             parse_mode="HTML",
+            reply_markup=_err_kb.as_markup(),
         )
         return
     finally:
@@ -1064,6 +1069,7 @@ async def cb_mini_strike_run(
     report_text = format_mini_result(result)
     kb = InlineKeyboardBuilder()
     kb.button(text="🔁 Ещё один страйк", callback_data=StrikeCb(action="mini"))
+    kb.button(text="📜 История", callback_data=StrikeCb(action="history"))
     kb.button(text="◀️ Меню Strike", callback_data=StrikeCb(action="menu"))
     kb.adjust(1)
 

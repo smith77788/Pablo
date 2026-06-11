@@ -1037,17 +1037,17 @@ async def _run_email_escalation(
             "skip_reason": "no email accounts configured",
         }
 
-    # Resolve helpers defined later in this file via module globals (safe at call-time)
+    # Use module-level helpers defined later in this file.
+    # Python resolves names at call-time, so these are available when this function runs.
     import sys as _sys
-
     _mod = _sys.modules[__name__]
-    _STRIKE_EMAIL_TARGETS = getattr(_mod, "_STRIKE_EMAIL_TARGETS", [])
-    _build_abuse_tg_email = getattr(_mod, "_build_abuse_tg_email", None)
-    _build_dmca_gdpr_email = getattr(_mod, "_build_dmca_gdpr_email", None)
-    _build_ncmec_email = getattr(_mod, "_build_ncmec_email", None)
-    _send_email = getattr(_mod, "_send_email", None)
+    _email_targets = getattr(_mod, "_STRIKE_EMAIL_TARGETS", None)
+    _fn_send = getattr(_mod, "_send_email", None)
+    _fn_abuse = getattr(_mod, "_build_abuse_tg_email", None)
+    _fn_dmca = getattr(_mod, "_build_dmca_gdpr_email", None)
+    _fn_ncmec = getattr(_mod, "_build_ncmec_email", None)
 
-    if not _STRIKE_EMAIL_TARGETS or not _send_email:
+    if not _email_targets or not _fn_send or not _fn_abuse or not _fn_dmca:
         return {
             "total_sent": 0,
             "emails": [],
@@ -1057,11 +1057,11 @@ async def _run_email_escalation(
 
     for ea in db_emails:
         any_ok = False
-        for tgt in _STRIKE_EMAIL_TARGETS:
+        for tgt in _email_targets:
             if tgt["email_type"] == "abuse":
-                body = _build_abuse_tg_email(target_clean, cat, report_time)
+                body = _fn_abuse(target_clean, cat, report_time)
             else:
-                body = _build_dmca_gdpr_email(
+                body = _fn_dmca(
                     target_clean, cat, report_time, tgt["email_type"]
                 )
 

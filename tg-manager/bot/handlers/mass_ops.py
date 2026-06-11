@@ -750,7 +750,7 @@ async def cb_mp_confirm(
         await callback.answer(f"🚫 {reason}", show_alert=True)
         return
     warn = await infra_orchestrator.get_pressure_warning(pool, callback.from_user.id)
-    await callback.answer(warn or "⏳ Запускаю рассылку...", show_alert=bool(warn))
+    await callback.answer(warn or "⏳ Ставлю в очередь...", show_alert=bool(warn))
 
     data = await state.get_data()
     await state.clear()
@@ -763,7 +763,7 @@ async def cb_mp_confirm(
     mp_text = data.get("mp_text", "")
     delay = int(data.get("mp_delay", 0))
 
-    # Build list of (account, dialog) to post to
+    # Validate accounts exist for the chosen filter
     accounts = await _get_accounts_for_filter(
         pool,
         callback.from_user.id,
@@ -787,56 +787,18 @@ async def cb_mp_confirm(
         )
         return
 
-    acc_id_list = [acc["id"] for acc in accounts]
+    # Count expected targets to give useful preview (op_worker will do actual fetch)
+    channel_count = await _count_targets(
+        pool,
+        callback.from_user.id,
+        target,
+        filter_type,
+        mp_acc_id,
+        mp_cluster,
+        pool_name=mp_pool,
+    )
 
-    # Фильтр по типу для managed_channels
-    if target == "channels":
-        type_filter = "mc.type = 'channel' OR mc.type IS NULL"
-    elif target == "groups":
-        type_filter = "mc.type IN ('megagroup', 'supergroup', 'group', 'chat')"
-    else:
-        type_filter = "TRUE"
-
-    try:
-        db_pairs = await pool.fetch(
-            f"SELECT DISTINCT ON (mc.channel_id) "
-            f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
-            f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
-            f"a.device_model, a.system_version, a.app_version, p.proxy_url "
-            f"FROM managed_channels mc "
-            f"JOIN tg_accounts a ON a.id = mc.acc_id AND a.is_active = TRUE AND a.session_str IS NOT NULL "
-            f"LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE "
-            f"WHERE mc.owner_id = $1 AND mc.acc_id = ANY($2::bigint[]) "
-            f"AND ({type_filter}) "
-            f"ORDER BY mc.channel_id, a.id",
-            callback.from_user.id,
-            acc_id_list,
-        )
-    except Exception as exc:
-        mark_handled_error(f"mp_confirm db_pairs: {exc}")
-        await safe_edit(
-            callback,
-            f"❌ Ошибка загрузки каналов: <code>{html.escape(str(exc)[:200])}</code>",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
-        return
-
-    targets_with_dialogs: list[tuple] = []
-    acc_map = {acc["id"]: acc for acc in accounts}
-    for row in db_pairs:
-        acc = acc_map.get(row["acc_id"])
-        if not acc:
-            continue
-        dialog = {
-            "id": row["id"],
-            "title": row["title"],
-            "access_hash": row["access_hash"],
-            "type": row["type"] or "channel",
-        }
-        targets_with_dialogs.append((acc, dialog))
-
-    total = len(targets_with_dialogs)
-    if total == 0:
+    if channel_count == 0:
         # Check if user has any managed channels at all
         try:
             has_managed = (
@@ -868,42 +830,55 @@ async def cb_mp_confirm(
         await safe_edit(callback, hint, reply_markup=empty_kb.as_markup())
         return
 
-    # Log operation to DB if table exists
-    # Include text so op_worker can resume/retry if bot restarts mid-execution
-    op_id = await _create_op_record(
-        pool,
-        callback.from_user.id,
-        "mass_publish",
-        total,
-        {
-            "target": target,
-            "filter": filter_type,
-            "delay": delay,
-            "text": mp_text,
-        },
-    )
+    # Build account_ids param for op_worker (filter-aware)
+    acc_id_list = [acc["id"] for acc in accounts]
 
-    progress_msg = await callback.message.edit_text(
-        f"⏳ Рассылка... 0/{total}\n[{'░' * 10}] 0%",
-        parse_mode="HTML",
-    )
-
-    task = asyncio.create_task(
-        _mass_publish_inline_bg(
+    # Submit to operation_bus — op_worker handles actual execution with proper
+    # account claiming, flood handling, progress tracking and retry logic.
+    # Do NOT use _create_op_record (status='running') + inline bg task here:
+    # that creates a duplicate execution path and causes double-execution on restart.
+    params = {
+        "target": target,
+        "filter": filter_type,
+        "delay_seconds": delay,
+        "delay": delay,
+        "text": mp_text,
+        "mp_text": mp_text,
+        "account_ids": acc_id_list if filter_type != "all" else [],
+    }
+    try:
+        op_id = await operation_bus.submit(
             pool,
             callback.from_user.id,
-            progress_msg,
-            targets_with_dialogs,
-            mp_text,
-            delay,
-            op_id,
+            "mass_publish",
+            params,
+            total_items=channel_count,
         )
-    )
-    _treg.register(
-        callback.from_user.id,
-        "mass_publish",
-        f"Рассылка в {total} каналов",
-        task,
+    except Exception as e:
+        log.error("mp_confirm submit error: %s", e)
+        await safe_edit(
+            callback,
+            "⚠️ Ошибка постановки операции в очередь. Попробуйте ещё раз.",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
+
+    target_label = _TARGET_LABELS.get(target, target)
+    delay_label = f"{delay}с" if delay > 0 else "немедленно"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue"))
+    kb.button(text="◀️ Меню", callback_data=MassOpCb(action="menu"))
+    kb.adjust(2)
+    await safe_edit(
+        callback,
+        f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
+        f"Тип: 📤 Массовая публикация\n"
+        f"Цели: <b>{target_label}</b>\n"
+        f"Каналов: <b>~{channel_count}</b>\n"
+        f"Задержка: <b>{delay_label}</b>\n\n"
+        f"Воркер запустит операцию автоматически.\n"
+        f"Следить за прогрессом: <b>Очередь операций</b>",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -1135,7 +1110,7 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         rows = await pool.fetch(
             "SELECT id, op_type, status, done_items, total_items, created_at, "
-            "last_error, retry_count, max_retries, finished_at "
+            "last_error, retry_count, max_retries, finished_at, result "
             "FROM operation_queue "
             "WHERE owner_id=$1 "
             "ORDER BY created_at DESC LIMIT 10",
@@ -1176,24 +1151,39 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         status = r["status"]
         done = r["done_items"] or 0
         total = r["total_items"] or 0
-        created = r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "—"
+        created = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "—"
         retry_count = r["retry_count"] or 0
         max_retries = r["max_retries"] or 0
         last_error = r["last_error"] or ""
 
         if status == "running":
-            progress = f"{done}/{total} ✓"
+            bar = _progress_bar(done, total)
+            pct = round(100 * done / total) if total else 0
+            progress = f"{done}/{total} [{bar}] {pct}%"
         elif status == "done":
-            progress = created
+            # Show real result summary from op_worker, not just the date
+            result_summary = ""
+            try:
+                if r["result"]:
+                    res_data = (
+                        r["result"]
+                        if isinstance(r["result"], dict)
+                        else json.loads(r["result"])
+                    )
+                    result_summary = res_data.get("summary", "")
+            except Exception:
+                pass
+            progress = result_summary[:70] if result_summary else f"✓ {done}/{total} · {created}"
         elif status == "failed":
-            progress = f"{total} элементов (попытка {retry_count}/{max_retries})"
+            progress = f"попытка {retry_count}/{max_retries} · {created}"
         else:
-            progress = f"{total} элементов"
+            progress = f"{total} элементов · {created}"
 
-        lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
+        lines.append(f"{i}. {icon} <b>{op_type}</b> #{r['id']}")
+        lines.append(f"   {progress}")
 
         if status == "failed" and last_error:
-            err_preview = html.escape(last_error[:60])
+            err_preview = html.escape(last_error[:70])
             lines.append(f"   ⚠️ <i>{err_preview}</i>")
 
         if status in ("pending", "running"):
@@ -1221,8 +1211,7 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(MassOpCb.filter(F.action == "clear_completed"))
 async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Удалить записи со статусом done/failed старше 24 часов."""
-    await callback.answer()
+    """Удалить записи со статусом done/failed старше 24 часов, затем показать очередь."""
     try:
         result = await pool.execute(
             "DELETE FROM operation_queue "
@@ -1246,83 +1235,8 @@ async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     else:
         await callback.answer(f"Удалено {deleted} записей.", show_alert=True)
 
-    # Re-render queue
-    try:
-        rows = await pool.fetch(
-            "SELECT id, op_type, status, done_items, total_items, created_at, "
-            "last_error, retry_count, max_retries, finished_at "
-            "FROM operation_queue "
-            "WHERE owner_id=$1 "
-            "ORDER BY created_at DESC LIMIT 10",
-            callback.from_user.id,
-        )
-    except Exception as e:
-        log.warning("Queue fetch error after clear: %s", e)
-        rows = []
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
-    kb.adjust(2)
-
-    if not rows:
-        await safe_edit(
-            callback,
-            "📋 <b>Очередь операций</b>\n\nОчередь пуста.\n\n"
-            "💡 Запустите операцию через меню Масс-Опс или Каналы",
-            reply_markup=kb.as_markup(),
-        )
-        return
-
-    _STATUS_ICONS = {
-        "pending": "⏳",
-        "running": "🔄",
-        "done": "✅",
-        "failed": "❌",
-        "cancelled": "🚫",
-    }
-    lines = ["📋 <b>Очередь операций</b>\n"]
-    has_completed = False
-    for i, r in enumerate(rows, 1):
-        icon = _STATUS_ICONS.get(r["status"], "❓")
-        op_type = html.escape(r["op_type"])
-        status = r["status"]
-        done = r["done_items"] or 0
-        total = r["total_items"] or 0
-        created = r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else "—"
-        retry_count = r["retry_count"] or 0
-        max_retries = r["max_retries"] or 0
-        last_error = r["last_error"] or ""
-        if status == "running":
-            progress = f"{done}/{total} ✓"
-        elif status == "done":
-            progress = created
-        elif status == "failed":
-            progress = f"{total} элементов (попытка {retry_count}/{max_retries})"
-        else:
-            progress = f"{total} элементов"
-        lines.append(f"{i}. {op_type} | {icon} {status} | {progress}")
-        if status == "failed" and last_error:
-            err_preview = html.escape(last_error[:60])
-            lines.append(f"   ⚠️ <i>{err_preview}</i>")
-        if status in ("pending", "running"):
-            kb.button(
-                text=f"❌ Отменить #{r['id']}",
-                callback_data=MassOpCb(action="cancel_op", op_id=r["id"]),
-            )
-        elif status == "failed":
-            kb.button(
-                text=f"🔄 Повторить #{r['id']}",
-                callback_data=MassOpCb(action="retry_op", op_id=r["id"]),
-            )
-        if status in ("done", "failed"):
-            has_completed = True
-    if has_completed:
-        kb.button(
-            text="🗑 Очистить завершённые",
-            callback_data=MassOpCb(action="clear_completed"),
-        )
-    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+    # Re-use cb_queue to render the updated queue (avoids duplicate rendering logic)
+    await cb_queue(callback, pool)
 
 
 # ══════════════════════════════════════════════════════════════════════════

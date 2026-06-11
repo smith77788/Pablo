@@ -1628,34 +1628,6 @@ async def cb_gp_launch(
 
     await state.clear()
 
-    # Auto-create ecosystem for this Global Presence package
-    try:
-        from services import ecosystem_brain as _eb
-
-        geo_label_eco = GEO_PRESETS.get(geo_preset, {}).get(
-            "label", geo_preset or "Custom"
-        )
-        eco_name = f"Global Presence — {geo_label_eco}"
-        eco_id = await _eb.create_ecosystem(
-            pool,
-            owner_id=callback.from_user.id,
-            name=eco_name,
-            description="Автоматически создана при запуске Global Presence",
-            ecosystem_type="global_presence",
-            region=geo_preset if geo_preset else None,
-        )
-        await _eb.record_event(
-            pool,
-            eco_id,
-            callback.from_user.id,
-            "operation",
-            f"Global Presence запущен: {geo_label_eco}",
-            severity="info",
-        )
-        log.debug("ecosystem created for global_presence: %d", eco_id)
-    except Exception as e:
-        log.debug("ecosystem auto-create failed: %s", e)
-
     # Build result message
     _type_emoji = {
         "channel": "📡",
@@ -1783,13 +1755,15 @@ async def cb_gp_progress(
     done = stats["done"]
     failed = stats["failed"]
     pending = stats["pending"]
+    running_now = stats.get("running", 0)
 
+    # Percent: done out of total (includes running-in-progress items in denominator)
     pct = int(done / total * 100) if total else 0
     bar_filled = pct // 10
     bar = "█" * bar_filled + "░" * (10 - bar_filled)
 
-    # Estimate remaining
-    remaining = pending
+    # Estimate remaining: pending + currently running (they haven't completed yet)
+    remaining = pending + running_now
     estimated_remaining = estimate_duration_minutes(remaining)
     hours = estimated_remaining // 60
     mins = estimated_remaining % 60
@@ -1804,6 +1778,7 @@ async def cb_gp_progress(
         "draft": "Черновик",
     }
 
+    running_line = f"🔄 Выполняется: {running_now}\n" if running_now > 0 else ""
     text = (
         f"🌍 <b>Global Presence Plan #{plan_id}</b>\n"
         f"Статус: {status_map.get(plan['status'], plan['status'])}\n"
@@ -1812,6 +1787,7 @@ async def cb_gp_progress(
         f"✅ Создано: {done}\n"
         f"❌ Ошибок: {failed}\n"
         f"⏳ Ожидают: {pending}\n"
+        f"{running_line}"
         f"⚡ Текущий: {current_city}\n\n"
         f"Прогресс: {bar} {pct}%\n"
         f"Осталось: {remaining_str}\n"
@@ -1996,16 +1972,33 @@ async def cb_gp_report(
         for t in failed_targets[:5]
     )
 
+    _asset_label_map = {
+        "channel": "Созданные каналы",
+        "group": "Созданные группы",
+        "bot": "Созданные боты",
+        "package": "Созданные пакеты",
+        "full_package": "Созданные пакеты",
+    }
+    asset_label = _asset_label_map.get(plan.get("asset_type", "channel"), "Созданные активы")
+    _status_ru = {
+        "queued": "В очереди",
+        "running": "Выполняется",
+        "done": "Завершён",
+        "failed": "Ошибка",
+        "cancelled": "Отменён",
+        "draft": "Черновик",
+    }
     text = (
         f"📊 <b>Отчёт: Global Presence Plan #{plan_id}</b>\n"
         f"{'─' * 28}\n"
-        f"Паттерн: <code>{plan['name_pattern']}</code>\n"
-        f"Статус: {plan['status']}\n\n"
+        f"Паттерн: <code>{html.escape(plan['name_pattern'])}</code>\n"
+        f"Тип: {plan.get('asset_type', 'channel')}\n"
+        f"Статус: {_status_ru.get(plan['status'], plan['status'])}\n\n"
         f"📊 Итого: {stats['total']}\n"
         f"✅ Создано: {stats['done']}\n"
         f"❌ Ошибок: {stats['failed']}\n"
         f"⏳ Ожидают: {stats['pending']}\n\n"
-        + (f"Созданные каналы:\n{done_lines}\n\n" if done_lines else "")
+        + (f"{asset_label}:\n{done_lines}\n\n" if done_lines else "")
         + (f"Ошибки:\n{fail_lines}" if fail_lines else "")
     )
 
