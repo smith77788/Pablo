@@ -197,6 +197,7 @@ async def msg_token(
         username=bot_info.get("username", ""),
         first_name=bot_info.get("first_name", ""),
         added_by=message.from_user.id,
+        bot=message.bot,
     )
 
     await state.clear()

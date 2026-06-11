@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import logging
 
 import asyncpg
@@ -20,6 +21,71 @@ from services import broadcaster
 
 router = Router()
 log = logging.getLogger(__name__)
+
+
+@router.callback_query(NetBcCb.filter(F.action == "cluster_broadcast"))
+async def cb_net_bc_cluster(
+    callback: CallbackQuery, callback_data: NetBcCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Entry point from cluster view: pre-select a cluster for broadcast."""
+    await callback.answer()
+    cluster_name = callback_data.cluster_name or ""
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        await callback.message.edit_text(
+            locked_text("Рассылка по кластеру", "pro"),
+            parse_mode="HTML",
+            reply_markup=subscription_locked_markup("pro"),
+        )
+        return
+
+    # Get bots in this cluster
+    bots = await pool.fetch(
+        """SELECT bot_id, username, first_name, token,
+                  COALESCE(aud.cnt, 0) AS audience_count
+           FROM managed_bots m
+           LEFT JOIN (
+               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+           ) aud ON aud.bot_id = m.bot_id
+           WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE
+           ORDER BY m.first_name""",
+        callback.from_user.id,
+        cluster_name,
+    )
+
+    if not bots:
+        from bot.callbacks import ClustMCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад к кластеру", callback_data=ClustMCb(action="view", cluster_name=cluster_name))
+        await callback.message.edit_text(
+            f"⚠️ <b>Нет ботов в кластере «{_html.escape(cluster_name)}»</b>\n\n"
+            "Сначала добавьте ботов в кластер.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    total_aud = sum(b["audience_count"] for b in bots)
+    names = ", ".join(
+        f"@{b['username']}" if b.get("username") else b.get("first_name", "?")
+        for b in bots[:5]
+    )
+    if len(bots) > 5:
+        names += f" и ещё {len(bots) - 5}"
+
+    await state.set_state(NetworkBroadcastV2.waiting_message)
+    await state.update_data(segment="cluster", cluster_name=cluster_name)
+
+    kb = InlineKeyboardBuilder()
+    from bot.callbacks import ClustMCb
+    kb.button(text="❌ Отмена", callback_data=ClustMCb(action="view", cluster_name=cluster_name))
+    await callback.message.edit_text(
+        f"📢 <b>Рассылка по кластеру «{_html.escape(cluster_name)}»</b>\n\n"
+        f"Ботов: <b>{len(bots)}</b> ({names})\n"
+        f"Аудитория: <b>{total_aud:,}</b>\n\n"
+        "Напишите текст сообщения (HTML поддерживается):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(NetBcCb.filter(F.action == "menu"))
@@ -288,6 +354,19 @@ async def msg_net_bc_text(
         if len(chosen) > 3:
             names += f" +{len(chosen) - 3}"
         target_desc = f"{len(chosen)} бот(ов): {names} ({total:,} юз.)"
+    elif segment == "cluster":
+        cluster_name = data.get("cluster_name", "")
+        cluster_bots = await pool.fetch(
+            """SELECT m.bot_id, COALESCE(aud.cnt, 0) AS audience_count
+               FROM managed_bots m
+               LEFT JOIN (SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id) aud
+               ON aud.bot_id = m.bot_id
+               WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE""",
+            message.from_user.id,
+            cluster_name,
+        )
+        total = sum(b["audience_count"] for b in cluster_bots)
+        target_desc = f"кластер «{cluster_name}» ({len(cluster_bots)} бот(ов), {total:,} юз.)"
     else:
         target_desc = segment
 
@@ -350,7 +429,7 @@ async def cb_net_bc_confirm(
         )
         return
 
-    # Если выбраны конкретные боты — фильтруем
+    # Если выбраны конкретные боты или кластер — фильтруем
     if segment == "selected_bots":
         selected_ids: list[int] = data.get("selected_bot_ids", [])
         bots = [b for b in bots_all if b["bot_id"] in selected_ids]
@@ -359,6 +438,26 @@ async def cb_net_bc_confirm(
             kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
             await callback.message.edit_text(
                 "❌ <b>Боты не выбраны</b>\n\nПожалуйста, выберите хотя бы одного бота.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+    elif segment == "cluster":
+        cluster_name = data.get("cluster_name", "")
+        cluster_bot_ids_rows = await pool.fetch(
+            "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
+            callback.from_user.id,
+            cluster_name,
+        )
+        cluster_bot_ids = {r["bot_id"] for r in cluster_bot_ids_rows}
+        bots = [b for b in bots_all if b["bot_id"] in cluster_bot_ids]
+        if not bots:
+            from bot.callbacks import ClustMCb
+            kb = InlineKeyboardBuilder()
+            kb.button(text="◀️ Назад к кластеру", callback_data=ClustMCb(action="view", cluster_name=cluster_name))
+            await callback.message.edit_text(
+                f"❌ <b>Нет ботов в кластере «{_html.escape(cluster_name)}»</b>\n\n"
+                "Сначала добавьте ботов в кластер.",
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
@@ -523,6 +622,7 @@ async def cb_net_bc_confirm(
             reply_markup=kb_empty.as_markup(),
         )
     else:
+        _cluster_name_label = data.get("cluster_name", "")
         segment_label = {
             "all_each": "Все боты → своей аудитории",
             "unique": "Уникальные пользователи сети",
@@ -530,6 +630,7 @@ async def cb_net_bc_confirm(
             "lost_all": "Потерянные (30+ дн)",
             "lang": f"По языку: {lang}",
             "selected_bots": f"Выбранные боты ({total_started} шт.)",
+            "cluster": f"Кластер «{_cluster_name_label}» ({total_started} бот(ов))",
         }.get(segment, segment)
 
         await callback.message.edit_text(

@@ -305,7 +305,7 @@ async def cb_cluster_view(
     if not rows:
         lines.append(
             "Нет ботов в этом кластере.\n\n"
-            "Назначьте ботов через раздел <b>Мои боты → Редактировать</b>."
+            "Нажмите <b>➕ Добавить бота</b> чтобы прикрепить ботов к кластеру."
         )
     else:
         for bot_rec in rows:
@@ -313,10 +313,18 @@ async def cb_cluster_view(
                 bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
             )
             lines.append(f"🤖 @{_html.escape(name)}")
+            kb.button(
+                text=f"➖ @{name}",
+                callback_data=ClustMCb(action="remove_bot", cluster_name=cluster_name, bot_id=bot_rec["bot_id"]),
+            )
 
     kb.button(
+        text="➕ Добавить бота в кластер",
+        callback_data=ClustMCb(action="add_bot_pick", cluster_name=cluster_name),
+    )
+    kb.button(
         text="📢 Рассылка по кластеру",
-        callback_data=NetBcCb(action="menu", segment="cluster"),
+        callback_data=NetBcCb(action="cluster_broadcast", segment="cluster", cluster_name=cluster_name),
     )
     kb.button(
         text="🗑 Удалить кластер",
@@ -411,7 +419,7 @@ async def cb_cluster_delete(
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
 
-    # Detach bots from cluster before deleting
+    # Detach bots from cluster and remove cluster record
     try:
         await pool.execute(
             "UPDATE managed_bots SET cluster=NULL WHERE added_by=$1 AND cluster=$2",
@@ -419,10 +427,134 @@ async def cb_cluster_delete(
             cluster_name,
         )
     except Exception:
-        log_exc_swallow(log, "cb_cluster_delete: DB execute failed")
+        log_exc_swallow(log, "cb_cluster_delete: detach bots failed")
+
+    try:
+        await pool.execute(
+            "DELETE FROM clusters WHERE owner_id=$1 AND name=$2",
+            user_id,
+            cluster_name,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_delete: delete cluster row failed")
 
     await callback.message.edit_text(
         f"✅ Кластер <b>{_html.escape(cluster_name)}</b> удалён.",
         parse_mode="HTML",
         reply_markup=_menu_kb().as_markup(),
     )
+
+
+# ── Add bot to cluster — pick ──────────────────────────────────────────────────
+
+
+@router.callback_query(ClustMCb.filter(F.action == "add_bot_pick"))
+async def cb_cluster_add_bot_pick(
+    callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    cluster_name = callback_data.cluster_name or ""
+
+    # Bots NOT already in this cluster
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT bot_id, username, first_name
+            FROM managed_bots
+            WHERE added_by=$1 AND is_active=TRUE
+              AND (cluster IS NULL OR cluster != $2)
+            ORDER BY first_name
+            """,
+            user_id,
+            cluster_name,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_add_bot_pick: DB fetch failed")
+        rows = []
+
+    kb = InlineKeyboardBuilder()
+    if not rows:
+        lines = [
+            f"🔗 <b>Кластер: {_html.escape(cluster_name)}</b>\n",
+            "Все активные боты уже в этом кластере.",
+        ]
+    else:
+        lines = [
+            f"🔗 <b>Добавить бота в кластер «{_html.escape(cluster_name)}»</b>\n",
+            "Выберите бота:",
+        ]
+        for bot_rec in rows:
+            name = (
+                bot_rec["username"] or bot_rec["first_name"] or f"id{bot_rec['bot_id']}"
+            )
+            kb.button(
+                text=f"🤖 @{name}",
+                callback_data=ClustMCb(action="add_bot", cluster_name=cluster_name, bot_id=bot_rec["bot_id"]),
+            )
+
+    kb.button(text="◀️ Назад", callback_data=ClustMCb(action="view", cluster_name=cluster_name))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ── Add bot to cluster — execute ──────────────────────────────────────────────
+
+
+@router.callback_query(ClustMCb.filter(F.action == "add_bot"))
+async def cb_cluster_add_bot(
+    callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    cluster_name = callback_data.cluster_name or ""
+    bot_id = callback_data.bot_id
+
+    try:
+        await pool.execute(
+            "UPDATE managed_bots SET cluster=$3 WHERE bot_id=$1 AND added_by=$2",
+            bot_id,
+            user_id,
+            cluster_name,
+        )
+        await callback.answer(f"✅ Бот добавлен в кластер «{cluster_name}»", show_alert=False)
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_add_bot: DB update failed")
+        await callback.answer("❌ Ошибка при добавлении бота", show_alert=True)
+        return
+
+    # Refresh view
+    from aiogram.types import CallbackQuery as CQ
+    await cb_cluster_view(callback, callback_data, pool)
+
+
+# ── Remove bot from cluster ────────────────────────────────────────────────────
+
+
+@router.callback_query(ClustMCb.filter(F.action == "remove_bot"))
+async def cb_cluster_remove_bot(
+    callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    user_id = callback.from_user.id
+    cluster_name = callback_data.cluster_name or ""
+    bot_id = callback_data.bot_id
+
+    try:
+        await pool.execute(
+            "UPDATE managed_bots SET cluster=NULL WHERE bot_id=$1 AND added_by=$2 AND cluster=$3",
+            bot_id,
+            user_id,
+            cluster_name,
+        )
+        await callback.answer(f"✅ Бот удалён из кластера «{cluster_name}»", show_alert=False)
+    except Exception:
+        log_exc_swallow(log, "cb_cluster_remove_bot: DB update failed")
+        await callback.answer("❌ Ошибка при удалении бота из кластера", show_alert=True)
+        return
+
+    # Refresh view
+    await cb_cluster_view(callback, callback_data, pool)

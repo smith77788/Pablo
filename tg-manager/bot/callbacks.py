@@ -164,6 +164,7 @@ class NetBcCb(CallbackData, prefix="nbc"):
     bot_id: int = 0
     segment: str = "all"
     lang: Optional[str] = None
+    cluster_name: Optional[str] = None
 
 
 class AccCb(CallbackData, prefix="acc"):

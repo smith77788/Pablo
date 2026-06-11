@@ -208,6 +208,7 @@ async def cb_import_save(
             username=bot_info.get("username", ""),
             first_name=bot_info.get("first_name", ""),
             added_by=user_id,
+            bot=callback.bot,
         )
         if ok:
             saved += 1
