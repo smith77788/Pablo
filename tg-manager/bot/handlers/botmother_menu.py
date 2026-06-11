@@ -328,7 +328,7 @@ async def cb_main(
                 """SELECT
                     (
                         SELECT COUNT(*) FROM operation_audit
-                        WHERE owner_id=$1 AND created_at >= CURRENT_DATE
+                        WHERE owner_id=$1 AND occurred_at >= CURRENT_DATE
                     ) +
                     (
                         SELECT COUNT(*) FROM operation_queue

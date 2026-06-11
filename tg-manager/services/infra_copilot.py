@@ -248,8 +248,8 @@ async def _analyze_account_patterns(
                FROM operation_audit oa
                JOIN tg_accounts a ON a.id = oa.account_id AND a.owner_id = $1
                WHERE oa.owner_id = $1
-                 AND oa.success = FALSE
-                 AND oa.created_at > NOW() - INTERVAL '3 days'
+                 AND oa.result != 'success'
+                 AND oa.occurred_at > NOW() - INTERVAL '3 days'
                GROUP BY account_id, a.first_name, a.phone, a.id
                HAVING COUNT(*) >= 3
                ORDER BY fail_count DESC
@@ -583,15 +583,15 @@ async def _analyze_operation_patterns(
     # 3. Время дня с наибольшей частотой ошибок (из operation_audit если есть)
     try:
         error_hours = await pool.fetch(
-            """SELECT EXTRACT(HOUR FROM created_at)::int AS hour,
-                      COUNT(*) FILTER (WHERE success = FALSE) AS errors,
+            """SELECT EXTRACT(HOUR FROM occurred_at)::int AS hour,
+                      COUNT(*) FILTER (WHERE result != 'success') AS errors,
                       COUNT(*) AS total
                FROM operation_audit
                WHERE owner_id = $1
-                 AND created_at > NOW() - INTERVAL '7 days'
-               GROUP BY EXTRACT(HOUR FROM created_at)
+                 AND occurred_at > NOW() - INTERVAL '7 days'
+               GROUP BY EXTRACT(HOUR FROM occurred_at)
                HAVING COUNT(*) >= 5
-                  AND COUNT(*) FILTER (WHERE success = FALSE) * 1.0 / NULLIF(COUNT(*), 0) > 0.3
+                  AND COUNT(*) FILTER (WHERE result != 'success') * 1.0 / NULLIF(COUNT(*), 0) > 0.3
                ORDER BY errors DESC
                LIMIT 3""",
             owner_id,
