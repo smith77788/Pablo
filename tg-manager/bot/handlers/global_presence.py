@@ -37,11 +37,6 @@ _ACC_PAGE_SIZE = 8
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
-def _back_cancel_row() -> list:
-    """Deprecated stub — use _back_cancel_kb() instead."""
-    return []
-
-
 async def _edit(cb: CallbackQuery, text: str, markup=None) -> None:
     try:
         await cb.answer()

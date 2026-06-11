@@ -1064,6 +1064,15 @@ async def cb_apply_bot_exec(
             log.warning("Failed to create funnel from template: %s", e)
             results.append("🔄 Воронка: ⚠️ не удалось создать")
 
+    # Auto-enable relay for support/intake bots (they need operator forwarding)
+    relay_templates = {"support_bot", "intake_bot"}
+    if preset_key and any(k in preset_key for k in relay_templates):
+        try:
+            await db.set_relay_enabled(pool, bot_id, True, user_id)
+            results.append("📨 Relay (переадресация оператору): ✅ включён")
+        except Exception as e:
+            log.warning("Failed to enable relay for bot %s: %s", bot_id, e)
+
     # Generate admin access token for this bot
     from services.presence_setup import generate_admin_token
     from bot.callbacks import BotAdminCb

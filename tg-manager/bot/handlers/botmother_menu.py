@@ -326,8 +326,14 @@ async def cb_main(
         async def _stats_query() -> object:
             return await pool.fetchrow(
                 """SELECT
-                    COUNT(DISTINCT oq.id) FILTER (
-                        WHERE oq.created_at >= CURRENT_DATE
+                    (
+                        SELECT COUNT(*) FROM operation_audit
+                        WHERE owner_id=$1 AND created_at >= CURRENT_DATE
+                    ) +
+                    (
+                        SELECT COUNT(*) FROM operation_queue
+                        WHERE owner_id=$1 AND created_at >= CURRENT_DATE
+                          AND status IN ('pending', 'running')
                     ) AS today_ops,
                     COUNT(DISTINCT ta.id) FILTER (
                         WHERE ta.is_active = TRUE
@@ -339,7 +345,6 @@ async def cb_main(
                         WHERE re.created_at > now() - INTERVAL '24 hours'
                     ) AS new_alerts
                 FROM (SELECT 1) x
-                LEFT JOIN operation_queue oq ON oq.owner_id=$1
                 LEFT JOIN tg_accounts ta ON ta.owner_id=$1
                 LEFT JOIN restriction_events re ON re.owner_id=$1""",
                 user_id,
