@@ -554,17 +554,85 @@ async def _get_or_fetch_analysis(
 
     from services import entity_analyzer as ea
 
-    # Resolve peer from cache or by ID
+    # Resolve peer: prefer username; fall back to canonical positive ID (Telethon-safe)
     row = await pool.fetchrow(
-        "SELECT username FROM reg_check_cache WHERE entity_id=$1 AND entity_type=$2",
+        "SELECT username, entity_name, reg_date, method FROM reg_check_cache "
+        "WHERE entity_id=$1 AND entity_type=$2",
         entity_id, entity_type,
     )
-    peer = (row["username"] if row and row["username"] else None) or entity_id
+    if row and row["username"]:
+        peer = row["username"]
+    else:
+        # Convert Bot API negative ID (-100XXXXXXXXX) to positive canonical ID
+        peer = rc.canonical_peer_id(entity_id)
 
     if entity_type in ("channel", "supergroup", "group"):
         data = await ea.analyze_channel(pool, owner_id, peer)
     else:
         data = await ea.analyze_user(pool, owner_id, peer)
+
+    # Fallback: if Telethon unavailable, build minimal data from reg_check_cache
+    if not data and row:
+        from services.registration_checker import estimate_by_id
+        est = estimate_by_id(entity_id, entity_type)
+        data = {
+            "entity_id": entity_id,
+            "entity_type": entity_type,
+            "title": row["entity_name"] or "",
+            "name": row["entity_name"] or "",
+            "username": row["username"],
+            "description": "",
+            "members": 0,
+            "admins_count": 0,
+            "bot_count": 0,
+            "banned_count": 0,
+            "online_count": None,
+            "boost_level": 0,
+            "created_at": row["reg_date"] or est["date"],
+            "created_method": row["method"] or est["method"],
+            "linked_chat_id": None,
+            "linked_name": None,
+            "slowmode_s": 0,
+            "ttl": None,
+            "noforwards": False,
+            "verified": False,
+            "scam": False,
+            "fake": False,
+            "restricted": False,
+            "restriction_reason": [],
+            "join_to_send": False,
+            "join_request": False,
+            "is_forum": False,
+            "is_gigagroup": False,
+            "has_signatures": False,
+            "avg_views": 0,
+            "avg_fwd": 0,
+            "avg_react": 0,
+            "avg_replies": 0,
+            "max_views": 0,
+            "engagement_rate": 0.0,
+            "posts_per_day": 0.0,
+            "peak_hour": None,
+            "top_hashtags": [],
+            "media_types": {},
+            "avg_post_length": 0,
+            "top_posts": [],
+            "hour_dist": {},
+            "admin_list": [],
+            "seo_score": 0,
+            "seo_notes": ["⚠️ Данные недоступны — добавьте аккаунт в пул для полного анализа"],
+            "posts_analyzed": 0,
+            "bio": "",
+            "phone": None,
+            "premium": False,
+            "is_contact": False,
+            "is_mutual": False,
+            "common_groups": 0,
+            "photos_count": 0,
+            "status": "неизвестен",
+            "bot_info": {},
+            "_partial": True,  # flag for formatters
+        }
 
     if data:
         _analysis_cache[cache_key] = (data, time.time())

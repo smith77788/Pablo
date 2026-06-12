@@ -639,6 +639,12 @@ def format_overview(data: dict) -> str:
         if data.get("is_mutual"):
             lines.append("🤝 Взаимный контакт")
 
+    if data.get("_partial"):
+        lines.append(
+            "\n⚠️ <i>Данные ограничены — нет активного аккаунта в пуле.\n"
+            "Добавьте аккаунт для получения полной статистики.</i>"
+        )
+
     return "\n".join(lines)
 
 
