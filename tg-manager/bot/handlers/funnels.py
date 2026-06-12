@@ -92,12 +92,21 @@ async def _show_funnel_view(
         )
     if not steps_text:
         steps_text = "\n  (нет шагов)"
+    # Fetch per-funnel counters (entered/completed/dropped)
+    entered = funnel.get("entered_count") or len(sub_ids)
+    completed = funnel.get("completed_count") or 0
+    dropped = funnel.get("dropped_count") or 0
+    active_subs = len(sub_ids)
     text = (
         f"🔗 <b>Цепочка: {funnel['name']}</b>\n\n"
         f"Триггер: {trigger}\n"
         f"Статус: {status}\n"
-        f"Шагов: {len(steps)}\n"
-        f"Подписчиков: <b>{len(sub_ids)}</b>\n\n"
+        f"Шагов: {len(steps)}\n\n"
+        f"📊 <b>Статистика:</b>\n"
+        f"  👤 Вошли: <b>{entered}</b>\n"
+        f"  ✅ Завершили: <b>{completed}</b>\n"
+        f"  🚫 Отписались: <b>{dropped}</b>\n"
+        f"  🔄 Активных: <b>{active_subs}</b>\n\n"
         f"<b>Шаги:</b>{steps_text}"
     )
     await message.edit_text(
