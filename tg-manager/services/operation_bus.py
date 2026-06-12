@@ -98,6 +98,18 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "🎁",
     },
+    "dm_campaign": {
+        "description": "DM-кампания",
+        "min_plan": "enterprise",
+        "max_retries": 1,
+        "icon": "📨",
+    },
+    "network_broadcast": {
+        "description": "Сетевая рассылка",
+        "min_plan": "enterprise",
+        "max_retries": 1,
+        "icon": "📢",
+    },
 }
 
 

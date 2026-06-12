@@ -234,7 +234,7 @@ async def _ask_post_text(event, edit: bool = True) -> None:
     kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
     text = (
         "📝 <b>Текст поста</b>\n\n"
-        "Введите текст публикации.\n"
+        "Введите текст публикации или отправьте медиа (фото/видео/документ) с подписью.\n"
         "Поддерживается HTML: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;code&gt;</code>"
     )
     markup = kb.as_markup()
@@ -254,18 +254,43 @@ async def _ask_post_text(event, edit: bool = True) -> None:
 
 @router.message(MassPublishFSM2.waiting_text)
 async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-    if not text:
-        await message.answer("⚠️ Введите текст поста:")
+    # Accept text message or media message with optional caption
+    text = (message.text or message.caption or "").strip()
+
+    # Extract media info if any (photo, video, animation, document)
+    media_file_id: str | None = None
+    media_type: str | None = None
+    if message.photo:
+        media_file_id = message.photo[-1].file_id
+        media_type = "photo"
+    elif message.video:
+        media_file_id = message.video.file_id
+        media_type = "video"
+    elif message.animation:
+        media_file_id = message.animation.file_id
+        media_type = "animation"
+    elif message.document:
+        media_file_id = message.document.file_id
+        media_type = "document"
+
+    if not text and not media_file_id:
+        await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:")
         return
-    await state.update_data(post_text=text)
+
+    await state.update_data(
+        post_text=text,
+        media_file_id=media_file_id,
+        media_type=media_type,
+    )
     await state.set_state(MassPublishFSM2.choosing_timing)
     kb = InlineKeyboardBuilder()
     for key, (label, _) in _TIMING_OPTIONS.items():
         kb.button(text=label, callback_data=MassPubCb(action=f"timing_{key}"))
     kb.button(text="❌ Отмена", callback_data=MassPubCb(action="menu"))
     kb.adjust(2, 2, 1)
+    media_hint = " + медиа" if media_file_id else ""
     await message.answer(
+        f"✅ Текст{media_hint} принят.\n\n"
         "⏱️ <b>Задержка между постами:</b>\n\n"
         "• <b>5 сек</b> — быстро, риск флуд-бана при большом кол-ве\n"
         "• <b>30 сек</b> — рекомендуется для большинства случаев\n"
@@ -300,6 +325,8 @@ async def _show_preview(
     delay_s: int = data.get("delay_s", 30)
     post_text: str = data.get("post_text", "")
     dry_run: bool = data.get("dry_run", False)
+    media_file_id: str | None = data.get("media_file_id")
+    media_type: str | None = data.get("media_type")
 
     # Count total channels from DB (fast, no Telegram connections)
     try:
@@ -353,10 +380,11 @@ async def _show_preview(
         except Exception:
             intel_text = ""
 
+    media_hint = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
     preview_msg = (
         f"🔍 <b>{'Сухой прогон' if dry_run else 'Предпросмотр публикации'}</b>\n\n"
         f"Каналов в БД: <b>{total_channels}</b> (из {acc_count} аккаунт{'а' if acc_count in (2, 3, 4) else 'ов' if acc_count != 1 else 'а'}){channels_hint}\n"
-        f"Задержка: <b>{timing_label}</b>\n"
+        f"Задержка: <b>{timing_label}</b>{media_hint}\n"
         f"Расчётное время: ~{_format_duration(estimated_s)}\n\n"
         f"Текст поста:\n"
         f"———\n"
@@ -400,6 +428,8 @@ async def cb_mpub_confirm_send(
     acc_ids: list[int] = data.get("target_acc_ids", [])
     delay_s: int = data.get("delay_s", 30)
     post_text: str = data.get("post_text", "")
+    media_file_id: str | None = data.get("media_file_id")
+    media_type: str | None = data.get("media_type")
 
     # Считаем каналы из managed_channels для total_items
     total_channels = 0
@@ -416,21 +446,27 @@ async def cb_mpub_confirm_send(
 
     from services import operation_bus
 
+    op_params: dict = {
+        "text": post_text,
+        "delay_seconds": delay_s,
+        "account_ids": acc_ids,
+    }
+    if media_file_id and media_type:
+        op_params["media_file_id"] = media_file_id
+        op_params["media_type"] = media_type
+
     try:
         op_id = await operation_bus.submit(
             pool,
             callback.from_user.id,
             "mass_publish",
-            {
-                "text": post_text,
-                "delay_seconds": delay_s,
-                "account_ids": acc_ids,
-            },
+            op_params,
             total_items=total_channels,
         )
+        media_note = f"\nМедиа: 🖼 {media_type}" if media_file_id and media_type else ""
         await callback.message.edit_text(
             f"📤 <b>Публикация поставлена в очередь</b>\n\n"
-            f"Каналов для публикации: <b>{total_channels}</b>\n"
+            f"Каналов для публикации: <b>{total_channels}</b>{media_note}\n"
             f"ID операции: <code>#{op_id}</code>\n\n"
             f"Вы получите уведомление по мере выполнения.\n"
             f"<i>Управление очередью: /ops → 📋 Очередь</i>",

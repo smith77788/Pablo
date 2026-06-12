@@ -292,6 +292,66 @@ async def cb_warmup_create_all_plans(
     asyncio.create_task(_create_bg())
 
 
+@router.callback_query(WarmupCb.filter(F.action == "start"))
+async def cb_warmup_start(
+    callback: CallbackQuery, callback_data: WarmupCb, pool: asyncpg.Pool
+) -> None:
+    """Quick-start warmup: creates a standard plan for the given account_id and starts it.
+
+    Used when the user taps a Start button with an explicit account_id.
+    Falls back to the account picker flow if no account_id is provided.
+    """
+    await callback.answer()
+    acc_id = callback_data.account_id
+
+    if not acc_id:
+        await cb_warmup_create_list(callback, pool)
+        return
+
+    from services.account_warmer import create_warmup_plan, run_daily_warmup, get_active_plans
+    from services import task_registry
+
+    try:
+        plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, "standard")
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка создания плана:</b> <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    plans = await get_active_plans(pool, callback.from_user.id)
+    plan = next((p for p in plans if p["id"] == plan_id), None)
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+        )
+    except Exception:
+        acc = None
+    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+
+    run_status = ""
+    if plan:
+        task = asyncio.create_task(run_daily_warmup(pool, plan))
+        task_registry.register(
+            callback.from_user.id, "warmup", f"Разогрев: {label}", task
+        )
+        run_status = "\n▶️ Первый цикл запущен в фоне."
+
+    await callback.message.edit_text(
+        f"✅ <b>План разогрева создан и запущен!</b>\n\n"
+        f"Аккаунт: <b>{html.escape(label)}</b>\n"
+        f"Режим: <b>🌿 Standard (14 дней, 10 действий/день)</b>\n"
+        f"ID плана: <code>{plan_id}</code>"
+        f"{run_status}\n\n"
+        "Следите за прогрессом в <b>⚡ Active Tasks</b>.",
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
+    )
+
+
 @router.callback_query(
     WarmupCb.filter(F.action.in_({"plan_gentle", "plan_standard", "plan_aggressive"}))
 )
@@ -866,7 +926,7 @@ async def _show_infra_picker(
             text=f"➡️ Готово ({len(selected_refs)} целей)",
             callback_data=WarmupCb(action="tgts_done"),
         )
-    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="accs_done"))
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="back_to_targets"))
     kb.button(text="❌ Отмена", callback_data=WarmupCb(action="menu"))
     kb.adjust(1)
 
@@ -928,6 +988,41 @@ async def cb_wu_infra_done(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await callback.answer()
     await _show_mode_picker(callback, state)
+
+
+@router.callback_query(WarmupCb.filter(F.action == "back_to_targets"))
+async def cb_wu_back_to_targets(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    """Back button from infra picker or mode picker — returns to target type chooser.
+
+    Works from any FSM state (picking_infra, choosing_mode, confirming).
+    Restores choosing_target_type without losing account selection.
+    """
+    await callback.answer()
+    await state.set_state(WarmupSessionFSM.choosing_target_type)
+    data = await state.get_data()
+    n = len(data.get("sel_acc_ids", []))
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🏗️ Из моей инфраструктуры", callback_data=WarmupCb(action="tgt_infra")
+    )
+    kb.button(text="📝 По username/ссылке", callback_data=WarmupCb(action="tgt_manual"))
+    kb.button(text="📋 Списком (несколько)", callback_data=WarmupCb(action="tgt_list"))
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="new_session"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🎯 <b>Новая сессия — Шаг 2: Цели прогрева</b>\n\n"
+        f"Выбрано аккаунтов: <b>{n}</b>\n\n"
+        "Откуда брать цели для прогрева?\n\n"
+        "🏗️ <b>Из инфраструктуры</b> — выберите ваши каналы/боты/группы\n"
+        "📝 <b>По username</b> — введите один @username или invite link\n"
+        "📋 <b>Списком</b> — введите несколько целей (по одной на строку)",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(
@@ -1008,7 +1103,7 @@ async def _show_mode_picker(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     for key, cfg in _SESSION_PLAN_CONFIG.items():
         kb.button(text=cfg["label"], callback_data=WarmupCb(action=f"sess_mode_{key}"))
-    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="accs_done"))
+    kb.button(text="◀️ Назад", callback_data=WarmupCb(action="back_to_targets"))
     kb.adjust(1)
 
     data = await state.get_data()
@@ -1065,7 +1160,7 @@ async def cb_wu_mode(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="▶️ Запустить сессию", callback_data=WarmupCb(action="sess_start"))
-    kb.button(text="◀️ Изменить режим", callback_data=WarmupCb(action="accs_done"))
+    kb.button(text="◀️ Изменить режим", callback_data=WarmupCb(action="back_to_targets"))
     kb.button(text="❌ Отмена", callback_data=WarmupCb(action="menu"))
     kb.adjust(1)
 

@@ -930,6 +930,132 @@ async def cb_retry_op(
     await cb_queue(callback, callback_data, pool)
 
 
+@router.callback_query(MassOpCb.filter(F.action == "retry_failed"))
+async def cb_retry_all_failed(
+    callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
+) -> None:
+    """Сбросить ВСЕ неудачные операции пользователя в статус pending для повторного выполнения."""
+    try:
+        result = await pool.execute(
+            "UPDATE operation_queue SET status='pending', last_error=NULL, error_msg=NULL, "
+            "retry_count=0, started_at=NULL, finished_at=NULL, done_items=0, "
+            "scheduled_for=NULL "
+            "WHERE owner_id=$1 AND status='failed'",
+            callback.from_user.id,
+        )
+    except Exception as e:
+        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        return
+    try:
+        reset_count = int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        reset_count = 0
+    if reset_count == 0:
+        await callback.answer("Нет неудачных операций для повторного запуска.", show_alert=True)
+        return
+    await callback.answer(
+        f"✅ {reset_count} операц{'ия' if reset_count == 1 else 'ии' if 2 <= reset_count <= 4 else 'ий'} "
+        f"поставлено в очередь повторно.",
+        show_alert=True,
+    )
+    # Re-render queue view
+    await cb_queue(callback, MassOpCb(action="queue", op_type="all", page=0), pool)
+
+
+@router.callback_query(MassOpCb.filter(F.action == "op_detail"))
+async def cb_op_detail(
+    callback: CallbackQuery, callback_data: MassOpCb, pool: asyncpg.Pool
+) -> None:
+    """Показать детальный лог шагов операции из таблицы operation_log."""
+    await callback.answer()
+    op_id = callback_data.op_id
+    user_id = callback.from_user.id
+
+    try:
+        op = await pool.fetchrow(
+            "SELECT id, op_type, status, done_items, total_items, created_at, "
+            "last_error, retry_count, max_retries, finished_at, result "
+            "FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            op_id, user_id,
+        )
+    except Exception as e:
+        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        return
+
+    if not op:
+        await callback.answer("Операция не найдена.", show_alert=True)
+        return
+
+    try:
+        log_rows = await pool.fetch(
+            "SELECT step_num, target, status, message, created_at "
+            "FROM operation_log WHERE op_id=$1 ORDER BY step_num DESC LIMIT 30",
+            op_id,
+        )
+    except Exception:
+        log_rows = []
+
+    _STATUS_ICONS = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    _LOG_ICONS = {"ok": "✅", "skip": "⏭", "error": "❌"}
+    icon = _STATUS_ICONS.get(op["status"], "❓")
+    op_type_label = html.escape(op["op_type"])
+    done = op["done_items"] or 0
+    total = op["total_items"] or 0
+    created = op["created_at"].strftime("%d.%m.%Y %H:%M") if op["created_at"] else "—"
+    finished = op["finished_at"].strftime("%d.%m %H:%M") if op["finished_at"] else "—"
+
+    lines = [
+        f"🔍 <b>Детали операции #{op_id}</b>",
+        f"{icon} <b>{op_type_label}</b>  [{op['status']}]",
+        f"Прогресс: {done}/{total}  ·  Создана: {created}",
+    ]
+    if op["finished_at"]:
+        lines.append(f"Завершена: {finished}")
+    if op["last_error"]:
+        lines.append(f"⚠️ Последняя ошибка: <i>{html.escape(op['last_error'][:150])}</i>")
+
+    # Result summary if done
+    if op["result"]:
+        try:
+            res_data = op["result"] if isinstance(op["result"], dict) else json.loads(op["result"])
+            summary = res_data.get("summary", "")
+            if summary:
+                lines.append(f"\n📊 <b>Итог:</b> {html.escape(summary[:200])}")
+        except Exception:
+            pass
+
+    # Per-step log
+    if log_rows:
+        lines.append(f"\n📋 <b>Последние шаги</b> (из {len(log_rows)}):")
+        for row in log_rows:
+            step_icon = _LOG_ICONS.get(row["status"], "❓")
+            target_str = html.escape(str(row["target"] or "")[:40])
+            msg_str = html.escape(str(row["message"] or "")[:60])
+            step_time = row["created_at"].strftime("%H:%M:%S") if row["created_at"] else ""
+            step_line = f"  {step_icon} #{row['step_num']} {target_str}"
+            if msg_str:
+                step_line += f" — {msg_str}"
+            if step_time:
+                step_line += f" <i>{step_time}</i>"
+            lines.append(step_line)
+    else:
+        lines.append("\n<i>Детальный лог шагов недоступен.</i>")
+
+    kb = InlineKeyboardBuilder()
+    if op["status"] == "failed":
+        kb.button(
+            text="🔄 Повторить",
+            callback_data=MassOpCb(action="retry_op", op_id=op_id),
+        )
+    kb.button(
+        text="◀️ В очередь",
+        callback_data=MassOpCb(action="queue", op_type="all", page=0),
+    )
+    kb.adjust(1)
+
+    await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # DRY RUN PREVIEW
 # ══════════════════════════════════════════════════════════════════════════
@@ -1090,6 +1216,7 @@ async def cb_queue(
     filter_label, _ = _QUEUE_STATUS_FILTERS[status_filter_key]
     lines = [f"📋 <b>Очередь операций</b>  [{filter_label}]  стр. {page + 1}/{total_pages}\n"]
     has_completed = False
+    failed_count = 0
     for i, r in enumerate(rows, offset + 1):
         icon = _STATUS_ICONS.get(r["status"], "❓")
         op_type_label = html.escape(r["op_type"])
@@ -1161,9 +1288,14 @@ async def cb_queue(
                 text=btn_label,
                 callback_data=MassOpCb(action="retry_op", op_id=r["id"]),
             )
+            failed_count += 1
 
         if status in ("done", "failed"):
             has_completed = True
+            kb.button(
+                text=f"🔍 Детали #{r['id']}",
+                callback_data=MassOpCb(action="op_detail", op_id=r["id"]),
+            )
 
     # Pagination navigation
     nav_btns = 0
@@ -1180,6 +1312,11 @@ async def cb_queue(
         )
         nav_btns += 1
 
+    if failed_count > 1:
+        kb.button(
+            text=f"🔄 Повторить все ошибки ({failed_count})",
+            callback_data=MassOpCb(action="retry_failed"),
+        )
     if has_completed:
         kb.button(
             text="🗑 Очистить завершённые",
@@ -1189,15 +1326,19 @@ async def cb_queue(
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
 
     # Build adjust list: filter row + action buttons per item + nav + util
+    # Each done/failed op has 2 buttons (retry/cancel + detail), pending/running has 1 (cancel)
     action_btn_count = sum(
-        1
+        2 if r["status"] in ("done", "failed") else 1
         for r in rows
-        if r["status"] in ("pending", "running", "failed")
+        if r["status"] in ("pending", "running", "done", "failed")
     )
     adjustments = [len(_QUEUE_STATUS_FILTERS)]
-    adjustments += [1] * action_btn_count
+    adjustments += [2 if r["status"] in ("done", "failed") else 1
+                    for r in rows if r["status"] in ("pending", "running", "done", "failed")]
     if nav_btns:
         adjustments.append(nav_btns)
+    if failed_count > 1:
+        adjustments.append(1)
     if has_completed:
         adjustments.append(1)
     adjustments.append(2)

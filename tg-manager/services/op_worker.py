@@ -773,6 +773,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 from services.gift_operation import _exec_gift_transfer
 
                 result = await _exec_gift_transfer(pool, op_id, params)
+            elif op_type == "dm_campaign":
+                result = await _exec_dm_campaign(pool, bot, op_id, owner_id, params)
+            elif op_type == "network_broadcast":
+                result = await _exec_network_broadcast(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -1093,6 +1097,79 @@ async def _exec_bulk_bot_edit(
         "failed": fail_count,
         "summary": f"Обновлено: {ok_count} ботов, ошибок: {fail_count}",
     }
+
+
+async def _exec_dm_campaign(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Execute a DM campaign via dm_engine.run_campaign().
+
+    Params:
+      campaign_id (int) — id from dm_campaigns table.
+
+    Progress is tracked in dm_campaigns table (sent_count/total_targets/status).
+    The operation_queue entry tracks op-level completion only.
+    Cancellation: setting dm_campaigns.status='paused' causes dm_engine inner loop to stop.
+    """
+    campaign_id = int(params.get("campaign_id", 0))
+    if not campaign_id:
+        return {
+            "status": "failed",
+            "summary": "⚠️ DM Campaign: campaign_id missing in params",
+        }
+
+    # Verify campaign exists and belongs to this owner
+    campaign = await pool.fetchrow(
+        "SELECT id, name, status, owner_id FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+        campaign_id,
+        owner_id,
+    )
+    if not campaign:
+        return {
+            "status": "failed",
+            "summary": f"⚠️ DM Campaign #{campaign_id} not found or wrong owner",
+        }
+
+    if await _is_cancelled(pool, op_id):
+        # Cancelled before starting — mark campaign paused so user can resume later
+        await pool.execute(
+            "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+        )
+        return {"status": "cancelled", "summary": "Operation cancelled before start"}
+
+    from services.dm_engine import run_campaign
+
+    try:
+        await run_campaign(pool, bot, campaign_id)
+    except asyncio.CancelledError:
+        # op_worker cancelled this asyncio task — mark campaign paused
+        try:
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
+            )
+        except Exception:
+            pass
+        raise
+
+    # Read final counts from dm_campaigns for the completion summary
+    final = await pool.fetchrow(
+        "SELECT status, sent_count, fail_count, total_targets FROM dm_campaigns WHERE id=$1",
+        campaign_id,
+    )
+    if final:
+        sent = final["sent_count"] or 0
+        failed = final["fail_count"] or 0
+        total = final["total_targets"] or 0
+        name = campaign["name"] or f"#{campaign_id}"
+        summary = f"📨 DM «{name}»: ✅ {sent} sent, ❌ {failed} errors, 📊 {total} total"
+        return {
+            "status": "done",
+            "ok": sent,
+            "failed": failed,
+            "total": total,
+            "summary": summary,
+        }
+    return {"status": "done", "summary": f"📨 DM campaign #{campaign_id} completed"}
 
 
 async def _exec_mass_publish(

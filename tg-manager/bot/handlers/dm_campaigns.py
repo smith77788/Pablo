@@ -7,7 +7,6 @@ Entry: DmCb(action="menu")
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 
@@ -19,7 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import DmCb, BmCb
 from bot.states import DmCampaignFSM
-from services import task_registry as _treg, intelligence_engine
+from services import intelligence_engine
 from services.logger import log_exc_swallow
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -661,7 +660,7 @@ async def cb_dm_launch_or_draft(
     await state.clear()
 
     if status == "running":
-        from services import infra_orchestrator
+        from services import infra_orchestrator, operation_bus
 
         ready, reason = await infra_orchestrator.is_ready_for_op(
             pool, callback.from_user.id
@@ -679,25 +678,24 @@ async def cb_dm_launch_or_draft(
                 .as_markup(),
             )
             return
+        # Submit to operation_queue so op_worker handles execution with proper
+        # retry logic, progress tracking, and cancellation support.
         try:
-            await pool.execute(
-                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1",
-                campaign_id,
+            op_id = await operation_bus.submit(
+                pool,
+                callback.from_user.id,
+                "dm_campaign",
+                {"campaign_id": campaign_id},
             )
         except Exception as exc:
             await _edit(
                 callback,
-                f"❌ Ошибка запуска кампании: <code>{html.escape(str(exc)[:200])}</code>",
+                f"❌ Ошибка постановки кампании в очередь: <code>{html.escape(str(exc)[:200])}</code>",
                 InlineKeyboardBuilder()
                 .button(text="◀️ Назад", callback_data=DmCb(action="menu"))
                 .as_markup(),
             )
             return
-        # Запустить асинхронно уже после установки статуса
-        _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
-        _treg.register(
-            callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t
-        )
         _launch_kb = InlineKeyboardBuilder()
         _launch_kb.button(
             text="📋 Детали кампании",
@@ -707,10 +705,11 @@ async def cb_dm_launch_or_draft(
         _launch_kb.adjust(1)
         await _edit(
             callback,
-            f"🚀 Кампания <b>«{html.escape(name)}»</b> запущена!\n\n"
+            f"🚀 Кампания <b>«{html.escape(name)}»</b> поставлена в очередь!\n\n"
             f"ID кампании: <code>{campaign_id}</code>\n"
+            f"ID операции: <code>#{op_id}</code>\n"
             "Отправка идёт в фоне — вы получите уведомление когда закончится.\n"
-            "<i>Для отмены: /tasks</i>",
+            "<i>Управление: /ops → 📋 Очередь</i>",
             _launch_kb.as_markup(),
         )
     else:
@@ -727,23 +726,6 @@ async def cb_dm_launch_or_draft(
             f"ID: <code>{campaign_id}</code>\n\n"
             "Запустите из меню кампаний когда будете готовы.",
             _draft_kb.as_markup(),
-        )
-
-
-async def _launch_campaign(pool: asyncpg.Pool, bot, campaign_id: int) -> None:
-    from services.dm_engine import run_campaign
-
-    try:
-        await run_campaign(pool, bot, campaign_id)
-    except asyncio.CancelledError:
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='paused' WHERE id=$1", campaign_id
-        )
-        raise
-    except Exception as e:
-        log.exception("dm_engine campaign %d error: %s", campaign_id, e)
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='failed' WHERE id=$1", campaign_id
         )
 
 
@@ -829,13 +811,21 @@ async def cb_dm_pause(
 ) -> None:
     await callback.answer("⏸️ Поставлена на паузу")
     campaign_id = callback_data.campaign_id
-    # Cancel the running asyncio task so the background coroutine actually stops.
-    # The task's CancelledError handler in _launch_campaign will update status→paused.
-    # We also update DB status here as a safety net in case the task already finished.
-    for entry in _treg.list_tasks(callback.from_user.id):
-        if entry.kind == "dm_campaign" and f"#{campaign_id}" in entry.label:
-            entry.task.cancel()
-            break
+    # Cancel running operation_queue entry for this campaign (if any).
+    # op_worker checks for cancellation every iteration and will stop the dm_engine loop.
+    try:
+        await pool.execute(
+            """UPDATE operation_queue
+               SET status='cancelled', finished_at=NOW()
+               WHERE owner_id=$1 AND op_type='dm_campaign'
+                 AND params->>'campaign_id' = $2::text
+                 AND status IN ('pending','running')""",
+            callback.from_user.id,
+            str(campaign_id),
+        )
+    except Exception:
+        pass
+    # Also update dm_campaigns status so dm_engine loop exits on next poll
     try:
         await pool.execute(
             "UPDATE dm_campaigns SET status='paused' WHERE id=$1 AND owner_id=$2",
@@ -863,19 +853,20 @@ async def cb_dm_resume(
         return
     await callback.answer("▶️ Запущена")
     campaign_id = callback_data.campaign_id
-    # Update DB status before creating task (same ordering as initial launch)
+    # Submit to operation_queue — op_worker will call dm_engine.run_campaign()
+    # which handles status→running and sends DMs with flood/skip handling.
     try:
-        await pool.execute(
-            "UPDATE dm_campaigns SET status='running', started_at=COALESCE(started_at, now()) WHERE id=$1 AND owner_id=$2",
-            campaign_id,
+        from services import operation_bus
+
+        await operation_bus.submit(
+            pool,
             callback.from_user.id,
+            "dm_campaign",
+            {"campaign_id": campaign_id},
         )
-    except Exception:
-        pass
-    _t = asyncio.create_task(_launch_campaign(pool, callback.bot, campaign_id))
-    _treg.register(
-        callback.from_user.id, "dm_campaign", f"DM campaign #{campaign_id}", _t
-    )
+    except Exception as exc:
+        await callback.answer(f"Ошибка постановки в очередь: {str(exc)[:100]}", show_alert=True)
+        return
     await cb_dm_detail(callback, callback_data, pool)
 
 

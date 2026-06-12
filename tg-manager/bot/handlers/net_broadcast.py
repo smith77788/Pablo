@@ -17,7 +17,7 @@ from bot.states import NetworkBroadcastV2
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
-from services import broadcaster
+from services import operation_bus
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -429,11 +429,11 @@ async def cb_net_bc_confirm(
         )
         return
 
-    # Если выбраны конкретные боты или кластер — фильтруем
+    # Проверяем бот-фильтр для selected_bots / cluster
+    selected_bot_ids: list[int] = []
     if segment == "selected_bots":
-        selected_ids: list[int] = data.get("selected_bot_ids", [])
-        bots = [b for b in bots_all if b["bot_id"] in selected_ids]
-        if not bots:
+        selected_bot_ids = data.get("selected_bot_ids", [])
+        if not selected_bot_ids:
             kb = InlineKeyboardBuilder()
             kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
             await callback.message.edit_text(
@@ -449,9 +449,8 @@ async def cb_net_bc_confirm(
             callback.from_user.id,
             cluster_name,
         )
-        cluster_bot_ids = {r["bot_id"] for r in cluster_bot_ids_rows}
-        bots = [b for b in bots_all if b["bot_id"] in cluster_bot_ids]
-        if not bots:
+        selected_bot_ids = [r["bot_id"] for r in cluster_bot_ids_rows]
+        if not selected_bot_ids:
             from bot.callbacks import ClustMCb
             kb = InlineKeyboardBuilder()
             kb.button(text="◀️ Назад к кластеру", callback_data=ClustMCb(action="view", cluster_name=cluster_name))
@@ -462,157 +461,35 @@ async def cb_net_bc_confirm(
                 reply_markup=kb.as_markup(),
             )
             return
-    else:
-        bots = bots_all
 
-    total_started = 0
+    # Estimate total recipients for the queue entry
     total_users = 0
-    # Stagger per-bot broadcast start by 2 s to avoid thundering-herd on Telegram.
-    _BOT_START_DELAY_S = 2.0
-
-    if segment in ("all_each", "selected_bots"):
-        for bot in bots:
-            try:
-                user_ids = await pool.fetch(
-                    "SELECT user_id FROM bot_users WHERE bot_id=$1", bot["bot_id"]
-                )
-            except Exception:
-                log.warning(
-                    "net_broadcast: fetch user_ids failed bot=%s",
-                    bot.get("bot_id"),
-                    exc_info=True,
-                )
-                user_ids = []
-            ids = [r["user_id"] for r in user_ids]
-            if ids:
-                bc_id = await db.create_broadcast(
-                    pool, bot["bot_id"], text, len(ids), callback.from_user.id
-                )
-                if not bc_id:
-                    continue
-                broadcaster.start(
-                    pool,
-                    http,
-                    bc_id,
-                    bot["token"],
-                    bot["bot_id"],
-                    text,
-                    None,
-                    ids,
-                    None,
-                    start_delay=total_started * _BOT_START_DELAY_S,
-                )
-                total_started += 1
-                total_users += len(ids)
-
+    if segment in ("all_each", "selected_bots", "cluster"):
+        bot_ids_filter = set(selected_bot_ids) if selected_bot_ids else None
+        for b in bots_all:
+            if bot_ids_filter is None or b["bot_id"] in bot_ids_filter:
+                total_users += b.get("audience_count", 0)
     elif segment == "unique":
         users = await db.get_unique_network_users(pool, callback.from_user.id)
-        from collections import defaultdict
-
-        by_bot: dict = defaultdict(list)
-        token_map: dict = {}
-        for u in users:
-            by_bot[u["bot_id"]].append(u["user_id"])
-            token_map[u["bot_id"]] = u["token"]
-        for bot_id, ids in by_bot.items():
-            bc_id = await db.create_broadcast(
-                pool, bot_id, text, len(ids), callback.from_user.id
-            )
-            if not bc_id:
-                continue
-            broadcaster.start(
-                pool,
-                http,
-                bc_id,
-                token_map[bot_id],
-                bot_id,
-                text,
-                None,
-                ids,
-                None,
-                start_delay=total_started * _BOT_START_DELAY_S,
-            )
-            total_started += 1
-            total_users += len(ids)
-
+        total_users = len(users)
     elif segment in ("cold_all", "lost_all"):
         days_from = 30 if segment == "lost_all" else 7
         days_to = None if segment == "lost_all" else 30
-        for bot in bots:
-            ids = await db.get_inactive_user_ids(
-                pool, bot["bot_id"], days_from, days_to
-            )
-            if ids:
-                bc_id = await db.create_broadcast(
-                    pool, bot["bot_id"], text, len(ids), callback.from_user.id
-                )
-                if not bc_id:
-                    continue
-                broadcaster.start(
-                    pool,
-                    http,
-                    bc_id,
-                    bot["token"],
-                    bot["bot_id"],
-                    text,
-                    None,
-                    ids,
-                    None,
-                    start_delay=total_started * _BOT_START_DELAY_S,
-                )
-                total_started += 1
-                total_users += len(ids)
-
+        for b in bots_all:
+            ids = await db.get_inactive_user_ids(pool, b["bot_id"], days_from, days_to)
+            total_users += len(ids)
     elif segment == "lang":
-        for bot in bots:
-            try:
-                user_ids = await pool.fetch(
-                    "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2",
-                    bot["bot_id"],
-                    lang,
-                )
-            except Exception:
-                log.warning(
-                    "net_broadcast: fetch user_ids (lang) failed bot=%s",
-                    bot.get("bot_id"),
-                    exc_info=True,
-                )
-                user_ids = []
-            ids = [r["user_id"] for r in user_ids]
-            if ids:
-                bc_id = await db.create_broadcast(
-                    pool, bot["bot_id"], text, len(ids), callback.from_user.id
-                )
-                if not bc_id:
-                    continue
-                broadcaster.start(
-                    pool,
-                    http,
-                    bc_id,
-                    bot["token"],
-                    bot["bot_id"],
-                    text,
-                    None,
-                    ids,
-                    None,
-                    start_delay=total_started * _BOT_START_DELAY_S,
-                )
-                total_started += 1
-                total_users += len(ids)
+        for b in bots_all:
+            cnt = await pool.fetchval(
+                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND language_code=$2",
+                b["bot_id"], lang,
+            ) or 0
+            total_users += cnt
 
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📊 История рассылок", callback_data=NetworkCb(action="menu"))
-    kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
-    if total_started == 0:
+    if total_users == 0:
         kb_empty = InlineKeyboardBuilder()
-        kb_empty.button(
-            text="🔄 Выбрать другой сегмент",
-            callback_data=NetBcCb(action="choose_target"),
-        )
-        kb_empty.button(
-            text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu")
-        )
+        kb_empty.button(text="🔄 Выбрать другой сегмент", callback_data=NetBcCb(action="choose_target"))
+        kb_empty.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
         kb_empty.adjust(1)
         await callback.message.edit_text(
             "⚠️ <b>Рассылка не запущена</b>\n\n"
@@ -621,28 +498,61 @@ async def cb_net_bc_confirm(
             parse_mode="HTML",
             reply_markup=kb_empty.as_markup(),
         )
-    else:
-        _cluster_name_label = data.get("cluster_name", "")
-        segment_label = {
-            "all_each": "Все боты → своей аудитории",
-            "unique": "Уникальные пользователи сети",
-            "cold_all": "Холодные (7–30 дн)",
-            "lost_all": "Потерянные (30+ дн)",
-            "lang": f"По языку: {lang}",
-            "selected_bots": f"Выбранные боты ({total_started} шт.)",
-            "cluster": f"Кластер «{_cluster_name_label}» ({total_started} бот(ов))",
-        }.get(segment, segment)
+        return
 
+    # Enqueue via operation_bus — op_worker executes the actual sends
+    params: dict = {
+        "text": text,
+        "segment": segment,
+        "lang": lang,
+        "selected_bot_ids": selected_bot_ids,
+        "cluster_name": data.get("cluster_name", ""),
+    }
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            owner_id=callback.from_user.id,
+            op_type="network_broadcast",
+            params=params,
+            total_items=total_users,
+        )
+    except Exception as exc:
+        log.exception("net_broadcast: failed to enqueue operation")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
         await callback.message.edit_text(
-            f"🚀 <b>Сетевая рассылка запущена!</b>\n\n"
-            f"📢 Сегмент: <b>{segment_label}</b>\n"
-            f"🤖 Ботов задействовано: <b>{total_started}</b>\n"
-            f"👥 Получателей: <b>{total_users:,}</b>\n\n"
-            "⏳ Рассылка выполняется в фоне.\n"
-            "Прогресс отображается в истории рассылок каждого бота.",
+            f"❌ <b>Ошибка постановки в очередь</b>\n\n<code>{_html.escape(str(exc))}</code>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
+        return
+
+    _cluster_name_label = data.get("cluster_name", "")
+    segment_label = {
+        "all_each": "Все боты → своей аудитории",
+        "unique": "Уникальные пользователи сети",
+        "cold_all": "Холодные (7–30 дн)",
+        "lost_all": "Потерянные (30+ дн)",
+        "lang": f"По языку: {lang}",
+        "selected_bots": f"Выбранные боты ({len(selected_bot_ids)} шт.)",
+        "cluster": f"Кластер «{_cluster_name_label}»",
+    }.get(segment, segment)
+
+    from bot.callbacks import BmCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Очередь операций", callback_data=BmCb(action="op_reports"))
+    kb.button(text="◀️ Сеть & операции", callback_data=NetworkCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📢 <b>Сетевая рассылка поставлена в очередь!</b>\n\n"
+        f"📢 Сегмент: <b>{segment_label}</b>\n"
+        f"👥 Получателей: <b>{total_users:,}</b>\n"
+        f"🆔 Операция: <code>#{op_id}</code>\n\n"
+        "⏳ Рассылка выполняется в фоне через очередь операций.\n"
+        "Прогресс можно отслеживать в «Очередь операций».",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(NetBcCb.filter(F.action == "cancel"))

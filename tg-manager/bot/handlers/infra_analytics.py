@@ -148,6 +148,10 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(
         text="🔬 Intelligence Report", callback_data=InfraCb(action="intelligence")
     )
+    kb.button(text="🚀 Развёртка аккаунтов", callback_data=InfraCb(action="deploy"))
+    kb.button(
+        text="🔍 Проверить аккаунты", callback_data=InfraCb(action="health_check")
+    )
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -1132,3 +1136,277 @@ async def cb_copilot_snooze_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
         await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
     except Exception:
         pass
+
+
+# ── Deploy accounts ────────────────────────────────────────────────────────────
+
+
+@router.callback_query(InfraCb.filter(F.action == "deploy"))
+async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Запускает последовательность развёртки аккаунтов.
+
+    Для каждого активного аккаунта без прокси или с неинициализированным
+    статусом — выставляет acc_status='active', проверяет account_capabilities,
+    и обновляет trust_score по умолчанию если он не задан.
+    Логирует результат в operation_audit.
+    """
+    await callback.answer("⏳ Развёртка...")
+    uid = callback.from_user.id
+
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, acc_status, trust_score, session_str, proxy_id
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY added_at DESC""",
+            uid,
+        )
+    except Exception:
+        accounts = []
+
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов для развёртки</b>\n\n"
+            "Добавьте аккаунты через 📱 Аккаунты.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    deployed = 0
+    skipped = 0
+    errors = 0
+
+    for acc in accounts:
+        acc_id = acc["id"]
+        status = acc.get("acc_status") or "active"
+        trust = float(acc.get("trust_score") or 0.0)
+        has_session = bool(acc.get("session_str"))
+
+        # Аккаунты в плохом состоянии — пропускаем
+        if status in ("banned", "spamblock", "deactivated"):
+            skipped += 1
+            continue
+
+        try:
+            updates: list[str] = []
+            params: list = []
+            idx = 1
+
+            # Инициализируем trust_score если не задан
+            if trust <= 0.0:
+                updates.append(f"trust_score=${idx}")
+                params.append(0.5)
+                idx += 1
+
+            # Статус active если не задан или unknown
+            if status not in ("active", "warming"):
+                updates.append(f"acc_status=${idx}")
+                params.append("active")
+                idx += 1
+
+            if updates:
+                params.append(acc_id)
+                params.append(uid)
+                await pool.execute(
+                    f"UPDATE tg_accounts SET {', '.join(updates)} WHERE id=${idx} AND owner_id=${idx + 1}",
+                    *params,
+                )
+
+            # Инициализируем capabilities если их нет
+            existing_caps = await pool.fetchval(
+                "SELECT 1 FROM account_capabilities WHERE account_id=$1", acc_id
+            )
+            if not existing_caps:
+                init_trust = max(trust, 0.5)
+                can_dm = init_trust >= 0.3
+                can_invite = init_trust >= 0.5
+                can_create = init_trust >= 0.2
+                dm_limit = 50 if init_trust >= 0.7 else (20 if init_trust >= 0.4 else 5)
+                try:
+                    await pool.execute(
+                        """INSERT INTO account_capabilities
+                           (account_id, owner_id, can_invite, can_dm,
+                            can_create_channel, daily_dm_limit, last_discovery)
+                           VALUES ($1,$2,$3,$4,$5,$6,NOW())
+                           ON CONFLICT(account_id) DO NOTHING""",
+                        acc_id,
+                        uid,
+                        can_invite,
+                        can_dm,
+                        can_create,
+                        dm_limit,
+                    )
+                except Exception:
+                    pass
+
+            deployed += 1
+
+            # Пишем в audit
+            try:
+                from services.op_worker import write_op_audit as _audit
+                await _audit(
+                    pool,
+                    owner_id=uid,
+                    action="deploy",
+                    result="success",
+                    target=f"acc_{acc_id}",
+                    account_id=acc_id,
+                )
+            except Exception:
+                pass
+
+        except Exception as exc:
+            log.warning("infra deploy: acc=%d error=%s", acc_id, exc)
+            errors += 1
+
+    from services import infra_orchestrator
+    state = await infra_orchestrator.get_state(pool, uid)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔍 Проверить аккаунты", callback_data=InfraCb(action="health_check"))
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"🚀 <b>Развёртка завершена</b>\n\n"
+        f"✅ Развёрнуто: <b>{deployed}</b>\n"
+        f"⏭ Пропущено (плохое состояние): <b>{skipped}</b>\n"
+        f"❌ Ошибок: <b>{errors}</b>\n\n"
+        f"📱 Доступных аккаунтов: <b>{state.account_available}</b>\n"
+        f"{state.pressure_emoji} Давление: <b>{state.pressure_score}/100</b> — {state.pressure_label}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Account health check (ping + DB update) ────────────────────────────────────
+
+
+@router.callback_query(InfraCb.filter(F.action == "health_check"))
+async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Пингует аккаунты через Telegram и обновляет acc_status в БД.
+
+    Реальная проверка: GetMe / GetState для каждого аккаунта с session_str.
+    Обновляет is_active, acc_status, last_real_check_at.
+    """
+    await callback.answer("🔍 Проверяю...")
+    uid = callback.from_user.id
+
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, phone, first_name, session_str, device_model,
+                      system_version, app_version, proxy_id
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE
+               ORDER BY id""",
+            uid,
+        )
+    except Exception:
+        accounts = []
+
+    if not accounts:
+        await callback.message.edit_text(
+            "⚠️ Нет активных аккаунтов для проверки.",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    await callback.message.edit_text(
+        f"🔍 <b>Проверяю {len(accounts)} аккаунтов…</b>\n\nЭто займёт 20-60 секунд.",
+        parse_mode="HTML",
+    )
+
+    from services.account_manager import check_account_status_full
+    from services.account_manager import should_persist_account_status
+
+    ok_count = 0
+    problem_count = 0
+    no_session_count = 0
+
+    for acc in accounts:
+        acc_id = acc["id"]
+        session_str = acc.get("session_str") or ""
+
+        if not session_str or len(session_str.strip()) < 10:
+            no_session_count += 1
+            continue
+
+        res: dict = {}
+        try:
+            res = await asyncio.wait_for(
+                check_account_status_full(session_str, dict(acc), check_spambot=False),
+                timeout=20.0,
+            )
+            status = res.get("status", "error")
+        except asyncio.TimeoutError:
+            status = "error"
+        except Exception as exc:
+            log.debug("health_check acc=%d: %s", acc_id, exc)
+            status = "error"
+
+        try:
+            if should_persist_account_status(
+                status,
+                auth_error=bool(res.get("auth_error")),
+                has_session=not res.get("no_session", False),
+            ):
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+                    status,
+                    acc_id,
+                )
+                if status in ("banned", "deactivated") and res.get("auth_error"):
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
+                    )
+                if status == "spamblock":
+                    await pool.execute(
+                        "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0),0.3) WHERE id=$1",
+                        acc_id,
+                    )
+            else:
+                await pool.execute(
+                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1", acc_id
+                )
+        except Exception as exc:
+            log.debug("health_check DB update acc=%d: %s", acc_id, exc)
+
+        if status == "active":
+            ok_count += 1
+        else:
+            problem_count += 1
+
+        # Log to operation_audit
+        try:
+            from services.op_worker import write_op_audit as _audit
+            await _audit(
+                pool,
+                owner_id=uid,
+                action="health_check",
+                result="success" if status == "active" else "error",
+                target=f"acc_{acc_id}",
+                account_id=acc_id,
+                error_msg=None if status == "active" else status,
+            )
+        except Exception:
+            pass
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Проверить снова", callback_data=InfraCb(action="health_check"))
+    kb.button(text="❤️ Здоровье аккаунтов", callback_data=InfraCb(action="health"))
+    kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
+    kb.adjust(2, 1)
+
+    total_checked = ok_count + problem_count
+    await callback.message.edit_text(
+        f"🔍 <b>Проверка завершена</b>\n\n"
+        f"Проверено: <b>{total_checked}</b> аккаунтов\n"
+        f"✅ Активных: <b>{ok_count}</b>\n"
+        f"⚠️ Проблемных: <b>{problem_count}</b>\n"
+        f"📵 Без сессии: <b>{no_session_count}</b>\n\n"
+        "<i>acc_status и last_real_check_at обновлены в БД.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
