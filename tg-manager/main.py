@@ -280,6 +280,7 @@ async def main() -> None:
             BotCommand(command="ranking", description="Трекер позиций в поиске"),
             BotCommand(command="cancel", description="Отменить текущее действие"),
             BotCommand(command="regdate", description="🔍 Дата регистрации / создания"),
+            BotCommand(command="analyze", description="🔬 Полный анализ канала / пользователя"),
         ]
     )
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

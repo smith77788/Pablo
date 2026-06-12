@@ -112,6 +112,41 @@ async def cmd_regdate(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await message.answer(_HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb())
 
 
+# ── /analyze command — alias that goes directly to full analysis mode ─────────
+
+_ANALYZE_HELP_TEXT = (
+    "🔬 <b>Полный анализатор сущностей</b>\n\n"
+    "Получи исчерпывающий анализ любого Telegram-канала, группы, пользователя или бота:\n"
+    "• 📊 Обзор (ID, дата создания, описание)\n"
+    "• 📈 Статистика (охваты, ER, частота постов)\n"
+    "• 📝 Контент (типы медиа, хэштеги, топ-посты)\n"
+    "• 🔗 Сеть и связи\n"
+    "• 🔍 SEO-оценка с рекомендациями\n"
+    "• 👮 Администраторы\n\n"
+    "<b>Как использовать:</b>\n"
+    "• Перешли любое сообщение сюда\n"
+    "• Отправь @username или ссылку t.me/...\n\n"
+    "<i>Требует активный аккаунт в вашем пуле для загрузки данных.</i>"
+)
+
+
+@router.message(Command("analyze"))
+async def cmd_analyze(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    """Alias for /regdate but goes directly to full analysis input mode."""
+    await state.clear()
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) > 1:
+        # Direct argument: /analyze @username
+        await _handle_text_entity(message, pool, state, args[1].strip())
+        return
+    # No argument — show analyze-specific help and set FSM to waiting state
+    await state.set_state(RegCheckFSM.waiting_entity)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=RegCb(action="cancel"))
+    kb.adjust(1)
+    await message.answer(_ANALYZE_HELP_TEXT, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
 # ── Menu callbacks ────────────────────────────────────────────────────────────
 
 @router.callback_query(RegCb.filter(F.action == "menu"))

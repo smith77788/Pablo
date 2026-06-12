@@ -43,6 +43,7 @@ from bot.callbacks import (
     RankCb,
     RefCb,
     RelayCb,
+    RegCb,
     ScheduleCb,
     SubCb,
     AutoReplyCb,
@@ -191,8 +192,9 @@ def _analytics_kb(plan: str = "free"):
     kb.button(text=f"{_lock(plan,'starter')}📋 Отчёты", callback_data=BmCb(action="vis_reports"))
     kb.button(text=f"{_lock(plan,'enterprise')}🧠 Поведение", callback_data=BmCb(action="behavioral"))
     kb.button(text="🗺️ Топология", callback_data=TopoCb(action="menu"))
+    kb.button(text="🔬 Анализатор", callback_data=RegCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
