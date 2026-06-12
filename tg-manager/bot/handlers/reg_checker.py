@@ -73,10 +73,29 @@ def _result_kb(entity_id: int, entity_type: str, can_exact: bool) -> object:
             text="📡 Узнать точную дату (через аккаунт)",
             callback_data=RegCb(action="exact", entity_id=entity_id, entity_type=entity_type),
         )
+    kb.button(
+        text="🔬 Полный анализ",
+        callback_data=RegCb(action="analyze", entity_id=entity_id, entity_type=entity_type, page=0),
+    )
     kb.button(text="🔄 Проверить ещё", callback_data=RegCb(action="start"))
     kb.button(text="📋 История", callback_data=RegCb(action="history"))
     kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def _analyze_kb(entity_id: int, entity_type: str, current_page: int) -> object:
+    from services.entity_analyzer import PAGE_TITLES
+    kb = InlineKeyboardBuilder()
+    for page, title in PAGE_TITLES.items():
+        if page == current_page:
+            kb.button(text=f"› {title} ‹", callback_data=RegCb(action="page", entity_id=entity_id, entity_type=entity_type, page=page))
+        else:
+            kb.button(text=title, callback_data=RegCb(action="page", entity_id=entity_id, entity_type=entity_type, page=page))
+    kb.button(text="📋 Экспорт", callback_data=RegCb(action="export", entity_id=entity_id, entity_type=entity_type))
+    kb.button(text="🔄 Обновить", callback_data=RegCb(action="analyze", entity_id=entity_id, entity_type=entity_type, page=current_page))
+    kb.button(text="◀️ Назад", callback_data=RegCb(action="menu"))
+    kb.adjust(3, 3, 2, 1)
     return kb.as_markup()
 
 
@@ -475,3 +494,149 @@ async def _show_result(
     kb = _result_kb(entity_id, entity_type, can_exact)
 
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+# ── Full entity analysis ──────────────────────────────────────────────────────
+
+# In-memory analysis cache to avoid re-fetching on tab switch (ttl=10min)
+_analysis_cache: dict[int, tuple[dict, float]] = {}
+_CACHE_TTL = 600  # seconds
+
+
+async def _get_or_fetch_analysis(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    entity_id: int,
+    entity_type: str,
+) -> dict | None:
+    import time
+    cache_key = entity_id
+    cached = _analysis_cache.get(cache_key)
+    if cached:
+        data, ts = cached
+        if time.time() - ts < _CACHE_TTL:
+            return data
+
+    from services import entity_analyzer as ea
+
+    # Resolve peer from cache or by ID
+    row = await pool.fetchrow(
+        "SELECT username FROM reg_check_cache WHERE entity_id=$1 AND entity_type=$2",
+        entity_id, entity_type,
+    )
+    peer = (row["username"] if row and row["username"] else None) or entity_id
+
+    if entity_type in ("channel", "supergroup", "group"):
+        data = await ea.analyze_channel(pool, owner_id, peer)
+    else:
+        data = await ea.analyze_user(pool, owner_id, peer)
+
+    if data:
+        _analysis_cache[cache_key] = (data, time.time())
+    return data
+
+
+@router.callback_query(RegCb.filter(F.action == "analyze"))
+async def cb_analyze(
+    callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("⏳ Анализирую...")
+    entity_id = callback_data.entity_id
+    entity_type = callback_data.entity_type
+    page = callback_data.page
+
+    try:
+        await callback.message.edit_text(
+            "🔬 <b>Полный анализ</b>\n\n⏳ Получаю данные из Telegram...\n"
+            "<i>Это может занять 10-30 секунд</i>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    data = await _get_or_fetch_analysis(pool, callback.from_user.id, entity_id, entity_type)
+    if not data:
+        try:
+            await callback.message.edit_text(
+                "❌ Не удалось получить данные.\n\n"
+                "Убедитесь что в вашем пуле есть активный аккаунт.",
+                parse_mode="HTML",
+                reply_markup=_analyze_kb(entity_id, entity_type, page),
+            )
+        except Exception:
+            pass
+        return
+
+    await _show_analysis_page(callback.message, data, entity_id, entity_type, page)
+
+
+@router.callback_query(RegCb.filter(F.action == "page"))
+async def cb_analyze_page(
+    callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    entity_id = callback_data.entity_id
+    entity_type = callback_data.entity_type
+    page = callback_data.page
+
+    data = await _get_or_fetch_analysis(pool, callback.from_user.id, entity_id, entity_type)
+    if not data:
+        await callback.answer("❌ Данные устарели. Нажмите «Обновить».", show_alert=True)
+        return
+
+    await _show_analysis_page(callback.message, data, entity_id, entity_type, page)
+
+
+@router.callback_query(RegCb.filter(F.action == "export"))
+async def cb_analyze_export(
+    callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    entity_id = callback_data.entity_id
+    entity_type = callback_data.entity_type
+
+    data = await _get_or_fetch_analysis(pool, callback.from_user.id, entity_id, entity_type)
+    if not data:
+        await callback.answer("❌ Нет данных для экспорта.", show_alert=True)
+        return
+
+    from services.entity_analyzer import format_export
+    report = format_export(data)
+
+    # Send as a document for easy copying
+    import io
+    title = data.get("title") or data.get("name") or str(entity_id)
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:30]
+    buf = io.BytesIO(report.encode())
+    buf.name = f"analysis_{safe_title}.txt"
+
+    try:
+        await callback.message.answer_document(
+            buf,
+            caption=f"📊 Полный отчёт: {html.escape(title)}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        # Fallback: send as message chunks
+        for i in range(0, len(report), 4000):
+            await callback.message.answer(
+                f"<code>{html.escape(report[i:i+4000])}</code>",
+                parse_mode="HTML",
+            )
+
+
+async def _show_analysis_page(
+    message,
+    data: dict,
+    entity_id: int,
+    entity_type: str,
+    page: int,
+) -> None:
+    from services.entity_analyzer import PAGE_FORMATTERS
+    formatter = PAGE_FORMATTERS.get(page, PAGE_FORMATTERS[0])
+    text = formatter(data)
+    kb = _analyze_kb(entity_id, entity_type, page)
+    try:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+    except Exception:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
