@@ -65,6 +65,8 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 try:
                     # Try up to 3 times with backoff before giving up on this step
                     sent_ok = False
+                    rate_limited = False
+                    permanently_failed = False
                     for attempt in range(3):
                         ok, retry_after = await bot_api.send_message(
                             http, row["token"], row["user_id"], row["message_text"]
@@ -73,6 +75,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             sent_ok = True
                             break
                         if retry_after:
+                            rate_limited = True
                             log.info(
                                 "Funnel step %d for sub %d rate-limited, sleeping %ds",
                                 row["current_step"] + 1,
@@ -82,6 +85,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                             await asyncio.sleep(retry_after)
                             continue
                         # Non-429 failure (user blocked, bot kicked, etc.) — don't retry
+                        permanently_failed = True
                         log.warning(
                             "Funnel step %d for sub %d failed: non-retryable",
                             row["current_step"] + 1,
@@ -90,25 +94,33 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         break
 
                     if not sent_ok:
-                        # Non-retryable failure (bot blocked, user deactivated, etc.)
-                        # Mark subscription as dropped so stats are accurate
-                        log.warning(
-                            "Funnel step %d for sub %d failed permanently, marking dropped",
-                            row["current_step"] + 1,
-                            row["sub_id"],
-                        )
-                        try:
-                            await pool.execute(
-                                "UPDATE funnel_subscriptions SET dropped=true, completed_at=now() "
-                                "WHERE id=$1 AND completed=false",
+                        if permanently_failed:
+                            # Non-retryable failure (bot blocked, user deactivated, etc.)
+                            # Mark subscription as dropped so stats are accurate
+                            log.warning(
+                                "Funnel step %d for sub %d failed permanently, marking dropped",
+                                row["current_step"] + 1,
                                 row["sub_id"],
                             )
-                            await pool.execute(
-                                "UPDATE funnels SET dropped_count = dropped_count + 1 WHERE id=$1",
-                                row["funnel_id"],
+                            try:
+                                await pool.execute(
+                                    "UPDATE funnel_subscriptions SET dropped=true, completed_at=now() "
+                                    "WHERE id=$1 AND completed=false",
+                                    row["sub_id"],
+                                )
+                                await pool.execute(
+                                    "UPDATE funnels SET dropped_count = dropped_count + 1 WHERE id=$1",
+                                    row["funnel_id"],
+                                )
+                            except Exception as _drop_err:
+                                log.debug("funnel drop mark failed: %s", _drop_err)
+                        else:
+                            # Rate-limited after all retries — will retry next loop cycle
+                            log.info(
+                                "Funnel step %d for sub %d skipped (rate-limited), will retry",
+                                row["current_step"] + 1,
+                                row["sub_id"],
                             )
-                        except Exception as _drop_err:
-                            log.debug("funnel drop mark failed: %s", _drop_err)
                         continue
 
                     next_step = row["current_step"] + 1
