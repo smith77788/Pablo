@@ -128,6 +128,11 @@ Deno.serve(async (req) => {
   // 2. Filter out pages with running experiments OR tested in last 30d.
   const cutoff = new Date(Date.now() - RECENT_TEST_DAYS * 24 * 3600 * 1000).toISOString();
   const deadPaths = deadPages.map((dp) => dp.page_path).filter(Boolean) as string[];
+  if (!deadPaths.length) {
+    return new Response(JSON.stringify({ ok: true, message: "No dead pages with valid paths", processed: 0 }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
   const { data: coveredExps } = await supabase
     .from("seo_experiments")
     .select("page_path")

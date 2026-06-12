@@ -157,7 +157,7 @@ Deno.serve(async (req) => {
 
     // Parallel Telegram sends + parallel ai_insights status updates.
     const routedAt = new Date().toISOString();
-    await Promise.all(
+    await Promise.allSettled(
       routingDecisions.map(async ({ ins, routeTg, routeInapp }) => {
         if (routeTg && (chats?.length ?? 0) > 0) {
           const text = `${severityEmoji(ins.risk_level ?? "low")} <b>${ins.title}</b>\n\n${ins.description}\n\n<i>Layer: ${ins.affected_layer ?? "—"} · Risk: ${ins.risk_level ?? "low"}</i>\n\n👉 /admin/insights`;

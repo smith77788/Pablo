@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
 
     const recoveredAt = new Date().toISOString();
     const [recResults, expResults] = await Promise.all([
-      Promise.all(recoveredUpdates.map(({ id, order }) =>
+      Promise.allSettled(recoveredUpdates.map(({ id, order }) =>
         supabase.from("cart_recovery_attempts").update({
           status: "recovered",
           recovered_at: recoveredAt,
