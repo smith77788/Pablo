@@ -264,7 +264,24 @@ async def _process_bot(
                     ok, retry = await bot_api.send_message(
                         http, token, chat_id, rendered
                     )
-                    if not ok:
+                    if ok:
+                        # Log the fired rule to auto_reply_log for analytics
+                        try:
+                            await pool.execute(
+                                """INSERT INTO auto_reply_log
+                                       (bot_id, chat_id, rule_id, rule_type, trigger_type, keyword)
+                                   VALUES ($1, $2, $3, 'auto_reply', $4, $5)""",
+                                bot_id,
+                                chat_id,
+                                rule.get("id"),
+                                rule.get("trigger_type"),
+                                rule.get("keyword"),
+                            )
+                        except Exception as _log_err:
+                            log.debug(
+                                "auto_reply_log insert failed bot=%d: %s", bot_id, _log_err
+                            )
+                    else:
                         log.warning(
                             "auto_responder: failed to send auto-reply to chat %d bot %d%s",
                             chat_id,

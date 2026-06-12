@@ -1,4 +1,4 @@
--- schema_v92: extend reg_check_cache with rich metadata columns
+-- schema_v93: extend reg_check_cache with rich metadata columns
 ALTER TABLE reg_check_cache
     ADD COLUMN IF NOT EXISTS participants_count INTEGER,
     ADD COLUMN IF NOT EXISTS verified           BOOLEAN DEFAULT FALSE,
