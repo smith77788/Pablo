@@ -82,7 +82,8 @@ async def cb_stats_menu(
         f"🤖 <b>Авто-ответов активных:</b> {stats['active_replies']}\n\n"
         f"🔗 <b>Цепочек активных:</b> {stats['active_funnels']}\n"
         f"  👤 Подписчиков: {stats['funnel_users']}\n"
-        f"  ✅ Завершили: {stats['funnel_completed']} ({completion_rate}%)" + hint
+        f"  ✅ Завершили: {stats['funnel_completed']} ({completion_rate}%)\n"
+        f"  🚫 Отписались/заблокировали: {stats.get('funnel_dropped', 0)}" + hint
     )
     await callback.message.edit_text(
         text,

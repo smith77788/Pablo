@@ -803,22 +803,47 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
     row is left untouched so in-progress users are not reset back to step 0.
     If the user previously completed the funnel they are re-enrolled from the
     beginning.
+
+    Respects the first step's delay_minutes so step-0 doesn't fire prematurely.
+    Increments the funnel's entered_count counter.
     """
-    await pool.execute(
-        """INSERT INTO funnel_subscriptions(funnel_id, user_id)
-           VALUES ($1, $2)
+    from datetime import datetime, timedelta, timezone
+
+    # Look up first step's delay so next_send_at is accurate from the start
+    first_step = await pool.fetchrow(
+        "SELECT delay_minutes FROM funnel_steps WHERE funnel_id=$1 AND step_order=0",
+        funnel_id,
+    )
+    first_delay = int(first_step["delay_minutes"]) if first_step else 0
+    first_send_at = datetime.now(timezone.utc) + timedelta(minutes=first_delay)
+
+    result = await pool.execute(
+        """INSERT INTO funnel_subscriptions(funnel_id, user_id, next_send_at)
+           VALUES ($1, $2, $3)
            ON CONFLICT (funnel_id, user_id) DO UPDATE
                SET current_step  = 0,
                    completed      = false,
-                   next_send_at   = now()
-               WHERE funnel_subscriptions.completed = true""",
+                   dropped        = false,
+                   next_send_at   = $3
+               WHERE funnel_subscriptions.completed = true
+                  OR funnel_subscriptions.dropped = true""",
         funnel_id,
         user_id,
+        first_send_at,
     )
+    # Increment entered_count when a new row was inserted (not an update)
+    if result == "INSERT 0 1":
+        try:
+            await pool.execute(
+                "UPDATE funnels SET entered_count = entered_count + 1 WHERE id=$1",
+                funnel_id,
+            )
+        except Exception:
+            pass  # column may not exist yet — schema migration will add it
 
 
 async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    """Returns subscriptions where next step is due."""
+    """Returns subscriptions where next step is due (excluding completed and dropped)."""
     return await pool.fetch(
         """SELECT fs.id as sub_id, fs.funnel_id, fs.user_id, fs.current_step,
                   fst.message_text, fst.delay_minutes,
@@ -828,7 +853,9 @@ async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
            JOIN funnels f ON f.id=fs.funnel_id AND f.is_active=true
            JOIN funnel_steps fst ON fst.funnel_id=fs.funnel_id AND fst.step_order=fs.current_step
            JOIN managed_bots mb ON mb.bot_id=f.bot_id AND mb.is_active=true
-           WHERE fs.completed=false AND fs.next_send_at<=now()""",
+           WHERE fs.completed=false
+             AND COALESCE(fs.dropped, false) = false
+             AND fs.next_send_at<=now()""",
     )
 
 
@@ -838,12 +865,22 @@ async def advance_funnel_step(
     next_step: int,
     total_steps: int,
     delay_minutes: int,
+    funnel_id: int | None = None,
 ) -> None:
     if next_step >= total_steps:
         await pool.execute(
             "UPDATE funnel_subscriptions SET completed=true, completed_at=now() WHERE id=$1",
             sub_id,
         )
+        # Increment completed_count on the funnel
+        if funnel_id is not None:
+            try:
+                await pool.execute(
+                    "UPDATE funnels SET completed_count = completed_count + 1 WHERE id=$1",
+                    funnel_id,
+                )
+            except Exception:
+                pass  # column may not exist yet — schema migration will add it
     else:
         from datetime import datetime, timedelta, timezone
 
@@ -904,6 +941,13 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
            WHERE f.bot_id=$1""",
         bot_id,
     )
+    # Funnel dropped count (users who failed delivery — bot blocked etc.)
+    funnel_dropped = await pool.fetchval(
+        """SELECT COUNT(*) FROM funnel_subscriptions fs
+           JOIN funnels f ON f.id=fs.funnel_id
+           WHERE f.bot_id=$1 AND COALESCE(fs.dropped, false) = true""",
+        bot_id,
+    )
     # Relay sessions today (used last_activity since relay_sessions has no created_at)
     relay_today = await pool.fetchval(
         """SELECT COUNT(*) FROM relay_sessions
@@ -938,6 +982,7 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
         "funnel_users": funnel_users or 0,
         "funnel_completed": funnel_completed or 0,
         "funnel_total_subs": funnel_total_subs or 0,
+        "funnel_dropped": funnel_dropped or 0,
         "relay_today": relay_today or 0,
         "aud_total": aud_total or 0,
         "aud_today": aud_today or 0,
@@ -4721,3 +4766,136 @@ async def get_activity_stats(pool: asyncpg.Pool) -> dict:
         "errors_day": row["errors_day"] or 0,
         "active_users_hour": row["active_users_hour"] or 0,
     }
+
+
+# ── CRM Deals ─────────────────────────────────────────────────────────────────
+
+async def create_crm_deal(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    title: str,
+    contact: str = "",
+    stage: str = "new",
+    value: float = 0.0,
+    notes: str = "",
+) -> int:
+    """Create a new CRM deal. Returns new deal id."""
+    row = await pool.fetchrow(
+        """INSERT INTO crm_deals(owner_id, title, contact, stage, value, notes)
+           VALUES($1,$2,$3,$4,$5,$6)
+           RETURNING id""",
+        owner_id, title, contact or None, stage, value, notes or None,
+    )
+    return row["id"]
+
+
+async def get_crm_deals(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    stage: str | None = None,
+) -> list[asyncpg.Record]:
+    """Return deals for owner, optionally filtered by stage."""
+    if stage:
+        return await pool.fetch(
+            "SELECT * FROM crm_deals WHERE owner_id=$1 AND stage=$2 ORDER BY updated_at DESC",
+            owner_id, stage,
+        )
+    return await pool.fetch(
+        "SELECT * FROM crm_deals WHERE owner_id=$1 ORDER BY updated_at DESC",
+        owner_id,
+    )
+
+
+async def get_crm_deal(pool: asyncpg.Pool, deal_id: int, owner_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM crm_deals WHERE id=$1 AND owner_id=$2", deal_id, owner_id
+    )
+
+
+async def move_crm_deal_stage(
+    pool: asyncpg.Pool, deal_id: int, owner_id: int, stage: str
+) -> None:
+    await pool.execute(
+        "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+        stage, deal_id, owner_id,
+    )
+
+
+async def delete_crm_deal(pool: asyncpg.Pool, deal_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM crm_deals WHERE id=$1 AND owner_id=$2", deal_id, owner_id
+    )
+
+
+async def add_crm_activity(
+    pool: asyncpg.Pool, owner_id: int, deal_id: int, note: str
+) -> None:
+    await pool.execute(
+        "INSERT INTO crm_activity(owner_id, deal_id, note) VALUES($1,$2,$3)",
+        owner_id, deal_id, note,
+    )
+
+
+async def get_crm_activity(
+    pool: asyncpg.Pool, deal_id: int, limit: int = 10
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM crm_activity WHERE deal_id=$1 ORDER BY created_at DESC LIMIT $2",
+        deal_id, limit,
+    )
+
+
+async def get_crm_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict:
+    """Return deal counts by stage and total value of won deals."""
+    rows = await pool.fetch(
+        """SELECT stage, COUNT(*) AS cnt, COALESCE(SUM(value),0) AS total_val
+           FROM crm_deals WHERE owner_id=$1 GROUP BY stage""",
+        owner_id,
+    )
+    stats: dict = {s: {"count": 0, "value": 0.0} for s in ("new", "contacted", "qualified", "won", "lost")}
+    for r in rows:
+        stats[r["stage"]] = {"count": r["cnt"], "value": float(r["total_val"])}
+    return stats
+
+
+# ── SEO Score History ─────────────────────────────────────────────────────────
+
+async def save_seo_score(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    entity_type: str,
+    entity_id: int,
+    score: int,
+    tips: list[str] | None = None,
+) -> None:
+    """Persist an SEO check result."""
+    import json as _json
+    tips_json = _json.dumps(tips or [], ensure_ascii=False)
+    try:
+        await pool.execute(
+            """INSERT INTO seo_score_history(owner_id, entity_type, entity_id, score, tips_json)
+               VALUES($1,$2,$3,$4,$5)""",
+            owner_id, entity_type, entity_id, score, tips_json,
+        )
+    except Exception:
+        pass  # non-critical
+
+
+async def get_seo_score_history(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    entity_type: str,
+    entity_id: int,
+    limit: int = 10,
+) -> list[asyncpg.Record]:
+    """Return last N SEO checks for a given entity."""
+    try:
+        return await pool.fetch(
+            """SELECT score, tips_json, checked_at
+               FROM seo_score_history
+               WHERE owner_id=$1 AND entity_type=$2 AND entity_id=$3
+               ORDER BY checked_at DESC LIMIT $4""",
+            owner_id, entity_type, entity_id, limit,
+        )
+    except Exception:
+        return []

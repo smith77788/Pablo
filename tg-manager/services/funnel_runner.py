@@ -90,12 +90,25 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         break
 
                     if not sent_ok:
-                        # Don't advance — will retry on next loop iteration
+                        # Non-retryable failure (bot blocked, user deactivated, etc.)
+                        # Mark subscription as dropped so stats are accurate
                         log.warning(
-                            "Funnel step %d for sub %d skipped after retries, will retry",
+                            "Funnel step %d for sub %d failed permanently, marking dropped",
                             row["current_step"] + 1,
                             row["sub_id"],
                         )
+                        try:
+                            await pool.execute(
+                                "UPDATE funnel_subscriptions SET dropped=true, completed_at=now() "
+                                "WHERE id=$1 AND completed=false",
+                                row["sub_id"],
+                            )
+                            await pool.execute(
+                                "UPDATE funnels SET dropped_count = dropped_count + 1 WHERE id=$1",
+                                row["funnel_id"],
+                            )
+                        except Exception as _drop_err:
+                            log.debug("funnel drop mark failed: %s", _drop_err)
                         continue
 
                     next_step = row["current_step"] + 1
@@ -107,7 +120,8 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                         else 0
                     )
                     await db.advance_funnel_step(
-                        pool, row["sub_id"], next_step, row["total_steps"], next_delay
+                        pool, row["sub_id"], next_step, row["total_steps"], next_delay,
+                        funnel_id=row["funnel_id"],
                     )
                     # Фиксировать конверсию при завершении воронки
                     if is_last:
