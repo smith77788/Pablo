@@ -383,10 +383,11 @@ class OpBuilderFSM(StatesGroup):
 
 
 class QuickPostFSM(StatesGroup):
-    writing_text = State()  # шаг 1: ввод текста поста
+    writing_text = State()      # шаг 1: ввод текста поста
     picking_channels = State()  # шаг 2: выбор каналов
-    picking_timing = State()  # шаг 3: задержка между постами
-    confirming = State()  # шаг 4: предпросмотр и подтверждение
+    uploading_media = State()   # шаг 3: прикрепить медиа (фото/видео/документ) или пропустить
+    picking_timing = State()    # шаг 4: задержка между постами
+    confirming = State()        # шаг 5: предпросмотр и подтверждение
 
 
 class GlobalPresenceFSM(StatesGroup):

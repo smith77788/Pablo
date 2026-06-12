@@ -2561,11 +2561,15 @@ async def post_to_channel(
     text: str,
     access_hash: int = 0,
     _acc: dict | None = None,
+    media_file_id: str | None = None,
+    media_type: str | None = None,
 ) -> dict:
-    """Post a text message to a channel/group.
+    """Post a text (or media+caption) message to a channel/group.
 
     access_hash: if provided, uses InputPeerChannel directly (fast, no cache needed).
     Without access_hash and without @username, fetches dialogs to populate entity cache.
+    media_file_id: Telegram file_id to attach as photo/video/document.
+    media_type: 'photo' | 'video' | 'animation' | 'document'.
 
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
     """
@@ -2605,7 +2609,17 @@ async def post_to_channel(
             else:
                 return {"error": "Канал не найден в диалогах аккаунта"}
 
-        msg = await client.send_message(peer, text, parse_mode="html")
+        if media_file_id and media_type:
+            # Send media with caption. Telethon accepts file_id strings directly.
+            # Map media_type to Telethon file argument (file_id strings work for all types).
+            msg = await client.send_file(
+                peer,
+                file=media_file_id,
+                caption=text,
+                parse_mode="html",
+            )
+        else:
+            msg = await client.send_message(peer, text, parse_mode="html")
         return {"msg_id": msg.id}
     except FloodWaitError as e:
         return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}

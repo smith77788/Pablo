@@ -912,8 +912,10 @@ async def cb_retry_op(
 ) -> None:
     try:
         result = await pool.execute(
-            "UPDATE operation_queue SET status='pending', last_error=NULL, retry_count=0, "
-            "finished_at=NULL WHERE id=$1 AND owner_id=$2 AND status='failed'",
+            "UPDATE operation_queue SET status='pending', last_error=NULL, error_msg=NULL, "
+            "retry_count=0, started_at=NULL, finished_at=NULL, done_items=0, "
+            "scheduled_for=NULL "
+            "WHERE id=$1 AND owner_id=$2 AND status='failed'",
             callback_data.op_id,
             callback.from_user.id,
         )
@@ -923,9 +925,9 @@ async def cb_retry_op(
     if result == "UPDATE 0":
         await callback.answer("Операция не найдена или уже выполнена.", show_alert=True)
         return
-    await callback.answer()
+    await callback.answer(f"✅ Операция #{callback_data.op_id} поставлена в очередь повторно.", show_alert=True)
     # Re-render queue view — re-use cb_queue to avoid duplicate rendering logic
-    await cb_queue(callback, pool)
+    await cb_queue(callback, callback_data, pool)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -992,34 +994,87 @@ async def cb_dry_run(
 # ══════════════════════════════════════════════════════════════════════════
 
 
+_QUEUE_PAGE_SIZE = 8
+_QUEUE_STATUS_FILTERS = {
+    "all": ("Все", None),
+    "active": ("Активные", ["pending", "running"]),
+    "done": ("Завершённые", ["done"]),
+    "failed": ("Ошибки", ["failed"]),
+}
+
+
 @router.callback_query(MassOpCb.filter(F.action == "queue"))
-async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_queue(
+    callback: CallbackQuery,
+    callback_data: MassOpCb,
+    pool: asyncpg.Pool,
+) -> None:
     await callback.answer()
+    page = callback_data.page
+    # op_type field reused as status filter key (e.g. "all", "active", "failed")
+    status_filter_key = callback_data.op_type or "all"
+    if status_filter_key not in _QUEUE_STATUS_FILTERS:
+        status_filter_key = "all"
+    _, allowed_statuses = _QUEUE_STATUS_FILTERS[status_filter_key]
+
+    user_id = callback.from_user.id
+    limit = _QUEUE_PAGE_SIZE
+    offset = page * limit
 
     try:
-        rows = await pool.fetch(
-            "SELECT id, op_type, status, done_items, total_items, created_at, "
-            "last_error, retry_count, max_retries, finished_at, result "
-            "FROM operation_queue "
-            "WHERE owner_id=$1 "
-            "ORDER BY created_at DESC LIMIT 10",
-            callback.from_user.id,
-        )
+        if allowed_statuses:
+            rows = await pool.fetch(
+                "SELECT id, op_type, status, done_items, total_items, created_at, "
+                "last_error, retry_count, max_retries, finished_at, result "
+                "FROM operation_queue "
+                "WHERE owner_id=$1 AND status = ANY($4::text[]) "
+                "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                user_id, limit, offset, allowed_statuses,
+            )
+            total_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status = ANY($2::text[])",
+                user_id, allowed_statuses,
+            ) or 0
+        else:
+            rows = await pool.fetch(
+                "SELECT id, op_type, status, done_items, total_items, created_at, "
+                "last_error, retry_count, max_retries, finished_at, result "
+                "FROM operation_queue "
+                "WHERE owner_id=$1 "
+                "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                user_id, limit, offset,
+            )
+            total_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1", user_id
+            ) or 0
     except asyncpg.exceptions.UndefinedTableError:
         rows = []
+        total_count = 0
     except Exception as e:
         log.warning("Queue fetch error: %s", e)
         rows = []
+        total_count = 0
+
+    total_pages = max(1, -(-total_count // limit))
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue"))
-    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
-    kb.adjust(2)
+
+    # Status filter buttons
+    for fkey, (flabel, _) in _QUEUE_STATUS_FILTERS.items():
+        marker = "▸ " if fkey == status_filter_key else ""
+        kb.button(
+            text=f"{marker}{flabel}",
+            callback_data=MassOpCb(action="queue", op_type=fkey, page=0),
+        )
+    kb.adjust(len(_QUEUE_STATUS_FILTERS))
 
     if not rows:
+        kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue", op_type=status_filter_key, page=0))
+        kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
+        kb.adjust(len(_QUEUE_STATUS_FILTERS), 2)
         await safe_edit(
             callback,
-            "📋 <b>Очередь операций</b>\n\nОчередь пуста.\n\n"
+            "📋 <b>Очередь операций</b>\n\nОперации не найдены.\n\n"
             "💡 Запустите операцию через меню Масс-Опс или Каналы",
             reply_markup=kb.as_markup(),
         )
@@ -1032,11 +1087,12 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         "failed": "❌",
         "cancelled": "🚫",
     }
-    lines = ["📋 <b>Очередь операций</b>\n"]
+    filter_label, _ = _QUEUE_STATUS_FILTERS[status_filter_key]
+    lines = [f"📋 <b>Очередь операций</b>  [{filter_label}]  стр. {page + 1}/{total_pages}\n"]
     has_completed = False
-    for i, r in enumerate(rows, 1):
+    for i, r in enumerate(rows, offset + 1):
         icon = _STATUS_ICONS.get(r["status"], "❓")
-        op_type = html.escape(r["op_type"])
+        op_type_label = html.escape(r["op_type"])
         status = r["status"]
         done = r["done_items"] or 0
         total = r["total_items"] or 0
@@ -1079,9 +1135,9 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             progress = f"{total} элементов · {created}"
 
         if is_dead_letter:
-            lines.append(f"{i}. ☠️ <b>{op_type}</b> #{r['id']} <i>(постоянная ошибка)</i>")
+            lines.append(f"{i}. ☠️ <b>{op_type_label}</b> #{r['id']} <i>(постоянная ошибка)</i>")
         else:
-            lines.append(f"{i}. {icon} <b>{op_type}</b> #{r['id']}")
+            lines.append(f"{i}. {icon} <b>{op_type_label}</b> #{r['id']}")
         lines.append(f"   {progress}")
 
         if status == "failed" and last_error:
@@ -1109,11 +1165,43 @@ async def cb_queue(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         if status in ("done", "failed"):
             has_completed = True
 
+    # Pagination navigation
+    nav_btns = 0
+    if page > 0:
+        kb.button(
+            text="◀️",
+            callback_data=MassOpCb(action="queue", op_type=status_filter_key, page=page - 1),
+        )
+        nav_btns += 1
+    if (page + 1) * limit < total_count:
+        kb.button(
+            text="▶️",
+            callback_data=MassOpCb(action="queue", op_type=status_filter_key, page=page + 1),
+        )
+        nav_btns += 1
+
     if has_completed:
         kb.button(
             text="🗑 Очистить завершённые",
             callback_data=MassOpCb(action="clear_completed"),
         )
+    kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue", op_type=status_filter_key, page=page))
+    kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
+
+    # Build adjust list: filter row + action buttons per item + nav + util
+    action_btn_count = sum(
+        1
+        for r in rows
+        if r["status"] in ("pending", "running", "failed")
+    )
+    adjustments = [len(_QUEUE_STATUS_FILTERS)]
+    adjustments += [1] * action_btn_count
+    if nav_btns:
+        adjustments.append(nav_btns)
+    if has_completed:
+        adjustments.append(1)
+    adjustments.append(2)
+    kb.adjust(*adjustments)
 
     await safe_edit(callback, "\n".join(lines), reply_markup=kb.as_markup())
 

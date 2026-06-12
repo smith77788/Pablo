@@ -100,6 +100,7 @@ class CrmCb(CallbackData, prefix="crm"):
     bot_id: int = 0
     user_id: int = 0
     tag: Optional[str] = None
+    deal_id: int = 0
 
 
 class AutoCb(CallbackData, prefix="au"):

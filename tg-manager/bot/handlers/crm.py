@@ -1,5 +1,7 @@
-"""CRM tags and automation rules management."""
+"""CRM tags, automation rules, deal pipeline and contact management."""
 
+import csv
+import io
 import logging
 
 from aiogram import Router, F
@@ -25,6 +27,15 @@ from database import db
 router = Router()
 log = logging.getLogger(__name__)
 
+_PIPELINE_STAGES = ["new", "contacted", "qualified", "won", "lost"]
+_STAGE_LABELS = {
+    "new": "🆕 Новый",
+    "contacted": "📞 Контакт",
+    "qualified": "✅ Квал-н",
+    "won": "🏆 Выигран",
+    "lost": "❌ Проигран",
+}
+
 
 class AddAutoRule(StatesGroup):
     choosing_trigger = State()
@@ -32,6 +43,16 @@ class AddAutoRule(StatesGroup):
     choosing_action = State()
     waiting_action_value = State()
     waiting_name = State()
+
+
+class AddDeal(StatesGroup):
+    waiting_title = State()
+    waiting_contact = State()
+    waiting_value = State()
+
+
+class AddDealNote(StatesGroup):
+    waiting_note = State()
 
 
 class AddGlobalTag(StatesGroup):

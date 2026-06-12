@@ -1,9 +1,10 @@
-"""Quick Post Wizard — публикация в каналы за 4 шага.
+"""Quick Post Wizard — публикация в каналы за 5 шагов.
 
 Шаг 1: написать текст
 Шаг 2: выбрать каналы
-Шаг 3: задержка между постами
-Шаг 4: предпросмотр + публикация
+Шаг 3: прикрепить медиа (фото/видео/документ) или пропустить
+Шаг 4: задержка между постами
+Шаг 5: предпросмотр + публикация
 
 Точки входа:
   /post — команда бота
@@ -100,8 +101,8 @@ async def _save_post_template(
 
 
 def _step(n: int, title: str) -> str:
-    dots = "●" * n + "○" * (4 - n)
-    return f"{dots}  Шаг {n} из 4 — {title}"
+    dots = "●" * n + "○" * (5 - n)
+    return f"{dots}  Шаг {n} из 5 — {title}"
 
 
 def _fmt_dur(seconds: int) -> str:
@@ -533,14 +534,14 @@ async def cb_qp_desel_all(
     await _show_step2(callback.message, channels, [], page=callback_data.page)
 
 
-# ── Step 3: timing ─────────────────────────────────────────────────────────
+# ── Step 4: timing ─────────────────────────────────────────────────────────
 
 
 def _timing_kb() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     for delay_s, label in _TIMING_OPTIONS.items():
         kb.button(text=label, callback_data=QuickPostCb(action="timing", val=delay_s))
-    kb.button(text="◀️ К каналам", callback_data=QuickPostCb(action="back_to_chans"))
+    kb.button(text="◀️ К медиа", callback_data=QuickPostCb(action="back_to_media"))
     kb.button(text="❌ Отмена", callback_data=QuickPostCb(action="cancel"))
     kb.adjust(1)
     return kb
@@ -559,16 +560,8 @@ async def cb_qp_chans_done(
         await callback.answer("⚠️ Выберите хотя бы один канал!", show_alert=True)
         return
     await callback.answer()
-    await state.set_state(QuickPostFSM.picking_timing)
-    await callback.message.edit_text(
-        f"⏱️ <b>{_step(3, 'Задержка между постами')}</b>\n\n"
-        f"Выбрано: <b>{_plural_channels(len(sel))}</b>\n\n"
-        "Задержка защищает аккаунты от временных ограничений.\n"
-        "Для небольшого числа каналов подойдёт «Быстро».\n\n"
-        "Выберите режим публикации:",
-        parse_mode="HTML",
-        reply_markup=_timing_kb().as_markup(),
-    )
+    await state.set_state(QuickPostFSM.uploading_media)
+    await _show_step3_media(callback.message)
 
 
 @router.callback_query(QuickPostCb.filter(F.action == "back_to_chans"))
@@ -585,7 +578,109 @@ async def cb_qp_back_chans(
     await _show_step2(callback.message, channels, selected_ids, page=0)
 
 
+# ── Step 3: media upload ───────────────────────────────────────────────────
+
+
+async def _show_step3_media(target, has_media: bool = False, edit: bool = True) -> None:
+    """Показать шаг 3: прикрепление медиа."""
+    kb = InlineKeyboardBuilder()
+    if has_media:
+        kb.button(text="🗑 Удалить медиа", callback_data=QuickPostCb(action="media_remove"))
+    kb.button(text="⏭ Пропустить (без медиа)", callback_data=QuickPostCb(action="media_skip"))
+    kb.button(text="◀️ К каналам", callback_data=QuickPostCb(action="back_to_chans"))
+    kb.button(text="❌ Отмена", callback_data=QuickPostCb(action="cancel"))
+    kb.adjust(1)
+
+    media_hint = "✅ Медиа прикреплено." if has_media else "Медиа не выбрано."
+    text = (
+        f"🖼 <b>{_step(3, 'Медиа (необязательно)')}</b>\n\n"
+        f"{media_hint}\n\n"
+        "Отправьте <b>фото</b>, <b>видео</b> или <b>документ</b> — оно будет прикреплено к посту.\n"
+        "Или нажмите <b>«Пропустить»</b>, чтобы публиковать только текст.\n\n"
+        "<i>Поддерживаются: JPG, PNG, GIF, MP4, PDF и другие форматы Telegram.</i>"
+    )
+    if edit:
+        try:
+            await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+            return
+        except Exception as _e:
+            _es = str(_e).lower()
+            if "message is not modified" in _es:
+                return
+            if "there is no text in the message to edit" in _es:
+                try:
+                    await target.edit_caption(caption=text, parse_mode="HTML", reply_markup=kb.as_markup())
+                    return
+                except Exception:
+                    pass
+            if "message to edit not found" in _es or "message can't be edited" in _es:
+                pass  # fall through
+            else:
+                log.warning("quick_post _show_step3_media edit error: %s", _e)
+    await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.message(QuickPostFSM.uploading_media, F.photo | F.video | F.document | F.animation)
+async def msg_qp_media(message: Message, state: FSMContext) -> None:
+    """Пользователь отправил медиа-файл на шаге 3."""
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        media_type = "photo"
+    elif message.video:
+        file_id = message.video.file_id
+        media_type = "video"
+    elif message.animation:
+        file_id = message.animation.file_id
+        media_type = "animation"
+    elif message.document:
+        file_id = message.document.file_id
+        media_type = "document"
+    else:
+        await message.answer("⚠️ Неподдерживаемый тип медиа. Отправьте фото, видео или документ.")
+        return
+
+    await state.update_data(media_file_id=file_id, media_type=media_type)
+    sent = await message.answer(
+        f"✅ <b>Медиа прикреплено</b> ({media_type})\n\nНажмите «Далее» чтобы продолжить.",
+        parse_mode="HTML",
+    )
+    await _show_step3_media(sent, has_media=True, edit=True)
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "media_remove"), QuickPostFSM.uploading_media)
+async def cb_qp_media_remove(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer("🗑 Медиа удалено")
+    await state.update_data(media_file_id=None, media_type=None)
+    await _show_step3_media(callback.message, has_media=False)
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "media_skip"), QuickPostFSM.uploading_media)
+async def cb_qp_media_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(QuickPostFSM.picking_timing)
+    sd = await state.get_data()
+    sel = sd.get("selected_chan_ids", [])
+    await callback.message.edit_text(
+        f"⏱️ <b>{_step(4, 'Задержка между постами')}</b>\n\n"
+        f"Выбрано: <b>{_plural_channels(len(sel))}</b>\n\n"
+        "Задержка защищает аккаунты от временных ограничений.\n"
+        "Для небольшого числа каналов подойдёт «Быстро».\n\n"
+        "Выберите режим публикации:",
+        parse_mode="HTML",
+        reply_markup=_timing_kb().as_markup(),
+    )
+
+
 # ── Step 4: preview + confirm ──────────────────────────────────────────────
+
+
+@router.callback_query(QuickPostCb.filter(F.action == "back_to_media"))
+async def cb_qp_back_to_media(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(QuickPostFSM.uploading_media)
+    sd = await state.get_data()
+    has_media = bool(sd.get("media_file_id"))
+    await _show_step3_media(callback.message, has_media=has_media)
 
 
 @router.callback_query(
@@ -604,11 +699,18 @@ async def cb_qp_timing(
     sd = await state.get_data()
     post_text: str = sd.get("post_text", "")
     sel: list[int] = sd.get("selected_chan_ids", [])
+    media_file_id: str | None = sd.get("media_file_id")
+    media_type: str | None = sd.get("media_type")
     timing_label = _TIMING_OPTIONS.get(delay_s, f"{delay_s} сек")
 
     effective_delay = 60 if delay_s < 0 else delay_s
     est_seconds = len(sel) * effective_delay
     preview = post_text[:300] + ("…" if len(post_text) > 300 else "")
+
+    media_line = ""
+    if media_file_id and media_type:
+        _type_labels = {"photo": "📷 Фото", "video": "🎬 Видео", "animation": "🎞 GIF", "document": "📎 Документ"}
+        media_line = f"Медиа: <b>{_type_labels.get(media_type, media_type)}</b> ✅\n"
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -624,10 +726,11 @@ async def cb_qp_timing(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"👀 <b>{_step(4, 'Подтверждение')}</b>\n\n"
+        f"👀 <b>{_step(5, 'Подтверждение')}</b>\n\n"
         f"Каналов: <b>{_plural_channels(len(sel))}</b>\n"
         f"Задержка: <b>{timing_label}</b>\n"
-        f"Расчётное время: ~<b>{_fmt_dur(est_seconds)}</b>\n\n"
+        f"Расчётное время: ~<b>{_fmt_dur(est_seconds)}</b>\n"
+        f"{media_line}\n"
         f"Текст поста:\n———\n{html.escape(preview)}\n———",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -644,7 +747,7 @@ async def cb_qp_back_timing(
     sd = await state.get_data()
     sel = sd.get("selected_chan_ids", [])
     await callback.message.edit_text(
-        f"⏱️ <b>{_step(3, 'Задержка между постами')}</b>\n\n"
+        f"⏱️ <b>{_step(4, 'Задержка между постами')}</b>\n\n"
         f"Выбрано: <b>{_plural_channels(len(sel))}</b>\n\n"
         "Выберите режим публикации:",
         parse_mode="HTML",
@@ -702,6 +805,8 @@ async def cb_qp_publish(
     post_text: str = sd.get("post_text", "")
     selected_chan_ids: list[int] = sd.get("selected_chan_ids", [])
     delay_s: int = sd.get("delay_s", 30)
+    media_file_id: str | None = sd.get("media_file_id")
+    media_type: str | None = sd.get("media_type")
 
     if not post_text or not selected_chan_ids:
         await callback.message.edit_text(
@@ -745,16 +850,21 @@ async def cb_qp_publish(
 
     from services import operation_bus
 
+    op_params: dict = {
+        "text": post_text,
+        "delay_seconds": delay_s,
+        "channel_ids": selected_chan_ids,
+    }
+    if media_file_id and media_type:
+        op_params["media_file_id"] = media_file_id
+        op_params["media_type"] = media_type
+
     try:
         op_id = await operation_bus.submit(
             pool,
             callback.from_user.id,
             "mass_publish",
-            {
-                "text": post_text,
-                "delay_seconds": delay_s,
-                "channel_ids": selected_chan_ids,
-            },
+            op_params,
             total_items=total,
         )
     except Exception as _e:
