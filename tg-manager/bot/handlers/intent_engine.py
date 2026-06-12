@@ -691,7 +691,8 @@ async def _execute_op_intent(
             "count": n_targets,
             "prefix": plan.get("name_pattern") or "Канал",
             "about": goal[:120],
-            "account_ids": account_ids,
+            # pass first primary account; _exec_bulk_create_channels uses acc_id (single int)
+            "acc_id": account_ids[0] if account_ids else 0,
         }
     elif op_type == "bulk_join":
         targets = plan.get("targets") or plan.get("channels") or []
