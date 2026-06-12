@@ -3286,3 +3286,170 @@ async def _exec_strike(
         "total_reported": total_reported,
         "summary": summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}",
     }
+
+
+async def _exec_network_broadcast(
+    pool: asyncpg.Pool, bot: "Bot", op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Выполнить сетевую рассылку по сегменту через broadcaster."""
+    import aiohttp as _aiohttp
+    from collections import defaultdict
+    from services import broadcaster
+
+    text: str = str(params.get("text") or "").strip()
+    segment: str = str(params.get("segment") or "all_each")
+    lang: str = str(params.get("lang") or "")
+    selected_bot_ids: list[int] = [int(x) for x in (params.get("selected_bot_ids") or [])]
+    cluster_name: str = str(params.get("cluster_name") or "")
+
+    if not text:
+        return {"status": "failed", "summary": "⚠️ Текст рассылки не указан"}
+
+    bots_all = await db.get_bots(pool, owner_id)
+    if not bots_all:
+        return {"status": "failed", "summary": "⚠️ Нет ботов для рассылки"}
+
+    # Apply segment filter to bot list
+    if segment == "selected_bots" and selected_bot_ids:
+        bots = [b for b in bots_all if b["bot_id"] in set(selected_bot_ids)]
+    elif segment == "cluster" and cluster_name:
+        cluster_bot_rows = await pool.fetch(
+            "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
+            owner_id, cluster_name,
+        )
+        cluster_ids = {r["bot_id"] for r in cluster_bot_rows}
+        bots = [b for b in bots_all if b["bot_id"] in cluster_ids]
+    else:
+        bots = list(bots_all)
+
+    if not bots:
+        return {"status": "failed", "summary": "⚠️ Нет ботов в выбранном сегменте"}
+
+    total_started = 0
+    total_users = 0
+    _BOT_START_DELAY_S = 2.0
+
+    async with _aiohttp.ClientSession() as http:
+        if segment in ("all_each", "selected_bots", "cluster"):
+            for b in bots:
+                try:
+                    rows = await pool.fetch(
+                        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", b["bot_id"]
+                    )
+                except Exception:
+                    log.warning("network_broadcast op=%d: fetch users failed bot=%s", op_id, b.get("bot_id"), exc_info=True)
+                    rows = []
+                ids = [r["user_id"] for r in rows]
+                if not ids:
+                    continue
+                bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id)
+                if not bc_id:
+                    continue
+                broadcaster.start(
+                    pool, http, bc_id, b["token"], b["bot_id"], text, None, ids, None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
+                )
+                total_started += 1
+                total_users += len(ids)
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
+                    len(ids), op_id,
+                )
+
+        elif segment == "unique":
+            users = await db.get_unique_network_users(pool, owner_id)
+            by_bot: dict = defaultdict(list)
+            token_map: dict = {}
+            for u in users:
+                by_bot[u["bot_id"]].append(u["user_id"])
+                token_map[u["bot_id"]] = u["token"]
+            for bid, ids in by_bot.items():
+                bc_id = await db.create_broadcast(pool, bid, text, len(ids), owner_id)
+                if not bc_id:
+                    continue
+                broadcaster.start(
+                    pool, http, bc_id, token_map[bid], bid, text, None, ids, None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
+                )
+                total_started += 1
+                total_users += len(ids)
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
+                    len(ids), op_id,
+                )
+
+        elif segment in ("cold_all", "lost_all"):
+            days_from = 30 if segment == "lost_all" else 7
+            days_to = None if segment == "lost_all" else 30
+            for b in bots:
+                ids = await db.get_inactive_user_ids(pool, b["bot_id"], days_from, days_to)
+                if not ids:
+                    continue
+                bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id)
+                if not bc_id:
+                    continue
+                broadcaster.start(
+                    pool, http, bc_id, b["token"], b["bot_id"], text, None, ids, None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
+                )
+                total_started += 1
+                total_users += len(ids)
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
+                    len(ids), op_id,
+                )
+
+        elif segment == "lang":
+            for b in bots:
+                try:
+                    rows = await pool.fetch(
+                        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND language_code=$2 AND is_active=TRUE",
+                        b["bot_id"], lang,
+                    )
+                except Exception:
+                    log.warning("network_broadcast op=%d: fetch lang users failed bot=%s", op_id, b.get("bot_id"), exc_info=True)
+                    rows = []
+                ids = [r["user_id"] for r in rows]
+                if not ids:
+                    continue
+                bc_id = await db.create_broadcast(pool, b["bot_id"], text, len(ids), owner_id)
+                if not bc_id:
+                    continue
+                broadcaster.start(
+                    pool, http, bc_id, b["token"], b["bot_id"], text, None, ids, None,
+                    start_delay=total_started * _BOT_START_DELAY_S,
+                )
+                total_started += 1
+                total_users += len(ids)
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+$1 WHERE id=$2",
+                    len(ids), op_id,
+                )
+
+    if total_started == 0:
+        return {
+            "status": "done",
+            "ok": 0,
+            "summary": "⚠️ Нет пользователей в выбранном сегменте — рассылка не запущена",
+        }
+
+    segment_labels = {
+        "all_each": "Все боты → своей аудитории",
+        "unique": "Уникальные пользователи",
+        "cold_all": "Холодные (7–30 дн)",
+        "lost_all": "Потерянные (30+ дн)",
+        "lang": f"По языку: {lang}",
+        "selected_bots": f"Выбранные боты ({total_started})",
+        "cluster": f"Кластер «{cluster_name}» ({total_started} бот(ов))",
+    }
+    label = segment_labels.get(segment, segment)
+    return {
+        "status": "done",
+        "ok": total_users,
+        "bots_started": total_started,
+        "summary": (
+            f"📢 Сетевая рассылка запущена\n"
+            f"Сегмент: {label}\n"
+            f"Ботов: {total_started}, получателей: {total_users:,}"
+        ),
+    }

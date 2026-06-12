@@ -53,7 +53,7 @@ from bot.states import (
 )
 from bot.utils.subscription import require_plan
 from bot.utils.op_helpers import _acc_label, _progress_text, backoff
-from services import session_simulator
+from services import session_simulator, operation_bus
 from services.logger import log_exc_swallow
 from bot.utils.event_status import mark_handled_error
 
@@ -4431,90 +4431,63 @@ async def cb_br_confirm(
         )
 
     # ═══════════════════════════════════════════════════════════════════════
-    # ФАЗА 1: РАЗВЕДКА — лучшим аккаунтом карту цели
+    # ПОСТАНОВКА В ОЧЕРЕДЬ — каждая цель получает отдельную операцию
     # ═══════════════════════════════════════════════════════════════════════
-    status_msg = await callback.message.edit_text(
-        f"⚔️ <b>Strike v2 — Инициализация</b>\n\n"
-        f"🛡 <b>Pre-flight:</b> {len(viable)}/{len(chosen)} аккаунтов готовы{preflight_note}\n"
-        f"🔍 <b>Фаза 1: Разведка цели...</b>\n"
-        f"Цели: <b>{len(peers)}</b> · Лучший разведчик: trust={viable[0].get('trust_score', 0):.1f}\n"
-        f"Маппинг: администраторы, узлы сети, боты, сообщения...",
-        parse_mode="HTML",
-    )
-
-    all_intel: dict[str, dict] = {}
+    account_ids = [a["id"] for a in viable]
+    op_ids: list[int] = []
+    errors: list[str] = []
     for peer in peers:
         try:
-            from services import account_manager
-
-            intel = await account_manager.strike_map_target(
-                viable[0]["session_str"], peer, _acc=viable[0]
+            op_id = await operation_bus.submit(
+                pool,
+                callback.from_user.id,
+                "strike",
+                {
+                    "target": peer,
+                    "reason": reason,
+                    "preset": preset,
+                    "label": label,
+                    "account_ids": account_ids,
+                    "num_waves": 3,
+                },
+                total_items=len(viable),
             )
+            op_ids.append(op_id)
         except Exception as e:
-            intel = {
-                "error": str(e)[:100],
-                "admin_ids": [],
-                "mentioned_usernames": [],
-                "bot_usernames": [],
-                "pinned_msg_ids": [],
-                "latest_msg_ids": [],
-                "title": peer,
-                "members": 0,
-                "linked_group_id": None,
-            }
-        all_intel[peer] = intel
+            errors.append(f"{peer}: {e}")
 
-    # План атаки: распределяем аккаунты по волнам
-    waves = strike_engine.plan_waves(viable, num_waves=3)
-    wave_sizes = [len(w) for w in waves]
-    wave_desc = " → ".join(f"W{i + 1}:{s}" for i, s in enumerate(wave_sizes) if s > 0)
+    if not op_ids:
+        err_text = "\n".join(errors[:3])
+        await callback.message.edit_text(
+            f"⚠️ <b>Не удалось поставить Strike в очередь</b>\n\n<code>{html.escape(err_text)}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
 
-    intel_lines = ["⚔️ <b>Strike v2 — Разведка завершена</b>\n"]
-    for peer, intel in all_intel.items():
-        nodes = (
-            len(intel.get("admin_ids", []))
-            + len(intel.get("mentioned_usernames", []))
-            + len(intel.get("bot_usernames", []))
-            + (1 if intel.get("linked_group_id") else 0)
-        )
-        intel_lines.append(
-            f"🎯 <code>{html.escape(peer)}</code>\n"
-            f"   📋 {intel.get('title', '?')} · {intel.get('members', 0):,} подписчиков\n"
-            f"   👤 Админов: <b>{len(intel.get('admin_ids', []))}</b> · "
-            f"Узлов сети: <b>{nodes}</b>\n"
-            f"   📌 Закреплённых: <b>{len(intel.get('pinned_msg_ids', []))}</b> · "
-            f"Сообщений: <b>{len(intel.get('latest_msg_ids', []))}</b>"
-        )
-    intel_lines.append(f"\n⚡ <b>План атаки:</b> {wave_desc}")
-    intel_lines.append(
-        f"🔄 Волны с паузами {strike_engine._WAVE_COOLDOWN[0]}-{strike_engine._WAVE_COOLDOWN[1]}с"
-    )
-    intel_lines.append("\n<i>Фазы 2-6 запускаются в фоне. Для отмены: /tasks</i>")
-    try:
-        await status_msg.edit_text("\n".join(intel_lines), parse_mode="HTML")
-    except Exception:
-        log_exc_swallow(log, "Сбой отправки статуса разведки Strike")
+    peers_preview = ", ".join(f"<code>{html.escape(p)}</code>" for p in peers[:3])
+    if len(peers) > 3:
+        peers_preview += f" <i>и ещё {len(peers) - 3}</i>"
 
-    task = asyncio.create_task(
-        _strike_bg_v2(
-            pool=pool,
-            status_msg=status_msg,
-            bot=callback.bot,
-            user_id=callback.from_user.id,
-            peers=peers,
-            viable=viable,
-            waves=waves,
-            all_intel=all_intel,
-            reason=reason,
-            preset=preset,
-            label=label,
-        )
-    )
-    _treg.register(
-        callback.from_user.id,
-        "strike",
-        f"Strike v2 {', '.join(peers[:2])[:40]}",
-        task,
+    from bot.callbacks import MassOpCb
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
+    kb.button(text="◀️ Меню", callback_data=ChanCb(action="menu"))
+    kb.adjust(1)
+
+    note = ""
+    if errors:
+        note = f"\n⚠️ Ошибок постановки: {len(errors)}"
+
+    await callback.message.edit_text(
+        f"⚔️ <b>Strike поставлен в очередь</b>\n\n"
+        f"🎯 Цели: {peers_preview}\n"
+        f"👥 Аккаунтов: <b>{len(viable)}</b>{preflight_note}\n"
+        f"📋 Операций: <b>{len(op_ids)}</b> (IDs: {', '.join(str(i) for i in op_ids[:5])})\n"
+        f"⚙️ Режим: {label}{note}\n\n"
+        f"Воркер запустит Strike автоматически. Следить за прогрессом: <b>Очередь</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 
