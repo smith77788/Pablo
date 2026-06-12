@@ -671,6 +671,25 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                     await bot_api.send_message(
                         http, rule["token"], chat_id, _inact_text
                     )
+                elif rule["action_type"] == "add_tag":
+                    await db.add_user_tag(
+                        pool, rule["bot_id"], chat_id, rule["action_value"]
+                    )
+                elif rule["action_type"] == "remove_tag":
+                    await db.remove_user_tag(
+                        pool, rule["bot_id"], chat_id, rule["action_value"]
+                    )
+                elif rule["action_type"] == "create_deal":
+                    title_prefix = rule.get("action_value") or "Реактивация"
+                    await pool.execute(
+                        """INSERT INTO crm_deals
+                               (bot_id, user_id, title, status, created_at)
+                           VALUES ($1, $2, $3, 'new', NOW())
+                           ON CONFLICT DO NOTHING""",
+                        rule["bot_id"],
+                        chat_id,
+                        f"{title_prefix} — id{chat_id}",
+                    )
                 elif rule["action_type"] == "webhook":
                     url = (rule["action_value"] or "").strip()
                     if url:

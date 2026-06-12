@@ -1021,6 +1021,10 @@ def automation_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(
         text="🏷 Тег добавлен", callback_data=AutoCb(action="trig_tag", bot_id=bot_id)
     )
+    kb.button(
+        text="💤 Неактивность (N дней)",
+        callback_data=AutoCb(action="trig_inact", bot_id=bot_id),
+    )
     kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     kb.adjust(1)
     return kb.as_markup()
@@ -1042,6 +1046,14 @@ def automation_action_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(
         text="🔗 Подписать на цепочку",
         callback_data=AutoCb(action="act_funnel", bot_id=bot_id),
+    )
+    kb.button(
+        text="📋 Создать сделку CRM",
+        callback_data=AutoCb(action="act_deal", bot_id=bot_id),
+    )
+    kb.button(
+        text="🌐 Webhook",
+        callback_data=AutoCb(action="act_webhook", bot_id=bot_id),
     )
     kb.button(text="◀️ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     kb.adjust(1)

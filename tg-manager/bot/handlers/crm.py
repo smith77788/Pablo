@@ -430,6 +430,7 @@ TRIGGER_LABELS = {
     "user_joined": "👤 Новый пользователь",
     "keyword": "🔑 Ключевое слово",
     "tag_added": "🏷 Тег добавлен",
+    "inactivity": "💤 Неактивность (N дней)",
 }
 
 ACTION_LABELS = {
@@ -437,6 +438,8 @@ ACTION_LABELS = {
     "add_tag": "🏷 Добавить тег",
     "remove_tag": "🗑 Удалить тег",
     "subscribe_funnel": "🔗 Подписать на цепочку",
+    "create_deal": "📋 Создать сделку CRM",
+    "webhook": "🌐 Webhook",
 }
 
 
@@ -449,7 +452,12 @@ async def _set_trigger(
     bot_id = data.get("bot_id", 0)
     if needs_value:
         await state.set_state(AddAutoRule.waiting_trigger_value)
-        hint = "ключевое слово" if trigger_type == "keyword" else "название тега"
+        if trigger_type == "keyword":
+            hint = "ключевое слово"
+        elif trigger_type == "inactivity":
+            hint = "количество дней неактивности (число, например: 7)"
+        else:
+            hint = "название тега"
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
         await callback.message.edit_text(
@@ -497,19 +505,41 @@ async def cb_trig_tag(
     await _set_trigger(callback, state, "tag_added", True)
 
 
+@router.callback_query(AutoCb.filter(F.action == "trig_inact"))
+async def cb_trig_inact(
+    callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
+) -> None:
+    """Inactivity trigger: user must enter number of days."""
+    await _set_trigger(callback, state, "inactivity", True)
+
+
 @router.message(AddAutoRule.waiting_trigger_value, F.text)
 async def msg_trigger_value(message: Message, state: FSMContext) -> None:
     value = (message.text or "").strip()
     data = await state.get_data()
     bot_id = data.get("bot_id", 0)
+    trigger_type = data.get("trigger_type", "")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
     if not value or len(value) > 100:
-        kb = InlineKeyboardBuilder()
-        kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
         await message.answer(
             "⚠️ Значение должно быть от 1 до 100 символов. Введите снова:",
             reply_markup=kb.as_markup(),
         )
         return
+    # Inactivity trigger: value must be a positive integer (number of days)
+    if trigger_type == "inactivity":
+        try:
+            days = int(value)
+            if days < 1 or days > 365:
+                raise ValueError("out of range")
+        except (ValueError, TypeError):
+            await message.answer(
+                "⚠️ Введите целое число дней от 1 до 365. Например: <code>7</code>",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
     await state.update_data(trigger_value=value)
     await state.set_state(AddAutoRule.choosing_action)
     await message.answer(
@@ -546,6 +576,52 @@ async def cb_choose_action(
     await callback.message.edit_text(
         f"⚙️ Действие: <b>{ACTION_LABELS[action_type]}</b>\n\n"
         f"<b>Шаг 3/3</b> — Введите {hints[action_type]}:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    AutoCb.filter(F.action == "act_deal"), AddAutoRule.choosing_action
+)
+async def cb_act_deal(
+    callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
+) -> None:
+    """Action: create CRM deal. action_value = deal title prefix."""
+    await callback.answer()
+    await state.update_data(action_type="create_deal")
+    await state.set_state(AddAutoRule.waiting_action_value)
+    data = await state.get_data()
+    bot_id = data.get("bot_id", callback_data.bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    await callback.message.edit_text(
+        f"⚙️ Действие: <b>{ACTION_LABELS['create_deal']}</b>\n\n"
+        "<b>Шаг 3/3</b> — Введите префикс названия сделки\n"
+        "(например: «Заявка», «Лид из бота»):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(
+    AutoCb.filter(F.action == "act_webhook"), AddAutoRule.choosing_action
+)
+async def cb_act_webhook(
+    callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
+) -> None:
+    """Action: send webhook POST. action_value = URL."""
+    await callback.answer()
+    await state.update_data(action_type="webhook")
+    await state.set_state(AddAutoRule.waiting_action_value)
+    data = await state.get_data()
+    bot_id = data.get("bot_id", callback_data.bot_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=AutoCb(action="menu", bot_id=bot_id))
+    await callback.message.edit_text(
+        f"⚙️ Действие: <b>{ACTION_LABELS['webhook']}</b>\n\n"
+        "<b>Шаг 3/3</b> — Введите URL для POST-запроса\n"
+        "(например: https://example.com/webhook):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
