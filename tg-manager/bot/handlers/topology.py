@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import asyncpg
 import logging
 from html import escape
@@ -24,6 +26,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import AccCb, BotCb, TopoCb
 from database import db
 from services.account_manager import effective_account_status
+from services import behavioral_engine
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -79,7 +82,8 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="🗺️ Обзорная карта", callback_data=TopoCb(action="overview"))
     kb.button(text="📱 По аккаунтам", callback_data=TopoCb(action="acc_list", page=0))
     kb.button(text="📡 По каналам", callback_data=TopoCb(action="chan_list", page=0))
-    kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="menu"))
+    kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="rebuild"))
+    kb.button(text="📤 Экспорт графа", callback_data=TopoCb(action="export"))
     kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
@@ -304,6 +308,22 @@ async def cb_topo_acc_view(
     await callback.answer()
 
     channels = await db.get_managed_channels(pool, owner_id, acc_id)
+
+    # Record cross-navigation: user navigated from account-list into this account.
+    # Each channel attached to this account is an edge in the topology graph.
+    for ch in channels:
+        chan_id = ch.get("channel_id") or ch.get("id")
+        if chan_id:
+            asyncio.create_task(
+                behavioral_engine.record_cross_nav(
+                    pool,
+                    owner_id=owner_id,
+                    from_type="account",
+                    from_id=acc_id,
+                    to_type="channel",
+                    to_id=chan_id,
+                )
+            )
     name = (
         acc.get("first_name")
         or acc.get("username")
@@ -461,3 +481,193 @@ async def cmd_topology(message: Message) -> None:
 @router.callback_query(TopoCb.filter(F.action == "noop"))
 async def cb_topo_noop(callback: CallbackQuery) -> None:
     await callback.answer()
+
+
+# ── Rebuild graph — compute account→channel edges ─────────────────────────────
+
+
+@router.callback_query(TopoCb.filter(F.action == "rebuild"))
+async def cb_topo_rebuild(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Compute topology edges: for every (account, channel) pair owned by this
+    user, record a cross_nav behavioral event so the topology graph is populated.
+    This is the real "Обновить граф" — it fills behavioral_events with cross_nav
+    entries representing account→channel structural links.
+    """
+    await callback.answer("🔄 Пересчитываю граф...")
+    owner_id = callback.from_user.id
+
+    accounts = await db.get_tg_accounts(pool, owner_id)
+    channels = await db.get_managed_channels(pool, owner_id)
+    bots = await db.get_bots(pool, owner_id)
+
+    # Build edges: account → channel
+    edge_count = 0
+    for ch in channels:
+        acc_id = ch.get("acc_id")
+        chan_id = ch.get("channel_id") or ch.get("id")
+        if acc_id and chan_id:
+            try:
+                await behavioral_engine.record_cross_nav(
+                    pool,
+                    owner_id=owner_id,
+                    from_type="account",
+                    from_id=acc_id,
+                    to_type="channel",
+                    to_id=chan_id,
+                )
+                edge_count += 1
+            except Exception:
+                log_exc_swallow(log, "Ошибка записи ребра account→channel")
+
+    # Build edges: bot → account (bots belong to owners; structural link)
+    for b in bots:
+        bot_id = b.get("bot_id")
+        if bot_id:
+            for acc in accounts:
+                try:
+                    await behavioral_engine.record_cross_nav(
+                        pool,
+                        owner_id=owner_id,
+                        from_type="bot",
+                        from_id=bot_id,
+                        to_type="account",
+                        to_id=acc["id"],
+                    )
+                    edge_count += 1
+                except Exception:
+                    log_exc_swallow(log, "Ошибка записи ребра bot→account")
+                break  # one representative edge per bot is enough
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🗺️ Обзорная карта", callback_data=TopoCb(action="overview"))
+    kb.button(text="◀️ Меню", callback_data=TopoCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "🔄 <b>Граф пересчитан</b>\n\n"
+        f"📱 Аккаунтов: <b>{len(accounts)}</b>\n"
+        f"📡 Каналов/групп: <b>{len(channels)}</b>\n"
+        f"🤖 Ботов: <b>{len(bots)}</b>\n"
+        f"🔗 Рёбер записано: <b>{edge_count}</b>\n\n"
+        "Перекрёстные связи сохранены в behavioral_events (тип cross_nav).",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Export topology as structured data ────────────────────────────────────────
+
+
+@router.callback_query(TopoCb.filter(F.action == "export"))
+async def cb_topo_export(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Export topology graph as JSON-like text: nodes + edges."""
+    await callback.answer("📤 Формирую экспорт...")
+    owner_id = callback.from_user.id
+
+    accounts = await db.get_tg_accounts(pool, owner_id)
+    channels = await db.get_managed_channels(pool, owner_id)
+    bots = await db.get_bots(pool, owner_id)
+
+    # Nodes
+    nodes: list[dict] = []
+    for a in accounts:
+        nodes.append({
+            "type": "account",
+            "id": a["id"],
+            "name": a.get("first_name") or a.get("username") or a.get("phone") or f"acc#{a['id']}",
+        })
+    for ch in channels:
+        nodes.append({
+            "type": "channel",
+            "id": ch.get("channel_id") or ch.get("id"),
+            "name": ch.get("title") or ch.get("username") or f"chan#{ch.get('channel_id')}",
+        })
+    for b in bots:
+        nodes.append({
+            "type": "bot",
+            "id": b.get("bot_id"),
+            "name": b.get("first_name") or b.get("username") or f"bot#{b.get('bot_id')}",
+        })
+
+    # Edges from cross_nav behavioral events
+    try:
+        edge_rows = await pool.fetch(
+            "SELECT meta FROM behavioral_events "
+            "WHERE owner_id=$1 AND event_type='cross_nav' "
+            "ORDER BY id DESC LIMIT 500",
+            owner_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "Ошибка чтения рёбер из behavioral_events")
+        edge_rows = []
+
+    edges: list[dict] = []
+    seen_edges: set[tuple] = set()
+    for row in edge_rows:
+        try:
+            meta = json.loads(row["meta"])
+            key = (meta.get("from_type"), meta.get("from_id"), meta.get("to_type"), meta.get("to_id"))
+            if key not in seen_edges:
+                seen_edges.add(key)
+                edges.append({
+                    "from": {"type": meta.get("from_type"), "id": meta.get("from_id")},
+                    "to": {"type": meta.get("to_type"), "id": meta.get("to_id")},
+                })
+        except Exception:
+            pass
+
+    export_data = {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "accounts": len(accounts),
+            "channels": len(channels),
+            "bots": len(bots),
+            "edges": len(edges),
+        },
+    }
+
+    # Format as readable text (Telegram has no file upload in callback)
+    lines = [
+        "📤 <b>Topology Export</b>\n",
+        f"Узлов: <b>{len(nodes)}</b>  |  Рёбер: <b>{len(edges)}</b>\n",
+        "<b>Узлы (nodes):</b>",
+    ]
+    for n in nodes[:20]:
+        lines.append(f"  [{n['type']}:{n['id']}] {escape(str(n['name'])[:40])}")
+    if len(nodes) > 20:
+        lines.append(f"  <i>...ещё {len(nodes) - 20}</i>")
+
+    lines.append("\n<b>Рёбра (edges):</b>")
+    for e in edges[:15]:
+        lines.append(
+            f"  {e['from']['type']}:{e['from']['id']} → {e['to']['type']}:{e['to']['id']}"
+        )
+    if len(edges) > 15:
+        lines.append(f"  <i>...ещё {len(edges) - 15}</i>")
+
+    if not edges:
+        lines.append(
+            "  <i>Рёбра не найдены. Нажмите «🔄 Обновить граф» для пересчёта.</i>"
+        )
+
+    # Send as a separate message for copy-paste (full JSON in code block)
+    json_preview = json.dumps(export_data["stats"], ensure_ascii=False)
+    lines.append(f"\n<code>{escape(json_preview)}</code>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="rebuild"))
+    kb.button(text="◀️ Меню", callback_data=TopoCb(action="menu"))
+    kb.adjust(1)
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n<i>...обрезано</i>"
+
+    try:
+        await callback.message.edit_text(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            raise

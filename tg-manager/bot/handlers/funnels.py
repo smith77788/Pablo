@@ -71,9 +71,12 @@ async def _show_funnel_view(
         await message.answer("Цепочка не найдена.")
         return
     steps = await db.get_funnel_steps(pool, funnel_id)
-    trigger = (
-        "/start" if funnel["trigger_type"] == "start" else f"🔑 {funnel['keyword']}"
-    )
+    if funnel["trigger_type"] == "start":
+        trigger = "/start"
+    elif funnel["trigger_type"] == "join":
+        trigger = "👤 Новый пользователь"
+    else:
+        trigger = f"🔑 {funnel['keyword']}"
     status = "✅ Активна" if funnel["is_active"] else "❌ Отключена"
     sub_ids = await db.get_funnel_subscriber_ids(pool, funnel_id)
     steps_text = ""
@@ -279,6 +282,44 @@ async def cb_fn_trig_start(
     )
 
 
+@router.callback_query(FunnelCb.filter(F.action == "trig_join"))
+async def cb_fn_trig_join(
+    callback: CallbackQuery,
+    callback_data: FunnelCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Trigger: first message from a new user (join)."""
+    await callback.answer()
+    data = await state.get_data()
+    funnel_name = data.get("funnel_name", "Новая цепочка")
+    bot_id = callback_data.bot_id or data.get("bot_id", 0)
+    row = await db.create_funnel(pool, bot_id, funnel_name, "join")
+    funnel_id = row["id"]
+    await state.clear()
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="➕ Добавить шаг",
+        callback_data=FunnelCb(
+            action="add_step", bot_id=bot_id, funnel_id=funnel_id, step=0
+        ),
+    )
+    kb.button(
+        text="◀️ К списку",
+        callback_data=FunnelCb(action="list", bot_id=bot_id),
+    )
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "✅ <b>Воронка создана!</b>\n\n"
+        f"🔗 <b>{_html.escape(funnel_name)}</b>\n"
+        "👤 Триггер: <b>Новый пользователь</b>\n\n"
+        "Добавьте первый шаг или вернитесь к списку воронок.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(FunnelCb.filter(F.action == "trig_keyword"))
 async def cb_fn_trig_keyword(
     callback: CallbackQuery, callback_data: FunnelCb, state: FSMContext
@@ -420,11 +461,12 @@ async def msg_fn_step_delay(
     funnel = next((f for f in funnels if f["id"] == funnel_id), None)
     steps = await db.get_funnel_steps(pool, funnel_id)
 
-    trigger = (
-        "/start"
-        if funnel and funnel["trigger_type"] == "start"
-        else f"🔑 {funnel['keyword'] if funnel else ''}"
-    )
+    if funnel and funnel["trigger_type"] == "start":
+        trigger = "/start"
+    elif funnel and funnel["trigger_type"] == "join":
+        trigger = "👤 Новый пользователь"
+    else:
+        trigger = f"🔑 {funnel['keyword'] if funnel else ''}"
     status = "✅ Активна" if funnel and funnel["is_active"] else "❌ Отключена"
     steps_text = ""
     for s in steps:

@@ -2599,7 +2599,7 @@ async def cb_behavioral(
                 rows = await pool.fetch(
                     "SELECT entity_type, entity_id, decay_rate, updated_at "
                     "FROM entity_behavioral_score "
-                    "WHERE owner_id=$1 AND decay_rate > 0.3 "
+                    "WHERE owner_id=$1 AND decay_rate > 0.1 "
                     "ORDER BY decay_rate DESC LIMIT 10",
                     user_id,
                 )
@@ -2612,7 +2612,7 @@ async def cb_behavioral(
                 rows = await pool.fetch(
                     "SELECT entity_type, entity_id, habit_score, updated_at "
                     "FROM entity_behavioral_score "
-                    "WHERE owner_id=$1 AND habit_score > 60 "
+                    "WHERE owner_id=$1 AND habit_score > 0 "
                     "ORDER BY habit_score DESC LIMIT 10",
                     user_id,
                 )

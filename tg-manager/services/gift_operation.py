@@ -131,17 +131,15 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
     await pool.execute(
         """
         UPDATE operation_queue SET
-            completed_at = now(),
+            finished_at = now(),
             status = 'done',
             total_items = $2,
-            processed_items = $3,
-            failed_items = $4
+            done_items = $3
         WHERE id = $1
         """,
         op_id,
         len(plan["items"]),
         transferred_count,
-        failed_count,
     )
 
     report_id = await GiftTransferReportService.generate_report(pool, plan_id, op_id)

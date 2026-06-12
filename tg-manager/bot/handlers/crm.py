@@ -131,7 +131,12 @@ async def msg_global_tag_name(
         return
     await state.clear()
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    await db.add_user_tag(pool, data["bot_id"], message.from_user.id, tag)
+    # Use user_id=0 as a sentinel to create a standalone tag definition.
+    # This avoids polluting the segment with the owner's Telegram user_id,
+    # which is not a bot user. get_users_by_tag excludes user_id=0 so
+    # broadcasts to this segment will correctly target only real bot users
+    # who later get the tag applied via automation rules.
+    await db.add_user_tag(pool, data["bot_id"], 0, tag)
     tags = await db.get_tag_names(pool, data["bot_id"])
     await message.answer(
         f"✅ Тег <b>{safe_tag}</b> создан!\n\nВсего тегов в боте: <b>{len(tags)}</b>",

@@ -907,6 +907,10 @@ def funnel_trigger_menu(bot_id: int) -> InlineKeyboardMarkup:
         text="▶️ /start", callback_data=FunnelCb(action="trig_start", bot_id=bot_id)
     )
     kb.button(
+        text="👤 Новый пользователь",
+        callback_data=FunnelCb(action="trig_join", bot_id=bot_id),
+    )
+    kb.button(
         text="🔑 Ключевое слово",
         callback_data=FunnelCb(action="trig_keyword", bot_id=bot_id),
     )

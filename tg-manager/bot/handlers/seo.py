@@ -2235,6 +2235,33 @@ def _keyword_coverage(text: str, keywords: list[str]) -> list[tuple[str, bool]]:
     return [(kw, all(w in text_lower for w in kw.lower().split())) for kw in keywords]
 
 
+def _keyword_density(text: str, keywords: list[str]) -> list[tuple[str, int]]:
+    """Return how many times each keyword appears in text (word-level count).
+
+    Counts non-overlapping occurrences of all words of the keyword phrase.
+    For single-word keywords this is equivalent to word frequency.
+    """
+    if not text:
+        return [(kw, 0) for kw in keywords]
+    # Split text into lowercase words (remove punctuation)
+    import re as _re
+    words = _re.findall(r"[a-zа-яёa-z0-9_]+", text.lower())
+    word_freq: dict[str, int] = {}
+    for w in words:
+        word_freq[w] = word_freq.get(w, 0) + 1
+
+    result = []
+    for kw in keywords:
+        kw_words = _re.findall(r"[a-zа-яёa-z0-9_]+", kw.lower())
+        if not kw_words:
+            result.append((kw, 0))
+            continue
+        # For single words use exact count; for phrases use minimum word count
+        counts = [word_freq.get(w, 0) for w in kw_words]
+        result.append((kw, min(counts)))
+    return result
+
+
 @router.callback_query(SeoCb.filter(F.action == "content_gap"))
 async def cb_seo_content_gap(
     callback: CallbackQuery,
@@ -2290,6 +2317,7 @@ async def cb_seo_content_gap(
         return
 
     coverage = _keyword_coverage(all_text, combined)
+    density = dict(_keyword_density(all_text, combined))
     found = [kw for kw, ok in coverage if ok]
     missing = [kw for kw, ok in coverage if not ok]
     pct = round(len(found) / len(coverage) * 100) if coverage else 0
@@ -2308,9 +2336,12 @@ async def cb_seo_content_gap(
         for kw in missing[:10]:
             lines.append(f"  • <code>{html.escape(kw)}</code>")
     if found:
-        lines.append(f"\n<b>✅ Уже покрыты ({len(found)}):</b>")
+        lines.append(f"\n<b>✅ Уже покрыты ({len(found)}) — плотность:</b>")
         for kw in found[:6]:
-            lines.append(f"  • <code>{html.escape(kw)}</code>")
+            cnt = density.get(kw, 0)
+            bar_len = min(cnt, 5)
+            bar = "█" * bar_len + "░" * (5 - bar_len)
+            lines.append(f"  • <code>{html.escape(kw)}</code> {bar} ×{cnt}")
     if missing:
         lines.append(
             "\n💡 Добавьте отсутствующие слова в описание → больший охват в поиске."
@@ -2410,6 +2441,7 @@ async def cb_seo_chan_content_gap(
         return
 
     coverage = _keyword_coverage(all_text, kw_list)
+    density = dict(_keyword_density(all_text, kw_list))
     found = [kw for kw, ok in coverage if ok]
     missing = [kw for kw, ok in coverage if not ok]
     pct = round(len(found) / len(coverage) * 100) if coverage else 0
@@ -2428,9 +2460,12 @@ async def cb_seo_chan_content_gap(
         for kw in missing[:10]:
             lines.append(f"  • <code>{html.escape(kw)}</code>")
     if found:
-        lines.append(f"\n<b>✅ Присутствуют ({len(found)}):</b>")
+        lines.append(f"\n<b>✅ Присутствуют ({len(found)}) — плотность:</b>")
         for kw in found[:6]:
-            lines.append(f"  • <code>{html.escape(kw)}</code>")
+            cnt = density.get(kw, 0)
+            bar_len = min(cnt, 5)
+            bar = "█" * bar_len + "░" * (5 - bar_len)
+            lines.append(f"  • <code>{html.escape(kw)}</code> {bar} ×{cnt}")
 
     kb = InlineKeyboardBuilder()
     kb.button(

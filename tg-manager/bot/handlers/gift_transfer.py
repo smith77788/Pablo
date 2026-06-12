@@ -812,7 +812,7 @@ async def cb_check_progress(callback: CallbackQuery, state: FSMContext, pool):
         f"💰 <b>Стоимость:</b> {stats['actual_cost'] or 0}⭐"
     )
 
-    if plan["status"] == "done":
+    if plan and plan["status"] == "done":
         progress_text += (
             "\n\n✅ <b>Передача завершена!</b> Просмотрите отчёт для подробностей."
         )
