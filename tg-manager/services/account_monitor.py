@@ -1,4 +1,8 @@
-"""Background service: monitor active account count per owner, alert on low count."""
+"""Background service: monitor active account count per owner, alert on low count.
+
+Also: ping Telegram to verify session liveness, mark dead sessions as
+session_expired, and notify account owners.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +25,9 @@ _ALERT_COOLDOWN = 86400  # 24h between repeated low-account alerts per owner
 
 # In-memory cooldown: owner_id → last_alert_ts
 _low_account_alerted: dict[int, float] = {}
+
+# In-memory cooldown for session_expired alerts: account_id → last_alert_ts
+_session_expired_alerted: dict[int, float] = {}
 
 
 async def _check_and_alert(pool: asyncpg.Pool, bot: Bot) -> None:
@@ -153,6 +160,113 @@ async def _recover_stuck_operations(pool: asyncpg.Pool, bot: Bot) -> None:
         log.debug("account_monitor: stuck ops check error: %s", exc)
 
 
+async def _check_dead_sessions(pool: asyncpg.Pool, bot: Bot) -> None:
+    """Ping Telegram for accounts whose session hasn't been verified recently.
+
+    Checks up to 5 accounts per cycle (those not checked in the last 3 hours).
+    On auth failure: sets acc_status='session_expired', is_active=FALSE,
+    and notifies the owner.  Uses should_persist_account_status() to avoid
+    flip-flopping on transient errors.
+    """
+    from services.account_manager import check_account_status_full, should_persist_account_status
+
+    try:
+        accounts = await pool.fetch(
+            """SELECT id, owner_id, session_str, phone, first_name, username,
+                      device_model, system_version, app_version, proxy_id, acc_status
+               FROM tg_accounts
+               WHERE is_active = TRUE
+                 AND session_str IS NOT NULL AND session_str != ''
+                 AND (last_real_check_at IS NULL
+                      OR last_real_check_at < NOW() - INTERVAL '3 hours')
+               ORDER BY COALESCE(last_real_check_at, '2000-01-01') ASC
+               LIMIT 5""",
+        )
+    except Exception as exc:
+        log.debug("_check_dead_sessions: query error: %s", exc)
+        return
+
+    if not accounts:
+        return
+
+    log.info("account_monitor: dead-session check — %d accounts", len(accounts))
+    now = time.time()
+
+    for acc in accounts:
+        try:
+            result = await asyncio.wait_for(
+                check_account_status_full(
+                    acc["session_str"], dict(acc), check_spambot=False
+                ),
+                timeout=25.0,
+            )
+        except asyncio.TimeoutError:
+            log.debug("account_monitor: session ping timeout acc=%d", acc["id"])
+            continue
+        except Exception as exc:
+            log_exc_swallow(log, "account_monitor dead-session check acc=%d: %s", acc["id"], exc)
+            continue
+
+        status = result.get("status", "active")
+        auth_error = result.get("auth_error", False)
+
+        # Always update the check timestamp
+        try:
+            await pool.execute(
+                "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1",
+                acc["id"],
+            )
+        except Exception:
+            log_exc_swallow(log, "account_monitor: failed to update last_real_check_at acc=%d", acc["id"])
+
+        if result.get("no_session"):
+            continue
+
+        if not should_persist_account_status(
+            status, auth_error=auth_error, has_session=True
+        ):
+            continue
+
+        # Session is confirmed dead
+        if status in ("session_expired", "banned", "deactivated") and auth_error:
+            try:
+                await pool.execute(
+                    "UPDATE tg_accounts SET acc_status=$1, is_active=FALSE WHERE id=$2",
+                    status,
+                    acc["id"],
+                )
+            except Exception:
+                log_exc_swallow(
+                    log, "account_monitor: failed to update dead acc=%d", acc["id"]
+                )
+
+            # Notify owner — deduplicated per 24h
+            last_sent = _session_expired_alerted.get(acc["id"], 0)
+            if now - last_sent >= _ALERT_COOLDOWN:
+                _session_expired_alerted[acc["id"]] = now
+                label = acc.get("username") or acc.get("first_name") or acc.get("phone") or str(acc["id"])
+                await db.notify_if_enabled(
+                    pool,
+                    bot,
+                    acc["owner_id"],
+                    "restriction",
+                    f"🔴 <b>Сессия аккаунта истекла</b>\n\n"
+                    f"Аккаунт: <b>@{label}</b>\n"
+                    f"Статус: <b>{status}</b>\n\n"
+                    "Telegram отклонил авторизацию — сессия мертва.\n"
+                    "Аккаунт деактивирован автоматически.\n\n"
+                    "Переимпортируйте сессию в разделе <b>Аккаунты</b>.",
+                )
+                log.warning(
+                    "account_monitor: dead session acc=%d owner=%d status=%s",
+                    acc["id"],
+                    acc["owner_id"],
+                    status,
+                )
+
+        await asyncio.sleep(2)  # small pause between account checks
+
+
 async def check_owner_now(pool: asyncpg.Pool, bot: Bot, owner_id: int) -> None:
     """Immediate check for a specific owner — call after deactivating an account."""
     row = await pool.fetchrow(
@@ -185,6 +299,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # Check for stuck operations every 3 cycles (every 3 hours)
             if cycle % 3 == 0:
                 await _recover_stuck_operations(pool, bot)
+            # Ping Telegram sessions every cycle to detect dead sessions
+            await _check_dead_sessions(pool, bot)
             cycle += 1
         except Exception as exc:
             log.exception("account_monitor error: %s", exc)

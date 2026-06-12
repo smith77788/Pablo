@@ -290,6 +290,16 @@ async def cb_seo_analyze(
     )
     bar = _score_bar(score)
 
+    # Save SEO score to history DB
+    await db.save_seo_score(
+        pool,
+        owner_id=callback.from_user.id,
+        entity_type="bot",
+        entity_id=callback_data.bot_id,
+        score=score,
+        tips=tips,
+    )
+
     label = (
         f"@{bot_username}"
         if bot_username
@@ -326,6 +336,10 @@ async def cb_seo_analyze(
     kb.button(
         text="✏️ Редактировать профиль",
         callback_data=EditCb(action="menu", bot_id=callback_data.bot_id),
+    )
+    kb.button(
+        text="📜 История проверок",
+        callback_data=SeoCb(action="bot_history", bot_id=callback_data.bot_id),
     )
     kb.button(
         text="🔄 Обновить анализ",

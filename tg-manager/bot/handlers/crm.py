@@ -670,3 +670,514 @@ async def msg_rule_name(
         parse_mode="HTML",
         reply_markup=back_to_bot(data["bot_id"]),
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# CRM DASHBOARD — real counts from DB
+# ══════════════════════════════════════════════════════════════════
+
+
+def _crm_dashboard_kb() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💼 Воронка сделок", callback_data=CrmCb(action="pipeline"))
+    kb.button(text="➕ Новая сделка", callback_data=CrmCb(action="deal_add"))
+    kb.button(text="📥 Импорт CSV", callback_data=CrmCb(action="csv_import_prompt"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2, 1)
+    return kb
+
+
+@router.callback_query(CrmCb.filter(F.action == "dashboard"))
+async def cb_crm_dashboard(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    stats = await db.get_crm_dashboard_stats(pool, owner_id)
+    total_deals = sum(v["count"] for v in stats.values())
+    won_val = stats["won"]["value"]
+
+    lines = [
+        "💼 <b>CRM — Дашборд</b>\n",
+        f"Всего сделок: <b>{total_deals}</b>",
+        f"Выигранных: <b>{stats['won']['count']}</b>  (💰 {won_val:,.0f})",
+        f"Проигранных: <b>{stats['lost']['count']}</b>",
+        "",
+        "<b>По стадиям:</b>",
+    ]
+    for stage in _PIPELINE_STAGES:
+        cnt = stats[stage]["count"]
+        label = _STAGE_LABELS[stage]
+        lines.append(f"  {label}: <b>{cnt}</b>")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_crm_dashboard_kb().as_markup(),
+    )
+
+
+# ── Pipeline view ─────────────────────────────────────────────────────────────
+
+
+@router.callback_query(CrmCb.filter(F.action == "pipeline"))
+async def cb_crm_pipeline(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    owner_id = callback.from_user.id
+
+    deals = await db.get_crm_deals(pool, owner_id)
+    if not deals:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="➕ Новая сделка", callback_data=CrmCb(action="deal_add"))
+        kb.button(text="◀️ Назад", callback_data=CrmCb(action="dashboard"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "💼 <b>Воронка сделок</b>\n\n📭 Сделок пока нет. Создайте первую.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    by_stage: dict = {s: [] for s in _PIPELINE_STAGES}
+    for d in deals:
+        by_stage.setdefault(d["stage"], []).append(d)
+
+    lines = ["💼 <b>Воронка сделок</b>\n"]
+    kb = InlineKeyboardBuilder()
+    for stage in _PIPELINE_STAGES:
+        stage_deals = by_stage.get(stage, [])
+        label = _STAGE_LABELS[stage]
+        lines.append(f"\n{label} — <b>{len(stage_deals)}</b>")
+        for d in stage_deals[:5]:
+            title = (d["title"] or "")[:28]
+            lines.append(f"  • {title}")
+            kb.button(
+                text=f"📄 {title[:16]}",
+                callback_data=CrmCb(action="deal_view", deal_id=d["id"]),
+            )
+        if len(stage_deals) > 5:
+            lines.append(f"  <i>...ещё {len(stage_deals) - 5}</i>")
+
+    kb.button(text="➕ Добавить сделку", callback_data=CrmCb(action="deal_add"))
+    kb.button(text="◀️ Дашборд", callback_data=CrmCb(action="dashboard"))
+    kb.adjust(1)
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n<i>...обрезано</i>"
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ── Deal view ─────────────────────────────────────────────────────────────────
+
+
+def _deal_stage_move_kb(deal_id: int, current_stage: str) -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    for stage in _PIPELINE_STAGES:
+        if stage != current_stage:
+            label = _STAGE_LABELS[stage]
+            kb.button(
+                text=f"→ {label}",
+                callback_data=CrmCb(action="deal_move", deal_id=deal_id, tag=stage),
+            )
+    kb.button(
+        text="📝 Добавить заметку",
+        callback_data=CrmCb(action="deal_note", deal_id=deal_id),
+    )
+    kb.button(
+        text="🗑 Удалить",
+        callback_data=CrmCb(action="deal_delete_confirm", deal_id=deal_id),
+    )
+    kb.button(text="◀️ Воронка", callback_data=CrmCb(action="pipeline"))
+    kb.adjust(2, 2, 1, 1)
+    return kb
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_view"))
+async def cb_deal_view(
+    callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    deal = await db.get_crm_deal(pool, callback_data.deal_id, callback.from_user.id)
+    if not deal:
+        await callback.answer("Сделка не найдена.", show_alert=True)
+        return
+
+    activities = await db.get_crm_activity(pool, deal["id"], limit=5)
+    stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])
+    contact = deal["contact"] or "—"
+    val = f"{deal['value']:,.0f}" if deal["value"] else "—"
+    notes = (deal["notes"] or "—")[:200]
+
+    lines = [
+        f"📄 <b>{deal['title']}</b>\n",
+        f"Стадия: {stage_label}",
+        f"Контакт: {contact}",
+        f"Сумма: {val}",
+        f"Заметки: <i>{notes}</i>",
+    ]
+    if activities:
+        lines.append("\n<b>Активность:</b>")
+        for act in activities:
+            ts = act["created_at"].strftime("%d.%m %H:%M")
+            lines.append(f"  [{ts}] {act['note'][:80]}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_deal_stage_move_kb(deal["id"], deal["stage"]).as_markup(),
+    )
+
+
+# ── Move deal between stages ──────────────────────────────────────────────────
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_move"))
+async def cb_deal_move(
+    callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
+) -> None:
+    new_stage = callback_data.tag or "new"
+    if new_stage not in _PIPELINE_STAGES:
+        await callback.answer("Неверная стадия.", show_alert=True)
+        return
+
+    await db.move_crm_deal_stage(
+        pool, callback_data.deal_id, callback.from_user.id, new_stage
+    )
+    await db.add_crm_activity(
+        pool,
+        callback.from_user.id,
+        callback_data.deal_id,
+        f"Стадия изменена на «{_STAGE_LABELS.get(new_stage, new_stage)}»",
+    )
+    await callback.answer(f"✅ Стадия → {_STAGE_LABELS.get(new_stage, new_stage)}")
+
+    deal = await db.get_crm_deal(pool, callback_data.deal_id, callback.from_user.id)
+    if not deal:
+        await callback.message.edit_text("✅ Стадия изменена.")
+        return
+    activities = await db.get_crm_activity(pool, deal["id"], limit=5)
+    stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])
+
+    lines = [
+        f"📄 <b>{deal['title']}</b>\n",
+        f"Стадия: {stage_label}",
+        f"Контакт: {deal['contact'] or '—'}",
+        f"Сумма: {deal['value']:,.0f}" if deal["value"] else "Сумма: —",
+    ]
+    if activities:
+        lines.append("\n<b>Активность:</b>")
+        for act in activities:
+            ts = act["created_at"].strftime("%d.%m %H:%M")
+            lines.append(f"  [{ts}] {act['note'][:80]}")
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_deal_stage_move_kb(deal["id"], deal["stage"]).as_markup(),
+    )
+
+
+# ── Add deal (FSM) ────────────────────────────────────────────────────────────
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_add"))
+async def cb_deal_add(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.set_state(AddDeal.waiting_title)
+    await state.update_data(csv_mode=False)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=CrmCb(action="pipeline"))
+    await callback.message.edit_text(
+        "💼 <b>Новая сделка</b>\n\nВведите название сделки:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AddDeal.waiting_title, F.text)
+async def msg_deal_title_or_csv(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    data = await state.get_data()
+    if data.get("csv_mode"):
+        await state.clear()
+        await _process_csv_import(message, pool, message.from_user.id, message.text or "")
+        return
+    title = (message.text or "").strip()
+    if not title or len(title) > 120:
+        await message.answer("⚠️ Название от 1 до 120 символов. Попробуйте ещё раз:")
+        return
+    await state.update_data(deal_title=title)
+    await state.set_state(AddDeal.waiting_contact)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=CrmCb(action="deal_skip_contact"))
+    await message.answer(
+        "📞 Введите имя или @username контакта (или пропустите):",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_skip_contact"))
+async def cb_deal_skip_contact(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.update_data(deal_contact="")
+    await state.set_state(AddDeal.waiting_value)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=CrmCb(action="deal_skip_value"))
+    await callback.message.edit_text(
+        "💰 Введите сумму сделки (число, например 50000) или пропустите:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AddDeal.waiting_contact, F.text)
+async def msg_deal_contact(message: Message, state: FSMContext) -> None:
+    contact = (message.text or "").strip()[:80]
+    await state.update_data(deal_contact=contact)
+    await state.set_state(AddDeal.waiting_value)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=CrmCb(action="deal_skip_value"))
+    await message.answer(
+        "💰 Введите сумму сделки (число) или пропустите:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_skip_value"))
+async def cb_deal_skip_value(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    await _finish_deal_creation(callback.message, state, pool, callback.from_user.id, 0.0)
+
+
+@router.message(AddDeal.waiting_value, F.text)
+async def msg_deal_value(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    raw = (message.text or "").strip().replace(",", ".").replace(" ", "")
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    await _finish_deal_creation(message, state, pool, message.from_user.id, value)
+
+
+async def _finish_deal_creation(
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    value: float,
+) -> None:
+    data = await state.get_data()
+    await state.clear()
+    title = data.get("deal_title", "Новая сделка")
+    contact = data.get("deal_contact", "")
+    deal_id = await db.create_crm_deal(
+        pool, owner_id, title, contact=contact, stage="new", value=value
+    )
+    await db.add_crm_activity(pool, owner_id, deal_id, "Сделка создана")
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📄 Открыть сделку",
+        callback_data=CrmCb(action="deal_view", deal_id=deal_id),
+    )
+    kb.button(text="💼 Воронка", callback_data=CrmCb(action="pipeline"))
+    kb.adjust(1)
+    val_str = f"{value:,.0f}" if value else "не указана"
+    await message.answer(
+        f"✅ <b>Сделка создана!</b>\n\n"
+        f"Название: <b>{title}</b>\n"
+        f"Контакт: {contact or '—'}\n"
+        f"Сумма: {val_str}\n"
+        f"Стадия: {_STAGE_LABELS['new']}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Deal note ─────────────────────────────────────────────────────────────────
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_note"))
+async def cb_deal_note_prompt(
+    callback: CallbackQuery, callback_data: CrmCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.set_state(AddDealNote.waiting_note)
+    await state.update_data(deal_id=callback_data.deal_id)
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="❌ Отмена",
+        callback_data=CrmCb(action="deal_view", deal_id=callback_data.deal_id),
+    )
+    await callback.message.edit_text(
+        "📝 Введите заметку / запись активности:",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AddDealNote.waiting_note, F.text)
+async def msg_deal_note(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    note = (message.text or "").strip()
+    data = await state.get_data()
+    deal_id = data.get("deal_id", 0)
+    await state.clear()
+    if not note:
+        await message.answer("⚠️ Заметка не может быть пустой.")
+        return
+    await db.add_crm_activity(pool, message.from_user.id, deal_id, note[:500])
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📄 К сделке",
+        callback_data=CrmCb(action="deal_view", deal_id=deal_id),
+    )
+    await message.answer("✅ Заметка сохранена.", reply_markup=kb.as_markup())
+
+
+# ── Delete deal ───────────────────────────────────────────────────────────────
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_delete_confirm"))
+async def cb_deal_delete_confirm(callback: CallbackQuery, callback_data: CrmCb) -> None:
+    await callback.answer()
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Да, удалить",
+        callback_data=CrmCb(action="deal_delete", deal_id=callback_data.deal_id),
+    )
+    kb.button(
+        text="◀️ Отмена",
+        callback_data=CrmCb(action="deal_view", deal_id=callback_data.deal_id),
+    )
+    kb.adjust(2)
+    await callback.message.edit_text(
+        "⚠️ <b>Удалить сделку?</b>\n\nДействие необратимо.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CrmCb.filter(F.action == "deal_delete"))
+async def cb_deal_delete(
+    callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
+) -> None:
+    await db.delete_crm_deal(pool, callback_data.deal_id, callback.from_user.id)
+    await callback.answer("🗑 Сделка удалена.")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💼 Воронка", callback_data=CrmCb(action="pipeline"))
+    await callback.message.edit_text("✅ Сделка удалена.", reply_markup=kb.as_markup())
+
+
+# ══════════════════════════════════════════════════════════════════
+# CSV IMPORT
+# ══════════════════════════════════════════════════════════════════
+
+
+@router.callback_query(CrmCb.filter(F.action == "csv_import_prompt"))
+async def cb_csv_import_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AddDeal.waiting_title)
+    await state.update_data(csv_mode=True)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=CrmCb(action="dashboard"))
+    await callback.message.edit_text(
+        "📥 <b>Импорт из CSV</b>\n\n"
+        "Отправьте <b>.csv файл</b> или вставьте данные текстом.\n\n"
+        "Формат (первая строка — заголовки):\n"
+        "<code>title,contact,value,stage,notes</code>\n\n"
+        "Допустимые стадии: new, contacted, qualified, won, lost\n"
+        "Разделитель: запятая или точка с запятой.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(AddDeal.waiting_title, F.document)
+async def msg_csv_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    data = await state.get_data()
+    if not data.get("csv_mode"):
+        await message.answer("⚠️ Ожидается текст названия сделки, а не файл.")
+        return
+    doc = message.document
+    if not doc or not (doc.file_name or "").lower().endswith(".csv"):
+        await message.answer("⚠️ Ожидается .csv файл.")
+        return
+    await state.clear()
+    bot = message.bot
+    file = await bot.get_file(doc.file_id)
+    file_bytes = await bot.download_file(file.file_path)
+    raw_text = file_bytes.read().decode("utf-8", errors="replace")
+    await _process_csv_import(message, pool, message.from_user.id, raw_text)
+
+
+async def _process_csv_import(
+    message: Message,
+    pool: asyncpg.Pool,
+    owner_id: int,
+    raw_text: str,
+) -> None:
+    """Parse CSV text and bulk-insert deals."""
+    delimiter = ";" if raw_text.count(";") > raw_text.count(",") else ","
+    reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+
+    _field_map = {
+        "title": "title", "название": "title",
+        "contact": "contact", "контакт": "contact",
+        "value": "value", "сумма": "value",
+        "stage": "stage", "стадия": "stage",
+        "notes": "notes", "заметки": "notes", "note": "notes",
+    }
+
+    ok = 0
+    errors = 0
+    for row in reader:
+        norm: dict = {}
+        for k, v in row.items():
+            mapped = _field_map.get((k or "").strip().lower())
+            if mapped:
+                norm[mapped] = (v or "").strip()
+
+        title = norm.get("title", "").strip()
+        if not title:
+            errors += 1
+            continue
+
+        contact = norm.get("contact", "")
+        stage_raw = (norm.get("stage") or "new").lower()
+        stage = stage_raw if stage_raw in _PIPELINE_STAGES else "new"
+        notes = norm.get("notes", "")
+        try:
+            value = float(
+                norm.get("value", "0").replace(",", ".").replace(" ", "") or 0
+            )
+        except ValueError:
+            value = 0.0
+
+        try:
+            deal_id = await db.create_crm_deal(
+                pool, owner_id, title,
+                contact=contact, stage=stage, value=value, notes=notes,
+            )
+            await db.add_crm_activity(pool, owner_id, deal_id, "Импортирована из CSV")
+            ok += 1
+        except Exception:
+            log.warning("csv import: failed to insert '%s'", title, exc_info=True)
+            errors += 1
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💼 Воронка сделок", callback_data=CrmCb(action="pipeline"))
+    kb.button(text="◀️ Дашборд", callback_data=CrmCb(action="dashboard"))
+    kb.adjust(1)
+    await message.answer(
+        f"📥 <b>Импорт завершён</b>\n\n"
+        f"✅ Импортировано: <b>{ok}</b>\n"
+        f"❌ Ошибок: <b>{errors}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
