@@ -57,97 +57,107 @@ async def _record_funnel_conversion(
         log.warning("funnel conversion record error: %s", e)
 
 
-async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    while True:
-        try:
-            due = await db.get_due_funnel_steps(pool)
-            for row in due:
-                try:
-                    # Try up to 3 times with backoff before giving up on this step
-                    sent_ok = False
-                    rate_limited = False
-                    permanently_failed = False
-                    for attempt in range(3):
-                        ok, retry_after = await bot_api.send_message(
-                            http, row["token"], row["user_id"], row["message_text"]
+async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    """Process all due funnel steps exactly once (one iteration, no loop).
+
+    Called from the background ``run`` loop and also usable in tests /
+    manual invocations.
+    """
+    try:
+        due = await db.get_due_funnel_steps(pool)
+        for row in due:
+            try:
+                # Try up to 3 times with backoff before giving up on this step
+                sent_ok = False
+                rate_limited = False
+                permanently_failed = False
+                for attempt in range(3):
+                    ok, retry_after = await bot_api.send_message(
+                        http, row["token"], row["user_id"], row["message_text"]
+                    )
+                    if ok:
+                        sent_ok = True
+                        break
+                    if retry_after:
+                        rate_limited = True
+                        log.info(
+                            "Funnel step %d for sub %d rate-limited, sleeping %ds",
+                            row["current_step"] + 1,
+                            row["sub_id"],
+                            retry_after,
                         )
-                        if ok:
-                            sent_ok = True
-                            break
-                        if retry_after:
-                            rate_limited = True
-                            log.info(
-                                "Funnel step %d for sub %d rate-limited, sleeping %ds",
-                                row["current_step"] + 1,
-                                row["sub_id"],
-                                retry_after,
-                            )
-                            await asyncio.sleep(retry_after)
-                            continue
-                        # Non-429 failure (user blocked, bot kicked, etc.) — don't retry
-                        permanently_failed = True
+                        await asyncio.sleep(retry_after)
+                        continue
+                    # Non-429 failure (403 blocked, user deactivated, etc.) — don't retry
+                    permanently_failed = True
+                    log.warning(
+                        "Funnel step %d for sub %d failed: non-retryable (bot blocked or user deactivated)",
+                        row["current_step"] + 1,
+                        row["sub_id"],
+                    )
+                    break
+
+                if not sent_ok:
+                    if permanently_failed:
+                        # 403 / non-retryable: mark dropped so the subscription
+                        # is excluded from future get_due_funnel_steps queries.
                         log.warning(
-                            "Funnel step %d for sub %d failed: non-retryable",
+                            "Funnel step %d for sub %d failed permanently, marking dropped",
                             row["current_step"] + 1,
                             row["sub_id"],
                         )
-                        break
-
-                    if not sent_ok:
-                        if permanently_failed:
-                            # Non-retryable failure (bot blocked, user deactivated, etc.)
-                            # Mark subscription as dropped so stats are accurate
-                            log.warning(
-                                "Funnel step %d for sub %d failed permanently, marking dropped",
-                                row["current_step"] + 1,
+                        try:
+                            await pool.execute(
+                                "UPDATE funnel_subscriptions SET dropped=true, completed_at=now() "
+                                "WHERE id=$1 AND completed=false",
                                 row["sub_id"],
                             )
-                            try:
-                                await pool.execute(
-                                    "UPDATE funnel_subscriptions SET dropped=true, completed_at=now() "
-                                    "WHERE id=$1 AND completed=false",
-                                    row["sub_id"],
-                                )
-                                await pool.execute(
-                                    "UPDATE funnels SET dropped_count = dropped_count + 1 WHERE id=$1",
-                                    row["funnel_id"],
-                                )
-                            except Exception as _drop_err:
-                                log.debug("funnel drop mark failed: %s", _drop_err)
-                        else:
-                            # Rate-limited after all retries — will retry next loop cycle
-                            log.info(
-                                "Funnel step %d for sub %d skipped (rate-limited), will retry",
-                                row["current_step"] + 1,
-                                row["sub_id"],
-                            )
-                        continue
-
-                    next_step = row["current_step"] + 1
-                    steps = await db.get_funnel_steps(pool, row["funnel_id"])
-                    is_last = next_step >= row["total_steps"]
-                    next_delay = (
-                        steps[next_step]["delay_minutes"]
-                        if next_step < len(steps)
-                        else 0
-                    )
-                    await db.advance_funnel_step(
-                        pool, row["sub_id"], next_step, row["total_steps"], next_delay,
-                        funnel_id=row["funnel_id"],
-                    )
-                    # Фиксировать конверсию при завершении воронки
-                    if is_last:
-                        asyncio.create_task(
-                            _record_funnel_conversion(
-                                pool,
-                                row["bot_id"],
-                                row["user_id"],
+                            await pool.execute(
+                                "UPDATE funnels SET dropped_count = dropped_count + 1 WHERE id=$1",
                                 row["funnel_id"],
-                                row["sub_id"],
                             )
+                        except Exception as _drop_err:
+                            log.debug("funnel drop mark failed: %s", _drop_err)
+                    else:
+                        # Rate-limited after all retries — will retry next loop cycle
+                        log.info(
+                            "Funnel step %d for sub %d skipped (rate-limited), will retry",
+                            row["current_step"] + 1,
+                            row["sub_id"],
                         )
-                except Exception:
-                    log.exception("Funnel runner error for sub_id=%s", row["sub_id"])
-        except Exception:
-            log.exception("Funnel runner loop error")
+                    continue
+
+                next_step = row["current_step"] + 1
+                steps = await db.get_funnel_steps(pool, row["funnel_id"])
+                is_last = next_step >= row["total_steps"]
+                next_delay = (
+                    steps[next_step]["delay_minutes"]
+                    if next_step < len(steps)
+                    else 0
+                )
+                await db.advance_funnel_step(
+                    pool, row["sub_id"], next_step, row["total_steps"], next_delay,
+                    funnel_id=row["funnel_id"],
+                )
+                # Record conversion when funnel completes
+                if is_last:
+                    asyncio.create_task(
+                        _record_funnel_conversion(
+                            pool,
+                            row["bot_id"],
+                            row["user_id"],
+                            row["funnel_id"],
+                            row["sub_id"],
+                        )
+                    )
+            except Exception:
+                log.exception("Funnel runner error for sub_id=%s", row["sub_id"])
+    except Exception:
+        log.exception("Funnel runner loop error")
+
+
+async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
+    """Continuous background loop: process due funnel steps every 60 seconds."""
+    while True:
+        await run_once(pool, http)
         await asyncio.sleep(60)
