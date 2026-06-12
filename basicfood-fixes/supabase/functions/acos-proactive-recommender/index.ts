@@ -206,7 +206,7 @@ Deno.serve(async (req) => {
       recommendations.push({ pattern: p.pattern_key, track, recent_uses: uses });
     }
 
-    await Promise.all([
+    await Promise.allSettled([
       ...proven.map((p) => emit(p, "proven")),
       ...emerging.map((p) => emit(p, "emerging")),
     ]);

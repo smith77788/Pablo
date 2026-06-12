@@ -76,14 +76,16 @@ Deno.serve(async (req) => {
     const chunkSize = 500;
     const chunks: string[][] = [];
     for (let i = 0; i < orderIds.length; i += chunkSize) chunks.push(orderIds.slice(i, i + chunkSize));
-    const chunkResults = await Promise.all(
+    const chunkResults = await Promise.allSettled(
       chunks.map((chunk) =>
         supabase.from("order_items")
           .select("order_id, product_id, product_name, product_price, quantity")
           .in("order_id", chunk)
       ),
     );
-    const items: ItemRow[] = chunkResults.flatMap((r) => (r.data as ItemRow[]) ?? []);
+    const items: ItemRow[] = chunkResults.flatMap((r) =>
+      r.status === "fulfilled" ? ((r.value.data as ItemRow[]) ?? []) : []
+    );
 
     if (items.length === 0) {
       return new Response(

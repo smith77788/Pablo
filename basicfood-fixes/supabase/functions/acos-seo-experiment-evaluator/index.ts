@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const results: Array<Record<string, unknown>> = await Promise.all(
+  const settled = await Promise.allSettled(
     ((experiments ?? []) as Experiment[]).map(async (exp): Promise<Record<string, unknown>> => {
       const aImp = exp.variant_a_impressions;
       const bImp = exp.variant_b_impressions;
@@ -157,6 +157,9 @@ Deno.serve(async (req) => {
         applied: overrideApplied,
       };
     }),
+  );
+  const results: Array<Record<string, unknown>> = settled.map((r) =>
+    r.status === "fulfilled" ? r.value : { action: "error", error: (r.reason as Error)?.message ?? String(r.reason) }
   );
 
   return new Response(
