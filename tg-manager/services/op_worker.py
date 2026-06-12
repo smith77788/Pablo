@@ -1108,6 +1108,38 @@ async def _exec_mass_publish(
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
+    # media_bytes: downloaded once before the loop, re-uploaded per channel via Telethon.
+    # Bot API file_ids cannot be used directly by Telethon (different protocol),
+    # so we download the file bytes first using the main bot token.
+    media_bytes: bytes | None = None
+    media_filename: str = "media"
+    if media_file_id and media_type:
+        try:
+            tg_file = await bot.get_file(media_file_id)
+            file_url = tg_file.file_path
+            if file_url and not file_url.startswith("http"):
+                from config import BOT_TOKEN
+                file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_url}"
+            if file_url:
+                import aiohttp as _aiohttp
+                async with _aiohttp.ClientSession() as _sess:
+                    async with _sess.get(file_url, timeout=_aiohttp.ClientTimeout(total=60)) as _resp:
+                        if _resp.status == 200:
+                            media_bytes = await _resp.read()
+                            # Derive filename from path
+                            import os as _os
+                            media_filename = _os.path.basename(file_url) or "media"
+                        else:
+                            log.warning(
+                                "_exec_mass_publish op=%d: media download failed status=%d, posting text-only",
+                                op_id, _resp.status,
+                            )
+        except Exception as _media_exc:
+            log.warning(
+                "_exec_mass_publish op=%d: failed to download media (%s), posting text-only",
+                op_id, _media_exc,
+            )
+            media_bytes = None
 
     if not mp_text:
         return {"status": "failed", "summary": "⚠️ Текст сообщения не указан"}

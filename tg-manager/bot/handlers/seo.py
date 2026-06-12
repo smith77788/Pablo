@@ -838,6 +838,16 @@ async def cb_seo_chan_analyze(
     score, tips = _chan_seo_score(title, about, username, members)
     bar = _score_bar(score)
 
+    # Save SEO score to history DB
+    await db.save_seo_score(
+        pool,
+        owner_id=user_id,
+        entity_type="channel",
+        entity_id=chan_id,
+        score=score,
+        tips=tips,
+    )
+
     display = f"@{username}" if username else html.escape(title)
     uname_line = (
         f"  🔗 Username: <b>@{html.escape(username)}</b> ✅ — ключевой фактор поиска"
@@ -878,6 +888,10 @@ async def cb_seo_chan_analyze(
         callback_data=SeoCb(action="chan_ai", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
+        text="📜 История проверок",
+        callback_data=SeoCb(action="chan_history", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
         text="📋 Экспорт как текст",
         callback_data=SeoCb(action="chan_export_txt", chan_id=chan_id, acc_id=acc_id),
     )
@@ -889,7 +903,7 @@ async def cb_seo_chan_analyze(
         text="◀️ Назад",
         callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
     )
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 2, 1, 1)
     try:
         await progress_msg.edit_text(
             "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
@@ -2573,6 +2587,109 @@ async def cb_seo_uname_alts(
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=back_cb)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# SEO SCORE HISTORY — per-entity check log
+# ══════════════════════════════════════════════════════════════════
+
+
+@router.callback_query(SeoCb.filter(F.action == "bot_history"))
+async def cb_seo_bot_history(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
+    """Show SEO check history for a bot."""
+    await callback.answer()
+    bot_id = callback_data.bot_id
+    history = await db.get_seo_score_history(
+        pool, callback.from_user.id, "bot", bot_id, limit=10
+    )
+    if not history:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=SeoCb(action="analyze", bot_id=bot_id))
+        await callback.message.edit_text(
+            "📜 <b>История SEO-проверок</b>\n\nЕщё нет ни одной проверки. Запустите анализ.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = ["📜 <b>История SEO-проверок бота</b>\n"]
+    for rec in history:
+        ts = rec["checked_at"].strftime("%d.%m.%y %H:%M")
+        bar = _score_bar(rec["score"])
+        lines.append(f"  [{ts}] {bar}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🔄 Новый анализ",
+        callback_data=SeoCb(action="analyze", bot_id=bot_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="menu", bot_id=bot_id),
+    )
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(SeoCb.filter(F.action == "chan_history"))
+async def cb_seo_chan_history(
+    callback: CallbackQuery, callback_data: SeoCb, pool: asyncpg.Pool
+) -> None:
+    """Show SEO check history for a channel."""
+    await callback.answer()
+    chan_id = callback_data.chan_id
+    acc_id = callback_data.acc_id
+    history = await db.get_seo_score_history(
+        pool, callback.from_user.id, "channel", chan_id, limit=10
+    )
+    if not history:
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="◀️ Назад",
+            callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id),
+        )
+        await callback.message.edit_text(
+            "📜 <b>История SEO-проверок канала</b>\n\nЕщё нет ни одной проверки. Запустите анализ.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    lines = ["📜 <b>История SEO-проверок канала</b>\n"]
+    # Show trend: compare consecutive scores
+    scores = [r["score"] for r in history]
+    for i, rec in enumerate(history):
+        ts = rec["checked_at"].strftime("%d.%m.%y %H:%M")
+        sc = rec["score"]
+        if i + 1 < len(scores):
+            prev = scores[i + 1]
+            if sc > prev:
+                trend = "↗️"
+            elif sc < prev:
+                trend = "↘️"
+            else:
+                trend = "→"
+        else:
+            trend = "🆕"
+        lines.append(f"  [{ts}] {_score_bar(sc)} {trend}")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🔄 Новый анализ",
+        callback_data=SeoCb(action="chan_analyze", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id),
+    )
+    kb.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
     )

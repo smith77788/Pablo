@@ -292,7 +292,17 @@ async def _process_bot(
 
             # Automation rules
             newly_added_tags: list[str] = []
+            _rate_key = (bot_id, chat_id)
             for arule in automation_rules:
+                # Rate limit: cap rules fired per user per polling cycle
+                if _cycle_rule_counts.get(_rate_key, 0) >= _MAX_RULES_PER_USER_PER_CYCLE:
+                    log.debug(
+                        "auto_responder: rate-limit hit for bot=%d chat=%d — skipping remaining rules",
+                        bot_id,
+                        chat_id,
+                    )
+                    break
+
                 triggered = False
                 if arule["trigger_type"] == "message_received":
                     triggered = True
@@ -302,6 +312,7 @@ async def _process_bot(
                     triggered = True
 
                 if triggered:
+                    _cycle_rule_counts[_rate_key] = _cycle_rule_counts.get(_rate_key, 0) + 1
                     if arule["action_type"] == "send_message":
                         rendered = _render_text(
                             arule["action_value"], from_user, bot_row
@@ -337,6 +348,33 @@ async def _process_bot(
                                 "Неверный funnel_id в правиле авто-ответа (блок 1)",
                                 rule_id=arule.get("id"),
                                 action_value=arule.get("action_value"),
+                            )
+                    elif arule["action_type"] == "create_deal":
+                        # Create a CRM deal for this user.
+                        # action_value is used as deal title prefix; falls back to "Новая заявка".
+                        try:
+                            title_prefix = arule.get("action_value") or "Новая заявка"
+                            user_label = (
+                                from_user.get("username")
+                                or from_user.get("first_name")
+                                or str(chat_id)
+                            )
+                            deal_title = f"{title_prefix} — {user_label}"
+                            await pool.execute(
+                                """INSERT INTO crm_deals
+                                       (bot_id, user_id, title, status, created_at)
+                                   VALUES ($1, $2, $3, 'new', NOW())
+                                   ON CONFLICT DO NOTHING""",
+                                bot_id,
+                                chat_id,
+                                deal_title,
+                            )
+                        except Exception as exc:
+                            log.warning(
+                                "auto_responder: create_deal failed bot=%d chat=%d: %s",
+                                bot_id,
+                                chat_id,
+                                exc,
                             )
                     elif arule["action_type"] == "webhook":
                         # action_value = URL to POST to
