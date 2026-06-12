@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import time
 from datetime import datetime
 
 import aiohttp
@@ -16,6 +17,14 @@ from services.logger import log_exc_swallow
 from bot.utils.template_validator import replace_placeholders
 
 log = logging.getLogger(__name__)
+
+# Rate limiter: prevent one user from triggering too many automation rules at once.
+# Maps (bot_id, chat_id) → count of rules fired in the current polling cycle.
+# Reset per-cycle in _process_bot.
+_MAX_RULES_PER_USER_PER_CYCLE = 5
+# Tracks rule execution counts within a single _process_bot call.
+# Structure: {(bot_id, chat_id): int}
+_cycle_rule_counts: dict[tuple[int, int], int] = {}
 
 
 def _render_text(text: str, from_user: dict, bot_row: dict | None = None) -> str:
@@ -106,6 +115,11 @@ async def _process_bot(
             _is_free = await brand_injection.is_free_tier(pool, bot_id)
         except Exception:
             _is_free = False
+
+        # Reset per-cycle rate-limit counters for this bot
+        keys_to_clear = [k for k in _cycle_rule_counts if k[0] == bot_id]
+        for k in keys_to_clear:
+            del _cycle_rule_counts[k]
 
         max_update_id = offset
 
