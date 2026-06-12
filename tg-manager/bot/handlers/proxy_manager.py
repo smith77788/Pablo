@@ -382,7 +382,10 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     ok_count = 0
     fail_count = 0
+    auto_removed = 0
     now = datetime.now(timezone.utc)
+    # Threshold: deactivate proxy after this many consecutive failures
+    _DEAD_THRESHOLD = 3
     lines = ["✅ <b>Проверка прокси завершена</b>\n"]
 
     async with pool.acquire() as conn:
@@ -394,31 +397,72 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 alive = False
                 latency_ms = None
 
+            label = row["label"] or row["proxy_url"][:30]
             if alive:
                 ok_count += 1
-                lat_str = f" — {latency_ms}ms" if latency_ms else ""
-                lines.append(
-                    f"✅ {html.escape(row['label'] or row['proxy_url'][:30])}{lat_str}"
-                )
+                # Classify speed: slow > 3000ms, normal otherwise
+                if latency_ms and latency_ms > 3000:
+                    lat_str = f" — ⚠️ медленный {latency_ms}ms"
+                elif latency_ms:
+                    lat_str = f" — {latency_ms}ms"
+                else:
+                    lat_str = ""
+                lines.append(f"✅ {html.escape(label)}{lat_str}")
             else:
                 fail_count += 1
-                lines.append(f"❌ {html.escape(row['label'] or row['proxy_url'][:30])}")
+                lines.append(f"❌ {html.escape(label)}")
 
             try:
+                # Reset consecutive_failures on success; increment on failure.
+                # consecutive_failures column added in schema migration.
+                # Use safe fallback: ignore if column missing.
                 await conn.execute(
                     """UPDATE user_proxies
-                       SET is_alive=$1, last_check=$2,
-                           latency_avg_ms=CASE WHEN $3::int IS NOT NULL THEN $3::int
+                       SET is_alive=$1,
+                           last_check=$2,
+                           last_checked_at=$2,
+                           latency_avg_ms=CASE WHEN $3::int IS NOT NULL
+                                               THEN $3::int
                                                ELSE latency_avg_ms END,
-                       last_checked_at=$2
+                           consecutive_failures=CASE WHEN $1 THEN 0
+                                                     ELSE COALESCE(consecutive_failures, 0) + 1 END,
+                           is_active=CASE WHEN NOT $1
+                                               AND COALESCE(consecutive_failures, 0) + 1 >= $5
+                                          THEN FALSE
+                                          ELSE is_active END
                        WHERE id=$4""",
                     alive,
                     now,
                     latency_ms,
                     row["id"],
+                    _DEAD_THRESHOLD,
                 )
+                # Check if it was just auto-deactivated
+                if not alive:
+                    deactivated = await conn.fetchval(
+                        "SELECT NOT is_active FROM user_proxies WHERE id=$1",
+                        row["id"],
+                    )
+                    if deactivated:
+                        auto_removed += 1
+                        lines[-1] += " 🚫 <i>деактивирован (3 провала подряд)</i>"
             except Exception:
-                log_exc_swallow(log, f"Не удалось обновить прокси id={row['id']}")
+                # Fallback without consecutive_failures column (column may not exist yet)
+                try:
+                    await conn.execute(
+                        """UPDATE user_proxies
+                           SET is_alive=$1, last_check=$2, last_checked_at=$2,
+                               latency_avg_ms=CASE WHEN $3::int IS NOT NULL
+                                                   THEN $3::int
+                                                   ELSE latency_avg_ms END
+                           WHERE id=$4""",
+                        alive,
+                        now,
+                        latency_ms,
+                        row["id"],
+                    )
+                except Exception:
+                    log_exc_swallow(log, f"Не удалось обновить прокси id={row['id']}")
             # Log to proxy_health_log
             try:
                 await conn.execute(
@@ -440,7 +484,10 @@ async def cb_check_all(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             except Exception:
                 log_exc_swallow(log, "Не удалось сохранить запись в proxy_quality_log")
 
-    lines.append(f"\n✅ Рабочих: <b>{ok_count}</b> | ❌ Нерабочих: <b>{fail_count}</b>")
+    summary = f"\n✅ Рабочих: <b>{ok_count}</b> | ❌ Нерабочих: <b>{fail_count}</b>"
+    if auto_removed:
+        summary += f" | 🚫 Деактивировано: <b>{auto_removed}</b>"
+    lines.append(summary)
     await progress_msg.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
