@@ -139,6 +139,26 @@ async def cmd_regdate(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await message.answer(_HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb())
 
 
+@router.message(Command("analyze"))
+async def cmd_analyze(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    await state.clear()
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) > 1:
+        await _handle_text_entity(message, pool, state, args[1].strip())
+        return
+    await state.set_state(RegCheckFSM.waiting_entity)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=RegCb(action="cancel"))
+    kb.adjust(1)
+    await message.answer(
+        "🔬 <b>Полный анализ Telegram-сущности</b>\n\n"
+        "Перешли сообщение или отправь @username / t.me/... ссылку:\n\n"
+        "<i>Поддерживаются: каналы, группы, пользователи, боты.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 # ── Menu callbacks ────────────────────────────────────────────────────────────
 
 @router.callback_query(RegCb.filter(F.action == "menu"))
