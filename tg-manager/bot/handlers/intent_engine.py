@@ -713,7 +713,8 @@ async def _execute_op_intent(
                 "mass_ops",
             )
             return
-        params = {"targets": targets, "account_ids": account_ids}
+        # _exec_bulk_leave reads params["channels"], not "targets"
+        params = {"channels": targets, "account_ids": account_ids}
     else:
         # Can't auto-submit (e.g. mass_publish needs message text) — redirect to tool
         await db.update_intent_status(pool, intent_id, owner_id, "ready")
