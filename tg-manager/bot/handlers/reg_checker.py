@@ -316,7 +316,7 @@ async def cb_reg_exact(
 ) -> None:
     await callback.answer("⏳ Получаю точную дату...", show_alert=False)
     entity_id = callback_data.entity_id
-    entity_type = callback_data.entity_type
+    entity_type = callback_data.entity_type or ""
 
     if entity_type not in ("channel", "supergroup", "group"):
         await callback.answer(
@@ -885,7 +885,7 @@ async def cb_analyze(
 ) -> None:
     await callback.answer("⏳ Анализирую...")
     entity_id = callback_data.entity_id
-    entity_type = callback_data.entity_type
+    entity_type = callback_data.entity_type or ""
     page = callback_data.page
 
     try:
@@ -921,7 +921,7 @@ async def cb_analyze_page(
 ) -> None:
     await callback.answer()
     entity_id = callback_data.entity_id
-    entity_type = callback_data.entity_type
+    entity_type = callback_data.entity_type or ""
     page = callback_data.page
 
     data = await _get_or_fetch_analysis(
@@ -942,7 +942,7 @@ async def cb_analyze_export(
 ) -> None:
     await callback.answer()
     entity_id = callback_data.entity_id
-    entity_type = callback_data.entity_type
+    entity_type = callback_data.entity_type or ""
 
     data = await _get_or_fetch_analysis(
         pool, callback.from_user.id, entity_id, entity_type

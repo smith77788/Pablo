@@ -60,6 +60,11 @@ _USER_ANCHORS: list[tuple[int, datetime]] = [
     (9_500_000_000,  datetime(2024, 11, 1, tzinfo=timezone.utc)),
     (10_000_000_000, datetime(2025, 2, 1,  tzinfo=timezone.utc)),
     (10_500_000_000, datetime(2025, 5, 1,  tzinfo=timezone.utc)),
+    (11_000_000_000, datetime(2025, 8, 1,  tzinfo=timezone.utc)),
+    (11_500_000_000, datetime(2025, 11, 1, tzinfo=timezone.utc)),
+    (12_000_000_000, datetime(2026, 2, 1,  tzinfo=timezone.utc)),
+    (12_500_000_000, datetime(2026, 5, 1,  tzinfo=timezone.utc)),
+    (13_000_000_000, datetime(2026, 8, 1,  tzinfo=timezone.utc)),
 ]
 
 # ── Channel / Supergroup / Chat ID → approximate creation date anchors ─────────
@@ -89,6 +94,9 @@ _CHAN_ANCHORS: list[tuple[int, datetime]] = [
     (2_600_000_000,  datetime(2024, 7, 1,  tzinfo=timezone.utc)),
     (2_800_000_000,  datetime(2025, 1, 1,  tzinfo=timezone.utc)),
     (3_000_000_000,  datetime(2025, 6, 1,  tzinfo=timezone.utc)),
+    (3_200_000_000,  datetime(2025, 11, 1, tzinfo=timezone.utc)),
+    (3_400_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
+    (3_600_000_000,  datetime(2026, 9, 1,  tzinfo=timezone.utc)),
 ]
 
 _RU_MONTHS = {
@@ -478,16 +486,39 @@ def format_date_ru(dt: datetime) -> str:
     return date_str
 
 
+def _plural_years(n: int) -> str:
+    if 11 <= n % 100 <= 19:
+        return f"{n} лет"
+    r = n % 10
+    if r == 1:
+        return f"{n} год"
+    if r in (2, 3, 4):
+        return f"{n} года"
+    return f"{n} лет"
+
+
+def _plural_months(n: int) -> str:
+    if 11 <= n % 100 <= 19:
+        return f"{n} мес."
+    r = n % 10
+    if r == 1:
+        return f"{n} мес."
+    if r in (2, 3, 4):
+        return f"{n} мес."
+    return f"{n} мес."
+
+
 def format_age(dt: datetime) -> str:
     now = datetime.now(tz=timezone.utc)
-    days = (now - dt).days
-    years, rem = divmod(days, 365)
-    months = rem // 30
+    days = max(0, (now - dt).days)
+    total_months = days // 30
+    years = total_months // 12
+    months = total_months % 12
     if years > 0 and months > 0:
-        return f"{years} лет {months} мес."
+        return f"{_plural_years(years)} {_plural_months(months)}"
     if years > 0:
-        return f"{years} лет"
-    return f"{months} мес."
+        return _plural_years(years)
+    return _plural_months(months) if months > 0 else "< 1 мес."
 
 
 def format_result(

@@ -435,5 +435,5 @@ class RegCb(CallbackData, prefix="rc"):
 
     action: str  # menu | start | exact | history | cancel | analyze | page
     entity_id: int = 0
-    entity_type: str = ""  # user | bot | channel | supergroup | group
+    entity_type: Optional[str] = None  # user | bot | channel | supergroup | group
     page: int = 0          # history page OR analyzer tab (0=overview,1=stats,2=content,3=network,4=seo,5=admins)
