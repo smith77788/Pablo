@@ -428,3 +428,12 @@ class InfraHCCb(CallbackData, prefix="ihc"):
     action: str  # menu | anomalies | recoveries | run_recovery | health_trend | copilot | resolve_anomaly | back
     item_id: int = 0  # anomaly_id, recovery_id, alert_id
     page: int = 0
+
+
+class RegCb(CallbackData, prefix="rc"):
+    """Registration / creation date checker."""
+
+    action: str  # menu | start | exact | history | cancel
+    entity_id: int = 0
+    entity_type: str = ""  # user | bot | channel | supergroup | group
+    page: int = 0

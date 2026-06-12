@@ -489,3 +489,7 @@ class ResourceActivityFSM(StatesGroup):
 class IntentFSM(StatesGroup):
     describing = State()  # ввод произвольного описания цели
     refining = State()  # уточнение параметров (geo, asset_type, pattern)
+
+
+class RegCheckFSM(StatesGroup):
+    waiting_entity = State()  # ожидание: пересланное сообщение / @username / ссылка
