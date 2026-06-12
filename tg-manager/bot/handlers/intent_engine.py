@@ -120,6 +120,7 @@ def _plan_kb(intent_id: int, plan: dict[str, Any], current_strategy: str) -> obj
         "execute_growth",
         "execute_sync",
         "run_visibility",
+        "execute_op",
     }:
         kb.button(
             text="🚀 Запустить",
@@ -426,6 +427,8 @@ async def cb_intent_confirm(
         await _execute_sync_intent(callback, pool, intent_id, plan, owner_id)
     elif action == "run_visibility":
         await _execute_visibility_intent(callback, pool, intent_id, owner_id)
+    elif action == "execute_op":
+        await _execute_op_intent(callback, pool, intent_id, plan, owner_id)
     else:
         await _navigate_to_tool(callback, plan)
 
@@ -659,6 +662,88 @@ async def _execute_visibility_intent(
             reply_markup=kb.as_markup(),
             parse_mode="HTML",
         )
+
+
+async def _execute_op_intent(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    intent_id: int,
+    plan: dict[str, Any],
+    owner_id: int,
+) -> None:
+    """Execute a custom/autonomous intent via operation_bus."""
+    from services import operation_bus
+
+    autonomous = plan.get("autonomous") or {}
+    resource_plan = autonomous.get("resource_plan") or {}
+    op_type = resource_plan.get("op_type") or autonomous_engine._intent_to_op_type(
+        str(plan.get("intent_type", "custom")), plan
+    )
+    account_ids: list[int] = resource_plan.get("primary_account_ids") or []
+    n_targets = int(
+        plan.get("n_targets") or plan.get("n_channels") or plan.get("n_bots") or 5
+    )
+    goal = str(plan.get("goal") or "")
+
+    # Build params per op_type
+    if op_type == "bulk_create_channels":
+        params: dict = {
+            "count": n_targets,
+            "prefix": plan.get("name_pattern") or "Канал",
+            "about": goal[:120],
+            "account_ids": account_ids,
+        }
+    elif op_type == "bulk_join":
+        targets = plan.get("targets") or plan.get("channels") or []
+        if not targets:
+            await _show_manual_hint(
+                callback,
+                "Для массового вступления укажи список каналов в Mass Ops.",
+                "mass_ops",
+            )
+            return
+        params = {"targets": targets, "account_ids": account_ids}
+    elif op_type == "bulk_leave":
+        targets = plan.get("targets") or plan.get("channels") or []
+        if not targets:
+            await _show_manual_hint(
+                callback,
+                "Для массового выхода укажи список каналов в Mass Ops.",
+                "mass_ops",
+            )
+            return
+        params = {"targets": targets, "account_ids": account_ids}
+    else:
+        # Can't auto-submit (e.g. mass_publish needs message text) — redirect to tool
+        await db.update_intent_status(pool, intent_id, owner_id, "ready")
+        await _navigate_to_tool(callback, plan | {"navigate_to": "mass_ops"})
+        return
+
+    try:
+        op_id = await operation_bus.submit(
+            pool, owner_id, op_type, params, total_items=n_targets
+        )
+    except Exception as exc:
+        log_exc_swallow(log, f"_execute_op_intent: submit failed: {exc}")
+        if callback.message:
+            await callback.message.edit_text(
+                f"❌ Не удалось поставить операцию в очередь: {type(exc).__name__}\n"
+                f"{str(exc)[:120]}",
+                reply_markup=_plan_kb(intent_id, plan, "balanced"),
+            )
+        return
+
+    await db.update_intent_status(pool, intent_id, owner_id, "executing")
+    await db.save_intent_feedback(
+        pool, intent_id, owner_id, {"op_id": op_id, "op_type": op_type}
+    )
+    detail = (
+        f"Тип: <code>{op_type}</code>\n"
+        f"Аккаунтов: <b>{len(account_ids)}</b>\n"
+        f"Целей: <b>{n_targets}</b>\n\n"
+        f"Отслеживай прогресс в /tasks"
+    )
+    await _show_operation_started(callback, op_id, detail)
 
 
 async def _show_operation_started(

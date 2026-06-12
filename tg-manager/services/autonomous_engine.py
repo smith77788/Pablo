@@ -43,6 +43,16 @@ class AutonomousContract:
             "recovery_plan": self.recovery_plan,
         }
         plan["steps"] = self.execution_plan or plan.get("steps", [])
+
+        # Promote non-executable plans to execute_op when the risk gate is green
+        # and accounts are assigned — covers custom/free-text goals.
+        if not plan.get("executable"):
+            has_accounts = bool(self.resource_plan.get("primary_account_ids"))
+            gate_go = bool(self.risk_plan.get("go", True)) and not self.risk_plan.get("blockers")
+            if has_accounts and gate_go:
+                plan["executable"] = True
+                plan["action"] = "execute_op"
+
         return plan
 
 
@@ -401,6 +411,17 @@ def _intent_to_op_type(intent_type: str, plan: dict[str, Any]) -> str:
         return "bulk_bot_edit"
     if intent_type == "visibility":
         return "visibility_audit"
+    # For custom goals, try to infer op_type from the description keywords
+    goal = (plan.get("goal") or "").lower()
+    if any(kw in goal for kw in ("создать канал", "создай канал", "создать каналы", "создай каналы",
+                                  "create channel", "пустых канал", "новый канал")):
+        return "bulk_create_channels"
+    if any(kw in goal for kw in ("вступить", "вступи ", "подписаться", "join channel",
+                                  "bulk join", "массово вступ")):
+        return "bulk_join"
+    if any(kw in goal for kw in ("покинуть", "покинь", "выйти", "выйди", "leave channel",
+                                  "bulk leave", "массово покин")):
+        return "bulk_leave"
     return "mass_publish"
 
 
