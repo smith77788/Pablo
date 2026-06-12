@@ -903,7 +903,7 @@ async def cb_cancel_op(
         return
     await callback.answer()
     # Refresh queue view — re-use cb_queue to avoid duplicate rendering logic
-    await cb_queue(callback, pool)
+    await cb_queue(callback, callback_data, pool)
 
 
 @router.callback_query(MassOpCb.filter(F.action == "retry_op"))
@@ -1233,7 +1233,7 @@ async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         await callback.answer(f"Удалено {deleted} записей.", show_alert=True)
 
     # Re-use cb_queue to render the updated queue (avoids duplicate rendering logic)
-    await cb_queue(callback, pool)
+    await cb_queue(callback, MassOpCb(action="queue", op_type="all", page=0), pool)
 
 
 # ══════════════════════════════════════════════════════════════════════════

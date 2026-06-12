@@ -816,7 +816,12 @@ def funnels_list(
     kb = InlineKeyboardBuilder()
     for f in funnels[:8]:
         icon = "✅" if f["is_active"] else "❌"
-        trigger = "/start" if f["trigger_type"] == "start" else f"🔑{f['keyword']}"
+        if f["trigger_type"] == "start":
+            trigger = "/start"
+        elif f["trigger_type"] == "join":
+            trigger = "👤новый"
+        else:
+            trigger = f"🔑{f['keyword']}"
         subs = ""
         if subscriber_counts is not None:
             cnt = subscriber_counts.get(f["id"], 0)
