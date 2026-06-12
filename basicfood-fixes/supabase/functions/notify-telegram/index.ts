@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const results = await Promise.all(
+    const settled = await Promise.allSettled(
       adminChats.map(async (chat) => {
         const response = await fetch(`${GATEWAY_URL}/sendMessage`, {
           method: "POST",
@@ -170,6 +170,9 @@ Deno.serve(async (req) => {
         if (!response.ok) console.error(`[notify-telegram] failed chat_id=${chat.chat_id}:`, data);
         return { chat_id: chat.chat_id, ok: response.ok, data };
       })
+    );
+    const results = settled.map((r) =>
+      r.status === "fulfilled" ? r.value : { chat_id: null, ok: false, data: { error: (r as PromiseRejectedResult).reason?.message } }
     );
 
     return new Response(JSON.stringify({ ok: true, sent: results.length }), {

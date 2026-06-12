@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     // Purchases in last 24h: count purchase_completed events that reference this product
     // (acos.ts emits purchase_completed once per checkout but order_items hold actual products,
     // so we also count distinct order_ids whose items include the product).
-    const [{ data: itemRows }, { data: viewerRows }, { count: directViews }] = await Promise.all([
+    const [itemsSettled, viewersSettled, directViewsSettled] = await Promise.allSettled([
       supabase
         .from("order_items")
         .select("order_id, orders!inner(created_at, status)")
@@ -63,6 +63,9 @@ Deno.serve(async (req) => {
         .eq("product_id", productId)
         .gte("created_at", since24h),
     ]);
+    const itemRows = itemsSettled.status === "fulfilled" ? itemsSettled.value.data : null;
+    const viewerRows = viewersSettled.status === "fulfilled" ? viewersSettled.value.data : null;
+    const directViews = directViewsSettled.status === "fulfilled" ? directViewsSettled.value.count : null;
 
     const distinctOrders = new Set((itemRows ?? []).map((r) => r.order_id));
     const distinctViewers = new Set((viewerRows ?? []).map((r) => r.session_id).filter(Boolean));

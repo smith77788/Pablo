@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
 
       // REJECT — нічого не виконуємо, оновлюємо memory
       if (v.verdict === "reject") {
-        await Promise.all([
+        await Promise.allSettled([
           supabase.from("tribunal_verdicts").update({
             enforcement_status: "skipped",
             enforced_at: new Date().toISOString(),
@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
 
       // DEFER → insight для адміна
       if (v.verdict === "defer_to_human") {
-        await Promise.all([
+        await Promise.allSettled([
           supabase.from("ai_insights").insert({
             insight_type: "tribunal_defer",
             title: `Трибунал передає рішення людині (${kase.category})`,
@@ -255,7 +255,7 @@ Deno.serve(async (req) => {
       }
 
       const success = !!invokeRes?.ok;
-      await Promise.all([
+      await Promise.allSettled([
         supabase.from("tribunal_verdicts").update({
           enforcement_status: success ? "enforced" : "failed",
           enforced_at: new Date().toISOString(),

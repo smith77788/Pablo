@@ -84,7 +84,7 @@ interface MetricsBundle {
 async function gatherMetrics(sb: any): Promise<MetricsBundle> {
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
-  const [orders, items, cases, verdicts, outreach, reports] = await Promise.all([
+  const [ordersSR, itemsSR, casesSR, verdictsSR, outreachSR, reportsSR] = await Promise.allSettled([
     sb.from("orders").select("total, status").gte("created_at", since),
     sb.from("order_items")
       .select("product_name, quantity, orders!inner(created_at)")
@@ -94,6 +94,13 @@ async function gatherMetrics(sb: any): Promise<MetricsBundle> {
     sb.from("outreach_actions").select("status").gte("created_at", since),
     sb.from("debug_reports").select("id, fingerprint", { count: "exact" }).in("status", [...OPEN_DEBUG_STATUSES]).is("resolved_at", null).limit(500),
   ]);
+
+  const orders   = ordersSR.status   === "fulfilled" ? ordersSR.value   : { data: null, count: null };
+  const items    = itemsSR.status    === "fulfilled" ? itemsSR.value    : { data: null, count: null };
+  const cases    = casesSR.status    === "fulfilled" ? casesSR.value    : { data: null, count: null };
+  const verdicts = verdictsSR.status === "fulfilled" ? verdictsSR.value : { data: null, count: null };
+  const outreach = outreachSR.status === "fulfilled" ? outreachSR.value : { data: null, count: null };
+  const reports  = reportsSR.status  === "fulfilled" ? reportsSR.value  : { data: null, count: null };
 
   const orderRows = (orders.data ?? []) as { total: number; status: string }[];
   const validOrders = orderRows.filter((o) => o.status !== "cancelled");

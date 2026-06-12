@@ -94,17 +94,25 @@ Deno.serve(async (req) => {
     }
 
     // 2. Drop chat_ids that have inbound messages in the window — clearly active.
-    const { data: inbound } = await supabase
-      .from("telegram_messages")
-      .select("chat_id")
-      .eq("direction", "in")
-      .gte("created_at", since)
-      .in("chat_id", Array.from(candidateChatIds));
-    for (const m of inbound ?? []) {
-      candidateChatIds.delete(Number(m.chat_id));
+    if (candidateChatIds.size > 0) {
+      const { data: inbound } = await supabase
+        .from("telegram_messages")
+        .select("chat_id")
+        .eq("direction", "in")
+        .gte("created_at", since)
+        .in("chat_id", Array.from(candidateChatIds));
+      for (const m of inbound ?? []) {
+        candidateChatIds.delete(Number(m.chat_id));
+      }
     }
 
     // 3. Drop chat_ids already tagged tg_blocked in customers (within 30d).
+    if (candidateChatIds.size === 0) {
+      return new Response(
+        JSON.stringify({ candidates: 0, checked: 0, blocked: 0, reason: "all_active_or_empty" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     const { data: customers } = await supabase
       .from("customers")
       .select("id, telegram_chat_id, tags")

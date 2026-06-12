@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       context: ctx,
     }));
     const activatedAt = new Date().toISOString();
-    const [logInsert, ...updateResults] = await Promise.all([
+    const [logInsert, ...updateResults] = (await Promise.allSettled([
       sb.from("neural_activation_log").insert(logRows),
       ...triggerResults.map(({ syn, result }) => {
         const isOk = result === "success";
@@ -114,8 +114,8 @@ Deno.serve(async (req) => {
           last_activated_at: activatedAt,
         }).eq("id", syn.id);
       }),
-    ]);
-    if (logInsert.error) console.warn("[pathway-router] activation log insert failed:", logInsert.error.message);
+    ])).map((r) => r.status === "fulfilled" ? r.value : { error: (r as PromiseRejectedResult).reason });
+    if ((logInsert as any).error) console.warn("[pathway-router] activation log insert failed:", (logInsert as any).error.message);
     for (const r of updateResults) {
       if ((r as any).error) console.warn("[pathway-router] synapse stat update failed:", (r as any).error.message);
     }
