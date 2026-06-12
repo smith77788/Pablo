@@ -135,9 +135,20 @@ _FATAL_ERRORS = {
     "AuthKeyUnregisteredError",
     "SessionRevokedError",
     "UserDeactivatedBan",
+    "UserDeactivatedError",
     "BotKicked",
     "PhoneNumberBanned",
+    "UserBannedInChannel",
+    "ChannelBannedError",
+    "ChatWriteForbiddenError",
 }
+# Fatal message fragments — if present in exception message, never retry
+_FATAL_MSG_PATTERNS = re.compile(
+    r"USER_DEACTIVATED|ACCOUNT_BANNED|USER_BANNED|SESSION_PASSWORD_NEEDED|"
+    r"AUTH_KEY_DUPLICATED|PHONE_NUMBER_BANNED|BOT_KICKED|CHANNEL_BANNED|"
+    r"permanently banned|account is banned",
+    re.IGNORECASE,
+)
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 _PEER_FLOOD_PATTERNS = re.compile(r"peer.flood|PEER_FLOOD|PeerFlood", re.IGNORECASE)
 _NETWORK_PATTERNS = re.compile(
@@ -184,7 +195,13 @@ def _classify_op_error(exc: Exception) -> str:
     """Классифицирует ошибку операции: 'retry' | 'flood' | 'fatal' | 'skip'."""
     name = type(exc).__name__
     msg = str(exc)
-    if name in _FATAL_ERRORS or "SESSION_REVOKED" in msg or "AUTH_KEY" in msg:
+    # Fatal: known class names OR fatal message patterns — do NOT retry these
+    if (
+        name in _FATAL_ERRORS
+        or "SESSION_REVOKED" in msg
+        or "AUTH_KEY" in msg
+        or _FATAL_MSG_PATTERNS.search(msg)
+    ):
         return "fatal"
     if _PEER_FLOOD_PATTERNS.search(msg) or _PEER_FLOOD_PATTERNS.search(name):
         return "peer_flood"
@@ -1088,6 +1105,9 @@ async def _exec_mass_publish(
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
+    # Optional media attachment (from Quick Post Wizard step 3)
+    media_file_id: str | None = params.get("media_file_id") or None
+    media_type: str | None = params.get("media_type") or None
 
     if not mp_text:
         return {"status": "failed", "summary": "⚠️ Текст сообщения не указан"}
@@ -1249,6 +1269,8 @@ async def _exec_mass_publish(
                     mp_text,
                     access_hash=dialog["access_hash"],
                     _acc=acc,
+                    media_file_id=media_file_id,
+                    media_type=media_type,
                 )
                 if result.get("proxy_error"):
                     raise ConnectionError(
@@ -1302,6 +1324,8 @@ async def _exec_mass_publish(
                                 mp_text,
                                 access_hash=dialog["access_hash"],
                                 _acc=fallback_acc,
+                                media_file_id=media_file_id,
+                                media_type=media_type,
                             )
                             if fallback_result.get("proxy_error"):
                                 raise ConnectionError(

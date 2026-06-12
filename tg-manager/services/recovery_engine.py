@@ -373,6 +373,7 @@ async def _queue_recovery(
     try:
         stuck = await pool.fetch(
             """SELECT id, op_type, account_id, retry_count,
+                      COALESCE(max_retries, 3) AS max_retries,
                       EXTRACT(EPOCH FROM (NOW() - started_at)) / 60 AS stuck_minutes
                FROM operation_queue
                WHERE owner_id=$1
@@ -387,29 +388,46 @@ async def _queue_recovery(
             op_id = op["id"]
             stuck_min = round(float(op.get("stuck_minutes") or 0))
             retry = op.get("retry_count") or 0
+            max_ret = op.get("max_retries") or 3
 
-            # Если retries < 2 → вернуть в pending для повтора
-            # Если retries >= 2 → пометить как failed
-            if retry < 2:
+            # Если retries < max_retries → вернуть в pending с экспоненциальным backoff
+            # Если retries >= max_retries → пометить как failed (dead letter)
+            if retry < max_ret:
                 new_status = "pending"
-                new_msg = f"Авто-восстановление: операция зависла на {stuck_min}мин, возобновлена"
+                # Exponential backoff: 60s, 120s, 240s, ... capped at 30min
+                backoff_s = min(60 * (2 ** retry), 1800)
+                new_msg = f"Авто-восстановление: операция зависла на {stuck_min}мин, возобновлена (backoff={backoff_s}s)"
                 action_name = "resume"
             else:
                 new_status = "failed"
-                new_msg = f"Авто-восстановление: операция зависла {stuck_min}мин, retry_count={retry} — помечена как failed"
+                backoff_s = 0
+                new_msg = f"Авто-восстановление: операция зависла {stuck_min}мин, retry_count={retry}/{max_ret} — помечена как failed (dead letter)"
                 action_name = "fail"
 
             try:
-                await pool.execute(
-                    """UPDATE operation_queue
-                       SET status=$1, error_msg=$2,
-                           started_at=NULL,
-                           retry_count=CASE WHEN $1='pending' THEN retry_count+1 ELSE retry_count END
-                       WHERE id=$3 AND status='running'""",
-                    new_status,
-                    new_msg,
-                    op_id,
-                )
+                if new_status == "pending":
+                    await pool.execute(
+                        """UPDATE operation_queue
+                           SET status='pending', error_msg=$1,
+                               started_at=NULL,
+                               last_error=$1,
+                               retry_count=retry_count+1,
+                               scheduled_for=now() + ($2 * INTERVAL '1 second')
+                           WHERE id=$3 AND status='running'""",
+                        new_msg,
+                        backoff_s,
+                        op_id,
+                    )
+                else:
+                    await pool.execute(
+                        """UPDATE operation_queue
+                           SET status='failed', error_msg=$1,
+                               started_at=NULL,
+                               finished_at=COALESCE(finished_at, now())
+                           WHERE id=$2 AND status='running'""",
+                        new_msg,
+                        op_id,
+                    )
             except Exception as e:
                 log.debug("recovery queue update failed op=%d: %s", op_id, e)
                 continue
@@ -455,11 +473,11 @@ async def _operation_recovery(
 
     try:
         terminal_failed = await pool.fetch(
-            """SELECT id, op_type, retry_count, error_msg, created_at
+            """SELECT id, op_type, retry_count, max_retries, error_msg, created_at
                FROM operation_queue
                WHERE owner_id=$1
                  AND status='failed'
-                 AND retry_count >= 3
+                 AND retry_count >= COALESCE(max_retries, 3)
                  AND finished_at > NOW() - INTERVAL '1 hour'
                  AND (notified_at IS NULL OR notified_at < NOW() - INTERVAL '3 hours')
                ORDER BY finished_at DESC

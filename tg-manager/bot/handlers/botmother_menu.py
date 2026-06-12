@@ -2084,7 +2084,7 @@ async def cb_op_retry(
 
     try:
         row = await pool.fetchrow(
-            "SELECT id, status FROM operation_queue WHERE id=$1 AND owner_id=$2",
+            "SELECT id, status, op_type, error_msg FROM operation_queue WHERE id=$1 AND owner_id=$2",
             op_id,
             user_id,
         )
@@ -2115,6 +2115,39 @@ async def cb_op_retry(
         mark_handled_error(f"op_retry update: {exc}")
         await callback.answer(f"Ошибка при перезапуске: {str(exc)[:80]}", show_alert=True)
         return
+
+    # Write audit trail for manual retry
+    try:
+        await pool.execute(
+            """INSERT INTO operation_audit(owner_id, operation_id, action, result, error_msg)
+               VALUES ($1, $2, $3, $4, $5)""",
+            user_id,
+            op_id,
+            row["op_type"] or "unknown",
+            "manual_retry",
+            f"Пользователь вручную перезапустил операцию (предыдущая ошибка: {(row['error_msg'] or '')[:200]})",
+        )
+    except Exception:
+        pass  # Audit write must not block retry
+
+    # Log manual recovery event
+    try:
+        from services import recovery_engine as _re
+        await _re.log_manual_recovery(
+            pool,
+            owner_id=user_id,
+            recovery_type="operation",
+            target_type="operation",
+            target_id=op_id,
+            action="manual_retry",
+            severity="info",
+            details={"op_type": row["op_type"], "prev_error": (row["error_msg"] or "")[:200]},
+            outcome={"new_status": "pending", "retry_count_reset": True},
+            status="success",
+        )
+    except Exception:
+        pass  # Recovery log must not block retry
+
     await callback.answer(
         f"✅ Операция #{op_id} поставлена в очередь повторно.", show_alert=True
     )
