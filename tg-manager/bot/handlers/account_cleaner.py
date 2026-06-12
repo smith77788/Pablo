@@ -114,9 +114,44 @@ async def cb_cleaner_leave_all(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 @router.callback_query(CleanerCb.filter(F.action == "del_contacts"))
 async def cb_cleaner_del_contacts(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    kb = await _pick_account_kb(pool, callback.from_user.id, "do_del_contacts")
+    kb = await _pick_account_kb(pool, callback.from_user.id, "confirm_del_contacts")
     await callback.message.edit_text(
         "👥 <b>Удалить контакты</b>\n\nВыберите аккаунт:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(CleanerCb.filter(F.action == "confirm_del_contacts"))
+async def cb_confirm_del_contacts(
+    callback: CallbackQuery, callback_data: CleanerCb, pool: asyncpg.Pool
+) -> None:
+    """Confirmation step before deleting all contacts."""
+    await callback.answer()
+    acc_id = callback_data.account_id
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT phone, first_name FROM tg_accounts WHERE id=$1", acc_id
+        )
+    except Exception:
+        log_exc_swallow(log, "confirm_del_contacts fetchrow failed")
+        acc = None
+    label = (acc["first_name"] or acc["phone"]) if acc else str(acc_id)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="⚠️ Да, удалить все контакты",
+        callback_data=CleanerCb(action="do_del_contacts", account_id=acc_id),
+    )
+    kb.button(text="❌ Отмена", callback_data=CleanerCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"⚠️ <b>Подтвердите удаление контактов</b>\n\n"
+        f"Аккаунт: <b>{html.escape(label)}</b>\n\n"
+        "Все контакты этого аккаунта будут удалены из Telegram.\n"
+        "Это действие <b>необратимо</b>!",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

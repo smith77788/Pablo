@@ -70,9 +70,20 @@ async def leave_all_chats(
 
             if not dry_run:
                 try:
-                    from telethon.tl.functions.channels import LeaveChannelRequest
+                    from telethon.tl.types import Chat as TLChat
 
-                    if dialog.is_channel or dialog.is_group:
+                    if dialog.is_channel:
+                        # Supergroup or broadcast channel
+                        from telethon.tl.functions.channels import LeaveChannelRequest
+                        await client(LeaveChannelRequest(entity))
+                    elif dialog.is_group and isinstance(entity, TLChat):
+                        # Legacy basic group — uses DeleteChatUserRequest
+                        from telethon.tl.functions.messages import DeleteChatUserRequest
+                        me = await client.get_me()
+                        await client(DeleteChatUserRequest(entity.id, me))
+                    else:
+                        # Megagroup / other channel-type group
+                        from telethon.tl.functions.channels import LeaveChannelRequest
                         await client(LeaveChannelRequest(entity))
                     left += 1
                     await asyncio.sleep(1.5)
