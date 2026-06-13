@@ -220,23 +220,22 @@ def _confidence_score(
     Confidence score 0.0–1.0 reflecting how well we know the account's age.
 
     Sources ranked by reliability:
-      first_message   → 0.90+ (exact Telegram server timestamp for channel creation)
-      oldest_avatar   → 0.55+ (real timestamp, but user may have set photo later)
-      id_interpolation → 0.20  (±2-3 months, no external signal)
-      Fragment NFT    → 0.10  (no date signal at all)
-
-    DC, avatar presence, DB sightings add marginal confidence.
+      first_message        → 0.75 base (exact Telegram server timestamp for channel creation)
+      oldest_group_message → 0.55 base (real timestamp, confirmed activity in shared group)
+      oldest_avatar        → 0.45 base (real timestamp, but avatar may be set later)
+      id_interpolation     → 0.20 base (±2-3 months, no external signal)
+      Fragment NFT         → 0.10 (no date signal at all)
     """
     if is_fragment:
         return 0.10
     if method == "first_message":
-        score = 0.75  # high base: real timestamp from Telegram servers
+        score = 0.75
+    elif method == "oldest_group_message":
+        score = 0.55
     elif method == "oldest_avatar":
-        # Avatar date is a real timestamp but NOT necessarily the creation date.
-        # User/bot may have set avatar weeks or months after registration.
         score = 0.45
     else:
-        score = 0.20  # ID interpolation only
+        score = 0.20
     if has_dc:
         score += 0.10
     if has_avatar:
@@ -244,6 +243,52 @@ def _confidence_score(
     if has_db_footprint:
         score += 0.05
     return round(min(score, 1.0), 2)
+
+
+async def _scan_oldest_message_in_dialogs(
+    client, user_id: int, max_dialogs: int = 35
+) -> tuple[datetime | None, int]:
+    """
+    Scan groups/channels our client is in to find the oldest message from user_id.
+    Returns (oldest_date, groups_scanned).
+
+    This is the highest-quality date signal for users: a real Telegram server
+    timestamp proving the account existed on that date. Far more accurate than
+    ID interpolation, and tighter than avatar date (users message before setting photos).
+    """
+    oldest: datetime | None = None
+    scanned = 0
+    try:
+        async for dialog in client.iter_dialogs():
+            if scanned >= max_dialogs:
+                break
+            if not (dialog.is_group or dialog.is_channel):
+                continue
+            scanned += 1
+            try:
+                msgs = await asyncio.wait_for(
+                    client.get_messages(
+                        dialog.entity, from_user=user_id, limit=1, reverse=True
+                    ),
+                    timeout=4,
+                )
+                if not msgs:
+                    continue
+                msg = msgs[0] if isinstance(msgs, list) else msgs
+                dt = getattr(msg, "date", None)
+                if dt is None:
+                    continue
+                if isinstance(dt, int):
+                    dt = datetime.fromtimestamp(dt, tz=timezone.utc)
+                elif dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if oldest is None or dt < oldest:
+                    oldest = dt
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return oldest, scanned
 
 
 def _map_mtproto_error(exc: Exception) -> dict[str, Any]:
@@ -631,6 +676,17 @@ async def analyze_user(
         is_contact = bool(getattr(u, "contact", False))
         is_mutual = bool(getattr(u, "mutual_contact", False))
         noforwards = bool(getattr(u, "noforwards", False))
+        # Extended attributes — not shown by Funstat/Telelog
+        is_deleted = bool(getattr(u, "deleted", False))
+        is_blocked = bool(getattr(fu, "blocked", False))
+        lang_code = getattr(u, "lang_code", None)
+        phone_calls_available = bool(getattr(fu, "phone_calls_available", False))
+        video_calls_available = bool(getattr(fu, "video_calls_available", False))
+        voice_messages_forbidden = bool(getattr(fu, "voice_messages_forbidden", False))
+        contact_require_premium = bool(getattr(u, "contact_require_premium", False))
+        stories_hidden = bool(getattr(u, "stories_hidden", False))
+        has_emoji_status = getattr(u, "emoji_status", None) is not None
+        pinned_msg_id = getattr(fu, "pinned_msg_id", None)
 
         # ── Avatar lifecycle metrics (Method C) ───────────────────────────────
         avatar_met = await _get_avatar_metrics(client, u)
@@ -681,23 +737,30 @@ async def analyze_user(
         footprint = await _get_db_footprint(pool, entity_id)
         earliest_activity = await _get_earliest_activity(pool, entity_id)
 
-        # Use real avatar date if available — far more accurate than ID interpolation
+        # Scan shared groups for oldest message from this user — best date signal
+        oldest_msg_date, groups_scanned = (None, 0)
+        if not is_frag and not u.bot:
+            oldest_msg_date, groups_scanned = await _scan_oldest_message_in_dialogs(
+                client, entity_id
+            )
+
+        # Select best date source (priority: group_msg > avatar > id_estimate)
+        # All sources are upper bounds — the user was created BEFORE the earliest evidence.
         avatar_date = avatar_met.get("oldest_photo_date")
+        candidates: list[tuple[datetime, str]] = []
+        if oldest_msg_date and not is_frag:
+            candidates.append((oldest_msg_date, "oldest_group_message"))
         if avatar_date and not is_frag:
-            created_at = avatar_date
-            created_method = "oldest_avatar"
+            candidates.append((avatar_date, "oldest_avatar"))
+
+        if candidates:
+            best_date, best_method = min(candidates, key=lambda x: x[0])
+            created_at = best_date
+            created_method = best_method
             has_exact = True
-        elif earliest_activity and not is_frag:
-            # Earliest activity in our DB is NOT the creation date, but an upper bound.
-            # We show both: approximate ID estimate + "first seen in DB" separately.
-            # The created_at is still the ID estimate (not activity date), but method
-            # is marked no_avatar so the display renders it as approximate.
-            created_at = id_estimate["date"]
-            created_method = "id_interpolation_no_avatar"
-            has_exact = False
         else:
             created_at = id_estimate["date"]
-            created_method = "id_interpolation_no_avatar" if not is_frag else id_estimate["method"]
+            created_method = "id_interpolation_no_avatar"
             has_exact = False
 
         confidence = _confidence_score(
@@ -713,14 +776,21 @@ async def analyze_user(
             "dc_id": dc_id,
             "is_fragment_number": is_frag,
             "estimated_creation_timestamp": int(id_estimate["date"].timestamp()),
-            "exact_creation_timestamp": int(avatar_date.timestamp()) if avatar_date else None,
+            "exact_creation_timestamp": int(created_at.timestamp()) if has_exact else None,
             "avatar_metrics": avatar_met,
+            "oldest_group_message_date": int(oldest_msg_date.timestamp()) if oldest_msg_date else None,
+            "groups_scanned": groups_scanned,
             "first_spotted_in_our_db": footprint,
             "earliest_activity_in_db": int(earliest_activity.timestamp()) if earliest_activity else None,
             "confidence_score": confidence,
             "privacy_restrictions": {
                 "hidden_forward_link": noforwards,
                 "private_chat": username is None,
+                "calls_available": phone_calls_available,
+                "video_calls_available": video_calls_available,
+                "voice_messages_forbidden": voice_messages_forbidden,
+                "contact_require_premium": contact_require_premium,
+                "stories_hidden": stories_hidden,
             },
         }
 
@@ -736,11 +806,24 @@ async def analyze_user(
             "scam": scam,
             "fake": fake,
             "restricted": restricted,
+            "is_deleted": is_deleted,
+            "is_blocked": is_blocked,
             "is_contact": is_contact,
             "is_mutual": is_mutual,
+            "lang_code": lang_code,
             "common_groups": common_groups,
             "photos_count": photos_count,
             "status": status_str,
+            "phone_calls_available": phone_calls_available,
+            "video_calls_available": video_calls_available,
+            "voice_messages_forbidden": voice_messages_forbidden,
+            "contact_require_premium": contact_require_premium,
+            "stories_hidden": stories_hidden,
+            "has_emoji_status": has_emoji_status,
+            "pinned_msg_id": pinned_msg_id,
+            "noforwards": noforwards,
+            "oldest_group_message_date": oldest_msg_date,
+            "groups_scanned": groups_scanned,
             "created_at": created_at,
             "created_method": created_method,
             "bot_info": bot_info,
@@ -1034,21 +1117,30 @@ def format_overview(data: dict) -> str:
     # Avatar metrics
     av = data.get("avatar_metrics") or {}
     total_ph = av.get("total_historical_count", 0)
-    method = data.get("created_method", "id_interpolation")
     if et in ("user", "bot"):
         if total_ph > 0:
             lines.append(f"🖼 Фотографий в профиле: <b>{total_ph}</b>")
         else:
             lines.append("🖼 <i>Аватар не установлен</i>")
 
-    # Earliest activity in our DB (real upper bound on account creation)
+    # Oldest message in shared groups — real existence date
+    ogm = data.get("oldest_group_message_date")
+    if ogm is not None and et in ("user", "bot"):
+        from services.registration_checker import format_date_ru
+        if not hasattr(ogm, "strftime"):
+            ogm = datetime.fromtimestamp(ogm, tz=timezone.utc)
+        gs = data.get("groups_scanned", 0)
+        lines.append(f"💬 Старейшее сообщение в наших группах: <b>{format_date_ru(ogm)}</b>")
+        if gs:
+            lines.append(f"<i>   (проверено {gs} групп)</i>")
+
+    # Earliest bot activity (from user_activity table)
     ea = data.get("earliest_activity_in_db")
-    if ea is not None:
+    if ea is not None and et in ("user", "bot"):
         from services.registration_checker import format_date_ru
         if not hasattr(ea, "strftime"):
             ea = datetime.fromtimestamp(ea, tz=timezone.utc)
         lines.append(f"🗄 Первое обращение к нашим ботам: <b>{format_date_ru(ea)}</b>")
-        lines.append("<i>(аккаунт точно существовал на эту дату)</i>")
 
     # DB footprint from reg_check_cache
     footprint = data.get("first_spotted_in_our_db")
@@ -1094,19 +1186,71 @@ def format_overview(data: dict) -> str:
             lines.append(f"🔗 Связан с: <b>{html.escape(ln)}</b>")
 
     elif et in ("user", "bot"):
+        # Deleted account
+        if data.get("is_deleted"):
+            lines.append("\n💀 <b>АККАУНТ УДАЛЁН</b>")
+
         bio = data.get("bio", "")
         if bio:
             lines.append(f"\n📝 <i>{html.escape(bio[:200])}</i>")
+
         lines.append(f"\n🔔 Статус: {data.get('status', '—')}")
-        if not av:
-            # Fallback for old data without avatar_metrics
-            lines.append(f"🖼 Фото профиля: {data.get('photos_count', 0)}")
-        if data.get("common_groups"):
-            lines.append(f"👥 Общих групп: {data['common_groups']}")
+
+        # Language
+        lang = data.get("lang_code")
+        if lang:
+            lang_names = {
+                "ru": "🇷🇺 Русский", "en": "🇬🇧 English", "uk": "🇺🇦 Ukrainian",
+                "de": "🇩🇪 Deutsch", "fr": "🇫🇷 Français", "ar": "🇸🇦 Arabic",
+                "zh": "🇨🇳 Chinese", "es": "🇪🇸 Spanish", "tr": "🇹🇷 Turkish",
+                "fa": "🇮🇷 Persian", "hi": "🇮🇳 Hindi", "pt": "🇧🇷 Portuguese",
+            }
+            lang_label = lang_names.get(lang, lang.upper())
+            lines.append(f"🌐 Язык интерфейса: <b>{lang_label}</b>")
+
+        # Emoji status
+        if data.get("has_emoji_status"):
+            lines.append("✨ Emoji-статус: установлен")
+
+        # Relations
+        relation_parts = []
         if data.get("is_contact"):
-            lines.append("📞 В контактах")
+            relation_parts.append("📞 контакт")
         if data.get("is_mutual"):
-            lines.append("🤝 Взаимный контакт")
+            relation_parts.append("🤝 взаимный")
+        if data.get("is_blocked"):
+            relation_parts.append("🚫 заблокирован")
+        if relation_parts:
+            lines.append("👤 " + " · ".join(relation_parts))
+
+        if data.get("common_groups"):
+            lines.append(f"👥 Общих групп: <b>{data['common_groups']}</b>")
+
+        # Privacy block
+        privacy_parts = []
+        if data.get("phone_calls_available") is not None:
+            privacy_parts.append(
+                "📞 звонки: ✅" if data["phone_calls_available"] else "📞 звонки: ❌"
+            )
+        if data.get("video_calls_available") is not None:
+            privacy_parts.append(
+                "🎥 видео: ✅" if data["video_calls_available"] else "🎥 видео: ❌"
+            )
+        if data.get("voice_messages_forbidden"):
+            privacy_parts.append("🎤 голос.: ❌")
+        if data.get("noforwards"):
+            privacy_parts.append("📤 пересылка: ❌")
+        if data.get("stories_hidden"):
+            privacy_parts.append("📖 истории: скрыты")
+        if data.get("contact_require_premium"):
+            privacy_parts.append("💎 контакт требует Premium")
+        if privacy_parts:
+            lines.append("\n🔒 Приватность: " + " · ".join(privacy_parts))
+
+        # Phone number (rare but OSINT gold)
+        phone = data.get("phone")
+        if phone:
+            lines.append(f"📱 Телефон: <code>+{phone}</code>")
 
     if data.get("_partial"):
         lines.append(
