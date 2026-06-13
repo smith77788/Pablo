@@ -805,6 +805,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_channel_import_all(pool, bot, op_id, owner_id, params)
             elif op_type == "check_accounts_health":
                 result = await _exec_check_accounts_health(pool, bot, op_id, owner_id, params)
+            elif op_type == "scan_owned_resources":
+                result = await _exec_scan_owned_resources(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -5128,5 +5130,136 @@ async def _exec_check_accounts_health(
         "checked": n,
         "deactivated": deactivated,
         "status_counts": status_counts,
+        "summary": summary,
+    }
+
+
+async def _exec_scan_owned_resources(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Сканировать каналы/группы, где аккаунт является создателем/администратором,
+    и импортировать найденные ресурсы в managed_channels с учётом лимита подписки."""
+    from services import account_manager
+    from bot.utils.subscription import get_channel_limit
+    from database import db as _db
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+
+    if account_ids:
+        rows = await pool.fetch(
+            "SELECT id, first_name, phone, username "
+            "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            owner_id, account_ids,
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT id, first_name, phone, username "
+            "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
+            owner_id,
+        )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Нет аккаунтов для сканирования"}
+
+    n = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+
+    chan_limit = await get_channel_limit(pool, owner_id)
+    current_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
+    ) or 0
+    slots_remaining = chan_limit - int(current_count)
+
+    total_imported = 0
+    dead_acc_ids: list[int] = []
+    acc_lines: list[str] = []
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "scanned": idx,
+                "imported": total_imported,
+                "summary": f"Отменено. Просканировано: {idx}/{n}, импортировано: {total_imported}",
+            }
+
+        acc_id = acc["id"]
+        label = (
+            acc.get("first_name") or acc.get("username") or acc.get("phone") or f"ID {acc_id}"
+        )
+
+        try:
+            acc_dict = await _db.get_account_for_telethon(pool, acc_id, owner_id)
+            session_str = (acc_dict.get("session_str") if acc_dict else None) or ""
+            result = await account_manager.scan_owned_assets(
+                session_str, _acc=dict(acc_dict) if acc_dict else None
+            )
+            err = result.get("error")
+            owned = result.get("channels", []) + result.get("groups", [])
+
+            if owned:
+                if slots_remaining <= 0:
+                    acc_lines.append(f"⛔️ {label}: лимит каналов исчерпан")
+                else:
+                    to_import = owned[:slots_remaining]
+                    imported = await _db.upsert_managed_channels(pool, owner_id, acc_id, to_import)
+                    total_imported += imported
+                    slots_remaining -= imported
+                    skipped = len(owned) - len(to_import)
+                    extra = f", пропущено {skipped} (лимит)" if skipped else ""
+                    acc_lines.append(f"✅ {label}: {len(to_import)} ресурсов ({imported} новых{extra})")
+            elif err:
+                err_low = err.lower()
+                is_dead = any(
+                    x in err_low
+                    for x in ("auth", "session", "unauthorized", "key is not registered",
+                              "registered in the system", "authkey", "auth_key")
+                )
+                if is_dead:
+                    dead_acc_ids.append(acc_id)
+                    try:
+                        await pool.execute(
+                            "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
+                        )
+                    except Exception:
+                        pass
+                    acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
+                elif "flood" in err_low:
+                    acc_lines.append(f"⏳ {label}: FloodWait")
+                else:
+                    acc_lines.append(f"❌ {label}: {err[:80]}")
+            else:
+                acc_lines.append(f"ℹ️ {label}: нет каналов/групп с правами admin/creator")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            exc_s = str(exc).lower()
+            if any(x in exc_s for x in ("auth", "key is not registered", "registered in the system")):
+                dead_acc_ids.append(acc_id)
+                try:
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
+                    )
+                except Exception:
+                    pass
+                acc_lines.append(f"🔑 {label}: ключ отозван — нужна переавторизация")
+            else:
+                acc_lines.append(f"❌ {label}: {str(exc)[:60]}")
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+    dead_count = len(dead_acc_ids)
+    dead_note = f"\n🔑 Мёртвых сессий: {dead_count}" if dead_count else ""
+    summary = (
+        f"🔎 Просканировано {n} аккаунтов\n"
+        f"📡 Импортировано новых ресурсов: {total_imported}{dead_note}"
+    )
+
+    return {
+        "status": "done",
+        "scanned": n,
+        "imported": total_imported,
+        "dead": dead_count,
         "summary": summary,
     }

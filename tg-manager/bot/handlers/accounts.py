@@ -2196,122 +2196,24 @@ async def cb_scan_all_resources(
         )
         return
 
-    await callback.message.edit_text(
-        f"🔎 <b>Сканирование ресурсов...</b>\n\n"
-        f"Ищу каналы/группы с правами создателя/администратора.\n"
-        f"Аккаунтов: {len(accounts)}. Это займёт ~{len(accounts) * 8} сек.",
-        parse_mode="HTML",
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool, uid, "scan_owned_resources",
+        {"account_ids": [int(a["id"]) for a in accounts]},
+        total_items=len(accounts),
     )
 
-    from services import account_manager
-    from bot.utils.subscription import get_channel_limit
-
-    chan_limit = await get_channel_limit(pool, uid)
-    current_chan_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
-    ) or 0
-    chan_slots_remaining = chan_limit - current_chan_count
-
-    total_imported = 0
-    acc_results: list[str] = []
-    dead_acc_ids: list[int] = []
-
-    for acc in accounts:
-        name = escape(
-            str(
-                acc.get("first_name")
-                or acc.get("username")
-                or acc.get("phone")
-                or f"ID {acc['id']}"
-            )
-        )
-        try:
-            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
-            session_str = (
-                (acc_dict.get("session_str") if acc_dict else None)
-                or acc.get("session_str")
-                or ""
-            )
-            result = await account_manager.scan_owned_assets(
-                session_str, _acc=dict(acc_dict) if acc_dict else None
-            )
-            err = result.get("error")
-            owned = result.get("channels", []) + result.get("groups", [])
-            if owned:
-                if chan_slots_remaining <= 0:
-                    acc_results.append(f"⛔️ {name}: лимит каналов исчерпан")
-                    continue
-                to_import = owned[:chan_slots_remaining]
-                imported = await db.upsert_managed_channels(pool, uid, acc["id"], to_import)
-                total_imported += imported
-                chan_slots_remaining -= imported
-                skipped = len(owned) - len(to_import)
-                extra = f", пропущено {skipped} (лимит)" if skipped else ""
-                acc_results.append(
-                    f"✅ {name}: {len(to_import)} ресурсов ({imported} новых{extra})"
-                )
-            elif err:
-                _err_low = err.lower()
-                _is_dead = any(
-                    x in _err_low
-                    for x in (
-                        "auth",
-                        "session",
-                        "unauthorized",
-                        "key is not registered",
-                        "registered in the system",
-                        "authkey",
-                        "auth_key",
-                    )
-                )
-                if _is_dead:
-                    dead_acc_ids.append(acc["id"])
-                    acc_results.append(
-                        f"🔑 {name}: ключ сессии отозван — нужна переавторизация"
-                    )
-                elif "flood" in _err_low:
-                    acc_results.append(f"⏳ {name}: FloodWait — попробуйте позже")
-                else:
-                    acc_results.append(f"❌ {name}: {escape(err[:80])}")
-            else:
-                acc_results.append(
-                    f"ℹ️ {name}: нет каналов/групп с правами admin/creator"
-                )
-        except Exception as exc:
-            exc_s = str(exc).lower()
-            if any(
-                x in exc_s
-                for x in ("auth", "key is not registered", "registered in the system")
-            ):
-                dead_acc_ids.append(acc["id"])
-                acc_results.append(
-                    f"🔑 {name}: ключ сессии отозван — нужна переавторизация"
-                )
-            else:
-                acc_results.append(f"❌ {name}: ошибка — {escape(str(exc)[:60])}")
-
-    dead_count = len(dead_acc_ids)
-    header = ["🔎 <b>Сканирование завершено!</b>"]
-    if dead_count:
-        header.append(
-            f"🔑 Мёртвых сессий: <b>{dead_count}</b> — ключи отозваны Telegram"
-        )
-        header.append("💡 Удалите их и добавьте заново через «Добавить аккаунт»")
-    header.append(f"Импортировано новых ресурсов: <b>{total_imported}</b>\n")
-    lines = header + acc_results
-
     kb = InlineKeyboardBuilder()
-    if dead_count:
-        kb.button(
-            text=f"🗑 Удалить {dead_count} мёртвых аккаунтов",
-            callback_data=AccCb(action="del_dead"),
-        )
-    kb.button(text="📡 Перейти к каналам", callback_data="chan:menu")
+    kb.button(text="📋 Статус операции", callback_data="ops:list")
     kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 
     await callback.message.edit_text(
-        "\n".join(lines),
+        f"🔎 <b>Сканирование ресурсов поставлено в очередь</b>\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"⏱ Ожидаемое время: ~{len(accounts) * 8} сек.\n\n"
+        "Уведомление придёт по окончании. Статус: /ops",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
