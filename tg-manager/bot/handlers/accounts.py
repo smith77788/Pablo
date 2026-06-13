@@ -2165,12 +2165,97 @@ async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
 
     kb.adjust(1)
+    kb.button(
+        text="🏊 Назначить пул аккаунтам",
+        callback_data=AccCb(action="pools_bulk_assign"),
+    )
     kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
     await callback.message.edit_text(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+@router.callback_query(AccCb.filter(F.action == "pools_bulk_assign"))
+async def cb_pools_bulk_assign(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    """Show all accounts and let user assign a pool to all of them at once."""
+    await callback.answer()
+    uid = callback.from_user.id
+    accounts = await db.get_tg_accounts(pool, uid)
+    if not accounts:
+        await callback.answer("Нет аккаунтов.", show_alert=True)
+        return
+
+    existing_pools = await db.get_distinct_pools(pool, uid)
+
+    kb = InlineKeyboardBuilder()
+    for p in existing_pools[:6]:
+        kb.button(
+            text=f"🏊 {p[:25]}",
+            callback_data=AccCb(action=f"bulk_pool_set", page=existing_pools.index(p)),
+        )
+    kb.button(text="✏️ Ввести новое название", callback_data=AccCb(action="bulk_pool_manual"))
+    kb.button(text="◀️ Назад", callback_data=AccCb(action="pools_view"))
+    kb.adjust(2)
+
+    acc_ids = [a["id"] for a in accounts if not a.get("pool")]
+    no_pool_cnt = len(acc_ids)
+    total_cnt = len(accounts)
+
+    await state.update_data(bulk_pool_acc_ids=[a["id"] for a in accounts], existing_pools=existing_pools)
+    await state.set_state(AccountTagsPoolFSM.waiting_pool)
+
+    await callback.message.edit_text(
+        f"🏊 <b>Массовое назначение пула</b>\n\n"
+        f"Всего аккаунтов: <b>{total_cnt}</b>\n"
+        f"Без пула: <b>{no_pool_cnt}</b>\n\n"
+        f"Выберите существующий пул или введите новое название:\n"
+        f"<i>Пул будет назначен ТОЛЬКО аккаунтам без пула.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(AccCb.filter(F.action == "bulk_pool_set"))
+async def cb_bulk_pool_set(
+    callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    sd = await state.get_data()
+    existing_pools: list = sd.get("existing_pools") or []
+    acc_ids: list = sd.get("bulk_pool_acc_ids") or []
+    pool_idx = callback_data.page
+    if not (0 <= pool_idx < len(existing_pools)):
+        await callback.answer("Пул не найден.", show_alert=True)
+        return
+    pool_name = existing_pools[pool_idx]
+    await state.clear()
+    uid = callback.from_user.id
+    updated = 0
+    for acc_id in acc_ids:
+        acc = await db.get_tg_account(pool, acc_id, uid)
+        if acc and not acc.get("pool"):
+            await db.update_account_pool(pool, acc_id, uid, pool_name)
+            updated += 1
+    await callback.answer(f"✅ Назначен пул «{pool_name}» для {updated} аккаунтов", show_alert=True)
+    new_cd = AccCb(action="pools_view")
+    await cb_pools_view(callback, pool)
+
+
+@router.callback_query(AccCb.filter(F.action == "bulk_pool_manual"))
+async def cb_bulk_pool_manual(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await callback.answer()
+    await callback.message.edit_text(
+        "✏️ <b>Введите название пула</b>\n\n"
+        "Например: <code>main</code>, <code>backup</code>, <code>strike</code>\n\n"
+        "<i>Пул будет назначен всем аккаунтам без пула.</i>",
+        parse_mode="HTML",
+    )
+    await state.update_data(bulk_pool_mode=True)
 
 
 # ── Scan all accounts for owned resources ─────────────────────────────────────
@@ -4280,16 +4365,17 @@ async def cb_edit_pool(
     existing_pools = await db.get_distinct_pools(pool, callback.from_user.id)
 
     kb = InlineKeyboardBuilder()
-    for p in existing_pools[:8]:
+    for i, p in enumerate(existing_pools[:8]):
+        # Use index in action to avoid 64-byte callback limit with long pool names
         kb.button(
-            text=f"🏊 {p}",
-            callback_data=AccCb(action=f"pool_set_{p[:20]}", acc_id=acc_id),
+            text=f"🏊 {p[:25]}",
+            callback_data=AccCb(action="pool_set", page=i, acc_id=acc_id),
         )
     kb.button(text="❌ Отмена", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
     kb.adjust(2)
 
     await state.set_state(AccountTagsPoolFSM.waiting_pool)
-    await state.update_data(acc_id=acc_id)
+    await state.update_data(acc_id=acc_id, existing_pools=existing_pools)
 
     pool_hint = (
         "\n\n" + "Быстрый выбор из существующих пулов ↑" if existing_pools else ""
@@ -4309,32 +4395,63 @@ async def handle_pool_input(
 ) -> None:
     sd = await state.get_data()
     acc_id = sd.get("acc_id")
+    bulk_mode = sd.get("bulk_pool_mode", False)
+    bulk_acc_ids: list = sd.get("bulk_pool_acc_ids") or []
     await state.clear()
     pool_name = (message.text or "").strip()[:50] or None
-    await db.update_account_pool(pool, acc_id, message.from_user.id, pool_name)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="◀️ Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
-    kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
-    kb.adjust(1)
-    await message.answer(
-        f"✅ Пул обновлён: <b>{escape(pool_name or 'не назначен')}</b>",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    uid = message.from_user.id
+
+    if bulk_mode and bulk_acc_ids:
+        # Bulk assignment: apply to all accounts that have no pool
+        updated = 0
+        for aid in bulk_acc_ids:
+            acc = await db.get_tg_account(pool, aid, uid)
+            if acc and not acc.get("pool"):
+                await db.update_account_pool(pool, aid, uid, pool_name)
+                updated += 1
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🏊 Пулы", callback_data=AccCb(action="pools_view"))
+        kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
+        kb.adjust(1)
+        await message.answer(
+            f"✅ Пул <b>{escape(pool_name or 'не назначен')}</b> назначен {updated} аккаунтам.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    else:
+        await db.update_account_pool(pool, acc_id, uid, pool_name)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Теги/Пул", callback_data=AccCb(action="tags_menu", acc_id=acc_id))
+        kb.button(text="◀️ Аккаунт", callback_data=AccCb(action="view", acc_id=acc_id))
+        kb.adjust(1)
+        await message.answer(
+            f"✅ Пул обновлён: <b>{escape(pool_name or 'не назначен')}</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
 
 
-@router.callback_query(AccCb.filter(F.action.startswith("pool_set_")))
+@router.callback_query(AccCb.filter(F.action == "pool_set"))
 async def cb_pool_set_quick(
     callback: CallbackQuery, callback_data: AccCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    sd = await state.get_data()
+    existing_pools: list = sd.get("existing_pools") or []
+    pool_idx = callback_data.page
+    if 0 <= pool_idx < len(existing_pools):
+        pool_name = existing_pools[pool_idx]
+    else:
+        # Fallback: re-fetch pools if FSM state was lost
+        all_pools = await db.get_distinct_pools(pool, callback.from_user.id)
+        pool_name = all_pools[pool_idx] if 0 <= pool_idx < len(all_pools) else None
+    if not pool_name:
+        await callback.answer("Пул не найден. Введите название вручную.", show_alert=True)
+        return
     await state.clear()
-    pool_name = callback_data.action.replace("pool_set_", "")
     acc_id = callback_data.acc_id
     await db.update_account_pool(pool, acc_id, callback.from_user.id, pool_name)
-    await callback.answer(f"Пул: {pool_name}", show_alert=False)
-    # refresh tags menu
+    await callback.answer(f"✅ Пул: {pool_name}", show_alert=False)
     from bot.callbacks import AccCb as _AccCb
-
     new_cd = _AccCb(action="tags_menu", acc_id=acc_id)
     await cb_tags_menu(callback, new_cd, pool)
 

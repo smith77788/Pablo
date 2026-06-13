@@ -4155,7 +4155,7 @@ async def get_accounts_by_tags(
 
 async def get_distinct_pools(pool: asyncpg.Pool, owner_id: int) -> list[str]:
     rows = await pool.fetch(
-        "SELECT DISTINCT pool FROM tg_accounts WHERE owner_id=$1 AND pool IS NOT NULL AND is_active=TRUE ORDER BY pool",
+        "SELECT DISTINCT pool FROM tg_accounts WHERE owner_id=$1 AND pool IS NOT NULL ORDER BY pool",
         owner_id,
     )
     return [r["pool"] for r in rows]

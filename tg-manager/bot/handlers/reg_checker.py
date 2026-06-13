@@ -556,7 +556,7 @@ async def _handle_text_entity(
         )
         return
 
-    # Username / invite link — get full info via Telethon
+    # Username / invite link — try Telethon first, Bot API as fallback
     loading = await message.answer(
         "⏳ <b>Запрашиваю данные...</b>",
         parse_mode="HTML",
@@ -570,19 +570,49 @@ async def _handle_text_entity(
     except Exception:
         pass
 
-    if not full_info:
-        await message.answer(
-            f"⚠️ Не удалось разрешить <code>{html.escape(username_str)}</code>.\n\n"
-            "Возможно:\n"
-            "• Аккаунта/канала с таким username не существует\n"
-            "• У вас нет активных аккаунтов в пуле\n"
-            "• Приватный канал — нужно быть участником",
-            parse_mode="HTML",
-            reply_markup=_waiting_kb(),
+    if full_info:
+        await _show_result_from_full_info(message, pool, state, full_info)
+        return
+
+    # Telethon unavailable — try Bot API fallback (works for public channels, bots, groups)
+    bot_entity_id: int | None = None
+    bot_entity_type: str | None = None
+    bot_name: str | None = None
+    try:
+        chat = await message.bot.get_chat(f"@{username_str.lstrip('@')}")
+        bot_entity_id = chat.id
+        bot_name = chat.title or chat.full_name or username_str
+        ct = getattr(chat, "type", "")
+        if ct == "channel":
+            bot_entity_type = "channel"
+        elif ct == "supergroup":
+            bot_entity_type = "supergroup"
+        elif ct == "group":
+            bot_entity_type = "group"
+        elif getattr(chat, "is_bot", False):
+            bot_entity_type = "bot"
+        else:
+            bot_entity_type = "user"
+    except Exception:
+        pass
+
+    if bot_entity_id is not None and bot_entity_type is not None:
+        # Got ID from Bot API — show ID-based estimation with note
+        await _show_result(
+            message, pool, state,
+            bot_entity_id, bot_entity_type, bot_name, username_str,
         )
         return
 
-    await _show_result_from_full_info(message, pool, state, full_info)
+    # Complete failure — inform user
+    await message.answer(
+        f"⚠️ Не удалось найти <code>{html.escape(username_str)}</code>.\n\n"
+        "Возможно, аккаунта/канала с таким username не существует.\n"
+        "<i>Для приватных аккаунтов без username — используйте числовой ID или "
+        "перешлите сообщение от этого человека.</i>",
+        parse_mode="HTML",
+        reply_markup=_waiting_kb(),
+    )
 
 
 async def _handle_batch(
@@ -639,7 +669,20 @@ async def _handle_batch(
                     full_info.get("name"), full_info.get("username"),
                 )
             else:
-                lines.append(rc.format_batch_line(idx, item, None))
+                # Bot API fallback for public channels/bots/groups
+                try:
+                    chat = await message.bot.get_chat(f"@{username_str.lstrip('@')}")
+                    b_id = chat.id
+                    b_name = chat.title or chat.full_name or username_str
+                    ct = getattr(chat, "type", "")
+                    b_type = {"channel": "channel", "supergroup": "supergroup",
+                              "group": "group"}.get(ct, "user")
+                    est = rc.estimate_by_id(b_id, b_type)
+                    est["name"] = b_name
+                    lines.append(rc.format_batch_line(idx, item, est, b_name))
+                    await rc.cache_result(pool, message.from_user.id, est, b_name, username_str)
+                except Exception:
+                    lines.append(rc.format_batch_line(idx, item, None))
 
     lines.append("")
     lines.append(
