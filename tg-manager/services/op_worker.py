@@ -2854,15 +2854,164 @@ _MIN_ACCOUNT_AGE_DAYS = 14  # минимальный возраст аккаун
 _MIN_TRUST_SCORE = 0.35  # минимальный trust_score для создания каналов
 _MAX_CHANNELS_PER_DAY = 2  # максимум каналов в сутки с одного аккаунта
 
+_BULK_PACING_PRESETS: dict[str, dict] = {
+    "safe":   {"item_delay": (90, 150), "cooldown_every": 5, "cooldown_delay": (300, 600)},
+    "medium": {"item_delay": (45, 90),  "cooldown_every": 5, "cooldown_delay": (120, 300)},
+    "fast":   {"item_delay": (30, 60),  "cooldown_every": 5, "cooldown_delay": (120, 300)},
+    "turbo":  {"item_delay": (45, 90),  "cooldown_every": 3, "cooldown_delay": (180, 360)},
+}
+
+
+async def _exec_bulk_create_channels_multi(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Multi-account round-robin bulk channel creation (from UI handler via operation_bus)."""
+    from services import account_manager, session_simulator
+    import random
+
+    account_ids = [int(x) for x in params["account_ids"]]
+    title_base = params.get("title", "Channel")
+    name_mode = params.get("name_mode", "none")
+    channel_count = int(params.get("channel_count", 1))
+    about = params.get("about", "")
+    is_group = bool(params.get("is_group", False))
+    bulk_pacing = params.get("bulk_pacing", "medium")
+
+    preset = _BULK_PACING_PRESETS.get(bulk_pacing, _BULK_PACING_PRESETS["medium"])
+
+    rows = await pool.fetch(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    active_accounts = [dict(r) for r in rows]
+    if not active_accounts:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    total_ops = len(active_accounts) * channel_count
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_ops, op_id)
+
+    created_count = 0
+    failed_count = 0
+    global_idx = 1
+
+    await mark_accounts_in_use([a["id"] for a in active_accounts])
+    try:
+        for task_i in range(total_ops):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "created": created_count,
+                    "failed": failed_count,
+                    "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+                }
+
+            if not active_accounts:
+                failed_count += total_ops - task_i
+                break
+
+            acc = active_accounts[task_i % len(active_accounts)]
+            acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
+
+            if name_mode == "num":
+                title = f"{title_base} {global_idx}"
+            elif name_mode == "acc":
+                title = f"{title_base} ({acc_label[:20]})"
+            else:
+                title = title_base
+
+            await session_simulator.typing_delay(title)
+
+            result = await account_manager.create_channel(
+                acc["session_str"], title, about=about, megagroup=is_group, _acc=acc
+            )
+
+            flood_wait = result.get("flood_wait", 0) if isinstance(result, dict) else 0
+            if result.get("banned") or account_manager.is_dead_session_error(
+                result.get("error") if isinstance(result, dict) else str(result)
+            ):
+                await db.deactivate_account(pool, acc["id"], "banned/dead in bulk_create_channels")
+                active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                failed_count += 1
+            elif isinstance(result, dict) and result.get("channel_id") and not result.get("error"):
+                ch_id = result["channel_id"]
+                try:
+                    await pool.execute(
+                        """INSERT INTO managed_channels
+                               (owner_id, acc_id, channel_id, title, username, access_hash, type)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7)
+                           ON CONFLICT(owner_id, channel_id) DO UPDATE SET title=$4""",
+                        owner_id, acc["id"], ch_id, title,
+                        result.get("username") or None,
+                        result.get("access_hash", 0) or 0,
+                        result.get("type", "channel"),
+                    )
+                except Exception:
+                    log_exc_swallow(log, "bulk_create_channels_multi: managed_channels insert failed")
+                try:
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                        " VALUES($1,$2,$3,'ok',$4)",
+                        op_id, task_i + 1, title, f"channel_id={ch_id}",
+                    )
+                except Exception:
+                    log_exc_swallow(log, "bulk_create_channels_multi: operation_log insert failed")
+                created_count += 1
+            else:
+                err_msg = str(result.get("error", result) if isinstance(result, dict) else result)[:200]
+                try:
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                        " VALUES($1,$2,$3,'error',$4)",
+                        op_id, task_i + 1, title, err_msg,
+                    )
+                except Exception:
+                    log_exc_swallow(log, "bulk_create_channels_multi: operation_log error insert failed")
+                failed_count += 1
+
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            global_idx += 1
+
+            if task_i < total_ops - 1:
+                cooldown_every = preset["cooldown_every"]
+                if (task_i + 1) % cooldown_every == 0:
+                    delay = random.uniform(*preset["cooldown_delay"])
+                else:
+                    delay = random.uniform(*preset["item_delay"])
+                chaos = session_simulator.chaos_factor()
+                await asyncio.sleep(max(delay * chaos, flood_wait))
+    finally:
+        await release_accounts([a["id"] for a in active_accounts])
+
+    return {
+        "status": "done",
+        "created": created_count,
+        "failed": failed_count,
+        "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+    }
+
 
 async def _exec_bulk_create_channels(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Массовое создание каналов через Telethon с умными задержками (из AI-ассистента)."""
+    """Массовое создание каналов через Telethon с умными задержками.
+
+    Поддерживает два режима:
+    - multi-account: account_ids, title, name_mode, channel_count, bulk_pacing, is_group
+    - legacy single-account: acc_id, prefix, count, about, username_pattern
+    """
     from services import account_manager, session_simulator
     import random
     from datetime import datetime, timezone
 
+    # ── Multi-account mode (new handler path via operation_bus) ───────────────
+    if params.get("account_ids"):
+        return await _exec_bulk_create_channels_multi(pool, bot, op_id, owner_id, params)
+
+    # ── Legacy single-account mode ─────────────────────────────────────────────
     prefix = params.get("prefix", "Channel")
     count = int(params.get("count", 5))
     about = params.get("about", "")

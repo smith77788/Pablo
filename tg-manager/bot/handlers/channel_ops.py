@@ -1400,6 +1400,8 @@ async def cb_do_bulk_create(
         )
         return
 
+    from services import operation_bus
+
     pacing_key = data.get("bulk_pacing", _DEFAULT_PACING)
     risk_note = ""
     if pacing_key in ("fast", "turbo"):
@@ -1407,14 +1409,26 @@ async def cb_do_bulk_create(
     if risk_warnings:
         risk_note += "\n\n🟡 <b>Аккаунты с риском:</b>\n" + "\n".join(risk_warnings)
 
-    progress_msg = await callback.message.edit_text(
-        _progress_text("Создание каналов...", 0, total_ops, 0, 0) + risk_note,
+    op_id = await operation_bus.submit(
+        pool, user_id, "bulk_create_channels",
+        {
+            "title": data.get("title", "Channel"),
+            "name_mode": data.get("name_mode", "none"),
+            "channel_count": channel_count,
+            "about": data.get("about", ""),
+            "is_group": data.get("is_group", False),
+            "bulk_pacing": pacing_key,
+            "account_ids": [int(a["id"]) for a in accounts],
+        },
+        total_items=total_ops,
+    )
+    await callback.message.edit_text(
+        f"✅ <b>Создание каналов запущено</b>{risk_note}\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {total_ops} шт. в очереди\n"
+        f"💡 Статус: /ops",
         parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
     )
-    task = asyncio.create_task(
-        _bulk_create_bg(pool, progress_msg, dict(data), list(accounts), user_id)
-    )
-    _treg.register(user_id, "bulk_create", f"Создание каналов ({total_ops} шт.)", task)
 
 
 # ══════════════════════════════════════════════════════════════════════════
