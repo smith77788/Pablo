@@ -2182,12 +2182,12 @@ async def cb_pools_bulk_assign(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     """Show all accounts and let user assign a pool to all of them at once."""
-    await callback.answer()
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
         await callback.answer("Нет аккаунтов.", show_alert=True)
         return
+    await callback.answer()
 
     existing_pools = await db.get_distinct_pools(pool, uid)
 

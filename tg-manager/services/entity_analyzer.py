@@ -624,6 +624,7 @@ async def analyze_channel(
         # Radar + name history for channels
         from database import db as _db
         await _db.record_entity_sighting(pool, entity_id, entity_type)
+        ch_radar = await _db.get_entity_radar_stats(pool, entity_id)
         await _db.record_name_snapshot(pool, entity_id, entity_type, username, title or None)
         ch_name_history = await _db.get_name_history(pool, entity_id)
 
@@ -748,6 +749,9 @@ async def analyze_channel(
             "confidence_score": confidence,
             "first_spotted_in_our_db": footprint,
             "name_history": ch_name_history,
+            "radar_distinct_chats": ch_radar.get("distinct_chats", 0),
+            "radar_total_sightings": ch_radar.get("total_sightings", 0),
+            "radar_first_seen_at": int(ch_radar["first_seen_at"].timestamp()) if ch_radar.get("first_seen_at") else None,
             "wayback_date": int(ch_web_osint["wayback"].timestamp()) if ch_web_osint.get("wayback") else None,
             "recon_payload": recon_payload,
         }

@@ -117,7 +117,7 @@ def _analyze_kb(entity_id: int, entity_type: str, current_page: int, is_followin
     follow_label = "🔕 Отписаться" if is_following else "📌 Следить"
     kb.button(
         text=follow_label,
-        callback_data=RegCb(action="follow_toggle", entity_id=entity_id, entity_type=entity_type),
+        callback_data=RegCb(action="follow_toggle", entity_id=entity_id, entity_type=entity_type, page=current_page),
     )
     kb.button(
         text="📋 Экспорт",
