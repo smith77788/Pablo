@@ -2490,45 +2490,38 @@ async def cb_promote_all(
     if not owner_acc:
         await callback.answer("Аккаунт-администратор не найден.", show_alert=True)
         return
-    await callback.answer("⏳ Промовую всех аккаунтов...")
 
-    try:
-        accounts = await pool.fetch(
-            "SELECT id, phone, first_name, tg_user_id FROM tg_accounts "
-            "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
-            owner_id,
-            acc_id,
-        )
-    except Exception:
-        accounts = []
+    n_others = await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
+        owner_id, acc_id,
+    ) or 0
+    if not n_others:
+        await callback.answer("Нет других аккаунтов для назначения.", show_alert=True)
+        return
 
-    from services import account_manager
+    await callback.answer()
+    from services import operation_bus
 
-    ok_count = 0
-    fail_count = 0
-    for acc in accounts:
-        try:
-            ok = await account_manager.promote_to_admin(
-                owner_acc["session_str"], ch_id, acc["tg_user_id"], _acc=owner_acc
-            )
-            if ok:
-                ok_count += 1
-            else:
-                fail_count += 1
-        except Exception:
-            fail_count += 1
-        await asyncio.sleep(2)
+    op_id = await operation_bus.submit(
+        pool, owner_id, "promote_all_admins",
+        {"owner_acc_id": acc_id, "channel_id": ch_id},
+        total_items=int(n_others),
+    )
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Статус операции", callback_data="ops:list")
     kb.button(
         text="◀️ Назад",
         callback_data=ChanCb(action="manage_admins", acc_id=acc_id, channel_id=ch_id),
     )
+    kb.adjust(1)
     await callback.message.edit_text(
-        f"👑 <b>Промоция завершена</b>\n\n"
-        f"✅ Успешно: <b>{ok_count}</b>\n"
-        f"❌ Ошибки: <b>{fail_count}</b>\n\n"
-        f"<i>Аккаунты должны быть участниками канала перед промоцией.</i>",
+        f"👑 <b>Назначение администраторов поставлено в очередь</b>\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {n_others} аккаунт(ов)\n"
+        f"⏱ Ожидаемое время: ~{n_others * 2} сек.\n\n"
+        f"<i>Аккаунты должны быть участниками канала перед промоцией.</i>\n"
+        "Статус: /ops",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

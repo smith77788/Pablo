@@ -807,6 +807,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_check_accounts_health(pool, bot, op_id, owner_id, params)
             elif op_type == "scan_owned_resources":
                 result = await _exec_scan_owned_resources(pool, bot, op_id, owner_id, params)
+            elif op_type == "promote_all_admins":
+                result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -5263,3 +5265,72 @@ async def _exec_scan_owned_resources(
         "dead": dead_count,
         "summary": summary,
     }
+
+
+async def _exec_promote_all_admins(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Назначить все аккаунты пользователя администраторами указанного канала.
+
+    Использует сессию owner_acc_id как учётную запись с правами admin, которая
+    повышает остальные аккаунты. Аккаунты должны уже быть участниками канала.
+    """
+    from services import account_manager
+    from database import db as _db
+
+    owner_acc_id = int(params.get("owner_acc_id", 0))
+    channel_id = int(params.get("channel_id", 0))
+
+    if not owner_acc_id or not channel_id:
+        return {"status": "failed", "summary": "⚠️ promote_all_admins: не указаны owner_acc_id или channel_id"}
+
+    owner_acc = await _db.get_account_for_telethon(pool, owner_acc_id, owner_id)
+    if not owner_acc:
+        return {"status": "failed", "summary": "⚠️ promote_all_admins: аккаунт-администратор не найден"}
+
+    accounts = await pool.fetch(
+        "SELECT id, phone, first_name, tg_user_id FROM tg_accounts "
+        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
+        owner_id, owner_acc_id,
+    )
+    if not accounts:
+        return {"status": "done", "ok": 0, "fail": 0, "summary": "👑 Нет других аккаунтов для назначения"}
+
+    n = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+
+    ok_count = 0
+    fail_count = 0
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "fail": fail_count,
+                "summary": f"Отменено. Назначено: {ok_count}/{n}",
+            }
+        try:
+            ok = await account_manager.promote_to_admin(
+                owner_acc["session_str"], channel_id, acc["tg_user_id"], _acc=dict(owner_acc)
+            )
+            if ok:
+                ok_count += 1
+            else:
+                fail_count += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("_exec_promote_all_admins op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < n - 1:
+            await asyncio.sleep(2)
+
+    summary = (
+        f"👑 Назначение администраторов канала\n"
+        f"✅ Успешно: {ok_count}/{n}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {"status": "done", "ok": ok_count, "fail": fail_count, "total": n, "summary": summary}

@@ -194,6 +194,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "🔎",
     },
+    "promote_all_admins": {
+        "description": "Назначение всех аккаунтов администраторами канала",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "👑",
+    },
 }
 
 
