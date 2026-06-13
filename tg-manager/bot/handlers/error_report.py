@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 
@@ -104,13 +105,13 @@ async def msg_error_screenshot(
 
         # Notify all admins about the new error report
         user = message.from_user
-        user_label = (
+        user_label = html.escape(
             f"@{user.username}" if user.username else user.first_name or str(user.id)
         )
         admin_notify = (
             f"🐛 <b>Новый отчёт об ошибке #{report_id}</b>\n\n"
             f"От: {user_label} (<code>{user.id}</code>)\n"
-            f"Описание: {description[:300]}"
+            f"Описание: {html.escape(description[:300])}"
         )
         admin_ids_raw = os.getenv("ADMIN_IDS", "")
         admin_ids = [

@@ -980,7 +980,7 @@ def _calc_seo(title: str, desc: str, username: str | None, members: int, ppd: fl
         if tl < 5:
             notes.append("⚠️ Название слишком короткое (менее 5 символов)")
         elif tl > 25:
-            notes.append("⚠️ Название длинное (>25 символов) — может обрезаться в поиске")
+            notes.append("⚠️ Название длинное (более 25 символов) — может обрезаться в поиске")
 
     # Description: 70-160 chars optimal
     dl = len(desc)
@@ -993,7 +993,7 @@ def _calc_seo(title: str, desc: str, username: str | None, members: int, ppd: fl
         notes.append("❌ Нет описания — критично для поиска")
     else:
         score += 5
-        notes.append("⚠️ Описание слишком длинное (>160 символов) — поиск видит только первые 160")
+        notes.append("⚠️ Описание слишком длинное (более 160 символов) — поиск видит только первые 160")
 
     # Username: having it + format
     if username:
@@ -1299,13 +1299,13 @@ def format_stats(data: dict) -> str:
 
         # ER benchmark
         if er >= 5:
-            lines.append("🔥 Отличная вовлечённость (>5%)")
+            lines.append("🔥 Отличная вовлечённость (более 5%)")
         elif er >= 2:
             lines.append("✅ Хорошая вовлечённость (2-5%)")
         elif er >= 0.5:
             lines.append("ℹ️ Средняя вовлечённость (0.5-2%)")
         else:
-            lines.append("⚠️ Низкая вовлечённость (<0.5%)")
+            lines.append("⚠️ Низкая вовлечённость (менее 0.5%)")
 
     return "\n".join(lines)
 
@@ -1443,7 +1443,7 @@ def format_seo(data: dict) -> str:
     if notes:
         lines.append("\n<b>Рекомендации:</b>")
         for n in notes:
-            lines.append(f"  {n}")
+            lines.append(f"  {html.escape(n)}")
     else:
         lines.append("\n✅ SEO-показатели в норме!")
 
