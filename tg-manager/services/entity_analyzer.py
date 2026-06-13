@@ -1,11 +1,44 @@
 """
-Comprehensive Telegram entity analyzer.
+Комплексный анализатор Telegram-сущностей (пользователей, ботов, каналов, групп).
 
-Fetches all available data for users, bots, channels, supergroups, groups
-via Telethon: creation date, stats, content analysis, admins, network links,
-SEO score, engagement metrics. Caches results to DB.
+Архитектура:
+    Модуль состоит из трёх слоёв:
+    1. OSINT-утилиты (_age_str, _num, _pct, _bar, _is_fragment_number,
+       _extract_dc, _get_avatar_metrics, _get_db_footprint, _get_earliest_activity,
+       _confidence_score, _scan_oldest_message_in_dialogs, _wayback_first_seen,
+       _google_snippet_date, _osint_web_date, _map_mtproto_error) — вспомогательные
+       функции для сбора и оценки разведывательных данных.
+    2. Анализаторы сущностей (analyze_channel, analyze_user,
+       analyze_telegram_object) — асинхронные функции, выполняющие запросы
+       через Telethon, агрегирующие метрики и записывающие данные в БД.
+    3. Форматтеры (format_overview, format_stats, format_content, format_network,
+       format_seo, format_admins, format_export) — преобразуют dict с данными
+       в HTML-текст для отправки через Telegram Bot API.
 
-More detailed than Telelog/Funstat.
+Зависимости:
+    - Telethon: MTProto-клиент для Telegram API (get_entity, GetFullChannelRequest,
+      GetFullUserRequest, GetParticipantsRequest, GetHistoryRequest, iter_messages).
+    - asyncpg: пул соединений с PostgreSQL для чтения/записи reg_check_cache,
+      user_activity, seen_entities, entity_radar_stats, entity_name_history.
+    - httpx (опционально): HTTP-клиент для запросов к Wayback Machine и Yandex.
+    - services.resource_selector: выбор Telethon-аккаунта из пула по owner_id.
+    - services.account_manager._make_client: создание Telethon-клиента по session_str.
+    - services.registration_checker: оценка даты регистрации по числовому ID
+      (estimate_by_id) и форматирование дат для русскоязычного вывода.
+    - database.db: запись/чтение radar-статистики, истории имён и событий подписок.
+
+Поддерживает сущности:
+    - Каналы (Channel, entity_type="channel")
+    - Супергруппы (Channel с megagroup=True, entity_type="supergroup")
+    - Пользователи (User, entity_type="user")
+    - Боты (User с bot=True, entity_type="bot")
+    - Группы (Chat, entity_type="group" — частичная поддержка)
+
+Точность определения даты регистрации (убывает):
+    first_message → oldest_group_message → oldest_avatar →
+    wayback_machine → web_snippet → id_interpolation → Fragment NFT
+
+Детальнее и точнее, чем Telelog и Funstat.
 """
 from __future__ import annotations
 

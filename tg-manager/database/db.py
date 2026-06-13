@@ -4929,10 +4929,35 @@ async def record_entity_sighting(
     chat_id: int | None = None,
 ) -> None:
     """
-    Record that we saw entity_id in chat_id (or via direct lookup if chat_id is None).
-    Uses NULL as chat_id key for direct lookups — store 0 internally for PK safety.
-    Upserts seen_entities and refreshes entity_radar_stats.
-    Fire-and-forget safe: all errors are swallowed.
+    Фиксирует факт встречи с Telegram-сущностью в рамках нашей инфраструктуры.
+
+    Вызывается при каждом парсинге участников чата, при анализе пользователя
+    или канала. Обновляет две таблицы: seen_entities (детали каждой встречи)
+    и entity_radar_stats (агрегат для быстрого чтения).
+
+    Параметры:
+        pool        — asyncpg.Pool, пул соединений к базе данных
+        entity_id   — числовой Telegram ID пользователя/канала/группы/бота
+        entity_type — строка: 'user' | 'bot' | 'channel' | 'group' | 'supergroup'
+        chat_id     — ID чата, где встретили сущность; None если прямой lookup
+                      (хранится как 0 внутри для PK-совместимости — chat_id=0
+                      означает «прямой поиск вне чата»)
+
+    Возвращает: None. Все ошибки молча поглощаются — fire-and-forget семантика.
+
+    Побочные эффекты:
+        seen_entities: UPSERT по (entity_id, chat_id), инкрементирует sighting_count,
+            обновляет last_seen_at; при первом встречании устанавливает first_seen_at
+        entity_radar_stats: полный пересчёт агрегатов через SELECT...FROM seen_entities
+            — first_seen_at, last_seen_at, distinct_chats (без учёта chat_id=0),
+            total_sightings; updated_at всегда обновляется до NOW()
+
+    Граничные случаи:
+        — chat_id=None и chat_id=0 обрабатываются одинаково (прямой lookup)
+        — При сетевых ошибках или constraint violation исключение поглощается;
+          вызывающий код не получает никакого сигнала об ошибке
+        — entity_type при конфликте в entity_radar_stats перезаписывается последним
+          переданным значением (EXCLUDED.entity_type)
     """
     chat_key = chat_id if chat_id is not None else 0
     try:
