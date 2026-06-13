@@ -56,6 +56,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "📡",
     },
+    "bot_factory": {
+        "description": "Создание ботов через BotFather",
+        "min_plan": "pro",
+        "max_retries": 1,
+        "icon": "🤖",
+    },
     "global_presence_channel": {
         "description": "Global Presence — каналы",
         "min_plan": "pro",
@@ -109,6 +115,12 @@ OP_REGISTRY: dict[str, dict] = {
         "min_plan": "enterprise",
         "max_retries": 1,
         "icon": "📢",
+    },
+    "seed_presence_pack": {
+        "description": "Посев постов в Presence Pack",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "🌱",
     },
 }
 

@@ -763,6 +763,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_create_channels(
                     pool, bot, op_id, owner_id, params
                 )
+            elif op_type == "bot_factory":
+                result = await _exec_bot_factory(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type in ("global_presence_full_package", "global_presence_package"):
                 result = await _exec_global_presence_channel(
                     pool, bot, op_id, owner_id, params
@@ -777,6 +781,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_dm_campaign(pool, bot, op_id, owner_id, params)
             elif op_type == "network_broadcast":
                 result = await _exec_network_broadcast(pool, bot, op_id, owner_id, params)
+            elif op_type == "seed_presence_pack":
+                result = await _exec_seed_presence_pack(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -3068,6 +3074,193 @@ async def _exec_bulk_create_channels(
         "created": created_count,
         "failed": failed_count,
         "summary": f"Создано каналов: {created_count}, ошибок: {failed_count}",
+    }
+
+
+async def _exec_bot_factory(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Создать ботов через @BotFather FSM с умными задержками.
+
+    Params:
+      acc_id         — int, id аккаунта в tg_accounts
+      count          — int, количество ботов (1-10)
+      name_template  — str, шаблон имени: "My Bot" → "My Bot 1", "My Bot 2"...
+      uname_template — str, шаблон username: "mybot" → "mybot1_bot", "mybot2_bot"...
+    """
+    from services import account_manager, session_simulator
+    import random
+
+    count = max(1, min(int(params.get("count", 1)), 10))
+    name_tpl = (params.get("name_template") or "Bot").strip()
+    uname_tpl = (params.get("uname_template") or "").strip().lstrip("@")
+    acc_id = params.get("acc_id", 0)
+
+    if acc_id:
+        candidates = await resource_selector.select_all_active(
+            pool, owner_id, include_ids=[int(acc_id)], respect_cooldown=False
+        )
+        acc_row = candidates[0] if candidates else None
+        acc = dict(acc_row) if acc_row else None
+    else:
+        acc = await resource_selector.select_account(pool, owner_id, "bot_factory")
+
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для Bot Factory"}
+
+    created_count = 0
+    failed_count = 0
+    created_tokens: list[str] = []
+
+    for i in range(count):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": created_count,
+                "failed": failed_count,
+                "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+            }
+
+        num = i + 1
+        display_name = f"{name_tpl} {num}" if count > 1 else name_tpl
+        username_base = f"{uname_tpl}{num}" if uname_tpl else f"bot{random.randint(10000, 99999)}"
+        if not username_base.endswith("bot"):
+            username_base = username_base + "bot"
+
+        await session_simulator.typing_delay(display_name)
+
+        result = await account_manager.create_bot_via_botfather(
+            acc["session_str"],
+            bot_display_name=display_name,
+            bot_username=username_base,
+            _acc=acc,
+        )
+
+        if result.get("token"):
+            token = result["token"]
+            actual_uname = result.get("username", username_base)
+            created_tokens.append(token)
+
+            # Validate token and get bot_id
+            bot_id = 0
+            try:
+                import aiohttp as _aiohttp
+                async with _aiohttp.ClientSession() as _sess:
+                    async with _sess.get(
+                        f"https://api.telegram.org/bot{token}/getMe",
+                        timeout=_aiohttp.ClientTimeout(total=10),
+                    ) as _resp:
+                        data = await _resp.json()
+                        if data.get("ok"):
+                            bot_id = data["result"]["id"]
+                            actual_uname = data["result"].get("username", actual_uname)
+            except Exception:
+                log_exc_swallow(log, f"_exec_bot_factory: getMe failed for token {token[:20]}...")
+
+            # Save to managed_bots
+            try:
+                await pool.execute(
+                    """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
+                       VALUES($1,$2,$3,$4,$5,TRUE)
+                       ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
+                    owner_id,
+                    token,
+                    bot_id or 0,
+                    actual_uname,
+                    display_name,
+                )
+            except Exception:
+                log_exc_swallow(log, f"_exec_bot_factory: managed_bots upsert failed")
+
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'ok',$4)",
+                op_id,
+                num,
+                display_name,
+                f"@{actual_uname} token={token[:20]}...",
+            )
+            created_count += 1
+            log.info(
+                "_exec_bot_factory op=%d: created @%s (bot_id=%s)",
+                op_id, actual_uname, bot_id,
+            )
+        else:
+            err_msg = result.get("error", "unknown error")[:200]
+            flood_wait = result.get("flood_wait")
+            if flood_wait:
+                wait_secs = int(flood_wait)
+                if wait_secs <= 600:
+                    log.info(
+                        "_exec_bot_factory: FloodWait %ds, sleeping...", wait_secs + 15
+                    )
+                    await asyncio.sleep(wait_secs + 15)
+                    # Retry once after flood wait
+                    result2 = await account_manager.create_bot_via_botfather(
+                        acc["session_str"],
+                        bot_display_name=display_name,
+                        bot_username=username_base,
+                        _acc=acc,
+                    )
+                    if result2.get("token"):
+                        token = result2["token"]
+                        actual_uname = result2.get("username", username_base)
+                        created_tokens.append(token)
+                        try:
+                            await pool.execute(
+                                """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
+                                   VALUES($1,$2,0,$3,$4,TRUE)
+                                   ON CONFLICT(token) DO UPDATE SET username=$3, is_active=TRUE""",
+                                owner_id, token, actual_uname, display_name,
+                            )
+                        except Exception:
+                            pass
+                        created_count += 1
+                        await pool.execute(
+                            "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'ok',$4)",
+                            op_id, num, display_name, f"@{actual_uname} (retry ok)",
+                        )
+                        await pool.execute(
+                            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                        )
+                        await asyncio.sleep(random.uniform(30, 60))
+                        continue
+
+            failed_count += 1
+            await pool.execute(
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id,
+                num,
+                display_name,
+                err_msg,
+            )
+            log.warning(
+                "_exec_bot_factory op=%d: failed to create '%s': %s",
+                op_id, display_name, err_msg,
+            )
+
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+
+        if i < count - 1:
+            # Anti-flood: BotFather rate-limits bot creation aggressively
+            chaos = session_simulator.chaos_factor()
+            tod = session_simulator.time_of_day_factor()
+            if i % 3 == 2:
+                # Longer pause every 3 bots
+                pause = random.uniform(120, 240) * chaos * tod
+            else:
+                pause = random.uniform(45, 90) * chaos * tod
+            await asyncio.sleep(pause)
+
+    return {
+        "status": "done",
+        "ok": created_count,
+        "failed": failed_count,
+        "created_tokens": created_tokens[:10],
+        "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
     }
 
 

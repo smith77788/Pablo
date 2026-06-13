@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb, BotFactCb, EcoPickCb
-from bot.states import BotCloneSettingsFSM, BotTokenImportFSM, BotValidateFSM
+from bot.states import BotCloneSettingsFSM, BotCreateFSM, BotTokenImportFSM, BotValidateFSM
 from database import db
 from services import bot_api
 
@@ -88,22 +88,252 @@ async def cb_factory_menu(callback: CallbackQuery) -> None:
     )
 
 
-# ── 1. Создать бота ───────────────────────────────────────────────────────
+# ── 1. Создать бота через BotFather — FSM wizard ─────────────────────────
 
 
 @router.callback_query(BotFactCb.filter(F.action == "create"))
 async def cb_factory_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    """Step 1: выбор аккаунта для управления BotFather."""
     await callback.answer()
+    from bot.utils.op_helpers import _get_active_accounts, _acc_label
+
+    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    if not accounts:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        await callback.message.edit_text(
+            "⚠️ <b>Нет активных аккаунтов</b>\n\n"
+            "Для создания ботов через BotFather нужен хотя бы один активный "
+            "Telegram-аккаунт.\n\n"
+            "Добавьте аккаунт в разделе 📱 Аккаунты.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    await state.set_state(BotCreateFSM.choosing_account)
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
-    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    for acc in accounts:
+        kb.button(
+            text=f"✅ {_acc_label(acc)}",
+            callback_data=BotFactCb(action="create_acc", bot_id=acc["id"]),
+        )
+    kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        "➕ <b>Создать бота</b>\n\n"
-        "Для добавления нового бота вам понадобится токен от @BotFather.\n\n"
-        "Нажмите кнопку ниже, чтобы перейти к добавлению:",
+        "🤖 <b>Создание ботов через BotFather</b>\n\n"
+        "Шаг 1: Выберите Telegram-аккаунт, который будет писать в @BotFather:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotFactCb.filter(F.action == "create_acc"))
+async def cb_factory_create_acc(
+    callback: CallbackQuery,
+    callback_data: BotFactCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Step 2: аккаунт выбран → спросить количество ботов."""
+    from bot.utils.op_helpers import _acc_label
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT id, phone, first_name, username FROM tg_accounts "
+            "WHERE id=$1 AND owner_id=$2",
+            callback_data.bot_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        acc = None
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    await callback.answer()
+    await state.update_data(acc_id=acc["id"], acc_label=_acc_label(acc))
+    await state.set_state(BotCreateFSM.waiting_count)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+    await callback.message.edit_text(
+        f"🤖 <b>Создание ботов</b>\n\n"
+        f"Аккаунт: <b>{_safe(_acc_label(acc))}</b>\n\n"
+        "Шаг 2: Сколько ботов создать? (1–10):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BotCreateFSM.waiting_count, F.text)
+async def fsm_botcreate_count(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (1 <= int(raw) <= 10):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+        await message.answer("⚠️ Введите число от 1 до 10:", reply_markup=kb.as_markup())
+        return
+    await state.update_data(count=int(raw))
+    await state.set_state(BotCreateFSM.waiting_name_tpl)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+    await message.answer(
+        "📝 <b>Шаблон имени</b>\n\n"
+        "Введите базовое имя бота. При создании нескольких ботов к нему "
+        "будет добавлен номер.\n\n"
+        "Пример: <code>My Assistant</code> → <i>My Assistant 1, My Assistant 2...</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BotCreateFSM.waiting_name_tpl, F.text)
+async def fsm_botcreate_name_tpl(message: Message, state: FSMContext) -> None:
+    name_tpl = (message.text or "").strip()
+    if not name_tpl or len(name_tpl) > 64:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+        await message.answer(
+            "⚠️ Имя от 1 до 64 символов. Попробуйте ещё раз:",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await state.update_data(name_template=name_tpl)
+    await state.set_state(BotCreateFSM.waiting_uname_tpl)
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="⏭ Авто-username", callback_data=BotFactCb(action="create_skip_uname")
+    )
+    kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        "🔤 <b>Шаблон username</b>\n\n"
+        "Введите базовый username (без @, без суффикса <code>bot</code>).\n"
+        "Суффикс <code>bot</code> добавляется автоматически.\n\n"
+        "Пример: <code>myassistant</code> → <i>myassistant1bot, myassistant2bot...</i>\n\n"
+        "Или нажмите «Авто-username» — система сгенерирует уникальные имена сама.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotFactCb.filter(F.action == "create_skip_uname"))
+async def cb_botcreate_skip_uname(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.update_data(uname_template="")
+    await _show_botcreate_confirm(callback, state)
+
+
+@router.message(BotCreateFSM.waiting_uname_tpl, F.text)
+async def fsm_botcreate_uname_tpl(message: Message, state: FSMContext) -> None:
+    uname = (message.text or "").strip().lstrip("@").rstrip("_")
+    if uname and (len(uname) < 3 or len(uname) > 20):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+        await message.answer(
+            "⚠️ Шаблон username от 3 до 20 символов. Попробуйте ещё раз:",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await state.update_data(uname_template=uname)
+    await _show_botcreate_confirm(message, state)
+
+
+async def _show_botcreate_confirm(event, state: FSMContext) -> None:
+    await state.set_state(BotCreateFSM.confirming)
+    data = await state.get_data()
+    count = data.get("count", 1)
+    name_tpl = _safe(data.get("name_template", "Bot"))
+    uname_tpl = data.get("uname_template", "")
+    acc_label = _safe(data.get("acc_label", ""))
+
+    uname_preview = (
+        f"<code>{uname_tpl}1bot</code>, <code>{uname_tpl}2bot</code>..."
+        if uname_tpl
+        else "<i>авто-генерация</i>"
+    )
+    name_preview = (
+        f"<code>{name_tpl} 1</code>, <code>{name_tpl} 2</code>..."
+        if count > 1
+        else f"<code>{name_tpl}</code>"
+    )
+    est_min = round(count * 2.5)
+
+    text = (
+        f"🤖 <b>Создание ботов — подтверждение</b>\n\n"
+        f"Аккаунт: <b>{acc_label}</b>\n"
+        f"Ботов: <b>{count}</b>\n"
+        f"Имена: {name_preview}\n"
+        f"Username: {uname_preview}\n\n"
+        f"⏱ Ориентировочно: ~{est_min} мин\n\n"
+        "Процесс выполняется в фоне. Вы получите уведомление по завершении."
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Создать", callback_data=BotFactCb(action="do_create_bots"))
+    kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
+    kb.adjust(2)
+    markup = kb.as_markup()
+    if hasattr(event, "message"):
+        try:
+            await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+            return
+        except Exception:
+            await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
+    else:
+        await event.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.callback_query(BotFactCb.filter(F.action == "do_create_bots"))
+async def cb_factory_do_create_bots(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Submit bot_factory operation to queue."""
+    await callback.answer("⏳ Ставлю в очередь...")
+    data = await state.get_data()
+    await state.clear()
+
+    acc_id = data.get("acc_id")
+    count = data.get("count", 1)
+    name_tpl = data.get("name_template", "Bot")
+    uname_tpl = data.get("uname_template", "")
+
+    if not acc_id:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        await callback.message.edit_text(
+            "⚠️ Сессия истекла. Начните заново.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool,
+        callback.from_user.id,
+        "bot_factory",
+        {
+            "acc_id": acc_id,
+            "count": count,
+            "name_template": name_tpl,
+            "uname_template": uname_tpl,
+        },
+        total_items=count,
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+    await callback.message.edit_text(
+        f"🤖 <b>Создание ботов поставлено в очередь</b>\n\n"
+        f"Ботов: <b>{count}</b>\n"
+        f"Шаблон имени: <b>{_safe(name_tpl)}</b>\n"
+        f"ID операции: <code>#{op_id}</code>\n\n"
+        f"Боты будут созданы в фоне. Вы получите уведомление по завершении.\n"
+        f"<i>Статус: /ops → 📋 Очередь</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

@@ -297,6 +297,14 @@ class BotValidateFSM(StatesGroup):
     waiting_tokens = State()  # paste tokens to validate
 
 
+class BotCreateFSM(StatesGroup):
+    choosing_account = State()   # pick Telethon account
+    waiting_count = State()      # how many bots to create
+    waiting_name_tpl = State()   # display name template, e.g. "My Bot"
+    waiting_uname_tpl = State()  # username template, e.g. "mybot" (suffix appended)
+    confirming = State()
+
+
 class ChannelFactoryFSM(StatesGroup):
     choosing_account = State()
     waiting_title = State()
