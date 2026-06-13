@@ -214,23 +214,31 @@ def _confidence_score(
     has_avatar: bool,
     has_db_footprint: bool,
     is_fragment: bool,
+    method: str = "id_interpolation",
 ) -> float:
     """
-    Confidence score 0.0–1.0:
-      0.20  base (ID interpolation ±2–3 months)
-    + 0.55  real server timestamp: first message or oldest avatar date
-    + 0.15  DC extracted (entity is reachable)
-    + 0.05  avatar exists (confirms entity has activity)
-    + 0.05  historical DB sighting
-    Fragment numbers: 0.10 (no date signal at all).
+    Confidence score 0.0–1.0 reflecting how well we know the account's age.
+
+    Sources ranked by reliability:
+      first_message   → 0.90+ (exact Telegram server timestamp for channel creation)
+      oldest_avatar   → 0.55+ (real timestamp, but user may have set photo later)
+      id_interpolation → 0.20  (±2-3 months, no external signal)
+      Fragment NFT    → 0.10  (no date signal at all)
+
+    DC, avatar presence, DB sightings add marginal confidence.
     """
     if is_fragment:
         return 0.10
-    score = 0.20
-    if has_exact_date:
-        score += 0.55  # real server timestamp (first_message or oldest_avatar)
+    if method == "first_message":
+        score = 0.75  # high base: real timestamp from Telegram servers
+    elif method == "oldest_avatar":
+        # Avatar date is a real timestamp but NOT necessarily the creation date.
+        # User/bot may have set avatar weeks or months after registration.
+        score = 0.45
+    else:
+        score = 0.20  # ID interpolation only
     if has_dc:
-        score += 0.15
+        score += 0.10
     if has_avatar:
         score += 0.05
     if has_db_footprint:
@@ -486,12 +494,14 @@ async def analyze_channel(
         if exact_date:
             created_at = exact_date
 
+        ch_method = "first_message" if exact_date else id_estimate["method"]
         confidence = _confidence_score(
             has_exact_date=exact_date is not None,
             has_dc=dc_id is not None,
             has_avatar=False,
             has_db_footprint=footprint is not None,
             is_fragment=is_frag,
+            method=ch_method,
         )
         recon_payload: dict[str, Any] = {
             "object_type": entity_type,
@@ -696,6 +706,7 @@ async def analyze_user(
             has_avatar=avatar_met["total_historical_count"] > 0,
             has_db_footprint=footprint is not None,
             is_fragment=is_frag,
+            method=created_method,
         )
         recon_payload: dict[str, Any] = {
             "object_type": entity_type,
@@ -994,19 +1005,21 @@ def format_overview(data: dict) -> str:
         ct = data.get("created_at")
         if ct:
             if method == "first_message":
+                # Канал: первое сообщение = самая точная дата создания
                 lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
                 lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
-                lines.append("🎯 Источник: первое сообщение (точная дата)")
+                lines.append("🎯 Источник: первое сообщение канала")
             elif method == "oldest_avatar":
-                lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
-                lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
-                lines.append("🖼 Источник: дата аватара (реальный timestamp)")
+                # Аватар — это дата УСТАНОВКИ фото, не создания аккаунта.
+                # Аккаунт существует МИНИМУМ с этой даты (верхняя граница возраста).
+                lines.append(f"\n🖼 Существует минимум с: <b>{format_date_ru(ct)}</b>")
+                lines.append(f"⏳ Возраст минимум: <b>{format_age(ct)}</b>")
+                lines.append("🖼 Источник: дата первого аватара")
+                lines.append("<i>⚠️ Аватар мог быть установлен позже регистрации</i>")
             else:
-                # ID interpolation — show approximate with prominent warning
-                lines.append(f"\n⚠️ <b>Точная дата создания недоступна</b>")
-                lines.append(f"📊 Оценка по ID: ~<b>{format_date_ru(ct)}</b> (±2–3 месяца)")
-                if et in ("user", "bot"):
-                    lines.append("🖼 <i>Нет аватара — аватар даёт точный timestamp</i>")
+                # ID interpolation — ни аватара, ни точного источника
+                lines.append(f"\n⚠️ <b>Точная дата регистрации неизвестна</b>")
+                lines.append(f"📊 Оценка по ID: ~<b>{format_date_ru(ct)}</b>  <i>(погрешность ±2–3 мес.)</i>")
                 lines.append(f"⏳ Оценочный возраст: ~{format_age(ct)}")
 
     # Confidence score
@@ -1023,27 +1036,26 @@ def format_overview(data: dict) -> str:
     total_ph = av.get("total_historical_count", 0)
     method = data.get("created_method", "id_interpolation")
     if et in ("user", "bot"):
-        if total_ph > 0 and method == "oldest_avatar":
+        if total_ph > 0:
             lines.append(f"🖼 Фотографий в профиле: <b>{total_ph}</b>")
-        elif total_ph > 0:
-            lines.append(f"🖼 Фото в профиле: <b>{total_ph}</b> (дата не считывается)")
         else:
             lines.append("🖼 <i>Аватар не установлен</i>")
 
-    # Earliest activity in our DB (upper bound on creation date)
+    # Earliest activity in our DB (real upper bound on account creation)
     ea = data.get("earliest_activity_in_db")
     if ea is not None:
         from services.registration_checker import format_date_ru
         if not hasattr(ea, "strftime"):
             ea = datetime.fromtimestamp(ea, tz=timezone.utc)
-        lines.append(f"🗄 Первое сообщение боту: <b>{format_date_ru(ea)}</b> (аккаунт существовал до этого)")
+        lines.append(f"🗄 Первое обращение к нашим ботам: <b>{format_date_ru(ea)}</b>")
+        lines.append("<i>(аккаунт точно существовал на эту дату)</i>")
 
-    # DB footprint
+    # DB footprint from reg_check_cache
     footprint = data.get("first_spotted_in_our_db")
     if footprint and not ea:
         ft = datetime.fromtimestamp(footprint, tz=timezone.utc)
         from services.registration_checker import format_date_ru
-        lines.append(f"🗄 Первое обнаружение в БД: <b>{format_date_ru(ft)}</b>")
+        lines.append(f"🗄 Первая проверка в системе: <b>{format_date_ru(ft)}</b>")
 
     if et in ("channel", "supergroup"):
         m = data.get("members", 0)
