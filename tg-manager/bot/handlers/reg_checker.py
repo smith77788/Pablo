@@ -597,10 +597,11 @@ async def _handle_text_entity(
         pass
 
     if bot_entity_id is not None and bot_entity_type is not None:
-        # Got ID from Bot API — show ID-based estimation with note
+        # Got ID from Bot API — pass username so _show_result can use Bot API for metadata
         await _show_result(
             message, pool, state,
             bot_entity_id, bot_entity_type, bot_name, username_str,
+            auto_resolve_peer=username_str,
         )
         return
 
@@ -705,6 +706,39 @@ async def _handle_batch(
     )
 
 
+async def _bot_api_channel_info(bot, entity_id: int, peer) -> dict | None:
+    """Базовые метаданные канала/группы через Bot API — не требует Telethon."""
+    try:
+        target: str | int
+        if isinstance(peer, str):
+            p = peer.strip()
+            target = p if p.startswith("@") else f"@{p.lstrip('@')}"
+        else:
+            target = entity_id
+        chat = await bot.get_chat(target)
+        member_count: int | None = None
+        try:
+            member_count = await bot.get_chat_member_count(chat.id)
+        except Exception:
+            pass
+        ct = getattr(chat, "type", "") or ""
+        etype = {"channel": "channel", "supergroup": "supergroup", "group": "group"}.get(ct, "channel")
+        return {
+            "entity_id": chat.id,
+            "entity_type": etype,
+            "name": chat.title or "",
+            "username": getattr(chat, "username", None),
+            "about": getattr(chat, "description", "") or "",
+            "participants_count": member_count,
+            "verified": getattr(chat, "is_verified", False) or False,
+            "scam": getattr(chat, "is_scam", False) or False,
+            "fake": getattr(chat, "is_fake", False) or False,
+            "_via_bot_api": True,
+        }
+    except Exception:
+        return None
+
+
 async def _show_result(
     message: Message,
     pool: asyncpg.Pool,
@@ -716,8 +750,9 @@ async def _show_result(
     auto_resolve_peer=None,
 ) -> None:
     """
-    Двухфазный показ для каналов/групп:
-    фаза 1 — ID-оценка сразу; фаза 2 — Telethon точные данные → редактирование.
+    Двухфазный показ:
+    фаза 1 — ID-оценка сразу;
+    фаза 2 — Telethon (если есть аккаунты) или Bot API (для публичных) → обновление.
     """
     await state.clear()
 
@@ -729,27 +764,30 @@ async def _show_result(
 
     if is_channel:
         text_loading = rc.format_result(estimate, name, username)
-        text_loading += "\n\n⏳ <i>Получаю точную дату и метаданные...</i>"
+        text_loading += "\n\n⏳ <i>Запрашиваю метаданные...</i>"
         sent = await message.answer(text_loading, parse_mode="HTML")
 
         peer = auto_resolve_peer or rc.canonical_peer_id(entity_id)
         full_info = await rc.get_entity_full_info(pool, message.from_user.id, peer)
+
+        if not full_info:
+            # Bot API fallback: title, описание, подписчики для публичных каналов
+            full_info = await _bot_api_channel_info(message.bot, entity_id, username or peer)
 
         if full_info:
             merged = {**estimate, **full_info}
             final_name = name or full_info.get("name")
             final_username = username or full_info.get("username")
             text = rc.format_result(merged, final_name, final_username)
+            if full_info.get("_via_bot_api"):
+                text += "\n\n<i>📊 Оценка по ID · для точной даты нажмите «📡 Получить точную дату»</i>"
             kb = _result_kb(entity_id, entity_type)
             await rc.cache_result(
                 pool, message.from_user.id, merged, final_name, final_username
             )
         else:
             text = rc.format_result(estimate, name, username)
-            text += (
-                "\n\n⚠️ <i>Метаданные недоступны — нет аккаунтов в пуле или "
-                "канал приватный. Оценка только по ID.</i>"
-            )
+            text += "\n\n<i>📊 Оценка по ID · приватный канал или данные недоступны</i>"
             kb = _result_kb_retry_exact(entity_id, entity_type)
             await rc.cache_result(pool, message.from_user.id, estimate, name, username)
 
