@@ -4973,3 +4973,76 @@ async def get_entity_radar_stats(
     except Exception:
         pass
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Username / display-name history tracking
+# ---------------------------------------------------------------------------
+
+async def record_name_snapshot(
+    pool: asyncpg.Pool,
+    entity_id: int,
+    entity_type: str,
+    username: str | None,
+    display_name: str | None,
+) -> bool:
+    """
+    Check if username or display_name changed since last observation.
+    If yes — insert a new record into entity_name_history and update entity_last_known.
+    Returns True if a change was detected and recorded.
+    Fire-and-forget safe: swallows all errors.
+    """
+    try:
+        async with pool.acquire() as conn:
+            last = await conn.fetchrow(
+                "SELECT username, display_name FROM entity_last_known WHERE entity_id=$1",
+                entity_id,
+            )
+            changed = (
+                last is None
+                or last["username"] != username
+                or last["display_name"] != display_name
+            )
+            if changed:
+                await conn.execute(
+                    """INSERT INTO entity_name_history (entity_id, entity_type, username, display_name, seen_at)
+                       VALUES ($1, $2, $3, $4, NOW())""",
+                    entity_id, entity_type, username, display_name,
+                )
+            # Always refresh last_seen_at
+            await conn.execute(
+                """INSERT INTO entity_last_known
+                       (entity_id, entity_type, username, display_name, first_seen_at, last_seen_at)
+                   VALUES ($1, $2, $3, $4, NOW(), NOW())
+                   ON CONFLICT (entity_id) DO UPDATE
+                       SET entity_type   = EXCLUDED.entity_type,
+                           username      = EXCLUDED.username,
+                           display_name  = EXCLUDED.display_name,
+                           last_seen_at  = NOW()""",
+                entity_id, entity_type, username, display_name,
+            )
+            return changed
+    except Exception:
+        return False
+
+
+async def get_name_history(
+    pool: asyncpg.Pool,
+    entity_id: int,
+    limit: int = 15,
+) -> list[asyncpg.Record]:
+    """
+    Return chronological list of (username, display_name, seen_at) for entity.
+    Oldest first. Includes all distinct changes.
+    """
+    try:
+        return await pool.fetch(
+            """SELECT username, display_name, seen_at
+               FROM entity_name_history
+               WHERE entity_id=$1
+               ORDER BY seen_at ASC
+               LIMIT $2""",
+            entity_id, limit,
+        )
+    except Exception:
+        return []

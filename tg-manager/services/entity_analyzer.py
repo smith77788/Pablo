@@ -621,6 +621,17 @@ async def analyze_channel(
         is_frag = _is_fragment_number(entity_id)
         footprint = await _get_db_footprint(pool, entity_id)
 
+        # Radar + name history for channels
+        from database import db as _db
+        await _db.record_entity_sighting(pool, entity_id, entity_type)
+        await _db.record_name_snapshot(pool, entity_id, entity_type, username, title or None)
+        ch_name_history = await _db.get_name_history(pool, entity_id)
+
+        # Web OSINT: Wayback Machine for channel username (run in parallel with history scan)
+        ch_web_osint: dict[str, Any] = {"wayback": None, "web_snippet": None, "best": None, "source": "none"}
+        if username and not is_frag:
+            ch_web_osint = await _osint_web_date(username)
+
         # Try deep channel creation date via GetHistoryRequest (first message)
         exact_date: datetime | None = None
         try:
@@ -736,6 +747,8 @@ async def analyze_channel(
             "is_fragment_number": is_frag,
             "confidence_score": confidence,
             "first_spotted_in_our_db": footprint,
+            "name_history": ch_name_history,
+            "wayback_date": int(ch_web_osint["wayback"].timestamp()) if ch_web_osint.get("wayback") else None,
             "recon_payload": recon_payload,
         }
 
@@ -859,6 +872,10 @@ async def analyze_user(
         await _db.record_entity_sighting(pool, entity_id, entity_type)
         radar = await _db.get_entity_radar_stats(pool, entity_id)
 
+        # Username/name history: detect and record changes
+        await _db.record_name_snapshot(pool, entity_id, entity_type, username, name or None)
+        name_history = await _db.get_name_history(pool, entity_id)
+
         # Scan shared groups for oldest message from this user — best date signal
         oldest_msg_date, groups_scanned = (None, 0)
         if not is_frag and not u.bot:
@@ -972,6 +989,7 @@ async def analyze_user(
             "radar_distinct_chats": radar.get("distinct_chats", 0),
             "radar_total_sightings": radar.get("total_sightings", 0),
             "radar_first_seen_at": radar.get("first_seen_at"),
+            "name_history": name_history,
             "recon_payload": recon_payload,
         }
 
@@ -1307,6 +1325,66 @@ def format_overview(data: dict) -> str:
         ft = datetime.fromtimestamp(footprint, tz=timezone.utc)
         from services.registration_checker import format_date_ru
         lines.append(f"🗄 Первая проверка в системе: <b>{format_date_ru(ft)}</b>")
+
+    # Username / display name history
+    if et in ("user", "bot"):
+        nh = data.get("name_history") or []
+        if len(nh) > 1:
+            from services.registration_checker import format_date_ru
+            lines.append("\n📋 <b>История имён и юзернеймов:</b>")
+            prev_u, prev_n = None, None
+            for i, rec in enumerate(nh):
+                rec_u = rec["username"]
+                rec_n = rec["display_name"]
+                rec_t = rec["seen_at"]
+                if not hasattr(rec_t, "strftime"):
+                    rec_t = datetime.fromtimestamp(rec_t, tz=timezone.utc)
+                date_s = format_date_ru(rec_t)
+                if i == 0:
+                    lines.append(f"  {date_s} — первое наблюдение")
+                else:
+                    parts = []
+                    if rec_u != prev_u:
+                        old_u = f"@{prev_u}" if prev_u else "без username"
+                        new_u = f"@{rec_u}" if rec_u else "без username"
+                        parts.append(f"username: {html.escape(old_u)} → {html.escape(new_u)}")
+                    if rec_n != prev_n:
+                        old_n = html.escape(prev_n or "—")
+                        new_n = html.escape(rec_n or "—")
+                        parts.append(f"имя: {old_n} → {new_n}")
+                    if parts:
+                        lines.append(f"  {date_s} — {'; '.join(parts)}")
+                prev_u, prev_n = rec_u, rec_n
+
+    # Name history for channels/supergroups
+    if et in ("channel", "supergroup"):
+        ch_nh = data.get("name_history") or []
+        if len(ch_nh) > 1:
+            from services.registration_checker import format_date_ru
+            lines.append("\n📋 <b>История названий и юзернеймов:</b>")
+            prev_u, prev_n = None, None
+            for i, rec in enumerate(ch_nh):
+                rec_u = rec["username"]
+                rec_n = rec["display_name"]
+                rec_t = rec["seen_at"]
+                if not hasattr(rec_t, "strftime"):
+                    rec_t = datetime.fromtimestamp(rec_t, tz=timezone.utc)
+                date_s = format_date_ru(rec_t)
+                if i == 0:
+                    lines.append(f"  {date_s} — первое наблюдение")
+                else:
+                    parts = []
+                    if rec_u != prev_u:
+                        old_u = f"@{prev_u}" if prev_u else "без username"
+                        new_u = f"@{rec_u}" if rec_u else "без username"
+                        parts.append(f"username: {html.escape(old_u)} → {html.escape(new_u)}")
+                    if rec_n != prev_n:
+                        old_n = html.escape(prev_n or "—")
+                        new_n = html.escape(rec_n or "—")
+                        parts.append(f"название: {old_n} → {new_n}")
+                    if parts:
+                        lines.append(f"  {date_s} — {'; '.join(parts)}")
+                prev_u, prev_n = rec_u, rec_n
 
     if et in ("channel", "supergroup"):
         m = data.get("members", 0)
