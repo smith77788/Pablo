@@ -509,19 +509,104 @@ async def _send_or_edit(msg_or_cb, text: str, kb, edit: bool = True) -> None:
 
 
 @router.message(Command("ops"))
-async def cmd_ops(message: Message) -> None:
-    from bot.callbacks import BmCb
+async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
+    """Quick access to operation reports and queue."""
+    from bot.callbacks import BmCb, MassOpCb, InfraCb
+
+    uid = message.from_user.id
+    # Fetch quick stats from operation_queue
+    try:
+        stats = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) FILTER (WHERE status='running')  AS running,
+                   COUNT(*) FILTER (WHERE status='pending')  AS pending,
+                   COUNT(*) FILTER (WHERE status='done'
+                       AND finished_at > NOW() - INTERVAL '24h') AS done_24h,
+                   COUNT(*) FILTER (WHERE status='failed')   AS failed
+               FROM operation_queue WHERE owner_id=$1""",
+            uid,
+        )
+    except Exception:
+        stats = None
+
+    running = int(stats["running"] or 0) if stats else 0
+    pending = int(stats["pending"] or 0) if stats else 0
+    done_24h = int(stats["done_24h"] or 0) if stats else 0
+    failed = int(stats["failed"] or 0) if stats else 0
+
+    status_line = (
+        f"🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
+        f"✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок: <b>{failed}</b>"
+    )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
+    kb.button(text="📊 Отчёты по операциям", callback_data=BmCb(action="op_reports"))
+    kb.button(text="📡 Аналитика инфраструктуры", callback_data=InfraCb(action="menu"))
+    kb.button(text="🏠 BotMother OS", callback_data=BmCb(action="main"))
+    kb.adjust(1)
     await message.answer(
-        "⚡ <b>Операции с аккаунтами</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
-        "<code>/menu → 📱 Активы → 📡 Каналы</code>",
+        "⚡ <b>Операции и отчёты</b>\n\n"
+        + status_line + "\n\n"
+        "Выберите раздел:",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
-    return
+
+
+@router.message(Command("report"))
+async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
+    """Quick access to operation reports — last 5 completed operations with results."""
+    from bot.callbacks import BmCb, MassOpCb, InfraCb
+    import html as _html
+
+    uid = message.from_user.id
+    try:
+        ops = await pool.fetch(
+            """SELECT id, op_type, status, done_items, total_items,
+                      finished_at, result, error_msg
+               FROM operation_queue WHERE owner_id=$1
+               ORDER BY created_at DESC LIMIT 5""",
+            uid,
+        )
+    except Exception:
+        ops = []
+
+    _icons = {"pending": "⏳", "running": "🔄", "done": "✅", "failed": "❌", "cancelled": "🚫"}
+    lines = ["📊 <b>Отчёт по операциям</b>\n"]
+    if not ops:
+        lines.append("<i>Операций ещё не было.</i>")
+    else:
+        for op in ops:
+            icon = _icons.get(op["status"], "❓")
+            otype = _html.escape(op["op_type"])
+            done = op["done_items"] or 0
+            total = op["total_items"] or 0
+            lines.append(f"{icon} <b>{otype}</b> #{op['id']}  [{done}/{total}]")
+            # Show result summary if present
+            if op["result"]:
+                try:
+                    import json as _json
+                    res = op["result"] if isinstance(op["result"], dict) else _json.loads(op["result"])
+                    summary = res.get("summary", "")
+                    if summary:
+                        lines.append(f"   📊 {_html.escape(summary[:100])}")
+                except Exception:
+                    pass
+            # Show error if failed
+            if op["status"] == "failed" and op["error_msg"]:
+                lines.append(f"   ⚠️ <i>{_html.escape(op['error_msg'][:80])}</i>")
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Полный список операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
+    kb.button(text="📊 Отчёты (расширенные)", callback_data=BmCb(action="op_reports"))
+    kb.button(text="📡 Аналитика", callback_data=InfraCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 # ── Main menu callback ─────────────────────────────────────────────────────

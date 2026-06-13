@@ -211,7 +211,9 @@ async def cb_help(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"/subscription — подписка и оплата\n"
         f"/ranking — трекер позиций в поиске\n"
         f"/accounts — мои Telegram-аккаунты\n"
-        f"/ops — операции с аккаунтами\n"
+        f"/ops — операции и отчёты\n"
+        f"/report — последние отчёты по операциям\n"
+        f"/stats — статистика инфраструктуры\n"
         f"/cancel — отменить текущее действие\n\n"
         f"<b>🤖 Разделы бота (открываются из меню бота):</b>\n"
         f"• Аудитория — список пользователей\n"
@@ -249,7 +251,9 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
         f"/subscription — подписка и оплата\n"
         f"/ranking — трекер позиций в поиске\n"
         f"/accounts — мои Telegram-аккаунты\n"
-        f"/ops — операции с аккаунтами\n"
+        f"/ops — операции и отчёты\n"
+        f"/report — последние отчёты по операциям\n"
+        f"/stats — статистика инфраструктуры\n"
         f"/cancel — отменить текущее действие\n\n"
         f"<b>🤖 Разделы бота:</b>\n"
         f"Добавьте бота → выберите из списка → откроется меню:\n"
@@ -264,3 +268,115 @@ async def cmd_help(message: Message, pool: asyncpg.Pool) -> None:
     await message.answer(
         text, parse_mode="HTML", reply_markup=main_menu(is_admin=admin)
     )
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
+    """Show a real-data analytics summary: accounts, operations, queue, errors."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import InfraCb, MassOpCb, BmCb
+
+    uid = message.from_user.id
+
+    # Accounts
+    try:
+        acc_total = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
+        ) or 0
+    except Exception:
+        acc_total = 0
+
+    try:
+        acc_banned = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND acc_status IN ('banned','spamblock','deactivated')", uid
+        ) or 0
+    except Exception:
+        acc_banned = 0
+
+    try:
+        acc_cooldown = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND cooldown_until > NOW()", uid
+        ) or 0
+    except Exception:
+        acc_cooldown = 0
+
+    # Operations stats
+    try:
+        op_stats = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) FILTER (WHERE status='running')  AS running,
+                   COUNT(*) FILTER (WHERE status='pending')  AS pending,
+                   COUNT(*) FILTER (WHERE status='done'
+                       AND finished_at > NOW() - INTERVAL '24h') AS done_24h,
+                   COUNT(*) FILTER (WHERE status='failed'
+                       AND created_at > NOW() - INTERVAL '24h')  AS failed_24h,
+                   COUNT(*) AS total
+               FROM operation_queue WHERE owner_id=$1""",
+            uid,
+        )
+    except Exception:
+        op_stats = None
+
+    # Recent errors from operation_audit
+    try:
+        errors_24h = await pool.fetchval(
+            """SELECT COUNT(*) FROM operation_audit
+               WHERE owner_id=$1 AND result != 'success'
+               AND occurred_at > NOW() - INTERVAL '24h'""",
+            uid,
+        ) or 0
+    except Exception:
+        errors_24h = 0
+
+    # Flood events 24h
+    try:
+        floods_24h = await pool.fetchval(
+            """SELECT COUNT(*) FROM account_flood_log fl
+               JOIN tg_accounts a ON a.id=fl.account_id
+               WHERE a.owner_id=$1 AND fl.created_at > NOW() - INTERVAL '24h'""",
+            uid,
+        ) or 0
+    except Exception:
+        floods_24h = 0
+
+    running = int(op_stats["running"] or 0) if op_stats else 0
+    pending = int(op_stats["pending"] or 0) if op_stats else 0
+    done_24h = int(op_stats["done_24h"] or 0) if op_stats else 0
+    failed_24h = int(op_stats["failed_24h"] or 0) if op_stats else 0
+    total_ops = int(op_stats["total"] or 0) if op_stats else 0
+
+    # Pressure score
+    try:
+        from services import infra_pressure
+        pressure = await infra_pressure.compute_pressure(pool, uid)
+        p_emoji = pressure.get("level_emoji", "🟢")
+        p_score = pressure.get("score", 0)
+        p_label = pressure.get("level_label", "Норма")
+        pressure_line = f"{p_emoji} Давление: <b>{p_score}/100</b> — {p_label}"
+    except Exception:
+        pressure_line = ""
+
+    text = (
+        "📊 <b>Статистика BotMother OS</b>\n\n"
+        f"📱 <b>Аккаунты:</b>\n"
+        f"   Активных: <b>{acc_total}</b>"
+        + (f"  |  Забанено/спам: <b>{acc_banned}</b>" if acc_banned else "")
+        + (f"  |  Кулдаун: <b>{acc_cooldown}</b>" if acc_cooldown else "")
+        + "\n\n"
+        f"⚙️ <b>Операции:</b>\n"
+        f"   🔄 Активных: <b>{running}</b>  ⏳ Ожидают: <b>{pending}</b>\n"
+        f"   ✅ Завершено (24ч): <b>{done_24h}</b>  ❌ Ошибок (24ч): <b>{failed_24h}</b>\n"
+        f"   Всего в очереди: <b>{total_ops}</b>\n\n"
+        f"🛡 <b>Здоровье:</b>\n"
+        f"   ⚡ Flood-событий (24ч): <b>{floods_24h}</b>\n"
+        f"   📋 Ошибок операций (24ч): <b>{errors_24h}</b>\n"
+        + (f"   {pressure_line}\n" if pressure_line else "")
+    )
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📡 Аналитика инфраструктуры", callback_data=InfraCb(action="menu"))
+    kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
+    kb.button(text="📊 Отчёты по операциям", callback_data=BmCb(action="op_reports"))
+    kb.adjust(1)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())

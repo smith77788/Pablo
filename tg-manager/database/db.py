@@ -444,6 +444,23 @@ async def delete_template(pool: asyncpg.Pool, template_id: int, owner_id: int) -
     return result == "DELETE 1"
 
 
+async def update_template(
+    pool: asyncpg.Pool, template_id: int, owner_id: int, name: str, text: str
+) -> bool:
+    """Update existing template name and text. Returns True on success."""
+    try:
+        result = await pool.execute(
+            "UPDATE message_templates SET name=$1, text=$2 WHERE id=$3 AND owner_id=$4",
+            name,
+            text,
+            template_id,
+            owner_id,
+        )
+        return result == "UPDATE 1"
+    except asyncpg.UniqueViolationError:
+        return False
+
+
 # ── Scheduled broadcasts ──────────────────────────────────────────────────
 
 

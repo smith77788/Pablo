@@ -65,6 +65,11 @@ class AddTemplate(StatesGroup):
     waiting_text = State()
 
 
+class EditTemplate(StatesGroup):
+    waiting_name = State()
+    waiting_text = State()
+
+
 class ScheduleBroadcast(StatesGroup):
     waiting_message = State()
     waiting_datetime = State()

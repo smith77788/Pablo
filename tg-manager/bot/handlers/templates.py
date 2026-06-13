@@ -16,7 +16,7 @@ from bot.keyboards import (
     back_to_bot,
     subscription_locked_markup,
 )
-from bot.states import AddTemplate, Broadcast, AiTemplateGenFSM
+from bot.states import AddTemplate, Broadcast, AiTemplateGenFSM, EditTemplate
 from bot.utils.template_validator import (
     validate_message_template,
     list_placeholders,
