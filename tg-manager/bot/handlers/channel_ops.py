@@ -1696,30 +1696,29 @@ async def fsm_bpchans_text(
     data = await state.get_data()
     selected_ids = data.get("bpchans_selected", [])
     acc_id = data.get("bpchans_acc_id")
-    channels = data.get("bpchans_channels", [])
     await state.clear()
 
-    acc = await db.get_account_for_telethon(pool, acc_id, message.from_user.id)
-    if not acc:
-        await message.answer("❌ Аккаунт не найден.")
+    if not acc_id or not selected_ids:
+        await message.answer("❌ Данные операции устарели. Начните заново.")
         return
 
-    ch_map = {ch["id"]: ch for ch in channels}
     total = len(selected_ids)
-    progress_msg = await message.answer(
-        _progress_text("Публикация постов...", 0, total, 0, 0),
-        parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _bulk_post_chans_bg(
-            pool, acc_id, progress_msg, acc, selected_ids, ch_map, text, total
-        )
-    )
-    _treg.register(
+    op_id = await operation_bus.submit(
+        pool,
         message.from_user.id,
         "bulk_post_chans",
-        f"Публикация в {total} каналов",
-        task,
+        {
+            "acc_id": acc_id,
+            "channel_ids": selected_ids,
+            "text": text,
+        },
+        total_items=total,
+    )
+    await message.answer(
+        f"📤 <b>Публикация в {total} каналов поставлена в очередь</b>\n\n"
+        f"ID операции: <code>{op_id}</code>\n"
+        "Прогресс: /ops",
+        parse_mode="HTML",
     )
 
 
@@ -6405,33 +6404,29 @@ async def cb_bulk_chan_exec(
 
     total = len(channels)
     op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
-    progress_msg = await callback.message.edit_text(
-        f"⏳ <b>{op_label} каналам (bulk)</b>\n\n"
-        f"Каналов: <b>{total}</b> | Аккаунтов: <b>{len(accounts)}</b>\n\n"
-        f"⏳ 0 / {total}",
-        parse_mode="HTML",
-    )
 
-    acc_by_id = {acc["id"]: dict(acc) for acc in accounts}
-    task = asyncio.create_task(
-        _bulk_chan_exec_bg(
-            pool,
-            callback.from_user.id,
-            progress_msg,
-            list(channels),
-            acc_by_id,
-            op,
-            base_uname,
-            value,
-            op_label,
-            total,
-        )
-    )
-    _treg.register(
+    op_id = await operation_bus.submit(
+        pool,
         callback.from_user.id,
         "bulk_chan_exec",
-        f"{op_label} {total} каналов",
-        task,
+        {
+            "channel_acc_pairs": [
+                {"channel_id": ch["channel_id"], "acc_id": ch["acc_id"], "title": ch["title"]}
+                for ch in channels
+            ],
+            "op": op,
+            "base_uname": base_uname,
+            "value": value,
+        },
+        total_items=total,
+    )
+    await callback.message.edit_text(
+        f"✅ <b>{op_label} каналам (bulk) поставлено в очередь</b>\n\n"
+        f"Каналов: <b>{total}</b> | Аккаунтов: <b>{len(accounts)}</b>\n\n"
+        f"ID операции: <code>{op_id}</code>\n"
+        "Прогресс: /ops",
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
     )
 
 

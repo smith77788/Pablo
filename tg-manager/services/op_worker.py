@@ -797,6 +797,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_post_to_channel(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_update_profile":
                 result = await _exec_bulk_update_profile(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_chan_exec":
+                result = await _exec_bulk_chan_exec(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_post_chans":
+                result = await _exec_bulk_post_chans(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -4590,4 +4594,229 @@ async def _exec_bulk_update_profile(
         "ok": len(ok_list),
         "failed": len(err_list),
         "summary": final_text[:500],
+    }
+
+
+async def _exec_bulk_chan_exec(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Bulk set username or about for channels across multiple accounts."""
+    import html as _html
+    from services import account_manager
+
+    channel_acc_pairs: list[dict] = params.get("channel_acc_pairs") or []
+    op: str = params.get("op", "")
+    base_uname: str = params.get("base_uname", "")
+    value: str = params.get("value", "")
+
+    if not channel_acc_pairs or op not in ("chan_uname", "chan_about"):
+        return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}
+
+    # Collect unique acc_ids and fetch sessions from DB (never pass session_str in params)
+    acc_ids = list({int(p["acc_id"]) for p in channel_acc_pairs})
+    rows = await pool.fetch(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, acc_ids,
+    )
+    if not rows:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    acc_map = {int(r["id"]): dict(r) for r in rows}
+
+    total = len(channel_acc_pairs)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    await mark_accounts_in_use(acc_ids)
+    ok_list: list[str] = []
+    err_list: list[str] = []
+
+    try:
+        for idx, pair in enumerate(channel_acc_pairs):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": len(ok_list),
+                    "fail": len(err_list),
+                    "summary": f"Отменено. Изменено: {len(ok_list)}",
+                }
+
+            ch_id = pair["channel_id"]
+            acc_id = int(pair["acc_id"])
+            chan_title = _html.escape(str(pair.get("title") or ch_id))
+            acc = acc_map.get(acc_id)
+            if not acc:
+                err_list.append(f"❌ {chan_title}: аккаунт не найден")
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
+
+            try:
+                if op == "chan_uname":
+                    from services.username_engine import (
+                        unique_channel_username,
+                        generate_username_variants,
+                        _short_suffix,
+                    )
+
+                    initial = unique_channel_username(base_uname, idx)
+                    variants_to_try = [initial]
+                    for v in generate_username_variants(f"{base_uname}{_short_suffix(idx, 2)}"):
+                        if v not in variants_to_try:
+                            variants_to_try.append(v)
+
+                    assigned = None
+                    last_err = ""
+                    for variant in variants_to_try[:12]:
+                        err = await account_manager.set_channel_username(
+                            acc["session_str"], ch_id, variant, _acc=acc
+                        )
+                        if not err:
+                            assigned = variant
+                            break
+                        last_err = err
+                        if not any(
+                            k in err.lower()
+                            for k in ("taken", "occupied", "username_occupied", "занят", "already")
+                        ):
+                            break
+                        await asyncio.sleep(2.0)
+
+                    if assigned:
+                        ok_list.append(f"✅ {chan_title}: @{assigned}")
+                        try:
+                            await pool.execute(
+                                "UPDATE managed_channels SET username=$1 WHERE owner_id=$2 AND channel_id=$3",
+                                assigned, owner_id, ch_id,
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        err_list.append(f"❌ {chan_title}: {_html.escape(last_err[:60])}")
+
+                elif op == "chan_about":
+                    ok = await account_manager.edit_channel_about(
+                        acc["session_str"], ch_id, value, _acc=acc
+                    )
+                    if ok:
+                        ok_list.append(f"✅ {chan_title}")
+                    else:
+                        err_list.append(f"❌ {chan_title}: ошибка обновления")
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, "_exec_bulk_chan_exec pair=%s: %s", ch_id, exc)
+                err_list.append(f"❌ {chan_title}: исключение")
+
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            await asyncio.sleep(2)
+    finally:
+        await release_accounts(acc_ids)
+
+    op_label = "🔤 Username" if op == "chan_uname" else "📄 Описание"
+    summary_lines = [
+        f"{op_label} — завершено: ✅ {len(ok_list)} ❌ {len(err_list)} из {total}"
+    ] + (ok_list + err_list)[:40]
+    summary = "\n".join(summary_lines)
+
+    return {
+        "status": "done",
+        "ok": len(ok_list),
+        "fail": len(err_list),
+        "summary": summary[:500],
+    }
+
+
+async def _exec_bulk_post_chans(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Post text to multiple channels belonging to one account."""
+    from services import account_manager
+    from database import db as _db
+    from bot.utils.op_helpers import backoff
+
+    acc_id = int(params.get("acc_id", 0))
+    channel_ids: list[int] = [int(x) for x in (params.get("channel_ids") or [])]
+    text: str = params.get("text", "")
+
+    if not acc_id or not channel_ids or not text:
+        return {"status": "failed", "reason": "Не указан аккаунт, каналы или текст"}
+
+    row = await pool.fetchrow(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
+        acc_id, owner_id,
+    )
+    if not row:
+        return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
+    acc = dict(row)
+
+    # Fetch channels with access_hash from DB (never pass session_str in params)
+    ch_rows = await pool.fetch(
+        "SELECT id, channel_id, access_hash FROM managed_channels "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+        owner_id, channel_ids,
+    )
+    channels = [dict(r) for r in ch_rows]
+    if not channels:
+        return {"status": "failed", "reason": "Каналы не найдены в БД"}
+
+    total = len(channels)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count = 0
+    err_count = 0
+    attempt = 0
+    last_result: dict = {}
+
+    for idx, ch in enumerate(channels):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "fail": err_count,
+                "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+            }
+
+        ch_id = ch["channel_id"]
+        access_hash = ch.get("access_hash", 0) or 0
+        try:
+            last_result = await account_manager.post_to_channel(
+                acc["session_str"], ch_id, text, access_hash=access_hash, _acc=acc
+            )
+            if last_result.get("banned"):
+                await _db.deactivate_account(pool, acc_id, "banned detected in bulk_post_chans")
+                err_count += 1
+            elif "error" in last_result:
+                err_count += 1
+            else:
+                ok_count += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_exc_swallow(log, "_exec_bulk_post_chans ch=%s: %s", ch_id, exc)
+            err_count += 1
+            last_result = {}
+
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+
+        if attempt >= 4:
+            attempt = 0
+        else:
+            attempt += 1
+        flood = last_result.get("flood_wait", 0) or 0
+        await asyncio.sleep(max(backoff(attempt, base=2.0, cap=30.0), flood))
+
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "fail": err_count,
+        "summary": f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}",
     }

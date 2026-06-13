@@ -164,6 +164,18 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "✏️",
     },
+    "bulk_chan_exec": {
+        "description": "Bulk username/about для каналов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "✏️",
+    },
+    "bulk_post_chans": {
+        "description": "Публикация поста в каналы аккаунта",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "📤",
+    },
 }
 
 
