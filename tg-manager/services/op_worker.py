@@ -857,19 +857,31 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 )
             summary = _op_summary
             from aiogram.utils.keyboard import InlineKeyboardBuilder
-            from bot.callbacks import BmCb
+            from bot.callbacks import BmCb, StrikeCb
 
             kb = InlineKeyboardBuilder()
             kb.button(
                 text="📋 Детали операции",
                 callback_data=BmCb(action="op_detail", op_id=op_id),
             )
+            # For strike operations add a direct shortcut to strike history
+            if op_type == "strike":
+                kb.button(
+                    text="📜 История Strike",
+                    callback_data=StrikeCb(action="history"),
+                )
+            kb.adjust(1)
+            # Strike summaries can be very long (one block per target × many accounts).
+            # Telegram messages cap at 4096 chars; truncate to leave room for the header.
+            _notify_header = f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n"
+            _max_summary = 4096 - len(_notify_header) - 50
+            _summary_notify = summary[:_max_summary] + ("…" if len(summary) > _max_summary else "")
             await db.notify_if_enabled(
                 pool,
                 bot,
                 owner_id,
                 "op_complete",
-                f"✅ <b>Операция #{op_id}</b> завершена за {duration_seconds}с\n{summary}",
+                _notify_header + _summary_notify,
                 reply_markup=kb.as_markup(),
             )
             # Фиксируем успех в Infrastructure Memory для всех аккаунтов из params
