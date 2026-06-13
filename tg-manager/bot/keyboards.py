@@ -546,6 +546,12 @@ def template_actions(template_id: int, bot_id: int) -> InlineKeyboardMarkup:
             ),
         )
     kb.button(
+        text="✏️ Редактировать",
+        callback_data=TemplateCb(
+            action="edit", template_id=template_id, bot_id=bot_id
+        ),
+    )
+    kb.button(
         text="🗑 Удалить шаблон",
         callback_data=TemplateCb(
             action="delete", template_id=template_id, bot_id=bot_id

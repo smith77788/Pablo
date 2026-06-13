@@ -578,6 +578,150 @@ async def cb_template_ai_save(
     )
 
 
+@router.callback_query(TemplateCb.filter(F.action == "edit"))
+async def cb_template_edit(
+    callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
+    if not tpl:
+        await callback.answer("❌ Шаблон не найден", show_alert=True)
+        return
+    await state.set_state(EditTemplate.waiting_name)
+    await state.update_data(
+        template_id=callback_data.template_id,
+        bot_id=callback_data.bot_id,
+        old_name=tpl["name"],
+        old_text=tpl["text"],
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏩ Оставить текущее", callback_data=TemplateCb(action="edit_keep_name", template_id=callback_data.template_id, bot_id=callback_data.bot_id))
+    kb.button(text="❌ Отмена", callback_data=TemplateCb(action="view", template_id=callback_data.template_id, bot_id=callback_data.bot_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"✏️ <b>Редактирование шаблона «{_html.escape(tpl['name'])}»</b>\n\n"
+        "Введите новое название (или нажмите «Оставить текущее»):",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(TemplateCb.filter(F.action == "edit_keep_name"))
+async def cb_template_edit_keep_name(
+    callback: CallbackQuery, callback_data: TemplateCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    await state.set_state(EditTemplate.waiting_text)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏩ Оставить текущий текст", callback_data=TemplateCb(action="edit_keep_text", template_id=callback_data.template_id, bot_id=callback_data.bot_id))
+    kb.button(text="❌ Отмена", callback_data=TemplateCb(action="view", template_id=callback_data.template_id, bot_id=callback_data.bot_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"✏️ Название оставлено: <b>{_html.escape(data.get('old_name', ''))}</b>\n\n"
+        "Введите новый текст шаблона:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(TemplateCb.filter(F.action == "edit_keep_text"))
+async def cb_template_edit_keep_text(
+    callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    await state.clear()
+    ok = await db.update_template(
+        pool,
+        data["template_id"],
+        callback.from_user.id,
+        data.get("new_name") or data["old_name"],
+        data["old_text"],
+    )
+    if ok:
+        await callback.message.edit_text(
+            f"✅ Шаблон обновлён.",
+            parse_mode="HTML",
+            reply_markup=template_actions(data["template_id"], data.get("bot_id", 0)),
+        )
+    else:
+        await callback.answer("❌ Не удалось обновить шаблон", show_alert=True)
+
+
+@router.message(EditTemplate.waiting_name, F.text)
+async def msg_edit_template_name(message: Message, state: FSMContext) -> None:
+    name = (message.text or "").strip()
+    if not name or len(name) > 64:
+        await message.answer("❌ Название от 1 до 64 символов:")
+        return
+    await state.update_data(new_name=name)
+    await state.set_state(EditTemplate.waiting_text)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏩ Оставить текущий текст", callback_data="tpl_edit_keep_text_fsm")
+    kb.adjust(1)
+    data = await state.get_data()
+    await message.answer(
+        f"✅ Новое название: <b>{_html.escape(name)}</b>\n\n"
+        "Введите новый текст шаблона или нажмите «Оставить текущий текст»:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(lambda c: c.data == "tpl_edit_keep_text_fsm")
+async def cb_edit_keep_text_fsm(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    await state.clear()
+    ok = await db.update_template(
+        pool,
+        data["template_id"],
+        callback.from_user.id,
+        data.get("new_name") or data["old_name"],
+        data["old_text"],
+    )
+    if ok:
+        await callback.message.edit_text(
+            "✅ Шаблон обновлён.",
+            parse_mode="HTML",
+            reply_markup=template_actions(data["template_id"], data.get("bot_id", 0)),
+        )
+    else:
+        await callback.answer("❌ Не удалось обновить шаблон", show_alert=True)
+
+
+@router.message(EditTemplate.waiting_text, F.text)
+async def msg_edit_template_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("❌ Текст не может быть пустым:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    ok = await db.update_template(
+        pool,
+        data["template_id"],
+        message.from_user.id,
+        data.get("new_name") or data["old_name"],
+        text,
+    )
+    if ok:
+        await message.answer(
+            "✅ Шаблон обновлён.",
+            parse_mode="HTML",
+            reply_markup=template_actions(data["template_id"], data.get("bot_id", 0)),
+        )
+    else:
+        await message.answer("❌ Шаблон с таким именем уже существует.")
+        await state.set_state(EditTemplate.waiting_name)
+        await state.update_data(**data)
+
+
 @router.message(AiTemplateGenFSM.waiting_name, F.text)
 async def msg_ai_template_name(
     message: Message, state: FSMContext, pool: asyncpg.Pool
