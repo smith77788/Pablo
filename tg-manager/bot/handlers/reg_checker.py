@@ -907,7 +907,7 @@ async def _get_or_fetch_analysis(
             "admin_list": [],
             "seo_score": 0,
             "seo_notes": [
-                "\u26a0\ufe0f \u0414\u0430\u043d\u043d\u044b\u0435 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b \u2014 \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442 \u0432 \u043f\u0443\u043b \u0434\u043b\u044f \u043f\u043e\u043b\u043d\u043e\u0433\u043e \u0430\u043d\u0430\u043b\u0438\u0437\u0430"
+                "⚠️ Данные недоступны — добавьте аккаунт в пул для полного анализа"
             ],
             "posts_analyzed": 0,
             "bio": "",
@@ -917,7 +917,7 @@ async def _get_or_fetch_analysis(
             "is_mutual": False,
             "common_groups": 0,
             "photos_count": 0,
-            "status": "\u043d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043d",
+            "status": "неизвестен",
             "bot_info": {},
             "_partial": True,
         }
