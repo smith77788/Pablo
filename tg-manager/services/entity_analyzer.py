@@ -1313,11 +1313,15 @@ def format_overview(data: dict) -> str:
     # Infrastructure-as-Radar: how many of our sessions have seen this entity
     radar_chats = data.get("radar_distinct_chats", 0)
     radar_sightings = data.get("radar_total_sightings", 0)
-    if et in ("user", "bot") and radar_chats is not None:
-        if radar_chats > 0:
-            lines.append(f"📡 Замечен в <b>{radar_chats}</b> наших чатах · всего проверок: {radar_sightings}")
-        else:
-            lines.append("📡 <i>Первый раз встречаем этого пользователя</i>")
+    if radar_chats is not None:
+        if et in ("user", "bot"):
+            if radar_chats > 0:
+                lines.append(f"📡 Замечен в <b>{radar_chats}</b> наших чатах · всего проверок: {radar_sightings}")
+            else:
+                lines.append("📡 <i>Первый раз встречаем этого пользователя</i>")
+        elif et in ("channel", "supergroup"):
+            if radar_sightings > 0:
+                lines.append(f"📡 Просматривался нами: <b>{radar_sightings}</b> раз")
 
     # DB footprint from reg_check_cache
     footprint = data.get("first_spotted_in_our_db")
