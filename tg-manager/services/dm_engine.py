@@ -210,6 +210,23 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             for r in rows
             if r["user_id"] not in sent_ids
         ]
+    elif target_type == "parsed_audience":
+        # target_id = parse_run_id (0 = all runs for this owner)
+        conditions = "owner_id=$1 AND tg_user_id > 0"
+        params_list: list = [campaign["owner_id"]]
+        if target_id:
+            conditions += " AND parse_run_id=$2"
+            params_list.append(target_id)
+        rows = await pool.fetch(
+            f"SELECT DISTINCT ON (tg_user_id) tg_user_id, username "
+            f"FROM parsed_audiences WHERE {conditions}",
+            *params_list,
+        )
+        return [
+            {"user_id": r["tg_user_id"], "username": r["username"] or None}
+            for r in rows
+            if r["tg_user_id"] not in sent_ids
+        ]
     return []
 
 

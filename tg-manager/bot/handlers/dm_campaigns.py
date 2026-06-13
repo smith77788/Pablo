@@ -222,6 +222,7 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
         callback_data=DmCb(action="target_cohort_bot"),
     )
     kb.button(text="👥 CRM-контакты", callback_data=DmCb(action="target_crm"))
+    kb.button(text="🔍 Спарсенная аудитория", callback_data=DmCb(action="target_parsed"))
     kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
     kb.adjust(1)
     await message.answer(
@@ -230,7 +231,8 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
         "  • 🔥 Hot — активны за последние 24ч\n"
         "  • 🟡 Warm — активны 1-7 дней назад\n"
         "  • 🧊 Cold — активны 7-30 дней назад\n"
-        "  • 💀 Lost — неактивны более 30 дней",
+        "  • 💀 Lost — неактивны более 30 дней\n\n"
+        "🔍 <b>Спарсенная аудитория</b> — пользователи из Парсера аудитории",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -431,6 +433,86 @@ async def cb_dm_target_crm(
     await _show_dm_preview(callback, state, pool)
 
 
+# ── Create — Step 3d: Parsed Audience ────────────────────────────────────────
+
+
+@router.callback_query(DmCb.filter(F.action == "target_parsed"))
+async def cb_dm_target_parsed(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Show list of parser runs so user can pick one (or use all)."""
+    await callback.answer()
+
+    try:
+        runs = await pool.fetch(
+            """SELECT id, source_ref, parse_type, total_found, started_at
+               FROM parser_runs
+               WHERE owner_id=$1 AND status='done' AND total_found > 0
+               ORDER BY started_at DESC LIMIT 10""",
+            callback.from_user.id,
+        )
+    except Exception:
+        runs = []
+
+    try:
+        total_all = (
+            await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1",
+                callback.from_user.id,
+            )
+            or 0
+        )
+    except Exception:
+        total_all = 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=f"🗂 Вся аудитория ({total_all:,} чел.)",
+        callback_data=DmCb(action="target_parsed_pick", campaign_id=0),
+    )
+    for r in runs:
+        started = r["started_at"].strftime("%d.%m %H:%M") if r["started_at"] else "—"
+        label = f"{r['source_ref'][:18]} [{r['parse_type']}] {r['total_found']:,} чел. {started}"
+        kb.button(
+            text=label,
+            callback_data=DmCb(action="target_parsed_pick", campaign_id=r["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+    kb.adjust(1)
+
+    if not runs and total_all == 0:
+        await _edit(
+            callback,
+            "⚠️ <b>Нет спарсенной аудитории</b>\n\n"
+            "Сначала запустите парсер: Аудитория → Парсер аудитории",
+            kb.as_markup(),
+        )
+        return
+
+    await _edit(
+        callback,
+        "🔍 <b>Спарсенная аудитория</b>\n\n"
+        "Выберите конкретный запуск парсера или всю аудиторию:",
+        kb.as_markup(),
+    )
+
+
+@router.callback_query(DmCb.filter(F.action == "target_parsed_pick"))
+async def cb_dm_target_parsed_pick(
+    callback: CallbackQuery,
+    callback_data: DmCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Store parsed_audience target (run_id=0 means all) and go to preview."""
+    await callback.answer()
+    run_id = callback_data.campaign_id  # 0 = all, >0 = specific run
+    await state.update_data(dm_target_type="parsed_audience", dm_target_id=run_id)
+    await _show_dm_preview(callback, state, pool)
+
+
 # ── Preview & Confirm ─────────────────────────────────────────────────────────
 
 
@@ -506,6 +588,38 @@ async def _show_dm_preview(
         cohort_label = _COHORT_LABELS.get(cohort_type, cohort_type)
         recipients_count = int(cnt)
         audience_str = f"{cohort_label} когорта @{bot_label}: <b>{cnt}</b>"
+    elif target_type == "parsed_audience":
+        try:
+            if target_id:
+                cnt = (
+                    await pool.fetchval(
+                        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2",
+                        callback.from_user.id,
+                        target_id,
+                    )
+                    or 0
+                )
+                run_row = await pool.fetchrow(
+                    "SELECT source_ref, parse_type FROM parser_runs WHERE id=$1",
+                    target_id,
+                )
+                src = (run_row["source_ref"] if run_row else str(target_id))
+                parse_label = f"{html.escape(src[:30])}"
+            else:
+                cnt = (
+                    await pool.fetchval(
+                        "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1",
+                        callback.from_user.id,
+                    )
+                    or 0
+                )
+                parse_label = "вся аудитория"
+        except Exception:
+            log_exc_swallow(log, "Ошибка подсчёта спарсенной аудитории для DM-кампании")
+            cnt = 0
+            parse_label = "спарсенная"
+        recipients_count = int(cnt)
+        audience_str = f"🔍 Спарсенная ({parse_label}): <b>{cnt}</b>"
     else:
         try:
             count_row = await pool.fetchrow(
@@ -609,6 +723,24 @@ async def cb_dm_launch_or_draft(
                     )
                     or 0
                 )
+            elif target_type == "parsed_audience":
+                if target_id:
+                    audience_cnt = (
+                        await pool.fetchval(
+                            "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1 AND parse_run_id=$2",
+                            callback.from_user.id,
+                            target_id,
+                        )
+                        or 0
+                    )
+                else:
+                    audience_cnt = (
+                        await pool.fetchval(
+                            "SELECT COUNT(DISTINCT tg_user_id) FROM parsed_audiences WHERE owner_id=$1",
+                            callback.from_user.id,
+                        )
+                        or 0
+                    )
             if audience_cnt == 0:
                 _empty_kb = InlineKeyboardBuilder()
                 _empty_kb.button(
