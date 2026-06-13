@@ -8,7 +8,7 @@ import logging
 import random
 import re
 from typing import Any, Optional
-from config import TG_API_ID, TG_API_HASH, TG_PROXY
+from config import TG_API_ID, TG_API_HASH, TG_PROXY, CF_RELAY_URL
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -423,7 +423,6 @@ def _make_client(session_string: str = "", device: dict | None = None):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
     from telethon.network.connection.tcpobfuscated import ConnectionTcpObfuscated
-    from config import CF_RELAY_URL
 
     d = _normalize_device_profile(device)
 
@@ -433,8 +432,8 @@ def _make_client(session_string: str = "", device: dict | None = None):
     # Выбор транспорта: если нет аккаунт-bound прокси И задан CF relay → используем relay
     has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
     if not has_bound_proxy and CF_RELAY_URL:
-        from services.cf_relay import make_cf_relay_connection
-        connection_cls = make_cf_relay_connection(CF_RELAY_URL)
+        from services.cf_relay import make_cf_relay_connection as _make_relay
+        connection_cls = _make_relay(CF_RELAY_URL)
         effective_proxy = None  # relay сам маршрутизирует
     else:
         connection_cls = ConnectionTcpObfuscated
