@@ -176,6 +176,18 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📤",
     },
+    "channel_import_all": {
+        "description": "Импорт каналов со всех аккаунтов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📡",
+    },
+    "check_accounts_health": {
+        "description": "Проверка статуса всех аккаунтов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🔍",
+    },
 }
 
 

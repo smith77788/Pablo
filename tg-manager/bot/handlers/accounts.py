@@ -2004,106 +2004,23 @@ async def cb_check_all_accounts(
         )
         return
 
-    total = len(accounts)
-    await callback.message.edit_text(
-        f"🔍 <b>Проверка аккаунтов...</b>\n\n"
-        f"Проверяю {total} аккаунт(ов). Это займёт ~{total * 5} сек.",
-        parse_mode="HTML",
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool,
+        uid,
+        "check_accounts_health",
+        {"account_ids": [int(a["id"]) for a in accounts], "check_spambot": True},
+        total_items=len(accounts),
     )
-
-    results: list[tuple[str, str, str]] = []
-    for idx, acc in enumerate(accounts):
-        name_raw = (
-            acc.get("first_name")
-            or acc.get("username")
-            or acc.get("phone")
-            or f"ID {acc['id']}"
-        )
-        name = escape(str(name_raw))
-        acc_dict = None
-        result: dict = {"auth_error": False}
-        try:
-            acc_dict = await db.get_account_for_telethon(pool, acc["id"], uid)
-            session_str = (
-                (acc_dict.get("session_str") if acc_dict else None)
-                or acc.get("session_str")
-                or ""
-            )
-            result = await check_account_status_full(
-                session_str,
-                _acc=dict(acc_dict) if acc_dict else None,
-                check_spambot=True,
-            )
-            status = result["status"]
-            reason = result.get("reason", "")
-            if result.get("auth_error"):
-                await pool.execute(
-                    "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"]
-                )
-        except Exception as exc:
-            status = "active"
-            reason = f"Ошибка: {str(exc)[:80]}"
-
-        has_session = bool(
-            (acc_dict.get("session_str") if acc_dict else None)
-            or acc.get("session_str")
-            or ""
-        )
-        if should_persist_account_status(
-            status,
-            auth_error=bool(result.get("auth_error", False)),
-            has_session=has_session,
-        ):
-            await db.update_acc_status(pool, acc["id"], status, reason)
-        results.append((name, status, reason))
-
-        # Update progress every 3 accounts
-        if (idx + 1) % 3 == 0 or (idx + 1) == total:
-            try:
-                await callback.message.edit_text(
-                    f"🔍 <b>Проверка...</b> {idx + 1}/{total}",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Ошибка обновления прогресса проверки аккаунтов")
-
-    # Build summary
-    status_counts: dict[str, int] = {}
-    for _, st, _ in results:
-        status_counts[st] = status_counts.get(st, 0) + 1
-
-    expired_count = status_counts.get("session_expired", 0)
-    lines = ["✅ <b>Проверка завершена!</b>\n"]
-    for st, cnt in sorted(status_counts.items(), key=lambda x: x[0]):
-        emoji = _STATUS_EMOJI.get(st, "•")
-        label = {
-            "session_expired": "🔑 сессия истекла",
-            "active": "активен",
-            "spamblock": "спам-блок",
-            "banned": "заблокирован",
-            "cooldown": "FloodWait",
-        }.get(st, st)
-        lines.append(f"{emoji} {label}: <b>{cnt}</b>")
-
-    if expired_count:
-        lines.append(f"\n⚠️ <b>{expired_count} аккаунт(ов) с истёкшей сессией</b>")
-        lines.append("Удалите и добавьте их заново через «Добавить аккаунт».")
-
-    lines.append("\n<b>Детали:</b>")
-    for name, st, reason in results:
-        emoji = _STATUS_EMOJI.get(st, "•")
-        reason_short = escape(reason[:60]) if reason else ""
-        lines.append(f"{emoji} {name} — {reason_short}")
-
     kb = InlineKeyboardBuilder()
-    kb.button(
-        text="⚠️ Показать проблемные", callback_data=AccCb(action="menu", chat_id=2)
-    )
-    kb.button(text="◀️ Все аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="📋 Статус проверки", callback_data=AccCb(action="menu"))
     kb.adjust(1)
-
     await callback.message.edit_text(
-        "\n".join(lines),
+        f"🔍 <b>Проверка аккаунтов поставлена в очередь</b>\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"⏱ Ожидаемое время: ~{len(accounts) * 5} сек.\n\n"
+        "Уведомление придёт по окончании. Статус: /ops",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

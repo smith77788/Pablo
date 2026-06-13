@@ -801,6 +801,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_chan_exec(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_post_chans":
                 result = await _exec_bulk_post_chans(pool, bot, op_id, owner_id, params)
+            elif op_type == "channel_import_all":
+                result = await _exec_channel_import_all(pool, bot, op_id, owner_id, params)
+            elif op_type == "check_accounts_health":
+                result = await _exec_check_accounts_health(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -4959,4 +4963,170 @@ async def _exec_bulk_post_chans(
         "ok": ok_count,
         "fail": err_count,
         "summary": f"📤 Публикация в {total} каналов: ✅ {ok_count} ❌ {err_count}",
+    }
+
+
+async def _exec_channel_import_all(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Импорт каналов со всех (или указанных) аккаунтов в managed_channels."""
+    from services import account_manager, session_simulator
+    from database.db import upsert_managed_channels
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    _CHANNEL_TYPES = ("channel", "megagroup", "supergroup", "gigagroup")
+
+    if account_ids:
+        rows = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "FROM tg_accounts "
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+            owner_id, account_ids,
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            owner_id,
+        )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Нет активных аккаунтов с сессией"}
+
+    n = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+
+    total_imported = 0
+    errors: list[str] = []
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "imported": total_imported,
+                "summary": f"Отменено. Импортировано: {total_imported} каналов из {idx}/{n} аккаунтов",
+            }
+        try:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+            channels = [d for d in dialogs if d.get("type") in _CHANNEL_TYPES]
+            if channels:
+                await upsert_managed_channels(pool, owner_id, acc["id"], channels)
+                total_imported += len(channels)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("_exec_channel_import_all acc=%s: %s", acc.get("id"), exc)
+            acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
+            errors.append(f"• {acc_label}: {str(exc)[:60]}")
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < n - 1:
+            await session_simulator.short_pause(1.5, 3.0)
+
+    err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
+    return {
+        "status": "done",
+        "imported": total_imported,
+        "accounts": n,
+        "summary": f"📡 Импорт каналов: {total_imported} из {n} аккаунтов{err_hint}",
+    }
+
+
+async def _exec_check_accounts_health(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Проверить статус всех (или указанных) аккаунтов через Telethon."""
+    from services.account_manager import (
+        check_account_status_full,
+        should_persist_account_status,
+    )
+    from database import db as _db
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    check_spambot = bool(params.get("check_spambot", True))
+
+    if account_ids:
+        rows = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, username "
+            "FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
+            owner_id, account_ids,
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, username "
+            "FROM tg_accounts WHERE owner_id=$1",
+            owner_id,
+        )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Нет аккаунтов для проверки"}
+
+    n = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+
+    status_counts: dict[str, int] = {}
+    deactivated = 0
+    errors = 0
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "checked": idx,
+                "summary": f"Отменено. Проверено: {idx}/{n}",
+            }
+
+        session_str = acc.get("session_str") or ""
+        result: dict = {"status": "no_session", "reason": ""}
+        try:
+            result = await check_account_status_full(
+                session_str, _acc=acc, check_spambot=check_spambot
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("_exec_check_accounts_health acc=%s: %s", acc.get("id"), exc)
+            result = {"status": "active", "reason": f"Ошибка: {str(exc)[:60]}"}
+            errors += 1
+
+        status = result.get("status", "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+        if result.get("auth_error"):
+            try:
+                await pool.execute("UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc["id"])
+                deactivated += 1
+            except Exception:
+                pass
+        elif should_persist_account_status(
+            status,
+            auth_error=bool(result.get("auth_error", False)),
+            has_session=bool(session_str),
+        ):
+            try:
+                await _db.update_acc_status(pool, acc["id"], status, result.get("reason", ""))
+            except Exception:
+                pass
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+    _STATUS_LABELS = {
+        "active": "✅ активен",
+        "spamblock": "🚫 спам-блок",
+        "banned": "❌ заблокирован",
+        "cooldown": "⏳ FloodWait",
+        "session_expired": "🔑 сессия истекла",
+        "no_session": "⚪ нет сессии",
+    }
+    parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
+    deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
+    summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note
+
+    return {
+        "status": "done",
+        "checked": n,
+        "deactivated": deactivated,
+        "status_counts": status_counts,
+        "summary": summary,
     }

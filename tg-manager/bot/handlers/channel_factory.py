@@ -36,7 +36,6 @@ from bot.utils.op_helpers import (
     _get_active_accounts,
     backoff,
 )
-from services import session_simulator
 from services import task_registry as _treg
 
 
@@ -261,60 +260,27 @@ async def cb_chanf_import_all_accs(callback: CallbackQuery, pool: asyncpg.Pool) 
     if not accounts:
         await callback.answer("Нет активных аккаунтов.", show_alert=True)
         return
-    await callback.answer("⏳ Загружаю каналы со всех аккаунтов...")
+    await callback.answer()
 
-    from services import account_manager
-    from database.db import upsert_managed_channels
+    from services import operation_bus
 
-    total_imported = 0
-    errors = []
-    progress_msg = await callback.message.edit_text(
-        f"⏳ Обработка аккаунтов: 0/{len(accounts)}...",
-        parse_mode="HTML",
+    op_id = await operation_bus.submit(
+        pool,
+        callback.from_user.id,
+        "channel_import_all",
+        {"account_ids": [int(a["id"]) for a in accounts]},
+        total_items=len(accounts),
     )
-
-    for idx, acc in enumerate(accounts):
-        try:
-            dialogs = (
-                await account_manager.get_dialogs(
-                    acc["session_str"], limit=200, _acc=acc
-                )
-                or []
-            )
-            channels = [
-                d
-                for d in dialogs
-                if d.get("type") in ("channel", "megagroup", "supergroup", "gigagroup")
-            ]
-            if channels:
-                await upsert_managed_channels(
-                    pool, callback.from_user.id, acc["id"], channels
-                )
-                total_imported += len(channels)
-            await progress_msg.edit_text(
-                f"⏳ Обработка аккаунтов: {idx + 1}/{len(accounts)}...\n"
-                f"Найдено каналов: {total_imported}",
-                parse_mode="HTML",
-            )
-            if idx < len(accounts) - 1:
-                await session_simulator.short_pause(2.0, 5.0)
-        except Exception as e:
-            log.warning("import_all_accs acc=%s error: %s", acc.get("id"), e)
-            errors.append(f"• {_acc_label(acc)}: {str(e)[:50]}")
-
-    text = f"✅ <b>Импорт завершён</b>\n\nПодключено каналов: <b>{total_imported}</b>"
-    if errors:
-        text += f"\n\n⚠️ Ошибки ({len(errors)}):\n" + "\n".join(errors[:5])
-    text += "\n\nТеперь вы можете использовать эти каналы для публикации и операций."
-
     kb = InlineKeyboardBuilder()
-    kb.button(
-        text="📤 Открыть публикацию",
-        callback_data=ChanFactCb(action="mass_pub_redirect"),
-    )
-    kb.button(text="◀️ В меню каналов", callback_data=ChanFactCb(action="menu"))
+    kb.button(text="📡 В меню каналов", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
-    await progress_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        f"✅ <b>Импорт каналов поставлен в очередь</b>\n\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        "Результат и прогресс: /ops",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "mass_pub_redirect"))
