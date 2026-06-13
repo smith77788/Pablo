@@ -3710,27 +3710,27 @@ async def fsm_botfather_username(
         await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
         return
 
+    from services import operation_bus
+
     total = len(accounts) * bot_count
-    msg = await message.answer(
-        _progress_text("Создание ботов...", 0, total, 0, 0),
-        parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _botfather_create_bg(
-            pool,
-            message.from_user.id,
-            msg,
-            list(accounts),
-            base_username,
-            data.get("bot_name", ""),
-            total,
-        )
-    )
-    _treg.register(
+    op_id = await operation_bus.submit(
+        pool,
         message.from_user.id,
-        "botfather_create",
-        f"Создание {total} ботов через BotFather",
-        task,
+        "bot_factory",
+        {
+            "account_ids": [int(a["id"]) for a in accounts],
+            "bot_count": bot_count,
+            "bot_name": data.get("bot_name", "Bot"),
+            "base_username": base_username,
+        },
+        total_items=total,
+    )
+    await message.answer(
+        f"✅ Создание ботов поставлено в очередь\n"
+        f"📋 Операция #{op_id} • {total} бот(ов) через {len(accounts)} аккаунт(ов)\n\n"
+        "Прогресс и результаты: /ops",
+        parse_mode="HTML",
+        reply_markup=_back_kb().as_markup(),
     )
 
 
@@ -5533,123 +5533,30 @@ async def fsm_join_invite_combined(
     from services import account_manager
 
     if is_bulk:
-        try:
-            accounts = await pool.fetch(
-                "SELECT a.id, a.session_str, a.first_name, a.phone, "
-                "a.device_model, a.system_version, a.app_version, p.proxy_url "
-                "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
-                "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
-                message.from_user.id,
-                selected_ids,
-            )
-        except Exception:
-            accounts = []
-        if not accounts:
+        from services import operation_bus
+
+        count = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts "
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND session_str IS NOT NULL",
+            message.from_user.id,
+            selected_ids,
+        )
+        if not count:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return
-        from database import db as _db
-
-        total = len(accounts)
-        msg = await message.answer(
-            _progress_text("Вступаю в канал...", 0, total, 0, 0), parse_mode="HTML"
+        op_id = await operation_bus.submit(
+            pool,
+            message.from_user.id,
+            "bulk_join",
+            {"links": [invite], "account_ids": [int(i) for i in selected_ids], "delay_mode": "smart"},
+            total_items=int(count),
         )
-        ok_list, err_list = [], []
-        active_accounts = list(accounts)
-        attempt = 0
-        from services.op_worker import write_op_audit as _op_audit
-
-        # Round-robin: distribute join attempts across accounts
-        for idx, acc in enumerate(active_accounts):
-            label = html.escape(acc["first_name"] or acc["phone"])
-            result = await account_manager.join_channel(
-                acc["session_str"], invite, _acc=dict(acc)
-            )
-            if result.get("banned"):
-                await _db.deactivate_account(
-                    pool, acc["id"], "banned detected in bulk op"
-                )
-                err_list.append(f"❌ {label}: забанен")
-                await _op_audit(
-                    pool,
-                    message.from_user.id,
-                    "join",
-                    "error",
-                    target=invite,
-                    account_id=acc["id"],
-                    error_msg="banned_in_channel",
-                )
-            elif result.get("flood_wait"):
-                err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                await _op_audit(
-                    pool,
-                    message.from_user.id,
-                    "join",
-                    "flood_wait",
-                    target=invite,
-                    account_id=acc["id"],
-                    flood_wait_s=result.get("flood_wait"),
-                )
-            elif "error" in result:
-                err_raw = result["error"]
-                err_e = err_raw.lower()
-                if "userbannedinchannels" in err_e or "banned in channel" in err_e:
-                    err_list.append(f"🚫 {label}: заблокирован в канале")
-                elif "channelprivate" in err_e or "channel_private" in err_e:
-                    err_list.append(
-                        f"🔒 {label}: закрытый канал (нужна ссылка-приглашение)"
-                    )
-                elif "floodwait" in err_e or "flood_wait" in err_e:
-                    err_list.append(f"⏳ {label}: FloodWait — пауза Telegram")
-                elif "usernotmutualcontact" in err_e:
-                    err_list.append(f"❌ {label}: доступ только для контактов")
-                elif "channelstoomuchchat" in err_e or "too much" in err_e:
-                    err_list.append(f"❌ {label}: превышен лимит каналов")
-                elif "invitehash" in err_e or "invalid" in err_e and "hash" in err_e:
-                    err_list.append(f"❌ {label}: недействительная ссылка-приглашение")
-                else:
-                    err_list.append(f"❌ {label}: {html.escape(err_raw[:60])}")
-                await _op_audit(
-                    pool,
-                    message.from_user.id,
-                    "join",
-                    "error",
-                    target=invite,
-                    account_id=acc["id"],
-                    error_msg=err_raw[:200],
-                )
-            else:
-                ok_list.append(f"✅ {label}: вступил")
-                await _op_audit(
-                    pool,
-                    message.from_user.id,
-                    "join",
-                    "success",
-                    target=invite,
-                    account_id=acc["id"],
-                )
-            try:
-                await msg.edit_text(
-                    _progress_text(
-                        "Вступаю в канал...",
-                        idx + 1,
-                        total,
-                        len(ok_list),
-                        len(err_list),
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log_exc_swallow(log, "Сбой обновления прогресса вступления в канал")
-            # Exponential backoff; reset every 5 iterations
-            if attempt >= 4:
-                attempt = 0
-            else:
-                attempt += 1
-            flood = result.get("flood_wait", 0)
-            await asyncio.sleep(max(backoff(attempt), flood))
-        lines = [f"🔗 <b>Вступление в {html.escape(invite)}</b>\n"] + ok_list + err_list
-        await msg.edit_text(
-            "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup()
+        await message.answer(
+            f"✅ Массовое вступление в <code>{html.escape(invite)}</code> поставлено в очередь\n"
+            f"📋 Операция #{op_id} • {count} аккаунт(ов)\n\n"
+            "Прогресс и результаты: /ops",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
         )
         return
 

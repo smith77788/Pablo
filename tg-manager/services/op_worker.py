@@ -3256,19 +3256,159 @@ async def _exec_bulk_create_channels(
     }
 
 
+async def _exec_bot_factory_multi(
+    pool: asyncpg.Pool,
+    bot: Bot,
+    op_id: int,
+    owner_id: int,
+    params: dict,
+    account_ids: list[int],
+) -> dict:
+    """Массовое создание ботов — несколько аккаунтов, round-robin с fallback."""
+    from services import account_manager, session_simulator
+    from services.username_engine import unique_bot_username
+    import random
+
+    bot_count = max(1, min(int(params.get("bot_count", 1)), 10))
+    bot_name = (params.get("bot_name") or "Bot").strip()
+    base_username = (params.get("base_username") or "").strip().lstrip("@")
+
+    rows = await pool.fetch(
+        "SELECT a.id, a.session_str, a.first_name, a.phone, "
+        "a.device_model, a.system_version, a.app_version, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id = ANY($2::bigint[]) AND a.session_str IS NOT NULL",
+        owner_id,
+        account_ids,
+    )
+    active_accounts = [dict(r) for r in rows]
+    if not active_accounts:
+        return {"status": "failed", "summary": "⚠️ Нет активных аккаунтов для Bot Factory"}
+
+    claimed_ids = [a["id"] for a in active_accounts]
+    await mark_accounts_in_use(claimed_ids)
+    total = len(active_accounts) * bot_count
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    created_count = 0
+    failed_count = 0
+    created_tokens: list[str] = []
+
+    try:
+        for global_i in range(total):
+            if await _is_cancelled(pool, op_id):
+                return {
+                    "status": "cancelled",
+                    "ok": created_count,
+                    "failed": failed_count,
+                    "summary": f"Отменено. Создано: {created_count}, ошибок: {failed_count}",
+                }
+            if not active_accounts:
+                break
+
+            username = unique_bot_username(base_username, global_i) if base_username else f"bot{random.randint(10000, 99999)}bot"
+            display_name = f"{bot_name} {global_i + 1}" if total > 1 else bot_name
+
+            await session_simulator.typing_delay(display_name)
+            result = None
+            tried: set[int] = set()
+            for candidate in active_accounts:
+                if candidate["id"] in tried:
+                    continue
+                tried.add(candidate["id"])
+                result = await account_manager.create_bot_via_botfather(
+                    candidate["session_str"],
+                    bot_display_name=display_name,
+                    bot_username=username,
+                    _acc=candidate,
+                )
+                if result.get("banned") or account_manager.is_dead_session_error(result.get("error")):
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", candidate["id"]
+                    )
+                    active_accounts = [a for a in active_accounts if a["id"] != candidate["id"]]
+                    continue
+                if result.get("peer_flood") or result.get("flood_wait"):
+                    continue
+                break
+            if result is None:
+                result = {"error": "нет доступных аккаунтов"}
+
+            if result.get("token"):
+                token = result["token"]
+                actual_uname = result.get("username", username)
+                created_tokens.append(token)
+                bot_id = 0
+                try:
+                    import aiohttp as _aiohttp
+                    async with _aiohttp.ClientSession() as _sess:
+                        async with _sess.get(
+                            f"https://api.telegram.org/bot{token}/getMe",
+                            timeout=_aiohttp.ClientTimeout(total=10),
+                        ) as _resp:
+                            data = await _resp.json()
+                            if data.get("ok"):
+                                bot_id = data["result"]["id"]
+                                actual_uname = data["result"].get("username", actual_uname)
+                except Exception:
+                    pass
+                try:
+                    await pool.execute(
+                        """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
+                           VALUES($1,$2,$3,$4,$5,TRUE)
+                           ON CONFLICT(bot_id) DO UPDATE SET token=$2, username=$4, is_active=TRUE""",
+                        owner_id, token, bot_id or 0, actual_uname, display_name,
+                    )
+                except Exception:
+                    log_exc_swallow(log, "_exec_bot_factory_multi: managed_bots upsert failed")
+                created_count += 1
+            else:
+                failed_count += 1
+
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+
+            if global_i < total - 1:
+                chaos = session_simulator.chaos_factor()
+                tod = session_simulator.time_of_day_factor()
+                pause = (random.uniform(120, 240) if global_i % 3 == 2 else random.uniform(45, 90)) * chaos * tod
+                await asyncio.sleep(pause)
+    finally:
+        await release_accounts(claimed_ids)
+
+    return {
+        "status": "done",
+        "ok": created_count,
+        "failed": failed_count,
+        "created_tokens": created_tokens[:10],
+        "summary": f"Создано ботов: {created_count}, ошибок: {failed_count}",
+    }
+
+
 async def _exec_bot_factory(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
     """Создать ботов через @BotFather FSM с умными задержками.
 
-    Params:
+    Params (single-account):
       acc_id         — int, id аккаунта в tg_accounts
       count          — int, количество ботов (1-10)
       name_template  — str, шаблон имени: "My Bot" → "My Bot 1", "My Bot 2"...
       uname_template — str, шаблон username: "mybot" → "mybot1_bot", "mybot2_bot"...
+
+    Params (multi-account round-robin):
+      account_ids    — list[int], несколько аккаунтов
+      bot_count      — int, ботов на аккаунт
+      bot_name       — str, отображаемое имя
+      base_username  — str, базовый username
     """
     from services import account_manager, session_simulator
     import random
+
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    if account_ids:
+        return await _exec_bot_factory_multi(pool, bot, op_id, owner_id, params, account_ids)
 
     count = max(1, min(int(params.get("count", 1)), 10))
     name_tpl = (params.get("name_template") or "Bot").strip()
