@@ -787,19 +787,22 @@ async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         return
     await callback.answer()
 
-    progress_msg = await callback.message.edit_text(
-        f"⏳ <b>Импорт групп запущен</b>\n\nАккаунтов: <b>{len(accounts)}</b>\n\n"
-        "<i>Операция выполняется в фоне — вы можете продолжать работу.</i>",
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool, callback.from_user.id, "group_import_all",
+        {"account_ids": [int(a["id"]) for a in accounts]},
+        total_items=len(accounts),
+    )
+    await callback.message.edit_text(
+        f"✅ <b>Импорт групп запущен</b>\n\n"
+        f"Аккаунтов: <b>{len(accounts)}</b>\n"
+        f"📋 Операция <code>#{op_id}</code> в очереди\n"
+        f"💡 Статус: /ops",
         parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _group_import_all_bg(pool, callback.from_user.id, progress_msg, list(accounts))
-    )
-    _treg.register(
-        callback.from_user.id,
-        "group_import_all",
-        f"Импорт групп с {len(accounts)} аккаунтов",
-        task,
+        reply_markup=InlineKeyboardBuilder().button(
+            text="◀️ В меню групп", callback_data=GroupFCb(action="menu")
+        ).as_markup(),
     )
 
 
@@ -1045,12 +1048,18 @@ async def cb_group_do_announce(
         )
         return
 
-    user_id = callback.from_user.id
-    progress_msg = await callback.message.edit_text(
-        f"⏳ Запускаю отправку объявления в {len(groups)} групп(ы)...\n<i>Для отмены: /tasks</i>",
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool, callback.from_user.id, "group_announce",
+        {"acc_id": acc_id, "text": announce_text},
+        total_items=len(groups),
+    )
+    await callback.message.edit_text(
+        f"✅ <b>Объявление поставлено в очередь</b>\n\n"
+        f"Групп: <b>{len(groups)}</b>\n"
+        f"📋 Операция <code>#{op_id}</code> в очереди\n"
+        f"💡 Статус: /ops",
         parse_mode="HTML",
+        reply_markup=_back_menu_kb().as_markup(),
     )
-    task = asyncio.create_task(
-        _group_announce_bg(dict(acc), groups, announce_text, progress_msg, user_id)
-    )
-    _treg.register(user_id, "announce", f"Объявление в {len(groups)} групп", task)

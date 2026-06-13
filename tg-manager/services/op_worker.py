@@ -785,6 +785,10 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_seed_presence_pack(pool, bot, op_id, owner_id, params)
             elif op_type == "promote_presence_pack":
                 result = await _exec_promote_presence_pack(pool, bot, op_id, owner_id, params)
+            elif op_type == "group_import_all":
+                result = await _exec_group_import_all(pool, bot, op_id, owner_id, params)
+            elif op_type == "group_announce":
+                result = await _exec_group_announce(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -4018,4 +4022,139 @@ async def _exec_promote_presence_pack(
             f"👑 Назначение бота admin — Presence Pack #{pack_id}\n"
             f"✅ Успешно: {success}/{total}{fail_hint}"
         ),
+    }
+
+
+async def _exec_group_import_all(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Импорт групп со всех аккаунтов пользователя в managed_channels."""
+    from services import account_manager
+    from database.db import upsert_managed_channels
+
+    account_ids = params.get("account_ids") or []
+    if account_ids:
+        rows = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "FROM tg_accounts "
+            "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+            owner_id, [int(x) for x in account_ids],
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+            "FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL",
+            owner_id,
+        )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    total_imported = 0
+    errors: list[str] = []
+    n = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", n, op_id)
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "imported": total_imported,
+                "summary": f"Отменено. Импортировано: {total_imported}",
+            }
+        try:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], limit=200, _acc=acc) or []
+            groups = [
+                d for d in dialogs
+                if d.get("type") in ("megagroup", "supergroup", "group", "chat", "gigagroup")
+            ]
+            if groups:
+                await upsert_managed_channels(pool, owner_id, acc["id"], groups)
+                total_imported += len(groups)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("_exec_group_import_all acc=%s: %s", acc.get("id"), exc)
+            acc_label = acc.get("first_name") or acc.get("phone") or str(acc["id"])
+            errors.append(f"• {acc_label}: {str(exc)[:60]}")
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < n - 1:
+            await asyncio.sleep(2)
+
+    err_hint = f"\n⚠️ Ошибок по аккаунтам: {len(errors)}" if errors else ""
+    return {
+        "status": "done",
+        "imported": total_imported,
+        "accounts": n,
+        "summary": f"📥 Импорт групп: {total_imported} групп из {n} аккаунтов{err_hint}",
+    }
+
+
+async def _exec_group_announce(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Рассылка объявления во все группы выбранного аккаунта."""
+    from services import account_manager
+
+    acc_id = int(params.get("acc_id", 0))
+    text = params.get("text", "")
+    if not acc_id or not text:
+        return {"status": "failed", "reason": "Не указан аккаунт или текст"}
+
+    row = await pool.fetchrow(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE AND session_str IS NOT NULL",
+        acc_id, owner_id,
+    )
+    if not row:
+        return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
+    acc = dict(row)
+
+    dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+    groups = [
+        d for d in dialogs
+        if d.get("type") in ("megagroup", "supergroup", "group", "chat")
+    ]
+    if not groups:
+        return {"status": "done", "ok": 0, "fail": 0, "summary": "Нет групп у аккаунта"}
+
+    total = len(groups)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count = 0
+    err_count = 0
+    for idx, grp in enumerate(groups):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "fail": err_count,
+                "summary": f"Отменено. Отправлено: {ok_count}/{total}",
+            }
+        access_hash = grp.get("access_hash", 0) or 0
+        try:
+            result = await account_manager.post_to_channel(
+                acc["session_str"], grp["id"], text, access_hash=access_hash, _acc=acc
+            )
+            if "error" in result or result.get("banned"):
+                err_count += 1
+            else:
+                ok_count += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_exc_swallow(log, "group_announce: post_to_channel grp=%s: %s", grp.get("id"), exc)
+            err_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total - 1:
+            await asyncio.sleep(3)
+
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "fail": err_count,
+        "summary": f"📢 Объявление: ✅ {ok_count} ❌ {err_count} из {total} групп",
     }

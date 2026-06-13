@@ -128,6 +128,18 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "👑",
     },
+    "group_import_all": {
+        "description": "Импорт групп со всех аккаунтов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📥",
+    },
+    "group_announce": {
+        "description": "Объявление во все группы аккаунта",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📢",
+    },
 }
 
 
