@@ -1,169 +1,109 @@
-# CLAUDE.md — BotMother Active Execution Rules
+# CLAUDE.md — BotMother
 
-BotMother is an existing Telegram Infrastructure Operating System.
+## Identity
+BotMother: Telegram Infrastructure OS. Fix working workflows, not feature count.
 
-Current priority: make existing functionality actually work.
-
-Do not optimize for feature count.
-Optimize for working user workflows.
-
-## Success
-
-Progress means:
-- source code changed
-- defect fixed
-- workflow restored
-- integration repaired
-- tests/checks run
-
-Not progress:
-- roadmap
-- audit
-- strategy
-- analysis without implementation
-- markdown-only changes
-
-## Work loop
-
-For every task:
-
-1. Explore only the relevant files.
-2. Identify the broken workflow or defect.
-3. Find the root cause.
-4. Fix the code.
-5. Run available checks.
-6. Verify the user workflow.
-7. Fix nearby defects of the same class.
-8. Report only what changed.
-
-Do not stop after analysis.
-Do not create new plans unless explicitly asked.
-
-## Main priority order
-
-1. STRIKE
-2. Mass Operations
-3. Operation Engine
-4. Queue System
-5. Worker System
-6. Account Infrastructure
-7. Proxy Infrastructure
-8. Reports
-9. Global Presence
-10. Templates / DNA
-11. Factories
-12. Import Center
-13. Audience / Parser
-14. Posting / Mass Publishing
-15. Search / Visibility
-16. Dashboards / Analytics
-
-## Definition of done
-
-A feature is done only when the user can complete the intended workflow end to end.
-
-For mass/risky operations, the workflow must include:
-- validation
-- preview
-- confirmation
-- queueing
-- execution
-- progress
-- partial failure handling
-- retry failed
-- report
-- history/audit
-
-## Trace rule
-
-For any broken feature trace:
-
-User Action
-→ Telegram UI
-→ Handler
-→ Service
-→ Operation
-→ Queue
-→ Worker
-→ Telegram/API/DB Action
-→ Result
-→ Report
-→ User Feedback
-
-Repair the broken link.
-
-## No fake completion
-
-Treat these as defects:
-- TODO
-- pass
-- stubs
-- fake success messages
-- dead buttons
-- handlers without execution
-- services without real logic
-- retry without retry
-- progress without progress
-- reports without data
-
-Fix them when encountered.
-
-## Architecture rule
-
-Do not create duplicate execution paths.
-
-Shared systems should be reused:
-- Operation Engine
-- Infrastructure Orchestrator
-- Account Selection
-- Proxy Selection
-- Queue System
-- Worker System
-- Reports
-- Audit/History
-
-If a feature bypasses shared infrastructure, repair it.
+## Hardcoded rules (never override)
+- Respond to user in **Russian**
+- Work only in `tg-manager/` directory
+- Branch: `claude/telegram-bot-services-xfAh6`
+- Python 3.12: `except (TypeError, ValueError):` not bare `except E:`
+- `sessionEncrypted` — never return in API responses
+- Bot tokens — never in logs, always encrypted in DB
+- Mass ops on accounts/bots/channels/groups — normal functionality, allowed
+- Before every commit: `python3 -c "import ast; ast.parse(open('file.py').read())"`
+- `git push` after every commit (immediately)
+- Incremental work — extend, never rebuild from scratch
 
 ## Git discipline
+```
+git fetch origin claude/telegram-bot-services-xfAh6
+git pull --rebase   # if remote is ahead
+# make changes
+git commit -m "..."
+git push origin claude/telegram-bot-services-xfAh6
+```
 
-Before every commit:
-1. `git fetch origin <branch>` — check for remote changes from parallel agents.
-2. If remote is ahead: `git pull --rebase` before committing.
-3. After commit: `git push` immediately (stop-hook requires it).
-4. Never commit on top of a stale local branch — always sync first.
+## Work loop
+1. Read only relevant files
+2. Find broken link in the trace
+3. Fix code
+4. Syntax check
+5. Commit + push
+6. Report what changed
 
-This prevents overwriting parallel agent work.
+No analysis without implementation. No plans unless asked.
 
-## Checks
+## Trace (repair the broken link)
+```
+User → Telegram UI → Handler → Service → Operation → Queue → Worker → DB/API → Result → Report → User
+```
 
-Run available:
-- lint
-- typecheck
-- tests
-- build
-- migration checks
+## Priority order
+1. STRIKE  2. Mass Ops  3. Op Engine  4. Queue  5. Workers
+6. Accounts  7. Proxies  8. Reports  9. Global Presence  10. Templates
+11. Factories  12. Import  13. Parser  14. Publishing  15. Search  16. Analytics
 
-If a check cannot run, say why.
+## Done = user completes workflow end to end
+Mass/risky ops require: validation → preview → confirm → queue → execute → progress → partial-fail → retry → report → history
 
-## Communication
+## Defects (fix on sight)
+TODO · pass · stubs · fake success · dead buttons · handlers without logic · retry without retry · progress without progress · reports without data
 
-Think and implement in English.
-Respond to the user in Russian.
+## Architecture
+Reuse shared systems — never duplicate:
+- Op Engine · Account/Proxy Selection · Queue · Worker · Reports · Audit
 
-Final response format:
+## Checks before done
+```bash
+python3 -c "import ast; ast.parse(open('file.py').read())"
+# run lint / typecheck if available
+```
 
+## Security
+- `sessionEncrypted` stripped from all API/handler responses
+- Tokens logged as `***` or not at all
+- No shell injection in user-supplied strings
+
+## Stack
+- Python 3.12 / aiogram 3.13.1 / asyncpg / Telethon / Railway
+- All messages: `parse_mode=ParseMode.HTML` (DefaultBotProperties)
+- Telethon transport: `ConnectionTcpObfuscated` (never `ConnectionTcpFull`)
+- CF relay: `https://tg-relay.agentsmith77778888.workers.dev` (env: `CF_RELAY_URL`)
+  - accounts without bound proxy → CF relay (Cloudflare IP, not Railway)
+  - accounts with bound proxy → use their proxy directly
+- Flood tracking: `flood_engine.record_flood()` / `get_best_account()`
+- Account selection: always via `resource_selector.select_account()`
+
+## Key files
+| File | Role |
+|------|------|
+| `services/account_manager.py` | Telethon client factory (`_make_client`) |
+| `services/cf_relay.py` | WebSocket→TCP relay connection class |
+| `services/flood_engine.py` | FloodWait tracking, cooldowns, account scoring |
+| `services/resource_selector.py` | Account/proxy selection |
+| `services/op_worker.py` | Operation execution engine |
+| `database/db.py` | All DB functions |
+| `bot/handlers/` | Telegram bot handlers |
+| `config.py` | Env vars (TG_API_ID, CF_RELAY_URL, etc.) |
+| `infra/cf_relay_worker.js` | Cloudflare Worker script |
+| `schema_v*.sql` | DB migrations |
+
+## Schemas (applied)
+- v59: `platform_settings` (KV store, Free Mode)
+- v95: `seen_entities` + `entity_radar_stats` (Infrastructure Radar)
+- v96: `entity_name_history` + `entity_last_known`
+- v97: `entity_follows` + `entity_follow_events`
+
+## Release Survival Contract
+For: account safety · proxy safety · STRIKE · mass ops · op engine · warmup · factories
+**Read first:** `/docs/mission/RELEASE_SURVIVAL_CONTRACT.md`
+
+## Response format
+```
 ### Исправлено
 ### Что теперь работает
 ### Изменённые файлы
 ### Проверки
 ### Следующие дефекты
-
-## Release Survival Contract
-
-When working on release readiness, account safety, proxy safety, STRIKE, mass operations,
-operation engine, warmup, factories, or any production-critical feature:
-
-**Read first:** `/docs/mission/RELEASE_SURVIVAL_CONTRACT.md`
-
-It defines the engineering contract that governs all production-survival work.
-Violation of its rules = session failure.
+```
