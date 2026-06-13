@@ -28,6 +28,13 @@ TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 # Format: socks5://user:pass@host:port  or  socks5://host:port
 TG_PROXY: str = os.getenv("TG_PROXY", "")
 
+# Optional Cloudflare Worker WebSocket relay for IP masking (free alternative to proxy).
+# Deploy infra/cf_relay_worker.js to Cloudflare Workers, set this to the worker URL.
+# Format: https://my-relay.my-name.workers.dev
+# When set, accounts without individual proxies route through the CF Worker instead of
+# connecting to Telegram DCs directly from the Railway datacenter IP.
+CF_RELAY_URL: str = os.getenv("CF_RELAY_URL", "").rstrip("/")
+
 # SMTP for email reporting (abuse@telegram.org, NCMEC, etc.)
 SMTP_HOST: str = os.getenv("SMTP_HOST", "")
 SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))

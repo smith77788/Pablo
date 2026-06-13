@@ -405,11 +405,41 @@ def generate_device_fingerprint(country_code: str | None = None) -> dict[str, st
 
 
 def _make_client(session_string: str = "", device: dict | None = None):
+    """Создать TelegramClient с правильным fingerprint и транспортом.
+
+    Приоритет транспорта (от высшего к низшему):
+    1. Аккаунт-bound прокси (proxy_url в device dict) — строгая изоляция,
+       используется если у аккаунта назначен конкретный прокси.
+    2. CF_RELAY_URL env var — Cloudflare Worker WebSocket→TCP relay (бесплатный,
+       скрывает Railway IP за Cloudflare edge IP). Используется только если
+       аккаунт не имеет собственного прокси.
+    3. Глобальный TG_PROXY (socks5://...) — применяется если CF_RELAY_URL не задан.
+    4. Прямое подключение через ConnectionTcpObfuscated — если ни один из выше
+       не задан. Протокол обфускован, но Railway IP виден Telegram.
+
+    Всегда используется обфускация (ConnectionTcpObfuscated или CF relay поверх неё),
+    никогда ConnectionTcpFull — он легко детектится как Telethon/MTProto.
+    """
     from telethon import TelegramClient
     from telethon.sessions import StringSession
+    from telethon.network.connection.tcpobfuscated import ConnectionTcpObfuscated
+    from config import CF_RELAY_URL
 
     d = _normalize_device_profile(device)
+
+    # Определяем прокси (может поднять ProxyIsolationError если обязательный прокси не задан)
     proxy = _resolve_client_proxy(d)
+
+    # Выбор транспорта: если нет аккаунт-bound прокси И задан CF relay → используем relay
+    has_bound_proxy = bool(proxy)  # _resolve_client_proxy вернул не None
+    if not has_bound_proxy and CF_RELAY_URL:
+        from services.cf_relay import make_cf_relay_connection
+        connection_cls = make_cf_relay_connection(CF_RELAY_URL)
+        effective_proxy = None  # relay сам маршрутизирует
+    else:
+        connection_cls = ConnectionTcpObfuscated
+        effective_proxy = proxy
+
     return TelegramClient(
         StringSession(session_string),
         int(TG_API_ID),
@@ -423,7 +453,8 @@ def _make_client(session_string: str = "", device: dict | None = None):
         request_retries=1,
         timeout=_CONNECT_TIMEOUT,
         flood_sleep_threshold=0,
-        proxy=proxy,
+        proxy=effective_proxy,
+        connection=connection_cls,
     )
 
 
