@@ -782,17 +782,15 @@ async def cb_fn_copy_single_confirm(
 # ── Steps management (reorder + delete + preview) ─────────────────────────
 
 
-@router.callback_query(FunnelCb.filter(F.action == "steps_manage"))
-async def cb_fn_steps_manage(
+async def _render_steps_manage(
     callback: CallbackQuery, callback_data: FunnelCb, pool: asyncpg.Pool
 ) -> None:
-    """Показать список шагов с кнопками управления."""
-    await callback.answer()
+    """Отрисовать экран управления шагами (не вызывает callback.answer)."""
     steps = await db.get_funnel_steps(pool, callback_data.funnel_id)
     funnels = await db.get_funnels(pool, callback_data.bot_id)
     funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
     if not funnel:
-        await callback.answer("Цепочка не найдена.", show_alert=True)
+        await callback.message.edit_text("❌ Цепочка не найдена.")
         return
 
     if not steps:
@@ -878,6 +876,15 @@ async def cb_fn_steps_manage(
     )
 
 
+@router.callback_query(FunnelCb.filter(F.action == "steps_manage"))
+async def cb_fn_steps_manage(
+    callback: CallbackQuery, callback_data: FunnelCb, pool: asyncpg.Pool
+) -> None:
+    """Показать список шагов с кнопками управления."""
+    await callback.answer()
+    await _render_steps_manage(callback, callback_data, pool)
+
+
 @router.callback_query(FunnelCb.filter(F.action == "step_preview"))
 async def cb_fn_step_preview(
     callback: CallbackQuery, callback_data: FunnelCb, pool: asyncpg.Pool
@@ -950,8 +957,8 @@ async def cb_fn_step_delete(
                 log_exc_swallow(log, "step_delete renumber execute failed")
 
     await callback.answer(f"🗑 Шаг {step_to_delete + 1} удалён", show_alert=False)
-    # Обновить экран управления шагами
-    await cb_fn_steps_manage(callback, callback_data, pool)
+    # Обновить экран управления шагами (не вызываем cb_fn_steps_manage чтобы не задвоить answer)
+    await _render_steps_manage(callback, callback_data, pool)
 
 
 async def _swap_step_content(
@@ -1009,7 +1016,7 @@ async def cb_fn_step_up(
     await _swap_step_content(
         pool, callback_data.funnel_id, callback_data.step, callback_data.step - 1
     )
-    await cb_fn_steps_manage(callback, callback_data, pool)
+    await _render_steps_manage(callback, callback_data, pool)
 
 
 @router.callback_query(FunnelCb.filter(F.action == "step_down"))
@@ -1028,4 +1035,4 @@ async def cb_fn_step_down(
     await _swap_step_content(
         pool, callback_data.funnel_id, callback_data.step, callback_data.step + 1
     )
-    await cb_fn_steps_manage(callback, callback_data, pool)
+    await _render_steps_manage(callback, callback_data, pool)
