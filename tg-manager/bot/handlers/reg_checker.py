@@ -1027,3 +1027,39 @@ async def cb_follow_toggle(
     if data:
         page = callback_data.page or 0
         await _show_analysis_page(callback.message, data, entity_id, entity_type, page, pool, owner_id)
+
+
+# ── /follows command — list followed entities ──────────────────────────────
+
+@router.message(Command("follows"))
+async def cmd_follows(message: Message, pool: asyncpg.Pool) -> None:
+    """Show list of entities this user is following."""
+    from database import db as _db
+    from services.registration_checker import format_date_ru
+    owner_id = message.from_user.id
+    follows = await _db.get_follows(pool, owner_id)
+    if not follows:
+        await message.answer(
+            "📋 <b>Список слежений пуст</b>\n\n"
+            "Нажмите кнопку <b>📌 Следить</b> в карточке анализа любого пользователя или канала.",
+            parse_mode="HTML",
+        )
+        return
+
+    lines = [f"📋 <b>Вы следите за {len(follows)} объектами:</b>\n"]
+    for row in follows:
+        eid = row["entity_id"]
+        et = row["entity_type"]
+        u = row["username"]
+        n = row["display_name"]
+        lbl = html.escape(row["label"] or "")
+        icon = {"user": "👤", "bot": "🤖", "channel": "📢", "group": "👥", "supergroup": "👥"}.get(et, "❓")
+        ref = f"@{html.escape(u)}" if u else f"<code>{eid}</code>"
+        name_part = f" — {html.escape(n)}" if n else ""
+        label_part = f" <i>({lbl})</i>" if lbl else ""
+        kb_part = f"\n   /analyze_{eid}"
+        lines.append(f"{icon} {ref}{name_part}{label_part}")
+    lines.append(
+        "\n<i>Вы получите уведомление при изменении username или имени.</i>"
+    )
+    await message.answer("\n".join(lines), parse_mode="HTML")
