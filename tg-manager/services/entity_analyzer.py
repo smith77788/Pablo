@@ -19,6 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Union
 
 import asyncpg
+try:
+    import httpx as _httpx
+    _HTTPX_AVAILABLE = True
+except ImportError:
+    _HTTPX_AVAILABLE = False
 
 log = logging.getLogger(__name__)
 
@@ -223,6 +228,8 @@ def _confidence_score(
       first_message        → 0.75 base (exact Telegram server timestamp for channel creation)
       oldest_group_message → 0.55 base (real timestamp, confirmed activity in shared group)
       oldest_avatar        → 0.45 base (real timestamp, but avatar may be set later)
+      wayback_machine      → 0.35 base (Wayback Machine first snapshot date, external)
+      web_snippet          → 0.25 base (search engine snippet date, least reliable)
       id_interpolation     → 0.20 base (±2-3 months, no external signal)
       Fragment NFT         → 0.10 (no date signal at all)
     """
@@ -234,6 +241,10 @@ def _confidence_score(
         score = 0.55
     elif method == "oldest_avatar":
         score = 0.45
+    elif method == "wayback_machine":
+        score = 0.35
+    elif method == "web_snippet":
+        score = 0.25
     else:
         score = 0.20
     if has_dc:
@@ -289,6 +300,112 @@ async def _scan_oldest_message_in_dialogs(
     except Exception:
         pass
     return oldest, scanned
+
+
+async def _wayback_first_seen(username: str) -> datetime | None:
+    """
+    Query the free Wayback Machine CDX API for the oldest snapshot of t.me/{username}.
+    Returns the timestamp of the first snapshot or None.
+    No API key required. Timeout: 4 seconds.
+    This gives an upper bound on username registration date (existed before this snapshot).
+    """
+    if not _HTTPX_AVAILABLE or not username:
+        return None
+    url = (
+        "https://web.archive.org/cdx/search/cdx"
+        f"?url=t.me/{username}&output=json&limit=1&fl=timestamp&from=20130101&to=20991231"
+        "&filter=statuscode:200&collapse=timestamp:6"
+    )
+    try:
+        async with _httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if not data or len(data) < 2:
+                return None
+            ts = data[1][0]  # first result, timestamp field: "20220315123456"
+            return datetime(
+                int(ts[0:4]), int(ts[4:6]), int(ts[6:8]),
+                int(ts[8:10]), int(ts[10:12]), int(ts[12:14]),
+                tzinfo=timezone.utc,
+            )
+    except Exception:
+        return None
+
+
+async def _google_snippet_date(username: str) -> datetime | None:
+    """
+    Search Yandex XML snippet for the oldest mention of t.me/{username}.
+    Uses Yandex's free web search (no API key). Timeout: 3 seconds.
+    Extracts dates from result snippets using regex.
+    Note: unreliable, only use as a fallback hint.
+    """
+    if not _HTTPX_AVAILABLE or not username:
+        return None
+    # Use Yandex since it doesn't require JS and has date snippets
+    query = f"site:t.me/{username}"
+    url = f"https://yandex.com/search/?text={query}&lang=ru"
+    date_re = re.compile(
+        r"(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})"
+    )
+    months_ru = {
+        "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+        "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+    }
+    try:
+        async with _httpx.AsyncClient(timeout=3.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
+                "Accept-Language": "ru-RU,ru;q=0.9",
+            })
+            if resp.status_code != 200:
+                return None
+            text = resp.text
+            matches = date_re.findall(text)
+            dates = []
+            for day_s, month_s, year_s in matches:
+                try:
+                    d = datetime(int(year_s), months_ru[month_s], int(day_s), tzinfo=timezone.utc)
+                    dates.append(d)
+                except (ValueError, KeyError):
+                    pass
+            return min(dates) if dates else None
+    except Exception:
+        return None
+
+
+async def _osint_web_date(username: str | None) -> dict[str, Any]:
+    """
+    Run free web OSINT methods in parallel for a username.
+    Returns {'wayback': dt|None, 'web_snippet': dt|None, 'best': dt|None, 'source': str}.
+    Total timeout: 5 seconds (both run in parallel).
+    """
+    if not username:
+        return {"wayback": None, "web_snippet": None, "best": None, "source": "none"}
+
+    wb_task = asyncio.create_task(_wayback_first_seen(username))
+    gs_task = asyncio.create_task(_google_snippet_date(username))
+
+    try:
+        wb, gs = await asyncio.wait_for(
+            asyncio.gather(wb_task, gs_task, return_exceptions=True), timeout=5.0
+        )
+    except asyncio.TimeoutError:
+        wb, gs = None, None
+
+    wayback = wb if isinstance(wb, datetime) else None
+    snippet = gs if isinstance(gs, datetime) else None
+
+    candidates = [d for d in [wayback, snippet] if d is not None]
+    if candidates:
+        best = min(candidates)
+        source = "wayback" if best == wayback else "web_snippet"
+    else:
+        best = None
+        source = "none"
+
+    return {"wayback": wayback, "web_snippet": snippet, "best": best, "source": source}
 
 
 def _map_mtproto_error(exc: Exception) -> dict[str, Any]:
@@ -737,6 +854,11 @@ async def analyze_user(
         footprint = await _get_db_footprint(pool, entity_id)
         earliest_activity = await _get_earliest_activity(pool, entity_id)
 
+        # Infrastructure-as-Radar: record this entity sighting (fire-and-forget)
+        from database import db as _db
+        await _db.record_entity_sighting(pool, entity_id, entity_type)
+        radar = await _db.get_entity_radar_stats(pool, entity_id)
+
         # Scan shared groups for oldest message from this user — best date signal
         oldest_msg_date, groups_scanned = (None, 0)
         if not is_frag and not u.bot:
@@ -744,14 +866,23 @@ async def analyze_user(
                 client, entity_id
             )
 
-        # Select best date source (priority: group_msg > avatar > id_estimate)
-        # All sources are upper bounds — the user was created BEFORE the earliest evidence.
+        # Free web OSINT: Wayback Machine + search snippet (run in parallel)
+        web_osint: dict[str, Any] = {"wayback": None, "web_snippet": None, "best": None, "source": "none"}
+        if username and not is_frag:
+            web_osint = await _osint_web_date(username)
+
+        # Select best date source (all are upper bounds on creation date)
+        # Priority by reliability: group_msg ≈ avatar > wayback > web_snippet > id_estimate
         avatar_date = avatar_met.get("oldest_photo_date")
         candidates: list[tuple[datetime, str]] = []
         if oldest_msg_date and not is_frag:
             candidates.append((oldest_msg_date, "oldest_group_message"))
         if avatar_date and not is_frag:
             candidates.append((avatar_date, "oldest_avatar"))
+        if web_osint.get("wayback") and not is_frag:
+            candidates.append((web_osint["wayback"], "wayback_machine"))
+        if web_osint.get("web_snippet") and not is_frag:
+            candidates.append((web_osint["web_snippet"], "web_snippet"))
 
         if candidates:
             best_date, best_method = min(candidates, key=lambda x: x[0])
@@ -780,8 +911,12 @@ async def analyze_user(
             "avatar_metrics": avatar_met,
             "oldest_group_message_date": int(oldest_msg_date.timestamp()) if oldest_msg_date else None,
             "groups_scanned": groups_scanned,
+            "wayback_date": int(web_osint["wayback"].timestamp()) if web_osint.get("wayback") else None,
             "first_spotted_in_our_db": footprint,
             "earliest_activity_in_db": int(earliest_activity.timestamp()) if earliest_activity else None,
+            "radar_distinct_chats": radar.get("distinct_chats", 0),
+            "radar_total_sightings": radar.get("total_sightings", 0),
+            "radar_first_seen_at": int(radar["first_seen_at"].timestamp()) if radar.get("first_seen_at") else None,
             "confidence_score": confidence,
             "privacy_restrictions": {
                 "hidden_forward_link": noforwards,
@@ -834,6 +969,9 @@ async def analyze_user(
             "confidence_score": confidence,
             "first_spotted_in_our_db": footprint,
             "earliest_activity_in_db": earliest_activity,
+            "radar_distinct_chats": radar.get("distinct_chats", 0),
+            "radar_total_sightings": radar.get("total_sightings", 0),
+            "radar_first_seen_at": radar.get("first_seen_at"),
             "recon_payload": recon_payload,
         }
 
@@ -1099,6 +1237,18 @@ def format_overview(data: dict) -> str:
                 lines.append(f"⏳ Возраст минимум: <b>{format_age(ct)}</b>")
                 lines.append("🖼 Источник: дата первого аватара")
                 lines.append("<i>⚠️ Аватар мог быть установлен позже регистрации</i>")
+            elif method == "wayback_machine":
+                # Wayback Machine: первый архивный снимок страницы t.me/username
+                lines.append(f"\n🌐 Существует минимум с: <b>{format_date_ru(ct)}</b>")
+                lines.append(f"⏳ Возраст минимум: <b>{format_age(ct)}</b>")
+                lines.append("🏛 Источник: Wayback Machine (первый архивный снимок)")
+                lines.append("<i>⚠️ Аккаунт мог быть зарегистрирован раньше</i>")
+            elif method == "web_snippet":
+                # Поисковый сниппет — менее надёжен, только как подсказка
+                lines.append(f"\n🔍 Существует минимум с: <b>{format_date_ru(ct)}</b>")
+                lines.append(f"⏳ Возраст минимум: <b>{format_age(ct)}</b>")
+                lines.append("🔍 Источник: дата из поискового сниппета")
+                lines.append("<i>⚠️ Низкая надёжность — только ориентир</i>")
             else:
                 # ID interpolation — ни аватара, ни точного источника
                 lines.append(f"\n⚠️ <b>Точная дата регистрации неизвестна</b>")
@@ -1141,6 +1291,15 @@ def format_overview(data: dict) -> str:
         if not hasattr(ea, "strftime"):
             ea = datetime.fromtimestamp(ea, tz=timezone.utc)
         lines.append(f"🗄 Первое обращение к нашим ботам: <b>{format_date_ru(ea)}</b>")
+
+    # Infrastructure-as-Radar: how many of our sessions have seen this entity
+    radar_chats = data.get("radar_distinct_chats", 0)
+    radar_sightings = data.get("radar_total_sightings", 0)
+    if et in ("user", "bot") and radar_chats is not None:
+        if radar_chats > 0:
+            lines.append(f"📡 Замечен в <b>{radar_chats}</b> наших чатах · всего проверок: {radar_sightings}")
+        else:
+            lines.append("📡 <i>Первый раз встречаем этого пользователя</i>")
 
     # DB footprint from reg_check_cache
     footprint = data.get("first_spotted_in_our_db")

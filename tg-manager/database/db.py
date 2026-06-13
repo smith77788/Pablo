@@ -4899,3 +4899,77 @@ async def get_seo_score_history(
         )
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure-as-Radar: track all entities seen across client sessions
+# ---------------------------------------------------------------------------
+
+async def record_entity_sighting(
+    pool: asyncpg.Pool,
+    entity_id: int,
+    entity_type: str,
+    chat_id: int | None = None,
+) -> None:
+    """
+    Record that we saw entity_id in chat_id (or via direct lookup if chat_id is None).
+    Uses NULL as chat_id key for direct lookups — store 0 internally for PK safety.
+    Upserts seen_entities and refreshes entity_radar_stats.
+    Fire-and-forget safe: all errors are swallowed.
+    """
+    chat_key = chat_id if chat_id is not None else 0
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO seen_entities
+                       (entity_id, entity_type, chat_id, seen_at, first_seen_at, last_seen_at, sighting_count)
+                   VALUES ($1, $2, $3, NOW(), NOW(), NOW(), 1)
+                   ON CONFLICT (entity_id, chat_id) DO UPDATE
+                       SET last_seen_at  = NOW(),
+                           sighting_count = seen_entities.sighting_count + 1""",
+                entity_id, entity_type, chat_key,
+            )
+            await conn.execute(
+                """INSERT INTO entity_radar_stats
+                       (entity_id, entity_type, first_seen_at, last_seen_at, distinct_chats, total_sightings, updated_at)
+                   SELECT
+                       $1,
+                       $2,
+                       MIN(first_seen_at),
+                       MAX(last_seen_at),
+                       COUNT(DISTINCT NULLIF(chat_id, 0)),
+                       SUM(sighting_count),
+                       NOW()
+                   FROM seen_entities WHERE entity_id = $1
+                   ON CONFLICT (entity_id) DO UPDATE
+                       SET entity_type    = EXCLUDED.entity_type,
+                           first_seen_at  = EXCLUDED.first_seen_at,
+                           last_seen_at   = EXCLUDED.last_seen_at,
+                           distinct_chats = EXCLUDED.distinct_chats,
+                           total_sightings= EXCLUDED.total_sightings,
+                           updated_at     = NOW()""",
+                entity_id, entity_type,
+            )
+    except Exception:
+        pass
+
+
+async def get_entity_radar_stats(
+    pool: asyncpg.Pool,
+    entity_id: int,
+) -> dict:
+    """
+    Return radar stats for entity_id: first_seen, last_seen, distinct_chats, total_sightings.
+    Returns empty dict if no data.
+    """
+    try:
+        row = await pool.fetchrow(
+            """SELECT first_seen_at, last_seen_at, distinct_chats, total_sightings
+               FROM entity_radar_stats WHERE entity_id = $1""",
+            entity_id,
+        )
+        if row:
+            return dict(row)
+    except Exception:
+        pass
+    return {}
