@@ -128,6 +128,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "👑",
     },
+    "bulk_edit_channels": {
+        "description": "Массовое редактирование каналов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "✏️",
+    },
     "group_import_all": {
         "description": "Импорт групп со всех аккаунтов",
         "min_plan": "starter",

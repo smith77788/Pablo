@@ -785,6 +785,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_seed_presence_pack(pool, bot, op_id, owner_id, params)
             elif op_type == "promote_presence_pack":
                 result = await _exec_promote_presence_pack(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_edit_channels":
+                result = await _exec_bulk_edit_channels(pool, bot, op_id, owner_id, params)
             elif op_type == "group_import_all":
                 result = await _exec_group_import_all(pool, bot, op_id, owner_id, params)
             elif op_type == "group_announce":
@@ -4022,6 +4024,79 @@ async def _exec_promote_presence_pack(
             f"👑 Назначение бота admin — Presence Pack #{pack_id}\n"
             f"✅ Успешно: {success}/{total}{fail_hint}"
         ),
+    }
+
+
+async def _exec_bulk_edit_channels(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовое редактирование title/about каналов всех указанных аккаунтов."""
+    from services import account_manager
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    field = params.get("field", "title")
+    value = params.get("value", "")
+
+    if not account_ids or not value:
+        return {"status": "failed", "reason": "Не указаны аккаунты или значение поля"}
+
+    rows = await pool.fetch(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    ok_total = 0
+    err_total = 0
+    step = 0
+
+    for acc in accounts:
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_total,
+                "fail": err_total,
+                "summary": f"Отменено. Изменено: {ok_total}",
+            }
+        try:
+            dialogs = await account_manager.get_dialogs(acc["session_str"], _acc=acc) or []
+        except Exception as exc:
+            log.warning("_exec_bulk_edit_channels get_dialogs acc=%s: %s", acc.get("id"), exc)
+            err_total += 1
+            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
+
+        channels = [d for d in dialogs if d.get("type") in ("channel", "megagroup", "supergroup")]
+        for ch in channels:
+            ch_id = ch["id"]
+            step += 1
+            try:
+                if field == "title":
+                    ok = await account_manager.edit_channel_title(acc["session_str"], ch_id, value, _acc=acc)
+                else:
+                    ok = await account_manager.edit_channel_about(acc["session_str"], ch_id, value, _acc=acc)
+                if ok:
+                    ok_total += 1
+                else:
+                    err_total += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_exc_swallow(log, "bulk_edit_channels ch=%s: %s", ch_id, exc)
+                err_total += 1
+            await asyncio.sleep(2)
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+    return {
+        "status": "done",
+        "ok": ok_total,
+        "fail": err_total,
+        "summary": f"✏️ Редактирование каналов ({field}): ✅ {ok_total} ❌ {err_total}",
     }
 
 

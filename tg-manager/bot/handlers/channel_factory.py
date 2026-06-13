@@ -1257,19 +1257,24 @@ async def cb_chanf_be_confirm(
         log_exc_swallow(log, "bulk_edit fetch accounts failed")
         accounts = []
 
-    progress_msg = await callback.message.edit_text(
-        "⏳ <b>Загружаю каналы и применяю изменения...</b>\n\n"
-        "<i>Операция выполняется в фоне — вы можете продолжать работу.</i>",
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool, callback.from_user.id, "bulk_edit_channels",
+        {
+            "account_ids": [int(a["id"]) for a in accounts],
+            "field": field,
+            "value": value,
+        },
+        total_items=len(accounts),
+    )
+    await callback.message.edit_text(
+        f"✅ <b>Редактирование каналов запущено</b>\n\n"
+        f"Поле: <b>{field}</b> · Аккаунтов: <b>{len(accounts)}</b>\n"
+        f"📋 Операция <code>#{op_id}</code> в очереди\n"
+        f"💡 Статус: /ops",
         parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _chanf_be_bg(pool, progress_msg, list(accounts), field, value)
-    )
-    _treg.register(
-        callback.from_user.id,
-        "bulk_edit_channels",
-        f"Массовое редактирование каналов ({field})",
-        task,
+        reply_markup=_back_menu_kb().as_markup(),
     )
 
 
