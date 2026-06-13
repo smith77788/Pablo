@@ -45,30 +45,33 @@ _USER_ANCHORS: list[tuple[int, datetime]] = [
     (1_500_000_000,  datetime(2020, 7, 1,  tzinfo=timezone.utc)),
     (1_600_000_000,  datetime(2020, 10, 1, tzinfo=timezone.utc)),
     (1_700_000_000,  datetime(2021, 1, 1,  tzinfo=timezone.utc)),
-    (1_800_000_000,  datetime(2021, 5, 1,  tzinfo=timezone.utc)),
-    (1_900_000_000,  datetime(2021, 9, 1,  tzinfo=timezone.utc)),
-    (2_000_000_000,  datetime(2021, 12, 1, tzinfo=timezone.utc)),
-    # Пересчитано на основе верифицированной точки: ID 8_643_511_275 = 8 апр 2026
-    # Скорость роста: ~127 млн ID/месяц (≈1.52 млрд/год) с дек 2021
-    (2_500_000_000,  datetime(2022, 4, 1,  tzinfo=timezone.utc)),
-    (2_890_000_000,  datetime(2022, 7, 1,  tzinfo=timezone.utc)),
-    (3_270_000_000,  datetime(2022, 10, 1, tzinfo=timezone.utc)),
-    (3_650_000_000,  datetime(2023, 1, 1,  tzinfo=timezone.utc)),
-    (4_030_000_000,  datetime(2023, 4, 1,  tzinfo=timezone.utc)),
-    (4_410_000_000,  datetime(2023, 7, 1,  tzinfo=timezone.utc)),
-    (4_790_000_000,  datetime(2023, 10, 1, tzinfo=timezone.utc)),
-    (5_170_000_000,  datetime(2024, 1, 1,  tzinfo=timezone.utc)),
-    (5_550_000_000,  datetime(2024, 4, 1,  tzinfo=timezone.utc)),
-    (5_930_000_000,  datetime(2024, 7, 1,  tzinfo=timezone.utc)),
-    (6_310_000_000,  datetime(2024, 10, 1, tzinfo=timezone.utc)),
-    (6_700_000_000,  datetime(2025, 1, 1,  tzinfo=timezone.utc)),
-    (7_080_000_000,  datetime(2025, 4, 1,  tzinfo=timezone.utc)),
-    (7_460_000_000,  datetime(2025, 7, 1,  tzinfo=timezone.utc)),
-    (7_840_000_000,  datetime(2025, 10, 1, tzinfo=timezone.utc)),
-    (8_220_000_000,  datetime(2026, 1, 1,  tzinfo=timezone.utc)),
-    (8_643_511_275,  datetime(2026, 4, 8,  tzinfo=timezone.utc)),  # VERIFIED
-    (9_000_000_000,  datetime(2026, 7, 1,  tzinfo=timezone.utc)),
-    (9_380_000_000,  datetime(2026, 10, 1, tzinfo=timezone.utc)),
+    # Перекалибровано по единственной верифицированной точке:
+    # ID 8_349_649_487 = 30 мая 2026 (BotFather скриншот, год 2026 = текущий)
+    # Линейная модель: ~102.48M ID/месяц от янв 2021 → верно на ±2–3 мес.
+    (2_007_000_000,  datetime(2021, 4, 1,  tzinfo=timezone.utc)),
+    (2_315_000_000,  datetime(2021, 7, 1,  tzinfo=timezone.utc)),
+    (2_622_000_000,  datetime(2021, 10, 1, tzinfo=timezone.utc)),
+    (2_930_000_000,  datetime(2022, 1, 1,  tzinfo=timezone.utc)),
+    (3_237_000_000,  datetime(2022, 4, 1,  tzinfo=timezone.utc)),
+    (3_545_000_000,  datetime(2022, 7, 1,  tzinfo=timezone.utc)),
+    (3_852_000_000,  datetime(2022, 10, 1, tzinfo=timezone.utc)),
+    (4_160_000_000,  datetime(2023, 1, 1,  tzinfo=timezone.utc)),
+    (4_467_000_000,  datetime(2023, 4, 1,  tzinfo=timezone.utc)),
+    (4_774_000_000,  datetime(2023, 7, 1,  tzinfo=timezone.utc)),
+    (5_082_000_000,  datetime(2023, 10, 1, tzinfo=timezone.utc)),
+    (5_389_000_000,  datetime(2024, 1, 1,  tzinfo=timezone.utc)),
+    (5_697_000_000,  datetime(2024, 4, 1,  tzinfo=timezone.utc)),
+    (6_004_000_000,  datetime(2024, 7, 1,  tzinfo=timezone.utc)),
+    (6_312_000_000,  datetime(2024, 10, 1, tzinfo=timezone.utc)),
+    (6_619_000_000,  datetime(2025, 1, 1,  tzinfo=timezone.utc)),
+    (6_926_000_000,  datetime(2025, 4, 1,  tzinfo=timezone.utc)),
+    (7_234_000_000,  datetime(2025, 7, 1,  tzinfo=timezone.utc)),
+    (7_541_000_000,  datetime(2025, 10, 1, tzinfo=timezone.utc)),
+    (7_849_000_000,  datetime(2026, 1, 1,  tzinfo=timezone.utc)),
+    (8_156_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
+    (8_349_649_487,  datetime(2026, 5, 30, tzinfo=timezone.utc)),  # VERIFIED
+    (8_464_000_000,  datetime(2026, 7, 1,  tzinfo=timezone.utc)),
+    (8_771_000_000,  datetime(2026, 10, 1, tzinfo=timezone.utc)),
 ]
 
 # ── Channel / Supergroup / Chat ID → approximate creation date anchors ─────────
