@@ -749,65 +749,53 @@ async def _show_result(
     username: str | None,
     auto_resolve_peer=None,
 ) -> None:
-    """
-    Двухфазный показ:
-    фаза 1 — ID-оценка сразу;
-    фаза 2 — Telethon (если есть аккаунты) или Bot API (для публичных) → обновление.
-    """
+    """Показ результата: дата по ID — моментально. Метаданные — фоном."""
     await state.clear()
 
     estimate = rc.estimate_by_id(entity_id, entity_type)
     estimate["name"] = name
     estimate["username"] = username
 
+    # Главное: показать дату сразу, без ожидания
+    text = rc.format_result(estimate, name, username)
     is_channel = entity_type in ("channel", "supergroup", "group")
+    kb = _result_kb(entity_id, entity_type) if not is_channel else _result_kb_retry_exact(entity_id, entity_type)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await rc.cache_result(pool, message.from_user.id, estimate, name, username)
 
-    if is_channel:
-        text_loading = rc.format_result(estimate, name, username)
-        text_loading += "\n\n⏳ <i>Запрашиваю метаданные...</i>"
-        sent = await message.answer(text_loading, parse_mode="HTML")
+    # Фоновое обогащение: Telethon → Bot API — без блокировки
+    peer = auto_resolve_peer or (username if username else rc.canonical_peer_id(entity_id))
+    asyncio.create_task(
+        _enrich_metadata(message, pool, entity_id, entity_type, name, username, peer)
+    )
 
-        peer = auto_resolve_peer or rc.canonical_peer_id(entity_id)
-        full_info = await rc.get_entity_full_info(pool, message.from_user.id, peer)
 
-        if not full_info:
-            # Bot API fallback: title, описание, подписчики для публичных каналов
+async def _enrich_metadata(
+    message: Message,
+    pool: asyncpg.Pool,
+    entity_id: int,
+    entity_type: str,
+    name: str | None,
+    username: str | None,
+    peer,
+) -> None:
+    """Фоновое обогащение кэша: Telethon → Bot API. Не блокирует пользователя."""
+    try:
+        owner_id = message.from_user.id
+        full_info = await rc.get_entity_full_info(pool, owner_id, peer)
+        if not full_info and entity_type in ("channel", "supergroup", "group"):
             full_info = await _bot_api_channel_info(message.bot, entity_id, username or peer)
-
-        if full_info:
-            merged = {**estimate, **full_info}
-            final_name = name or full_info.get("name")
-            final_username = username or full_info.get("username")
-            text = rc.format_result(merged, final_name, final_username)
-            if full_info.get("_via_bot_api"):
-                text += "\n\n<i>📊 Оценка по ID · для точной даты нажмите «📡 Получить точную дату»</i>"
-            kb = _result_kb(entity_id, entity_type)
-            await rc.cache_result(
-                pool, message.from_user.id, merged, final_name, final_username
-            )
-        else:
-            text = rc.format_result(estimate, name, username)
-            text += "\n\n<i>📊 Оценка по ID · приватный канал или данные недоступны</i>"
-            kb = _result_kb_retry_exact(entity_id, entity_type)
-            await rc.cache_result(pool, message.from_user.id, estimate, name, username)
-
-        try:
-            await sent.edit_text(text, parse_mode="HTML", reply_markup=kb)
-        except Exception:
-            await message.answer(text, parse_mode="HTML", reply_markup=kb)
-
-    else:
-        text = rc.format_result(estimate, name, username)
-        kb = _result_kb(entity_id, entity_type)
-        await message.answer(text, parse_mode="HTML", reply_markup=kb)
-        await rc.cache_result(pool, message.from_user.id, estimate, name, username)
-
-        if auto_resolve_peer:
-            asyncio.create_task(
-                _enrich_user_metadata(
-                    pool, message.from_user.id, entity_id, entity_type, auto_resolve_peer
-                )
-            )
+        if not full_info:
+            return
+        estimate = rc.estimate_by_id(entity_id, entity_type)
+        merged = {**estimate, **full_info}
+        await rc.cache_result(
+            pool, owner_id, merged,
+            full_info.get("name") or name,
+            full_info.get("username") or username,
+        )
+    except Exception as e:
+        log.debug("_enrich_metadata: %s", e)
 
 
 async def _enrich_user_metadata(
@@ -817,7 +805,7 @@ async def _enrich_user_metadata(
     entity_type: str,
     peer,
 ) -> None:
-    """Фоновое обогащение кэша метаданными пользователя/бота."""
+    """Устаревший alias — оставлен для совместимости."""
     try:
         full_info = await rc.get_entity_full_info(pool, owner_id, peer)
         if not full_info:
