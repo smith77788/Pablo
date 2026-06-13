@@ -3646,3 +3646,147 @@ async def _exec_network_broadcast(
             f"Ботов: {total_started}, получателей: {total_users:,}"
         ),
     }
+
+
+async def _exec_seed_presence_pack(
+    pool: asyncpg.Pool, bot: "Bot", op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Опубликовать начальные посты во всех каналах Presence Pack.
+
+    params: {"pack_id": int}
+    """
+    import aiohttp as _aiohttp
+    import json as _json
+    from services import presence_setup as _ps
+
+    pack_id: int = int(params.get("pack_id") or 0)
+    if not pack_id:
+        return {"status": "failed", "summary": "⚠️ pack_id не указан"}
+
+    pack = await db.get_presence_pack(pool, pack_id, owner_id)
+    if not pack:
+        return {"status": "failed", "summary": f"⚠️ Presence Pack #{pack_id} не найден"}
+
+    def _jlist(val) -> list:
+        if isinstance(val, list):
+            return val
+        if val is None:
+            return []
+        try:
+            return _json.loads(val) or []
+        except Exception:
+            return []
+
+    ch_ids: list[int] = _jlist(pack["channel_ids"])
+    if not ch_ids:
+        return {"status": "done", "summary": "⚠️ В пакете нет каналов — посев пропущен"}
+
+    # Resolve bot token if bot is linked
+    bot_token: str | None = None
+    if pack.get("bot_id"):
+        try:
+            bot_row = await pool.fetchrow(
+                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+                pack["bot_id"], owner_id,
+            )
+            if bot_row:
+                bot_token = bot_row["token"]
+        except Exception:
+            log.warning("_exec_seed_presence_pack op=%d: failed to fetch bot token", op_id)
+
+    # Resolve a group link for cross-linking in seed post
+    gr_ids: list[int] = _jlist(pack["group_ids"])
+    group_link: str | None = None
+    if gr_ids:
+        try:
+            gr_row = await pool.fetchrow(
+                "SELECT username FROM managed_channels "
+                "WHERE id = ANY($1::int[]) AND username IS NOT NULL LIMIT 1",
+                gr_ids,
+            )
+            if gr_row:
+                group_link = f"@{gr_row['username']}"
+        except Exception:
+            log.warning("_exec_seed_presence_pack op=%d: failed to fetch group link", op_id)
+
+    try:
+        channels = await pool.fetch(
+            "SELECT title, username, channel_id, access_hash FROM managed_channels "
+            "WHERE id = ANY($1::int[])",
+            ch_ids,
+        )
+    except Exception as exc:
+        log.error("_exec_seed_presence_pack op=%d: fetch channels failed: %s", op_id, exc)
+        return {"status": "failed", "summary": "❌ Ошибка при загрузке каналов из БД"}
+
+    success = 0
+    fail = 0
+    fail_names: list[str] = []
+    total = len(channels)
+
+    async with _aiohttp.ClientSession() as http:
+        for idx, ch in enumerate(channels, 1):
+            post_text = _ps.build_seed_post(
+                channel_title=ch["title"] or ch.get("username") or pack["name"],
+                bot_username=pack.get("bot_username"),
+                group_link=group_link,
+                target_url=pack.get("target_url"),
+                target_label=pack.get("target_label"),
+                pack_description=pack.get("description"),
+            )
+            chan_name = ch.get("title") or (
+                f"@{ch['username']}" if ch.get("username") else f"id{ch['channel_id']}"
+            )
+            posted = False
+            if bot_token:
+                chan_target = (
+                    f"@{ch['username']}"
+                    if ch.get("username")
+                    else int(f"-100{ch['channel_id']}")
+                )
+                posted = await _ps.seed_channel_post(http, bot_token, chan_target, post_text)
+            if not posted:
+                posted = await _ps.seed_channel_via_account(
+                    pool, owner_id, ch["channel_id"], ch.get("access_hash") or 0, post_text
+                )
+            if posted:
+                success += 1
+            else:
+                fail += 1
+                fail_names.append(chan_name)
+
+            # Update progress in operation_queue
+            try:
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                    idx, op_id,
+                )
+            except Exception:
+                pass
+
+            await asyncio.sleep(2)
+
+    if success > 0:
+        try:
+            await db.mark_presence_pack_seeded(pool, pack_id, owner_id)
+        except Exception:
+            log.warning(
+                "_exec_seed_presence_pack op=%d: mark_presence_pack_seeded failed", op_id
+            )
+
+    fail_hint = ""
+    if fail_names:
+        names = ", ".join(fail_names[:3])
+        extra = f" (+{len(fail_names) - 3})" if len(fail_names) > 3 else ""
+        fail_hint = f"\n⚠️ Не удалось: {names}{extra}"
+
+    return {
+        "status": "done",
+        "ok": success,
+        "fail": fail,
+        "total": total,
+        "summary": (
+            f"🌱 Посев постов Presence Pack #{pack_id}\n"
+            f"✅ Опубликовано: {success}/{total}{fail_hint}"
+        ),
+    }

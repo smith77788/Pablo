@@ -7,7 +7,6 @@ import json
 import logging
 from html import escape
 
-import aiohttp
 import asyncpg
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -728,138 +727,14 @@ async def cb_pack_view(
 # ── Seed Posts ─────────────────────────────────────────────────────────────
 
 
-async def _pack_seed_bg(
-    pool: asyncpg.Pool,
-    http: aiohttp.ClientSession,
-    progress_msg,
-    owner_id: int,
-    pack_id: int,
-    pack: dict,
-    channels: list,
-    bot_token: str | None,
-    group_link: str | None,
-) -> None:
-    success = 0
-    fail = 0
-    fail_details: list[str] = []
-    total = len(channels)
-    _last_progress_text = ""
-    try:
-        for idx, ch in enumerate(channels, 1):
-            post_text = presence_setup.build_seed_post(
-                channel_title=ch["title"] or ch.get("username") or pack["name"],
-                bot_username=pack.get("bot_username"),
-                group_link=group_link,
-                target_url=pack.get("target_url"),
-                target_label=pack.get("target_label"),
-                pack_description=pack.get("description"),
-            )
-            chan_name = ch.get("title") or (
-                f"@{ch['username']}" if ch.get("username") else f"id{ch['channel_id']}"
-            )
-            posted = False
-            if bot_token:
-                chan_target = (
-                    f"@{ch['username']}"
-                    if ch.get("username")
-                    else int(f"-100{ch['channel_id']}")
-                )
-                posted = await presence_setup.seed_channel_post(
-                    http, bot_token, chan_target, post_text
-                )
-            if not posted:
-                posted = await presence_setup.seed_channel_via_account(
-                    pool,
-                    owner_id,
-                    ch["channel_id"],
-                    ch.get("access_hash") or 0,
-                    post_text,
-                )
-            if posted:
-                success += 1
-            else:
-                fail += 1
-                fail_details.append(chan_name)
-            # Update progress message every 3 channels or on last
-            if idx % 3 == 0 or idx == total:
-                progress_text = (
-                    f"⏳ <b>Посев постов</b> — {idx}/{total}\n\n"
-                    f"✅ Успешно: {success} | ❌ Ошибок: {fail}\n"
-                    f"<i>Текущий: {escape(chan_name[:40])}</i>"
-                )
-                if progress_text != _last_progress_text:
-                    try:
-                        await progress_msg.edit_text(progress_text, parse_mode="HTML")
-                        _last_progress_text = progress_text
-                    except Exception:
-                        pass
-            await asyncio.sleep(2)
-    except asyncio.CancelledError:
-        log.info("_pack_seed_bg: отменено")
-        raise
-    except Exception:
-        log_exc_swallow(log, "_pack_seed_bg: неожиданная ошибка")
-
-    if success > 0:
-        try:
-            await db.mark_presence_pack_seeded(pool, pack_id, owner_id)
-        except Exception:
-            log_exc_swallow(log, "_pack_seed_bg: mark_presence_pack_seeded failed")
-
-    kb = InlineKeyboardBuilder()
-    if fail > 0:
-        kb.button(
-            text="🔁 Повторить посев",
-            callback_data=PackCb(action="seed", pack_id=pack_id),
-        )
-    kb.button(
-        text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id)
-    )
-    kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
-    kb.adjust(1)
-
-    fail_hint = ""
-    if fail > 0 and fail_details:
-        names = ", ".join(fail_details[:3])
-        extra = f" (+{len(fail_details) - 3})" if len(fail_details) > 3 else ""
-        fail_hint = (
-            f"\n\n⚠️ Не удалось опубликовать в: <b>{escape(names)}{extra}</b>\n"
-            f"💡 Причины: бот не является администратором канала, или аккаунт не участник."
-        )
-    elif fail > 0:
-        fail_hint = "\n\n⚠️ Некоторые посты не опубликованы — убедитесь что бот является admin в каналах."
-
-    if success == 0:
-        result_text = (
-            f"❌ <b>Посев не удался</b>\n\n"
-            f"Ни один пост не был опубликован.\n"
-            f"💡 Попробуйте:\n"
-            f"1. Нажмите <b>👑 Назначить бота admin</b> — дайте боту права публикации\n"
-            f"2. Убедитесь что аккаунты являются участниками каналов\n"
-            f"3. Повторите посев{fail_hint}"
-        )
-    else:
-        result_text = (
-            f"🌱 <b>Посев завершён</b>\n\n"
-            f"✅ Опубликовано: {success} | ❌ Ошибок: {fail}\n\n"
-            f"Каналы содержат начальный пост с взаимными ссылками."
-            f"{fail_hint}"
-        )
-    try:
-        await progress_msg.edit_text(
-            result_text, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
-    except Exception:
-        log_exc_swallow(log, "_pack_seed_bg: сбой финального отчёта")
-
-
 @router.callback_query(PackCb.filter(F.action == "seed"))
 async def cb_pack_seed(
     callback: CallbackQuery,
     callback_data: PackCb,
     pool: asyncpg.Pool,
-    http: aiohttp.ClientSession,
 ) -> None:
+    from services import operation_bus
+
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.answer()
         await callback.message.edit_text(
@@ -869,7 +744,8 @@ async def cb_pack_seed(
         )
         return
     owner_id = callback.from_user.id
-    pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
+    pack_id = callback_data.pack_id
+    pack = await db.get_presence_pack(pool, pack_id, owner_id)
     if not pack:
         await callback.answer("Пакет не найден", show_alert=True)
         return
@@ -881,63 +757,37 @@ async def cb_pack_seed(
 
     await callback.answer()
 
-    bot_token = None
-    if pack.get("bot_id"):
-        try:
-            bot_row = await pool.fetchrow(
-                "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-                pack["bot_id"],
-                owner_id,
-            )
-        except Exception:
-            log_exc_swallow(log, "pool.fetchrow managed_bots token (pack seed)")
-            bot_row = None
-        if bot_row:
-            bot_token = bot_row["token"]
-
-    gr_ids = _jlist(pack["group_ids"])
-    group_link = None
-    if gr_ids:
-        try:
-            gr_row = await pool.fetchrow(
-                "SELECT username FROM managed_channels WHERE id = ANY($1::int[]) AND username IS NOT NULL LIMIT 1",
-                gr_ids,
-            )
-        except Exception:
-            log_exc_swallow(log, "pool.fetchrow managed_channels group_link (pack seed)")
-            gr_row = None
-        if gr_row:
-            group_link = f"@{gr_row['username']}"
-
     try:
-        channels = await pool.fetch(
-            "SELECT title, username, channel_id, access_hash FROM managed_channels WHERE id = ANY($1::int[])",
-            ch_ids,
-        )
-    except Exception:
-        log_exc_swallow(log, "pool.fetch managed_channels (pack seed)")
-        channels = []
-
-    pack_id = callback_data.pack_id
-    progress_msg = await callback.message.edit_text(
-        f"⏳ <b>Посев постов запущен</b>\n\nКаналов: <b>{len(channels)}</b>\n\n"
-        "<i>Операция выполняется в фоне — вы можете продолжать работу.</i>",
-        parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _pack_seed_bg(
+        op_id = await operation_bus.submit(
             pool,
-            http,
-            progress_msg,
             owner_id,
-            pack_id,
-            dict(pack),
-            list(channels),
-            bot_token,
-            group_link,
+            "seed_presence_pack",
+            {"pack_id": pack_id},
+            total_items=len(ch_ids),
         )
+    except Exception as exc:
+        log_exc_swallow(log, f"cb_pack_seed: operation_bus.submit failed: {exc}")
+        await _edit(
+            callback,
+            "❌ <b>Не удалось поставить посев в очередь</b>\n\nПопробуйте ещё раз.",
+            markup=None,
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📋 Детали пакета", callback_data=PackCb(action="view", pack_id=pack_id)
     )
-    _treg.register(owner_id, "pack_seed", f"Посев постов пакета {pack_id}", task)
+    kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        f"⏳ <b>Посев постов поставлен в очередь</b>\n\n"
+        f"Каналов: <b>{len(ch_ids)}</b>\n"
+        f"Операция: <b>#{op_id}</b>\n\n"
+        f"Вы получите уведомление по завершении.",
+        markup=kb.as_markup(),
+    )
 
 
 # ── Promote Bot as Admin ───────────────────────────────────────────────────
