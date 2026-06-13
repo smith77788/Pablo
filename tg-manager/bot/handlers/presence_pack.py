@@ -909,18 +909,39 @@ async def cb_pack_promote(
 
     pack_id = callback_data.pack_id
     bot_tg_id = pack["bot_id"]
-    progress_msg = await callback.message.edit_text(
-        f"⏳ <b>Назначение администратора запущено</b>\n\nКаналов/групп: <b>{len(channels)}</b>\n\n"
-        "<i>Операция выполняется в фоне — вы можете продолжать работу.</i>",
-        parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _pack_promote_bg(
-            pool, progress_msg, owner_id, pack_id, list(channels), bot_tg_id
+
+    from services import operation_bus
+    try:
+        op_id = await operation_bus.submit(
+            pool,
+            owner_id,
+            "promote_presence_pack",
+            {
+                "pack_id": pack_id,
+                "bot_tg_id": bot_tg_id,
+                "channel_ids": all_asset_ids,
+            },
+            total_items=len(all_asset_ids),
         )
-    )
-    _treg.register(
-        owner_id, "pack_promote", f"Назначение бота admin пакета {pack_id}", task
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ Не удалось поставить операцию в очередь: {escape(str(exc)[:120])}",
+            parse_mode="HTML",
+        )
+        return
+
+    from bot.callbacks import BmCb, MassOpCb
+    from aiogram.utils.keyboard import InlineKeyboardBuilder as IKB
+    kb = IKB()
+    kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue", op_type="all", page=0))
+    kb.button(text="📋 Детали", callback_data=PackCb(action="view", pack_id=pack_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"👑 <b>Назначение бота администратором — в очереди</b>\n\n"
+        f"Каналов/групп: <b>{len(all_asset_ids)}</b>\n"
+        f"Операция #{op_id} — прогресс виден в очереди операций.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
 
 

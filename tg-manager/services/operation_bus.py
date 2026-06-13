@@ -122,6 +122,12 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "🌱",
     },
+    "promote_presence_pack": {
+        "description": "Назначение бота администратором Presence Pack",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "👑",
+    },
 }
 
 

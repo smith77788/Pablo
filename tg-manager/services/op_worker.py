@@ -783,6 +783,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_network_broadcast(pool, bot, op_id, owner_id, params)
             elif op_type == "seed_presence_pack":
                 result = await _exec_seed_presence_pack(pool, bot, op_id, owner_id, params)
+            elif op_type == "promote_presence_pack":
+                result = await _exec_promote_presence_pack(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -3800,5 +3802,71 @@ async def _exec_seed_presence_pack(
         "summary": (
             f"🌱 Посев постов Presence Pack #{pack_id}\n"
             f"✅ Опубликовано: {success}/{total}{fail_hint}"
+        ),
+    }
+
+
+async def _exec_promote_presence_pack(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Назначить бота администратором во всех каналах/группах Presence Pack."""
+    from services import presence_setup as _ps
+    from database import db as _db
+
+    pack_id = int(params.get("pack_id", 0))
+    bot_tg_id = int(params.get("bot_tg_id", 0))
+    channel_ids: list[int] = [int(x) for x in (params.get("channel_ids") or [])]
+
+    if not pack_id or not bot_tg_id or not channel_ids:
+        return {"status": "failed", "summary": "⚠️ Неверные параметры promote_presence_pack"}
+
+    total = len(channel_ids)
+    success = 0
+    fail = 0
+
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    )
+
+    for idx, ch_id in enumerate(channel_ids, 1):
+        try:
+            row = await pool.fetchrow(
+                "SELECT channel_id, access_hash FROM managed_channels WHERE id=$1", ch_id
+            )
+            if not row:
+                fail += 1
+                continue
+            ok = await _ps.promote_bot_in_channel(
+                pool, owner_id, row["channel_id"], row.get("access_hash") or 0, bot_tg_id
+            )
+            if ok:
+                success += 1
+            else:
+                fail += 1
+        except Exception as exc:
+            log.warning("_exec_promote_presence_pack op=%d ch=%d: %s", op_id, ch_id, exc)
+            fail += 1
+
+        if idx % 3 == 0 or idx == total:
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=$1 WHERE id=$2", success + fail, op_id
+            )
+        await asyncio.sleep(2)
+
+    if success > 0:
+        try:
+            await _db.mark_presence_pack_promoted(pool, pack_id, owner_id)
+        except Exception:
+            log.warning("_exec_promote_presence_pack op=%d: mark_promoted failed", op_id)
+
+    fail_hint = f"\n⚠️ Ошибок: {fail}" if fail else ""
+    return {
+        "status": "done",
+        "ok": success,
+        "fail": fail,
+        "total": total,
+        "summary": (
+            f"👑 Назначение бота admin — Presence Pack #{pack_id}\n"
+            f"✅ Успешно: {success}/{total}{fail_hint}"
         ),
     }
