@@ -82,8 +82,14 @@ async def _save_users(
     source_username: str,
     users: list[dict],
 ) -> int:
+    from database import db as _db
     saved = 0
     for u in users:
+        uid = u["id"]
+        entity_type = "bot" if u.get("bot") else "user"
+        display_name = " ".join(
+            p for p in [u.get("first_name"), u.get("last_name")] if p
+        ).strip() or None
         try:
             result = await pool.execute(
                 """INSERT INTO parsed_audiences(
@@ -100,7 +106,7 @@ async def _save_users(
                 source_title,
                 source_username,
                 run_id,
-                u["id"],
+                uid,
                 u.get("username"),
                 u.get("first_name"),
                 u.get("last_name"),
@@ -110,7 +116,10 @@ async def _save_users(
             if "INSERT" in str(result):
                 saved += 1
         except Exception as e:
-            log.debug("parser save user %s: %s", u.get("id"), e)
+            log.debug("parser save user %s: %s", uid, e)
+        # Radar: record sighting with the source chat context
+        await _db.record_entity_sighting(pool, uid, entity_type, chat_id=source_id)
+        await _db.record_name_snapshot(pool, uid, entity_type, u.get("username"), display_name)
     return saved
 
 
