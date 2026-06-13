@@ -468,23 +468,6 @@ async def msg_inactivity_days(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(AutoCb.filter(F.action == "act_webhook"))
-async def cb_act_webhook(
-    callback: CallbackQuery, callback_data: AutoCb, state: FSMContext
-) -> None:
-    """Action: webhook — ask for URL."""
-    await callback.answer()
-    await state.update_data(action_type="webhook", bot_id=callback_data.bot_id)
-    await state.set_state(AddAutoRuleExt.waiting_action_value)
-    await callback.message.edit_text(
-        "🔗 <b>Действие: Webhook</b>\n\n"
-        "<b>Шаг 3/3</b> — Введите URL для POST-запроса:\n"
-        "Пример: <code>https://your-service.com/webhook</code>",
-        parse_mode="HTML",
-        reply_markup=_ar_cancel_kb(callback_data.bot_id),
-    )
-
-
 @router.callback_query(
     AutoCb.filter(F.action == "ext_act_webhook"), AddAutoRuleExt.waiting_action_value
 )
