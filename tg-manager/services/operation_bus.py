@@ -146,6 +146,24 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "📢",
     },
+    "bulk_dm_adhoc": {
+        "description": "Рассылка личных сообщений",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "📨",
+    },
+    "bulk_post_to_channel": {
+        "description": "Массовая публикация в канал",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "📤",
+    },
+    "bulk_update_profile": {
+        "description": "Массовое обновление профилей",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "✏️",
+    },
 }
 
 

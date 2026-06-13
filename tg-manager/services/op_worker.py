@@ -791,6 +791,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_group_import_all(pool, bot, op_id, owner_id, params)
             elif op_type == "group_announce":
                 result = await _exec_group_announce(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_dm_adhoc":
+                result = await _exec_bulk_dm_adhoc(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_post_to_channel":
+                result = await _exec_bulk_post_to_channel(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_update_profile":
+                result = await _exec_bulk_update_profile(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
@@ -4232,4 +4238,101 @@ async def _exec_group_announce(
         "ok": ok_count,
         "fail": err_count,
         "summary": f"📢 Объявление: ✅ {ok_count} ❌ {err_count} из {total} групп",
+    }
+
+
+async def _exec_bulk_dm_adhoc(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Рассылка личных сообщений по списку usernames с нескольких аккаунтов (round-robin)."""
+    from services import account_manager
+    from database import db as _db
+
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    usernames: list[str] = params.get("usernames") or []
+    text: str = params.get("text") or ""
+    delay: float = float(params.get("delay") or 2.5)
+
+    if not account_ids or not usernames or not text:
+        return {"status": "failed", "reason": "Не указаны аккаунты, получатели или текст"}
+
+    rows = await pool.fetch(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id,
+        account_ids,
+    )
+    active_accounts = [dict(r) for r in rows]
+    if not active_accounts:
+        return {"status": "failed", "reason": "Нет активных аккаунтов"}
+
+    total = len(usernames)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count = 0
+    err_count = 0
+    flood_wait_total = 0.0
+
+    for i, username in enumerate(usernames):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "fail": err_count,
+                "summary": f"Отменено. Отправлено: {ok_count}/{total}",
+            }
+
+        if not active_accounts:
+            err_count += 1
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            continue
+
+        acc = active_accounts[i % len(active_accounts)]
+
+        try:
+            result = await account_manager.send_dm(
+                acc["session_str"], username, text, _acc=acc
+            )
+
+            if result.get("banned"):
+                await _db.deactivate_account(pool, acc["id"], "banned detected in bulk_dm_adhoc")
+                active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                err_count += 1
+                log.info("bulk_dm_adhoc: account %s banned, removed from pool", acc["id"])
+            elif result.get("flood_wait"):
+                fw = result.get("flood_wait", 0)
+                flood_wait_total += fw
+                err_count += 1
+                log.info("bulk_dm_adhoc: flood_wait %ss for @%s", fw, username)
+            elif result.get("ok"):
+                ok_count += 1
+            else:
+                err_count += 1
+                log.warning(
+                    "bulk_dm_adhoc: failed @%s: %s", username, result.get("error", "unknown")
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_exc_swallow(log, "bulk_dm_adhoc: send_dm @%s: %s", username, exc)
+            err_count += 1
+
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+
+        # adaptive delay: base + any accumulated flood wait (capped at 30s)
+        wait = delay + min(flood_wait_total, 30.0)
+        flood_wait_total = max(0.0, flood_wait_total - delay)
+        if i < total - 1:
+            await asyncio.sleep(wait)
+
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "fail": err_count,
+        "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей",
     }

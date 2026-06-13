@@ -6082,31 +6082,30 @@ async def fsm_bulk_dm_text(
     n_acc = len(accounts)
     base_delay = 5.0 if n_acc == 1 else (3.0 if n_acc == 2 else 2.5)
     total = len(usernames)
+    account_ids_list = [int(a["id"]) for a in accounts]
 
-    progress_msg = await message.answer(
-        f"⏳ <b>Рассылка запущена</b>\n\n"
+    from services import operation_bus
+
+    op_id = await operation_bus.submit(
+        pool,
+        message.from_user.id,
+        "bulk_dm_adhoc",
+        {
+            "account_ids": account_ids_list,
+            "usernames": usernames,
+            "text": text_to_send,
+            "delay": base_delay,
+        },
+        total_items=total,
+    )
+
+    await message.answer(
+        f"📨 <b>Рассылка ЛС поставлена в очередь</b>\n\n"
         f"Получателей: <b>{total}</b> | Аккаунтов: <b>{n_acc}</b>\n"
         f"Задержка: ~{base_delay:.0f}с | Ожидаемое время: ~{round(total * base_delay / 60, 1)} мин\n\n"
-        "⏳ 0 / " + str(total),
+        f"ID операции: <code>{op_id}</code>\n"
+        "Прогресс доступен в разделе /ops",
         parse_mode="HTML",
-    )
-    task = asyncio.create_task(
-        _bulk_dm_bg(
-            pool,
-            message.from_user.id,
-            progress_msg,
-            list(accounts),
-            usernames,
-            text_to_send,
-            base_delay,
-            total,
-        )
-    )
-    _treg.register(
-        message.from_user.id,
-        "bulk_dm",
-        f"Рассылка ЛС в {total} получателей",
-        task,
     )
 
 
