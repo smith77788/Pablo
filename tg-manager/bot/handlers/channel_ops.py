@@ -5453,23 +5453,25 @@ async def fsm_bulk_post_text(
         msg = await message.answer(
             _progress_text("Публикую посты...", 0, total, 0, 0), parse_mode="HTML"
         )
-        task = asyncio.create_task(
-            _bulk_post_to_channel_bg(
-                pool,
-                message.from_user.id,
-                msg,
-                list(accounts),
-                channel_ref,
-                text_to_post,
-                bulk_access_hash,
-                total,
-            )
-        )
-        _treg.register(
+        op_id = await operation_bus.submit(
+            pool,
             message.from_user.id,
             "bulk_post_to_channel",
-            f"Публикация в {html.escape(channel_ref)} ({total} аккаунтов)",
-            task,
+            {
+                "account_ids": [int(a["id"]) for a in accounts],
+                "channel_ref": channel_ref,
+                "text_to_post": text_to_post,
+                "bulk_access_hash": bulk_access_hash,
+                "chat_id": message.chat.id,
+                "message_id": msg.message_id,
+            },
+            total_items=total,
+        )
+        await msg.edit_text(
+            f"⏳ <b>Публикация в канал поставлена в очередь</b>\n\n"
+            f"📋 Операция <code>#{op_id}</code> · {total} аккаунтов\n"
+            f"💡 Статус: /ops",
+            parse_mode="HTML",
         )
     else:
         # Single-account post (from cb_post_channel_chosen)
@@ -5817,16 +5819,24 @@ async def fsm_update_profile(
         msg = await message.answer(
             _progress_text("Обновляю профили...", 0, total, 0, 0), parse_mode="HTML"
         )
-        task = asyncio.create_task(
-            _bulk_update_profile_bg(
-                pool, message.from_user.id, msg, list(accounts), field, value, total
-            )
-        )
-        _treg.register(
+        op_id = await operation_bus.submit(
+            pool,
             message.from_user.id,
             "bulk_update_profile",
-            f"Обновление {field} у {total} аккаунтов",
-            task,
+            {
+                "account_ids": [int(a["id"]) for a in accounts],
+                "field": field,
+                "value": value,
+                "chat_id": message.chat.id,
+                "message_id": msg.message_id,
+            },
+            total_items=total,
+        )
+        await msg.edit_text(
+            f"⏳ <b>Обновление профилей поставлено в очередь</b>\n\n"
+            f"📋 Операция <code>#{op_id}</code> · {total} аккаунтов\n"
+            f"💡 Статус: /ops",
+            parse_mode="HTML",
         )
     else:
         acc = await db.get_account_for_telethon(

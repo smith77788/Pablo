@@ -4336,3 +4336,258 @@ async def _exec_bulk_dm_adhoc(
         "fail": err_count,
         "summary": f"📨 Рассылка ЛС: ✅ {ok_count} ❌ {err_count} из {total} получателей",
     }
+
+
+async def _exec_bulk_post_to_channel(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Публикация текста в канал от нескольких аккаунтов."""
+    import html as _html
+    from services import account_manager
+    from database import db as _db
+    from bot.utils.op_helpers import backoff, _progress_text
+
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    channel_ref = params.get("channel_ref", "")
+    text_to_post = params.get("text_to_post", "")
+    bulk_access_hash = int(params.get("bulk_access_hash", 0) or 0)
+    chat_id = params.get("chat_id")
+    message_id = params.get("message_id")
+
+    if not account_ids or not channel_ref or not text_to_post:
+        return {"status": "failed", "reason": "Не указан channel_ref, text_to_post или account_ids"}
+
+    rows = await pool.fetch(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Аккаунты не найдены или неактивны"}
+
+    total = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    attempt = 0
+
+    for idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": len(ok_list),
+                "failed": len(err_list),
+                "summary": f"Отменено. Опубликовано: {len(ok_list)}, ошибок: {len(err_list)}",
+            }
+
+        label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+        result = await account_manager.post_to_channel(
+            acc["session_str"],
+            channel_ref,
+            text_to_post,
+            access_hash=bulk_access_hash,
+            _acc=acc,
+        )
+        if result.get("banned"):
+            await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+            err_list.append(f"❌ {label}: забанен")
+        elif result.get("flood_wait"):
+            err_list.append(f"⏳ {label}: flood_wait, пропущен")
+        elif "msg_id" in result:
+            ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
+        else:
+            err_list.append(
+                f"❌ {label}: {_html.escape(result.get('error', 'ошибка')[:60])}"
+            )
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+        if chat_id and message_id:
+            try:
+                await bot.edit_message_text(
+                    _progress_text(
+                        "Публикую посты...",
+                        idx + 1, total, len(ok_list), len(err_list),
+                    ),
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        if attempt >= 4:
+            attempt = 0
+        else:
+            attempt += 1
+        flood = result.get("flood_wait", 0) or 0
+        await asyncio.sleep(max(backoff(attempt), flood))
+
+    lines = (
+        [f"\U0001f4e4 <b>Публикация в {_html.escape(channel_ref)}</b>\n"]
+        + ok_list
+        + err_list
+    )
+    final_text = "\n".join(lines)
+
+    if chat_id and message_id:
+        try:
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot.callbacks import BmCb
+
+            kb = InlineKeyboardBuilder()
+            kb.button(
+                text="\U0001f4cb Детали операции",
+                callback_data=BmCb(action="op_detail", op_id=op_id),
+            )
+            await bot.edit_message_text(
+                final_text,
+                chat_id=chat_id,
+                message_id=message_id,
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+
+    return {
+        "status": "done",
+        "ok": len(ok_list),
+        "failed": len(err_list),
+        "summary": final_text[:500],
+    }
+
+
+async def _exec_bulk_update_profile(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Обновление поля профиля на нескольких аккаунтах."""
+    import html as _html
+    from services import account_manager
+    from database import db as _db
+    from bot.utils.op_helpers import backoff, _progress_text
+
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    field = params.get("field", "")
+    value = params.get("value", "")
+    chat_id = params.get("chat_id")
+    message_id = params.get("message_id")
+
+    if not account_ids or not field or value == "":
+        return {"status": "failed", "reason": "Не указано field, value или account_ids"}
+
+    rows = await pool.fetch(
+        "SELECT id, session_str, first_name, phone, device_model, system_version, app_version "
+        "FROM tg_accounts "
+        "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    accounts = [dict(r) for r in rows]
+    if not accounts:
+        return {"status": "failed", "reason": "Аккаунты не найдены или неактивны"}
+
+    total = len(accounts)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    attempt = 0
+
+    for i, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": len(ok_list),
+                "failed": len(err_list),
+                "summary": f"Отменено. Обновлено: {len(ok_list)}, ошибок: {len(err_list)}",
+            }
+
+        label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
+        actual_value = f"{value}{i + 1}" if field == "username" else value
+
+        try:
+            if field == "username":
+                result = await account_manager.update_account_username(
+                    acc["session_str"], actual_value, _acc=acc
+                )
+                if isinstance(result, dict) and result.get("banned"):
+                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                    err_list.append(f"❌ {label}: забанен")
+                elif isinstance(result, dict) and result.get("flood_wait"):
+                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                elif result and not isinstance(result, dict):
+                    err_list.append(f"❌ {label}: {_html.escape(str(result)[:50])}")
+                else:
+                    ok_list.append(f"✅ {label}: @{_html.escape(actual_value)}")
+            else:
+                result = await account_manager.update_profile(
+                    acc["session_str"], **{field: value}, _acc=acc
+                )
+                if isinstance(result, dict) and result.get("banned"):
+                    await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
+                    err_list.append(f"❌ {label}: забанен")
+                elif isinstance(result, dict) and result.get("flood_wait"):
+                    err_list.append(f"⏳ {label}: flood_wait, пропущен")
+                elif result:
+                    ok_list.append(f"✅ {label}")
+                else:
+                    err_list.append(f"❌ {label}: ошибка")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            err_list.append(f"❌ {label}: {str(e)[:50]}")
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+
+        if chat_id and message_id:
+            try:
+                await bot.edit_message_text(
+                    _progress_text(
+                        "Обновляю профили...",
+                        i + 1, total, len(ok_list), len(err_list),
+                    ),
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        if attempt >= 4:
+            attempt = 0
+        else:
+            attempt += 1
+        await asyncio.sleep(backoff(attempt, base=2.0, cap=30.0))
+
+    lines = [f"✏️ <b>Обновление {field}</b>\n"] + ok_list + err_list
+    final_text = "\n".join(lines)
+
+    if chat_id and message_id:
+        try:
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            from bot.callbacks import BmCb
+
+            kb = InlineKeyboardBuilder()
+            kb.button(
+                text="\U0001f4cb Детали операции",
+                callback_data=BmCb(action="op_detail", op_id=op_id),
+            )
+            await bot.edit_message_text(
+                final_text,
+                chat_id=chat_id,
+                message_id=message_id,
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+
+    return {
+        "status": "done",
+        "ok": len(ok_list),
+        "failed": len(err_list),
+        "summary": final_text[:500],
+    }
