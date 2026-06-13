@@ -130,12 +130,16 @@ def _extract_dc(entity) -> int | None:
 
 async def _get_avatar_metrics(client, entity) -> dict[str, Any]:
     """
-    Extract avatar lifecycle metrics: total count + oldest photo ID.
-    The photo object's .id behaves linearly within server clusters
-    and can serve as secondary epoch verification.
+    Extract avatar lifecycle: total count, oldest photo ID and DATE.
+
+    photo.date is a real Unix timestamp from Telegram's servers — far more
+    accurate than ID interpolation (within days vs ±2-3 months).
+    For bots: photo is usually set at creation time.
+    For users: photo is set early after registration.
     """
     total = 0
     oldest_photo_id = None
+    oldest_photo_date = None
     try:
         result = await asyncio.wait_for(
             client.get_profile_photos(entity, limit=100), timeout=15
@@ -143,11 +147,30 @@ async def _get_avatar_metrics(client, entity) -> dict[str, Any]:
         photos = list(result)
         total = result.total if hasattr(result, "total") else len(photos)
         if photos:
-            oldest = min(photos, key=lambda p: p.id)
-            oldest_photo_id = oldest.id
+            # Sort by date ascending to find the earliest known photo
+            photos_with_date = [
+                p for p in photos if getattr(p, "date", None)
+            ]
+            if photos_with_date:
+                oldest = min(photos_with_date, key=lambda p: p.date)
+                oldest_photo_id = oldest.id
+                dt = oldest.date
+                # Telethon returns date as datetime or int
+                if hasattr(dt, "timestamp"):
+                    oldest_photo_date = dt
+                elif isinstance(dt, int):
+                    from datetime import datetime, timezone
+                    oldest_photo_date = datetime.fromtimestamp(dt, tz=timezone.utc)
+            elif photos:
+                oldest = min(photos, key=lambda p: p.id)
+                oldest_photo_id = oldest.id
     except Exception:
         pass
-    return {"total_historical_count": total, "oldest_photo_id": oldest_photo_id}
+    return {
+        "total_historical_count": total,
+        "oldest_photo_id": oldest_photo_id,
+        "oldest_photo_date": oldest_photo_date,
+    }
 
 
 async def _get_db_footprint(pool: asyncpg.Pool, entity_id: int) -> int | None:
@@ -173,23 +196,23 @@ def _confidence_score(
     is_fragment: bool,
 ) -> float:
     """
-    Confidence score 0.0–1.0 based on data alignment:
-      0.30  base (ID interpolation always available)
-    + 0.40  exact creation date via first message
+    Confidence score 0.0–1.0:
+      0.20  base (ID interpolation ±2–3 months)
+    + 0.55  real server timestamp: first message or oldest avatar date
     + 0.15  DC extracted (entity is reachable)
-    + 0.10  avatar history available (secondary epoch signal)
+    + 0.05  avatar exists (confirms entity has activity)
     + 0.05  historical DB sighting
-    Fragment numbers start at 0.10 (no meaningful date signal).
+    Fragment numbers: 0.10 (no date signal at all).
     """
     if is_fragment:
         return 0.10
-    score = 0.30
+    score = 0.20
     if has_exact_date:
-        score += 0.40
+        score += 0.55  # real server timestamp (first_message or oldest_avatar)
     if has_dc:
         score += 0.15
     if has_avatar:
-        score += 0.10
+        score += 0.05
     if has_db_footprint:
         score += 0.05
     return round(min(score, 1.0), 2)
@@ -626,8 +649,20 @@ async def analyze_user(
         dc_id = _extract_dc(u)
         is_frag = _is_fragment_number(entity_id)
         footprint = await _get_db_footprint(pool, entity_id)
+
+        # Use real avatar date if available — far more accurate than ID interpolation
+        avatar_date = avatar_met.get("oldest_photo_date")
+        if avatar_date and not is_frag:
+            created_at = avatar_date
+            created_method = "oldest_avatar"
+            has_exact = True
+        else:
+            created_at = id_estimate["date"]
+            created_method = id_estimate["method"]
+            has_exact = False
+
         confidence = _confidence_score(
-            has_exact_date=False,
+            has_exact_date=has_exact,
             has_dc=dc_id is not None,
             has_avatar=avatar_met["total_historical_count"] > 0,
             has_db_footprint=footprint is not None,
@@ -638,7 +673,7 @@ async def analyze_user(
             "dc_id": dc_id,
             "is_fragment_number": is_frag,
             "estimated_creation_timestamp": int(id_estimate["date"].timestamp()),
-            "exact_creation_timestamp": None,
+            "exact_creation_timestamp": int(avatar_date.timestamp()) if avatar_date else None,
             "avatar_metrics": avatar_met,
             "first_spotted_in_our_db": footprint,
             "confidence_score": confidence,
@@ -665,8 +700,8 @@ async def analyze_user(
             "common_groups": common_groups,
             "photos_count": photos_count,
             "status": status_str,
-            "created_at": id_estimate["date"],
-            "created_method": id_estimate["method"],
+            "created_at": created_at,
+            "created_method": created_method,
             "bot_info": bot_info,
             # OSINT
             "dc_id": dc_id,
@@ -930,9 +965,11 @@ def format_overview(data: dict) -> str:
             lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
             method = data.get("created_method", "id_interpolation")
             if method == "first_message":
-                lines.append("🎯 Метод: первое сообщение (точно)")
+                lines.append("🎯 Источник: первое сообщение (точная дата)")
+            elif method == "oldest_avatar":
+                lines.append("🖼 Источник: дата аватара (реальный timestamp)")
             else:
-                lines.append("📊 Метод: оценка по ID (±2 мес.)")
+                lines.append("📊 Источник: оценка по ID (±2–3 мес.)")
 
     # Confidence score
     conf = data.get("confidence_score")
@@ -946,12 +983,14 @@ def format_overview(data: dict) -> str:
     # Avatar metrics
     av = data.get("avatar_metrics") or {}
     total_ph = av.get("total_historical_count", 0)
-    oldest_ph = av.get("oldest_photo_id")
+    method = data.get("created_method", "id_interpolation")
     if et in ("user", "bot") and total_ph > 0:
-        ph_line = f"🖼 Фото в истории: <b>{total_ph}</b>"
-        if oldest_ph:
-            ph_line += f"  (oldest ID: <code>{oldest_ph}</code>)"
-        lines.append(ph_line)
+        if method == "oldest_avatar":
+            # Date already shown as main creation date — just show count
+            lines.append(f"🖼 Фотографий в профиле: <b>{total_ph}</b>")
+        else:
+            # Avatar date not available — show as additional signal
+            lines.append(f"🖼 Фото в профиле: <b>{total_ph}</b> (нет даты → ID-оценка)")
 
     # DB footprint
     footprint = data.get("first_spotted_in_our_db")
