@@ -5046,3 +5046,138 @@ async def get_name_history(
         )
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Entity follow / watch list
+# ---------------------------------------------------------------------------
+
+async def follow_entity(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    entity_id: int,
+    entity_type: str,
+    label: str | None = None,
+) -> bool:
+    """Add entity to owner's follow list. Returns True if newly added, False if already following."""
+    try:
+        result = await pool.execute(
+            """INSERT INTO entity_follows (owner_id, entity_id, entity_type, label)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (owner_id, entity_id) DO NOTHING""",
+            owner_id, entity_id, entity_type, label,
+        )
+        return "INSERT 0 1" in str(result)
+    except Exception:
+        return False
+
+
+async def unfollow_entity(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    entity_id: int,
+) -> bool:
+    """Remove entity from owner's follow list. Returns True if removed."""
+    try:
+        result = await pool.execute(
+            "DELETE FROM entity_follows WHERE owner_id=$1 AND entity_id=$2",
+            owner_id, entity_id,
+        )
+        return "DELETE 1" in str(result)
+    except Exception:
+        return False
+
+
+async def is_following(pool: asyncpg.Pool, owner_id: int, entity_id: int) -> bool:
+    """Check if owner is following entity."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT id FROM entity_follows WHERE owner_id=$1 AND entity_id=$2",
+            owner_id, entity_id,
+        )
+        return row is not None
+    except Exception:
+        return False
+
+
+async def get_follows(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    limit: int = 50,
+) -> list[asyncpg.Record]:
+    """Return all entities owner is following, newest first."""
+    try:
+        return await pool.fetch(
+            """SELECT f.id, f.entity_id, f.entity_type, f.label, f.created_at, f.last_checked_at,
+                      lk.username, lk.display_name
+               FROM entity_follows f
+               LEFT JOIN entity_last_known lk ON lk.entity_id = f.entity_id
+               WHERE f.owner_id = $1
+               ORDER BY f.created_at DESC
+               LIMIT $2""",
+            owner_id, limit,
+        )
+    except Exception:
+        return []
+
+
+async def record_follow_change(
+    pool: asyncpg.Pool,
+    follow_id: int,
+    owner_id: int,
+    entity_id: int,
+    change_type: str,
+    old_username: str | None,
+    new_username: str | None,
+    old_name: str | None,
+    new_name: str | None,
+) -> int | None:
+    """Record a detected change for a followed entity. Returns new event id."""
+    try:
+        return await pool.fetchval(
+            """INSERT INTO entity_follow_events
+                   (follow_id, owner_id, entity_id, change_type,
+                    old_username, new_username, old_name, new_name)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+               RETURNING id""",
+            follow_id, owner_id, entity_id, change_type,
+            old_username, new_username, old_name, new_name,
+        )
+    except Exception:
+        return None
+
+
+async def get_pending_follow_notifications(
+    pool: asyncpg.Pool,
+    limit: int = 100,
+) -> list[asyncpg.Record]:
+    """Return unnotified follow events for delivery."""
+    try:
+        return await pool.fetch(
+            """SELECT e.id, e.follow_id, e.owner_id, e.entity_id,
+                      e.change_type, e.old_username, e.new_username,
+                      e.old_name, e.new_name, e.detected_at
+               FROM entity_follow_events e
+               WHERE NOT e.notified
+               ORDER BY e.detected_at ASC
+               LIMIT $1""",
+            limit,
+        )
+    except Exception:
+        return []
+
+
+async def mark_follow_notifications_sent(
+    pool: asyncpg.Pool,
+    event_ids: list[int],
+) -> None:
+    """Mark events as notified."""
+    if not event_ids:
+        return
+    try:
+        await pool.execute(
+            "UPDATE entity_follow_events SET notified=TRUE WHERE id = ANY($1::bigint[])",
+            event_ids,
+        )
+    except Exception:
+        pass

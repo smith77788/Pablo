@@ -372,6 +372,10 @@ async def main() -> None:
         asyncio.create_task(
             _resilient("anomaly_detector", anomaly_detector.run_anomaly_loop, pool, bot)
         )
+        from services import follow_checker as _follow_checker
+        asyncio.create_task(
+            _resilient("follow_checker", _follow_checker.run_follow_checker, pool, bot)
+        )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http)
     finally:

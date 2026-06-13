@@ -418,8 +418,8 @@ async def cache_result(
                (entity_id, entity_type, entity_name, username, reg_date, method,
                 checked_by, participants_count, verified, scam, fake, premium, about,
                 confidence_lo, confidence_hi,
-                dc_id, is_fragment, confidence_score, oldest_photo_id)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                dc_id, is_fragment, confidence_score, oldest_photo_id, first_spotted_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW())
                ON CONFLICT (entity_id, entity_type) DO UPDATE
                SET entity_name=$3, username=$4, reg_date=$5, method=$6,
                    checked_by=$7, participants_count=$8, verified=$9,

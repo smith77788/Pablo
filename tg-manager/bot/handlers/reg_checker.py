@@ -100,7 +100,7 @@ def _result_kb_retry_exact(entity_id: int, entity_type: str) -> object:
     return kb.as_markup()
 
 
-def _analyze_kb(entity_id: int, entity_type: str, current_page: int) -> object:
+def _analyze_kb(entity_id: int, entity_type: str, current_page: int, is_following: bool = False) -> object:
     from services.entity_analyzer import PAGE_TITLES
     kb = InlineKeyboardBuilder()
     for page, title in PAGE_TITLES.items():
@@ -114,6 +114,11 @@ def _analyze_kb(entity_id: int, entity_type: str, current_page: int) -> object:
                 text=title,
                 callback_data=RegCb(action="page", entity_id=entity_id, entity_type=entity_type, page=page),
             )
+    follow_label = "🔕 Отписаться" if is_following else "📌 Следить"
+    kb.button(
+        text=follow_label,
+        callback_data=RegCb(action="follow_toggle", entity_id=entity_id, entity_type=entity_type),
+    )
     kb.button(
         text="📋 Экспорт",
         callback_data=RegCb(action="export", entity_id=entity_id, entity_type=entity_type),
@@ -123,7 +128,7 @@ def _analyze_kb(entity_id: int, entity_type: str, current_page: int) -> object:
         callback_data=RegCb(action="analyze", entity_id=entity_id, entity_type=entity_type, page=current_page),
     )
     kb.button(text="◀️ Назад", callback_data=RegCb(action="menu"))
-    kb.adjust(3, 3, 2, 1)
+    kb.adjust(3, 3, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -912,7 +917,7 @@ async def cb_analyze(
             pass
         return
 
-    await _show_analysis_page(callback.message, data, entity_id, entity_type, page)
+    await _show_analysis_page(callback.message, data, entity_id, entity_type, page, pool, callback.from_user.id)
 
 
 @router.callback_query(RegCb.filter(F.action == "page"))
@@ -933,7 +938,7 @@ async def cb_analyze_page(
         )
         return
 
-    await _show_analysis_page(callback.message, data, entity_id, entity_type, page)
+    await _show_analysis_page(callback.message, data, entity_id, entity_type, page, pool, callback.from_user.id)
 
 
 @router.callback_query(RegCb.filter(F.action == "export"))
@@ -979,13 +984,19 @@ async def _show_analysis_page(
     message: Message,
     data: dict,
     entity_id: int,
-    entity_type: int,
+    entity_type: str,
     page: int,
+    pool: asyncpg.Pool | None = None,
+    owner_id: int | None = None,
 ) -> None:
     from services.entity_analyzer import PAGE_FORMATTERS
+    from database import db as _db
     formatter = PAGE_FORMATTERS.get(page, PAGE_FORMATTERS[0])
     text = formatter(data)
-    kb = _analyze_kb(entity_id, entity_type, page)
+    is_following = False
+    if pool and owner_id:
+        is_following = await _db.is_following(pool, owner_id, entity_id)
+    kb = _analyze_kb(entity_id, entity_type, page, is_following=is_following)
     try:
         await message.edit_text(
             text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True
@@ -994,3 +1005,25 @@ async def _show_analysis_page(
         await message.answer(
             text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True
         )
+
+
+@router.callback_query(RegCb.filter(F.action == "follow_toggle"))
+async def cb_follow_toggle(
+    callback: CallbackQuery, callback_data: RegCb, pool: asyncpg.Pool
+) -> None:
+    from database import db as _db
+    entity_id = callback_data.entity_id
+    entity_type = callback_data.entity_type or "user"
+    owner_id = callback.from_user.id
+    currently_following = await _db.is_following(pool, owner_id, entity_id)
+    if currently_following:
+        await _db.unfollow_entity(pool, owner_id, entity_id)
+        await callback.answer("🔕 Вы отписались от уведомлений", show_alert=False)
+    else:
+        await _db.follow_entity(pool, owner_id, entity_id, entity_type)
+        await callback.answer("📌 Подписались! Уведомим при изменении имени/username", show_alert=True)
+    # Re-render the current page with updated follow button
+    data = await _get_or_fetch_analysis(pool, owner_id, entity_id, entity_type)
+    if data:
+        page = callback_data.page or 0
+        await _show_analysis_page(callback.message, data, entity_id, entity_type, page, pool, owner_id)
