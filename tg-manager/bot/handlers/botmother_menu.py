@@ -155,9 +155,10 @@ def _operations_kb(plan: str = "free"):
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
     kb.button(text=f"{_lock(plan,'pro')}🛠️ Построитель", callback_data=MassOpCb(action="menu"))
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
+    kb.button(text="📊 Дашборд опер.", callback_data=BmCb(action="ops"))
     kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 1, 2, 2, 1)
+    kb.adjust(2, 2, 1, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -556,6 +557,162 @@ async def cb_operations(
         "⏱️ <b>Планировщик</b> — запустить операцию по расписанию" + infra_line,
         _operations_kb(user_plan),
     )
+
+
+# ── Ops Dashboard (BmCb action="ops") ────────────────────────────────────
+
+
+@router.callback_query(BmCb.filter(F.action == "ops"))
+async def cb_ops_dashboard(
+    callback: CallbackQuery,
+    callback_data: BmCb,
+    pool: asyncpg.Pool,
+) -> None:
+    """Operation dashboard: running count, recent history (last 5), quick actions."""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    running_count = 0
+    pending_count = 0
+    recent_ops: list = []
+    try:
+        stats = await pool.fetchrow(
+            """SELECT
+                   COUNT(*) FILTER (WHERE status='running') AS running_cnt,
+                   COUNT(*) FILTER (WHERE status='pending') AS pending_cnt
+               FROM operation_queue WHERE owner_id=$1""",
+            user_id,
+        )
+        if stats:
+            running_count = stats["running_cnt"] or 0
+            pending_count = stats["pending_cnt"] or 0
+    except Exception:
+        log_exc_swallow(log, "ops_dashboard: failed to fetch operation counts")
+
+    try:
+        recent_ops = await pool.fetch(
+            "SELECT id, op_type, status, done_items, total_items, created_at, "
+            "finished_at, last_error, retry_count, max_retries "
+            "FROM operation_queue WHERE owner_id=$1 "
+            "ORDER BY created_at DESC LIMIT 5",
+            user_id,
+        )
+    except Exception:
+        log_exc_swallow(log, "ops_dashboard: failed to fetch recent operations")
+        recent_ops = []
+
+    _STATUS_ICONS = {
+        "pending": "⏳",
+        "running": "🔄",
+        "done": "✅",
+        "failed": "❌",
+        "cancelled": "🚫",
+    }
+
+    lines = ["<b>📊 Дашборд операций</b>\n"]
+    if running_count > 0 or pending_count > 0:
+        parts = []
+        if running_count:
+            parts.append(f"🔄 {running_count} выполняется")
+        if pending_count:
+            parts.append(f"⏳ {pending_count} в очереди")
+        lines.append("<i>" + " · ".join(parts) + "</i>\n")
+    else:
+        lines.append("<i>Активных операций нет</i>\n")
+
+    kb = InlineKeyboardBuilder()
+
+    if recent_ops:
+        lines.append("<b>Последние операции:</b>")
+        failed_count = 0
+        for op in recent_ops:
+            icon = _STATUS_ICONS.get(op["status"], "❓")
+            otype = html.escape(op["op_type"])
+            done = op["done_items"] or 0
+            total = op["total_items"] or 0
+            created = op["created_at"].strftime("%d.%m %H:%M") if op["created_at"] else "—"
+            retry_count = op["retry_count"] or 0
+            max_retries = op["max_retries"] or 3
+            is_dead = op["status"] == "failed" and max_retries > 0 and retry_count >= max_retries
+
+            if op["status"] == "running" and total:
+                pct = round(100 * done / total) if total else 0
+                progress = f" [{done}/{total} {pct}%]"
+            elif op["status"] == "done":
+                progress = f" [{done}/{total}]" if total else ""
+            elif op["status"] == "failed":
+                err = (op["last_error"] or "")[:50]
+                progress = f" — <i>{html.escape(err)}</i>" if err else ""
+            else:
+                progress = f" [{total} эл.]" if total else ""
+
+            dead_mark = "☠️ " if is_dead else ""
+            lines.append(f"{dead_mark}{icon} <b>{otype}</b> #{op['id']}{progress} <i>{created}</i>")
+
+            # Action buttons per operation
+            if op["status"] in ("pending", "running"):
+                kb.button(
+                    text=f"❌ Отменить #{op['id']}",
+                    callback_data=BmCb(action="op_cancel", op_id=op["id"]),
+                )
+            elif op["status"] == "failed":
+                btn_label = f"🔄 Перезапустить #{op['id']}" if is_dead else f"🔄 Повторить #{op['id']}"
+                kb.button(
+                    text=btn_label,
+                    callback_data=BmCb(action="op_retry", op_id=op["id"]),
+                )
+                failed_count += 1
+
+        if failed_count > 1:
+            kb.button(
+                text=f"🔄 Повторить все ошибки",
+                callback_data=BmCb(action="ops_retry_all_failed"),
+            )
+    else:
+        lines.append("<i>Операций пока нет. Запустите операцию через меню.</i>")
+
+    lines.append("")
+    kb.button(text="📋 Полная очередь", callback_data=MassOpCb(action="queue", op_type="all", page=0))
+    kb.button(text="📊 Отчёты", callback_data=BmCb(action="op_reports"))
+    kb.button(text="🔄 Обновить", callback_data=BmCb(action="ops"))
+    kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
+    kb.adjust(1)
+    await _edit(callback, "\n".join(lines), kb.as_markup())
+
+
+@router.callback_query(BmCb.filter(F.action == "ops_retry_all_failed"))
+async def cb_ops_retry_all_failed(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+) -> None:
+    """Retry ALL failed operations for this user from the ops dashboard."""
+    user_id = callback.from_user.id
+    try:
+        result = await pool.execute(
+            "UPDATE operation_queue SET status='pending', last_error=NULL, error_msg=NULL, "
+            "retry_count=0, started_at=NULL, finished_at=NULL, done_items=0, "
+            "scheduled_for=NULL "
+            "WHERE owner_id=$1 AND status='failed'",
+            user_id,
+        )
+    except Exception as e:
+        await callback.answer(f"Ошибка БД: {e}", show_alert=True)
+        return
+    try:
+        reset_count = int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        reset_count = 0
+    if reset_count == 0:
+        await callback.answer("Нет неудачных операций для повторного запуска.", show_alert=True)
+        return
+    await callback.answer(
+        f"✅ {reset_count} операц{'ия' if reset_count == 1 else 'ии' if 2 <= reset_count <= 4 else 'ий'} "
+        f"поставлено в очередь повторно.",
+        show_alert=True,
+    )
+    # Re-render dashboard
+    from bot.callbacks import BmCb as _BmCb
+    await cb_ops_dashboard(callback, _BmCb(action="ops"), pool)
 
 
 # ── Comms ─────────────────────────────────────────────────────────────────
