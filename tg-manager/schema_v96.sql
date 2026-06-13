@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS entity_name_history (
     id            BIGSERIAL     PRIMARY KEY,
     entity_id     BIGINT        NOT NULL,
-    entity_type   TEXT          NOT NULL CHECK (entity_type IN ('user', 'bot', 'channel', 'group')),
+    entity_type   TEXT          NOT NULL CHECK (entity_type IN ('user', 'bot', 'channel', 'group', 'supergroup')),
     username      TEXT,                             -- @handle without @, NULL if none
     display_name  TEXT,                             -- first+last or channel title
     seen_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()

@@ -7,8 +7,8 @@
 
 CREATE TABLE IF NOT EXISTS seen_entities (
     entity_id       BIGINT       NOT NULL,
-    entity_type     TEXT         NOT NULL CHECK (entity_type IN ('user', 'bot', 'channel', 'group')),
-    chat_id         BIGINT,                           -- which chat/dialog we saw them in (NULL = direct lookup)
+    entity_type     TEXT         NOT NULL CHECK (entity_type IN ('user', 'bot', 'channel', 'group', 'supergroup')),
+    chat_id         BIGINT       NOT NULL DEFAULT 0,   -- 0 = direct lookup, else the chat's ID
     seen_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     first_seen_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     last_seen_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),

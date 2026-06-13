@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS entity_follows (
     id          BIGSERIAL     PRIMARY KEY,
     owner_id    BIGINT        NOT NULL,   -- Telegram user_id of the subscriber
     entity_id   BIGINT        NOT NULL,
-    entity_type TEXT          NOT NULL CHECK (entity_type IN ('user', 'bot', 'channel', 'group')),
+    entity_type TEXT          NOT NULL CHECK (entity_type IN ('user', 'bot', 'channel', 'group', 'supergroup')),
     label       TEXT,                     -- optional human label ("competitor", "client", etc.)
     created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     last_checked_at TIMESTAMPTZ,
