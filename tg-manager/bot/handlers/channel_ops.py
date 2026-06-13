@@ -5298,20 +5298,23 @@ async def fsm_bulk_channel_id(
         return
 
     if op == "leave":
+        from services import operation_bus
+
         total = len(accounts)
-        msg = await message.answer(
-            _progress_text("Покидаю каналы...", 0, total, 0, 0), parse_mode="HTML"
+        op_id = await operation_bus.submit(
+            pool, message.from_user.id, "bulk_leave",
+            {
+                "channels": [channel_ref],
+                "account_ids": [int(a["id"]) for a in accounts],
+            },
+            total_items=total,
         )
-        task = asyncio.create_task(
-            _bulk_leave_channel_bg(
-                pool, message.from_user.id, msg, list(accounts), channel_ref, total
-            )
-        )
-        _treg.register(
-            message.from_user.id,
-            "bulk_leave",
-            f"Выход из {html.escape(channel_ref)} ({total} аккаунтов)",
-            task,
+        await message.answer(
+            f"✅ <b>Выход из канала запущен</b>\n\n"
+            f"Канал: <code>{html.escape(channel_ref)}</code> · {total} аккаунтов\n"
+            f"📋 Операция <code>#{op_id}</code> в очереди\n"
+            f"💡 Статус: /ops",
+            parse_mode="HTML",
         )
 
     elif op == "post":
