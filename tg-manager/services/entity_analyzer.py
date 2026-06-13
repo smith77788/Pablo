@@ -188,6 +188,26 @@ async def _get_db_footprint(pool: asyncpg.Pool, entity_id: int) -> int | None:
         return None
 
 
+async def _get_earliest_activity(pool: asyncpg.Pool, entity_id: int) -> datetime | None:
+    """
+    Find the earliest date this user_id appears in our user_activity table
+    (across all bots in our system). Acts as an upper bound: user existed
+    no later than this date.
+    """
+    try:
+        val = await pool.fetchval(
+            "SELECT MIN(first_seen) FROM user_activity WHERE user_id=$1",
+            entity_id,
+        )
+        if val is None:
+            return None
+        if hasattr(val, "tzinfo") and val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        return val
+    except Exception:
+        return None
+
+
 def _confidence_score(
     has_exact_date: bool,
     has_dc: bool,
@@ -649,6 +669,7 @@ async def analyze_user(
         dc_id = _extract_dc(u)
         is_frag = _is_fragment_number(entity_id)
         footprint = await _get_db_footprint(pool, entity_id)
+        earliest_activity = await _get_earliest_activity(pool, entity_id)
 
         # Use real avatar date if available — far more accurate than ID interpolation
         avatar_date = avatar_met.get("oldest_photo_date")
@@ -656,9 +677,17 @@ async def analyze_user(
             created_at = avatar_date
             created_method = "oldest_avatar"
             has_exact = True
+        elif earliest_activity and not is_frag:
+            # Earliest activity in our DB is NOT the creation date, but an upper bound.
+            # We show both: approximate ID estimate + "first seen in DB" separately.
+            # The created_at is still the ID estimate (not activity date), but method
+            # is marked no_avatar so the display renders it as approximate.
+            created_at = id_estimate["date"]
+            created_method = "id_interpolation_no_avatar"
+            has_exact = False
         else:
             created_at = id_estimate["date"]
-            created_method = id_estimate["method"]
+            created_method = "id_interpolation_no_avatar" if not is_frag else id_estimate["method"]
             has_exact = False
 
         confidence = _confidence_score(
@@ -676,6 +705,7 @@ async def analyze_user(
             "exact_creation_timestamp": int(avatar_date.timestamp()) if avatar_date else None,
             "avatar_metrics": avatar_met,
             "first_spotted_in_our_db": footprint,
+            "earliest_activity_in_db": int(earliest_activity.timestamp()) if earliest_activity else None,
             "confidence_score": confidence,
             "privacy_restrictions": {
                 "hidden_forward_link": noforwards,
@@ -709,6 +739,7 @@ async def analyze_user(
             "avatar_metrics": avatar_met,
             "confidence_score": confidence,
             "first_spotted_in_our_db": footprint,
+            "earliest_activity_in_db": earliest_activity,
             "recon_payload": recon_payload,
         }
 
@@ -958,18 +989,25 @@ def format_overview(data: dict) -> str:
     if data.get("is_fragment_number"):
         lines.append("🔷 <b>Fragment анонимный номер</b> — дата не определяется")
     else:
+        from services.registration_checker import format_date_ru, format_age
+        method = data.get("created_method", "id_interpolation")
         ct = data.get("created_at")
         if ct:
-            from services.registration_checker import format_date_ru, format_age
-            lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
-            lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
-            method = data.get("created_method", "id_interpolation")
             if method == "first_message":
+                lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
+                lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
                 lines.append("🎯 Источник: первое сообщение (точная дата)")
             elif method == "oldest_avatar":
+                lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
+                lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
                 lines.append("🖼 Источник: дата аватара (реальный timestamp)")
             else:
-                lines.append("📊 Источник: оценка по ID (±2–3 мес.)")
+                # ID interpolation — show approximate with prominent warning
+                lines.append(f"\n⚠️ <b>Точная дата создания недоступна</b>")
+                lines.append(f"📊 Оценка по ID: ~<b>{format_date_ru(ct)}</b> (±2–3 месяца)")
+                if et in ("user", "bot"):
+                    lines.append("🖼 <i>Нет аватара — аватар даёт точный timestamp</i>")
+                lines.append(f"⏳ Оценочный возраст: ~{format_age(ct)}")
 
     # Confidence score
     conf = data.get("confidence_score")
@@ -984,18 +1022,25 @@ def format_overview(data: dict) -> str:
     av = data.get("avatar_metrics") or {}
     total_ph = av.get("total_historical_count", 0)
     method = data.get("created_method", "id_interpolation")
-    if et in ("user", "bot") and total_ph > 0:
-        if method == "oldest_avatar":
-            # Date already shown as main creation date — just show count
+    if et in ("user", "bot"):
+        if total_ph > 0 and method == "oldest_avatar":
             lines.append(f"🖼 Фотографий в профиле: <b>{total_ph}</b>")
+        elif total_ph > 0:
+            lines.append(f"🖼 Фото в профиле: <b>{total_ph}</b> (дата не считывается)")
         else:
-            # Avatar date not available — show as additional signal
-            lines.append(f"🖼 Фото в профиле: <b>{total_ph}</b> (нет даты → ID-оценка)")
+            lines.append("🖼 <i>Аватар не установлен</i>")
+
+    # Earliest activity in our DB (upper bound on creation date)
+    ea = data.get("earliest_activity_in_db")
+    if ea is not None:
+        from services.registration_checker import format_date_ru
+        if not hasattr(ea, "strftime"):
+            ea = datetime.fromtimestamp(ea, tz=timezone.utc)
+        lines.append(f"🗄 Первое сообщение боту: <b>{format_date_ru(ea)}</b> (аккаунт существовал до этого)")
 
     # DB footprint
     footprint = data.get("first_spotted_in_our_db")
-    if footprint:
-        from datetime import datetime, timezone
+    if footprint and not ea:
         ft = datetime.fromtimestamp(footprint, tz=timezone.utc)
         from services.registration_checker import format_date_ru
         lines.append(f"🗄 Первое обнаружение в БД: <b>{format_date_ru(ft)}</b>")
