@@ -542,7 +542,7 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             tgt = _html.escape(q["target"] or "?")
             rsn = _html.escape(q["reason"] or "")
             progress = ""
-            if q["status"] == "running" and q["total_items"]:
+            if q["status"] == "running" and q["total_items"] and q["total_items"] > 0:
                 pct = int(q["done_items"] * 100 / q["total_items"])
                 progress = f" {q['done_items']}/{q['total_items']} ({pct}%)"
             err_note = ""
