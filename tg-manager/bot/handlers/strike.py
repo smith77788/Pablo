@@ -475,7 +475,31 @@ import html as _html
 
 
 async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Общий хелпер: показывает историю Strike."""
+    """Общий хелпер: показывает историю Strike.
+
+    Раздел 1 — активные/ожидающие операции из operation_queue (тип strike).
+    Раздел 2 — завершённые удары из strike_history (последние 10).
+    """
+    # ── Раздел 1: активные / ожидающие из operation_queue ────────────────────
+    queue_rows: list = []
+    try:
+        queue_rows = await pool.fetch(
+            """SELECT id, status, created_at, started_at, finished_at,
+                      params->>'target' AS target,
+                      params->>'reason' AS reason,
+                      COALESCE(total_items, 0) AS total_items,
+                      COALESCE(done_items, 0)  AS done_items,
+                      error_msg
+               FROM operation_queue
+               WHERE owner_id=$1 AND op_type='strike'
+               ORDER BY created_at DESC LIMIT 5""",
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "_show_strike_history: queue fetch failed")
+
+    # ── Раздел 2: завершённые удары из strike_history ────────────────────────
+    rows: list = []
     try:
         rows = await pool.fetch(
             """SELECT id, target, reason, preset, accounts_used, peer_reported, msgs_reported,
@@ -487,12 +511,11 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
             callback.from_user.id,
         )
     except Exception:
-        log_exc_swallow(log, "_show_strike_history: fetch failed")
-        rows = []
+        log_exc_swallow(log, "_show_strike_history: history fetch failed")
 
     kb = InlineKeyboardBuilder()
 
-    if not rows:
+    if not queue_rows and not rows:
         kb.button(text="◀️ Назад", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
             "📜 <b>История атак</b>\n\nАтак ещё не было.",
@@ -501,36 +524,68 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         )
         return
 
-    lines = ["📜 <b>История Strike (последние 10)</b>\n"]
-    rerun_rows = []  # rows eligible for re-run buttons (unique targets, max 5)
+    lines: list[str] = ["📜 <b>История Strike</b>\n"]
+
+    # ── Очередь ──────────────────────────────────────────────────────────────
+    if queue_rows:
+        _STATUS_ICONS = {
+            "pending":  "⏳",
+            "running":  "⚡",
+            "done":     "✅",
+            "failed":   "❌",
+            "cancelled":"🚫",
+        }
+        lines.append("<b>Очередь операций:</b>")
+        for q in queue_rows:
+            icon = _STATUS_ICONS.get(q["status"], "❓")
+            ts = q["created_at"].strftime("%d.%m %H:%M") if q["created_at"] else "?"
+            tgt = _html.escape(q["target"] or "?")
+            rsn = _html.escape(q["reason"] or "")
+            progress = ""
+            if q["status"] == "running" and q["total_items"]:
+                pct = int(q["done_items"] * 100 / q["total_items"])
+                progress = f" {q['done_items']}/{q['total_items']} ({pct}%)"
+            err_note = ""
+            if q["status"] == "failed" and q["error_msg"]:
+                err_note = f"\n   ⚠️ {_html.escape(str(q['error_msg'])[:80])}"
+            lines.append(
+                f"{icon} #{q['id']} <code>{tgt}</code> · {rsn} · {ts}{progress}{err_note}"
+            )
+        lines.append("")
+
+    # ── Завершённые удары ─────────────────────────────────────────────────────
+    rerun_rows: list = []
     seen_targets: set[str] = set()
-    for r in rows:
-        # 🟢 = подтверждено удаление, ⚔️ = полный удар, 🟡 = только ReportPeer, 🔴 = не прошёл
-        _pr = r["peer_reported"] or 0
-        _mr = r["msgs_reported"] or 0
-        _mf = r["msgs_fetched"] or 0
-        if r["verified_down"]:
-            status = "🟢"
-        elif _pr > 0 and (_mr > 0 or _mf > 0):
-            status = "⚔️"
-        elif _pr > 0:
-            status = "🟡"
-        else:
-            status = "🔴"
-        ts = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "?"
-        msgs_r = r["msgs_reported"] or 0
-        msgs_f = r["msgs_fetched"] or 0
-        msgs_str = f"{msgs_r}/{msgs_f}" if msgs_f > msgs_r else str(msgs_r)
-        preset_label = f" [{r['preset']}]" if r["preset"] else ""
-        lines.append(
-            f"{status} <code>{_html.escape(r['target'])}</code> · {ts}\n"
-            f"   {r['reason']}{preset_label} · {r['accounts_used']} акк · "
-            f"{r['peer_reported']} жалоб · сообщ: {msgs_str} · {int(r['duration_s'] or 0)}с"
-        )
-        # Collect distinct targets for re-run buttons (first occurrence wins)
-        if r["target"] not in seen_targets and len(rerun_rows) < 5:
-            seen_targets.add(r["target"])
-            rerun_rows.append(r)
+
+    if rows:
+        lines.append("<b>Выполненные удары (последние 10):</b>")
+        for r in rows:
+            # 🟢 = подтверждено удаление, ⚔️ = полный удар, 🟡 = только ReportPeer, 🔴 = не прошёл
+            _pr = r["peer_reported"] or 0
+            _mr = r["msgs_reported"] or 0
+            _mf = r["msgs_fetched"] or 0
+            if r["verified_down"]:
+                status = "🟢"
+            elif _pr > 0 and (_mr > 0 or _mf > 0):
+                status = "⚔️"
+            elif _pr > 0:
+                status = "🟡"
+            else:
+                status = "🔴"
+            ts = r["created_at"].strftime("%d.%m %H:%M") if r["created_at"] else "?"
+            msgs_r = r["msgs_reported"] or 0
+            msgs_f = r["msgs_fetched"] or 0
+            msgs_str = f"{msgs_r}/{msgs_f}" if msgs_f > msgs_r else str(msgs_r)
+            preset_label = f" [{r['preset']}]" if r["preset"] else ""
+            lines.append(
+                f"{status} <code>{_html.escape(r['target'])}</code> · {ts}\n"
+                f"   {r['reason']}{preset_label} · {r['accounts_used']} акк · "
+                f"{r['peer_reported']} жалоб · сообщ: {msgs_str} · {int(r['duration_s'] or 0)}с"
+            )
+            # Collect distinct targets for re-run buttons (first occurrence wins)
+            if r["target"] not in seen_targets and len(rerun_rows) < 5:
+                seen_targets.add(r["target"])
+                rerun_rows.append(r)
 
     # Re-run buttons: one per unique target (max 5), compact label
     if rerun_rows:
@@ -612,6 +667,8 @@ async def cb_strike_rerun(
     preset = row["preset"]
 
     # Pre-fill FSM state for the account picker (same flow as regular bulk report)
+    from bot.states import BulkReportFSM
+    await state.set_state(BulkReportFSM.selecting_accounts)
     await state.update_data(
         peer=target,
         peers=[target],
