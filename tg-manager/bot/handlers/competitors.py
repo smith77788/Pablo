@@ -267,9 +267,8 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    progress_msg = await safe_edit(
-        cb, f"🔄 Обновляю данные для {len(rows)} конкурентов..."
-    )
+    await safe_edit(cb, f"🔄 Обновляю данные для {len(rows)} конкурентов...")
+    progress_msg = cb.message
 
     async def _fetch_members(sess: aiohttp.ClientSession, username: str) -> int | None:
         """Try multiple Telegram public endpoints to get subscriber count."""
@@ -330,8 +329,7 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         try:
             kb2 = InlineKeyboardBuilder()
             kb2.button(text="📋 Смотреть список", callback_data=CompCb(action="menu"))
-            target = progress_msg if progress_msg else cb.message
-            await target.edit_text(
+            await progress_msg.edit_text(
                 f"✅ Обновлено {updated} из {len(rows)} конкурентов.\n\n"
                 "Тренды подписчиков (↗️↘️) теперь видны в списке.",
                 reply_markup=kb2.as_markup(),

@@ -1167,7 +1167,7 @@ async def cb_eco_dna_save(
         "ecosystem_type": eco["ecosystem_type"],
         "health_threshold": 0.65,
         "pressure_threshold": 70,
-        "region": eco["region"],
+        "region": eco.get("region") or "",
     }
 
     try:
@@ -1178,7 +1178,7 @@ async def cb_eco_dna_save(
             eco["name"] + " — ДНК",
             eco["ecosystem_type"],
             f"Шаблон из экосистемы {eco['name']}",
-            _json.dumps(member_counts and template_data or {}, ensure_ascii=False),
+            _json.dumps(template_data, ensure_ascii=False),
         )
     except Exception:
         log_exc_swallow(log, "cb_eco_dna_save: dna INSERT failed")

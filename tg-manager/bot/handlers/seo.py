@@ -738,7 +738,8 @@ async def cb_seo_chan_menu(
         callback_data=SeoCb(action="chan_apply", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
-        text="📖 Гайд SEO 2026", callback_data=SeoCb(action="full_guide", bot_id=0)
+        text="📖 Гайд SEO 2026",
+        callback_data=SeoCb(action="full_guide", bot_id=0, chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(text="◀️ Назад", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1, 2, 2, 2, 1)
@@ -1968,24 +1969,30 @@ async def cb_seo_full_guide(callback: CallbackQuery, callback_data: SeoCb) -> No
     next_actions = ["full_guide_p2", "full_guide_p3", None]
     next_labels = ["▶️ Стр. 2: Вовлечённость →", "▶️ Стр. 3: Продвинутые факторы →", None]
     bot_id = callback_data.bot_id
+    chan_id = callback_data.chan_id
+    acc_id = callback_data.acc_id
 
     kb = InlineKeyboardBuilder()
     if next_actions[page]:
         kb.button(
             text=next_labels[page],
-            callback_data=SeoCb(action=next_actions[page], bot_id=bot_id),
+            callback_data=SeoCb(
+                action=next_actions[page], bot_id=bot_id, chan_id=chan_id, acc_id=acc_id
+            ),
         )
     if page > 0:
         prev = ["full_guide", "full_guide", "full_guide_p2"][page]
         kb.button(
-            text=f"◀️ Стр. {page}", callback_data=SeoCb(action=prev, bot_id=bot_id)
+            text=f"◀️ Стр. {page}",
+            callback_data=SeoCb(action=prev, bot_id=bot_id, chan_id=chan_id, acc_id=acc_id),
         )
-    kb.button(
-        text="🏠 К SEO-меню",
-        callback_data=SeoCb(action="menu", bot_id=bot_id)
-        if bot_id
-        else SeoCb(action="chan_menu"),
-    )
+    if bot_id:
+        back_cb = SeoCb(action="menu", bot_id=bot_id)
+    elif chan_id:
+        back_cb = SeoCb(action="chan_menu", chan_id=chan_id, acc_id=acc_id)
+    else:
+        back_cb = SeoCb(action="menu", bot_id=0)
+    kb.button(text="🏠 К SEO-меню", callback_data=back_cb)
     kb.adjust(1)
     try:
         await callback.message.edit_text(
