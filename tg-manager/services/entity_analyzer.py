@@ -16,13 +16,38 @@ import math
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Union
 
 import asyncpg
 
 log = logging.getLogger(__name__)
 
 _HASHTAG_RE = re.compile(r"#(\w+)", re.UNICODE)
+
+# ── OSINT constants ───────────────────────────────────────────────────────────
+
+# IDs ≥ 5 trillion belong to Fragment anonymous number accounts (NFT-based)
+_FRAGMENT_THRESHOLD = 5_000_000_000_000
+
+_DC_REGIONS: dict[int, str] = {
+    1: "DC1 🇺🇸 США (Вирджиния)",
+    2: "DC2 🇳🇱 Нидерланды (Амстердам)",
+    3: "DC3 🇺🇸 США (Майами)",
+    4: "DC4 🇳🇱 Нид. / Азия",
+    5: "DC5 🇸🇬 Сингапур / 🇦🇪 БВ",
+}
+
+_MTPROTO_ERROR_MAP: dict[str, str] = {
+    "ChannelPrivateError": "Приватный канал",
+    "ChatAdminRequiredError": "Нет прав администратора",
+    "UserPrivacyRestrictedError": "Скрыто настройками приватности",
+    "PeerIdInvalidError": "Неверный ID",
+    "FloodWaitError": "Превышен лимит запросов (FloodWait)",
+    "UsernameInvalidError": "Неверный username",
+    "UsernameNotOccupiedError": "Username не занят",
+    "AuthKeyUnregisteredError": "Сессия недействительна",
+    "RPCError": "Ошибка MTProto RPC",
+}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,14 +92,123 @@ def _bar(val: float, max_val: float, width: int = 8) -> str:
 # ── Core analysis ─────────────────────────────────────────────────────────────
 
 async def _get_client(pool: asyncpg.Pool, owner_id: int):
+    """Return first connected client from account pool (resilient: tries all)."""
     from services import resource_selector
     from services.account_manager import _make_client
 
     candidates = await resource_selector.select_all_active(pool, owner_id, action_type="read")
-    acc = next((a for a in candidates if a.get("session_str")), None)
-    if not acc:
+    for acc in candidates:
+        if not acc.get("session_str"):
+            continue
+        client = _make_client(acc["session_str"])
+        try:
+            await asyncio.wait_for(client.connect(), timeout=12)
+            return client
+        except Exception:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+    return None
+
+
+# ── OSINT helper functions ─────────────────────────────────────────────────────
+
+def _is_fragment_number(entity_id: int) -> bool:
+    """Fragment anonymous number accounts have IDs ≥ 5 trillion."""
+    return entity_id >= _FRAGMENT_THRESHOLD
+
+
+def _extract_dc(entity) -> int | None:
+    """Extract DC ID from entity's photo metadata (peer.photo.dc_id)."""
+    photo = getattr(entity, "photo", None)
+    if photo is None:
         return None
-    return _make_client(acc["session_str"])
+    dc = getattr(photo, "dc_id", None)
+    return int(dc) if dc is not None else None
+
+
+async def _get_avatar_metrics(client, entity) -> dict[str, Any]:
+    """
+    Extract avatar lifecycle metrics: total count + oldest photo ID.
+    The photo object's .id behaves linearly within server clusters
+    and can serve as secondary epoch verification.
+    """
+    total = 0
+    oldest_photo_id = None
+    try:
+        result = await asyncio.wait_for(
+            client.get_profile_photos(entity, limit=100), timeout=15
+        )
+        photos = list(result)
+        total = result.total if hasattr(result, "total") else len(photos)
+        if photos:
+            oldest = min(photos, key=lambda p: p.id)
+            oldest_photo_id = oldest.id
+    except Exception:
+        pass
+    return {"total_historical_count": total, "oldest_photo_id": oldest_photo_id}
+
+
+async def _get_db_footprint(pool: asyncpg.Pool, entity_id: int) -> int | None:
+    """
+    Cross-reference our reg_check_cache for earliest sighting of this entity.
+    Returns Unix timestamp or None if not previously tracked.
+    """
+    try:
+        val = await pool.fetchval(
+            "SELECT MIN(checked_at) FROM reg_check_cache WHERE entity_id=$1",
+            entity_id,
+        )
+        return int(val.timestamp()) if val else None
+    except Exception:
+        return None
+
+
+def _confidence_score(
+    has_exact_date: bool,
+    has_dc: bool,
+    has_avatar: bool,
+    has_db_footprint: bool,
+    is_fragment: bool,
+) -> float:
+    """
+    Confidence score 0.0–1.0 based on data alignment:
+      0.30  base (ID interpolation always available)
+    + 0.40  exact creation date via first message
+    + 0.15  DC extracted (entity is reachable)
+    + 0.10  avatar history available (secondary epoch signal)
+    + 0.05  historical DB sighting
+    Fragment numbers start at 0.10 (no meaningful date signal).
+    """
+    if is_fragment:
+        return 0.10
+    score = 0.30
+    if has_exact_date:
+        score += 0.40
+    if has_dc:
+        score += 0.15
+    if has_avatar:
+        score += 0.10
+    if has_db_footprint:
+        score += 0.05
+    return round(min(score, 1.0), 2)
+
+
+def _map_mtproto_error(exc: Exception) -> dict[str, Any]:
+    """Map MTProto exceptions to structured metadata — never surface raw errors."""
+    name = type(exc).__name__
+    description = _MTPROTO_ERROR_MAP.get(name, str(exc)[:150])
+    return {
+        "error_type": name,
+        "description": description,
+        "privacy_restrictions": {
+            "hidden_forward_link": name in ("UserPrivacyRestrictedError",),
+            "private_chat": name in (
+                "ChannelPrivateError", "ChatAdminRequiredError",
+            ),
+        },
+    }
 
 
 async def analyze_channel(
@@ -99,8 +233,6 @@ async def analyze_channel(
         return None
 
     try:
-        await asyncio.wait_for(client.connect(), timeout=15)
-
         # ── Resolve entity ────────────────────────────────────────────────────
         entity = await asyncio.wait_for(client.get_entity(peer), timeout=20)
         if not isinstance(entity, Channel):
@@ -271,6 +403,68 @@ async def analyze_channel(
             except Exception:
                 pass
 
+        # ── OSINT enrichment ──────────────────────────────────────────────────
+        dc_id = _extract_dc(ch)
+        is_frag = _is_fragment_number(entity_id)
+        footprint = await _get_db_footprint(pool, entity_id)
+
+        # Try deep channel creation date via GetHistoryRequest (first message)
+        exact_date: datetime | None = None
+        try:
+            from telethon.tl.functions.messages import GetHistoryRequest
+            history = await asyncio.wait_for(
+                client(GetHistoryRequest(
+                    peer=ch,
+                    offset_id=2,
+                    offset_date=None,
+                    add_offset=-1,
+                    limit=1,
+                    max_id=0,
+                    min_id=0,
+                    hash=0,
+                )),
+                timeout=15,
+            )
+            if history.messages:
+                exact_date = history.messages[0].date
+        except Exception:
+            pass
+        if not exact_date:
+            try:
+                msg = await asyncio.wait_for(
+                    client.get_messages(ch, ids=1), timeout=15
+                )
+                if msg and hasattr(msg, "date") and msg.date:
+                    exact_date = msg.date
+                elif msg and isinstance(msg, list) and msg and getattr(msg[0], "date", None):
+                    exact_date = msg[0].date
+            except Exception:
+                pass
+        if exact_date:
+            created_at = exact_date
+
+        confidence = _confidence_score(
+            has_exact_date=exact_date is not None,
+            has_dc=dc_id is not None,
+            has_avatar=False,
+            has_db_footprint=footprint is not None,
+            is_fragment=is_frag,
+        )
+        recon_payload: dict[str, Any] = {
+            "object_type": entity_type,
+            "dc_id": dc_id,
+            "is_fragment_number": is_frag,
+            "estimated_creation_timestamp": int(id_estimate["date"].timestamp()),
+            "exact_creation_timestamp": int(exact_date.timestamp()) if exact_date else None,
+            "avatar_metrics": {"total_historical_count": 0, "oldest_photo_id": None},
+            "first_spotted_in_our_db": footprint,
+            "confidence_score": confidence,
+            "privacy_restrictions": {
+                "hidden_forward_link": noforwards,
+                "private_chat": username is None,
+            },
+        }
+
         return {
             "entity_id": entity_id,
             "entity_type": entity_type,
@@ -284,7 +478,8 @@ async def analyze_channel(
             "online_count": online_count,
             "boost_level": boost_level,
             "created_at": created_at,
-            "created_method": id_estimate["method"],
+            "created_method": "first_message" if exact_date else id_estimate["method"],
+            "exact_date": exact_date,
             "linked_chat_id": linked_chat_id,
             "linked_name": linked_name,
             "slowmode_s": slowmode_s,
@@ -321,13 +516,20 @@ async def analyze_channel(
             "seo_notes": seo_notes,
             # sample size
             "posts_analyzed": len(views_list),
+            # OSINT
+            "dc_id": dc_id,
+            "is_fragment_number": is_frag,
+            "confidence_score": confidence,
+            "first_spotted_in_our_db": footprint,
+            "recon_payload": recon_payload,
         }
 
     except asyncio.TimeoutError:
         log.warning("entity_analyzer: timeout for %s", peer)
         return None
     except Exception as e:
-        log.warning("entity_analyzer.analyze_channel(%s): %s", peer, e)
+        log.warning("entity_analyzer.analyze_channel(%s): %s — %s",
+                    peer, type(e).__name__, e)
         return None
     finally:
         try:
@@ -341,7 +543,7 @@ async def analyze_user(
     owner_id: int,
     peer,
 ) -> dict[str, Any] | None:
-    """Full user/bot analysis."""
+    """Full user/bot analysis with OSINT enrichment."""
     from telethon.tl.functions.users import GetFullUserRequest
     from telethon.tl.types import User
     from services.registration_checker import estimate_by_id
@@ -351,8 +553,6 @@ async def analyze_user(
         return None
 
     try:
-        await asyncio.wait_for(client.connect(), timeout=15)
-
         entity = await asyncio.wait_for(client.get_entity(peer), timeout=20)
         if not isinstance(entity, User):
             return None
@@ -377,14 +577,11 @@ async def analyze_user(
         phone = getattr(u, "phone", None)
         is_contact = bool(getattr(u, "contact", False))
         is_mutual = bool(getattr(u, "mutual_contact", False))
+        noforwards = bool(getattr(u, "noforwards", False))
 
-        # Profile photos count
-        photos_count = 0
-        try:
-            photos_count = await client.get_profile_photos(u, limit=0)
-            photos_count = photos_count.total if hasattr(photos_count, "total") else 0
-        except Exception:
-            pass
+        # ── Avatar lifecycle metrics (Method C) ───────────────────────────────
+        avatar_met = await _get_avatar_metrics(client, u)
+        photos_count = avatar_met["total_historical_count"]
 
         # Bot-specific info
         bot_info: dict = {}
@@ -425,6 +622,32 @@ async def analyze_user(
 
         id_estimate = estimate_by_id(entity_id, entity_type)
 
+        # ── OSINT enrichment ──────────────────────────────────────────────────
+        dc_id = _extract_dc(u)
+        is_frag = _is_fragment_number(entity_id)
+        footprint = await _get_db_footprint(pool, entity_id)
+        confidence = _confidence_score(
+            has_exact_date=False,
+            has_dc=dc_id is not None,
+            has_avatar=avatar_met["total_historical_count"] > 0,
+            has_db_footprint=footprint is not None,
+            is_fragment=is_frag,
+        )
+        recon_payload: dict[str, Any] = {
+            "object_type": entity_type,
+            "dc_id": dc_id,
+            "is_fragment_number": is_frag,
+            "estimated_creation_timestamp": int(id_estimate["date"].timestamp()),
+            "exact_creation_timestamp": None,
+            "avatar_metrics": avatar_met,
+            "first_spotted_in_our_db": footprint,
+            "confidence_score": confidence,
+            "privacy_restrictions": {
+                "hidden_forward_link": noforwards,
+                "private_chat": username is None,
+            },
+        }
+
         return {
             "entity_id": entity_id,
             "entity_type": entity_type,
@@ -445,18 +668,126 @@ async def analyze_user(
             "created_at": id_estimate["date"],
             "created_method": id_estimate["method"],
             "bot_info": bot_info,
+            # OSINT
+            "dc_id": dc_id,
+            "is_fragment_number": is_frag,
+            "avatar_metrics": avatar_met,
+            "confidence_score": confidence,
+            "first_spotted_in_our_db": footprint,
+            "recon_payload": recon_payload,
         }
 
     except asyncio.TimeoutError:
+        log.warning("entity_analyzer.analyze_user: timeout for %s", peer)
         return None
     except Exception as e:
-        log.warning("entity_analyzer.analyze_user(%s): %s", peer, e)
+        log.warning("entity_analyzer.analyze_user(%s): %s — %s",
+                    peer, type(e).__name__, e)
         return None
     finally:
         try:
             await client.disconnect()
         except Exception:
             pass
+
+
+async def analyze_telegram_object(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    target: Union[str, int],
+) -> dict[str, Any]:
+    """
+    Enterprise unified OSINT entry point.
+    Routes to analyze_channel or analyze_user depending on resolved entity type.
+    Returns enriched dict with 'recon_payload' conforming to the standard schema.
+    Falls back to ID-only estimation when Telethon is unavailable.
+    """
+    from telethon.tl.types import User, Channel, Chat
+    from services.registration_checker import estimate_by_id, canonical_peer_id
+
+    client = await _get_client(pool, owner_id)
+    if not client:
+        # Partial result: ID interpolation only
+        if isinstance(target, int):
+            raw_id = target
+            if raw_id < -1_000_000_000:
+                etype = "channel"
+            elif raw_id < 0:
+                etype = "group"
+            else:
+                etype = "user"
+            eid = canonical_peer_id(raw_id)
+            est = estimate_by_id(eid, etype)
+            is_frag = _is_fragment_number(eid)
+            footprint = await _get_db_footprint(pool, eid)
+            confidence = 0.10 if is_frag else 0.30
+            return {
+                "_partial": True,
+                "entity_id": eid,
+                "entity_type": etype,
+                "created_at": est["date"],
+                "created_method": "id_interpolation",
+                "recon_payload": {
+                    "object_type": etype,
+                    "dc_id": None,
+                    "is_fragment_number": is_frag,
+                    "estimated_creation_timestamp": int(est["date"].timestamp()),
+                    "exact_creation_timestamp": None,
+                    "avatar_metrics": {"total_historical_count": 0, "oldest_photo_id": None},
+                    "first_spotted_in_our_db": footprint,
+                    "confidence_score": confidence,
+                    "privacy_restrictions": {"hidden_forward_link": False, "private_chat": False},
+                },
+            }
+        return {"_partial": True}
+
+    try:
+        entity = await asyncio.wait_for(client.get_entity(target), timeout=20)
+    except Exception as exc:
+        await client.disconnect()
+        err_meta = _map_mtproto_error(exc)
+        # Still return ID-based partial if we have an int target
+        if isinstance(target, int):
+            eid = canonical_peer_id(abs(target))
+            etype = "channel" if target < -1_000_000_000 else "user"
+            est = estimate_by_id(eid, etype)
+            is_frag = _is_fragment_number(eid)
+            footprint = await _get_db_footprint(pool, eid)
+            return {
+                "_partial": True,
+                "_error_meta": err_meta,
+                "entity_id": eid,
+                "entity_type": etype,
+                "created_at": est["date"],
+                "created_method": "id_interpolation",
+                "recon_payload": {
+                    "object_type": etype,
+                    "dc_id": None,
+                    "is_fragment_number": is_frag,
+                    "estimated_creation_timestamp": int(est["date"].timestamp()),
+                    "exact_creation_timestamp": None,
+                    "avatar_metrics": {"total_historical_count": 0, "oldest_photo_id": None},
+                    "first_spotted_in_our_db": footprint,
+                    "confidence_score": 0.15,
+                    "privacy_restrictions": err_meta.get("privacy_restrictions", {}),
+                },
+            }
+        return {"_partial": True, "_error_meta": err_meta}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    # Route to the appropriate analyzer
+    if isinstance(entity, User):
+        peer = entity.username or entity.id
+        return await analyze_user(pool, owner_id, peer) or {"_partial": True}
+    elif isinstance(entity, (Channel, Chat)):
+        peer = getattr(entity, "username", None) or entity.id
+        return await analyze_channel(pool, owner_id, peer) or {"_partial": True}
+
+    return {"_partial": True}
 
 
 def _ago(dt: datetime) -> str:
@@ -571,24 +902,64 @@ def format_overview(data: dict) -> str:
         badges.append("⚠️ FAKE")
     if data.get("restricted"):
         badges.append("🔒 Ограничен")
+    if data.get("is_fragment_number"):
+        badges.append("🔷 Fragment NFT")
 
     lines = [f"{icon} <b>{label}</b>  {' '.join(badges)}"]
     if title:
         lines.append(f"🏷 <b>{html.escape(title)}</b>")
     if uname:
         lines.append(f"🔗 @{uname}  →  t.me/{uname}")
-    lines.append(f"🆔 <code>{data['entity_id']}</code>")
 
-    ct = data.get("created_at")
-    if ct:
-        from services.registration_checker import format_date_ru, format_age
-        lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
-        lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
-        method = data.get("created_method", "id_interpolation")
-        if method == "first_message":
-            lines.append("🎯 Метод: первое сообщение (точно)")
-        else:
-            lines.append("📊 Метод: оценка по ID (±2 мес.)")
+    eid = data.get("entity_id", 0)
+    lines.append(f"🆔 <code>{eid}</code>")
+
+    # ── DC & OSINT block ──────────────────────────────────────────────────────
+    dc_id = data.get("dc_id")
+    if dc_id is not None:
+        dc_label = _DC_REGIONS.get(dc_id, f"DC{dc_id}")
+        lines.append(f"📡 Датацентр: <b>{dc_label}</b>")
+
+    if data.get("is_fragment_number"):
+        lines.append("🔷 <b>Fragment анонимный номер</b> — дата не определяется")
+    else:
+        ct = data.get("created_at")
+        if ct:
+            from services.registration_checker import format_date_ru, format_age
+            lines.append(f"\n📅 Создан: <b>{format_date_ru(ct)}</b>")
+            lines.append(f"⏳ Возраст: <b>{format_age(ct)}</b>")
+            method = data.get("created_method", "id_interpolation")
+            if method == "first_message":
+                lines.append("🎯 Метод: первое сообщение (точно)")
+            else:
+                lines.append("📊 Метод: оценка по ID (±2 мес.)")
+
+    # Confidence score
+    conf = data.get("confidence_score")
+    if conf is not None:
+        pct = int(conf * 100)
+        bar_w = 8
+        filled = round(bar_w * conf)
+        bar = "█" * filled + "░" * (bar_w - filled)
+        lines.append(f"🎯 Достоверность: [{bar}] <b>{pct}%</b>")
+
+    # Avatar metrics
+    av = data.get("avatar_metrics") or {}
+    total_ph = av.get("total_historical_count", 0)
+    oldest_ph = av.get("oldest_photo_id")
+    if et in ("user", "bot") and total_ph > 0:
+        ph_line = f"🖼 Фото в истории: <b>{total_ph}</b>"
+        if oldest_ph:
+            ph_line += f"  (oldest ID: <code>{oldest_ph}</code>)"
+        lines.append(ph_line)
+
+    # DB footprint
+    footprint = data.get("first_spotted_in_our_db")
+    if footprint:
+        from datetime import datetime, timezone
+        ft = datetime.fromtimestamp(footprint, tz=timezone.utc)
+        from services.registration_checker import format_date_ru
+        lines.append(f"🗄 Первое обнаружение в БД: <b>{format_date_ru(ft)}</b>")
 
     if et in ("channel", "supergroup"):
         m = data.get("members", 0)
@@ -616,9 +987,9 @@ def format_overview(data: dict) -> str:
         sl = data.get("slowmode_s", 0)
         if sl:
             flags.append(f"🐌 Медленный режим: {sl}с")
-        ttl = data.get("ttl")
-        if ttl:
-            flags.append(f"⏱ Автоудаление: {ttl}с")
+        ttl_val = data.get("ttl")
+        if ttl_val:
+            flags.append(f"⏱ Автоудаление: {ttl_val}с")
         if flags:
             lines.append("\n" + " · ".join(flags))
 
@@ -631,7 +1002,9 @@ def format_overview(data: dict) -> str:
         if bio:
             lines.append(f"\n📝 <i>{html.escape(bio[:200])}</i>")
         lines.append(f"\n🔔 Статус: {data.get('status', '—')}")
-        lines.append(f"🖼 Фото профиля: {data.get('photos_count', 0)}")
+        if not av:
+            # Fallback for old data without avatar_metrics
+            lines.append(f"🖼 Фото профиля: {data.get('photos_count', 0)}")
         if data.get("common_groups"):
             lines.append(f"👥 Общих групп: {data['common_groups']}")
         if data.get("is_contact"):

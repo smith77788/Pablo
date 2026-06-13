@@ -408,34 +408,42 @@ async def cache_result(
     name: str | None,
     username: str | None,
 ) -> None:
+    av = result.get("avatar_metrics") or {}
     try:
         await pool.execute(
             """INSERT INTO reg_check_cache
                (entity_id, entity_type, entity_name, username, reg_date, method,
                 checked_by, participants_count, verified, scam, fake, premium, about,
-                confidence_lo, confidence_hi)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                confidence_lo, confidence_hi,
+                dc_id, is_fragment, confidence_score, oldest_photo_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                ON CONFLICT (entity_id, entity_type) DO UPDATE
                SET entity_name=$3, username=$4, reg_date=$5, method=$6,
                    checked_by=$7, participants_count=$8, verified=$9,
                    scam=$10, fake=$11, premium=$12, about=$13,
                    confidence_lo=$14, confidence_hi=$15,
+                   dc_id=$16, is_fragment=$17, confidence_score=$18,
+                   oldest_photo_id=$19,
                    checked_at=NOW()""",
             result["entity_id"],
             result["entity_type"],
-            name or result.get("name"),
+            name or result.get("name") or result.get("title"),
             username or result.get("username"),
             result.get("exact_date") or result.get("date"),
-            result.get("method", "id_interpolation"),
+            result.get("method", result.get("created_method", "id_interpolation")),
             owner_id,
-            result.get("participants_count"),
+            result.get("participants_count") or result.get("members"),
             result.get("verified", False),
             result.get("scam", False),
             result.get("fake", False),
             result.get("premium", False),
-            result.get("about"),
+            result.get("about") or result.get("bio") or result.get("description"),
             result.get("confidence_lo"),
             result.get("confidence_hi"),
+            result.get("dc_id"),
+            result.get("is_fragment_number", False),
+            result.get("confidence_score"),
+            av.get("oldest_photo_id"),
         )
     except Exception as e:
         log.debug("reg_check_cache insert: %s", e)
