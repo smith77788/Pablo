@@ -196,7 +196,7 @@ async def upsert_users(pool: asyncpg.Pool, bot_id: int, users: list[dict]) -> in
                     u.get("language_code"),
                     u.get("phone"),
                 )
-                if result == "INSERT 1":
+                if result == "INSERT 0 1":
                     inserted += 1
     return inserted
 
@@ -1730,16 +1730,17 @@ async def get_referral_total(pool, bot_id: int) -> int:
 
 async def upsert_user_activity(pool, bot_id: int, user_id: int) -> bool:
     """Returns True if this is the user's first message (new user)."""
-    result = await pool.execute(
+    row = await pool.fetchrow(
         """INSERT INTO user_activity(bot_id, user_id, message_count, last_seen, first_seen)
            VALUES($1, $2, 1, now(), now())
            ON CONFLICT (bot_id, user_id) DO UPDATE
            SET message_count = user_activity.message_count + 1,
-               last_seen = now()""",
+               last_seen = now()
+           RETURNING (xmax = 0) AS is_new""",
         bot_id,
         user_id,
     )
-    return result == "INSERT 0 1"
+    return bool(row["is_new"]) if row else False
 
 
 async def get_activity_segments(pool, bot_id: int) -> dict:
@@ -3375,15 +3376,26 @@ async def get_gift_transfer_stats(pool: asyncpg.Pool, plan_id: int) -> dict:
     return dict(row) if row else {}
 
 
+_ALLOWED_GIFT_PLAN_FIELDS: frozenset[str] = frozenset({
+    "name", "recipient_username", "recipient_user_id", "recipient_name",
+    "payment_source", "payment_method_id", "status",
+    "total_gifts", "selected_gifts", "estimated_cost", "actual_cost",
+    "error_message", "completed_at",
+})
+
+
 async def update_gift_transfer_plan(pool: asyncpg.Pool, plan_id: int, **kwargs) -> None:
     """Update gift transfer plan fields."""
     if not kwargs:
         return
-    set_clause = ", ".join(f"{k}=${i + 2}" for i, k in enumerate(kwargs.keys()))
+    safe = {k: v for k, v in kwargs.items() if k in _ALLOWED_GIFT_PLAN_FIELDS}
+    if not safe:
+        return
+    set_clause = ", ".join(f"{k}=${i + 2}" for i, k in enumerate(safe.keys()))
     await pool.execute(
         f"UPDATE gift_transfer_plans SET {set_clause}, updated_at=now() WHERE id=$1",
         plan_id,
-        *kwargs.values(),
+        *safe.values(),
     )
 
 

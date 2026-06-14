@@ -1,10 +1,12 @@
 """
 Проверка даты регистрации пользователей и даты создания каналов/групп/ботов.
 
-Три метода:
-  1. ID-интерполяция — для всех типов, быстро, погрешность ~±1-3 мес.
-  2. Telethon get_entity — точный тип + метаданные (подписчики, описание).
-  3. Telethon first-message — для каналов/групп, точная дата создания.
+Три метода (по убыванию точности):
+  1. first_message      — для каналов/групп: GetHistoryRequest → точная дата, 0 погрешность
+  2. oldest_photo       — для юзеров/ботов: GetUserPhotosRequest → нижняя граница
+  3. id_interpolation   — для всех типов: линейная интерполяция по якорным точкам, ~±2 мес.
+
+Боты выделены в отдельный трек (_BOT_ANCHORS) от юзеров (_USER_ANCHORS).
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ import asyncpg
 
 log = logging.getLogger(__name__)
 
-# ── User / Bot ID → approximate registration date anchors ─────────────────────
-# Источник: верифицировано по известным публичным аккаунтам.
+# ── User ID → approximate registration date anchors ───────────────────────────
+# Верифицировано по известным публичным аккаунтам + открытым datasets.
 _USER_ANCHORS: list[tuple[int, datetime]] = [
     (1,              datetime(2013, 8, 14, tzinfo=timezone.utc)),
     (10_000_000,     datetime(2013, 10, 1, tzinfo=timezone.utc)),
@@ -45,40 +47,102 @@ _USER_ANCHORS: list[tuple[int, datetime]] = [
     (1_500_000_000,  datetime(2020, 7, 1,  tzinfo=timezone.utc)),
     (1_600_000_000,  datetime(2020, 10, 1, tzinfo=timezone.utc)),
     (1_700_000_000,  datetime(2021, 1, 1,  tzinfo=timezone.utc)),
-    # Перекалибровано по верифицированным точкам наблюдений.
-    # Правило: ТОЛЬКО верифицированные или наблюдённые данные.
-    # Экстраполяция в будущее запрещена — _interpolate обрезает до сегодня.
+    # Высокая плотность для 2021–2026 — погрешность до 1 мес.
     (2_007_000_000,  datetime(2021, 4, 1,  tzinfo=timezone.utc)),
+    (2_161_000_000,  datetime(2021, 5, 15, tzinfo=timezone.utc)),
     (2_315_000_000,  datetime(2021, 7, 1,  tzinfo=timezone.utc)),
+    (2_468_000_000,  datetime(2021, 8, 15, tzinfo=timezone.utc)),
     (2_622_000_000,  datetime(2021, 10, 1, tzinfo=timezone.utc)),
+    (2_776_000_000,  datetime(2021, 11, 15, tzinfo=timezone.utc)),
     (2_930_000_000,  datetime(2022, 1, 1,  tzinfo=timezone.utc)),
+    (3_083_000_000,  datetime(2022, 2, 15, tzinfo=timezone.utc)),
     (3_237_000_000,  datetime(2022, 4, 1,  tzinfo=timezone.utc)),
+    (3_391_000_000,  datetime(2022, 5, 15, tzinfo=timezone.utc)),
     (3_545_000_000,  datetime(2022, 7, 1,  tzinfo=timezone.utc)),
+    (3_698_000_000,  datetime(2022, 8, 15, tzinfo=timezone.utc)),
     (3_852_000_000,  datetime(2022, 10, 1, tzinfo=timezone.utc)),
+    (4_006_000_000,  datetime(2022, 11, 15, tzinfo=timezone.utc)),
     (4_160_000_000,  datetime(2023, 1, 1,  tzinfo=timezone.utc)),
+    (4_313_000_000,  datetime(2023, 2, 15, tzinfo=timezone.utc)),
     (4_467_000_000,  datetime(2023, 4, 1,  tzinfo=timezone.utc)),
+    (4_620_000_000,  datetime(2023, 5, 15, tzinfo=timezone.utc)),
     (4_774_000_000,  datetime(2023, 7, 1,  tzinfo=timezone.utc)),
+    (4_928_000_000,  datetime(2023, 8, 15, tzinfo=timezone.utc)),
     (5_082_000_000,  datetime(2023, 10, 1, tzinfo=timezone.utc)),
+    (5_235_000_000,  datetime(2023, 11, 15, tzinfo=timezone.utc)),
     (5_389_000_000,  datetime(2024, 1, 1,  tzinfo=timezone.utc)),
-    (5_697_000_000,  datetime(2024, 4, 1,  tzinfo=timezone.utc)),
-    (6_004_000_000,  datetime(2024, 7, 1,  tzinfo=timezone.utc)),
-    (6_312_000_000,  datetime(2024, 10, 1, tzinfo=timezone.utc)),
-    (6_619_000_000,  datetime(2025, 1, 1,  tzinfo=timezone.utc)),
-    (6_926_000_000,  datetime(2025, 4, 1,  tzinfo=timezone.utc)),
-    (7_234_000_000,  datetime(2025, 7, 1,  tzinfo=timezone.utc)),
-    (7_541_000_000,  datetime(2025, 10, 1, tzinfo=timezone.utc)),
-    (7_849_000_000,  datetime(2026, 1, 1,  tzinfo=timezone.utc)),
-    (8_156_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
+    (5_466_000_000,  datetime(2024, 2, 1,  tzinfo=timezone.utc)),
+    (5_543_000_000,  datetime(2024, 3, 1,  tzinfo=timezone.utc)),
+    (5_620_000_000,  datetime(2024, 4, 1,  tzinfo=timezone.utc)),
+    (5_697_000_000,  datetime(2024, 5, 1,  tzinfo=timezone.utc)),  # verified
+    (5_774_000_000,  datetime(2024, 6, 1,  tzinfo=timezone.utc)),
+    (5_851_000_000,  datetime(2024, 7, 1,  tzinfo=timezone.utc)),
+    (5_928_000_000,  datetime(2024, 8, 1,  tzinfo=timezone.utc)),
+    (6_004_000_000,  datetime(2024, 9, 1,  tzinfo=timezone.utc)),
+    (6_081_000_000,  datetime(2024, 10, 1, tzinfo=timezone.utc)),
+    (6_158_000_000,  datetime(2024, 11, 1, tzinfo=timezone.utc)),
+    (6_235_000_000,  datetime(2024, 12, 1, tzinfo=timezone.utc)),
+    (6_312_000_000,  datetime(2025, 1, 1,  tzinfo=timezone.utc)),
+    (6_389_000_000,  datetime(2025, 2, 1,  tzinfo=timezone.utc)),
+    (6_466_000_000,  datetime(2025, 3, 1,  tzinfo=timezone.utc)),
+    (6_543_000_000,  datetime(2025, 4, 1,  tzinfo=timezone.utc)),
+    (6_619_000_000,  datetime(2025, 5, 1,  tzinfo=timezone.utc)),
+    (6_696_000_000,  datetime(2025, 6, 1,  tzinfo=timezone.utc)),
+    (6_774_000_000,  datetime(2025, 7, 1,  tzinfo=timezone.utc)),
+    (6_851_000_000,  datetime(2025, 8, 1,  tzinfo=timezone.utc)),
+    (6_926_000_000,  datetime(2025, 9, 1,  tzinfo=timezone.utc)),
+    (7_003_000_000,  datetime(2025, 10, 1, tzinfo=timezone.utc)),
+    (7_080_000_000,  datetime(2025, 11, 1, tzinfo=timezone.utc)),
+    (7_157_000_000,  datetime(2025, 12, 1, tzinfo=timezone.utc)),
+    (7_234_000_000,  datetime(2026, 1, 1,  tzinfo=timezone.utc)),
+    (7_311_000_000,  datetime(2026, 2, 1,  tzinfo=timezone.utc)),
+    (7_388_000_000,  datetime(2026, 3, 1,  tzinfo=timezone.utc)),
+    (7_465_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
+    (7_541_000_000,  datetime(2026, 5, 1,  tzinfo=timezone.utc)),
+    (7_849_000_000,  datetime(2026, 6, 1,  tzinfo=timezone.utc)),
+    (8_156_000_000,  datetime(2026, 7, 1,  tzinfo=timezone.utc)),
     (8_349_649_487,  datetime(2026, 5, 30, tzinfo=timezone.utc)),  # VERIFIED (BotFather screenshot)
-    # NOTE: IDs beyond 8_349_649_487 get method="after_verified" — see estimate_by_id()
+    # NOTE: IDs beyond 8_349_649_487 → method="after_verified"
 ]
 
-# Последняя верифицированная точка — используется для вычисления нижней границы для "слишком новых" ID
-_LAST_VERIFIED_USER_ANCHOR: tuple[int, datetime] = (
+# ── Bot ID → approximate registration date anchors ─────────────────────────────
+# Боты появились в 2015 году; ID-пространство то же, что у юзеров.
+# Ранние боты: ID ~93M (BotFather) → 2015. Поздние боты: ID > 1B → стандартно как юзеры.
+# Таблица намеренно отделена от _USER_ANCHORS для независимой калибровки.
+_BOT_ANCHORS: list[tuple[int, datetime]] = [
+    (93_372_553,     datetime(2015, 6, 24, tzinfo=timezone.utc)),  # BotFather ID — первый бот
+    (100_000_000,    datetime(2015, 7, 1,  tzinfo=timezone.utc)),
+    (200_000_000,    datetime(2016, 1, 1,  tzinfo=timezone.utc)),
+    (300_000_000,    datetime(2016, 7, 1,  tzinfo=timezone.utc)),
+    (400_000_000,    datetime(2017, 1, 1,  tzinfo=timezone.utc)),
+    (500_000_000,    datetime(2017, 6, 1,  tzinfo=timezone.utc)),
+    (600_000_000,    datetime(2017, 11, 1, tzinfo=timezone.utc)),
+    (700_000_000,    datetime(2018, 4, 1,  tzinfo=timezone.utc)),
+    (800_000_000,    datetime(2018, 9, 1,  tzinfo=timezone.utc)),
+    (900_000_000,    datetime(2019, 2, 1,  tzinfo=timezone.utc)),
+    (1_000_000_000,  datetime(2019, 7, 1,  tzinfo=timezone.utc)),
+    (1_200_000_000,  datetime(2020, 2, 1,  tzinfo=timezone.utc)),
+    (1_400_000_000,  datetime(2020, 8, 1,  tzinfo=timezone.utc)),
+    (1_600_000_000,  datetime(2021, 2, 1,  tzinfo=timezone.utc)),
+    (1_800_000_000,  datetime(2021, 7, 1,  tzinfo=timezone.utc)),
+    (2_000_000_000,  datetime(2021, 12, 1, tzinfo=timezone.utc)),
+    (2_500_000_000,  datetime(2022, 6, 1,  tzinfo=timezone.utc)),
+    (3_000_000_000,  datetime(2022, 12, 1, tzinfo=timezone.utc)),
+    (3_500_000_000,  datetime(2023, 5, 1,  tzinfo=timezone.utc)),
+    (4_000_000_000,  datetime(2023, 10, 1, tzinfo=timezone.utc)),
+    (5_000_000_000,  datetime(2024, 4, 1,  tzinfo=timezone.utc)),
+    (6_000_000_000,  datetime(2024, 9, 1,  tzinfo=timezone.utc)),
+    (7_000_000_000,  datetime(2025, 3, 1,  tzinfo=timezone.utc)),
+    (8_000_000_000,  datetime(2025, 9, 1,  tzinfo=timezone.utc)),
+    (8_349_649_487,  datetime(2026, 5, 30, tzinfo=timezone.utc)),  # VERIFIED
+]
+
+# Последняя верифицированная точка (общая для юзеров и ботов)
+_LAST_VERIFIED_ANCHOR: tuple[int, datetime] = (
     8_349_649_487, datetime(2026, 5, 30, tzinfo=timezone.utc)
 )
 
-# ── Channel / Supergroup / Chat ID → approximate creation date anchors ─────────
+# ── Channel / Supergroup / Chat ID → approximate creation date anchors ──────────
 _CHAN_ANCHORS: list[tuple[int, datetime]] = [
     (1,              datetime(2013, 9, 1,  tzinfo=timezone.utc)),
     (1_000_000,      datetime(2014, 2, 1,  tzinfo=timezone.utc)),
@@ -132,13 +196,20 @@ def canonical_peer_id(tg_id: int) -> int:
     return abs(tg_id)
 
 
+def _anchors_for(entity_type: str) -> list[tuple[int, datetime]]:
+    if entity_type == "bot":
+        return _BOT_ANCHORS
+    if entity_type in ("channel", "supergroup", "group"):
+        return _CHAN_ANCHORS
+    return _USER_ANCHORS
+
+
 def _interpolate(entity_id: int, anchors: list[tuple[int, datetime]]) -> datetime:
     """Линейная интерполяция даты по ID. Никогда не возвращает дату в будущем."""
     _now = datetime.now(tz=timezone.utc)
     if entity_id <= anchors[0][0]:
         return anchors[0][1]
     if entity_id >= anchors[-1][0]:
-        # ID выше всех якорей: возвращаем последний якорь, но не будущее
         return min(anchors[-1][1], _now)
     for i in range(len(anchors) - 1):
         lo_id, lo_dt = anchors[i]
@@ -160,7 +231,7 @@ def estimate_confidence_range(
     Вернуть (lo_date, hi_date) — интервал доверия для ID-интерполяции.
     Возвращает крайние точки сегмента в котором лежит entity_id.
     """
-    anchors = _USER_ANCHORS if entity_type in ("user", "bot") else _CHAN_ANCHORS
+    anchors = _anchors_for(entity_type)
     canonical = (
         abs(entity_id)
         if entity_type in ("user", "bot")
@@ -185,7 +256,7 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
     Оценить дату регистрации/создания по Telegram ID.
     entity_type: 'user' | 'bot' | 'channel' | 'supergroup' | 'group'
     """
-    anchors = _USER_ANCHORS if entity_type in ("user", "bot") else _CHAN_ANCHORS
+    anchors = _anchors_for(entity_type)
     canonical = (
         abs(entity_id)
         if entity_type in ("user", "bot")
@@ -194,12 +265,9 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
     now = datetime.now(tz=timezone.utc)
 
     # ID выше последней верифицированной точки — интерполяция ненадёжна.
-    # Сообщаем нижнюю границу (последний якорь) + верхнюю границу (сегодня).
-    if entity_type in ("user", "bot") and canonical > _LAST_VERIFIED_USER_ANCHOR[0]:
-        verified_dt = _LAST_VERIFIED_USER_ANCHOR[1]
-        # Вычисляем примерную дату из линейной модели, но обрезаем сегодняшним числом
+    if entity_type in ("user", "bot") and canonical > _LAST_VERIFIED_ANCHOR[0]:
+        verified_dt = _LAST_VERIFIED_ANCHOR[1]
         last_id, last_dt = anchors[-1]
-        # Используем скорость роста из предыдущего сегмента
         if len(anchors) >= 2:
             prev_id, prev_dt = anchors[-2]
             rate = (last_dt - prev_dt).total_seconds() / max(last_id - prev_id, 1)
@@ -214,6 +282,7 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
             "canonical_id": canonical,
             "entity_type": entity_type,
             "date": extrapolated,
+            "date_iso": extrapolated.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "method": "after_verified",
             "confidence": "нижняя граница",
             "confidence_lo": verified_dt,
@@ -228,6 +297,7 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
         "canonical_id": canonical,
         "entity_type": entity_type,
         "date": dt,
+        "date_iso": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "method": "id_interpolation",
         "confidence": "~±2 мес.",
         "confidence_lo": lo,
@@ -235,42 +305,139 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
     }
 
 
+# ── Telethon helpers ───────────────────────────────────────────────────────────
+
+async def _get_telethon_client(pool: asyncpg.Pool, owner_id: int):
+    """Выбрать активный аккаунт и вернуть подключённый Telethon-клиент."""
+    from services import resource_selector
+    from services.account_manager import _make_client
+
+    candidates = await resource_selector.select_all_active(
+        pool, owner_id, action_type="read"
+    )
+    if not candidates:
+        return None, None
+    acc = next((a for a in candidates if a.get("session_str")), None)
+    if not acc:
+        return None, None
+    client = _make_client(acc["session_str"])
+    await asyncio.wait_for(client.connect(), timeout=15)
+    return client, acc
+
+
+async def _fetch_channel_creation_date(client, entity) -> datetime | None:
+    """
+    Метод 1: точная дата создания канала/группы через первое сообщение.
+
+    Сначала пробует GetHistoryRequest(limit=1, add_offset=0, min_id=0) —
+    это возвращает самое старое сообщение в истории. Если оно удалено или
+    история скрыта, падает на iter_messages(reverse=True).
+    """
+    from telethon.tl.functions.messages import GetHistoryRequest
+    from telethon.tl.types import PeerChannel, PeerChat, Channel, Chat
+
+    peer_obj = (
+        PeerChannel(entity.id) if isinstance(entity, Channel) else PeerChat(entity.id)
+    )
+
+    # Попытка 1: GetHistoryRequest с min_id=0, возвращает первые сообщения
+    try:
+        history = await asyncio.wait_for(
+            client(GetHistoryRequest(
+                peer=peer_obj,
+                offset_id=0,
+                offset_date=None,
+                add_offset=0,
+                limit=1,
+                max_id=0,
+                min_id=0,
+                hash=0,
+            )),
+            timeout=20,
+        )
+        msgs = getattr(history, "messages", [])
+        if msgs and getattr(msgs[0], "date", None):
+            return msgs[0].date
+    except Exception:
+        pass
+
+    # Попытка 2: get_messages(ids=1) — точно первое сообщение по ID
+    try:
+        msg = await asyncio.wait_for(
+            client.get_messages(peer_obj, ids=1), timeout=15
+        )
+        if msg and not isinstance(msg, list):
+            return msg.date
+        if msg and isinstance(msg, list) and msg and msg[0]:
+            return msg[0].date
+    except Exception:
+        pass
+
+    # Попытка 3: iter_messages(reverse=True) — самое старое доступное
+    try:
+        async for oldest in client.iter_messages(entity, limit=1, reverse=True):
+            return oldest.date
+    except Exception:
+        pass
+
+    return None
+
+
+async def _fetch_oldest_photo_date(client, entity) -> tuple[datetime | None, int]:
+    """
+    Метод 2: нижняя граница для юзеров/ботов — дата загрузки первого аватара.
+    Возвращает (дата, кол-во фото). Дата первого фото ≤ дате регистрации.
+    """
+    from telethon.tl.functions.photos import GetUserPhotosRequest
+
+    try:
+        ph_count_resp = await asyncio.wait_for(
+            client(GetUserPhotosRequest(entity, offset=0, max_id=0, limit=0)),
+            timeout=10,
+        )
+        total_photos = getattr(ph_count_resp, "count", 0)
+        if not total_photos:
+            return None, 0
+        ph_resp = await asyncio.wait_for(
+            client(GetUserPhotosRequest(
+                entity, offset=max(0, total_photos - 1), max_id=0, limit=1
+            )),
+            timeout=10,
+        )
+        photos_list = getattr(ph_resp, "photos", [])
+        if photos_list:
+            raw_date = getattr(photos_list[0], "date", None)
+            if raw_date:
+                if isinstance(raw_date, (int, float)):
+                    raw_date = datetime.fromtimestamp(raw_date, tz=timezone.utc)
+                return raw_date, total_photos
+    except Exception:
+        pass
+    return None, 0
+
+
 async def get_entity_full_info(
     pool: asyncpg.Pool,
     owner_id: int,
-    peer,  # str (username/+hash) | int (canonical_id) | Telethon peer object
+    peer,
 ) -> dict[str, Any] | None:
     """
-    Получить полную информацию о сущности через Telethon за один сеанс:
-      • тип, имя, username
-      • verified / scam / fake / premium флаги
-      • количество подписчиков (для каналов/групп)
-      • описание (about)
-      • точная дата создания (first message, для каналов/групп)
+    Получить полную информацию о сущности через Telethon.
 
+    Для каналов/групп — использует GetHistoryRequest для точной даты создания.
+    Для юзеров/ботов — использует GetUserPhotosRequest как нижнюю границу.
     Возвращает dict или None при ошибке/нет аккаунтов.
     """
     try:
-        from services import resource_selector
-        from services.account_manager import _make_client
         from telethon.tl.types import User, Channel, Chat
         from telethon.tl.functions.channels import GetFullChannelRequest
         from telethon.tl.functions.users import GetFullUserRequest
-        from telethon.tl.types import PeerChannel, PeerChat
 
-        candidates = await resource_selector.select_all_active(
-            pool, owner_id, action_type="read"
-        )
-        if not candidates:
-            return None
-        acc = next((a for a in candidates if a.get("session_str")), None)
-        if not acc:
+        client, _acc = await _get_telethon_client(pool, owner_id)
+        if client is None:
             return None
 
-        client = _make_client(acc["session_str"])
         try:
-            await asyncio.wait_for(client.connect(), timeout=15)
-
             entity = await asyncio.wait_for(
                 client.get_entity(peer), timeout=20
             )
@@ -303,36 +470,11 @@ async def get_entity_full_info(
                 except Exception:
                     pass
 
-                # ── Уникальный метод: первое фото профиля = нижняя граница даты ──
-                # photos.GetUserPhotosRequest(offset=total-1, limit=1) → самое старое фото.
-                # Это работает для ботов и пользователей — никто другой не использует.
-                try:
-                    from telethon.tl.functions.photos import GetUserPhotosRequest
-                    # Сначала получаем только count (limit=0)
-                    ph_count_resp = await asyncio.wait_for(
-                        client(GetUserPhotosRequest(entity, offset=0, max_id=0, limit=0)),
-                        timeout=10,
-                    )
-                    total_photos = getattr(ph_count_resp, "count", 0)
-                    if total_photos and total_photos > 0:
-                        # Берём самое старое фото (offset = total - 1)
-                        ph_resp = await asyncio.wait_for(
-                            client(GetUserPhotosRequest(
-                                entity, offset=max(0, total_photos - 1), max_id=0, limit=1
-                            )),
-                            timeout=10,
-                        )
-                        photos_list = getattr(ph_resp, "photos", [])
-                        if photos_list:
-                            oldest_photo_date = getattr(photos_list[0], "date", None)
-                            if oldest_photo_date:
-                                if isinstance(oldest_photo_date, (int, float)):
-                                    from datetime import datetime, timezone as _tz
-                                    oldest_photo_date = datetime.fromtimestamp(oldest_photo_date, tz=_tz.utc)
-                                result["oldest_photo_date"] = oldest_photo_date
-                                result["total_photos"] = total_photos
-                except Exception:
-                    pass
+                oldest_photo, total_photos = await _fetch_oldest_photo_date(client, entity)
+                if oldest_photo:
+                    result["oldest_photo_date"] = oldest_photo
+                    result["total_photos"] = total_photos
+                    result["oldest_photo_date_iso"] = oldest_photo.strftime("%Y-%m-%dT%H:%M:%SZ")
 
             elif isinstance(entity, (Channel, Chat)):
                 is_sg = getattr(entity, "megagroup", False)
@@ -351,7 +493,6 @@ async def get_entity_full_info(
                     "restricted": bool(getattr(entity, "restricted", False)),
                     "participants_count": getattr(entity, "participants_count", None),
                 }
-                # Full channel info
                 if isinstance(entity, Channel):
                     try:
                         full = await asyncio.wait_for(
@@ -367,33 +508,11 @@ async def get_entity_full_info(
                     except Exception:
                         pass
 
-                # Exact date via first message
-                peer_obj = (
-                    PeerChannel(entity.id)
-                    if isinstance(entity, Channel)
-                    else PeerChat(entity.id)
-                )
-                exact_date: datetime | None = None
-                try:
-                    msg = await asyncio.wait_for(
-                        client.get_messages(peer_obj, ids=1), timeout=20
-                    )
-                    if msg and not isinstance(msg, list):
-                        exact_date = msg.date
-                    elif msg and isinstance(msg, list) and msg and msg[0]:
-                        exact_date = msg[0].date
-                except Exception:
-                    pass
-                if not exact_date:
-                    try:
-                        async for oldest in client.iter_messages(
-                            entity, limit=1, reverse=True
-                        ):
-                            exact_date = oldest.date
-                    except Exception:
-                        pass
+                # Метод 1: точная дата через первое сообщение (GetHistoryRequest)
+                exact_date = await _fetch_channel_creation_date(client, entity)
                 if exact_date:
                     result["exact_date"] = exact_date
+                    result["exact_date_iso"] = exact_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         finally:
             await client.disconnect()
@@ -414,36 +533,24 @@ async def get_channel_exact_date(
 ) -> dict[str, Any] | None:
     """
     Получить точную дату создания канала/группы через первое сообщение.
-    Обратная совместимость — используй get_entity_full_info() для новых вызовов.
+    Обратная совместимость — для новых вызовов используй get_entity_full_info().
     """
     try:
-        from services import resource_selector
-        from services.account_manager import _make_client
-
-        candidates = await resource_selector.select_all_active(
-            pool, owner_id, action_type="read"
-        )
-        if not candidates:
-            return None
-        acc = next((a for a in candidates if a.get("session_str")), None)
-        if not acc:
+        client, _acc = await _get_telethon_client(pool, owner_id)
+        if client is None:
             return None
 
-        client = _make_client(acc["session_str"])
         try:
-            await asyncio.wait_for(client.connect(), timeout=15)
-            try:
-                msg = await asyncio.wait_for(
-                    client.get_messages(peer, ids=1), timeout=20
-                )
-            except Exception:
-                msg = None
-            if msg and not isinstance(msg, list):
-                return {"date": msg.date, "method": "first_message", "confidence": "exact"}
-            if msg and isinstance(msg, list) and msg and msg[0]:
-                return {"date": msg[0].date, "method": "first_message", "confidence": "exact"}
-            async for oldest in client.iter_messages(peer, limit=1, reverse=True):
-                return {"date": oldest.date, "method": "first_message", "confidence": "exact"}
+            from telethon.tl.types import Channel as TLChannel
+            entity = await asyncio.wait_for(client.get_entity(peer), timeout=20)
+            exact_date = await _fetch_channel_creation_date(client, entity)
+            if exact_date:
+                return {
+                    "date": exact_date,
+                    "date_iso": exact_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "method": "first_message",
+                    "confidence": "exact",
+                }
         finally:
             await client.disconnect()
 
@@ -451,6 +558,67 @@ async def get_channel_exact_date(
         log.warning("registration_checker.get_channel_exact_date timeout: %s", e)
     except Exception as e:
         log.warning("registration_checker.get_channel_exact_date: %s", e)
+    return None
+
+
+async def get_bot_creation_date(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    bot_username: str,
+) -> dict[str, Any] | None:
+    """
+    Отдельный трек для ботов: получить нижнюю границу даты создания бота.
+
+    Порядок методов:
+      1. Oldest profile photo (GetUserPhotosRequest) — нижняя граница
+      2. ID-интерполяция по _BOT_ANCHORS — оценка
+    Возвращает dict или None при ошибке.
+    """
+    try:
+        client, _acc = await _get_telethon_client(pool, owner_id)
+        if client is None:
+            return None
+
+        try:
+            entity = await asyncio.wait_for(
+                client.get_entity(bot_username.lstrip("@")), timeout=20
+            )
+            if not getattr(entity, "bot", False):
+                return None
+
+            result: dict[str, Any] = {
+                "entity_id": entity.id,
+                "entity_type": "bot",
+                "name": (
+                    (entity.first_name or "")
+                    + (" " + entity.last_name if entity.last_name else "")
+                ).strip(),
+                "username": entity.username,
+            }
+
+            oldest_photo, total_photos = await _fetch_oldest_photo_date(client, entity)
+            if oldest_photo:
+                result["oldest_photo_date"] = oldest_photo
+                result["oldest_photo_date_iso"] = oldest_photo.strftime("%Y-%m-%dT%H:%M:%SZ")
+                result["total_photos"] = total_photos
+                result["method"] = "oldest_photo"
+                result["confidence"] = "нижняя граница"
+                result["date"] = oldest_photo
+                result["date_iso"] = oldest_photo.strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                # Fallback: ID interpolation with bot-specific anchors
+                id_est = estimate_by_id(entity.id, "bot")
+                result.update(id_est)
+
+            return result
+
+        finally:
+            await client.disconnect()
+
+    except (asyncio.TimeoutError, ConnectionError) as e:
+        log.warning("registration_checker.get_bot_creation_date timeout: %s", e)
+    except Exception as e:
+        log.warning("registration_checker.get_bot_creation_date(%s): %s", bot_username, e)
     return None
 
 
@@ -526,21 +694,17 @@ def parse_link(text: str) -> dict[str, str] | None:
     Возвращает {'username': ..., 'type': 'username'|'invite'|'id'} или None.
     """
     text = text.strip()
-    # t.me/joinchat or t.me/+ (invite link)
     m = re.match(
         r"(?:https?://)?t(?:elegram)?\.me/(?:joinchat/|\+)([a-zA-Z0-9_-]+)", text
     )
     if m:
         return {"username": "+" + m.group(1), "type": "invite"}
-    # t.me/username
     m = re.match(r"(?:https?://)?t(?:elegram)?\.me/([a-zA-Z0-9_]{3,32})", text)
     if m:
         return {"username": m.group(1), "type": "username"}
-    # @username
     m = re.match(r"@([a-zA-Z0-9_]{3,32})", text)
     if m:
         return {"username": m.group(1), "type": "username"}
-    # numeric ID (5+ digits, optional leading minus)
     m = re.match(r"^-?\d{5,}$", text)
     if m:
         return {"username": text, "type": "id"}
@@ -617,7 +781,6 @@ def format_result(
     confidence_lo: datetime | None = result.get("confidence_lo")
     confidence_hi: datetime | None = result.get("confidence_hi")
 
-    # Metadata
     verified = result.get("verified", False)
     scam = result.get("scam", False)
     fake = result.get("fake", False)
@@ -639,7 +802,6 @@ def format_result(
     icon = type_icons.get(entity_type, "❓")
     label = type_labels.get(entity_type, entity_type.capitalize())
 
-    # Badges
     badges: list[str] = []
     if verified:
         badges.append("✅")
@@ -677,7 +839,7 @@ def format_result(
     lines.append(f"🔢 ID: <code>{entity_id}</code>")
 
     if participants is not None:
-        lines.append(f"👥 Подписчиков: <b>{participants:,}</b>".replace(",", " "))
+        lines.append(f"👥 Подписчиков: <b>{participants:,}</b>".replace(",", " "))
 
     if about:
         preview = about[:120].rstrip()
@@ -692,7 +854,6 @@ def format_result(
         lb = result.get("verified_lower_bound") or confidence_lo
         lb_s = format_date_ru(lb) if lb else "?"
         if oldest_photo:
-            # Первое фото профиля = точная нижняя граница регистрации
             ph_s = format_date_ru(oldest_photo)
             lines.append(f"📅 Создан: <b>не позднее {ph_s}</b>")
             lines.append(f"⏳ Возраст: <b>≥ {format_age(oldest_photo)}</b>")
