@@ -1844,7 +1844,8 @@ async def fsm_seo_edit_value(
         await message.answer("⚠️ Название не более 128 символов. Попробуйте ещё раз:")
         return
     if field == "about" and len(value) > 255:
-        value = value[:255]
+        await message.answer("⚠️ Описание не более 255 символов. Попробуйте ещё раз:")
+        return
     if field == "username":
         import re as _re
 
