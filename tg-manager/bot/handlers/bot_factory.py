@@ -936,35 +936,38 @@ async def cb_factory_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
 
-    row = await pool.fetchrow(
-        """
-        SELECT
-            COUNT(*) AS total_bots,
-            COUNT(CASE WHEN is_active THEN 1 END) AS active_bots,
-            SUM(COALESCE(
-                (SELECT COUNT(*) FROM bot_users WHERE bot_id = bots.id), 0
-            )) AS total_users
-        FROM managed_bots bots
-        WHERE owner_id = $1
-        """,
-        user_id,
-    )
-
-    # Fallback query using added_by if owner_id column doesn't exist
-    if row is None:
+    try:
         row = await pool.fetchrow(
             """
             SELECT
                 COUNT(*) AS total_bots,
                 COUNT(CASE WHEN is_active THEN 1 END) AS active_bots,
-                COALESCE(SUM(
-                    (SELECT COUNT(*) FROM bot_users bu WHERE bu.bot_id = mb.bot_id)
-                ), 0) AS total_users
-            FROM managed_bots mb
-            WHERE mb.added_by = $1
+                SUM(COALESCE(
+                    (SELECT COUNT(*) FROM bot_users WHERE bot_id = bots.id), 0
+                )) AS total_users
+            FROM managed_bots bots
+            WHERE owner_id = $1
             """,
             user_id,
         )
+        # Fallback query using added_by if owner_id column doesn't exist
+        if row is None:
+            row = await pool.fetchrow(
+                """
+                SELECT
+                    COUNT(*) AS total_bots,
+                    COUNT(CASE WHEN is_active THEN 1 END) AS active_bots,
+                    COALESCE(SUM(
+                        (SELECT COUNT(*) FROM bot_users bu WHERE bu.bot_id = mb.bot_id)
+                    ), 0) AS total_users
+                FROM managed_bots mb
+                WHERE mb.added_by = $1
+                """,
+                user_id,
+            )
+    except Exception as exc:
+        log.warning("cb_factory_stats: DB error: %s", exc)
+        row = None
 
     if row is None:
         total_bots = active_bots = total_users = 0
