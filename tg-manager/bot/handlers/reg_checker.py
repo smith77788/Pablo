@@ -70,18 +70,10 @@ _HELP_TEXT = (
 
 
 def _main_kb() -> object:
-    """
-    Строит главную инлайн-клавиатуру раздела «Дата регистрации».
-
-    Содержит три кнопки: «Начать проверку», «История проверок» и «Меню».
-    Возвращает объект InlineKeyboardMarkup, пригодный для передачи в reply_markup.
-
-    Возвращает:
-        InlineKeyboardMarkup — готовая клавиатура.
-    """
     kb = InlineKeyboardBuilder()
     kb.button(text="🔍 Начать проверку", callback_data=RegCb(action="start"))
     kb.button(text="📋 История проверок", callback_data=RegCb(action="history"))
+    kb.button(text="⚙️ Настройки пула", callback_data=RegCb(action="settings"))
     kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb.as_markup()
@@ -104,28 +96,13 @@ def _waiting_kb() -> object:
 
 
 def _result_kb(entity_id: int, entity_type: str) -> object:
-    """
-    Строит клавиатуру после успешного получения полных данных о сущности.
-
-    Отображается когда результат проверки уже включает метаданные (имя, тип и т.д.).
-    Предлагает пользователю перейти к полному анализу, проверить ещё, открыть историю
-    или вернуться в главное меню.
-
-    Параметры:
-        entity_id   — числовой Telegram ID сущности; передаётся в callback_data
-                      для последующей загрузки полного анализа.
-        entity_type — строка: 'user' | 'bot' | 'channel' | 'supergroup' | 'group';
-                      передаётся в callback_data.
-
-    Возвращает:
-        InlineKeyboardMarkup — клавиатура с четырьмя кнопками.
-    """
     kb = InlineKeyboardBuilder()
     kb.button(
         text="🔬 Полный анализ",
         callback_data=RegCb(action="analyze", entity_id=entity_id, entity_type=entity_type, page=0),
     )
     kb.button(text="🔄 Проверить ещё", callback_data=RegCb(action="start"))
+    kb.button(text="⚙️ Пул аккаунтов", callback_data=RegCb(action="settings"))
     kb.button(text="📋 История", callback_data=RegCb(action="history"))
     kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
@@ -268,6 +245,100 @@ async def cb_reg_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     try:
         await callback.message.edit_text(
             _HELP_TEXT, parse_mode="HTML", reply_markup=_main_kb()
+        )
+    except Exception:
+        pass
+
+
+# ── Settings: pool selection ──────────────────────────────────────────────────
+
+@router.callback_query(RegCb.filter(F.action == "settings"))
+async def cb_reg_settings(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    from database import db
+
+    # Текущий выбранный пул из FSM
+    fsm_data = await state.get_data()
+    current_pool = fsm_data.get("reg_pool_name")
+
+    # Доступные пулы + кол-во активных аккаунтов в каждом
+    try:
+        pools = await db.get_distinct_pools(pool) or []
+    except Exception:
+        pools = []
+
+    try:
+        all_accounts = await pool.fetch(
+            """SELECT pool, COUNT(*) as cnt
+               FROM tg_accounts
+               WHERE owner_id=$1 AND status='active' AND session_str IS NOT NULL
+               GROUP BY pool""",
+            callback.from_user.id,
+        )
+        pool_counts = {r["pool"]: r["cnt"] for r in all_accounts if r["pool"]}
+        total_active = sum(r["cnt"] for r in all_accounts)
+    except Exception:
+        pool_counts = {}
+        total_active = 0
+
+    kb = InlineKeyboardBuilder()
+
+    # Кнопка "Все пулы" (default)
+    mark = "✅ " if not current_pool else ""
+    kb.button(
+        text=f"{mark}🌐 Все пулы ({total_active} акк.)",
+        callback_data=RegCb(action="set_pool", entity_id=0, entity_type="__all__"),
+    )
+
+    for p in pools:
+        pname = p if isinstance(p, str) else (p.get("pool") if isinstance(p, dict) else str(p))
+        if not pname:
+            continue
+        cnt = pool_counts.get(pname, 0)
+        mark = "✅ " if current_pool == pname else ""
+        kb.button(
+            text=f"{mark}📦 {pname} ({cnt} акк.)",
+            callback_data=RegCb(action="set_pool", entity_id=0, entity_type=pname),
+        )
+
+    kb.button(text="◀️ Назад", callback_data=RegCb(action="menu"))
+    kb.adjust(1)
+
+    cur_label = f"<b>{current_pool}</b>" if current_pool else "<i>все пулы</i>"
+    text = (
+        "⚙️ <b>Настройки — выбор пула аккаунтов</b>\n\n"
+        f"Текущий пул: {cur_label}\n\n"
+        "Выберите из каких аккаунтов брать Telethon-сессию для проверки "
+        "дат, аватаров и метаданных.\n\n"
+        f"<i>Всего активных аккаунтов: {total_active}</i>"
+    )
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(RegCb.filter(F.action == "set_pool"))
+async def cb_reg_set_pool(
+    callback: CallbackQuery, callback_data: RegCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    chosen = callback_data.entity_type  # мы кладём pool_name в entity_type
+    if chosen == "__all__":
+        await state.update_data(reg_pool_name=None)
+        label = "все пулы"
+    else:
+        await state.update_data(reg_pool_name=chosen)
+        label = chosen
+
+    try:
+        await callback.message.edit_text(
+            f"✅ <b>Пул выбран:</b> {html.escape(label)}\n\n"
+            "Следующие проверки будут использовать аккаунты из этого пула.",
+            parse_mode="HTML",
+            reply_markup=_main_kb(),
         )
     except Exception:
         pass
@@ -630,13 +701,17 @@ async def _handle_text_entity(
         return
 
     # Username / invite link — try Telethon first, Bot API as fallback
+    fsm_data = await state.get_data()
+    reg_pool_name: str | None = fsm_data.get("reg_pool_name")
+    pool_label = f" (пул: <b>{html.escape(reg_pool_name)}</b>)" if reg_pool_name else ""
+
     loading = await message.answer(
-        "⏳ <b>Запрашиваю данные...</b>",
+        f"⏳ <b>Запрашиваю данные через Telethon...</b>{pool_label}",
         parse_mode="HTML",
         reply_markup=_waiting_kb(),
     )
 
-    full_info = await rc.get_entity_full_info(pool, message.from_user.id, username_str)
+    full_info = await rc.get_entity_full_info(pool, message.from_user.id, username_str, pool_name=reg_pool_name)
 
     try:
         await loading.delete()
@@ -823,13 +898,17 @@ async def _show_result(
     auto_resolve_peer=None,
 ) -> None:
     """Показ результата: дата по ID — моментально. Метаданные — фоном."""
+    fsm_data = await state.get_data()
+    reg_pool_name: str | None = fsm_data.get("reg_pool_name")
     await state.clear()
+    # Сохраняем pool_name обратно — state.clear() стирает всё
+    if reg_pool_name:
+        await state.update_data(reg_pool_name=reg_pool_name)
 
     estimate = rc.estimate_by_id(entity_id, entity_type)
     estimate["name"] = name
     estimate["username"] = username
 
-    # Главное: показать дату сразу, без ожидания
     text = rc.format_result(estimate, name, username)
     is_channel = entity_type in ("channel", "supergroup", "group")
     kb = _result_kb(entity_id, entity_type) if not is_channel else _result_kb_retry_exact(entity_id, entity_type)
@@ -848,7 +927,7 @@ async def _show_result(
     # Фоновое обогащение: Telethon → обновляем то же сообщение через edit_text
     peer = auto_resolve_peer or (username if username else rc.canonical_peer_id(entity_id))
     asyncio.create_task(
-        _enrich_metadata(sent, pool, entity_id, entity_type, name, username, peer, kb)
+        _enrich_metadata(sent, pool, entity_id, entity_type, name, username, peer, kb, reg_pool_name)
     )
 
 
@@ -861,6 +940,7 @@ async def _enrich_metadata(
     username: str | None,
     peer,
     kb=None,
+    pool_name: str | None = None,
 ) -> None:
     """Фоновое обогащение: Telethon → обновляет уже отправленное сообщение через edit_text."""
     if sent_msg is None:
@@ -869,10 +949,28 @@ async def _enrich_metadata(
         owner_id = sent_msg.from_user.id if sent_msg.from_user else (sent_msg.chat.id if sent_msg.chat else None)
         if not owner_id:
             return
-        full_info = await rc.get_entity_full_info(pool, owner_id, peer)
+        full_info = await rc.get_entity_full_info(pool, owner_id, peer, pool_name=pool_name)
         if not full_info and entity_type in ("channel", "supergroup", "group"):
             full_info = await _bot_api_channel_info(sent_msg.bot, entity_id, username or peer)
         if not full_info:
+            # Нет данных — сообщаем пользователю причину
+            pool_hint = f" в пуле «{html.escape(pool_name)}»" if pool_name else ""
+            no_data_suffix = (
+                f"\n\n⚠️ <i>Telethon-проверка недоступна{pool_hint}. "
+                "Нет активных аккаунтов с сессией. "
+                "Добавьте аккаунты в разделе <b>Аккаунты</b> "
+                "или выберите другой пул в <b>⚙️ Настройки пула</b>.</i>"
+            )
+            try:
+                old_text = sent_msg.text or sent_msg.caption or ""
+                if "⚠️" not in old_text:
+                    await sent_msg.edit_text(
+                        old_text + no_data_suffix,
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                    )
+            except Exception:
+                pass
             return
 
         enriched_name = full_info.get("name") or name

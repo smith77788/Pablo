@@ -386,13 +386,17 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
 
 # ── Telethon helpers ───────────────────────────────────────────────────────────
 
-async def _get_telethon_client(pool: asyncpg.Pool, owner_id: int):
-    """Выбрать активный аккаунт и вернуть подключённый Telethon-клиент."""
+async def _get_telethon_client(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    pool_name: str | None = None,
+):
+    """Выбрать активный аккаунт из указанного пула и вернуть подключённый Telethon-клиент."""
     from services import resource_selector
     from services.account_manager import _make_client
 
     candidates = await resource_selector.select_all_active(
-        pool, owner_id, action_type="read"
+        pool, owner_id, action_type="read", pool_name=pool_name
     )
     if not candidates:
         return None, None
@@ -499,12 +503,14 @@ async def get_entity_full_info(
     pool: asyncpg.Pool,
     owner_id: int,
     peer,
+    pool_name: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Получить полную информацию о сущности через Telethon.
 
     Для каналов/групп — использует GetHistoryRequest для точной даты создания.
     Для юзеров/ботов — использует GetUserPhotosRequest как нижнюю границу.
+    pool_name: использовать аккаунты только из указанного пула (None = все).
     Возвращает dict или None при ошибке/нет аккаунтов.
     """
     try:
@@ -512,7 +518,7 @@ async def get_entity_full_info(
         from telethon.tl.functions.channels import GetFullChannelRequest
         from telethon.tl.functions.users import GetFullUserRequest
 
-        client, _acc = await _get_telethon_client(pool, owner_id)
+        client, _acc = await _get_telethon_client(pool, owner_id, pool_name=pool_name)
         if client is None:
             return None
 
@@ -609,13 +615,14 @@ async def get_channel_exact_date(
     pool: asyncpg.Pool,
     owner_id: int,
     peer,
+    pool_name: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Получить точную дату создания канала/группы через первое сообщение.
     Обратная совместимость — для новых вызовов используй get_entity_full_info().
     """
     try:
-        client, _acc = await _get_telethon_client(pool, owner_id)
+        client, _acc = await _get_telethon_client(pool, owner_id, pool_name=pool_name)
         if client is None:
             return None
 
@@ -644,6 +651,7 @@ async def get_bot_creation_date(
     pool: asyncpg.Pool,
     owner_id: int,
     bot_username: str,
+    pool_name: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Отдельный трек для ботов: получить нижнюю границу даты создания бота.
@@ -654,7 +662,7 @@ async def get_bot_creation_date(
     Возвращает dict или None при ошибке.
     """
     try:
-        client, _acc = await _get_telethon_client(pool, owner_id)
+        client, _acc = await _get_telethon_client(pool, owner_id, pool_name=pool_name)
         if client is None:
             return None
 
