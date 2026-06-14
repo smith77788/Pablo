@@ -231,7 +231,6 @@ async def _fetch_flood_events_7d(pool: asyncpg.Pool, owner_id: int) -> int:
 async def cb_health_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
-    datetime.now(timezone.utc)
 
     stats = await _fetch_account_stats(pool, user_id)
     flood_7d = await _fetch_flood_events_7d(pool, user_id)
@@ -1015,7 +1014,7 @@ async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 status = "🔴"
 
             lines.append(
-                f"{status} {trend} @{name}  [{bar}] {h7:.0f}/100\n"
+                f"{status} {trend} @{html.escape(name)}  [{bar}] {h7:.0f}/100\n"
                 f"   <i>24ч: {h24:.0f} | min: {hmin:.0f} | trust: {trust:.2f}</i>"
             )
 
@@ -1180,7 +1179,7 @@ async def cb_health_compare(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         trend_sym = "↗️" if h24 >= h7 else "↘️"
 
         lines.append(
-            f"{status}{trend_sym} <code>{name:<14}</code> {bar} {h7:>4.0f}   "
+            f"{status}{trend_sym} <code>{html.escape(name):<14}</code> {bar} {h7:>4.0f}   "
             f"<code>{trust:.2f}</code>"
         )
 
@@ -1408,7 +1407,6 @@ async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) ->
     """Show confirmation before auto-rotating unhealthy accounts."""
     await callback.answer()
     user_id = callback.from_user.id
-    datetime.now(timezone.utc)
 
     try:
         critical = (

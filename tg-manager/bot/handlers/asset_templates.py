@@ -304,7 +304,8 @@ async def _delete_template(pool: asyncpg.Pool, tpl_id: int, owner_id: int) -> bo
 
 
 @router.callback_query(AssetTplCb.filter(F.action == "menu"))
-async def cb_menu(callback: CallbackQuery, callback_data: AssetTplCb) -> None:
+async def cb_menu(callback: CallbackQuery, callback_data: AssetTplCb, state: FSMContext) -> None:
+    await state.clear()
     await callback.answer()
     await callback.message.edit_text(
         "📄 <b>Шаблоны ассетов</b>\n\n"
@@ -375,7 +376,7 @@ async def cb_view(
         f"Тип: {_TYPE_LABELS.get(tpl['asset_type'], tpl['asset_type'])}",
     ]
     for k, v in data.items():
-        lines.append(f"<b>{k}:</b> {v}")
+        lines.append(f"<b>{html.escape(str(k))}:</b> {html.escape(str(v))}")
 
     # Detect placeholders in template text
     from bot.utils.template_validator import list_placeholders

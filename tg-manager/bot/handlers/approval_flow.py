@@ -95,7 +95,6 @@ async def cb_approval_cancel(
     if not op_check or op_check != callback.from_user.id:
         await callback.answer("Операция не найдена или нет прав.", show_alert=True)
         return
-    await callback.answer()
     try:
         await pool.execute(
             "UPDATE operation_queue SET status='cancelled' WHERE id=$1 AND status='waiting_approval'",
@@ -104,6 +103,7 @@ async def cb_approval_cancel(
     except Exception:
         await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
         return
+    await callback.answer()
     from bot.callbacks import BmCb
 
     _kb = InlineKeyboardBuilder()

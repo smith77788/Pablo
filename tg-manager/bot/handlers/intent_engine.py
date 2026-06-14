@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as _html
 import json
 import logging
 from typing import Any
@@ -774,7 +775,7 @@ async def _show_manual_hint(
     kb.button(text="📍 Навигатор", callback_data=IntentCb(action="menu"))
     kb.adjust(1)
     if callback.message:
-        await callback.message.edit_text(f"⚠️ {text}", reply_markup=kb.as_markup(), parse_mode="HTML")
+        await callback.message.edit_text(f"⚠️ {_html.escape(text)}", reply_markup=kb.as_markup(), parse_mode="HTML")
 
 
 def _nav_callback(nav_key: str) -> object:
@@ -803,7 +804,7 @@ async def _navigate_to_tool(callback: CallbackQuery, plan: dict[str, Any]) -> No
     kb.adjust(1)
     if callback.message:
         await callback.message.edit_text(
-            f"➡️ <b>Открываю нужный раздел</b>\n\n{plan.get('goal', 'Цель готова к ручному запуску.')}",
+            f"➡️ <b>Открываю нужный раздел</b>\n\n{_html.escape(plan.get('goal', 'Цель готова к ручному запуску.'))}",
             reply_markup=kb.as_markup(),
             parse_mode="HTML",
         )
@@ -867,11 +868,11 @@ async def cb_intent_history(
 async def cb_intent_detail(
     callback: CallbackQuery, callback_data: IntentCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     row = await db.get_intent(pool, callback_data.intent_id, callback.from_user.id)
     if not row:
         await callback.answer("Не найдено", show_alert=True)
         return
+    await callback.answer()
     if callback.message:
         await _show_plan_card(
             callback.message,

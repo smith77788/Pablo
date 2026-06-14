@@ -1087,7 +1087,9 @@ async def vis_dashboard(
     callback: CallbackQuery,
     callback_data: VisCb,
     pool: asyncpg.Pool,
+    state: FSMContext,
 ) -> None:
+    await state.clear()
     await callback.answer()
     owner_id = callback.from_user.id
 

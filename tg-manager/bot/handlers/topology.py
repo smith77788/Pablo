@@ -370,7 +370,7 @@ async def cb_topo_acc_view(
                 title = (
                     c.get("title") or c.get("username") or f"ID:{c.get('channel_id')}"
                 )
-                uname = f" @{c['username']}" if c.get("username") else ""
+                uname = f" @{escape(c['username'])}" if c.get("username") else ""
                 lines.append(f"    • {escape(str(title)[:40])}{uname}")
             if len(chans) > 15:
                 lines.append(f"    <i>...ещё {len(chans) - 15}</i>")
@@ -380,7 +380,7 @@ async def cb_topo_acc_view(
                 title = (
                     g.get("title") or g.get("username") or f"ID:{g.get('channel_id')}"
                 )
-                uname = f" @{g['username']}" if g.get("username") else ""
+                uname = f" @{escape(g['username'])}" if g.get("username") else ""
                 lines.append(f"    • {escape(str(title)[:40])}{uname}")
             if len(groups) > 15:
                 lines.append(f"    <i>...ещё {len(groups) - 15}</i>")
@@ -432,7 +432,7 @@ async def cb_topo_chan_list(
     lines = ["📡 <b>Топология — по каналам</b>\n"]
     for ch in chunk:
         title = ch.get("title") or ch.get("username") or f"ID:{ch.get('channel_id')}"
-        uname = f"@{ch['username']}" if ch.get("username") else ""
+        uname = f"@{escape(ch['username'])}" if ch.get("username") else ""
         acc_name = acc_lookup.get(ch.get("acc_id"), "неизв.")
         ctype = {"megagroup": "👥", "supergroup": "👥", "group": "👥"}.get(
             ch.get("type", ""), "📡"
@@ -613,8 +613,8 @@ async def cb_topo_export(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                     "from": {"type": meta.get("from_type"), "id": meta.get("from_id")},
                     "to": {"type": meta.get("to_type"), "id": meta.get("to_id")},
                 })
-        except Exception:
-            pass
+        except Exception as _exc:
+            log.debug("topo_export: failed to parse edge meta: %s", _exc)
 
     export_data = {
         "nodes": nodes,

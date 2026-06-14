@@ -674,7 +674,7 @@ async def cb_pack_view(
         gr_rows = []
 
     def _row_label(r) -> str:
-        return r["title"] or r.get("username") or "—"
+        return escape(r["title"] or r.get("username") or "—")
 
     ch_list = "\n".join(f"  • {_row_label(r)}" for r in ch_rows[:8]) or "  —"
     gr_list = "\n".join(f"  • {_row_label(r)}" for r in gr_rows[:5]) or "  —"
