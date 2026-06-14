@@ -1253,7 +1253,7 @@ def format_overview(data: dict) -> str:
     label = labels.get(et, et.capitalize())
 
     title = html.escape(data.get("title") or data.get("name") or "")
-    uname = data.get("username")
+    uname = html.escape(data.get("username") or "")
     badges = []
     if data.get("verified"):
         badges.append("✅ Верифицирован")
@@ -1270,7 +1270,7 @@ def format_overview(data: dict) -> str:
 
     lines = [f"{icon} <b>{label}</b>  {' '.join(badges)}"]
     if title:
-        lines.append(f"🏷 <b>{html.escape(title)}</b>")
+        lines.append(f"🏷 <b>{title}</b>")
     if uname:
         lines.append(f"🔗 @{uname}  →  t.me/{uname}")
 
@@ -1721,7 +1721,7 @@ def format_seo(data: dict) -> str:
 
     title = data.get("title") or data.get("name") or ""
     desc = data.get("description", "")
-    uname = data.get("username")
+    uname = html.escape(data.get("username") or "")
 
     lines.append(f"\n<b>Название:</b> «{html.escape(title)}» — {len(title)} симв.")
     lines.append(f"<b>Описание:</b> {len(desc)} симв.")
