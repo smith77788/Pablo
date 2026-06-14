@@ -457,8 +457,19 @@ async def cb_reg_exact(
 
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    except Exception:
-        pass
+    except Exception as _e:
+        if "parse entities" in str(_e).lower() or "can't parse" in str(_e).lower():
+            import re as _re
+            plain = _re.sub(r"<[^>]*>", "", text)
+            try:
+                await callback.message.edit_text(plain, reply_markup=kb)
+            except Exception:
+                await callback.message.answer(plain, reply_markup=kb)
+        elif "message is not modified" not in str(_e).lower():
+            try:
+                await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                pass
 
 
 # ── FSM: incoming message in waiting_entity state ─────────────────────────────
