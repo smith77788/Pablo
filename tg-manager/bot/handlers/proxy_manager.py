@@ -332,11 +332,11 @@ async def _save_proxy(
             proxy_url,
             proxy_type,
         )
-        display = label or proxy_url
+        display = html.escape(label or proxy_url)
         text = f"✅ Прокси <code>{display}</code> добавлен."
     except Exception as exc:
         log.exception("Error saving proxy: %s", exc)
-        text = f"⚠️ Ошибка сохранения: {exc}"
+        text = f"⚠️ Ошибка сохранения: {html.escape(str(exc)[:200])}"
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Список прокси", callback_data=ProxyCb(action="list"))

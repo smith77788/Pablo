@@ -61,7 +61,12 @@ async def _edit(cb: CallbackQuery, text: str, markup=None):
 
 @router.callback_query(PackCb.filter(F.action == "menu"))
 async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+    # cb_pack_menu is re-used as a delegate from cb_pack_delete and cb_pack_cancel_fsm
+    # which may have already answered the query; silently skip the double-answer.
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await _edit(
             callback,
@@ -628,9 +633,13 @@ async def cb_pack_confirm_create(
 async def cb_pack_view(
     callback: CallbackQuery, callback_data: PackCb, pool: asyncpg.Pool
 ) -> None:
-    pack = await db.get_presence_pack(
-        pool, callback_data.pack_id, callback.from_user.id
-    )
+    try:
+        pack = await db.get_presence_pack(
+            pool, callback_data.pack_id, callback.from_user.id
+        )
+    except Exception as _e:
+        await callback.answer(f"Ошибка загрузки пакета: {_e}", show_alert=True)
+        return
     if not pack:
         await callback.answer("Пакет не найден", show_alert=True)
         return
@@ -870,7 +879,11 @@ async def cb_pack_mirror(
     pool: asyncpg.Pool,
 ) -> None:
     owner_id = callback.from_user.id
-    pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
+    try:
+        pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
+    except Exception as _e:
+        await callback.answer(f"Ошибка загрузки пакета: {_e}", show_alert=True)
+        return
     if not pack or not pack.get("bot_id"):
         await callback.answer("Нет бота в пакете", show_alert=True)
         return
@@ -1077,9 +1090,13 @@ async def cb_bot_regen_token(
     pool: asyncpg.Pool,
 ) -> None:
     new_token = presence_setup.generate_admin_token()
-    await db.upsert_bot_admin_session(
-        pool, callback_data.bot_id, callback.from_user.id, new_token
-    )
+    try:
+        await db.upsert_bot_admin_session(
+            pool, callback_data.bot_id, callback.from_user.id, new_token
+        )
+    except Exception as _e:
+        await callback.answer(f"❌ Ошибка сохранения токена: {_e}", show_alert=True)
+        return
     # Show alert with new token, then refresh the panel.
     # cb_bot_admin_panel will call callback.answer() — skip it here to avoid double answer.
     await callback.answer(f"✅ Новый токен: /admin {new_token}", show_alert=True)

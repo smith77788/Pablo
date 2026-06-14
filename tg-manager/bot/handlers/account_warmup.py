@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 
 import asyncpg
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -364,7 +365,15 @@ async def cb_warmup_create_plan(
     plan_type = callback_data.action.replace("plan_", "")
     acc_id = callback_data.account_id
 
-    plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
+    try:
+        plan_id = await create_warmup_plan(pool, callback.from_user.id, acc_id, plan_type)
+    except Exception as _e:
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка создания плана:</b> {html.escape(str(_e)[:200])}",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
 
     try:
         acc = await pool.fetchrow(
@@ -1678,7 +1687,8 @@ async def cb_ract_toggle_acc(
 
 
 @router.callback_query(
-    ResourceActCb.filter(F.action == "accs_done"), ResourceActivityFSM.choosing_accounts
+    ResourceActCb.filter(F.action == "accs_done"),
+    StateFilter(ResourceActivityFSM.choosing_accounts, ResourceActivityFSM.confirming),
 )
 async def cb_ract_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
