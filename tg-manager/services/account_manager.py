@@ -1157,7 +1157,19 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
             from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
 
             _ch, _gr = [], []
-            async for dialog in client.iter_dialogs(limit=300):
+            # Use manual __anext__ so ChannelPrivateError from the iterator
+            # itself (thrown mid-batch) skips that dialog instead of killing
+            # the entire scan and discarding already-collected results.
+            _iter = client.iter_dialogs(limit=300)
+            while True:
+                try:
+                    dialog = await _iter.__anext__()
+                except StopAsyncIteration:
+                    break
+                except (ChannelPrivateError, ChatAdminRequiredError):
+                    continue
+                except Exception:
+                    continue
                 try:
                     entity = dialog.entity
                 except (ChannelPrivateError, ChatAdminRequiredError):
