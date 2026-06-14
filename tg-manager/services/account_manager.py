@@ -2680,14 +2680,29 @@ async def post_to_channel(
             cid = (
                 abs(int(channel_id)) if isinstance(channel_id, str) else abs(channel_id)
             )
-            async for _d in client.iter_dialogs(limit=500):
-                if getattr(_d.entity, "id", None) == cid:
+            from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
+            peer = None
+            _iter = client.iter_dialogs(limit=500)
+            while True:
+                try:
+                    _d = await _iter.__anext__()
+                except StopAsyncIteration:
+                    break
+                except (ChannelPrivateError, ChatAdminRequiredError):
+                    continue
+                except Exception:
+                    continue
+                try:
+                    eid = getattr(_d.entity, "id", None)
+                except Exception:
+                    continue
+                if eid == cid:
                     peer = InputPeerChannel(
                         channel_id=cid,
                         access_hash=getattr(_d.entity, "access_hash", 0),
                     )
                     break
-            else:
+            if peer is None:
                 return {"error": "Канал не найден в диалогах аккаунта"}
 
         if media_file_id and media_type:
