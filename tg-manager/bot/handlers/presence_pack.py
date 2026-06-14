@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from html import escape
@@ -789,90 +788,6 @@ async def cb_pack_seed(
         markup=kb.as_markup(),
     )
 
-
-# ── Promote Bot as Admin ───────────────────────────────────────────────────
-
-
-async def _pack_promote_bg(
-    pool: asyncpg.Pool,
-    progress_msg,
-    owner_id: int,
-    pack_id: int,
-    channels: list,
-    bot_tg_id: int,
-) -> None:
-    success = 0
-    fail = 0
-    total = len(channels)
-    _last_progress_text = ""
-    try:
-        for idx, ch in enumerate(channels, 1):
-            ok = await presence_setup.promote_bot_in_channel(
-                pool, owner_id, ch["channel_id"], ch.get("access_hash") or 0, bot_tg_id
-            )
-            if ok:
-                success += 1
-            else:
-                fail += 1
-            # Update progress every 3 channels or on last
-            if idx % 3 == 0 or idx == total:
-                progress_text = (
-                    f"⏳ <b>Назначение администратора</b> — {idx}/{total}\n\n"
-                    f"✅ Успешно: {success} | ❌ Ошибок: {fail}"
-                )
-                if progress_text != _last_progress_text:
-                    try:
-                        await progress_msg.edit_text(progress_text, parse_mode="HTML")
-                        _last_progress_text = progress_text
-                    except Exception:
-                        pass
-            await asyncio.sleep(2)
-    except asyncio.CancelledError:
-        log.info("_pack_promote_bg: отменено")
-        raise
-    except Exception:
-        log_exc_swallow(log, "_pack_promote_bg: неожиданная ошибка")
-
-    if success > 0:
-        try:
-            await db.mark_presence_pack_promoted(pool, pack_id, owner_id)
-        except Exception:
-            log_exc_swallow(log, "_pack_promote_bg: mark_presence_pack_promoted failed")
-
-    kb = InlineKeyboardBuilder()
-    if fail > 0:
-        kb.button(
-            text="🔁 Повторить назначение",
-            callback_data=PackCb(action="promote", pack_id=pack_id),
-        )
-    kb.button(
-        text="🌱 Посеять посты", callback_data=PackCb(action="seed", pack_id=pack_id)
-    )
-    kb.button(text="📋 Детали", callback_data=PackCb(action="view", pack_id=pack_id))
-    kb.button(text="◀️ Все пакеты", callback_data=PackCb(action="menu"))
-    kb.adjust(1)
-    if success == 0:
-        result_text = (
-            f"❌ <b>Назначение не удалось</b>\n\n"
-            f"Ни один канал не получил бота-администратора.\n"
-            f"💡 Убедитесь что аккаунты являются администраторами каналов.\n\n"
-            f"❌ Ошибок: {fail}"
-        )
-    else:
-        result_text = (
-            f"👑 <b>Бот назначен администратором</b>\n\n"
-            f"✅ Успешно: {success} | ❌ Ошибок: {fail}\n\n"
-            f"Права бота: публикация постов, приглашение пользователей.\n\n"
-            f"💡 Теперь можно посеять посты через Bot API напрямую."
-        )
-    try:
-        await progress_msg.edit_text(
-            result_text,
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-    except Exception:
-        log_exc_swallow(log, "_pack_promote_bg: сбой финального отчёта")
 
 
 @router.callback_query(PackCb.filter(F.action == "promote"))

@@ -13,7 +13,6 @@ Entry point: ChanFactCb(action="menu")
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 
@@ -34,7 +33,6 @@ from bot.states import (
 from bot.utils.op_helpers import (
     _acc_label,
     _get_active_accounts,
-    backoff,
 )
 from services import task_registry as _treg
 
@@ -1128,68 +1126,6 @@ async def fsm_be_value(message: Message, state: FSMContext) -> None:
         reply_markup=kb.as_markup(),
     )
 
-
-async def _chanf_be_bg(
-    pool: asyncpg.Pool,
-    progress_msg,
-    accounts: list,
-    field: str,
-    value: str,
-) -> None:
-    from services import account_manager
-
-    ok_total = 0
-    err_total = 0
-    try:
-        for acc in accounts:
-            acc = dict(acc)
-            try:
-                dialogs = (
-                    await account_manager.get_dialogs(acc["session_str"], _acc=acc)
-                    or []
-                )
-            except Exception as _e:
-                log.warning(
-                    "_chanf_be_bg get_dialogs failed acc=%s: %s", acc.get("id"), _e
-                )
-                err_total += 1
-                continue
-            channels = [
-                d
-                for d in dialogs
-                if d.get("type") in ("channel", "megagroup", "supergroup")
-            ]
-            for ch in channels:
-                ch_id = ch["id"]
-                if field == "title":
-                    ok = await account_manager.edit_channel_title(
-                        acc["session_str"], ch_id, value, _acc=acc
-                    )
-                else:
-                    ok = await account_manager.edit_channel_about(
-                        acc["session_str"], ch_id, value, _acc=acc
-                    )
-                if ok:
-                    ok_total += 1
-                else:
-                    err_total += 1
-                await asyncio.sleep(backoff(1, base=2.0, cap=10.0))
-    except asyncio.CancelledError:
-        log.info("_chanf_be_bg: отменено")
-        raise
-    except Exception:
-        log_exc_swallow(log, "_chanf_be_bg: неожиданная ошибка")
-
-    try:
-        await progress_msg.edit_text(
-            f"✅ <b>Изменение применено</b>\n\n"
-            f"✅ Успешно: {ok_total}\n"
-            f"❌ Ошибок: {err_total}",
-            parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
-        )
-    except Exception:
-        log_exc_swallow(log, "_chanf_be_bg: сбой финального отчёта")
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "be_confirm"))
