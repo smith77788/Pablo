@@ -16,7 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from bot.keyboards import main_menu
 from bot.utils.subscription import get_free_mode, set_free_mode
 from bot.utils.event_status import mark_handled_error
@@ -1496,7 +1496,7 @@ async def _adm_swarm_mode(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 # ── Message handler for admin FSM states ─────────────────────────────────────
 
 
-@router.message(F.text)
+@router.message(F.text, StateFilter(None))
 async def handle_admin_message(
     message: Message, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
