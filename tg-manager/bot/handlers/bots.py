@@ -171,6 +171,7 @@ async def msg_token(
             parse_mode="HTML",
             reply_markup=_fmt_kb.as_markup(),
         )
+        await state.clear()
         return
 
     info_msg = await message.answer("⏳ Проверяю токен...")
@@ -185,6 +186,7 @@ async def msg_token(
             "❌ Неверный токен или бот недоступен. Попробуйте ещё раз:",
             reply_markup=_retry_kb.as_markup(),
         )
+        await state.clear()
         return
 
     added = await db.add_bot(

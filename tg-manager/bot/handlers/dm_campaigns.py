@@ -941,7 +941,6 @@ async def cb_dm_pause(
     callback_data: DmCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer("⏸️ Поставлена на паузу")
     campaign_id = callback_data.campaign_id
     # Cancel running operation_queue entry for this campaign (if any).
     # op_worker checks for cancellation every iteration and will stop the dm_engine loop.

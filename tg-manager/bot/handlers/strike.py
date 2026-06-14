@@ -306,7 +306,8 @@ async def _set_strike_mode(
         "normal": "🔥 Нормальный",
         "maximum": "💀 Максимальный",
     }
-    await callback.answer(f"✅ Режим: {mode_labels.get(mode, mode)}", show_alert=True)
+    # callback.answer() will be called by cb_strike_settings below;
+    # calling it here first would cause a double-answer TelegramBadRequest.
     await cb_strike_settings(callback, pool)
 
 

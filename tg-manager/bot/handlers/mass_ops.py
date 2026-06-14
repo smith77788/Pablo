@@ -1134,7 +1134,7 @@ async def cb_queue(
                     result_summary = res_data.get("summary", "")
             except Exception:
                 pass
-            progress = result_summary[:70] if result_summary else f"✓ {done}/{total} · {created}"
+            progress = html.escape(result_summary[:70]) if result_summary else f"✓ {done}/{total} · {created}"
         elif status == "failed":
             if is_dead_letter:
                 progress = f"🪦 Все {retry_count}/{max_retries} попыток исчерпаны · {created}"
