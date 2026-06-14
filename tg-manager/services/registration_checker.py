@@ -184,11 +184,16 @@ _CHAN_ANCHORS: list[tuple[int, datetime]] = [
     (2_400_000_000,  datetime(2024, 1, 1,  tzinfo=timezone.utc)),
     (2_600_000_000,  datetime(2024, 7, 1,  tzinfo=timezone.utc)),
     (2_800_000_000,  datetime(2025, 1, 1,  tzinfo=timezone.utc)),
-    (3_000_000_000,  datetime(2025, 6, 1,  tzinfo=timezone.utc)),
-    (3_200_000_000,  datetime(2025, 11, 1, tzinfo=timezone.utc)),
-    (3_400_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
-    # NOTE: IDs beyond 3_400_000_000 → date = 2026-04-01 (last verified chan anchor)
+    (3_000_000_000,  datetime(2025, 4, 14, tzinfo=timezone.utc)),  # recalibrated ~58M IDs/month
+    (3_200_000_000,  datetime(2025, 7, 27, tzinfo=timezone.utc)),  # recalibrated ~58M IDs/month
+    (3_419_806_392,  datetime(2025, 11, 18, tzinfo=timezone.utc)), # VERIFIED: @Synthetic_Crew screenshot
+    # IDs beyond this point → method="after_verified", lower bound = Nov 18 2025
 ]
+
+# Последняя верифицированная точка для каналов
+_LAST_VERIFIED_CHAN_ANCHOR: tuple[int, datetime] = (
+    3_419_806_392, datetime(2025, 11, 18, tzinfo=timezone.utc)
+)
 
 _RU_MONTHS = {
     "January": "января", "February": "февраля", "March": "марта",
@@ -333,6 +338,31 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
         else canonical_peer_id(entity_id)
     )
     now = datetime.now(tz=timezone.utc)
+
+    # Каналы: ID выше верифицированной точки → экстраполяция с нижней границей Nov 2025
+    if entity_type not in ("user", "bot") and canonical > _LAST_VERIFIED_CHAN_ANCHOR[0]:
+        verified_dt = _LAST_VERIFIED_CHAN_ANCHOR[1]
+        last_id, last_dt = anchors[-1]
+        if len(anchors) >= 2:
+            prev_id, prev_dt = anchors[-2]
+            rate = (last_dt - prev_dt).total_seconds() / max(last_id - prev_id, 1)
+            extrapolated = datetime.fromtimestamp(
+                last_dt.timestamp() + rate * (canonical - last_id), tz=timezone.utc
+            )
+            extrapolated = min(extrapolated, now)
+        else:
+            extrapolated = min(last_dt, now)
+        return {
+            "entity_id": entity_id,
+            "canonical_id": canonical,
+            "entity_type": entity_type,
+            "date": extrapolated,
+            "method": "after_verified",
+            "confidence": "нижняя граница",
+            "confidence_lo": verified_dt,
+            "confidence_hi": now,
+            "verified_lower_bound": verified_dt,
+        }
 
     # ── Случай 1: ID за пределами верифицированного диапазона ────────────────
     # Экстраполяция запрещена. Возвращаем только нижнюю границу.
