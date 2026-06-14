@@ -300,10 +300,20 @@ async def _scan_oldest_message_in_dialogs(
     timestamp proving the account existed on that date. Far more accurate than
     ID interpolation, and tighter than avatar date (users message before setting photos).
     """
+    from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
     oldest: datetime | None = None
     scanned = 0
     try:
-        async for dialog in client.iter_dialogs():
+        _iter = client.iter_dialogs()
+        while True:
+            try:
+                dialog = await _iter.__anext__()
+            except StopAsyncIteration:
+                break
+            except (ChannelPrivateError, ChatAdminRequiredError):
+                continue
+            except Exception:
+                continue
             if scanned >= max_dialogs:
                 break
             if not (dialog.is_group or dialog.is_channel):
