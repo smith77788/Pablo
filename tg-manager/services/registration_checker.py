@@ -700,8 +700,8 @@ def format_result(
             lines.append(f"📏 Нижняя граница по ID: после {lb_s}")
         else:
             lines.append(f"📅 Создан: <b>после {lb_s}</b>")
-            lines.append(f"⚡ Возраст: <b>< {format_age(lb)}</b>")
-            lines.append(f"📏 Диапазон: <i>{lb_s} — сегодня</i>")
+            lines.append(f"📏 Нижняя граница по ID: {lb_s}")
+            lines.append(f"ℹ️ <i>ID выше верифицированного диапазона — точная дата неизвестна</i>")
     elif dt:
         lines.append(f"📅 Дата: <b>{format_date_ru(dt)}</b>")
         lines.append(f"⏳ Возраст: <b>{format_age(dt)}</b>")

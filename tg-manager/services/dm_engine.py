@@ -429,7 +429,18 @@ async def run_campaign(
                 user_id,
                 result.get("error", "")[:200],
             )
-            # Не считаем как fail — пользователь просто недоступен
+            # Не считаем как fail — пользователь просто недоступен.
+            # Применяем задержку, чтобы не спамить API при большом числе неактивных.
+            if op_id:
+                try:
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                        sent + failed,
+                        op_id,
+                    )
+                except Exception:
+                    pass
+            await asyncio.sleep(random.uniform(_MIN_DELAY, _MAX_DELAY))
             continue
         else:
             # retry — логируем как ошибку
@@ -505,7 +516,7 @@ async def run_campaign(
             unprocessed,
         )
 
-    status_final = "done"
+    status_final = "partial" if unprocessed > 0 else "done"
     await pool.execute(
         "UPDATE dm_campaigns SET status=$1, finished_at=now() WHERE id=$2",
         status_final,

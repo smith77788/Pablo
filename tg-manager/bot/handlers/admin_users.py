@@ -1,5 +1,6 @@
 """Admin user management: list, grant/revoke plans, ban/unban."""
 
+import html
 import logging
 
 from aiogram import Router, F
@@ -75,7 +76,7 @@ async def _users_list_text(
             expires = f" (истекает через {days_left}д)" if days_left > 0 else " (ИСТЁК)"
 
         banned_mark = "🚫 " if u["is_banned"] else ""
-        username = u["username"] or f"#{u['user_id']}"
+        username = html.escape(u["username"] or f"#{u['user_id']}")
         reg_dt = u.get("registered_at")
         reg_str = reg_dt.strftime("%d.%m.%y") if reg_dt else "—"
         text += (
@@ -184,7 +185,7 @@ async def cb_plan_list(
         text += "Нет пользователей с этим планом."
     else:
         for u in users:
-            username = u["username"] or f"#{u['user_id']}"
+            username = html.escape(u["username"] or f"#{u['user_id']}")
             text += f"@{username} (<code>{u['user_id']}</code>)\n"
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -231,7 +232,7 @@ async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         text += "Нет забаненных пользователей."
     else:
         for u in users:
-            username = u["username"] or f"#{u['user_id']}"
+            username = html.escape(u["username"] or f"#{u['user_id']}")
             text += f"🚫 <b>@{username}</b>\n  ID: <code>{u['user_id']}</code>\n\n"
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -255,15 +256,17 @@ async def cb_user_actions(
         return
 
     user_id = callback_data.user_id
-    user = await db.get_user_info(pool, user_id)
-
+    try:
+        user = await db.get_user_info(pool, user_id)
+    except Exception:
+        await callback.answer("Ошибка базы данных.", show_alert=True)
+        return
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
         return
-
     await callback.answer()
 
-    username = user["username"] or f"#{user_id}"
+    username = html.escape(user["username"] or f"#{user_id}")
     emoji = _format_plan_emoji(user["current_plan"])
 
     text = (
@@ -417,7 +420,12 @@ async def cb_confirm_grant(
     plan = callback_data.plan
     months = callback_data.months
 
-    await db.grant_plan_to_user(pool, user_id, callback.from_user.id, plan, months)
+    try:
+        await db.grant_plan_to_user(pool, user_id, callback.from_user.id, plan, months)
+    except Exception:
+        log_exc_swallow(log, "cb_confirm_grant: DB write failed", user_id=user_id)
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
     await callback.answer(f"✅ План {plan} выдан на {months} мес.", show_alert=True)
@@ -452,7 +460,12 @@ async def cb_revoke_plan(
         return
 
     user_id = callback_data.user_id
-    await db.revoke_plan_from_user(pool, user_id, callback.from_user.id)
+    try:
+        await db.revoke_plan_from_user(pool, user_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_revoke_plan: DB write failed", user_id=user_id)
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
     await callback.answer(
@@ -558,7 +571,12 @@ async def cb_ban(
         return
 
     user_id = callback_data.user_id
-    await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
+    try:
+        await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
+    except Exception:
+        log_exc_swallow(log, "cb_ban: DB write failed", user_id=user_id)
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
     await callback.answer(f"✅ Пользователь #{user_id} забанен.", show_alert=True)
 
     # Уведомить пользователя о бане
@@ -617,7 +635,12 @@ async def cb_unban(
         return
 
     user_id = callback_data.user_id
-    await db.unban_user(pool, user_id, callback.from_user.id)
+    try:
+        await db.unban_user(pool, user_id, callback.from_user.id)
+    except Exception:
+        log_exc_swallow(log, "cb_unban: DB write failed", user_id=user_id)
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
 
     # Уведомить пользователя о разбане
@@ -726,12 +749,13 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "main_menu"))
-async def cb_main_menu(callback: CallbackQuery) -> None:
+async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Вернуться в админ-меню."""
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️", show_alert=True)
         return
 
+    await state.clear()
     await callback.answer()
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
