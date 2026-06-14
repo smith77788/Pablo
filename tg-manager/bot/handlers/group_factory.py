@@ -80,14 +80,13 @@ async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_group_create_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "pro"):
-        await callback.answer()
         await callback.message.edit_text(
             locked_text("Создание групп", "pro"),
             reply_markup=subscription_locked_markup("pro"),
         )
         return
-    await callback.answer()
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -564,9 +563,18 @@ async def cb_group_members_list(
     await callback.answer("⏳ Загружаю участников...")
     from services import account_manager
 
-    members = await account_manager.get_channel_members(
-        acc["session_str"], callback_data.group_id, limit=50, _acc=acc
-    )
+    try:
+        members = await account_manager.get_channel_members(
+            acc["session_str"], callback_data.group_id, limit=50, _acc=acc
+        )
+    except Exception as _e:
+        log.warning("members_list get_channel_members failed group=%s: %s", callback_data.group_id, _e)
+        await callback.message.edit_text(
+            f"❌ Не удалось загрузить участников: <code>{html.escape(str(_e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
 
     if not members:
         await callback.message.edit_text(
@@ -748,14 +756,13 @@ async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 async def cb_group_announce_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
         await callback.message.edit_text(
             locked_text("Объявление во все группы", "starter"),
             reply_markup=subscription_locked_markup("starter"),
         )
         return
-    await callback.answer()
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
