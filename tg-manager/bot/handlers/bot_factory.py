@@ -310,6 +310,18 @@ async def cb_factory_do_create_bots(
         )
         return
 
+    from bot.utils.subscription import require_plan
+
+    if not await require_plan(pool, callback.from_user.id, "pro"):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Bot Factory", callback_data=BotFactCb(action="menu"))
+        await callback.message.edit_text(
+            "🔒 <b>Bot Factory — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     from services import operation_bus
 
     op_id = await operation_bus.submit(

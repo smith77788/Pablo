@@ -126,6 +126,15 @@ async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
 async def cb_chanf_import(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Step 1: выбор аккаунта для импорта каналов."""
     await callback.answer()
+    from bot.utils.subscription import require_plan
+
+    if not await require_plan(pool, callback.from_user.id, _PRO):
+        await callback.message.edit_text(
+            "🔒 <b>Импорт каналов — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
@@ -977,8 +986,19 @@ async def cb_chanf_do_bulk_create(
 
 
 @router.callback_query(ChanFactCb.filter(F.action == "bulk_edit"))
-async def cb_chanf_bulk_edit_start(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_chanf_bulk_edit_start(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     await callback.answer()
+    from bot.utils.subscription import require_plan
+
+    if not await require_plan(pool, callback.from_user.id, _PRO):
+        await callback.message.edit_text(
+            "🔒 <b>Массовое редактирование — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     await state.set_state(EditChannelBulkFSM.choosing_field)
     kb = InlineKeyboardBuilder()
     kb.button(text="✏️ Название", callback_data=ChanFactCb(action="be_field_title"))
