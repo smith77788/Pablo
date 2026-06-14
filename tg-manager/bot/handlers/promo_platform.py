@@ -469,7 +469,7 @@ async def cb_new_order_start(callback: CallbackQuery, state: FSMContext, pool: a
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PromoCb(action="orders"))
     await safe_edit(
-        callback.message,
+        callback,
         "📋 <b>Новый заказ продвижения</b>\n\n"
         "Шаг 1/5: введите <b>ключевое слово</b> для поиска в Telegram\n"
         "(например: <code>крипто боты</code>)\n\n"
@@ -524,7 +524,7 @@ async def fsm_order_position(callback: CallbackQuery, state: FSMContext, pool: a
 
     bot_hint = f"✅ Готовых ботов: {len(ready)}" if ready else "⚠️ Нет готовых ботов (добавьте в Складе)"
     await safe_edit(
-        callback.message,
+        callback,
         f"✅ Позиция: топ-{pos}\n\n"
         f"Шаг 3/5: выберите <b>бота</b> для продвижения\n{bot_hint}:",
         reply_markup=kb.as_markup(),
@@ -560,7 +560,7 @@ async def fsm_order_pick_bot(callback: CallbackQuery, state: FSMContext, pool: a
             bot_label = f"@{b['bot_username']}"
 
     await safe_edit(
-        callback.message,
+        callback,
         f"✅ Бот: {bot_label}\n\n"
         "Шаг 4/5: выберите <b>SMM-панель</b> для накрутки:",
         reply_markup=kb.as_markup(),
@@ -579,7 +579,7 @@ async def fsm_order_pick_panel(callback: CallbackQuery, state: FSMContext) -> No
     await state.update_data(panel_id=panel_id)
     await state.set_state(PromoOrderFSM.target_subs)
     await safe_edit(
-        callback.message,
+        callback,
         "Шаг 5/5: введите <b>целевое количество подписчиков</b>\n"
         "(например: <code>5000</code>)\n\nОтправьте <code>0</code> чтобы задать позже.",
     )
@@ -820,7 +820,7 @@ async def cb_bot_add_start(callback: CallbackQuery, state: FSMContext, pool: asy
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PromoCb(action="warehouse"))
     await safe_edit(
-        callback.message,
+        callback,
         "🤖 <b>Добавить бота на склад</b>\n\n"
         "Введите <b>username</b> бота (без @):\n\n<i>Отмена: /cancel</i>",
         reply_markup=kb.as_markup(),
@@ -858,7 +858,7 @@ async def fsm_bot_regdate_today(callback: CallbackQuery, state: FSMContext) -> N
     await state.update_data(reg_date=datetime.now(tz=timezone.utc).strftime("%Y-%m-%d"))
     await state.set_state(PromoAddBotFSM.token)
     await safe_edit(
-        callback.message,
+        callback,
         "Введите <b>токен бота</b> (из BotFather) или отправьте <code>-</code> чтобы пропустить:",
     )
 
@@ -938,7 +938,7 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     # Select best account for the user
     try:
         from services.resource_selector import select_account
-        acc = await select_account(pool, callback.from_user.id, action="read")
+        acc = await select_account(pool, callback.from_user.id, action_type="read")
     except Exception as exc:
         await callback.message.answer(
             f"⚠️ Нет доступных аккаунтов для парсинга BotFather.\n"
@@ -1033,7 +1033,7 @@ async def cb_bot_transfer_start(callback: CallbackQuery, callback_data: PromoCb,
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PromoCb(action="bot_detail", item_id=bot["id"]))
     await safe_edit(
-        callback.message,
+        callback,
         f"📤 <b>Передача @{html.escape(bot['bot_username'])}</b>\n\n"
         "Введите <b>@username нового владельца</b> (должен принять запрос в BotFather):\n\n"
         "<i>Отмена: /cancel</i>",
@@ -1057,7 +1057,7 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
     # Select account for BotFather interaction
     try:
         from services.resource_selector import select_account
-        acc = await select_account(pool, message.from_user.id, action="read")
+        acc = await select_account(pool, message.from_user.id, action_type="read")
     except Exception as exc:
         await message.answer(
             f"⚠️ Нет доступных аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>"
@@ -1315,7 +1315,7 @@ async def cb_panel_add_start(callback: CallbackQuery, state: FSMContext, pool: a
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PromoCb(action="panels"))
     await safe_edit(
-        callback.message,
+        callback,
         "📡 <b>Добавить SMM-панель</b>\n\n"
         "Поддерживается любая панель с API v2:\n"
         "GlobalSMM, SmmRaja, PerfectPanel, FastSMM, SmmKings и другие\n\n"
@@ -1401,7 +1401,7 @@ async def fsm_panel_rekey(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     data = await state.get_data()
     await safe_edit(
-        callback.message,
+        callback,
         f"Шаг 3/4: введите <b>API-ключ</b> панели заново:\n(URL: {html.escape(data.get('api_url', '')[:60])})"
     )
 
@@ -1411,7 +1411,7 @@ async def fsm_panel_force(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(PromoAddPanelFSM.service_id)
     await safe_edit(
-        callback.message,
+        callback,
         "Шаг 4/4: введите <b>ID сервиса</b> для накрутки Telegram-подписчиков\n"
         "или <code>-</code> чтобы пропустить:"
     )
@@ -1462,7 +1462,7 @@ async def cb_topcheck_menu(callback: CallbackQuery, state: FSMContext, pool: asy
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PromoCb(action="menu"))
     await safe_edit(
-        callback.message,
+        callback,
         "🔍 <b>Чекер топа Telegram</b>\n\n"
         "Введите <b>ключевое слово</b> для анализа позиций в поиске Telegram:\n"
         "(например: <code>crypto bots</code>)\n\n"
@@ -1547,7 +1547,7 @@ async def cb_session_upload_start(callback: CallbackQuery, state: FSMContext, po
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=PromoCb(action="menu"))
     await safe_edit(
-        callback.message,
+        callback,
         "📁 <b>Загрузить .session файл</b>\n\n"
         "Отправьте <b>файл</b> с расширением <code>.session</code>\n\n"
         "Поддерживаемые форматы:\n"
