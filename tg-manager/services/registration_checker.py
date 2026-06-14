@@ -652,10 +652,15 @@ def format_result(
 
     method_label = {
         "id_interpolation": "📊 Оценка по ID",
+        "id_interpolation_no_avatar": "📊 Оценка по ID",
         "first_message": "✅ Первое сообщение (точно)",
-        "after_verified": "🆕 Создан недавно (выше верифицированных данных)",
+        "after_verified": "🆕 Создан недавно (нижняя граница)",
         "oldest_photo": "🖼 По первому фото профиля",
-    }.get(method, method)
+        "oldest_avatar": "🖼 По первому аватару",
+        "oldest_group_message": "💬 По старейшему сообщению в группах",
+        "wayback_machine": "🏛 Wayback Machine",
+        "web_snippet": "🔍 Поисковый сниппет",
+    }.get(method, "📊 " + method)
 
     lines: list[str] = []
 

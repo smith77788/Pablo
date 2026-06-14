@@ -1314,6 +1314,12 @@ def format_overview(data: dict) -> str:
                 lines.append(f"⏳ Возраст минимум: <b>{format_age(ct)}</b>")
                 lines.append("🔍 Источник: дата из поискового сниппета")
                 lines.append("<i>⚠️ Низкая надёжность — только ориентир</i>")
+            elif method == "oldest_group_message":
+                # Реальный Telegram-timestamp из общей группы — точная нижняя граница
+                lines.append(f"\n💬 Существует минимум с: <b>{format_date_ru(ct)}</b>")
+                lines.append(f"⏳ Возраст минимум: <b>{format_age(ct)}</b>")
+                lines.append("💬 Источник: старейшее сообщение в наших группах")
+                lines.append("<i>Аккаунт мог быть зарегистрирован раньше</i>")
             else:
                 # ID interpolation — ни аватара, ни точного источника
                 lines.append(f"\n⚠️ <b>Точная дата регистрации неизвестна</b>")
@@ -1345,7 +1351,9 @@ def format_overview(data: dict) -> str:
         if not hasattr(ogm, "strftime"):
             ogm = datetime.fromtimestamp(ogm, tz=timezone.utc)
         gs = data.get("groups_scanned", 0)
-        lines.append(f"💬 Старейшее сообщение в наших группах: <b>{format_date_ru(ogm)}</b>")
+        # Skip if already shown in the created_at block (oldest_group_message is the primary signal)
+        if data.get("created_method") != "oldest_group_message":
+            lines.append(f"💬 Старейшее сообщение в наших группах: <b>{format_date_ru(ogm)}</b>")
         if gs:
             lines.append(f"<i>   (проверено {gs} групп)</i>")
 
