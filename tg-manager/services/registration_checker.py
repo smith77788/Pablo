@@ -187,7 +187,7 @@ _CHAN_ANCHORS: list[tuple[int, datetime]] = [
     (3_000_000_000,  datetime(2025, 6, 1,  tzinfo=timezone.utc)),
     (3_200_000_000,  datetime(2025, 11, 1, tzinfo=timezone.utc)),
     (3_400_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
-    (3_600_000_000,  datetime(2026, 9, 1,  tzinfo=timezone.utc)),
+    # NOTE: IDs beyond 3_400_000_000 → date = 2026-04-01 (last verified chan anchor)
 ]
 
 _RU_MONTHS = {
@@ -254,16 +254,24 @@ def _segment_lookup(
     Находит bracket [lo_id, hi_id] и интерполирует строго внутри него.
     Возвращает (date, lo_date, hi_date, confidence_days).
     confidence_days = половина ширины сегмента в днях.
+
+    Если интерполированная дата попадает в будущее — возвращает lo_dt сегмента
+    (нижняя граница которую мы точно знаем), а не now(). Это избегает race condition
+    между несколькими вызовами now() и не создаёт ложную привязку к текущей дате.
     """
     _now = datetime.now(tz=timezone.utc)
 
     if canonical_id <= anchors[0][0]:
-        dt = _clamp_to_present(anchors[0][1])
-        return dt, anchors[0][1], anchors[0][1], 0
+        return anchors[0][1], anchors[0][1], anchors[0][1], 0
 
     if canonical_id >= anchors[-1][0]:
-        dt = _clamp_to_present(anchors[-1][1])
-        return dt, anchors[-1][1], anchors[-1][1], 0
+        last_dt = anchors[-1][1]
+        # Если последний якорь в будущем — возвращаем предпоследний
+        if last_dt > _now and len(anchors) >= 2:
+            safe_dt = anchors[-2][1]
+        else:
+            safe_dt = last_dt
+        return safe_dt, safe_dt, safe_dt, 0
 
     for i in range(len(anchors) - 1):
         lo_id, lo_dt = anchors[i]
@@ -274,13 +282,14 @@ def _segment_lookup(
             raw = datetime.fromtimestamp(
                 lo_dt.timestamp() + frac * delta_s, tz=timezone.utc
             )
-            dt = _clamp_to_present(raw)
+            # Если результат в будущем — возвращаем нижнюю границу сегмента,
+            # не now(). Нижняя граница — это факт; now() создаёт ложный "якорь".
+            dt = lo_dt if raw > _now else raw
             segment_days = int((hi_dt - lo_dt).days)
             confidence_days = max(1, segment_days // 2)
             return dt, lo_dt, hi_dt, confidence_days
 
-    dt = _clamp_to_present(anchors[-1][1])
-    return dt, anchors[-1][1], anchors[-1][1], 0
+    return anchors[-1][1], anchors[-1][1], anchors[-1][1], 0
 
 
 def _interpolate(entity_id: int, anchors: list[tuple[int, datetime]]) -> datetime:
