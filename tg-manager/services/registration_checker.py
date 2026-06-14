@@ -886,7 +886,7 @@ def format_result(
         "id_interpolation": "📊 Оценка по ID",
         "id_interpolation_no_avatar": "📊 Оценка по ID",
         "first_message": "✅ Первое сообщение (точно)",
-        "after_verified": "🆕 Создан недавно (нижняя граница)",
+        "after_verified": "❓ ID вне верифицированного диапазона",
         "oldest_photo": "🖼 По первому фото профиля",
         "oldest_avatar": "🖼 По первому аватару",
         "oldest_group_message": "💬 По старейшему сообщению в группах",
@@ -924,15 +924,22 @@ def format_result(
         lb = result.get("verified_lower_bound") or confidence_lo
         lb_s = format_date_ru(lb) if lb else "?"
         if oldest_photo:
+            # Есть фото — даём реальную нижнюю границу
             ph_s = format_date_ru(oldest_photo)
             lines.append(f"📅 Создан: <b>не позднее {ph_s}</b>")
             lines.append(f"⏳ Возраст: <b>≥ {format_age(oldest_photo)}</b>")
-            lines.append(f"📸 Первое фото: {ph_s}")
-            lines.append(f"📏 Нижняя граница по ID: после {lb_s}")
+            lines.append(f"📸 По первому фото профиля: {ph_s}")
+            lines.append(f"ℹ️ <i>Точнее — только через API</i>")
         else:
-            lines.append(f"📅 Создан: <b>после {lb_s}</b>")
-            lines.append(f"📏 Нижняя граница по ID: {lb_s}")
-            lines.append(f"ℹ️ <i>ID выше верифицированного диапазона — точная дата неизвестна</i>")
+            # Нет API-данных — ID выше верифицированного диапазона.
+            # DC-шардинг: аккаунт с высоким ID мог быть создан раньше
+            # чем подсказывает цифра (пул был зарезервирован заранее).
+            # Поэтому НЕ утверждаем нижнюю границу — это вводит в заблуждение.
+            lines.append(f"📅 Дата создания: <b>точно неизвестна</b>")
+            lines.append(f"⚠️ <i>ID выше верифицированного диапазона</i>")
+            lines.append(f"ℹ️ <i>DC-шардинг Telegram может давать высокие ID аккаунтам,</i>")
+            lines.append(f"<i>созданным раньше последнего якоря ({lb_s})</i>")
+            lines.append(f"💡 Для точной даты — нажмите «Проверить через API»")
     elif dt:
         lines.append(f"📅 Дата: <b>{format_date_ru(dt)}</b>")
         lines.append(f"⏳ Возраст: <b>{format_age(dt)}</b>")
