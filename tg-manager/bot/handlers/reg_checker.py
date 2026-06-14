@@ -822,7 +822,15 @@ async def _show_result(
     text = rc.format_result(estimate, name, username)
     is_channel = entity_type in ("channel", "supergroup", "group")
     kb = _result_kb(entity_id, entity_type) if not is_channel else _result_kb_retry_exact(entity_id, entity_type)
-    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    try:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    except Exception as _html_err:
+        if "parse entities" in str(_html_err).lower() or "can't parse" in str(_html_err).lower():
+            import re as _re
+            plain = _re.sub(r"<[^>]*>", "", text)
+            await message.answer(plain, reply_markup=kb)
+        else:
+            raise
     await rc.cache_result(pool, message.from_user.id, estimate, name, username)
 
     # Фоновое обогащение: Telethon → Bot API — без блокировки
@@ -1128,14 +1136,21 @@ async def _show_analysis_page(
     if pool and owner_id:
         is_following = await _db.is_following(pool, owner_id, entity_id)
     kb = _analyze_kb(entity_id, entity_type, page, is_following=is_following)
+    async def _send(txt: str, pm: str | None) -> None:
+        try:
+            await message.edit_text(txt, parse_mode=pm, reply_markup=kb, disable_web_page_preview=True)
+        except Exception:
+            await message.answer(txt, parse_mode=pm, reply_markup=kb, disable_web_page_preview=True)
+
     try:
-        await message.edit_text(
-            text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True
-        )
-    except Exception:
-        await message.answer(
-            text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True
-        )
+        await _send(text, "HTML")
+    except Exception as _html_err:
+        if "parse entities" in str(_html_err).lower() or "can't parse" in str(_html_err).lower():
+            import re as _re
+            plain = _re.sub(r"<[^>]*>", "", text)
+            await _send(plain, None)
+        else:
+            raise
 
 
 @router.callback_query(RegCb.filter(F.action == "follow_toggle"))

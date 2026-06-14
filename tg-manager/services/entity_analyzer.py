@@ -1493,7 +1493,7 @@ def format_overview(data: dict) -> str:
                 "zh": "🇨🇳 Chinese", "es": "🇪🇸 Spanish", "tr": "🇹🇷 Turkish",
                 "fa": "🇮🇷 Persian", "hi": "🇮🇳 Hindi", "pt": "🇧🇷 Portuguese",
             }
-            lang_label = lang_names.get(lang, lang.upper())
+            lang_label = lang_names.get(lang, html.escape(lang.upper()))
             lines.append(f"🌐 Язык интерфейса: <b>{lang_label}</b>")
 
         # Emoji status

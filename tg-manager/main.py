@@ -380,7 +380,7 @@ async def main() -> None:
             _resilient("follow_checker", _follow_checker.run_follow_checker, pool, bot)
         )
         log.info("TG Manager started")
-        await dp.start_polling(bot, pool=pool, http=http)
+        await dp.start_polling(bot, pool=pool, http=http, drop_pending_updates=True)
     finally:
         await pool.close()
         await http.close()
