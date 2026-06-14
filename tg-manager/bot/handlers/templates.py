@@ -206,13 +206,13 @@ async def msg_template_text(
     saved = await db.save_template(pool, message.from_user.id, name, text)
     if saved:
         await message.answer(
-            f"✅ Шаблон <b>«{name}»</b> сохранён!",
+            f"✅ Шаблон <b>«{_html.escape(name)}»</b> сохранён!",
             parse_mode="HTML",
             reply_markup=back_to_bot(bot_id) if bot_id else None,
         )
     else:
         await message.answer(
-            f"⚠️ Шаблон с именем <b>«{name}»</b> уже существует. Выберите другое название.",
+            f"⚠️ Шаблон с именем <b>«{_html.escape(name)}»</b> уже существует. Выберите другое название.",
             parse_mode="HTML",
             reply_markup=back_to_bot(bot_id) if bot_id else None,
         )
@@ -582,11 +582,11 @@ async def cb_template_ai_save(
 async def cb_template_edit(
     callback: CallbackQuery, callback_data: TemplateCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     tpl = await db.get_template(pool, callback_data.template_id, callback.from_user.id)
     if not tpl:
         await callback.answer("❌ Шаблон не найден", show_alert=True)
         return
+    await callback.answer()
     await state.set_state(EditTemplate.waiting_name)
     await state.update_data(
         template_id=callback_data.template_id,
@@ -673,8 +673,10 @@ async def msg_edit_template_name(message: Message, state: FSMContext) -> None:
 async def cb_edit_keep_text_fsm(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     data = await state.get_data()
+    if not data.get("template_id"):
+        await callback.answer("Сессия истекла. Начните заново.", show_alert=True)
+        return
     await state.clear()
     ok = await db.update_template(
         pool,
@@ -684,6 +686,7 @@ async def cb_edit_keep_text_fsm(
         data["old_text"],
     )
     if ok:
+        await callback.answer()
         await callback.message.edit_text(
             "✅ Шаблон обновлён.",
             parse_mode="HTML",
@@ -742,14 +745,14 @@ async def msg_ai_template_name(
     saved = await db.save_template(pool, message.from_user.id, name, generated_text)
     if saved:
         await message.answer(
-            f"✅ Шаблон <b>«{name}»</b> сохранён!\n\n"
+            f"✅ Шаблон <b>«{_html.escape(name)}»</b> сохранён!\n\n"
             "Его можно найти в разделе <b>Шаблоны</b> и использовать для рассылки.",
             parse_mode="HTML",
             reply_markup=back_to_bot(bot_id) if bot_id else None,
         )
     else:
         await message.answer(
-            f"⚠️ Шаблон с именем <b>«{name}»</b> уже существует. Введите другое:",
+            f"⚠️ Шаблон с именем <b>«{_html.escape(name)}»</b> уже существует. Введите другое:",
             parse_mode="HTML",
         )
         await state.set_state(AiTemplateGenFSM.waiting_name)
