@@ -348,6 +348,7 @@ async def cb_chanf_create_acc_chosen(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
+    await callback.answer()
     try:
         acc = await pool.fetchrow(
             "SELECT id, phone, first_name, username, session_str "
@@ -359,9 +360,12 @@ async def cb_chanf_create_acc_chosen(
         log_exc_swallow(log, "create_acc_chosen fetchrow failed")
         acc = None
     if not acc:
-        await callback.answer("Аккаунт не найден.", show_alert=True)
+        await callback.message.edit_text(
+            "⚠️ Аккаунт не найден.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
         return
-    await callback.answer()
     await state.update_data(acc_id=acc["id"], acc_label=_acc_label(acc))
 
     sd = await state.get_data()
@@ -547,7 +551,7 @@ async def cb_chanf_pick_cluster(
     except Exception:
         log_exc_swallow(log, "pick_cluster fetchrow failed")
         cl = None
-    cluster_name = cl["name"] if cl else ""
+    cluster_name = (cl["name"] or "") if cl else ""
     await state.update_data(
         cluster_id=callback_data.channel_id, cluster_name=cluster_name
     )
