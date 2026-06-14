@@ -107,6 +107,7 @@ from services import recovery_engine
 from services import anomaly_detector
 from services import proxy_scraper
 from services import activity_logger
+from services import promo_scheduler
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -392,6 +393,9 @@ async def main() -> None:
         from services import follow_checker as _follow_checker
         asyncio.create_task(
             _resilient("follow_checker", _follow_checker.run_follow_checker, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("promo_scheduler", promo_scheduler.run, pool, bot)
         )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http, drop_pending_updates=True)

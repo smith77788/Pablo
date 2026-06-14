@@ -537,3 +537,11 @@ class PromoAddPanelFSM(StatesGroup):
 
 class PromoTopCheckFSM(StatesGroup):
     keyword = State()           # ключевое слово для анализа топа
+
+
+class PromoTransferFSM(StatesGroup):
+    new_owner = State()         # @username нового владельца бота
+
+
+class PromoSessionUploadFSM(StatesGroup):
+    waiting_file = State()      # ожидаем .session файл
