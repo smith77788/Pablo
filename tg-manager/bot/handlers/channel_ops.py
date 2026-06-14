@@ -596,7 +596,8 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ChanCb.filter(F.action == "menu"))
-async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     await callback.answer()
     if not await require_plan(pool, callback.from_user.id, _STARTER):
         _lock_kb = InlineKeyboardBuilder()
@@ -4234,34 +4235,6 @@ async def cb_br_confirm(
         reply_markup=kb.as_markup(),
     )
     await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text(
-            "🔒 <b>Массовые операции — 💎 ПОДПИСКА</b>\n\nОформите: /subscription",
-            parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
-        )
-        return
-    try:
-        accounts = await pool.fetch(
-            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE",
-            callback.from_user.id,
-        )
-    except Exception:
-        accounts = []
-    count = len(accounts)
-    await callback.message.edit_text(
-        f"⚡ <b>Массовые операции</b>\n\n"
-        f"Активных аккаунтов: <b>{count}</b>\n\n"
-        "Выберите операцию — затем выберете конкретные аккаунты (или все сразу):\n"
-        "• 📢 Создать канал/группу — создаст на выбранных аккаунтах\n"
-        "• 🔗 Вступить в канал — все выбранные вступят по ссылке\n"
-        "• 🚪 Выйти из канала — все выбранные покинут канал\n"
-        "• 📤 Опубликовать пост — опубликует от всех выбранных\n"
-        "• ✏️ Имя / 📝 Bio / 🔤 Username — изменить профиль аккаунтов\n\n"
-        "💡 После выбора операции появится список аккаунтов с чекбоксами",
-        parse_mode="HTML",
-        reply_markup=_bulk_menu_kb().as_markup(),
-    )
 
 
 # ══════════════════════════════════════════════════════════════════════════

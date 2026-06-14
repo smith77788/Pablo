@@ -29,9 +29,9 @@ router = Router()
 
 @router.callback_query(AudCb.filter(F.action == "menu"))
 async def cb_aud_menu(
-    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: AudCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-
+    await state.clear()
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
