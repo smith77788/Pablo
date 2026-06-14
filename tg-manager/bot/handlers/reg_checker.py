@@ -833,47 +833,70 @@ async def _show_result(
     text = rc.format_result(estimate, name, username)
     is_channel = entity_type in ("channel", "supergroup", "group")
     kb = _result_kb(entity_id, entity_type) if not is_channel else _result_kb_retry_exact(entity_id, entity_type)
+    sent: Message | None = None
     try:
-        await message.answer(text, parse_mode="HTML", reply_markup=kb)
+        sent = await message.answer(text, parse_mode="HTML", reply_markup=kb)
     except Exception as _html_err:
         if "parse entities" in str(_html_err).lower() or "can't parse" in str(_html_err).lower():
             import re as _re
             plain = _re.sub(r"<[^>]*>", "", text)
-            await message.answer(plain, reply_markup=kb)
+            sent = await message.answer(plain, reply_markup=kb)
         else:
             raise
     await rc.cache_result(pool, message.from_user.id, estimate, name, username)
 
-    # Фоновое обогащение: Telethon → Bot API — без блокировки
+    # Фоновое обогащение: Telethon → обновляем то же сообщение через edit_text
     peer = auto_resolve_peer or (username if username else rc.canonical_peer_id(entity_id))
     asyncio.create_task(
-        _enrich_metadata(message, pool, entity_id, entity_type, name, username, peer)
+        _enrich_metadata(sent, pool, entity_id, entity_type, name, username, peer, kb)
     )
 
 
 async def _enrich_metadata(
-    message: Message,
+    sent_msg: Message | None,
     pool: asyncpg.Pool,
     entity_id: int,
     entity_type: str,
     name: str | None,
     username: str | None,
     peer,
+    kb=None,
 ) -> None:
-    """Фоновое обогащение кэша: Telethon → Bot API. Не блокирует пользователя."""
+    """Фоновое обогащение: Telethon → обновляет уже отправленное сообщение через edit_text."""
+    if sent_msg is None:
+        return
     try:
-        owner_id = message.from_user.id
+        owner_id = sent_msg.from_user.id if sent_msg.from_user else (sent_msg.chat.id if sent_msg.chat else None)
+        if not owner_id:
+            return
         full_info = await rc.get_entity_full_info(pool, owner_id, peer)
         if not full_info and entity_type in ("channel", "supergroup", "group"):
-            full_info = await _bot_api_channel_info(message.bot, entity_id, username or peer)
+            full_info = await _bot_api_channel_info(sent_msg.bot, entity_id, username or peer)
         if not full_info:
             return
+
+        enriched_name = full_info.get("name") or name
+        enriched_username = full_info.get("username") or username
+
         estimate = rc.estimate_by_id(entity_id, entity_type)
         merged = {**estimate, **full_info}
+
+        # Если Telethon нашёл фото или точную дату — обновляем сообщение
+        has_new_data = (
+            "oldest_photo_date" in full_info
+            or "exact_date" in full_info
+            or "about" in full_info
+            or "participants_count" in full_info
+        )
+        if has_new_data:
+            new_text = rc.format_result(merged, enriched_name, enriched_username)
+            try:
+                await sent_msg.edit_text(new_text, parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                pass  # сообщение старое или уже удалено — не критично
+
         await rc.cache_result(
-            pool, owner_id, merged,
-            full_info.get("name") or name,
-            full_info.get("username") or username,
+            pool, owner_id, merged, enriched_name, enriched_username,
         )
     except Exception as e:
         log.debug("_enrich_metadata: %s", e)

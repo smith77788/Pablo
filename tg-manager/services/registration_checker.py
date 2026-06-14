@@ -950,10 +950,26 @@ def format_result(
             lines.append(f"<i>созданным раньше последнего якоря ({lb_s})</i>")
             lines.append(f"💡 Для точной даты — нажмите «Проверить через API»")
     elif dt:
-        lines.append(f"📅 Дата: <b>{format_date_ru(dt)}</b>")
-        lines.append(f"⏳ Возраст: <b>{format_age(dt)}</b>")
+        # Если есть дата первого фото — это лучшая (более точная) нижняя граница
+        oldest_photo: datetime | None = result.get("oldest_photo_date")
+        if oldest_photo and method != "oldest_photo":
+            # Фото даёт реальный факт; дата по ID — оценка. Показываем оба.
+            ph_s = format_date_ru(oldest_photo)
+            lines.append(f"📅 Создан: <b>не позднее {ph_s}</b>")
+            lines.append(f"⏳ Возраст: <b>≥ {format_age(oldest_photo)}</b>")
+            lines.append(f"📸 Первое фото профиля: {ph_s}")
+            if method == "id_interpolation":
+                lines.append(f"📊 Оценка по ID: <i>~{format_date_ru(dt)}</i>")
+        elif method == "oldest_photo" and oldest_photo:
+            ph_s = format_date_ru(oldest_photo)
+            lines.append(f"📅 Создан: <b>не позднее {ph_s}</b>")
+            lines.append(f"⏳ Возраст: <b>≥ {format_age(oldest_photo)}</b>")
+            lines.append(f"📸 Первое фото профиля: {ph_s}")
+        else:
+            lines.append(f"📅 Дата: <b>{format_date_ru(dt)}</b>")
+            lines.append(f"⏳ Возраст: <b>{format_age(dt)}</b>")
         if method == "id_interpolation" and confidence_lo and confidence_hi:
-            if confidence_lo != confidence_hi:
+            if confidence_lo != confidence_hi and not oldest_photo:
                 lo_s = format_date_ru(confidence_lo)
                 hi_s = format_date_ru(confidence_hi)
                 confidence_days = result.get("confidence_days")
