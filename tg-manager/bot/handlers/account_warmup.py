@@ -46,7 +46,8 @@ def _back_kb() -> InlineKeyboardBuilder:
 
 
 @router.callback_query(WarmupCb.filter(F.action == "menu"))
-async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     await callback.answer()
     from services.account_warmer import get_active_plans
 
@@ -1555,7 +1556,8 @@ def _ract_back_kb() -> InlineKeyboardBuilder:
 
 
 @router.callback_query(ResourceActCb.filter(F.action == "menu"))
-async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_ract_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     await callback.answer()
     uid = callback.from_user.id
     try:

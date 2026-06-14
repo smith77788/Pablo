@@ -4389,7 +4389,7 @@ async def handle_label_add(
     new_label = (message.text or "").strip()[:50]
     if new_label:
         acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
-        labels = list(acc.get("labels") or [])
+        labels = list((acc.get("labels") if acc else None) or [])
         if new_label not in labels:
             labels.append(new_label)
         await db.update_account_labels(pool, acc_id, message.from_user.id, labels)
@@ -4443,7 +4443,7 @@ async def handle_warning_add(
     new_warn = (message.text or "").strip()[:100]
     if new_warn:
         acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
-        warnings = list(acc.get("warnings") or [])
+        warnings = list((acc.get("warnings") if acc else None) or [])
         if new_warn not in warnings:
             warnings.append(new_warn)
         await db.update_account_warnings(pool, acc_id, message.from_user.id, warnings)

@@ -982,7 +982,6 @@ async def cb_dm_resume(
             reply_markup=subscription_locked_markup("enterprise"),
         )
         return
-    await callback.answer()
     campaign_id = callback_data.campaign_id
     # Submit to operation_queue — op_worker will call dm_engine.run_campaign()
     # which handles status→running and sends DMs with flood/skip handling.
@@ -996,11 +995,14 @@ async def cb_dm_resume(
             {"campaign_id": campaign_id},
         )
     except Exception as exc:
+        await callback.answer()
+        import html as _h
         await callback.message.answer(
-            f"⚠️ Ошибка постановки в очередь: {str(exc)[:200]}",
+            f"⚠️ Ошибка постановки в очередь: {_h.escape(str(exc)[:200])}",
             parse_mode="HTML",
         )
         return
+    # cb_dm_detail calls callback.answer() itself
     await cb_dm_detail(callback, callback_data, pool)
 
 

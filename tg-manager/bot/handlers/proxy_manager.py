@@ -589,7 +589,7 @@ async def cb_proxy_delete(
         )
         return
 
-    label = row["label"] or row["proxy_url"]
+    label = html.escape(row["label"] or row["proxy_url"])
     await callback.message.edit_text(
         f"🗑 Прокси <code>{label}</code> удалён.",
         parse_mode="HTML",
