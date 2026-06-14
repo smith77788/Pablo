@@ -1534,6 +1534,7 @@ async def fsm_seo_username(
     )
 
     if not result:
+        await state.clear()
         await message.answer("⚠️ AI недоступен. Проверьте OPENROUTER_API_KEY.")
         return
 
@@ -2578,7 +2579,11 @@ async def cb_seo_uname_alts(
             acc_id=callback_data.acc_id,
         )
     else:
-        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+        try:
+            row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+        except Exception:
+            await callback.answer("Ошибка базы данных.", show_alert=True)
+            return
         if not row:
             await callback.answer("Не найдено.", show_alert=True)
             return
