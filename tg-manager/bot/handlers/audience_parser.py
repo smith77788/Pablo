@@ -315,7 +315,7 @@ async def _start_parse(
         log.warning("parse error for user=%s source=%s: %s", owner_id, source, e)
         return
 
-    if result.get("status") == "error":
+    if result and result.get("status") == "error":
         await progress_msg.edit_text(
             f"❌ <b>Ошибка парсинга</b>\n\n{html.escape(result.get('error', 'неизвестная ошибка')[:200])}",
             parse_mode="HTML",

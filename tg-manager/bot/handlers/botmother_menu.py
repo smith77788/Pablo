@@ -2017,7 +2017,7 @@ async def cb_op_reports(
     text = (
         f"<b>📊 Отчёты по операциям</b>  стр. {page + 1}/{total_pages}"
         + summary_line
-        + "\n".join(lines)
+        + ("\n" + "\n".join(lines) if lines else "")
     )
 
     nav_count = 0
