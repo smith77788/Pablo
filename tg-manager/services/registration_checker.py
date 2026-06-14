@@ -45,9 +45,9 @@ _USER_ANCHORS: list[tuple[int, datetime]] = [
     (1_500_000_000,  datetime(2020, 7, 1,  tzinfo=timezone.utc)),
     (1_600_000_000,  datetime(2020, 10, 1, tzinfo=timezone.utc)),
     (1_700_000_000,  datetime(2021, 1, 1,  tzinfo=timezone.utc)),
-    # Перекалибровано по единственной верифицированной точке:
-    # ID 8_349_649_487 = 30 мая 2026 (BotFather скриншот, год 2026 = текущий)
-    # Линейная модель: ~102.48M ID/месяц от янв 2021 → верно на ±2–3 мес.
+    # Перекалибровано по верифицированным точкам наблюдений.
+    # Правило: ТОЛЬКО верифицированные или наблюдённые данные.
+    # Экстраполяция в будущее запрещена — _interpolate обрезает до сегодня.
     (2_007_000_000,  datetime(2021, 4, 1,  tzinfo=timezone.utc)),
     (2_315_000_000,  datetime(2021, 7, 1,  tzinfo=timezone.utc)),
     (2_622_000_000,  datetime(2021, 10, 1, tzinfo=timezone.utc)),
@@ -69,10 +69,14 @@ _USER_ANCHORS: list[tuple[int, datetime]] = [
     (7_541_000_000,  datetime(2025, 10, 1, tzinfo=timezone.utc)),
     (7_849_000_000,  datetime(2026, 1, 1,  tzinfo=timezone.utc)),
     (8_156_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
-    (8_349_649_487,  datetime(2026, 5, 30, tzinfo=timezone.utc)),  # VERIFIED
-    (8_464_000_000,  datetime(2026, 7, 1,  tzinfo=timezone.utc)),
-    (8_771_000_000,  datetime(2026, 10, 1, tzinfo=timezone.utc)),
+    (8_349_649_487,  datetime(2026, 5, 30, tzinfo=timezone.utc)),  # VERIFIED (BotFather screenshot)
+    # NOTE: IDs beyond 8_349_649_487 get method="after_verified" — see estimate_by_id()
 ]
+
+# Последняя верифицированная точка — используется для вычисления нижней границы для "слишком новых" ID
+_LAST_VERIFIED_USER_ANCHOR: tuple[int, datetime] = (
+    8_349_649_487, datetime(2026, 5, 30, tzinfo=timezone.utc)
+)
 
 # ── Channel / Supergroup / Chat ID → approximate creation date anchors ─────────
 _CHAN_ANCHORS: list[tuple[int, datetime]] = [
@@ -129,21 +133,24 @@ def canonical_peer_id(tg_id: int) -> int:
 
 
 def _interpolate(entity_id: int, anchors: list[tuple[int, datetime]]) -> datetime:
-    """Линейная интерполяция даты по ID между ближайшими опорными точками."""
+    """Линейная интерполяция даты по ID. Никогда не возвращает дату в будущем."""
+    _now = datetime.now(tz=timezone.utc)
     if entity_id <= anchors[0][0]:
         return anchors[0][1]
     if entity_id >= anchors[-1][0]:
-        return anchors[-1][1]
+        # ID выше всех якорей: возвращаем последний якорь, но не будущее
+        return min(anchors[-1][1], _now)
     for i in range(len(anchors) - 1):
         lo_id, lo_dt = anchors[i]
         hi_id, hi_dt = anchors[i + 1]
         if lo_id <= entity_id <= hi_id:
             frac = (entity_id - lo_id) / (hi_id - lo_id)
             delta_s = (hi_dt - lo_dt).total_seconds()
-            return datetime.fromtimestamp(
+            result = datetime.fromtimestamp(
                 lo_dt.timestamp() + frac * delta_s, tz=timezone.utc
             )
-    return anchors[-1][1]
+            return min(result, _now)
+    return min(anchors[-1][1], _now)
 
 
 def estimate_confidence_range(
@@ -184,6 +191,36 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
         if entity_type in ("user", "bot")
         else canonical_peer_id(entity_id)
     )
+    now = datetime.now(tz=timezone.utc)
+
+    # ID выше последней верифицированной точки — интерполяция ненадёжна.
+    # Сообщаем нижнюю границу (последний якорь) + верхнюю границу (сегодня).
+    if entity_type in ("user", "bot") and canonical > _LAST_VERIFIED_USER_ANCHOR[0]:
+        verified_dt = _LAST_VERIFIED_USER_ANCHOR[1]
+        # Вычисляем примерную дату из линейной модели, но обрезаем сегодняшним числом
+        last_id, last_dt = anchors[-1]
+        # Используем скорость роста из предыдущего сегмента
+        if len(anchors) >= 2:
+            prev_id, prev_dt = anchors[-2]
+            rate = (last_dt - prev_dt).total_seconds() / max(last_id - prev_id, 1)
+            extrapolated = datetime.fromtimestamp(
+                last_dt.timestamp() + rate * (canonical - last_id), tz=timezone.utc
+            )
+            extrapolated = min(extrapolated, now)
+        else:
+            extrapolated = min(last_dt, now)
+        return {
+            "entity_id": entity_id,
+            "canonical_id": canonical,
+            "entity_type": entity_type,
+            "date": extrapolated,
+            "method": "after_verified",
+            "confidence": "нижняя граница",
+            "confidence_lo": verified_dt,
+            "confidence_hi": now,
+            "verified_lower_bound": verified_dt,
+        }
+
     dt = _interpolate(canonical, anchors)
     lo, hi = estimate_confidence_range(entity_id, entity_type)
     return {
@@ -263,6 +300,37 @@ async def get_entity_full_info(
                     fu = getattr(full, "full_user", None)
                     if fu:
                         result["about"] = getattr(fu, "about", None)
+                except Exception:
+                    pass
+
+                # ── Уникальный метод: первое фото профиля = нижняя граница даты ──
+                # photos.GetUserPhotosRequest(offset=total-1, limit=1) → самое старое фото.
+                # Это работает для ботов и пользователей — никто другой не использует.
+                try:
+                    from telethon.tl.functions.photos import GetUserPhotosRequest
+                    # Сначала получаем только count (limit=0)
+                    ph_count_resp = await asyncio.wait_for(
+                        client(GetUserPhotosRequest(entity, offset=0, max_id=0, limit=0)),
+                        timeout=10,
+                    )
+                    total_photos = getattr(ph_count_resp, "count", 0)
+                    if total_photos and total_photos > 0:
+                        # Берём самое старое фото (offset = total - 1)
+                        ph_resp = await asyncio.wait_for(
+                            client(GetUserPhotosRequest(
+                                entity, offset=max(0, total_photos - 1), max_id=0, limit=1
+                            )),
+                            timeout=10,
+                        )
+                        photos_list = getattr(ph_resp, "photos", [])
+                        if photos_list:
+                            oldest_photo_date = getattr(photos_list[0], "date", None)
+                            if oldest_photo_date:
+                                if isinstance(oldest_photo_date, (int, float)):
+                                    from datetime import datetime, timezone as _tz
+                                    oldest_photo_date = datetime.fromtimestamp(oldest_photo_date, tz=_tz.utc)
+                                result["oldest_photo_date"] = oldest_photo_date
+                                result["total_photos"] = total_photos
                 except Exception:
                     pass
 
@@ -585,6 +653,8 @@ def format_result(
     method_label = {
         "id_interpolation": "📊 Оценка по ID",
         "first_message": "✅ Первое сообщение (точно)",
+        "after_verified": "🆕 Создан недавно (выше верифицированных данных)",
+        "oldest_photo": "🖼 По первому фото профиля",
     }.get(method, method)
 
     lines: list[str] = []
@@ -612,7 +682,22 @@ def format_result(
 
     lines.append("")
 
-    if dt:
+    if method == "after_verified":
+        oldest_photo = result.get("oldest_photo_date")
+        lb = result.get("verified_lower_bound") or confidence_lo
+        lb_s = format_date_ru(lb) if lb else "?"
+        if oldest_photo:
+            # Первое фото профиля = точная нижняя граница регистрации
+            ph_s = format_date_ru(oldest_photo)
+            lines.append(f"📅 Создан: <b>не позднее {ph_s}</b>")
+            lines.append(f"⏳ Возраст: <b>≥ {format_age(oldest_photo)}</b>")
+            lines.append(f"📸 Первое фото: {ph_s}")
+            lines.append(f"📏 Нижняя граница по ID: после {lb_s}")
+        else:
+            lines.append(f"📅 Создан: <b>после {lb_s}</b>")
+            lines.append(f"⚡ Возраст: <b>< {format_age(lb)}</b>")
+            lines.append(f"📏 Диапазон: <i>{lb_s} — сегодня</i>")
+    elif dt:
         lines.append(f"📅 Дата: <b>{format_date_ru(dt)}</b>")
         lines.append(f"⏳ Возраст: <b>{format_age(dt)}</b>")
         if method == "id_interpolation" and confidence_lo and confidence_hi:
