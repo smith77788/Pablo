@@ -93,6 +93,7 @@ async def cb_gp_menu(
     pool: asyncpg.Pool,
 ) -> None:
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
+        await state.clear()
         await callback.answer()
         await callback.message.edit_text(
             locked_text("Global Presence Factory", "enterprise"),
@@ -930,10 +931,13 @@ async def _show_accounts_step(
             except Exception as _ea:
                 _eas = str(_ea).lower()
                 if "message to edit not found" in _eas or "message can't be edited" in _eas:
-                    await callback.bot.send_message(
-                        callback.from_user.id, no_acc_text,
-                        reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
-                    )
+                    if hasattr(callback, "bot") and callback.bot is not None:
+                        await callback.bot.send_message(
+                            callback.from_user.id, no_acc_text,
+                            reply_markup=no_acc_kb.as_markup(), parse_mode="HTML"
+                        )
+                    else:
+                        log.warning("global_presence: no bot on callback, cannot send fallback")
                 elif "message is not modified" not in _eas:
                     log.warning("global_presence acc fallback edit error: %s", _ea)
         return
