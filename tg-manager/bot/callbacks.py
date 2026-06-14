@@ -439,6 +439,11 @@ class RegCb(CallbackData, prefix="rc"):
     page: int = 0          # history page OR analyzer tab (0=overview,1=stats,2=content,3=network,4=seo,5=admins)
 
 
+class BotCustomizeCb(CallbackData, prefix="btcz"):
+    action: str  # "apply"
+    bot_id: int = 0
+
+
 class PromoCb(CallbackData, prefix="promo"):
     """Bot Promotion Platform — orders, warehouse, panels, logs."""
 

@@ -23,6 +23,7 @@ import asyncpg
 
 from bot.callbacks import (
     AssetTplCb,
+    BotCustomizeCb,
     ChanFactCb,
     GroupFCb,
     MassPubCb,
@@ -32,6 +33,7 @@ from bot.callbacks import (
 )
 from bot.states import (
     AssetTemplateFSM,
+    BotTplCustomizeFSM,
     ChannelFactoryFSM,
     CreateGroupFSM,
     BulkJoinFSM,
@@ -929,6 +931,145 @@ async def cb_delete(
 # ── Bot template execution ──────────────────────────────────────────────────────
 
 
+async def _apply_bot_template_data(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+    bot_id: int,
+    data: dict,
+    tpl_name: str,
+    preset_key: str | None = None,
+) -> None:
+    """Core logic: apply template data dict to a managed bot. Called from multiple entry points."""
+    from services import bot_api
+    from services.presence_setup import generate_admin_token
+    from bot.callbacks import BotAdminCb
+
+    user_id = callback.from_user.id
+
+    bot_row = await pool.fetchrow(
+        "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+        bot_id, user_id,
+    )
+    if not bot_row:
+        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_menu_kb())
+        return
+
+    token = bot_row["token"]
+    results: list[str] = []
+
+    if data.get("name"):
+        ok = await bot_api.set_name(http, token, data["name"])
+        results.append(f"📛 Имя: {'✅' if ok else '❌'}")
+
+    if data.get("description"):
+        ok = await bot_api.set_description(http, token, data["description"])
+        results.append(f"📄 Описание: {'✅' if ok else '❌'}")
+
+    if data.get("short_description"):
+        ok = await bot_api.set_short_description(http, token, data["short_description"])
+        results.append(f"📃 Краткое описание: {'✅' if ok else '❌'}")
+
+    if data.get("commands"):
+        cmds = data["commands"]
+        try:
+            ok = await bot_api.set_my_commands(http, token, cmds)
+        except Exception as e:
+            log.warning("set_my_commands bot_id=%s: %s", bot_id, e)
+            ok = False
+        results.append(f"🤖 Команды ({len(cmds)} шт.): {'✅' if ok else '❌'}")
+
+    # Auto-replies
+    if data.get("auto_replies"):
+        ar_list = data["auto_replies"]
+        ok_count = 0
+        for ar in ar_list:
+            try:
+                kw = ar.get("keyword") or ""
+                trigger_type = "start" if kw.strip().lower() in ("/start", "start") else "keyword"
+                await db.add_auto_reply(pool, bot_id, trigger_type, kw, ar["response"])
+                ok_count += 1
+            except Exception as e:
+                log.warning("auto_reply create %s: %s", ar.get("keyword"), e)
+        results.append(f"💬 Авто-ответы ({ok_count}/{len(ar_list)} шт.): {'✅' if ok_count == len(ar_list) else '⚠️'}")
+
+    # Welcome /start message
+    if data.get("welcome_message") and not any(
+        ar.get("keyword", "").strip().lower() in ("/start", "start")
+        for ar in (data.get("auto_replies") or [])
+    ):
+        try:
+            await db.add_auto_reply(pool, bot_id, "start", "/start", data["welcome_message"])
+            results.append("👋 Приветственное сообщение: ✅")
+        except Exception as e:
+            log.warning("welcome auto_reply bot=%s: %s", bot_id, e)
+            results.append("👋 Приветственное сообщение: ⚠️")
+
+    # Funnel
+    if data.get("funnel_steps"):
+        steps = data["funnel_steps"]
+        funnel_trigger = data.get("funnel_trigger", "start")
+        try:
+            funnel_row = await db.create_funnel(pool, bot_id, f"{tpl_name} — Автоворонка", funnel_trigger, None)
+            funnel_id = funnel_row["id"]
+            for i, step in enumerate(steps):
+                delay_minutes = int(step.get("delay_hours", 0) * 60)
+                await db.add_funnel_step(pool, funnel_id, i, step["message"], delay_minutes)
+            results.append(f"🔄 Воронка ({funnel_trigger}): ✅ ({len(steps)} шагов)")
+        except Exception as e:
+            log.warning("funnel create bot=%s: %s", bot_id, e)
+            results.append("🔄 Воронка: ⚠️ не удалось создать")
+
+    # Auto-enable relay for support/intake bots
+    relay_templates = {"support_bot", "intake_bot"}
+    if preset_key and any(k in preset_key for k in relay_templates):
+        try:
+            await db.enable_relay(pool, bot_id, True, user_id)
+            results.append("📨 Relay (переадресация оператору): ✅ включён")
+        except Exception as e:
+            log.warning("relay enable bot=%s: %s", bot_id, e)
+
+    # Reset update offset → bot starts responding to NEW messages immediately
+    try:
+        await db.set_update_offset(pool, bot_id, 0)
+        results.append("🔄 Сброс очереди сообщений: ✅")
+    except Exception as e:
+        log.warning("offset reset bot=%s: %s", bot_id, e)
+
+    # Admin token
+    admin_token = generate_admin_token()
+    try:
+        await db.upsert_bot_admin_session(pool, bot_id, user_id, admin_token)
+        results.append("🔑 Токен управления: создан")
+    except Exception as e:
+        log.warning("admin token bot=%s: %s", bot_id, e)
+        admin_token = None
+
+    bot_display = (
+        f"@{bot_row['username']}" if bot_row.get("username")
+        else bot_row.get("first_name") or f"id{bot_id}"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔧 Admin панель бота", callback_data=BotAdminCb(action="panel", bot_id=bot_id))
+    kb.button(text="💬 Авто-ответы бота", callback_data=BotAdminCb(action="list_replies", bot_id=bot_id))
+    kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
+    kb.adjust(1)
+
+    token_line = (
+        f"\n\n🔑 <b>Команда управления ботом</b> (введите в боте):\n<code>/admin {admin_token}</code>"
+        if admin_token else ""
+    )
+    await callback.message.edit_text(
+        f"✅ <b>Шаблон «{html.escape(tpl_name)}» применён к {html.escape(bot_display)}</b>\n\n"
+        + "\n".join(results or ["Нечего применять."])
+        + "\n\n<b>Бот теперь отвечает на команды!</b> Напишите ему /start для проверки."
+        + token_line,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 @router.callback_query(TplBotApplyCb.filter())
 async def cb_apply_bot_exec(
     callback: CallbackQuery,
@@ -953,172 +1094,19 @@ async def cb_apply_bot_exec(
     # Load template data
     if preset_key:
         from services.preset_templates import get_preset_by_key
-
         preset = get_preset_by_key(preset_key)
         data = preset["template"] if preset else {}
         tpl_name = preset["name"] if preset else "preset"
     else:
         tpl = await _get_template(pool, tpl_id, user_id)
         if not tpl:
-            await callback.message.edit_text(
-                "❌ Шаблон не найден.",
-                parse_mode="HTML",
-                reply_markup=_menu_kb(),
-            )
+            await callback.message.edit_text("❌ Шаблон не найден.", parse_mode="HTML", reply_markup=_menu_kb())
             return
         raw = tpl["template"]
         data = json.loads(raw) if isinstance(raw, str) else (raw or {})
         tpl_name = tpl["name"]
 
-    # Load bot token
-    try:
-        bot_row = await pool.fetchrow(
-            "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
-            bot_id,
-            user_id,
-        )
-    except Exception:
-        bot_row = None
-    if not bot_row:
-        await callback.message.edit_text(
-            "❌ Бот не найден.",
-            parse_mode="HTML",
-            reply_markup=_menu_kb(),
-        )
-        return
-
-    from services import bot_api
-
-    token = bot_row["token"]
-    results = []
-
-    if data.get("name"):
-        ok = await bot_api.set_name(http, token, data["name"])
-        results.append(f"📛 Имя: {'✅' if ok else '❌'}")
-
-    if data.get("description"):
-        ok = await bot_api.set_description(http, token, data["description"])
-        results.append(f"📄 Описание: {'✅' if ok else '❌'}")
-
-    if data.get("short_description"):
-        ok = await bot_api.set_short_description(http, token, data["short_description"])
-        results.append(f"📃 Краткое описание: {'✅' if ok else '❌'}")
-
-    if data.get("commands"):
-        cmds = data["commands"]
-        try:
-            ok = await bot_api.set_my_commands(http, token, cmds)
-        except Exception as e:
-            log.warning("Failed to set_my_commands for bot_id=%s: %s", bot_id, e)
-            ok = False
-        results.append(f"🤖 Команды ({len(cmds)} шт.): {'✅' if ok else '❌'}")
-
-    # Create auto-replies if template has auto_replies
-    if data.get("auto_replies"):
-        ar_list = data["auto_replies"]
-        ok_count = 0
-        for ar in ar_list:
-            try:
-                kw = ar["keyword"]
-                # /start → trigger_type "start"; everything else → "keyword"
-                trigger_type = "start" if kw.strip().lower() in ("/start", "start") else "keyword"
-                await db.add_auto_reply(
-                    pool, bot_id, trigger_type, kw, ar["response"]
-                )
-                ok_count += 1
-            except Exception as e:
-                log.warning("Failed to create auto_reply %s: %s", ar.get("keyword"), e)
-        results.append(
-            f"💬 Авто-ответы на команды ({ok_count}/{len(ar_list)} шт.): {'✅' if ok_count == len(ar_list) else '⚠️'}"
-        )
-
-    # Apply welcome_message as a /start auto-reply (if not already covered above)
-    if data.get("welcome_message") and not any(
-        ar.get("keyword", "").strip().lower() in ("/start", "start")
-        for ar in (data.get("auto_replies") or [])
-    ):
-        try:
-            await db.add_auto_reply(
-                pool, bot_id, "start", "/start", data["welcome_message"]
-            )
-            results.append("👋 Приветственное сообщение: ✅")
-        except Exception as e:
-            log.warning("Failed to create welcome auto_reply for bot %s: %s", bot_id, e)
-            results.append("👋 Приветственное сообщение: ⚠️")
-
-    # Create funnel if template has funnel_steps
-    if data.get("funnel_steps"):
-        steps = data["funnel_steps"]
-        # Use template's funnel_trigger field; default to "start"
-        funnel_trigger = data.get("funnel_trigger", "start")
-        try:
-            funnel_row = await db.create_funnel(
-                pool,
-                bot_id,
-                f"{tpl_name} — Автоворонка",
-                funnel_trigger,
-                None,
-            )
-            funnel_id = funnel_row["id"]
-            for i, step in enumerate(steps):
-                delay_minutes = int(step.get("delay_hours", 0) * 60)
-                await db.add_funnel_step(
-                    pool, funnel_id, i, step["message"], delay_minutes
-                )
-            results.append(f"🔄 Воронка ({funnel_trigger}): ✅ ({len(steps)} шагов)")
-        except Exception as e:
-            log.warning("Failed to create funnel from template: %s", e)
-            results.append("🔄 Воронка: ⚠️ не удалось создать")
-
-    # Auto-enable relay for support/intake bots (they need operator forwarding)
-    relay_templates = {"support_bot", "intake_bot"}
-    if preset_key and any(k in preset_key for k in relay_templates):
-        try:
-            await db.enable_relay(pool, bot_id, True, user_id)
-            results.append("📨 Relay (переадресация оператору): ✅ включён")
-        except Exception as e:
-            log.warning("Failed to enable relay for bot %s: %s", bot_id, e)
-
-    # Generate admin access token for this bot
-    from services.presence_setup import generate_admin_token
-    from bot.callbacks import BotAdminCb
-
-    admin_token = generate_admin_token()
-    try:
-        await db.upsert_bot_admin_session(pool, bot_id, user_id, admin_token)
-        results.append("🔑 Токен управления: создан")
-    except Exception as e:
-        log.warning("Failed to create admin token for bot %s: %s", bot_id, e)
-        admin_token = None
-
-    bot_display = (
-        f"@{bot_row['username']}"
-        if bot_row.get("username")
-        else bot_row.get("first_name") or f"id{bot_id}"
-    )
-
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text="🔧 Admin панель бота",
-        callback_data=BotAdminCb(action="panel", bot_id=bot_id),
-    )
-    kb.button(text="◀️ Назад к шаблонам", callback_data=AssetTplCb(action="menu"))
-    kb.adjust(1)
-
-    token_line = ""
-    if admin_token:
-        token_line = (
-            f"\n\n🔑 <b>Команда управления ботом</b> (введите в боте):\n"
-            f"<code>/admin {admin_token}</code>"
-        )
-
-    await callback.message.edit_text(
-        f"🤖 <b>Шаблон «{html.escape(tpl_name)}» применён к {html.escape(bot_display)}</b>\n\n"
-        + "\n".join(results or ["Нечего применять."])
-        + token_line,
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await _apply_bot_template_data(callback, pool, http, bot_id, data, tpl_name, preset_key=preset_key)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1391,45 +1379,379 @@ async def cb_lib_apply(
         )
 
     elif atype == "bot":
-        # Bot: pick which managed bot to apply to
-        try:
-            bots = await pool.fetch(
-                "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
-                callback.from_user.id,
+        # Bot: check if preset has customizable fields
+        customize_fields = preset.get("customize_fields", []) if preset else []
+        kb = InlineKeyboardBuilder()
+        if customize_fields:
+            # Show preview + option to customize
+            fields_preview = "\n".join(
+                f"• {f['label']}: <i>{html.escape(f['default'] or '—')}</i>"
+                for f in customize_fields
             )
-        except Exception:
-            bots = []
-        if not bots:
-            kb = InlineKeyboardBuilder()
-            kb.button(text="◀️ Назад", callback_data=LibCb(action="menu"))
+            kb.button(
+                text="✅ Применить с настройками по умолчанию",
+                callback_data=LibCb(action="bot_pick", asset_type=atype, preset_key=key),
+            )
+            kb.button(
+                text="✏️ Настроить под себя",
+                callback_data=LibCb(action="bot_customize", asset_type=atype, preset_key=key),
+            )
+            kb.button(text="◀️ Назад", callback_data=LibCb(action="type", asset_type=atype))
+            kb.adjust(1)
             await callback.message.edit_text(
-                "⚠️ У вас нет управляемых ботов.",
+                f"🤖 <b>Шаблон «{html.escape(tpl_name)}»</b>\n\n"
+                f"Этот шаблон поддерживает персонализацию:\n{fields_preview}\n\n"
+                "Выберите: применить с дефолтными значениями или настроить под свою компанию?",
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
             return
+
+        # No customizable fields — go straight to bot selection
+        await _show_bot_pick_for_preset(callback, pool, atype, key, tpl_name)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+
+def _substitute_placeholders(template: dict, subs: dict[str, str]) -> dict:
+    """Deep-copy template dict and replace {{KEY}} placeholders with subs values."""
+    import copy
+    import re
+
+    def _replace(val: object) -> object:
+        if isinstance(val, str):
+            for k, v in subs.items():
+                val = val.replace(f"{{{{{k}}}}}", v)
+            return val
+        if isinstance(val, dict):
+            return {kk: _replace(vv) for kk, vv in val.items()}
+        if isinstance(val, list):
+            return [_replace(item) for item in val]
+        return val
+
+    return _replace(copy.deepcopy(template))
+
+
+async def _show_bot_pick_for_preset(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    atype: str,
+    key: str,
+    tpl_name: str,
+) -> None:
+    """Show the list of managed bots to apply a preset to."""
+    try:
+        bots = await pool.fetch(
+            "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY first_name",
+            callback.from_user.id,
+        )
+    except Exception:
+        bots = []
+    if not bots:
         kb = InlineKeyboardBuilder()
-        for bot_row in bots:
-            name = bot_row["first_name"] or ""
-            uname = (
-                f"@{bot_row['username']}"
-                if bot_row.get("username")
-                else f"id{bot_row['bot_id']}"
-            )
-            label = f"{name} ({uname})" if name else uname
-            kb.button(
-                text=f"🤖 {label[:40]}",
-                callback_data=TplBotApplyCb(
-                    tpl_id=0, bot_id=bot_row["bot_id"], preset_key=key
-                ),
-            )
-        kb.adjust(1)
-        kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=LibCb(action="menu"))
         await callback.message.edit_text(
-            f"🤖 <b>Применить шаблон «{html.escape(tpl_name)}»</b>\n\nВыберите бота:",
+            "⚠️ У вас нет управляемых ботов.\nДобавьте бота через /start → Добавить бота.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
+        return
+    kb = InlineKeyboardBuilder()
+    for bot_row in bots:
+        name = bot_row["first_name"] or ""
+        uname = (
+            f"@{bot_row['username']}"
+            if bot_row.get("username")
+            else f"id{bot_row['bot_id']}"
+        )
+        label = f"{name} ({uname})" if name else uname
+        kb.button(
+            text=f"🤖 {label[:40]}",
+            callback_data=TplBotApplyCb(tpl_id=0, bot_id=bot_row["bot_id"], preset_key=key),
+        )
+    kb.adjust(1)
+    kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
+    await callback.message.edit_text(
+        f"🤖 <b>Применить шаблон «{html.escape(tpl_name)}»</b>\n\nВыберите бота:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Customizable bot template flow ─────────────────────────────────────────────
+
+
+@router.callback_query(LibCb.filter(F.action == "bot_pick"))
+async def cb_lib_bot_pick(
+    callback: CallbackQuery,
+    callback_data: LibCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    from services.preset_templates import get_preset_by_key
+    key = callback_data.preset_key or ""
+    preset = get_preset_by_key(key)
+    tpl_name = preset["name"] if preset else key
+    await _show_bot_pick_for_preset(callback, pool, callback_data.asset_type or "bot", key, tpl_name)
+
+
+@router.callback_query(LibCb.filter(F.action == "bot_customize"))
+async def cb_lib_bot_customize(
+    callback: CallbackQuery,
+    callback_data: LibCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    from services.preset_templates import get_preset_by_key
+    key = callback_data.preset_key or ""
+    preset = get_preset_by_key(key)
+    if not preset:
+        await callback.message.edit_text("❌ Шаблон не найден.", parse_mode="HTML", reply_markup=_menu_kb())
+        return
+
+    customize_fields = preset.get("customize_fields", [])
+    first_field = customize_fields[0] if customize_fields else None
+
+    await state.set_state(BotTplCustomizeFSM.company_name)
+    await state.update_data(
+        tpl_preset_key=key,
+        tpl_customize_fields=customize_fields,
+        tpl_subs={},
+    )
+
+    label = first_field["label"] if first_field else "название компании"
+    default = first_field["default"] if first_field else ""
+    default_hint = f"\n<i>По умолчанию: {html.escape(default)}</i>" if default else ""
+
+    kb = InlineKeyboardBuilder()
+    if default:
+        kb.button(text=f'✅ Оставить: "{default}"', callback_data="btcz_skip_company")
+    kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        f"✏️ <b>Настройка шаблона — шаг 1/3</b>\n\n"
+        f"🏢 {label}:{default_hint}\n\n"
+        "Введите значение или нажмите «Оставить»:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotTplCustomizeFSM.company_name, F.data == "btcz_skip_company")
+async def cb_btcz_skip_company(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    fields = data.get("tpl_customize_fields", [])
+    default = fields[0]["default"] if fields else ""
+    subs = data.get("tpl_subs", {})
+    subs["COMPANY"] = default
+    await state.update_data(tpl_subs=subs)
+    await _ask_working_hours(callback.message, state, data)
+
+
+@router.message(BotTplCustomizeFSM.company_name)
+async def fsm_btcz_company(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("⚠️ Введите название компании или нажмите «Отмена».")
+        return
+    data = await state.get_data()
+    subs = data.get("tpl_subs", {})
+    subs["COMPANY"] = text
+    await state.update_data(tpl_subs=subs)
+    await _ask_working_hours(message, state, data)
+
+
+async def _ask_working_hours(target: Message, state: FSMContext, data: dict) -> None:
+    fields = data.get("tpl_customize_fields", [])
+    field = next((f for f in fields if f["key"] == "HOURS"), None)
+    default = field["default"] if field else "пн-пт 9:00-18:00 МСК"
+
+    await state.set_state(BotTplCustomizeFSM.working_hours)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f'✅ Оставить: "{default}"', callback_data="btcz_skip_hours")
+    kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
+    kb.adjust(1)
+
+    send = target.answer if isinstance(target, Message) else target.edit_text
+    await send(
+        f"✏️ <b>Настройка шаблона — шаг 2/3</b>\n\n"
+        f"⏰ Часы / режим работы:\n<i>По умолчанию: {html.escape(default)}</i>\n\n"
+        "Введите свой вариант или нажмите «Оставить»:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotTplCustomizeFSM.working_hours, F.data == "btcz_skip_hours")
+async def cb_btcz_skip_hours(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    fields = data.get("tpl_customize_fields", [])
+    field = next((f for f in fields if f["key"] == "HOURS"), None)
+    default = field["default"] if field else "пн-пт 9:00-18:00 МСК"
+    subs = data.get("tpl_subs", {})
+    subs["HOURS"] = default
+    await state.update_data(tpl_subs=subs)
+    await _ask_operator(callback.message, state, data)
+
+
+@router.message(BotTplCustomizeFSM.working_hours)
+async def fsm_btcz_hours(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("⚠️ Введите часы работы или нажмите «Оставить».")
+        return
+    data = await state.get_data()
+    subs = data.get("tpl_subs", {})
+    subs["HOURS"] = text
+    await state.update_data(tpl_subs=subs)
+    await _ask_operator(message, state, data)
+
+
+async def _ask_operator(target: Message, state: FSMContext, data: dict) -> None:
+    await state.set_state(BotTplCustomizeFSM.operator)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➡️ Пропустить (без оператора)", callback_data="btcz_skip_operator")
+    kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
+    kb.adjust(1)
+    send = target.answer if isinstance(target, Message) else target.edit_text
+    await send(
+        "✏️ <b>Настройка шаблона — шаг 3/3</b>\n\n"
+        "👤 Username живого оператора (например @support_manager)\n"
+        "Пользователи смогут написать напрямую.\n\n"
+        "Если оператора нет — нажмите «Пропустить»:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotTplCustomizeFSM.operator, F.data == "btcz_skip_operator")
+async def cb_btcz_skip_operator(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    subs = data.get("tpl_subs", {})
+    subs["OPERATOR"] = ""
+    subs["OPERATOR_LINE"] = ""
+    await state.update_data(tpl_subs=subs)
+    await _show_bot_pick_customize(callback.message, state, pool)
+
+
+@router.message(BotTplCustomizeFSM.operator)
+async def fsm_btcz_operator(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    text = (message.text or "").strip()
+    data = await state.get_data()
+    subs = data.get("tpl_subs", {})
+    op = text.lstrip("@") if text else ""
+    subs["OPERATOR"] = f"@{op}" if op else ""
+    subs["OPERATOR_LINE"] = f" пишите @{op}" if op else ""
+    await state.update_data(tpl_subs=subs)
+    await _show_bot_pick_customize(message, state, pool)
+
+
+async def _show_bot_pick_customize(target: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    """Show bot selection after customization values collected."""
+    data = await state.get_data()
+    key = data.get("tpl_preset_key", "")
+    subs = data.get("tpl_subs", {})
+
+    from services.preset_templates import get_preset_by_key
+    preset = get_preset_by_key(key)
+    if not preset:
+        await state.clear()
+        await target.answer("❌ Шаблон не найден.", parse_mode="HTML")
+        return
+
+    tpl_name = preset["name"]
+
+    # Store customized substituted template in FSM for apply step
+    customized = _substitute_placeholders(preset["template"], subs)
+    await state.update_data(tpl_customized=customized)
+
+    try:
+        owner_id = target.from_user.id if hasattr(target, "from_user") else target.chat.id
+        bots = await pool.fetch(
+            "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY first_name",
+            owner_id,
+        )
+    except Exception:
+        bots = []
+
+    if not bots:
+        await state.clear()
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Библиотека", callback_data=LibCb(action="menu"))
+        await target.answer(
+            "⚠️ У вас нет управляемых ботов.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # Preview of substituted text
+    company = subs.get("COMPANY", "компания")
+    hours = subs.get("HOURS", "—")
+    operator = subs.get("OPERATOR", "—")
+
+    kb = InlineKeyboardBuilder()
+    for bot_row in bots:
+        name = bot_row["first_name"] or ""
+        uname = (
+            f"@{bot_row['username']}"
+            if bot_row.get("username")
+            else f"id{bot_row['bot_id']}"
+        )
+        label = f"{name} ({uname})" if name else uname
+        kb.button(
+            text=f"🤖 {label[:40]}",
+            callback_data=BotCustomizeCb(action="apply", bot_id=bot_row["bot_id"]),
+        )
+    kb.adjust(1)
+    kb.button(text="❌ Отмена", callback_data=LibCb(action="menu"))
+
+    await target.answer(
+        f"✅ <b>Настройка завершена!</b>\n\n"
+        f"🏢 Компания: <b>{html.escape(company)}</b>\n"
+        f"⏰ Часы: <b>{html.escape(hours)}</b>\n"
+        f"👤 Оператор: <b>{html.escape(operator or 'не указан')}</b>\n\n"
+        f"Выберите бота для применения шаблона «{html.escape(tpl_name)}»:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotCustomizeCb.filter(F.action == "apply"), BotTplCustomizeFSM.operator)
+async def cb_btcz_apply(
+    callback: CallbackQuery,
+    callback_data: BotCustomizeCb,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
+    await callback.answer("⏳ Применяю шаблон...")
+    data = await state.get_data()
+    await state.clear()
+
+    customized = data.get("tpl_customized", {})
+    key = data.get("tpl_preset_key", "")
+    bot_id = callback_data.bot_id
+
+    if not customized or not bot_id:
+        await callback.message.edit_text("❌ Данные шаблона утеряны. Попробуйте заново.", parse_mode="HTML", reply_markup=_menu_kb())
+        return
+
+    # Delegate to the shared apply logic
+    from services.preset_templates import get_preset_by_key
+    preset = get_preset_by_key(key)
+    tpl_name = preset["name"] if preset else "Шаблон"
+
+    await _apply_bot_template_data(callback, pool, http, bot_id, customized, tpl_name, preset_key=key)
 
 
 # ── Back / cancel ──────────────────────────────────────────────────────────────

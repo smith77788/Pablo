@@ -545,3 +545,9 @@ class PromoTransferFSM(StatesGroup):
 
 class PromoSessionUploadFSM(StatesGroup):
     waiting_file = State()      # ожидаем .session файл
+
+
+class BotTplCustomizeFSM(StatesGroup):
+    company_name = State()   # название компании / сервиса
+    working_hours = State()  # часы работы (или /skip)
+    operator = State()       # @username оператора (или /skip)

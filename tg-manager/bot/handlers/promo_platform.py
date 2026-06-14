@@ -145,7 +145,7 @@ async def _show_menu(target, pool: asyncpg.Pool, edit: bool = True) -> None:
     kb.adjust(2, 2, 2, 1)
 
     if edit and isinstance(target, CallbackQuery):
-        await safe_edit(target.message, text, reply_markup=kb.as_markup())
+        await safe_edit(target, text, reply_markup=kb.as_markup())
     else:
         msg = target.message if isinstance(target, CallbackQuery) else target
         await msg.answer(text, reply_markup=kb.as_markup())
@@ -219,7 +219,7 @@ async def cb_promo_orders(callback: CallbackQuery, callback_data: PromoCb, pool:
     kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
     kb.adjust(1, 4, 1, 1)
 
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 # ── Order detail ───────────────────────────────────────────────────────────────
@@ -291,7 +291,7 @@ async def cb_order_detail(callback: CallbackQuery, callback_data: PromoCb, pool:
     kb.button(text="◀️ Заказы", callback_data=PromoCb(action="orders"))
     kb.adjust(1)
 
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(PromoCb.filter(F.action == "order_cancel"))
@@ -728,7 +728,7 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
     kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
     kb.adjust(2, 5, 1, 1)
 
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(PromoCb.filter(F.action == "bot_detail"))
@@ -777,7 +777,7 @@ async def cb_bot_detail(callback: CallbackQuery, callback_data: PromoCb, pool: a
     kb.button(text="◀️ Склад", callback_data=PromoCb(action="warehouse"))
     kb.adjust(2, 1, 1, 1)
 
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(PromoCb.filter(F.action == "bot_setstatus"))
@@ -1156,7 +1156,7 @@ async def cb_panels(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
     kb.adjust(1)
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(PromoCb.filter(F.action == "panel_detail"))
@@ -1185,7 +1185,7 @@ async def cb_panel_detail(callback: CallbackQuery, callback_data: PromoCb, pool:
     kb.button(text="🗑 Удалить", callback_data=PromoCb(action="panel_delete", item_id=panel["id"]))
     kb.button(text="◀️ Панели", callback_data=PromoCb(action="panels"))
     kb.adjust(2, 1, 1, 1)
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
 
 
 @router.callback_query(PromoCb.filter(F.action == "panel_check"))
@@ -1655,4 +1655,4 @@ async def cb_logs(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg
     kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
     kb.adjust(3, 1, 1, 1)
 
-    await safe_edit(callback.message, text, reply_markup=kb.as_markup())
+    await safe_edit(callback, text, reply_markup=kb.as_markup())
