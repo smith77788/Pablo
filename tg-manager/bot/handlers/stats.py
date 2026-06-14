@@ -1,5 +1,7 @@
 """Per-bot statistics handler."""
 
+import html as _html
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -27,12 +29,19 @@ async def cb_stats_menu(
         return
     await callback.message.edit_text("⏳ Загружаю статистику…")
 
-    stats = await db.get_bot_stats(pool, callback_data.bot_id)
-    daily_growth = await db.get_audience_daily_growth(
-        pool, callback_data.bot_id, days=7
-    )
+    try:
+        stats = await db.get_bot_stats(pool, callback_data.bot_id)
+        daily_growth = await db.get_audience_daily_growth(
+            pool, callback_data.bot_id, days=7
+        )
+    except Exception:
+        await callback.message.edit_text(
+            "❌ Ошибка загрузки статистики. Попробуйте позже.",
+            reply_markup=back_to_bot(callback_data.bot_id),
+        )
+        return
 
-    label = (
+    label = _html.escape(
         f"@{row.get('username')}"
         if row.get("username")
         else (row.get("first_name") or str(row.get("bot_id", "")))
