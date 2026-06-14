@@ -116,9 +116,12 @@ async def _global_error_handler(event: ErrorEvent) -> None:
     """Catch any unhandled exception and show it to the user."""
     exc = event.exception
 
-    # Silently ignore "message is not modified" — happens when refresh yields same content
+    # Silently ignore known non-actionable Telegram errors
     exc_str = str(exc).lower()
     if "message is not modified" in exc_str or "not modified" in exc_str:
+        return
+    # Expired callback queries — user clicked an old button, nothing to do
+    if "query is too old" in exc_str or "query_id_invalid" in exc_str or "query id is invalid" in exc_str:
         return
 
     log.exception("Unhandled error in update %s", event.update, exc_info=exc)
