@@ -132,93 +132,109 @@ async def run(
             bot_name = bot_row.get("username") or bot_row.get("first_name") or ""
     user_count = len(user_ids)
 
-    for uid in user_ids:
-        # Resume support: skip users already reached in a previous run
-        if uid in already_sent:
-            continue
+    # _loop_exc captures any exception (including CancelledError) so we can
+    # always mark the broadcast final status in DB before propagating.
+    _loop_exc: BaseException | None = None
+    try:
+        for uid in user_ids:
+            # Resume support: skip users already reached in a previous run
+            if uid in already_sent:
+                continue
 
-        # Render per-user placeholders
-        user_text = text
-        if has_placeholders:
-            ui = user_map.get(uid, {})
-            user_text = _render_for_user(text, ui, bot_name)
+            # Render per-user placeholders
+            user_text = text
+            if has_placeholders:
+                ui = user_map.get(uid, {})
+                user_text = _render_for_user(text, ui, bot_name)
 
-        if photo_file_id:
-            success, retry_after = await bot_api.send_photo(
-                session, token, uid, photo_file_id, user_text, buttons=buttons
-            )
-        else:
-            success, retry_after = await bot_api.send_message(
-                session, token, uid, user_text, buttons=buttons
-            )
-        if success:
-            sent += 1
-            _since_last_flush += 1
-            # Log delivery immediately so a crash can resume from here
-            try:
-                await db.log_broadcast_delivery(pool, broadcast_id, uid)
-            except Exception as _e:
-                logger.warning(
-                    "Broadcast %d: failed to log delivery for user %d: %s",
-                    broadcast_id,
-                    uid,
-                    _e,
+            if photo_file_id:
+                success, retry_after = await bot_api.send_photo(
+                    session, token, uid, photo_file_id, user_text, buttons=buttons
                 )
-            # Periodically flush progress to DB so the broadcast history shows
-            # real-time progress instead of staying at 0/N until completion.
-            if _since_last_flush >= _PROGRESS_FLUSH_INTERVAL:
-                _since_last_flush = 0
+            else:
+                success, retry_after = await bot_api.send_message(
+                    session, token, uid, user_text, buttons=buttons
+                )
+            if success:
+                sent += 1
+                _since_last_flush += 1
+                # Log delivery immediately so a crash can resume from here
                 try:
-                    await db.update_broadcast(pool, broadcast_id, sent, failed, "running")
-                except Exception as _fe:
-                    logger.debug(
-                        "Broadcast %d: progress flush failed (non-fatal): %s",
+                    await db.log_broadcast_delivery(pool, broadcast_id, uid)
+                except Exception as _e:
+                    logger.warning(
+                        "Broadcast %d: failed to log delivery for user %d: %s",
                         broadcast_id,
-                        _fe,
+                        uid,
+                        _e,
                     )
-        else:
-            failed += 1
-            if retry_after:
-                logger.info(
-                    "Broadcast %d: rate-limited, sleeping %ds",
-                    broadcast_id,
-                    retry_after,
-                )
-                await asyncio.sleep(retry_after)
-                if photo_file_id:
-                    ok, _ = await bot_api.send_photo(
-                        session, token, uid, photo_file_id, user_text, buttons=buttons
-                    )
-                else:
-                    ok, _ = await bot_api.send_message(
-                        session, token, uid, user_text, buttons=buttons
-                    )
-                if ok:
-                    sent += 1
-                    failed -= 1
-                    _since_last_flush += 1
+                # Periodically flush progress to DB so the broadcast history shows
+                # real-time progress instead of staying at 0/N until completion.
+                if _since_last_flush >= _PROGRESS_FLUSH_INTERVAL:
+                    _since_last_flush = 0
                     try:
-                        await db.log_broadcast_delivery(pool, broadcast_id, uid)
-                    except Exception as _e:
-                        logger.warning(
-                            "Broadcast %d: failed to log delivery for user %d: %s",
+                        await db.update_broadcast(pool, broadcast_id, sent, failed, "running")
+                    except Exception as _fe:
+                        logger.debug(
+                            "Broadcast %d: progress flush failed (non-fatal): %s",
                             broadcast_id,
-                            uid,
-                            _e,
+                            _fe,
                         )
+            else:
+                failed += 1
+                if retry_after:
+                    logger.info(
+                        "Broadcast %d: rate-limited, sleeping %ds",
+                        broadcast_id,
+                        retry_after,
+                    )
+                    await asyncio.sleep(retry_after)
+                    if photo_file_id:
+                        ok, _ = await bot_api.send_photo(
+                            session, token, uid, photo_file_id, user_text, buttons=buttons
+                        )
+                    else:
+                        ok, _ = await bot_api.send_message(
+                            session, token, uid, user_text, buttons=buttons
+                        )
+                    if ok:
+                        sent += 1
+                        failed -= 1
+                        _since_last_flush += 1
+                        try:
+                            await db.log_broadcast_delivery(pool, broadcast_id, uid)
+                        except Exception as _e:
+                            logger.warning(
+                                "Broadcast %d: failed to log delivery for user %d: %s",
+                                broadcast_id,
+                                uid,
+                                _e,
+                            )
+                    else:
+                        await db.mark_user_inactive(pool, bot_id, uid)
                 else:
                     await db.mark_user_inactive(pool, bot_id, uid)
-            else:
-                await db.mark_user_inactive(pool, bot_id, uid)
 
-        # Respect per-chat type rate limits.
-        # Groups/channels: 20 msg/min max → 3s between sends to same chat.
-        # Private users: global 30 msg/s limit → BROADCAST_DELAY (default 0.05s).
-        delay = _GROUP_DELAY if uid < 0 else BROADCAST_DELAY
-        await asyncio.sleep(delay)
+            # Respect per-chat type rate limits.
+            # Groups/channels: 20 msg/min max → 3s between sends to same chat.
+            # Private users: global 30 msg/s limit → BROADCAST_DELAY (default 0.05s).
+            delay = _GROUP_DELAY if uid < 0 else BROADCAST_DELAY
+            await asyncio.sleep(delay)
+    except BaseException as _exc:
+        _loop_exc = _exc
+        if not isinstance(_exc, asyncio.CancelledError):
+            logger.error(
+                "Broadcast %d: send loop aborted after %d sent: %s",
+                broadcast_id,
+                sent,
+                _exc,
+                exc_info=True,
+            )
 
     total = user_count
-    if total == 0 or sent == total:
+    if _loop_exc is not None:
+        final_status = "partial" if sent > 0 else "failed"
+    elif total == 0 or sent == total:
         final_status = "done"
     elif sent == 0:
         final_status = "failed"
@@ -233,6 +249,9 @@ async def run(
         )
     finally:
         _running.pop(broadcast_id, None)
+
+    if _loop_exc is not None:
+        raise _loop_exc
     logger.info(
         "Broadcast %d %s: sent=%d failed=%d total=%d",
         broadcast_id,
