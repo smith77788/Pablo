@@ -75,7 +75,9 @@ async def _check_membership(bot, user_id: int, channels: list[dict]) -> list[dic
             if member.status in ("left", "kicked", "banned"):
                 not_subscribed.append(ch)
         except Exception:
-            log.debug("subscription_gate: cannot check %s (bot not admin?)", username)
+            # Fail-closed: if check fails (bot not in channel / API error), block user
+            log.warning("subscription_gate: cannot check %s — blocking user %s", username, user_id)
+            not_subscribed.append(ch)
     return not_subscribed
 
 

@@ -446,8 +446,8 @@ async def cb_pay(
     try:
         await pool.execute(
             """INSERT INTO payments (user_id, plan, period_months, currency, amount_crypto, amount_usd,
-                                      wallet_address, reference)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                                      wallet_address, reference, expires_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() + INTERVAL '24 hours')
                ON CONFLICT (reference) DO NOTHING""",
             callback.from_user.id,
             plan,
@@ -485,7 +485,7 @@ async def cb_pay(
         f"Сумма: <b>{crypto_str}</b> (≈ ${usd})\n"
         f"Кошелёк: <code>{wallet}</code>\n\n"
         f"{note}\n\n"
-        f"⏱ Ожидание подтверждения: до 30 минут\n"
+        f"⏱ Ожидание подтверждения: до 24 часов\n"
         f"Подписка активируется автоматически.\n\n"
         f"<i>ID платежа: {ref}</i>",
         parse_mode="HTML",

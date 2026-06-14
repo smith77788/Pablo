@@ -43,8 +43,13 @@ async def _check_pending(
     await pool.execute(
         "UPDATE payments SET status='expired' WHERE status='pending' AND expires_at < now()"
     )
+    # Check active + recently expired (within 24h) — user may have paid after initial expiry
     rows = await pool.fetch(
-        "SELECT * FROM payments WHERE status IN ('pending','confirming') ORDER BY created_at"
+        """SELECT * FROM payments
+           WHERE status IN ('pending','confirming')
+              OR (status = 'expired' AND expires_at > now() - INTERVAL '24 hours'
+                  AND confirmed_at IS NULL)
+           ORDER BY created_at"""
     )
     if not rows:
         return
@@ -183,7 +188,7 @@ async def _check_trc20(pool, http, bot, payments) -> None:
 async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
     updated = await pool.fetchval(
         """UPDATE payments SET status='confirmed', tx_hash=$1, confirmed_at=now()
-           WHERE id=$2 AND status IN ('pending','confirming')
+           WHERE id=$2 AND status IN ('pending','confirming','expired')
            RETURNING id""",
         tx_hash,
         payment["id"],
