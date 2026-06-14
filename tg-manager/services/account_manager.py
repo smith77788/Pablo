@@ -4858,3 +4858,197 @@ async def create_bot_via_botfather(
             await client.disconnect()
         except Exception:
             log_exc_swallow(log, "Сбой в create_bot_via_botfather")
+
+
+async def list_bots_via_botfather(
+    session_string: str,
+    _acc: dict | None = None,
+) -> dict:
+    """List bots owned by this account via @BotFather /mybots.
+
+    Returns {"bots": [{"username": "..."}]} or {"error": "..."}.
+    """
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+        bf_entity = await client.get_entity(_BOTFATHER_USERNAME)
+        bf_id = bf_entity.id
+
+        msgs = await client.get_messages(bf_entity, limit=1)
+        baseline_id = msgs[0].id if (msgs and msgs[0].sender_id == bf_id) else 0
+
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+        await client.send_message(bf_entity, "/mybots")
+
+        deadline = asyncio.get_event_loop().time() + 30.0
+        response_msg = None
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(3.0)
+            try:
+                msgs = await client.get_messages(bf_entity, limit=5)
+                for msg in msgs:
+                    if msg.id > baseline_id and msg.sender_id == bf_id:
+                        response_msg = msg
+                        break
+            except Exception:
+                pass
+            if response_msg is not None:
+                break
+
+        if response_msg is None:
+            return {"error": "Timeout: BotFather did not respond to /mybots"}
+
+        text = (response_msg.text or "").lower()
+        if "don't have any bots" in text or "у вас нет ботов" in text or "no bots" in text:
+            return {"bots": []}
+
+        bots: list[dict] = []
+        seen: set[str] = set()
+
+        if response_msg.buttons:
+            for row in response_msg.buttons:
+                for btn in row:
+                    btn_text = getattr(btn, "text", "") or ""
+                    if btn_text.startswith("@"):
+                        uname = btn_text.lstrip("@").strip()
+                        if uname and uname not in seen:
+                            seen.add(uname)
+                            bots.append({"username": uname})
+
+        if not bots:
+            for match in re.finditer(r"@([\w]{3,}bot)", response_msg.text or "", re.IGNORECASE):
+                uname = match.group(1)
+                if uname not in seen:
+                    seen.add(uname)
+                    bots.append({"username": uname})
+
+        return {"bots": bots}
+
+    except Exception as e:
+        log.exception("list_bots_via_botfather error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в list_bots_via_botfather")
+
+
+async def transfer_bot_via_botfather(
+    session_string: str,
+    bot_username: str,
+    new_owner_username: str,
+    _acc: dict | None = None,
+) -> dict:
+    """Transfer bot ownership to another user via @BotFather dialog.
+
+    Returns {"ok": True, "message": text} or {"error": "..."}.
+    """
+    client = _make_client(session_string, _acc)
+    try:
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+
+        bf_entity = await client.get_entity(_BOTFATHER_USERNAME)
+        bf_id = bf_entity.id
+
+        async def _get_last_bf_msg_id() -> int:
+            try:
+                msgs = await client.get_messages(bf_entity, limit=1)
+                if msgs and msgs[0].sender_id == bf_id:
+                    return msgs[0].id
+            except Exception:
+                pass
+            return 0
+
+        async def _bf_wait_for_new(baseline_id: int, timeout: float = 30.0):
+            """Poll BotFather chat until a new message (id > baseline) appears."""
+            deadline = asyncio.get_event_loop().time() + timeout
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(3.0)
+                try:
+                    msgs = await client.get_messages(bf_entity, limit=5)
+                    for msg in msgs:
+                        if msg.id > baseline_id and msg.sender_id == bf_id:
+                            return msg
+                except Exception:
+                    pass
+            return None
+
+        async def _bf_send(text: str, timeout: float = 45.0):
+            baseline_id = await _get_last_bf_msg_id()
+            await asyncio.sleep(random.uniform(1.5, 3.5))
+            await client.send_message(bf_entity, text)
+            return await _bf_wait_for_new(baseline_id, timeout)
+
+        async def _click_button(msg, text_to_match: str):
+            """Click the first button whose text contains text_to_match (case-insensitive)."""
+            match_low = text_to_match.lower()
+            if not msg.buttons:
+                return None
+            for r_idx, row in enumerate(msg.buttons):
+                for c_idx, btn in enumerate(row):
+                    btn_text = (getattr(btn, "text", "") or "").lower()
+                    if match_low in btn_text:
+                        baseline_id = await _get_last_bf_msg_id()
+                        await asyncio.sleep(random.uniform(1.5, 3.5))
+                        try:
+                            await msg.click(r_idx, c_idx)
+                        except Exception:
+                            await btn.click()
+                        return await _bf_wait_for_new(baseline_id)
+            return None
+
+        bot_uname = bot_username.lstrip("@").strip()
+        new_owner = new_owner_username.lstrip("@").strip()
+
+        mybots_msg = await _bf_send("/mybots")
+        if mybots_msg is None:
+            return {"error": "Timeout: BotFather did not respond to /mybots"}
+
+        settings_msg = await _click_button(mybots_msg, f"@{bot_uname}")
+        if settings_msg is None:
+            settings_msg = await _click_button(mybots_msg, bot_uname)
+        if settings_msg is None:
+            return {"error": f"Bot @{bot_uname} not found in BotFather button list"}
+
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+
+        transfer_msg = await _click_button(settings_msg, "transfer")
+        if transfer_msg is None:
+            transfer_msg = await _click_button(settings_msg, "передать")
+        if transfer_msg is None:
+            return {"error": "Transfer Ownership button not found in bot settings"}
+
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+
+        confirm_msg = await _bf_send(f"@{new_owner}")
+        if confirm_msg is None:
+            return {"error": "Timeout: BotFather did not ask for confirmation"}
+
+        confirm_text = (confirm_msg.text or "").lower()
+
+        if "are you sure" in confirm_text or "вы уверены" in confirm_text or "уверен" in confirm_text:
+            await asyncio.sleep(random.uniform(1.5, 3.5))
+            final_msg = await _bf_send("Yes, I am sure.")
+            if final_msg is None:
+                return {"error": "Timeout: BotFather did not respond after confirmation"}
+            confirm_text = (final_msg.text or "").lower()
+            final_text = final_msg.text or ""
+        else:
+            final_text = confirm_msg.text or ""
+
+        success_indicators = ("transfer", "success", "done", "transferred", "передан", "передача", "успешно")
+        if any(ind in confirm_text for ind in success_indicators):
+            return {"ok": True, "message": final_text}
+
+        return {"error": f"Unexpected BotFather response: {final_text[:300]}"}
+
+    except Exception as e:
+        log.exception("transfer_bot_via_botfather error: %s", e)
+        return {"error": str(e)[:200]}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            log_exc_swallow(log, "Сбой в transfer_bot_via_botfather")
