@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
 
-from bot.callbacks import AccCb, BotCb, ChanCb
+from bot.callbacks import AccCb, BotCb, ChanCb, MassOpCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils.event_status import mark_handled_error
@@ -1322,13 +1322,13 @@ async def cb_acc_op_history(
     pool: asyncpg.Pool,
 ) -> None:
     """История операций для аккаунта (через operation_queue)."""
-    await callback.answer()
     acc_id = callback_data.acc_id
 
     acc = await db.get_tg_account(pool, acc_id, callback.from_user.id)
     if not acc:
         await callback.answer("Аккаунт не найден.", show_alert=True)
         return
+    await callback.answer()
 
     name = escape(acc.get("first_name") or acc.get("phone") or f"ID {acc_id}")
 
@@ -1891,8 +1891,15 @@ async def cb_remove_confirm(
 
     # Check for active operations before deletion
     acc_id = callback_data.acc_id
-    assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)
-    active_ops = assets.get("ops", [])
+    try:
+        assets = await db.get_account_assets(pool, acc_id, callback.from_user.id)
+        active_ops = assets.get("ops", [])
+    except Exception as _e:
+        await callback.message.edit_text(
+            f"❌ Ошибка при проверке операций: {escape(str(_e)[:200])}",
+            parse_mode="HTML",
+        )
+        return
     if active_ops:
         op_list = ", ".join(
             escape(op.get("op_type") or "операция") for op in active_ops[:3]
@@ -1910,7 +1917,14 @@ async def cb_remove_confirm(
         )
         return
 
-    await db.remove_tg_account(pool, acc_id, callback.from_user.id)
+    try:
+        await db.remove_tg_account(pool, acc_id, callback.from_user.id)
+    except Exception as _e:
+        await callback.message.edit_text(
+            f"❌ Ошибка при удалении аккаунта: {escape(str(_e)[:200])}",
+            parse_mode="HTML",
+        )
+        return
 
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 Мои аккаунты", callback_data=AccCb(action="menu"))
@@ -2205,7 +2219,7 @@ async def cb_scan_all_resources(
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Статус операции", callback_data="ops:list")
+    kb.button(text="📋 Статус операции", callback_data=MassOpCb(action="queue").pack())
     kb.button(text="◀️ Аккаунты", callback_data=AccCb(action="menu"))
     kb.adjust(1)
 

@@ -811,13 +811,13 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
-                    "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking done/skipped",
+                    "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
                     op_type,
                     op_id,
                     owner_id,
                 )
                 result = {
-                    "status": "skipped",
+                    "status": "failed",
                     "reason": f"unknown op_type: {op_type}",
                     "summary": f"⚠️ Неизвестный тип операции: {op_type}",
                 }

@@ -783,8 +783,7 @@ async def cb_cancel_op(
     if result == "UPDATE 0":
         await callback.answer("Операция уже завершена или не найдена.", show_alert=True)
         return
-    await callback.answer()
-    # Refresh queue view — re-use cb_queue to avoid duplicate rendering logic
+    # cb_queue calls callback.answer() itself; calling it here would cause double answer
     await cb_queue(callback, callback_data, pool)
 
 
@@ -1017,7 +1016,12 @@ async def cb_queue(
     callback_data: MassOpCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
+    # Silently skip if the query was already answered (cb_queue is re-used as a
+    # delegate from cb_cancel_op / cb_retry_op which may have answered it first).
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     page = callback_data.page
     # op_type field reused as status filter key (e.g. "all", "active", "failed")
     status_filter_key = callback_data.op_type or "all"
