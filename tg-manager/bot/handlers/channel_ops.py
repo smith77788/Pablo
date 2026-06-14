@@ -487,23 +487,6 @@ def _account_picker_kb(accounts: list, action: str) -> InlineKeyboardBuilder:
     return kb
 
 
-async def _send_or_edit(msg_or_cb, text: str, kb, edit: bool = True) -> None:
-    markup = kb.as_markup() if hasattr(kb, "as_markup") else kb
-    if edit and hasattr(msg_or_cb, "message"):
-        try:
-            await msg_or_cb.message.edit_text(
-                text, parse_mode="HTML", reply_markup=markup
-            )
-            return
-        except Exception:
-            log_exc_swallow(
-                log, "Сбой edit_text в _send_or_edit — отправляю новое сообщение"
-            )
-        await msg_or_cb.message.answer(text, parse_mode="HTML", reply_markup=markup)
-    else:
-        target = msg_or_cb if hasattr(msg_or_cb, "answer") else msg_or_cb.message
-        await target.answer(text, parse_mode="HTML", reply_markup=markup)
-
 
 # ── /ops entry point (redirect to BotMother OS) ────────────────────────────
 

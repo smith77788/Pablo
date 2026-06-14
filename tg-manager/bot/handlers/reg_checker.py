@@ -868,27 +868,6 @@ async def _enrich_metadata(
         log.debug("_enrich_metadata: %s", e)
 
 
-async def _enrich_user_metadata(
-    pool: asyncpg.Pool,
-    owner_id: int,
-    entity_id: int,
-    entity_type: str,
-    peer,
-) -> None:
-    """Устаревший alias — оставлен для совместимости."""
-    try:
-        full_info = await rc.get_entity_full_info(pool, owner_id, peer)
-        if not full_info:
-            return
-        estimate = rc.estimate_by_id(entity_id, entity_type)
-        merged = {**estimate, **full_info}
-        await rc.cache_result(
-            pool, owner_id, merged,
-            full_info.get("name"), full_info.get("username"),
-        )
-    except Exception as e:
-        log.debug("_enrich_user_metadata: %s", e)
-
 
 async def _show_result_from_full_info(
     message: Message,

@@ -724,10 +724,6 @@ async def cb_gp_geo_custom(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-async def _parse_geo_from_text_or_file(text: str) -> list[dict]:
-    """Parse geo list from plain text (city per line or CSV format)."""
-    return parse_custom_geo_list(text)
-
 
 async def _parse_geo_csv_bytes(raw: bytes) -> list[dict] | None:
     """Parse CSV bytes → list of geo dicts. Returns None on decode error."""

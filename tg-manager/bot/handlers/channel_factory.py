@@ -61,18 +61,6 @@ def _no_accounts_kb() -> InlineKeyboardBuilder:
     return kb
 
 
-async def _send_or_edit(event, text: str, kb: InlineKeyboardBuilder) -> None:
-    markup = kb.as_markup()
-    if hasattr(event, "message"):
-        try:
-            await event.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-            return
-        except Exception:
-            log_exc_swallow(log, "Не удалось отредактировать сообщение в _send_or_edit")
-        await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
-    else:
-        await event.answer(text, parse_mode="HTML", reply_markup=markup)
-
 
 # ── Main menu ──────────────────────────────────────────────────────────────
 

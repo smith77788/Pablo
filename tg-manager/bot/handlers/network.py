@@ -44,29 +44,6 @@ _LANG_HINT = (
 )
 
 
-async def _apply_all(
-    pool: asyncpg.Pool, user_id: int, http: aiohttp.ClientSession, method, *args
-) -> tuple[int, int, int]:
-    bots = await db.get_bots(pool, user_id)
-    if not bots:
-        return 0, 0, 0
-    results = await asyncio.gather(
-        *(method(http, b["token"], *args) for b in bots),
-        return_exceptions=True,
-    )
-    success = sum(1 for r in results if r is True)
-    return success, len(results) - success, len(results)
-
-
-def _result_text(ok: int, fail: int, total: int, action: str) -> str:
-    return (
-        f"📦 <b>Результат массового применения</b>\n\n"
-        f"Действие: {action}\n"
-        f"Всего ботов: {total}\n"
-        f"✅ Успешно: {ok}\n"
-        f"❌ Ошибок: {fail}"
-    )
-
 
 @router.callback_query(NetworkCb.filter(F.action == "menu"))
 async def cb_net_menu(
