@@ -116,7 +116,14 @@ async def cb_net_bc_target(
             ),
         )
         return
-    bots = await db.get_bots(pool, callback.from_user.id)
+    try:
+        bots = await db.get_bots(pool, callback.from_user.id)
+    except Exception:
+        log.exception("cb_net_bc_target: db.get_bots failed")
+        await callback.message.edit_text(
+            "⚠️ Ошибка загрузки ботов. Попробуйте снова.", parse_mode="HTML"
+        )
+        return
     total_aud = sum(b.get("audience_count", 0) for b in bots)
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка v2</b>\n\n"
@@ -202,7 +209,6 @@ async def cb_net_bc_toggle_bot(
     state: FSMContext,
 ) -> None:
     _MAX_BOTS_SELECTION = 50
-    await callback.answer()
     data = await state.get_data()
     selected: list[int] = list(data.get("selected_bot_ids", []))
     bid = callback_data.bot_id
@@ -216,6 +222,7 @@ async def cb_net_bc_toggle_bot(
             )
             return
         selected.append(bid)
+    await callback.answer()
     await state.update_data(selected_bot_ids=selected)
     bots = await db.get_bots(pool, callback.from_user.id)
     await callback.message.edit_reply_markup(
@@ -375,12 +382,12 @@ async def msg_net_bc_text(
             log.exception("msg_net_bc_text: cluster_bots fetch failed")
             cluster_bots = []
         total = sum(b["audience_count"] for b in cluster_bots)
-        target_desc = f"кластер «{cluster_name}» ({len(cluster_bots)} бот(ов), {total:,} юз.)"
+        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} бот(ов), {total:,} юз.)"
     else:
         target_desc = segment
 
     # Ограничиваем превью длинных сообщений
-    preview_text = message.text or ""
+    preview_text = _html.escape(message.text or "")
     if len(preview_text) > 500:
         preview_text = (
             preview_text[:500] + "...\n<i>[сообщение обрезано для предпросмотра]</i>"
