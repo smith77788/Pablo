@@ -83,17 +83,24 @@ async def cb_webhook_disable(
     http: aiohttp.ClientSession,
 ) -> None:
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Ошибка БД.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
+    await callback.answer()
     result = await bot_api.delete_webhook(http, row["token"])
     if result.get("ok"):
         await callback.message.edit_text(
             "✅ Вебхук отключён.",
             reply_markup=back_to_bot(callback_data.bot_id),
         )
-        await callback.answer("✅ Готово.")
     else:
-        await callback.answer("❌ Не удалось отключить вебхук.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Не удалось отключить вебхук.",
+            reply_markup=back_to_bot(callback_data.bot_id),
+        )

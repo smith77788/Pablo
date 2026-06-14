@@ -176,8 +176,6 @@ async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
 )
 async def cb_toggle_account(callback: CallbackQuery, state: FSMContext):
     """Toggle account selection."""
-    await callback.answer()
-
     data = await state.get_data()
     accounts = data.get("scan_accounts", [])
     acc_id = int(callback.data.split(":")[2])
@@ -188,8 +186,6 @@ async def cb_toggle_account(callback: CallbackQuery, state: FSMContext):
         accounts.append(acc_id)
 
     await state.update_data(scan_accounts=accounts)
-
-    # Refresh button states (just acknowledge)
     await callback.answer(f"Аккаунт переключён. Выбрано: {len(accounts)}")
 
 
@@ -214,7 +210,6 @@ async def cb_scan_all(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:scan_none", GiftTransferFSM.selecting_accounts)
 async def cb_scan_none(callback: CallbackQuery, state: FSMContext):
     """Deselect all accounts."""
-    await callback.answer()
     await state.update_data(scan_accounts=[])
     await callback.answer("Выбор снят")
 
@@ -222,8 +217,6 @@ async def cb_scan_none(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "gt:start_scan", GiftTransferFSM.selecting_accounts)
 async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
     """Start scanning selected accounts."""
-    await callback.answer("⏳ Сканирование...")
-
     user_id = callback.from_user.id
     data = await state.get_data()
     account_ids = data.get("scan_accounts", [])
@@ -231,6 +224,8 @@ async def cb_start_scan(callback: CallbackQuery, state: FSMContext, pool):
     if not account_ids:
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
+
+    await callback.answer("⏳ Сканирование...")
 
     # Show scanning message
     await callback.message.edit_text(
@@ -427,7 +422,6 @@ async def cb_transfer_all(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:transfer_none", GiftTransferFSM.selecting_accounts)
 async def cb_transfer_none(callback: CallbackQuery, state: FSMContext):
     """Clear selection."""
-    await callback.answer()
     await state.update_data(transfer_accounts=[])
     await callback.answer("Выбор очищен")
 
@@ -435,14 +429,14 @@ async def cb_transfer_none(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "gt:select_recipient")
 async def cb_select_recipient(callback: CallbackQuery, state: FSMContext, pool):
     """Select recipient for transfer."""
-    await callback.answer()
-
     user_id = callback.from_user.id
     data = await state.get_data()
 
     if not data.get("transfer_accounts"):
         await callback.answer("Выберите хотя бы один аккаунт", show_alert=True)
         return
+
+    await callback.answer()
 
     # Get saved recipients
     recipients = await db.get_gift_recipients(pool, user_id)
