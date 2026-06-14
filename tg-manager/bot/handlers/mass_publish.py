@@ -139,6 +139,7 @@ async def cb_mpub_start(
         # Skip account selection — use all active accounts
         accounts = await _get_active_accounts(pool, callback.from_user.id)
         if not accounts:
+            await state.clear()
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов. Подключите через /accounts",
                 parse_mode="HTML",
@@ -348,8 +349,8 @@ async def _show_preview(
         data.get("timing_key", "delay_30s"), ("30с", 30)
     )[0]
 
-    # Truncate post text for preview
-    preview_text = post_text[:300] + ("..." if len(post_text) > 300 else "")
+    # Truncate post text for preview and escape HTML chars for bot UI display
+    preview_text = html.escape(post_text[:300]) + ("..." if len(post_text) > 300 else "")
 
     channels_hint = (
         "\n⚠️ <i>Каналы не найдены в БД. Импортируйте их через «📡 Каналы → 📥 Импорт».</i>"
@@ -508,8 +509,18 @@ async def cb_mpub_dry_run(
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
-    accounts = await _get_active_accounts(pool, callback.from_user.id)
+    try:
+        accounts = await _get_active_accounts(pool, callback.from_user.id)
+    except Exception:
+        await state.clear()
+        await callback.message.edit_text(
+            "❌ Ошибка загрузки аккаунтов. Попробуйте позже.",
+            parse_mode="HTML",
+            reply_markup=_back_menu_kb().as_markup(),
+        )
+        return
     if not accounts:
+        await state.clear()
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов.",
             parse_mode="HTML",
