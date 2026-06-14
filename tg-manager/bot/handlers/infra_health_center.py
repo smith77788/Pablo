@@ -254,7 +254,6 @@ async def cb_hc_resolve_anomaly(
     callback_data: InfraHCCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     owner_id = callback.from_user.id
     anom_id = callback_data.item_id
 
@@ -263,7 +262,9 @@ async def cb_hc_resolve_anomaly(
     ok = await anomaly_detector.resolve_anomaly(pool, anom_id, owner_id)
 
     if ok:
-        await callback.answer("✅ Аномалия разрешена", show_alert=False)
+        await callback.answer("✅ Аномалия разрешена", show_alert=True)
+    else:
+        await callback.answer()
     await _show_hc_menu(callback, pool, owner_id)
 
 

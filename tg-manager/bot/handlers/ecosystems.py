@@ -289,8 +289,9 @@ async def cb_eco_create_type(
 
 @router.callback_query(EcoCb.filter(F.action == "view"))
 async def cb_eco_view(
-    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    await state.clear()
     from services import ecosystem_brain as _eb
 
     eco_id = callback_data.eco_id
@@ -1600,8 +1601,9 @@ async def fsm_eco_clone_region(
 
 @router.callback_query(EcoCb.filter(F.action == "dna_menu"))
 async def cb_eco_dna_menu(
-    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool
+    callback: CallbackQuery, callback_data: EcoCb, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
+    await state.clear()
     from services import ecosystem_brain as _eb
 
     eco_id = callback_data.eco_id

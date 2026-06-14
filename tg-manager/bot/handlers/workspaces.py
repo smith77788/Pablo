@@ -7,7 +7,11 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+import html as _html
 from bot.callbacks import WorkspaceCb, BmCb
+
+def _esc(s: str) -> str:
+    return _html.escape(str(s) if s else "")
 from bot.states import WorkspaceFSM
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
@@ -54,7 +58,8 @@ def _ws_view_kb(ws_id: int, is_owner: bool) -> ...:
 
 
 @router.callback_query(WorkspaceCb.filter(F.action == "menu"))
-async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         from bot.utils.subscription import locked_text
         from bot.keyboards import subscription_locked_markup
@@ -109,12 +114,12 @@ async def cb_ws_view(
     role_map = {m["user_id"]: m["role"] for m in members}
     user_role = role_map.get(callback.from_user.id, "?")
     text = (
-        f"🏢 <b>{ws['name']}</b>\n"
+        f"🏢 <b>{_esc(ws['name'])}</b>\n"
         f"Ваша роль: <code>{user_role}</code>\n"
         f"Участников: {len(members)}\n"
     )
     if ws.get("description"):
-        text += f"\n{ws['description']}"
+        text += f"\n{_esc(ws['description'])}"
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=_ws_view_kb(callback_data.ws_id, is_owner)
     )
@@ -196,7 +201,7 @@ async def msg_ws_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     kb.button(text="❌ Отмена", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        f"✅ Название: <b>{name}</b>\n\nВведите описание (необязательно) или нажмите Пропустить:",
+        f"✅ Название: <b>{_esc(name)}</b>\n\nВведите описание (необязательно) или нажмите Пропустить:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -225,7 +230,7 @@ async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        f"✅ <b>Workspace создан!</b>\n\n🏢 {name}\n\nID: <code>{ws_id}</code>",
+        f"✅ <b>Workspace создан!</b>\n\n🏢 {_esc(name)}\n\nID: <code>{ws_id}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -248,7 +253,7 @@ async def cb_ws_skip_desc(
     kb.button(text="⬅️ К списку", callback_data=WorkspaceCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
-        f"✅ <b>Workspace создан!</b>\n\n🏢 {name}\n\nID: <code>{ws_id}</code>",
+        f"✅ <b>Workspace создан!</b>\n\n🏢 {_esc(name)}\n\nID: <code>{ws_id}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

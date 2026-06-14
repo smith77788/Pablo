@@ -53,7 +53,8 @@ def _cancel_kb() -> InlineKeyboardBuilder:
 
 
 @router.callback_query(ClustMCb.filter(F.action == "menu"))
-async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.answer()
         await callback.message.edit_text(
@@ -508,7 +509,6 @@ async def cb_cluster_add_bot_pick(
 async def cb_cluster_add_bot(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
     bot_id = callback_data.bot_id
@@ -538,7 +538,6 @@ async def cb_cluster_add_bot(
 async def cb_cluster_remove_bot(
     callback: CallbackQuery, callback_data: ClustMCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     user_id = callback.from_user.id
     cluster_name = callback_data.cluster_name or ""
     bot_id = callback_data.bot_id
