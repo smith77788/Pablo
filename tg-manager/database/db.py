@@ -5258,3 +5258,258 @@ async def add_subscription_gate_channel(
 
 async def remove_subscription_gate_channel(pool: asyncpg.Pool, channel_id: int) -> None:
     await pool.execute("DELETE FROM subscription_gate_channels WHERE id=$1", channel_id)
+
+
+# ── Promo Platform (v99) ───────────────────────────────────────────────────────
+
+async def promo_create_order(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    keyword: str,
+    target_position: int = 1,
+    bot_id: int | None = None,
+    smm_panel_id: int | None = None,
+    target_subs: int | None = None,
+) -> int:
+    row = await pool.fetchrow(
+        """INSERT INTO promo_orders
+               (owner_id, keyword, target_position, bot_id, smm_panel_id, target_subs)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id""",
+        owner_id, keyword, target_position, bot_id, smm_panel_id, target_subs,
+    )
+    return row["id"]
+
+
+async def promo_get_order(pool: asyncpg.Pool, order_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM promo_orders WHERE id=$1", order_id
+    )
+
+
+async def promo_list_orders(
+    pool: asyncpg.Pool, owner_id: int, status: str | None = None, limit: int = 20, offset: int = 0
+) -> list[asyncpg.Record]:
+    if status:
+        return await pool.fetch(
+            "SELECT * FROM promo_orders WHERE owner_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            owner_id, status, limit, offset,
+        )
+    return await pool.fetch(
+        "SELECT * FROM promo_orders WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        owner_id, limit, offset,
+    )
+
+
+async def promo_update_order_status(
+    pool: asyncpg.Pool, order_id: int, status: str, **kwargs
+) -> None:
+    sets = ["status=$2", "updated_at=NOW()"]
+    vals: list = [order_id, status]
+    idx = 3
+    allowed = {"smm_order_id", "last_position", "current_subs", "smm_panel_id", "completed_at"}
+    for k, v in kwargs.items():
+        if k in allowed:
+            sets.append(f"{k}=${idx}")
+            vals.append(v)
+            idx += 1
+    await pool.execute(
+        f"UPDATE promo_orders SET {', '.join(sets)} WHERE id=$1",
+        *vals,
+    )
+
+
+async def promo_delete_order(pool: asyncpg.Pool, order_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM promo_orders WHERE id=$1 AND owner_id=$2", order_id, owner_id
+    )
+
+
+# ── Bot Warehouse ─────────────────────────────────────────────────────────────
+
+async def warehouse_add_bot(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    bot_username: str,
+    bot_token_enc: str | None = None,
+    session_path: str | None = None,
+    account_id: int | None = None,
+    proxy_id: int | None = None,
+    registered_at=None,
+    notes: str = "",
+) -> int:
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(tz=timezone.utc)
+    if registered_at is None:
+        registered_at = now
+    ready_at = registered_at + timedelta(days=21)
+    status = "ready" if now >= ready_at else "aging"
+    row = await pool.fetchrow(
+        """INSERT INTO bot_warehouse
+               (owner_id, bot_username, bot_token_enc, session_path,
+                account_id, proxy_id, status, registered_at, ready_at, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING id""",
+        owner_id, bot_username.lstrip("@"), bot_token_enc, session_path,
+        account_id, proxy_id, status, registered_at, ready_at, notes,
+    )
+    return row["id"]
+
+
+async def warehouse_get_bot(pool: asyncpg.Pool, bot_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM bot_warehouse WHERE id=$1", bot_id)
+
+
+async def warehouse_list_bots(
+    pool: asyncpg.Pool, owner_id: int, status: str | None = None, limit: int = 20, offset: int = 0
+) -> list[asyncpg.Record]:
+    if status:
+        return await pool.fetch(
+            "SELECT * FROM bot_warehouse WHERE owner_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            owner_id, status, limit, offset,
+        )
+    return await pool.fetch(
+        "SELECT * FROM bot_warehouse WHERE owner_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        owner_id, limit, offset,
+    )
+
+
+async def warehouse_update_bot(
+    pool: asyncpg.Pool, bot_id: int, owner_id: int, **kwargs
+) -> None:
+    allowed = {"status", "current_subs", "session_path", "account_id", "proxy_id", "notes", "bot_token_enc"}
+    sets = ["updated_at=NOW()"]
+    vals: list = [bot_id, owner_id]
+    idx = 3
+    for k, v in kwargs.items():
+        if k in allowed:
+            sets.append(f"{k}=${idx}")
+            vals.append(v)
+            idx += 1
+    if len(vals) == 2:
+        return
+    await pool.execute(
+        f"UPDATE bot_warehouse SET {', '.join(sets)} WHERE id=$1 AND owner_id=$2",
+        *vals,
+    )
+
+
+async def warehouse_delete_bot(pool: asyncpg.Pool, bot_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM bot_warehouse WHERE id=$1 AND owner_id=$2", bot_id, owner_id
+    )
+
+
+async def warehouse_refresh_statuses(pool: asyncpg.Pool) -> int:
+    """Update aging→ready for bots where ready_at <= NOW(). Returns count updated."""
+    result = await pool.execute(
+        "UPDATE bot_warehouse SET status='ready', updated_at=NOW() WHERE status='aging' AND ready_at <= NOW()"
+    )
+    try:
+        return int(result.split()[-1])
+    except Exception:
+        return 0
+
+
+# ── SMM Panels ────────────────────────────────────────────────────────────────
+
+async def smm_add_panel(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    name: str,
+    api_url: str,
+    api_key_enc: str,
+    service_id: str = "",
+) -> int:
+    row = await pool.fetchrow(
+        """INSERT INTO smm_panels (owner_id, name, api_url, api_key_enc, service_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+        owner_id, name, api_url, api_key_enc, service_id,
+    )
+    return row["id"]
+
+
+async def smm_list_panels(
+    pool: asyncpg.Pool, owner_id: int
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM smm_panels WHERE owner_id=$1 ORDER BY created_at DESC",
+        owner_id,
+    )
+
+
+async def smm_get_panel(pool: asyncpg.Pool, panel_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM smm_panels WHERE id=$1", panel_id)
+
+
+async def smm_update_panel(
+    pool: asyncpg.Pool, panel_id: int, owner_id: int, **kwargs
+) -> None:
+    allowed = {"name", "api_url", "api_key_enc", "service_id", "is_active", "balance", "last_checked"}
+    sets: list = []
+    vals: list = [panel_id, owner_id]
+    idx = 3
+    for k, v in kwargs.items():
+        if k in allowed:
+            sets.append(f"{k}=${idx}")
+            vals.append(v)
+            idx += 1
+    if not sets:
+        return
+    await pool.execute(
+        f"UPDATE smm_panels SET {', '.join(sets)} WHERE id=$1 AND owner_id=$2",
+        *vals,
+    )
+
+
+async def smm_delete_panel(pool: asyncpg.Pool, panel_id: int, owner_id: int) -> None:
+    await pool.execute("DELETE FROM smm_panels WHERE id=$1 AND owner_id=$2", panel_id, owner_id)
+
+
+# ── Promo Logs ────────────────────────────────────────────────────────────────
+
+async def promo_log(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    event: str,
+    message: str,
+    level: str = "INFO",
+    order_id: int | None = None,
+    meta: dict | None = None,
+) -> None:
+    import json
+    try:
+        await pool.execute(
+            """INSERT INTO promo_logs (order_id, owner_id, level, event, message, meta)
+               VALUES ($1, $2, $3, $4, $5, $6)""",
+            order_id, owner_id, level, event, message,
+            json.dumps(meta or {}),
+        )
+    except Exception:
+        pass
+
+
+async def promo_get_logs(
+    pool: asyncpg.Pool,
+    owner_id: int,
+    order_id: int | None = None,
+    level: str | None = None,
+    limit: int = 50,
+) -> list[asyncpg.Record]:
+    conditions = ["owner_id=$1"]
+    vals: list = [owner_id]
+    idx = 2
+    if order_id is not None:
+        conditions.append(f"order_id=${idx}")
+        vals.append(order_id)
+        idx += 1
+    if level:
+        conditions.append(f"level=${idx}")
+        vals.append(level)
+        idx += 1
+    where = " AND ".join(conditions)
+    vals.append(limit)
+    return await pool.fetch(
+        f"SELECT * FROM promo_logs WHERE {where} ORDER BY created_at DESC LIMIT ${idx}",
+        *vals,
+    )

@@ -437,3 +437,15 @@ class RegCb(CallbackData, prefix="rc"):
     entity_id: int = 0
     entity_type: Optional[str] = None  # user | bot | channel | supergroup | group
     page: int = 0          # history page OR analyzer tab (0=overview,1=stats,2=content,3=network,4=seo,5=admins)
+
+
+class PromoCb(CallbackData, prefix="promo"):
+    """Bot Promotion Platform — orders, warehouse, panels, logs."""
+
+    action: str  # menu|orders|new_order|order_detail|order_cancel|order_delete
+                 # warehouse|bot_detail|bot_delete|bot_add
+                 # panels|panel_add|panel_detail|panel_delete|panel_check
+                 # topcheck|logs|logs_filter|back
+    item_id: int = 0   # order_id | bot_id | panel_id
+    page: int = 0
+    value: Optional[str] = None  # status filter, log level

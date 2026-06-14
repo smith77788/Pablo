@@ -510,3 +510,30 @@ class RegCheckFSM(StatesGroup):
 
 class GateAddFSM(StatesGroup):
     waiting_username = State()  # ввод @username канала для подписки-гейта
+
+
+class PromoOrderFSM(StatesGroup):
+    keyword = State()           # ввод ключевого слова
+    target_position = State()   # целевая позиция (1–10)
+    pick_bot = State()          # выбор бота из склада
+    pick_panel = State()        # выбор SMM-панели
+    target_subs = State()       # целевое кол-во подписчиков
+    confirm = State()           # подтверждение
+
+
+class PromoAddBotFSM(StatesGroup):
+    username = State()          # @username бота
+    token = State()             # токен (опционально)
+    reg_date = State()          # дата регистрации бота (YYYY-MM-DD или "сегодня")
+    notes = State()             # заметки (опционально)
+
+
+class PromoAddPanelFSM(StatesGroup):
+    name = State()              # название панели
+    api_url = State()           # URL API
+    api_key = State()           # ключ API
+    service_id = State()        # ID сервиса (подписчики Telegram)
+
+
+class PromoTopCheckFSM(StatesGroup):
+    keyword = State()           # ключевое слово для анализа топа
