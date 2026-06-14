@@ -490,13 +490,18 @@ async def cb_grant_strike(
     user_id = callback_data.user_id
     from bot.handlers.strike import _ensure_table
 
-    await _ensure_table(pool)
-    await pool.execute(
-        "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
-        "ON CONFLICT (user_id) DO NOTHING",
-        user_id,
-        callback.from_user.id,
-    )
+    try:
+        await _ensure_table(pool)
+        await pool.execute(
+            "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO NOTHING",
+            user_id,
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_grant_strike: DB write failed")
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
     await callback.answer("✅ Strike доступ выдан.", show_alert=True)
 
     await callback.message.edit_text(

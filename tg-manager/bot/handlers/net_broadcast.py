@@ -39,18 +39,23 @@ async def cb_net_bc_cluster(
         return
 
     # Get bots in this cluster
-    bots = await pool.fetch(
-        """SELECT bot_id, username, first_name, token,
-                  COALESCE(aud.cnt, 0) AS audience_count
-           FROM managed_bots m
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) aud ON aud.bot_id = m.bot_id
-           WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE
-           ORDER BY m.first_name""",
-        callback.from_user.id,
-        cluster_name,
-    )
+    try:
+        bots = await pool.fetch(
+            """SELECT bot_id, username, first_name, token,
+                      COALESCE(aud.cnt, 0) AS audience_count
+               FROM managed_bots m
+               LEFT JOIN (
+                   SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
+               ) aud ON aud.bot_id = m.bot_id
+               WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE
+               ORDER BY m.first_name""",
+            callback.from_user.id,
+            cluster_name,
+        )
+    except Exception:
+        log.exception("cb_net_bc_cluster: pool.fetch failed")
+        await callback.message.edit_text("⚠️ Ошибка загрузки ботов кластера.", parse_mode="HTML")
+        return
 
     if not bots:
         from bot.callbacks import ClustMCb
@@ -356,15 +361,19 @@ async def msg_net_bc_text(
         target_desc = f"{len(chosen)} бот(ов): {names} ({total:,} юз.)"
     elif segment == "cluster":
         cluster_name = data.get("cluster_name", "")
-        cluster_bots = await pool.fetch(
-            """SELECT m.bot_id, COALESCE(aud.cnt, 0) AS audience_count
-               FROM managed_bots m
-               LEFT JOIN (SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id) aud
-               ON aud.bot_id = m.bot_id
-               WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE""",
-            message.from_user.id,
-            cluster_name,
-        )
+        try:
+            cluster_bots = await pool.fetch(
+                """SELECT m.bot_id, COALESCE(aud.cnt, 0) AS audience_count
+                   FROM managed_bots m
+                   LEFT JOIN (SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id) aud
+                   ON aud.bot_id = m.bot_id
+                   WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE""",
+                message.from_user.id,
+                cluster_name,
+            )
+        except Exception:
+            log.exception("msg_net_bc_text: cluster_bots fetch failed")
+            cluster_bots = []
         total = sum(b["audience_count"] for b in cluster_bots)
         target_desc = f"кластер «{cluster_name}» ({len(cluster_bots)} бот(ов), {total:,} юз.)"
     else:
@@ -444,11 +453,15 @@ async def cb_net_bc_confirm(
             return
     elif segment == "cluster":
         cluster_name = data.get("cluster_name", "")
-        cluster_bot_ids_rows = await pool.fetch(
-            "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
-            callback.from_user.id,
-            cluster_name,
-        )
+        try:
+            cluster_bot_ids_rows = await pool.fetch(
+                "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE",
+                callback.from_user.id,
+                cluster_name,
+            )
+        except Exception:
+            log.exception("cb_net_bc_confirm: cluster_bot_ids fetch failed")
+            cluster_bot_ids_rows = []
         selected_bot_ids = [r["bot_id"] for r in cluster_bot_ids_rows]
         if not selected_bot_ids:
             from bot.callbacks import ClustMCb
@@ -480,10 +493,13 @@ async def cb_net_bc_confirm(
             total_users += len(ids)
     elif segment == "lang":
         for b in bots_all:
-            cnt = await pool.fetchval(
-                "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND language_code=$2",
-                b["bot_id"], lang,
-            ) or 0
+            try:
+                cnt = await pool.fetchval(
+                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND language_code=$2",
+                    b["bot_id"], lang,
+                ) or 0
+            except Exception:
+                cnt = 0
             total_users += cnt
 
     if total_users == 0:

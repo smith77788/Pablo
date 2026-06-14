@@ -1048,6 +1048,8 @@ async def _exec_bulk_bot_edit(
         "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
         owner_id,
     )
+    if not bots_rows:
+        return {"status": "failed", "summary": "⚠️ Bulk Bot Edit: нет активных ботов"}
 
     ok_count = 0
     fail_count = 0
@@ -1184,7 +1186,7 @@ async def _exec_dm_campaign(
     from services.dm_engine import run_campaign
 
     try:
-        await run_campaign(pool, bot, campaign_id)
+        await run_campaign(pool, bot, campaign_id, op_id=op_id)
     except asyncio.CancelledError:
         # op_worker cancelled this asyncio task — mark campaign paused
         try:
@@ -5091,7 +5093,7 @@ async def _exec_check_accounts_health(
             raise
         except Exception as exc:
             log.warning("_exec_check_accounts_health acc=%s: %s", acc.get("id"), exc)
-            result = {"status": "active", "reason": f"Ошибка: {str(exc)[:60]}"}
+            result = {"status": "unknown", "reason": f"Ошибка: {str(exc)[:60]}"}
             errors += 1
 
         status = result.get("status", "unknown")
@@ -5122,6 +5124,7 @@ async def _exec_check_accounts_health(
         "cooldown": "⏳ FloodWait",
         "session_expired": "🔑 сессия истекла",
         "no_session": "⚪ нет сессии",
+        "unknown": "❓ ошибка проверки",
     }
     parts = [f"{_STATUS_LABELS.get(s, s)}: {c}" for s, c in sorted(status_counts.items())]
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""

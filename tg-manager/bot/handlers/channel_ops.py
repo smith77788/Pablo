@@ -2238,11 +2238,14 @@ async def cb_promote_all(
         await callback.answer("Аккаунт-администратор не найден.", show_alert=True)
         return
 
-    n_others = await pool.fetchval(
-        "SELECT COUNT(*) FROM tg_accounts "
-        "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
-        owner_id, acc_id,
-    ) or 0
+    try:
+        n_others = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND tg_user_id IS NOT NULL AND id != $2",
+            owner_id, acc_id,
+        ) or 0
+    except Exception:
+        n_others = 0
     if not n_others:
         await callback.answer("Нет других аккаунтов для назначения.", show_alert=True)
         return
@@ -4740,12 +4743,15 @@ async def fsm_join_invite_combined(
     if is_bulk:
         from services import operation_bus
 
-        count = await pool.fetchval(
-            "SELECT COUNT(*) FROM tg_accounts "
-            "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND session_str IS NOT NULL",
-            message.from_user.id,
-            selected_ids,
-        )
+        try:
+            count = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND session_str IS NOT NULL",
+                message.from_user.id,
+                selected_ids,
+            )
+        except Exception:
+            count = None
         if not count:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return

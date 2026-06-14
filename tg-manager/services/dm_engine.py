@@ -234,6 +234,7 @@ async def run_campaign(
     pool: asyncpg.Pool,
     bot: Bot,
     campaign_id: int,
+    op_id: int | None = None,
 ) -> None:
     """Запустить или продолжить DM-кампанию. Вызывается из operation_queue."""
     campaign = await pool.fetchrow(
@@ -288,6 +289,13 @@ async def run_campaign(
     await pool.execute(
         "UPDATE dm_campaigns SET total_targets=$1 WHERE id=$2", total, campaign_id
     )
+    if op_id and total:
+        try:
+            await pool.execute(
+                "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+            )
+        except Exception:
+            pass
 
     if not targets:
         await pool.execute(
@@ -442,6 +450,17 @@ async def run_campaign(
             infra_memory.record_account_op(
                 acc["id"], "dm_campaign", False, result.get("error", "")
             )
+
+        # Sync done_items into operation_queue for progress bar in ops list
+        if op_id:
+            try:
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
+                    sent + failed,
+                    op_id,
+                )
+            except Exception:
+                pass
 
         # Milestone progress notifications (25%, 50%, 75%)
         if total > 0:
