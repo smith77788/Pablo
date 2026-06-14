@@ -335,7 +335,7 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
 # ── Callback dispatcher ────────────────────────────────────────────────────────
 
 
-@router.callback_query(F.data.startswith("adm:"))
+@router.callback_query(F.data.startswith("adm:") & ~F.data.startswith("adm:gate"))
 async def cb_admin(
     callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
