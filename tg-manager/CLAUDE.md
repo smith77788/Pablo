@@ -94,6 +94,7 @@ python3 -c "import ast; ast.parse(open('file.py').read())"
 - v95: `seen_entities` + `entity_radar_stats` (Infrastructure Radar)
 - v96: `entity_name_history` + `entity_last_known`
 - v97: `entity_follows` + `entity_follow_events`
+- v98: `subscription_gate_channels` (подписка-гейт)
 
 ## Release Survival Contract
 For: account safety · proxy safety · STRIKE · mass ops · op engine · warmup · factories
