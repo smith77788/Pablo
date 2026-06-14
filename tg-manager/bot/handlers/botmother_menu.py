@@ -38,6 +38,7 @@ from bot.callbacks import (
     NetBcCb,
     NetworkCb,
     ParserCb,
+    PromoCb,
     ProxyCb,
     QuickPostCb,
     RankCb,
@@ -125,8 +126,9 @@ def _main_menu_kb():
     kb.button(text="📊 Аналитика", callback_data=BmCb(action="analytics"))
     kb.button(text="🛡️ Мониторинг", callback_data=BmCb(action="monitoring"))
     kb.button(text="🌐 Экосистемы", callback_data=EcoCb(action="menu"))
+    kb.button(text="🚀 Продвижение", callback_data=PromoCb(action="menu"))
     kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
-    kb.adjust(1, 2, 2, 2, 1)
+    kb.adjust(1, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -157,8 +159,9 @@ def _operations_kb(plan: str = "free"):
     kb.button(text="📋 Очередь", callback_data=MassOpCb(action="queue"))
     kb.button(text="📊 Дашборд опер.", callback_data=BmCb(action="ops"))
     kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
+    kb.button(text=f"{_lock(plan,'pro')}🚀 Продвижение ботов", callback_data=PromoCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 1, 2, 2, 1, 1)
+    kb.adjust(2, 2, 1, 2, 2, 1, 2, 1)
     return kb.as_markup()
 
 
