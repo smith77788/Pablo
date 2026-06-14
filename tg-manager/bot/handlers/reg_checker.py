@@ -889,7 +889,15 @@ async def _show_result_from_full_info(
     text = rc.format_result(merged, name, username)
     kb = _result_kb(entity_id, entity_type)
 
-    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    try:
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    except Exception as _html_err:
+        if "parse entities" in str(_html_err).lower() or "can't parse" in str(_html_err).lower():
+            import re as _re
+            plain = _re.sub(r"<[^>]*>", "", text)
+            await message.answer(plain, reply_markup=kb)
+        else:
+            raise
     await rc.cache_result(pool, message.from_user.id, merged, name, username)
 
 

@@ -633,8 +633,9 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(ChanCb.filter(F.action == "bulk_menu"))
-async def cb_bulk_menu(callback: CallbackQuery) -> None:
+async def cb_bulk_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     try:
         await callback.message.edit_text(
             "⚡ <b>Массовые операции</b>\n\nВыберите операцию:",
