@@ -434,7 +434,10 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         rows = await pool.fetch(
             """
             SELECT a.id, a.phone, a.first_name, a.username, a.trust_score, a.cooldown_until,
-                   COALESCE(a.flood_count_7d, 0) AS flood_count_7d, a.is_active,
+                   (SELECT COUNT(*) FROM account_flood_log fl
+                    WHERE fl.account_id = a.id
+                      AND fl.created_at > NOW() - INTERVAL '7 days') AS flood_count_7d,
+                   a.is_active,
                    a.pool, a.tags,
                    COALESCE(a.acc_status, 'active') AS acc_status,
                    a.last_real_check_at,
