@@ -1079,9 +1079,22 @@ async def get_dialogs(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
         dialogs = []
-        async for dialog in client.iter_dialogs(limit=limit, offset_id=offset):
-            entity = dialog.entity
+        _iter = client.iter_dialogs(limit=limit, offset_id=offset)
+        while True:
+            try:
+                dialog = await _iter.__anext__()
+            except StopAsyncIteration:
+                break
+            except (ChannelPrivateError, ChatAdminRequiredError):
+                continue
+            except Exception:
+                continue
+            try:
+                entity = dialog.entity
+            except Exception:
+                continue
             if isinstance(entity, (Channel, Chat)):
                 dialogs.append(
                     {
@@ -1344,13 +1357,26 @@ async def get_account_dialogs_stats(
     client = _make_client(session_string, _acc)
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
         total = 0
         channels = 0
         groups = 0
         personal = 0
-        async for dialog in client.iter_dialogs():
+        _iter = client.iter_dialogs()
+        while True:
+            try:
+                dialog = await _iter.__anext__()
+            except StopAsyncIteration:
+                break
+            except (ChannelPrivateError, ChatAdminRequiredError):
+                continue
+            except Exception:
+                continue
+            try:
+                entity = dialog.entity
+            except Exception:
+                continue
             total += 1
-            entity = dialog.entity
             if isinstance(entity, Channel):
                 if getattr(entity, "broadcast", False):
                     channels += 1
@@ -2070,8 +2096,21 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
     try:
         return await client.get_entity(target_id)
     except Exception:
-        async for dlg in client.iter_dialogs(limit=500):
-            eid = getattr(dlg.entity, "id", None)
+        from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
+        _iter = client.iter_dialogs(limit=500)
+        while True:
+            try:
+                dlg = await _iter.__anext__()
+            except StopAsyncIteration:
+                break
+            except (ChannelPrivateError, ChatAdminRequiredError):
+                continue
+            except Exception:
+                continue
+            try:
+                eid = getattr(dlg.entity, "id", None)
+            except Exception:
+                continue
             if eid and abs(int(eid)) == target_id:
                 ah = getattr(dlg.entity, "access_hash", 0)
                 if ah:
