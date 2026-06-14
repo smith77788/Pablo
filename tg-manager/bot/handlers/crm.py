@@ -878,11 +878,11 @@ def _deal_stage_move_kb(deal_id: int, current_stage: str) -> InlineKeyboardBuild
 async def cb_deal_view(
     callback: CallbackQuery, callback_data: CrmCb, pool: asyncpg.Pool
 ) -> None:
-    await callback.answer()
     deal = await db.get_crm_deal(pool, callback_data.deal_id, callback.from_user.id)
     if not deal:
         await callback.answer("Сделка не найдена.", show_alert=True)
         return
+    await callback.answer()
 
     activities = await db.get_crm_activity(pool, deal["id"], limit=5)
     stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])

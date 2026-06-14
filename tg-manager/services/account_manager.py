@@ -370,9 +370,8 @@ def _normalize_device_profile(device: dict | None = None) -> dict[str, Any]:
 
 def _resolve_client_proxy(device: dict[str, Any]) -> Any:
     acc_proxy_url = str(device.get("proxy_url") or "").strip()
-    proxy_id = device.get("proxy_id")
     strict_account_proxy = bool(device) and (
-        bool(acc_proxy_url) or proxy_id is not None or bool(device.get("enforce_proxy"))
+        bool(acc_proxy_url) or bool(device.get("enforce_proxy"))
     )
     if strict_account_proxy:
         if not acc_proxy_url:
