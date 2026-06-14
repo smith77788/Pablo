@@ -6,6 +6,15 @@ Last updated: 2026-06-14
 
 - [HIGH] Channel/Group/Bot Creation — BotFather dialog brittle; hard to fix without live interactive session
 
+## FIXED (2026-06-14 session, continued)
+- dm_engine progress: operation_queue.done_items never updated → run_campaign() accepts op_id, syncs per iteration
+- _exec_check_accounts_health: exception → status "active" (fake success) → now "unknown"
+- _exec_bulk_bot_edit: no bots → returned done 0/0 (fake success) → now returns failed
+- net_broadcast.py: 4 pool calls without try (crash on DB error) → wrapped
+- admin_users.py cb_grant_strike: 2 pool calls without try → wrapped
+- accounts.py cb_scan_connect: pool.fetchval without try → wrapped
+- channel_ops.py: 2 pool calls without try → wrapped
+
 ## FIXED (2026-06-14 session)
 - scan_owned_assets: ChannelPrivateError from iter_dialogs iterator kills entire scan, partial results lost
   → Fixed: manual __anext__ loop catches ChannelPrivateError per-dialog, scan continues
