@@ -165,7 +165,11 @@ async def cb_seo_menu(
             ),
         )
         return
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Ошибка базы данных.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -245,7 +249,11 @@ async def cb_seo_analyze(
         )
         return
 
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Ошибка базы данных.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -2024,7 +2032,11 @@ async def cb_seo_preview(
             reply_markup=subscription_locked_markup("starter"),
         )
         return
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Ошибка базы данных.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -2189,7 +2201,11 @@ async def cb_seo_momentum(
         )
         return
     bot_id = callback_data.bot_id
-    row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Ошибка базы данных.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
@@ -2314,7 +2330,11 @@ async def cb_seo_content_gap(
         )
         return
     bot_id = callback_data.bot_id
-    row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    try:
+        row = await db.get_bot(pool, bot_id, callback.from_user.id)
+    except Exception:
+        await callback.answer("Ошибка базы данных.", show_alert=True)
+        return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
