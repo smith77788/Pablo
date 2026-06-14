@@ -2044,7 +2044,8 @@ async def cb_check_all_accounts(
 
 
 @router.callback_query(AccCb.filter(F.action == "pools_view"))
-async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def cb_pools_view(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     await callback.answer()
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
@@ -2180,11 +2181,15 @@ async def cb_bulk_pool_manual(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
     await callback.answer()
+    _cancel_kb = InlineKeyboardBuilder()
+    _cancel_kb.button(text="❌ Отмена", callback_data=AccCb(action="pools_view"))
+    _cancel_kb.adjust(1)
     await callback.message.edit_text(
         "✏️ <b>Введите название пула</b>\n\n"
         "Например: <code>main</code>, <code>backup</code>, <code>strike</code>\n\n"
         "<i>Пул будет назначен всем аккаунтам без пула.</i>",
         parse_mode="HTML",
+        reply_markup=_cancel_kb.as_markup(),
     )
     await state.update_data(bulk_pool_mode=True)
 
