@@ -11,6 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from services.pg_fsm_storage import PostgresFSMStorage
 from aiogram.types import ErrorEvent, CallbackQuery
 from config import BOT_TOKEN
 from database.db import create_pool
@@ -178,7 +179,9 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=bot_session,
     )
-    dp = Dispatcher(storage=MemoryStorage())
+    pool = await create_pool()
+    fsm_storage = await PostgresFSMStorage.create(pool)
+    dp = Dispatcher(storage=fsm_storage)
     activity_log_middleware = UserActivityLogMiddleware()
     gate_middleware = SubscriptionGateMiddleware()
     dp.message.outer_middleware(gate_middleware)
@@ -251,8 +254,6 @@ async def main() -> None:
     dp.include_router(admin_users_handler.router)
     dp.include_router(admin_handler.router)
     dp.error.register(_global_error_handler)
-
-    pool = await create_pool()
 
     # Load persistent platform settings
     from database import db as _db
