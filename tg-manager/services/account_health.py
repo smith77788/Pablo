@@ -486,11 +486,15 @@ async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> N
             for row in owners:
                 total_loaded += await load_from_db(pool, row["owner_id"])
 
-            # Сохраняем снапшоты health_score в БД для трендов
-            if total_loaded > 0:
-                written = await _persist_health_snapshots(pool)
-                if written:
-                    log.debug("account_health: persisted %d snapshots", written)
+            # Сохраняем снапшоты health_score в БД для трендов.
+            # Вызываем безусловно: _persist_health_snapshots сама проверяет
+            # наличие данных в кеше, поэтому пустой вызов безопасен.
+            # Ранее условие total_loaded > 0 не давало записывать снапшоты
+            # для аккаунтов, обновлённых только через in-memory (record_flood
+            # и update_after_success/failure) без полной перезагрузки из БД.
+            written = await _persist_health_snapshots(pool)
+            if written:
+                log.debug("account_health: persisted %d snapshots", written)
 
             # Чистка старых снапшотов раз в сутки (24 цикла)
             if cycle % 24 == 0:
