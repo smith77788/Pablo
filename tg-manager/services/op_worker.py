@@ -5130,6 +5130,15 @@ async def _exec_check_accounts_health(
     deact_note = f"\n🔒 Деактивировано: {deactivated}" if deactivated else ""
     summary = f"🔍 Проверено {n} аккаунтов\n" + "\n".join(parts) + deact_note
 
+    # Persist health snapshots immediately so health_dashboard trends show current data
+    # without waiting for the hourly run_health_check_loop cycle.
+    try:
+        from services import account_health as _ah
+        await _ah.load_from_db(pool, owner_id)
+        await _ah._persist_health_snapshots(pool)
+    except Exception as _he:
+        log.debug("_exec_check_accounts_health: health snapshot persist failed: %s", _he)
+
     return {
         "status": "done",
         "checked": n,
