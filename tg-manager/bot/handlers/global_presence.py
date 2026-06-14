@@ -1956,7 +1956,7 @@ async def cb_gp_report(
         failed_targets = []
 
     done_lines = "\n".join(
-        f"  ✅ {t['city'] or '?'}: {t['planned_name'] or '?'}"
+        f"  ✅ {html.escape(t['city'] or '?')}: {html.escape(t['planned_name'] or '?')}"
         + (f" (id:{t['result_asset_id']})" if t["result_asset_id"] else "")
         for t in done_targets[:10]
     )
@@ -1964,7 +1964,7 @@ async def cb_gp_report(
         done_lines += f"\n  … и ещё {stats['done'] - 10}"
 
     fail_lines = "\n".join(
-        f"  ❌ {t['city'] or '?'}: {(t['error_message'] or '?')[:60]}"
+        f"  ❌ {html.escape(t['city'] or '?')}: {html.escape((t['error_message'] or '?')[:60])}"
         for t in failed_targets[:5]
     )
 

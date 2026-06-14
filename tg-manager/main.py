@@ -16,6 +16,7 @@ from config import BOT_TOKEN
 from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
 from bot.middlewares.user_activity import UserActivityLogMiddleware
+from bot.middlewares.subscription_gate import SubscriptionGateMiddleware, set_gate_enabled, set_gate_channels
 from bot.utils.button_styles import install_button_style_patch
 
 install_button_style_patch()
@@ -179,6 +180,9 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage())
     activity_log_middleware = UserActivityLogMiddleware()
+    gate_middleware = SubscriptionGateMiddleware()
+    dp.message.outer_middleware(gate_middleware)
+    dp.callback_query.outer_middleware(gate_middleware)
     dp.message.outer_middleware(activity_log_middleware)
     dp.callback_query.outer_middleware(activity_log_middleware)
 
@@ -257,6 +261,12 @@ async def main() -> None:
     _fm = await _db.get_platform_setting(pool, "free_mode", "false")
     set_free_mode(_fm == "true")
     log.info("Free Mode on startup: %s", "ON" if _fm == "true" else "OFF")
+
+    _gate_val = await _db.get_platform_setting(pool, "gate_enabled", "false")
+    set_gate_enabled(_gate_val == "true")
+    _gate_chs = await _db.get_subscription_gate_channels(pool)
+    set_gate_channels(_gate_chs)
+    log.info("Subscription gate on startup: %s (%d channels)", "ON" if _gate_val == "true" else "OFF", len(_gate_chs))
 
     # Init op_worker DB pool and reset stale in_operation flags from previous process
     op_worker.init_op_worker_pool(pool)

@@ -506,3 +506,7 @@ class IntentFSM(StatesGroup):
 
 class RegCheckFSM(StatesGroup):
     waiting_entity = State()  # ожидание: пересланное сообщение / @username / ссылка
+
+
+class GateAddFSM(StatesGroup):
+    waiting_username = State()  # ввод @username канала для подписки-гейта

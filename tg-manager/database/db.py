@@ -5235,3 +5235,26 @@ async def mark_follow_notifications_sent(
         )
     except Exception:
         pass
+
+
+# ── Subscription Gate ─────────────────────────────────────────────────────────
+
+async def get_subscription_gate_channels(pool: asyncpg.Pool) -> list:
+    return await pool.fetch(
+        "SELECT id, channel_username, channel_title, added_at FROM subscription_gate_channels ORDER BY id"
+    )
+
+
+async def add_subscription_gate_channel(
+    pool: asyncpg.Pool, username: str, title: str = ""
+) -> int:
+    row = await pool.fetchrow(
+        "INSERT INTO subscription_gate_channels (channel_username, channel_title) VALUES ($1, $2) RETURNING id",
+        username,
+        title,
+    )
+    return row["id"]
+
+
+async def remove_subscription_gate_channel(pool: asyncpg.Pool, channel_id: int) -> None:
+    await pool.execute("DELETE FROM subscription_gate_channels WHERE id=$1", channel_id)

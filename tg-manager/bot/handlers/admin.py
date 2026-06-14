@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import asyncpg
 import aiohttp
 from aiogram import Router, F
+from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -19,6 +20,12 @@ from aiogram.filters import Command
 from bot.keyboards import main_menu
 from bot.utils.subscription import get_free_mode, set_free_mode
 from bot.utils.event_status import mark_handled_error
+from bot.middlewares.subscription_gate import (
+    get_gate_enabled,
+    set_gate_enabled,
+    set_gate_channels,
+)
+from bot.states import GateAddFSM
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -171,6 +178,8 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         )
         kb.button(text="🔑 Railway env", callback_data="adm:env_list")
         kb.button(text="⚙️ Swarm режим", callback_data="adm:swarm_mode")
+        _gate_icon = "✅ ВКЛ" if get_gate_enabled() else "❌ ВЫКЛ"
+        kb.button(text=f"🔒 Подписка-гейт: {_gate_icon}", callback_data="adm:gate")
         err_label = (
             f"🐛 Отчёты ({new_error_reports})"
             if new_error_reports > 0
@@ -2969,4 +2978,167 @@ async def _adm_logs(
     kb = _logs_kb(source, status_filter, page, has_next)
     await callback.message.edit_text(
         text, parse_mode="HTML", reply_markup=kb.as_markup()
+    )
+
+
+# ── Subscription Gate Management ──────────────────────────────────────────────
+
+
+def _gate_kb(channels: list, gate_on: bool):
+    kb = InlineKeyboardBuilder()
+    toggle_text = "🔴 Выключить гейт" if gate_on else "🟢 Включить гейт"
+    kb.button(text=toggle_text, callback_data="adm:gate_toggle")
+    kb.button(text="➕ Добавить канал", callback_data="adm:gate_add_ask")
+    for ch in channels:
+        safe = _html.escape(ch["channel_title"] or ch["channel_username"])
+        kb.button(
+            text=f"🗑 {safe}", callback_data=f"adm:gate_del:{ch['id']}"
+        )
+    kb.button(text="🏠 Админка", callback_data="adm:main")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def _gate_text(gate_on: bool, channels: list) -> str:
+    status = "🟢 <b>ВКЛЮЧЁН</b>" if gate_on else "🔴 <b>ВЫКЛЮЧЕН</b>"
+    if channels:
+        ch_lines = "\n".join(
+            f"  • {_html.escape(ch['channel_title'] or ch['channel_username'])} "
+            f"(<code>{_html.escape(ch['channel_username'])}</code>)"
+            for ch in channels
+        )
+    else:
+        ch_lines = "  <i>каналов нет</i>"
+    return (
+        f"🔒 <b>Подписка-гейт</b>\n\n"
+        f"Статус: {status}\n\n"
+        f"Каналы для обязательной подписки:\n{ch_lines}\n\n"
+        "Нажмите «🗑 название» чтобы удалить канал.\n"
+        "Бот должен быть участником каналов чтобы проверять подписку."
+    )
+
+
+@router.callback_query(F.data == "adm:gate")
+async def cb_adm_gate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    channels = await db.get_subscription_gate_channels(pool)
+    gate_on = get_gate_enabled()
+    await callback.message.edit_text(
+        _gate_text(gate_on, channels),
+        parse_mode="HTML",
+        reply_markup=_gate_kb(channels, gate_on),
+    )
+
+
+@router.callback_query(F.data == "adm:gate_toggle")
+async def cb_adm_gate_toggle(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    new_val = not get_gate_enabled()
+    set_gate_enabled(new_val)
+    await db.set_platform_setting(pool, "gate_enabled", "true" if new_val else "false")
+    # Reload channels into memory
+    channels = await db.get_subscription_gate_channels(pool)
+    set_gate_channels(channels)
+    label = "включён ✅" if new_val else "выключен ❌"
+    await callback.answer(f"Гейт {label}")
+    await callback.message.edit_text(
+        _gate_text(new_val, channels),
+        parse_mode="HTML",
+        reply_markup=_gate_kb(channels, new_val),
+    )
+
+
+@router.callback_query(F.data == "adm:gate_add_ask")
+async def cb_adm_gate_add_ask(callback: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(GateAddFSM.waiting_username)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data="adm:gate")
+    kb.adjust(1)
+    await callback.message.edit_text(
+        "🔒 <b>Добавить канал в гейт</b>\n\n"
+        "Введите @username канала или ссылку:\n"
+        "<code>@mychannel</code> или <code>https://t.me/mychannel</code>\n\n"
+        "⚠️ Бот должен быть участником (подписчиком) канала "
+        "чтобы проверять подписку пользователей.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(GateAddFSM.waiting_username)
+async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    # Normalise to @username
+    if raw.startswith("https://t.me/"):
+        username = "@" + raw.split("https://t.me/")[-1].split("/")[0].lstrip("@")
+    elif raw.startswith("t.me/"):
+        username = "@" + raw.split("t.me/")[-1].split("/")[0].lstrip("@")
+    elif raw.startswith("@"):
+        username = raw.split()[0]
+    else:
+        username = "@" + raw.split()[0].lstrip("@")
+
+    if len(username) < 3 or not username[1:].replace("_", "").isalnum():
+        await message.answer(
+            "❌ Некорректный @username. Введите ещё раз или нажмите Отмена:",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="❌ Отмена", callback_data="adm:gate")
+            .as_markup(),
+        )
+        return
+
+    try:
+        await db.add_subscription_gate_channel(pool, username, title="")
+    except Exception as exc:
+        await state.clear()
+        await message.answer(f"❌ Ошибка БД: {_html.escape(str(exc)[:100])}", parse_mode="HTML")
+        return
+
+    # Reload channels into memory
+    channels = await db.get_subscription_gate_channels(pool)
+    set_gate_channels(channels)
+    await state.clear()
+    gate_on = get_gate_enabled()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К настройкам гейта", callback_data="adm:gate")
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Канал <code>{_html.escape(username)}</code> добавлен.\n\n"
+        + _gate_text(gate_on, channels),
+        parse_mode="HTML",
+        reply_markup=_gate_kb(channels, gate_on),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:gate_del:"))
+async def cb_adm_gate_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    try:
+        channel_id = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный ID.", show_alert=True)
+        return
+    await callback.answer()
+    await db.remove_subscription_gate_channel(pool, channel_id)
+    channels = await db.get_subscription_gate_channels(pool)
+    set_gate_channels(channels)
+    gate_on = get_gate_enabled()
+    await callback.message.edit_text(
+        _gate_text(gate_on, channels),
+        parse_mode="HTML",
+        reply_markup=_gate_kb(channels, gate_on),
     )
