@@ -569,7 +569,10 @@ async def cb_ops_dashboard(
     pool: asyncpg.Pool,
 ) -> None:
     """Operation dashboard: running count, recent history (last 5), quick actions."""
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
     user_id = callback.from_user.id
 
     running_count = 0
