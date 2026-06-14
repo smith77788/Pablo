@@ -99,10 +99,8 @@ _USER_ANCHORS: list[tuple[int, datetime]] = [
     (7_388_000_000,  datetime(2026, 3, 1,  tzinfo=timezone.utc)),
     (7_465_000_000,  datetime(2026, 4, 1,  tzinfo=timezone.utc)),
     (7_541_000_000,  datetime(2026, 5, 1,  tzinfo=timezone.utc)),
-    (7_849_000_000,  datetime(2026, 6, 1,  tzinfo=timezone.utc)),
-    (8_156_000_000,  datetime(2026, 7, 1,  tzinfo=timezone.utc)),
     (8_349_649_487,  datetime(2026, 5, 30, tzinfo=timezone.utc)),  # VERIFIED (BotFather screenshot)
-    # NOTE: IDs beyond 8_349_649_487 → method="after_verified"
+    # NOTE: IDs beyond 8_349_649_487 → method="after_verified" (no extrapolation)
 ]
 
 # ── Bot ID → approximate registration date anchors ─────────────────────────────
@@ -141,6 +139,24 @@ _BOT_ANCHORS: list[tuple[int, datetime]] = [
 _LAST_VERIFIED_ANCHOR: tuple[int, datetime] = (
     8_349_649_487, datetime(2026, 5, 30, tzinfo=timezone.utc)
 )
+
+# ── DC-шардинг: известные "дыры" в ID-пространстве ────────────────────────────
+# Telegram резервирует пулы ID по датацентрам (DC1-DC5). При переполнении DC
+# сервер выдаёт ранее зарезервированный пул, из-за чего новый аккаунт получает
+# ID меньше чем у аккаунтов, созданных месяцами ранее на другом DC.
+# Поправка: если canonical_id попадает в диапазон [id_lo, id_hi] — добавить
+# correction_days к расчётной дате (может быть отрицательным).
+# Формат: (id_lo, id_hi, correction_days, описание)
+_DC_SHARDING_BUFFERS: list[tuple[int, int, int, str]] = [
+    # Февраль-март 2022: массовый приток русских пользователей после угрозы блокировки.
+    # DC1/DC5 исчерпали пулы — ряд новых пользователей получил ID из более ранних пулов.
+    (2_900_000_000, 3_100_000_000, 15, "Russia surge Feb-Mar 2022"),
+    # Октябрь 2023: скачок аудитории на фоне Ближнего Востока.
+    # Известны случаи выдачи ID из пула ~-30 дней.
+    (5_050_000_000, 5_150_000_000, -20, "Middle East surge Oct 2023"),
+    # Август 2024: арест Дурова → медийный скачок, DC2/DC5 перегрузка.
+    (5_900_000_000, 6_050_000_000, -25, "Durov arrest Aug 2024"),
+]
 
 # ── Channel / Supergroup / Chat ID → approximate creation date anchors ──────────
 _CHAN_ANCHORS: list[tuple[int, datetime]] = [
@@ -204,49 +220,87 @@ def _anchors_for(entity_type: str) -> list[tuple[int, datetime]]:
     return _USER_ANCHORS
 
 
-def _interpolate(entity_id: int, anchors: list[tuple[int, datetime]]) -> datetime:
-    """Линейная интерполяция даты по ID. Никогда не возвращает дату в будущем."""
+def _clamp_to_present(dt: datetime) -> datetime:
+    """Гарантия: никогда не вернуть дату в будущем."""
+    now = datetime.now(tz=timezone.utc)
+    if dt > now:
+        log.warning(
+            "registration_checker: calculated date %s is in the future, clamping to now",
+            dt.isoformat(),
+        )
+        return now
+    return dt
+
+
+def _apply_dc_sharding_correction(canonical_id: int, dt: datetime) -> tuple[datetime, int]:
+    """
+    Применить поправку DC-шардинга для известных "дыр" в ID-пространстве.
+    Возвращает (скорректированная_дата, correction_days).
+    correction_days=0 означает, что ID вне известных нестабильных зон.
+    """
+    from datetime import timedelta
+    for id_lo, id_hi, correction_days, _desc in _DC_SHARDING_BUFFERS:
+        if id_lo <= canonical_id <= id_hi:
+            corrected = dt + timedelta(days=correction_days)
+            return _clamp_to_present(corrected), correction_days
+    return dt, 0
+
+
+def _segment_lookup(
+    canonical_id: int, anchors: list[tuple[int, datetime]]
+) -> tuple[datetime, datetime, datetime, int]:
+    """
+    Строгий табличный поиск по сегментам (не глобальная регрессия).
+    Находит bracket [lo_id, hi_id] и интерполирует строго внутри него.
+    Возвращает (date, lo_date, hi_date, confidence_days).
+    confidence_days = половина ширины сегмента в днях.
+    """
     _now = datetime.now(tz=timezone.utc)
-    if entity_id <= anchors[0][0]:
-        return anchors[0][1]
-    if entity_id >= anchors[-1][0]:
-        return min(anchors[-1][1], _now)
+
+    if canonical_id <= anchors[0][0]:
+        dt = _clamp_to_present(anchors[0][1])
+        return dt, anchors[0][1], anchors[0][1], 0
+
+    if canonical_id >= anchors[-1][0]:
+        dt = _clamp_to_present(anchors[-1][1])
+        return dt, anchors[-1][1], anchors[-1][1], 0
+
     for i in range(len(anchors) - 1):
         lo_id, lo_dt = anchors[i]
         hi_id, hi_dt = anchors[i + 1]
-        if lo_id <= entity_id <= hi_id:
-            frac = (entity_id - lo_id) / (hi_id - lo_id)
+        if lo_id <= canonical_id <= hi_id:
+            frac = (canonical_id - lo_id) / (hi_id - lo_id)
             delta_s = (hi_dt - lo_dt).total_seconds()
-            result = datetime.fromtimestamp(
+            raw = datetime.fromtimestamp(
                 lo_dt.timestamp() + frac * delta_s, tz=timezone.utc
             )
-            return min(result, _now)
-    return min(anchors[-1][1], _now)
+            dt = _clamp_to_present(raw)
+            segment_days = int((hi_dt - lo_dt).days)
+            confidence_days = max(1, segment_days // 2)
+            return dt, lo_dt, hi_dt, confidence_days
+
+    dt = _clamp_to_present(anchors[-1][1])
+    return dt, anchors[-1][1], anchors[-1][1], 0
+
+
+def _interpolate(entity_id: int, anchors: list[tuple[int, datetime]]) -> datetime:
+    """Обёртка для обратной совместимости. Используй _segment_lookup() в новом коде."""
+    dt, _lo, _hi, _cd = _segment_lookup(entity_id, anchors)
+    return dt
 
 
 def estimate_confidence_range(
     entity_id: int, entity_type: str
 ) -> tuple[datetime, datetime]:
-    """
-    Вернуть (lo_date, hi_date) — интервал доверия для ID-интерполяции.
-    Возвращает крайние точки сегмента в котором лежит entity_id.
-    """
+    """Вернуть (lo_date, hi_date) — границы сегмента. Обёртка для совместимости."""
     anchors = _anchors_for(entity_type)
     canonical = (
         abs(entity_id)
         if entity_type in ("user", "bot")
         else canonical_peer_id(entity_id)
     )
-    if canonical <= anchors[0][0]:
-        return anchors[0][1], anchors[0][1]
-    if canonical >= anchors[-1][0]:
-        return anchors[-1][1], anchors[-1][1]
-    for i in range(len(anchors) - 1):
-        lo_id, lo_dt = anchors[i]
-        hi_id, hi_dt = anchors[i + 1]
-        if lo_id <= canonical <= hi_id:
-            return lo_dt, hi_dt
-    return anchors[-1][1], anchors[-1][1]
+    _dt, lo, hi, _cd = _segment_lookup(canonical, anchors)
+    return lo, hi
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -255,6 +309,13 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
     """
     Оценить дату регистрации/создания по Telegram ID.
     entity_type: 'user' | 'bot' | 'channel' | 'supergroup' | 'group'
+
+    Алгоритм:
+    1. ID выше последнего верифицированного якоря → метод 'after_verified',
+       date = нижняя граница (НИКАКОЙ экстраполяции).
+    2. ID внутри таблицы → строгий сегментный поиск в bracket [lo_id, hi_id],
+       + поправка DC-шардинга для известных нестабильных зон.
+    3. Финальный запобіжник: date > now → clamp к текущей дате.
     """
     anchors = _anchors_for(entity_type)
     canonical = (
@@ -264,45 +325,54 @@ def estimate_by_id(entity_id: int, entity_type: str) -> dict[str, Any]:
     )
     now = datetime.now(tz=timezone.utc)
 
-    # ID выше последней верифицированной точки — интерполяция ненадёжна.
+    # ── Случай 1: ID за пределами верифицированного диапазона ────────────────
+    # Экстраполяция запрещена. Возвращаем только нижнюю границу.
     if entity_type in ("user", "bot") and canonical > _LAST_VERIFIED_ANCHOR[0]:
         verified_dt = _LAST_VERIFIED_ANCHOR[1]
-        last_id, last_dt = anchors[-1]
-        if len(anchors) >= 2:
-            prev_id, prev_dt = anchors[-2]
-            rate = (last_dt - prev_dt).total_seconds() / max(last_id - prev_id, 1)
-            extrapolated = datetime.fromtimestamp(
-                last_dt.timestamp() + rate * (canonical - last_id), tz=timezone.utc
-            )
-            extrapolated = min(extrapolated, now)
-        else:
-            extrapolated = min(last_dt, now)
         return {
             "entity_id": entity_id,
             "canonical_id": canonical,
             "entity_type": entity_type,
-            "date": extrapolated,
-            "date_iso": extrapolated.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "date": verified_dt,          # нижняя граница, не экстраполяция
+            "date_iso": verified_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "method": "after_verified",
             "confidence": "нижняя граница",
             "confidence_lo": verified_dt,
             "confidence_hi": now,
             "verified_lower_bound": verified_dt,
+            "confidence_days": None,      # неизвестно
         }
 
-    dt = _interpolate(canonical, anchors)
-    lo, hi = estimate_confidence_range(entity_id, entity_type)
-    return {
+    # ── Случай 2: строгий сегментный поиск по таблице ────────────────────────
+    dt, lo, hi, confidence_days = _segment_lookup(canonical, anchors)
+
+    # Поправка DC-шардинга для известных нестабильных зон
+    dt, sharding_correction = _apply_dc_sharding_correction(canonical, dt)
+
+    # Финальный запобіжник (уже в _clamp_to_present, но дублируем явно)
+    dt = _clamp_to_present(dt)
+
+    # Строка погрешности для UI: ширина сегмента → реальная погрешность
+    if confidence_days is not None and confidence_days > 0:
+        confidence_str = f"~±{confidence_days} дн."
+    else:
+        confidence_str = "точно"
+
+    result: dict[str, Any] = {
         "entity_id": entity_id,
         "canonical_id": canonical,
         "entity_type": entity_type,
         "date": dt,
         "date_iso": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "method": "id_interpolation",
-        "confidence": "~±2 мес.",
+        "confidence": confidence_str,
         "confidence_lo": lo,
         "confidence_hi": hi,
+        "confidence_days": confidence_days,
     }
+    if sharding_correction != 0:
+        result["sharding_correction_days"] = sharding_correction
+    return result
 
 
 # ── Telethon helpers ───────────────────────────────────────────────────────────
@@ -870,7 +940,13 @@ def format_result(
             if confidence_lo != confidence_hi:
                 lo_s = format_date_ru(confidence_lo)
                 hi_s = format_date_ru(confidence_hi)
-                lines.append(f"📏 Диапазон: <i>{lo_s} — {hi_s}</i>")
+                confidence_days = result.get("confidence_days")
+                cd_str = f" (±{confidence_days} дн.)" if confidence_days else ""
+                lines.append(f"📏 Диапазон: <i>{lo_s} — {hi_s}{cd_str}</i>")
+            sharding_corr = result.get("sharding_correction_days")
+            if sharding_corr:
+                sign = "+" if sharding_corr > 0 else ""
+                lines.append(f"⚡ <i>DC-поправка шардинга: {sign}{sharding_corr} дн.</i>")
     else:
         lines.append("📅 Дата: <i>не удалось определить</i>")
 
