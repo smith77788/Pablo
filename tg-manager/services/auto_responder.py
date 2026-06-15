@@ -104,7 +104,7 @@ async def _process_bot(
         funnels = await db.get_active_funnels(pool, bot_id)
         automation_rules = await db.get_active_automation_rules(pool, bot_id)
         bot_row = await pool.fetchrow(
-            "SELECT bot_role, swarm_enabled, cluster, added_by, username, first_name "
+            "SELECT bot_role, swarm_enabled, cluster, added_by, username, first_name, relay_enabled "
             "FROM managed_bots WHERE bot_id=$1",
             bot_id,
         )
@@ -254,6 +254,10 @@ async def _process_bot(
                                 bot_id,
                             )
                         continue  # skip normal auto_replies
+
+            # Relay mode: skip automated responses — relay.py forwards to operator
+            if bot_row and bot_row.get("relay_enabled"):
+                continue
 
             # Auto-replies (first match wins)
             for rule in rules:
