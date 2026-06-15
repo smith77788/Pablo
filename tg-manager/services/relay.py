@@ -19,11 +19,16 @@ _MAX_RELAY_SESSIONS = 200
 
 
 async def _send_via_management(
-    http: aiohttp.ClientSession, operator_id: int, text: str
+    http: aiohttp.ClientSession,
+    operator_id: int,
+    text: str,
+    reply_markup: dict | None = None,
 ) -> int | None:
     """Send message to operator via management bot. Returns message_id."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": operator_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     for attempt in range(3):
         try:
             async with http.post(
@@ -174,16 +179,37 @@ async def _process_bot(
                     )
 
             display_text = text or f"📱 Поделился телефоном: {phone}"
-
-            # Forward to operator with enriched context header
             phone_line = f"\n📱 Телефон: <code>{phone}</code>" if phone else ""
-            fwd_text = (
-                f"📨 <b>{bot_label}</b>  |  👤 {user_label}\n"
-                f"<i>ID: {user_id}</i>{phone_line}\n\n"
-                f"{display_text}\n\n"
-                f"<i>← Reply здесь чтобы ответить пользователю</i>"
-            )
-            fwd_msg_id = await _send_via_management(http, operator_id, fwd_text)
+
+            _SUPPORT_TRIGGERS = ("/support", "💬 написать в поддержку")
+            is_support_trigger = (text or "").strip().lower() in _SUPPORT_TRIGGERS
+
+            if is_support_trigger:
+                # New support request — rich notification with "Open dialog" button
+                notify_text = (
+                    f"🔔 <b>Новый запрос в поддержку!</b>\n\n"
+                    f"🤖 {bot_label}  |  👤 {user_label}\n"
+                    f"<i>ID: {user_id}</i>{phone_line}\n\n"
+                    f"<i>Нажмите кнопку ниже чтобы открыть диалог и ответить</i>"
+                )
+                # RelayCb(prefix="rl", action, bot_id, session_id, template_id)
+                cb_data = f"rl:session:{bot_id}:{session_id}:0"
+                notify_markup = {
+                    "inline_keyboard": [[{"text": "💬 Открыть диалог", "callback_data": cb_data}]]
+                }
+                fwd_msg_id = await _send_via_management(
+                    http, operator_id, notify_text, reply_markup=notify_markup
+                )
+            else:
+                # Regular message in existing dialog
+                fwd_text = (
+                    f"📨 <b>{bot_label}</b>  |  👤 {user_label}\n"
+                    f"<i>ID: {user_id}</i>{phone_line}\n\n"
+                    f"{display_text}\n\n"
+                    f"<i>← Reply здесь чтобы ответить пользователю</i>"
+                )
+                fwd_msg_id = await _send_via_management(http, operator_id, fwd_text)
+
             await db.save_relay_message(
                 pool, session_id, "in", display_text, fwd_msg_id
             )

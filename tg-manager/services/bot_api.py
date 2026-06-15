@@ -336,12 +336,16 @@ async def send_message(
     chat_id: int,
     text: str,
     buttons: list[dict] | None = None,
+    reply_markup: dict | None = None,
 ) -> tuple[bool, int | None]:
     """Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    kb = _build_inline_keyboard(buttons)
-    if kb:
-        params["reply_markup"] = kb
+    if reply_markup is not None:
+        params["reply_markup"] = reply_markup
+    elif buttons:
+        kb = _build_inline_keyboard(buttons)
+        if kb:
+            params["reply_markup"] = kb
     data = await _call(session, token, "sendMessage", **params)
     if data.get("ok"):
         return True, None

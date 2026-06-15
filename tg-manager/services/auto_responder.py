@@ -255,8 +255,31 @@ async def _process_bot(
                             )
                         continue  # skip normal auto_replies
 
-            # Relay mode: skip automated responses — relay.py forwards to operator
+            # Relay mode: skip automated responses — relay.py forwards to operator.
+            # Exception: /start and /support still get a response so users know how to reach support.
             if bot_row and bot_row.get("relay_enabled"):
+                _SUPPORT_TRIGGERS = ("/support", "💬 написать в поддержку")
+                if is_start:
+                    fname = from_user.get("first_name") or "друг"
+                    bot_name = bot_row.get("username") or bot_row.get("first_name") or "бот"
+                    welcome = (
+                        f"👋 Привет, <b>{fname}</b>!\n\n"
+                        f"Добро пожаловать в <b>@{bot_name}</b>.\n\n"
+                        "Если вам нужна помощь — нажмите кнопку ниже, чтобы связаться с оператором поддержки."
+                    )
+                    rkb = {
+                        "keyboard": [[{"text": "💬 Написать в поддержку"}]],
+                        "resize_keyboard": True,
+                        "one_time_keyboard": False,
+                    }
+                    await bot_api.send_message(http, token, chat_id, welcome, reply_markup=rkb)
+                elif text.strip().lower() in _SUPPORT_TRIGGERS:
+                    ack = (
+                        "✅ <b>Запрос принят!</b>\n\n"
+                        "Оператор поддержки скоро ответит вам. "
+                        "Вы можете написать детали вашего вопроса прямо здесь."
+                    )
+                    await bot_api.send_message(http, token, chat_id, ack)
                 continue
 
             # Auto-replies (first match wins)
