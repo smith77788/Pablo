@@ -181,6 +181,7 @@ async def select_all_active(
                    a.lang_code, a.system_lang_code, a.proxy_id,
                    a.tags, a.pool, a.labels, a.warnings, a.project,
                    a.trust_score, a.cooldown_until,
+                   COALESCE(a.acc_status, 'active') AS acc_status,
                    p.proxy_url, p.geo_country
             FROM tg_accounts a
             LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE

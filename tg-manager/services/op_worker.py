@@ -558,13 +558,26 @@ async def _reset_stale_running(pool: asyncpg.Pool) -> None:
 
 
 async def _watchdog_stale(pool: asyncpg.Pool) -> None:
-    """Периодически сбрасывает 'running' операции, которые висят дольше N минут."""
+    """Периодически сбрасывает 'running' операции, которые висят дольше N минут.
+
+    Исключает операции, которые реально выполняются в памяти (_active_op_ids),
+    чтобы не перезапустить strike/bulk-op пока первый прогон ещё идёт.
+    """
     try:
+        async with _active_lock:
+            active_now: frozenset[int] = frozenset(_active_op_ids)
+
+        exclude_clause = ""
+        if active_now:
+            id_csv = ",".join(str(x) for x in active_now)
+            exclude_clause = f" AND id NOT IN ({id_csv})"
+
         result = await pool.execute(
             f"""UPDATE operation_queue
                 SET status = 'pending', started_at = NULL
                 WHERE status = 'running'
-                  AND started_at < now() - INTERVAL '{_STALE_RUNNING_TIMEOUT_MIN} minutes'""",
+                  AND started_at < now() - INTERVAL '{_STALE_RUNNING_TIMEOUT_MIN} minutes'
+                  {exclude_clause}""",
         )
         count = int((result or "UPDATE 0").split()[-1])
         if count:
