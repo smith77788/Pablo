@@ -13,8 +13,6 @@ from services import bot_api
 from services import brand_injection
 from services import routing_engine
 from services.logger import log_exc_swallow
-from services.relay import _send_via_management as _relay_forward
-
 from bot.utils.template_validator import replace_placeholders
 
 log = logging.getLogger(__name__)
@@ -129,11 +127,10 @@ async def _process_bot(
             if uid > max_update_id:
                 max_update_id = uid
 
-            # Answer callback_query to stop button spinner
+            # Answer callback_query to dismiss the button spinner in managed bots
             cbq = upd.get("callback_query")
             if cbq:
                 cbq_id = cbq.get("id")
-                cbq_chat = (cbq.get("message") or {}).get("chat", {}).get("id")
                 if cbq_id:
                     try:
                         await bot_api._call(
@@ -143,13 +140,6 @@ async def _process_bot(
                         )
                     except Exception:
                         pass
-                    # If relay enabled and message comes with callback, send support confirmation
-                    if bot_row and bot_row.get("relay_enabled") and cbq_chat:
-                        cbq_from = cbq.get("from", {})
-                        await bot_api.send_message(
-                            http, token, cbq_chat,
-                            "✅ <b>Вы подключены к поддержке.</b>\n\nОпишите вашу проблему — оператор ответит в ближайшее время."
-                        )
                 continue
 
             msg = upd.get("message")
