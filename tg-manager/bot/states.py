@@ -18,10 +18,6 @@ class EditProfile(StatesGroup):
     waiting_photo = State()
 
 
-class SetWebhook(StatesGroup):
-    waiting_url = State()
-
-
 class Broadcast(StatesGroup):
     waiting_message = State()
     confirming = State()
@@ -29,9 +25,6 @@ class Broadcast(StatesGroup):
     waiting_button_url = State()
     waiting_placeholders = State()
 
-
-class Compare(StatesGroup):
-    waiting_second_bot = State()
 
 
 class BulkEdit(StatesGroup):
@@ -328,15 +321,6 @@ class BulkChannelCreateFSM(StatesGroup):
     confirming = State()
 
 
-class MassPublishFSM2(StatesGroup):
-    choosing_target_type = State()  # all | by_account | by_cluster
-    choosing_target = State()  # specific account or cluster
-    waiting_text = State()
-    choosing_timing = State()  # immediate | delay_5s | delay_30s | delay_60s
-    previewing = State()
-    confirming = State()
-
-
 class EditChannelBulkFSM(StatesGroup):
     choosing_field = State()  # title | about | username
     choosing_scope = State()  # all_channels | by_account
@@ -422,11 +406,6 @@ class DmCampaignFSM(StatesGroup):
     choosing_bot = State()  # выбор бота (для bot_users)
 
 
-class CleanerFSM(StatesGroup):
-    choosing_account = State()
-    confirm_action = State()
-
-
 class PresencePackFSM(StatesGroup):
     entering_name = State()
     entering_description = State()
@@ -467,12 +446,6 @@ class EcosystemCreateFSM(StatesGroup):
     name = State()
     description = State()
     ecosystem_type = State()
-
-
-class EcosystemAddMemberFSM(StatesGroup):
-    choose_type = State()
-    choose_object = State()
-    awaiting_screenshot = State()  # скриншот для доказательства
 
 
 class EcosystemDnaFSM(StatesGroup):
@@ -553,27 +526,3 @@ class BotTplCustomizeFSM(StatesGroup):
     operator = State()       # @username оператора (или /skip)
 
 
-class BotBoosterFSM(StatesGroup):
-    # Bot warehouse: add bot manually
-    wh_username = State()
-    wh_token = State()
-    # Session: paste StringSession
-    sess_phone = State()
-    sess_string = State()
-    # SMM panel wizard
-    pan_name = State()
-    pan_url = State()
-    pan_key = State()
-    pan_service = State()
-    # Order configurator
-    order_keyword = State()
-    order_premiums = State()
-    # Top checker
-    checker_keyword = State()
-    # Bot registrar
-    reg_keyword = State()
-    reg_count = State()
-    reg_session_id = State()
-    # Bot transfer
-    xfer_bot_id = State()
-    xfer_recipient = State()
