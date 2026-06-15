@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import os
@@ -678,12 +679,14 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
 
     updated = await db.warehouse_refresh_statuses(pool)
 
-    bots = await db.warehouse_list_bots(pool, user_id, status=status_filter, limit=10, offset=page * 10)
-    all_bots = await db.warehouse_list_bots(pool, user_id, limit=500)
-
-    counts: dict[str, int] = {}
-    for b in all_bots:
-        counts[b["status"]] = counts.get(b["status"], 0) + 1
+    bots, count_rows = await asyncio.gather(
+        db.warehouse_list_bots(pool, user_id, status=status_filter, limit=10, offset=page * 10),
+        pool.fetch(
+            "SELECT status, COUNT(*)::int AS cnt FROM bot_warehouse WHERE owner_id=$1 GROUP BY status",
+            user_id,
+        ),
+    )
+    counts: dict[str, int] = {r["status"]: r["cnt"] for r in count_rows}
 
     status_line = " · ".join(
         f"{_BOT_STATUS.get(s, s)}: {c}" for s, c in sorted(counts.items())
@@ -1305,6 +1308,7 @@ async def cb_panel_services(callback: CallbackQuery, callback_data: PromoCb, poo
 
 @router.callback_query(PromoCb.filter(F.action == "panel_toggle"))
 async def cb_panel_toggle(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
+    await callback.answer()
     panel = await db.smm_get_panel(pool, callback_data.item_id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
@@ -1318,6 +1322,7 @@ async def cb_panel_toggle(callback: CallbackQuery, callback_data: PromoCb, pool:
 
 @router.callback_query(PromoCb.filter(F.action == "panel_delete"))
 async def cb_panel_delete(callback: CallbackQuery, callback_data: PromoCb, pool: asyncpg.Pool) -> None:
+    await callback.answer()
     panel = await db.smm_get_panel(pool, callback_data.item_id)
     if not panel or panel["owner_id"] != callback.from_user.id:
         await callback.answer("Панель не найдена", show_alert=True)
