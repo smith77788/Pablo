@@ -648,6 +648,22 @@ async def cb_admin_grant(
         )
     except Exception:
         log_exc_swallow(log, "cb_admin_grant: failed to upsert subscription")
+    try:
+        await pool.execute(
+            """UPDATE platform_users
+               SET current_plan=$1,
+                   plan_expires_at = CASE
+                       WHEN plan_expires_at > now()
+                           THEN plan_expires_at + ($2 || ' months')::INTERVAL
+                       ELSE now() + ($2 || ' months')::INTERVAL
+                   END
+               WHERE user_id=$3""",
+            plan,
+            str(months),
+            callback.from_user.id,
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_admin_grant: failed to sync platform_users.current_plan")
     sub_utils.invalidate_plan_cache(callback.from_user.id)
     try:
         row = await pool.fetchrow(

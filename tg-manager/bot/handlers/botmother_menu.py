@@ -68,21 +68,21 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
-_PLAN_ORDER = {"free": 0, "starter": 1, "pro": 2, "enterprise": 3}
-
-
 def _lock(user_plan: str, required: str) -> str:
-    if _PLAN_ORDER.get(user_plan, 0) < _PLAN_ORDER.get(required, 0):
+    from bot.utils.subscription import PLAN_LEVELS, coerce_plan
+
+    if PLAN_LEVELS.get(coerce_plan(user_plan), 0) < PLAN_LEVELS.get(
+        coerce_plan(required), 0
+    ):
         return "🔒 "
     return ""
 
 
 async def _get_user_plan(pool: asyncpg.Pool, user_id: int) -> str:
+    from bot.utils.subscription import get_plan
+
     try:
-        row = await pool.fetchrow(
-            "SELECT current_plan FROM platform_users WHERE user_id=$1", user_id
-        )
-        return (row["current_plan"] if row else "free") or "free"
+        return await get_plan(pool, user_id)
     except Exception:
         return "free"
 

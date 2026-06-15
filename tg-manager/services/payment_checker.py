@@ -292,8 +292,30 @@ async def _activate_subscription(pool, user_id: int, plan: str, months: int) -> 
         plan,
         str(months),
     )
+    # Keep platform_users.current_plan in sync so admin panels show correct plan
+    try:
+        await pool.execute(
+            """UPDATE platform_users
+               SET current_plan=$1,
+                   plan_expires_at = CASE
+                       WHEN plan_expires_at > now()
+                           THEN plan_expires_at + ($2 || ' months')::INTERVAL
+                       ELSE now() + ($2 || ' months')::INTERVAL
+                   END
+               WHERE user_id=$3""",
+            plan,
+            str(months),
+            user_id,
+        )
+    except Exception:
+        log.warning(
+            "payment_checker: failed to sync platform_users.current_plan for user=%d",
+            user_id,
+            exc_info=True,
+        )
     try:
         from bot.utils.subscription import invalidate_plan_cache
+
         invalidate_plan_cache(user_id)
     except Exception:
         pass
