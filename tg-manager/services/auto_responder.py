@@ -325,6 +325,59 @@ async def _process_bot(
                         )
                     break
 
+            # Passive inbox relay: forward non-/start messages to operator even when
+            # relay_enabled=false.  Old bots that have custom auto-replies ("Сообщение
+            # успешно отправлено") still need to deliver messages to the bot owner.
+            # Uses the same relay_sessions / relay_messages tables → reply-back works.
+            if (
+                not is_start
+                and text
+                and bot_row
+                and not bot_row.get("relay_enabled")
+                and bot_row.get("added_by")
+                and main_bot
+            ):
+                added_by = bot_row["added_by"]
+                try:
+                    uname = from_user.get("username")
+                    fname = from_user.get("first_name", "")
+                    lname = from_user.get("last_name", "")
+                    user_label = (
+                        f"@{uname}"
+                        if uname
+                        else (f"{fname} {lname}".strip() or f"ID:{chat_id}")
+                    )
+                    bname = (
+                        bot_row.get("username")
+                        or bot_row.get("first_name")
+                        or str(bot_id)
+                    )
+                    fwd_text = (
+                        f"📨 <b>@{bname}</b>  |  👤 {user_label}\n"
+                        f"<i>ID: {chat_id}</i>\n\n"
+                        f"{text}\n\n"
+                        f"<i>← Reply чтобы ответить пользователю</i>"
+                    )
+                    session_id = await db.get_or_create_relay_session(
+                        pool, bot_id, chat_id, uname, fname
+                    )
+                    sent = await main_bot.send_message(
+                        added_by, fwd_text, parse_mode="HTML"
+                    )
+                    await db.save_relay_message(
+                        pool,
+                        session_id,
+                        "in",
+                        text,
+                        sent.message_id if sent else None,
+                    )
+                except Exception:
+                    log.exception(
+                        "auto_responder: passive relay failed bot=%d chat=%d",
+                        bot_id,
+                        chat_id,
+                    )
+
             # Swarm routing: /start on entry bot with swarm enabled
             if (
                 is_start
