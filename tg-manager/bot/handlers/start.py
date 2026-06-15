@@ -380,3 +380,88 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
     kb.button(text="📊 Отчёты по операциям", callback_data=BmCb(action="op_reports"))
     kb.adjust(1)
     await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ── /find — поиск функции по ключевому слову ─────────────────────────────────
+
+_NAV_MAP: list[tuple[list[str], str, str]] = [
+    # keywords, button_text, callback_data_str
+    (["пост", "опубликовать", "publish", "quick post"], "✍️ Быстрый пост", "qp:start"),
+    (["рассылка", "broadcast", "сообщение всем"], "📢 Рассылки & Связь", "bm:comms"),
+    (["аккаунт", "аккаунты", "account", "телефон"], "📱 Аккаунты", "acc:menu"),
+    (["бот", "боты", "мои боты", "bot"], "🤖 Мои боты", "bot:list:0"),
+    (["канал", "каналы", "channel"], "📡 Каналы", "chan:menu"),
+    (["группа", "группы", "group"], "👥 Группы", "grpf:menu"),
+    (["прокси", "proxy", "vpn"], "🌐 Прокси", "prx:menu"),
+    (["позиция", "позиции", "поиск", "ranking", "keyword"], "📊 Позиции в поиске", "vis:dashboard"),
+    (["продвижение", "promo", "накрутка", "подписчики"], "🚀 Продвижение", "promo:menu"),
+    (["конкурент", "competitors", "analyse"], "🏆 Конкуренты", "comp:menu"),
+    (["seo", "сео", "описание", "title"], "📈 SEO", "chanf:seo_pick"),
+    (["экосистема", "ecosystem", "сеть"], "🌐 Экосистемы", "eco:menu"),
+    (["кластер", "cluster"], "🔗 Кластеры", "clm:menu"),
+    (["разогрев", "warmup", "прогрев"], "🌡 Разогрев аккаунтов", "wu:menu"),
+    (["парсер", "аудитория", "parser"], "🔍 Парсер аудитории", "prs:menu"),
+    (["здоровье", "health", "статус аккаунтов"], "❤️ Здоровье", "hlth:menu"),
+    (["очередь", "операции", "queue", "задачи"], "📋 Очередь операций", "mop:queue"),
+    (["масспаблиш", "массовая публикация", "mass publish"], "📤 Массовая публикация", "mpub:menu"),
+    (["шаблон", "template"], "📄 Шаблоны", "atpl:menu"),
+    (["подписка", "subscription", "тариф", "план", "оплата"], "💳 Подписка", "sub:menu"),
+    (["strike", "страйк", "удар"], "⚔️ Strike", "strk:menu"),
+    (["присутствие", "presence", "global"], "🌍 Присутствие", "gp:menu"),
+    (["воронка", "funnel", "авторассылка"], "🔗 Воронки", "bm:pick_bot_for:fn"),
+    (["авто-ответ", "auto reply", "автоответ"], "💬 Авто-ответы", "bm:pick_bot_for:ar"),
+    (["ии", "ai", "искусственный интеллект", "ассистент"], "🤖 ИИ Помощник", "ai:start"),
+    (["workspace", "пространство", "команда"], "🏢 Пространства", "ws:menu"),
+    (["реферал", "реф", "referral"], "👥 Рефералы", "ref:menu"),
+    (["топология", "topology", "карта"], "🗺️ Топология", "topo:menu"),
+    (["регистрация", "дата", "regdate", "возраст"], "🔍 Дата регистрации", "rc:start"),
+    (["анализ", "analyse", "analyze"], "🔬 Полный анализ", "rc:analyze_start"),
+    (["dm", "директ", "личное сообщение"], "📨 DM-кампании", "dm:menu"),
+]
+
+
+@router.message(Command("find"))
+async def cmd_find(message: Message) -> None:
+    """Поиск функции по ключевому слову."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton
+
+    raw = (message.text or "").strip()
+    query = raw.removeprefix("/find").strip().lower()
+
+    if not query:
+        await message.answer(
+            "🔍 <b>Поиск функции</b>\n\n"
+            "Введите: <code>/find [ключевое слово]</code>\n\n"
+            "Примеры:\n"
+            "<code>/find рассылка</code>\n"
+            "<code>/find аккаунт</code>\n"
+            "<code>/find позиции</code>\n"
+            "<code>/find прокси</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    matches: list[tuple[str, str]] = []
+    for keywords, label, cb_str in _NAV_MAP:
+        if any(kw in query or query in kw for kw in keywords):
+            matches.append((label, cb_str))
+
+    if not matches:
+        await message.answer(
+            f"🔍 По запросу «{query}» ничего не найдено.\n\n"
+            "Попробуйте другое слово или откройте меню: /menu",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    for label, cb_str in matches[:8]:
+        kb.button(text=label, callback_data=cb_str)
+        kb.adjust(1)
+
+    await message.answer(
+        f"🔍 <b>Результаты по «{query}»:</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )

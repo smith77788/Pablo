@@ -272,6 +272,14 @@ class MassPublishFSM(StatesGroup):
     confirming = State()  # финальное подтверждение
 
 
+class MassPublishFSM2(StatesGroup):
+    choosing_target = State()
+    waiting_text = State()
+    choosing_timing = State()
+    previewing = State()
+    confirming = State()
+
+
 class BulkBotEditFSM(StatesGroup):
     choosing_field = State()  # name | desc | short_desc | commands
     waiting_value = State()

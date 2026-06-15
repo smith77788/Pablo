@@ -297,7 +297,9 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
                 (SELECT COUNT(*)           FROM platform_users)                                    AS total_users,
                 (SELECT COUNT(*)           FROM platform_users
                     WHERE COALESCE(registered_at, first_seen) >= CURRENT_DATE)                     AS today_users,
-                (SELECT COUNT(*)           FROM error_reports WHERE status='new')                  AS new_error_reports"""
+                (SELECT COUNT(*)           FROM error_reports WHERE status='new')                  AS new_error_reports,
+                (SELECT COUNT(*)           FROM operation_queue WHERE status='running')            AS active_ops,
+                (SELECT COUNT(*)           FROM operation_queue WHERE status='pending')            AS pending_ops"""
         )
     except Exception:
         row = None
@@ -310,6 +312,12 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
     total_users = int(row["total_users"] or 0) if row else 0
     today_users = int(row["today_users"] or 0) if row else 0
     new_error_reports = int(row["new_error_reports"] or 0) if row else 0
+    active_ops = int(row["active_ops"] or 0) if row else 0
+    pending_ops = int(row["pending_ops"] or 0) if row else 0
+
+    queue_str = ""
+    if active_ops or pending_ops:
+        queue_str = f"\n⚡ Операций в работе: <b>{active_ops}</b> · в очереди: <b>{pending_ops}</b>"
 
     text = (
         "🛡 <b>Admin Panel</b>\n\n"
@@ -317,7 +325,8 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         f"🤖 Ботов в системе: <b>{total_bots}</b>\n"
         f"💳 Активных подписок: <b>{total_subs}</b>\n"
         f"✅ Оплат подтверждено: <b>{total_payments}</b>\n"
-        f"💰 Выручка (USD): <b>${float(revenue):.2f}</b>\n\n"
+        f"💰 Выручка (USD): <b>${float(revenue):.2f}</b>"
+        f"{queue_str}\n\n"
         f"📅 {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M')} UTC"
     )
     kb = _admin_main_kb(new_error_reports=int(new_error_reports))
@@ -380,22 +389,55 @@ async def cb_admin(
 
     elif action == "broadcast":
         kb = InlineKeyboardBuilder()
-        kb.button(text="👥 Юзерам платформы", callback_data="adm:bc_platform")
+        kb.button(text="👥 Все пользователи", callback_data="adm:bc_seg:all")
+        kb.button(text="🆓 Только Free", callback_data="adm:bc_seg:free")
+        kb.button(text="⭐ Только Starter+", callback_data="adm:bc_seg:paid")
+        kb.button(text="🚀 Только Pro+", callback_data="adm:bc_seg:pro")
+        kb.button(text="👑 Только Enterprise", callback_data="adm:bc_seg:enterprise")
         kb.button(text="🤖 Аудиториям всех ботов", callback_data="adm:bc_botusers")
         kb.button(text="📢 Во все каналы/группы", callback_data="adm:bc_channels")
         kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
         kb.adjust(1)
         await callback.message.edit_text(
             "📨 <b>Рассылка владельца сервиса</b>\n\n"
-            "Выберите область рассылки:\n\n"
-            "👥 <b>Юзерам платформы</b> — всем, кто запускал manager-бот\n"
-            "🤖 <b>Аудиториям ботов</b> — подписчикам каждого управляемого бота "
-            "(от имени самих ботов)\n"
-            "📢 <b>В каналы/группы</b> — пост во все подключённые каналы "
-            "через их аккаунты",
+            "Выберите <b>сегмент</b> пользователей платформы:\n\n"
+            "👥 <b>Все</b> — всем зарегистрированным\n"
+            "🆓 <b>Free</b> — только на бесплатном плане\n"
+            "⭐ <b>Starter+</b> — платные подписчики (starter/pro/enterprise)\n"
+            "🚀 <b>Pro+</b> — pro и enterprise\n"
+            "👑 <b>Enterprise</b> — только enterprise\n\n"
+            "🤖 <b>Аудиториям ботов</b> — подписчики всех управляемых ботов\n"
+            "📢 <b>Каналы/группы</b> — пост во все подключённые каналы",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
+
+    elif action.startswith("bc_seg:"):
+        seg = action.removeprefix("bc_seg:")
+        seg_labels = {
+            "all": "всем пользователям платформы",
+            "free": "пользователям на плане FREE",
+            "paid": "пользователям на планах Starter/Pro/Enterprise",
+            "pro": "пользователям на планах Pro/Enterprise",
+            "enterprise": "пользователям на плане Enterprise",
+        }
+        seg_label = seg_labels.get(seg, seg)
+        await callback.message.edit_text(
+            f"📨 <b>Рассылка</b> → {seg_label}\n\n"
+            "Отправьте текст сообщения следующим сообщением.",
+            parse_mode="HTML",
+            reply_markup=_back_kb(),
+        )
+        try:
+            await pool.execute(
+                "INSERT INTO admin_state(admin_id, state, data) "
+                "VALUES($1,'broadcast',$2) "
+                "ON CONFLICT(admin_id) DO UPDATE SET state='broadcast',data=$2",
+                callback.from_user.id,
+                seg,
+            )
+        except Exception:
+            log_exc_swallow(log, "admin_state insert failed for bc_seg")
 
     elif action in ("bc_platform", "bc_botusers", "bc_channels"):
         _bc_states = {
@@ -1504,13 +1546,10 @@ async def handle_admin_message(
         return
 
     # Check admin state
-    try:
-        state_row = await pool.fetchrow(
-            "SELECT state, data FROM admin_state WHERE admin_id=$1",
-            message.from_user.id,
-        )
-    except Exception:
-        return  # admin_state table not yet created
+    state_row = await pool.fetchrow(
+        "SELECT state, data FROM admin_state WHERE admin_id=$1",
+        message.from_user.id,
+    )
 
     if not state_row:
         return
@@ -1526,9 +1565,23 @@ async def handle_admin_message(
         log_exc_swallow(log, "admin_state delete failed")
 
     if state == "broadcast":
+        seg = state_row["data"] or "all"
+        _seg_conditions = {
+            "all":        "COALESCE(is_banned, false) = false",
+            "free":       "COALESCE(is_banned, false) = false AND (current_plan='free' OR current_plan IS NULL)",
+            "paid":       "COALESCE(is_banned, false) = false AND current_plan IN ('starter','pro','enterprise')",
+            "pro":        "COALESCE(is_banned, false) = false AND current_plan IN ('pro','enterprise')",
+            "enterprise": "COALESCE(is_banned, false) = false AND current_plan = 'enterprise'",
+        }
+        _seg_labels = {
+            "all": "все пользователи", "free": "Free", "paid": "Starter+",
+            "pro": "Pro+", "enterprise": "Enterprise",
+        }
+        where = _seg_conditions.get(seg, _seg_conditions["all"])
+        seg_label = _seg_labels.get(seg, seg)
         try:
             users = await pool.fetch(
-                "SELECT user_id FROM platform_users WHERE COALESCE(is_banned, false) = false ORDER BY user_id"
+                f"SELECT user_id FROM platform_users WHERE {where} ORDER BY user_id"
             )
         except Exception:
             users = []
@@ -1536,7 +1589,7 @@ async def handle_admin_message(
         sent = 0
         failed = 0
         progress_msg = await message.answer(
-            f"📨 <b>Рассылка по платформе</b>\n\nВсего пользователей: <b>{len(users)}</b>\nОтправляю...",
+            f"📨 <b>Рассылка</b> [{seg_label}]\n\nВсего: <b>{len(users)}</b>\nОтправляю...",
             parse_mode="HTML",
         )
         for i, u in enumerate(users):
@@ -1547,13 +1600,11 @@ async def handle_admin_message(
             except Exception:
                 failed += 1
                 log_exc_swallow(log, "admin broadcast: failed to send", user_id=uid)
-            # Rate-limit safe delay
             await asyncio.sleep(0.05)
-            # Update progress every 50 users
             if (i + 1) % 50 == 0:
                 try:
                     await progress_msg.edit_text(
-                        f"📨 <b>Рассылка по платформе</b>\n\n"
+                        f"📨 <b>Рассылка</b> [{seg_label}]\n\n"
                         f"Прогресс: <b>{i + 1}</b> / {len(users)}\n"
                         f"✅ Отправлено: <b>{sent}</b> | ❌ Ошибок: <b>{failed}</b>",
                         parse_mode="HTML",
@@ -1561,7 +1612,7 @@ async def handle_admin_message(
                 except Exception:
                     pass
         await message.answer(
-            f"✅ <b>Рассылка завершена</b>\n\n"
+            f"✅ <b>Рассылка завершена</b> [{seg_label}]\n\n"
             f"Всего: <b>{len(users)}</b>\n"
             f"✅ Отправлено: <b>{sent}</b>\n"
             f"❌ Ошибок (заблокировали бота и т.п.): <b>{failed}</b>",

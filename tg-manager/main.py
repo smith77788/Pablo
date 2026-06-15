@@ -290,19 +290,13 @@ async def main() -> None:
         [
             BotCommand(command="start", description="Главное меню"),
             BotCommand(command="menu", description="🏠 BotMother OS"),
-            BotCommand(command="intent", description="🎯 Навигатор целей"),
-            BotCommand(command="ai", description="AI-ассистент"),
-            BotCommand(command="accounts", description="Мои аккаунты"),
-            BotCommand(command="ops", description="Операции с аккаунтами"),
-            BotCommand(command="post", description="✍️ Быстрая публикация в каналы"),
-            BotCommand(command="topology", description="🗺️ Топология активов"),
-            BotCommand(command="tasks", description="Активные задачи (отмена)"),
-            BotCommand(command="subscription", description="Подписка и оплата"),
-            BotCommand(command="ranking", description="Трекер позиций в поиске"),
+            BotCommand(command="find", description="🔍 Найти функцию"),
+            BotCommand(command="post", description="✍️ Быстрый пост в каналы"),
+            BotCommand(command="accounts", description="📱 Мои аккаунты"),
+            BotCommand(command="tasks", description="⚡ Активные задачи"),
+            BotCommand(command="promo", description="🚀 Продвижение ботов"),
+            BotCommand(command="subscription", description="💳 Подписка & Тариф"),
             BotCommand(command="cancel", description="Отменить текущее действие"),
-            BotCommand(command="regdate", description="🔍 Дата регистрации / создания"),
-            BotCommand(command="analyze", description="🔬 Полный анализ канала / пользователя"),
-            BotCommand(command="promo", description="🎯 Платформа продвижения ботов"),
         ]
     )
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)

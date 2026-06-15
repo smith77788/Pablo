@@ -48,8 +48,8 @@ def _format_plan_emoji(plan: str) -> str:
 
 async def _users_list_text(
     pool: asyncpg.Pool, page: int = 0, items_per_page: int = 5
-) -> tuple[str, int]:
-    """Вернуть текст списка пользователей и общее количество."""
+) -> tuple[str, int, list]:
+    """Вернуть текст списка пользователей, общее количество и список users."""
     total = await db.count_platform_users(pool)
     users = await db.get_all_platform_users(
         pool, limit=items_per_page, offset=page * items_per_page
@@ -58,7 +58,7 @@ async def _users_list_text(
     text = f"👥 <b>Все пользователи</b> (всего: {total})\n\n"
 
     if not users:
-        return text + "Нет пользователей.", total
+        return text + "Нет пользователей.", total, []
 
     for u in users:
         emoji = _format_plan_emoji(u["current_plan"])
@@ -67,7 +67,6 @@ async def _users_list_text(
             from datetime import timezone
 
             exp = u["plan_expires_at"]
-            # asyncpg returns timezone-aware datetimes from TIMESTAMPTZ columns
             from datetime import datetime
 
             now = datetime.now(timezone.utc)
@@ -86,7 +85,7 @@ async def _users_list_text(
             f"  Зарег: {reg_str}\n\n"
         )
 
-    return text, total
+    return text, total, list(users)
 
 
 @router.callback_query(AdminUserCb.filter(F.action == "list"))
@@ -101,28 +100,36 @@ async def cb_users_list(
     await callback.answer()
     page = callback_data.page
 
-    text, total = await _users_list_text(pool, page)
-    max_page = (total - 1) // 5
+    text, total, users = await _users_list_text(pool, page)
+    max_page = max(0, (total - 1) // 5)
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     kb = InlineKeyboardBuilder()
 
-    # Навигация
-    if page > 0:
-        kb.button(
-            text="⬅️ Назад", callback_data=AdminUserCb(action="list", page=page - 1)
-        )
-    kb.button(
-        text=f"📄 {page + 1}/{max_page + 1}",
-        callback_data=AdminUserCb(action="list", page=page),
-    )
-    if page < max_page:
-        kb.button(
-            text="➡️ Вперёд", callback_data=AdminUserCb(action="list", page=page + 1)
-        )
+    # Быстрые действия для каждого пользователя
+    for u in users:
+        uid = u["user_id"]
+        uname = u["username"] or f"#{uid}"
+        ban_label = "✅ Разбан" if u["is_banned"] else "🚫 Бан"
+        ban_action = "unban" if u["is_banned"] else "quick_ban"
+        kb.button(text=f"👁 @{uname}", callback_data=AdminUserCb(action="user_actions", user_id=uid))
+        kb.button(text=ban_label, callback_data=AdminUserCb(action=ban_action, user_id=uid, page=page))
+        kb.button(text="💳 +30д", callback_data=AdminUserCb(action="quick_grant30", user_id=uid, page=page))
+        kb.adjust(3)
 
-    kb.adjust(1)
+    # Навигация
+    nav_buttons = 0
+    if page > 0:
+        kb.button(text="⬅️", callback_data=AdminUserCb(action="list", page=page - 1))
+        nav_buttons += 1
+    kb.button(text=f"📄 {page + 1}/{max_page + 1}", callback_data=AdminUserCb(action="list", page=page))
+    nav_buttons += 1
+    if page < max_page:
+        kb.button(text="➡️", callback_data=AdminUserCb(action="list", page=page + 1))
+        nav_buttons += 1
+    kb.adjust(nav_buttons)
+
     kb.button(text="🔍 Поиск по плану", callback_data=AdminUserCb(action="filter_plan"))
     kb.button(text="🚫 Забаненные", callback_data=AdminUserCb(action="banned_list"))
     kb.button(text="◀️ В админ-меню", callback_data=AdminUserCb(action="main_menu"))
@@ -685,6 +692,123 @@ async def cb_unban(
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
+    except Exception:
+        pass
+
+
+@router.callback_query(AdminUserCb.filter(F.action == "quick_ban"))
+async def cb_quick_ban(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
+    """Быстрый бан из списка пользователей — с возвратом к списку."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️", show_alert=True)
+        return
+
+    user_id = callback_data.user_id
+    page = callback_data.page
+    try:
+        await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
+    except Exception:
+        log_exc_swallow(log, "cb_quick_ban: DB write failed", user_id=user_id)
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
+    await callback.answer(f"🚫 #{user_id} забанен", show_alert=True)
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "🚫 <b>Ваш аккаунт был заблокирован администратором.</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    # Обновить список
+    text, total, users = await _users_list_text(pool, page)
+    max_page = max(0, (total - 1) // 5)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    for u in users:
+        uid = u["user_id"]
+        uname = u["username"] or f"#{uid}"
+        ban_label = "✅ Разбан" if u["is_banned"] else "🚫 Бан"
+        ban_action = "unban" if u["is_banned"] else "quick_ban"
+        kb.button(text=f"👁 @{uname}", callback_data=AdminUserCb(action="user_actions", user_id=uid))
+        kb.button(text=ban_label, callback_data=AdminUserCb(action=ban_action, user_id=uid, page=page))
+        kb.button(text="💳 +30д", callback_data=AdminUserCb(action="quick_grant30", user_id=uid, page=page))
+        kb.adjust(3)
+    nav = []
+    if page > 0:
+        kb.button(text="⬅️", callback_data=AdminUserCb(action="list", page=page - 1))
+        nav.append(1)
+    kb.button(text=f"📄 {page + 1}/{max_page + 1}", callback_data=AdminUserCb(action="list", page=page))
+    if page < max_page:
+        kb.button(text="➡️", callback_data=AdminUserCb(action="list", page=page + 1))
+    kb.adjust(len(nav) + 1 + (1 if page < max_page else 0))
+    kb.button(text="🔍 Поиск по плану", callback_data=AdminUserCb(action="filter_plan"))
+    kb.button(text="🚫 Забаненные", callback_data=AdminUserCb(action="banned_list"))
+    kb.button(text="◀️ В админ-меню", callback_data=AdminUserCb(action="main_menu"))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        pass
+
+
+@router.callback_query(AdminUserCb.filter(F.action == "quick_grant30"))
+async def cb_quick_grant30(
+    callback: CallbackQuery, callback_data: AdminUserCb, pool: asyncpg.Pool
+) -> None:
+    """Выдать 30 дней Starter из списка пользователей."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️", show_alert=True)
+        return
+
+    user_id = callback_data.user_id
+    page = callback_data.page
+    try:
+        from bot.utils.subscription import invalidate_plan_cache
+        await db.grant_subscription(pool, user_id, "starter", 30, callback.from_user.id)
+        invalidate_plan_cache(user_id)
+    except Exception:
+        log_exc_swallow(log, "cb_quick_grant30: DB write failed", user_id=user_id)
+        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        return
+    await callback.answer(f"✅ #{user_id} +30д Starter", show_alert=True)
+    try:
+        await callback.bot.send_message(
+            user_id,
+            "🎉 <b>Вам выдана подписка Starter на 30 дней!</b>\n\nИспользуйте /menu для начала работы.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    # Обновить список
+    text, total, users = await _users_list_text(pool, page)
+    max_page = max(0, (total - 1) // 5)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    for u in users:
+        uid = u["user_id"]
+        uname = u["username"] or f"#{uid}"
+        ban_label = "✅ Разбан" if u["is_banned"] else "🚫 Бан"
+        ban_action = "unban" if u["is_banned"] else "quick_ban"
+        kb.button(text=f"👁 @{uname}", callback_data=AdminUserCb(action="user_actions", user_id=uid))
+        kb.button(text=ban_label, callback_data=AdminUserCb(action=ban_action, user_id=uid, page=page))
+        kb.button(text="💳 +30д", callback_data=AdminUserCb(action="quick_grant30", user_id=uid, page=page))
+        kb.adjust(3)
+    nav_count = (1 if page > 0 else 0) + 1 + (1 if page < max_page else 0)
+    if page > 0:
+        kb.button(text="⬅️", callback_data=AdminUserCb(action="list", page=page - 1))
+    kb.button(text=f"📄 {page + 1}/{max_page + 1}", callback_data=AdminUserCb(action="list", page=page))
+    if page < max_page:
+        kb.button(text="➡️", callback_data=AdminUserCb(action="list", page=page + 1))
+    kb.adjust(nav_count)
+    kb.button(text="🔍 Поиск по плану", callback_data=AdminUserCb(action="filter_plan"))
+    kb.button(text="🚫 Забаненные", callback_data=AdminUserCb(action="banned_list"))
+    kb.button(text="◀️ В админ-меню", callback_data=AdminUserCb(action="main_menu"))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
         pass
 
