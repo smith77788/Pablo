@@ -238,6 +238,27 @@ async def cb_reg_start(callback: CallbackQuery, state: FSMContext) -> None:
         )
 
 
+@router.callback_query(RegCb.filter(F.action == "analyze_start"))
+async def cb_analyze_start(callback: CallbackQuery, state: FSMContext) -> None:
+    """Inline entry point for full analysis — mirrors /analyze command."""
+    await callback.answer()
+    await state.set_state(RegCheckFSM.waiting_entity)
+    await state.update_data(mode="analyze")
+    prompt = (
+        "🔬 <b>Полный анализ Telegram-сущности</b>\n\n"
+        "Перешли сообщение или отправь @username / t.me/... ссылку:\n\n"
+        "<i>Поддерживаются: каналы, группы, пользователи, боты.</i>"
+    )
+    try:
+        await callback.message.edit_text(
+            prompt, parse_mode="HTML", reply_markup=_waiting_kb()
+        )
+    except Exception:
+        await callback.message.answer(
+            prompt, parse_mode="HTML", reply_markup=_waiting_kb()
+        )
+
+
 @router.callback_query(RegCb.filter(F.action == "cancel"))
 async def cb_reg_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
