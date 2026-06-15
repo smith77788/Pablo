@@ -3674,6 +3674,14 @@ async def grant_plan_to_user(
         )
 
 
+async def grant_subscription(
+    pool: asyncpg.Pool, user_id: int, plan: str, days: int, granted_by: int
+) -> None:
+    """Admin UI alias: grant plan for N days (converts to months, min 1)."""
+    months = max(1, days // 30)
+    await grant_plan_to_user(pool, user_id, granted_by, plan, months)
+
+
 async def revoke_plan_from_user(
     pool: asyncpg.Pool, user_id: int, admin_id: int
 ) -> None:
