@@ -142,7 +142,7 @@ async def _show_menu(target, pool: asyncpg.Pool, edit: bool = True) -> None:
     kb.button(text="🔍 Чекер топа", callback_data=PromoCb(action="topcheck"))
     kb.button(text="📁 Загрузить сессию", callback_data=PromoCb(action="session_upload"))
     kb.button(text="📜 Логи", callback_data=PromoCb(action="logs"))
-    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="menu"))
+    kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(2, 2, 2, 1)
 
     if edit and isinstance(target, CallbackQuery):
