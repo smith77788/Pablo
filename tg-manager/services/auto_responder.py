@@ -260,19 +260,27 @@ async def _process_bot(
             if bot_row and bot_row.get("relay_enabled"):
                 _SUPPORT_TRIGGERS = ("/support", "💬 написать в поддержку")
                 if is_start:
-                    fname = from_user.get("first_name") or "друг"
-                    bot_name = bot_row.get("username") or bot_row.get("first_name") or "бот"
-                    welcome = (
-                        f"👋 Привет, <b>{fname}</b>!\n\n"
-                        f"Добро пожаловать в <b>@{bot_name}</b>.\n\n"
-                        "Если вам нужна помощь — нажмите кнопку ниже, чтобы связаться с оператором поддержки."
-                    )
-                    rkb = {
-                        "keyboard": [[{"text": "💬 Написать в поддержку"}]],
-                        "resize_keyboard": True,
-                        "one_time_keyboard": False,
-                    }
-                    await bot_api.send_message(http, token, chat_id, welcome, reply_markup=rkb)
+                    # Prefer operator's configured start rule; fall back to generic welcome
+                    start_rules = [r for r in rules if r["trigger_type"] == "start"]
+                    if start_rules:
+                        rendered = _render_text(start_rules[0]["response_text"], from_user, bot_row)
+                        if _is_free:
+                            rendered = brand_injection.add_promo(rendered, html=True)
+                        await bot_api.send_message(http, token, chat_id, rendered)
+                    else:
+                        fname = from_user.get("first_name") or "друг"
+                        bot_name = bot_row.get("username") or bot_row.get("first_name") or "бот"
+                        welcome = (
+                            f"👋 Привет, <b>{fname}</b>!\n\n"
+                            f"Добро пожаловать в <b>@{bot_name}</b>.\n\n"
+                            "Если вам нужна помощь — нажмите кнопку ниже, чтобы связаться с оператором поддержки."
+                        )
+                        rkb = {
+                            "keyboard": [[{"text": "💬 Написать в поддержку"}]],
+                            "resize_keyboard": True,
+                            "one_time_keyboard": False,
+                        }
+                        await bot_api.send_message(http, token, chat_id, welcome, reply_markup=rkb)
                 elif text.strip().lower() in _SUPPORT_TRIGGERS:
                     ack = (
                         "✅ <b>Запрос принят!</b>\n\n"
