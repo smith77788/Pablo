@@ -551,3 +551,29 @@ class BotTplCustomizeFSM(StatesGroup):
     company_name = State()   # название компании / сервиса
     working_hours = State()  # часы работы (или /skip)
     operator = State()       # @username оператора (или /skip)
+
+
+class BotBoosterFSM(StatesGroup):
+    # Bot warehouse: add bot manually
+    wh_username = State()
+    wh_token = State()
+    # Session: paste StringSession
+    sess_phone = State()
+    sess_string = State()
+    # SMM panel wizard
+    pan_name = State()
+    pan_url = State()
+    pan_key = State()
+    pan_service = State()
+    # Order configurator
+    order_keyword = State()
+    order_premiums = State()
+    # Top checker
+    checker_keyword = State()
+    # Bot registrar
+    reg_keyword = State()
+    reg_count = State()
+    reg_session_id = State()
+    # Bot transfer
+    xfer_bot_id = State()
+    xfer_recipient = State()

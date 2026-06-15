@@ -53,27 +53,36 @@ def _ai_preview_kb(bot_id: int) -> InlineKeyboardMarkup:
 
 
 async def _call_ai(prompt: str) -> str | None:
-    api_key = os.getenv("OPENROUTER_API_KEY", "")
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-    if not api_key:
+    from services.ai_providers import configured_providers
+
+    providers = configured_providers()
+    if not providers:
         return None
     try:
         from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _AI_SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=800,
-            temperature=0.7,
-        )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception as exc:
-        log.warning("AI template gen failed: %s", exc)
+    except ImportError:
         return None
+    for provider in providers:
+        model = provider.models[0] if provider.models else ""
+        if not model:
+            continue
+        try:
+            client = AsyncOpenAI(api_key=provider.api_key, base_url=provider.base_url, timeout=25.0)
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _AI_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=800,
+                temperature=0.7,
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            if text:
+                return text
+        except Exception as exc:
+            log.warning("AI template gen failed provider=%s: %s", provider.name, exc)
+    return None
 
 
 @router.callback_query(TemplateCb.filter(F.action == "list"))

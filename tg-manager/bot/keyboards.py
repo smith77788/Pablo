@@ -248,13 +248,14 @@ def bot_menu(bot_id: int, username: str | None = None) -> InlineKeyboardMarkup:
         text="📤 Экспорт аудитории",
         callback_data=BotCb(action="export_audience", bot_id=bot_id),
     )
+    kb.button(text="📦 Шаблон бота", callback_data=BotCb(action="pset_list", bot_id=bot_id))
     kb.button(text="🗑 Удалить", callback_data=BotCb(action="delete", bot_id=bot_id))
     kb.button(text="◀️ К списку", callback_data=BotCb(action="list", page=0))
     if username:
         kb.row(
             InlineKeyboardButton(text="🔗 Открыть бота", url=f"https://t.me/{username}")
         )
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

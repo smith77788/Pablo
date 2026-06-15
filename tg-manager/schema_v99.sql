@@ -1,4 +1,4 @@
--- v99: Bot Promotion Platform — promo_orders, bot_warehouse, smm_panels, promo_logs
+-- v99: Bot Promotion Platform — promo_orders, bot_warehouse, smm_panels, promo_logs, booster_sessions
 
 CREATE TABLE IF NOT EXISTS promo_orders (
     id              SERIAL PRIMARY KEY,
@@ -61,11 +61,26 @@ CREATE TABLE IF NOT EXISTS promo_logs (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS promo_orders_owner_idx  ON promo_orders(owner_id);
-CREATE INDEX IF NOT EXISTS promo_orders_status_idx ON promo_orders(status);
+-- Telethon sessions for BotFather automation
+CREATE TABLE IF NOT EXISTS booster_sessions (
+    id              SERIAL PRIMARY KEY,
+    owner_id        BIGINT NOT NULL,
+    phone           TEXT NOT NULL,
+    session_str     TEXT NOT NULL,
+    proxy           TEXT,
+    label           TEXT,
+    status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','invalid','banned')),
+    last_used_at    TIMESTAMPTZ,
+    added_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS promo_orders_owner_idx   ON promo_orders(owner_id);
+CREATE INDEX IF NOT EXISTS promo_orders_status_idx  ON promo_orders(status);
 CREATE INDEX IF NOT EXISTS bot_warehouse_owner_idx  ON bot_warehouse(owner_id);
 CREATE INDEX IF NOT EXISTS bot_warehouse_status_idx ON bot_warehouse(status);
-CREATE INDEX IF NOT EXISTS smm_panels_owner_idx    ON smm_panels(owner_id);
-CREATE INDEX IF NOT EXISTS promo_logs_order_idx    ON promo_logs(order_id);
-CREATE INDEX IF NOT EXISTS promo_logs_owner_idx    ON promo_logs(owner_id);
-CREATE INDEX IF NOT EXISTS promo_logs_created_idx  ON promo_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS smm_panels_owner_idx     ON smm_panels(owner_id);
+CREATE INDEX IF NOT EXISTS promo_logs_order_idx     ON promo_logs(order_id);
+CREATE INDEX IF NOT EXISTS promo_logs_owner_idx     ON promo_logs(owner_id);
+CREATE INDEX IF NOT EXISTS promo_logs_created_idx   ON promo_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS booster_sessions_owner_idx ON booster_sessions(owner_id);

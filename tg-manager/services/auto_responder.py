@@ -13,6 +13,7 @@ from services import bot_api
 from services import brand_injection
 from services import routing_engine
 from services.logger import log_exc_swallow
+from services.relay import _send_via_management as _relay_forward
 
 from bot.utils.template_validator import replace_placeholders
 
@@ -127,6 +128,29 @@ async def _process_bot(
             uid = upd.get("update_id", 0)
             if uid > max_update_id:
                 max_update_id = uid
+
+            # Answer callback_query to stop button spinner
+            cbq = upd.get("callback_query")
+            if cbq:
+                cbq_id = cbq.get("id")
+                cbq_chat = (cbq.get("message") or {}).get("chat", {}).get("id")
+                if cbq_id:
+                    try:
+                        await bot_api._call(
+                            http, token, "answerCallbackQuery",
+                            callback_query_id=cbq_id,
+                            text="",
+                        )
+                    except Exception:
+                        pass
+                    # If relay enabled and message comes with callback, send support confirmation
+                    if bot_row and bot_row.get("relay_enabled") and cbq_chat:
+                        cbq_from = cbq.get("from", {})
+                        await bot_api.send_message(
+                            http, token, cbq_chat,
+                            "✅ <b>Вы подключены к поддержке.</b>\n\nОпишите вашу проблему — оператор ответит в ближайшее время."
+                        )
+                continue
 
             msg = upd.get("message")
             if not msg:
@@ -686,6 +710,36 @@ async def _process_bot(
                         chat_id=chat_id,
                     )
 
+            # Relay: forward message to operator if relay is enabled for this bot
+            if bot_row and bot_row.get("relay_enabled") and bot_row.get("added_by"):
+                try:
+                    operator_id = bot_row["added_by"]
+                    username = from_user.get("username")
+                    first_name_r = from_user.get("first_name", "")
+                    bot_label = (
+                        f"@{bot_row['username']}"
+                        if bot_row.get("username")
+                        else (bot_row.get("first_name") or str(bot_id))
+                    )
+                    user_label = (
+                        f"@{username}"
+                        if username
+                        else (f"{first_name_r} {from_user.get('last_name', '')}".strip() or f"ID:{chat_id}")
+                    )
+                    session_id = await db.get_or_create_relay_session(
+                        pool, bot_id, chat_id, username, first_name_r
+                    )
+                    fwd_text = (
+                        f"📨 <b>{bot_label}</b>  |  👤 {user_label}\n"
+                        f"<i>ID: {chat_id}</i>\n\n"
+                        f"{text}\n\n"
+                        f"<i>← Reply здесь чтобы ответить пользователю</i>"
+                    )
+                    fwd_msg_id = await _relay_forward(http, operator_id, fwd_text)
+                    await db.save_relay_message(pool, session_id, "in", text, fwd_msg_id)
+                except Exception as _relay_err:
+                    log.warning("auto_responder: relay forward failed bot=%d: %s", bot_id, _relay_err)
+
         if max_update_id > offset:
             await db.set_update_offset(pool, bot_id, max_update_id)
 
@@ -708,7 +762,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                 )
         except Exception:
             log.exception("Auto-responder loop error")
-        await asyncio.sleep(30)
+        await asyncio.sleep(5)
 
 
 async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:

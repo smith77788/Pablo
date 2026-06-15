@@ -454,3 +454,15 @@ class PromoCb(CallbackData, prefix="promo"):
     item_id: int = 0   # order_id | bot_id | panel_id
     page: int = 0
     value: Optional[str] = None  # status filter, log level
+
+
+class BotBoosterCb(CallbackData, prefix="bst"):
+    """Bot Booster / Search Promotion module callback payload."""
+
+    action: str  # menu|warehouse|wh_add|wh_detail|wh_del|sessions|sess_add|sess_del|
+                 # panels|pan_add|pan_del|pan_bal|orders|order_new|order_detail|order_cancel|
+                 # checker|checker_run|registrar|registrar_run|parser|parser_run|
+                 # transfer|logs|logs_page|back
+    item_id: int = 0
+    page: int = 0
+    filter: str = "all"

@@ -1,9 +1,11 @@
 """Add, list, select, delete managed bots."""
 
+import html
 import re
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
 from bot.callbacks import BotCb, SubCb
@@ -302,3 +304,174 @@ async def cb_confirm_delete(
             parse_mode="HTML",
             reply_markup=main_menu(),
         )
+
+
+# ── Bot Preset Templates ───────────────────────────────────────────────────
+
+
+@router.callback_query(BotCb.filter(F.action == "pset_list"))
+async def cb_pset_list(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
+    from services.preset_templates import get_presets
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await callback.answer()
+    presets = get_presets("bot")
+    bot_label = html.escape(f"@{row['username']}" if row.get("username") else row.get("first_name", "бот"))
+    kb = InlineKeyboardBuilder()
+    for idx, p in enumerate(presets):
+        kb.button(
+            text=p["name"],
+            callback_data=BotCb(action="pset_view", bot_id=callback_data.bot_id, page=idx),
+        )
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="menu", bot_id=callback_data.bot_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📦 <b>Шаблоны для {bot_label}</b>\n\n"
+        "Выберите готовый тип бота — будут автоматически настроены авто-ответы, команды и приветственная воронка.\n\n"
+        "⚠️ Существующие авто-ответы <b>не удаляются</b>, новые добавляются сверху.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotCb.filter(F.action == "pset_view"))
+async def cb_pset_view(
+    callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
+) -> None:
+    from services.preset_templates import get_presets
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    presets = get_presets("bot")
+    idx = callback_data.page
+    if idx < 0 or idx >= len(presets):
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    await callback.answer()
+    preset = presets[idx]
+    tpl = preset["template"]
+    cmds = tpl.get("commands", [])
+    replies = tpl.get("auto_replies", [])
+    steps = tpl.get("funnel_steps", [])
+    cmd_list = "\n".join(f"  • /{c['command']} — {c['description']}" for c in cmds[:5]) or "нет"
+    reply_list = "\n".join(f"  • {r['keyword']}" for r in replies[:5]) or "нет"
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Применить",
+        callback_data=BotCb(action="pset_apply", bot_id=callback_data.bot_id, page=idx),
+    )
+    kb.button(
+        text="◀️ Назад",
+        callback_data=BotCb(action="pset_list", bot_id=callback_data.bot_id),
+    )
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📦 <b>{html.escape(preset['name'])}</b>\n"
+        f"<i>{html.escape(preset.get('description', ''))}</i>\n\n"
+        f"<b>Команды ({len(cmds)}):</b>\n{cmd_list}\n\n"
+        f"<b>Авто-ответы ({len(replies)}):</b>\n{reply_list}\n\n"
+        f"<b>Приветственная воронка:</b> {len(steps)} шаг(а/ов)\n\n"
+        f"Нажмите <b>Применить</b> — всё будет настроено автоматически.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(BotCb.filter(F.action == "pset_apply"))
+async def cb_pset_apply(
+    callback: CallbackQuery,
+    callback_data: BotCb,
+    pool: asyncpg.Pool,
+    http: aiohttp.ClientSession,
+) -> None:
+    from services.preset_templates import get_presets
+
+    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    if not row:
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    presets = get_presets("bot")
+    idx = callback_data.page
+    if idx < 0 or idx >= len(presets):
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    await callback.answer("⏳ Применяю шаблон...")
+    preset = presets[idx]
+    tpl = preset["template"]
+    token = row["token"]
+    bot_id = callback_data.bot_id
+
+    applied = []
+    errors = []
+
+    # 1. Commands
+    cmds = tpl.get("commands", [])
+    if cmds:
+        ok = await bot_api.set_my_commands(http, token, cmds)
+        if ok:
+            applied.append(f"✅ Команды ({len(cmds)} шт.)")
+        else:
+            errors.append("❌ Команды — ошибка Telegram API")
+
+    # 2. Welcome message as start auto-reply
+    welcome = tpl.get("welcome_message", "")
+    if welcome:
+        try:
+            await db.add_auto_reply(pool, bot_id, "start", None, welcome)
+            applied.append("✅ Приветственное сообщение")
+        except Exception as e:
+            errors.append(f"❌ Приветствие: {e}")
+
+    # 3. Auto-replies
+    replies = tpl.get("auto_replies", [])
+    for r in replies:
+        kw = r.get("keyword") or r.get("trigger", "")
+        resp = r.get("response") or r.get("response_text", "")
+        if kw and resp:
+            try:
+                await db.add_auto_reply(pool, bot_id, "keyword", kw, resp)
+            except Exception:
+                pass
+    if replies:
+        applied.append(f"✅ Авто-ответы ({len(replies)} шт.)")
+
+    # 4. Funnel
+    steps = tpl.get("funnel_steps", [])
+    if steps:
+        try:
+            funnel_row = await db.create_funnel(
+                pool, bot_id, f"{preset['name']} (авто)", "start"
+            )
+            funnel_id = funnel_row["id"]
+            for i, step in enumerate(steps):
+                msg = step.get("message", "")
+                delay_h = step.get("delay_hours", 0)
+                if msg:
+                    await db.add_funnel_step(
+                        pool, funnel_id, i, msg, int(delay_h * 60)
+                    )
+            applied.append(f"✅ Воронка ({len(steps)} шаг(а))")
+        except Exception as e:
+            errors.append(f"❌ Воронка: {e}")
+
+    bot_label = html.escape(f"@{row['username']}" if row.get("username") else row.get("first_name", "бот"))
+    result_lines = "\n".join(applied + errors)
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="◀️ К боту", callback_data=BotCb(action="menu", bot_id=bot_id)
+    )
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"📦 <b>Шаблон «{html.escape(preset['name'])}» применён к {bot_label}</b>\n\n"
+        f"{result_lines}\n\n"
+        "<i>Авто-ответы и воронка активны. Команды видны пользователям.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )

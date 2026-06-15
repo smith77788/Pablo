@@ -5438,6 +5438,15 @@ async def smm_list_panels(
     )
 
 
+# ── Booster Sessions (v99) ─────────────────────────────────────────────────────
+
+async def bb_get_sessions(pool: asyncpg.Pool, owner_id: int) -> list:
+    return await pool.fetch(
+        "SELECT id, phone, label, status, proxy, last_used_at, added_at FROM booster_sessions WHERE owner_id=$1 ORDER BY added_at DESC",
+        owner_id,
+    )
+
+
 async def smm_get_panel(pool: asyncpg.Pool, panel_id: int) -> asyncpg.Record | None:
     return await pool.fetchrow("SELECT * FROM smm_panels WHERE id=$1", panel_id)
 
@@ -5460,6 +5469,36 @@ async def smm_update_panel(
         f"UPDATE smm_panels SET {', '.join(sets)} WHERE id=$1 AND owner_id=$2",
         *vals,
     )
+
+
+async def bb_add_session(pool: asyncpg.Pool, owner_id: int, phone: str, session_str: str, proxy: str | None, label: str | None) -> int:
+    row = await pool.fetchrow(
+        "INSERT INTO booster_sessions(owner_id,phone,session_str,proxy,label) VALUES($1,$2,$3,$4,$5) RETURNING id",
+        owner_id, phone, session_str, proxy, label,
+    )
+    return row["id"]
+
+
+async def bb_get_session(pool: asyncpg.Pool, session_id: int, owner_id: int):
+    return await pool.fetchrow(
+        "SELECT * FROM booster_sessions WHERE id=$1 AND owner_id=$2", session_id, owner_id
+    )
+
+
+async def bb_delete_session(pool: asyncpg.Pool, session_id: int, owner_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM booster_sessions WHERE id=$1 AND owner_id=$2", session_id, owner_id
+    )
+
+
+async def bb_get_session_str(pool: asyncpg.Pool, session_id: int, owner_id: int) -> tuple:
+    row = await pool.fetchrow(
+        "SELECT session_str, proxy FROM booster_sessions WHERE id=$1 AND owner_id=$2 AND status='active'",
+        session_id, owner_id,
+    )
+    if not row:
+        return None, None
+    return row["session_str"], row["proxy"]
 
 
 async def smm_delete_panel(pool: asyncpg.Pool, panel_id: int, owner_id: int) -> None:

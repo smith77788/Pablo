@@ -219,34 +219,15 @@ async def _process_bot(
 
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
-    _cleanup_counter = 0
+    # Relay forwarding is now handled inside auto_responder to avoid getUpdates race condition.
+    # This loop only cleans up stale in-memory offset entries.
     while True:
         try:
             bots = await db.get_bots_with_relay(pool)
-            if bots:
-                active_bot_ids = {b["bot_id"] for b in bots}
-
-                # Periodically evict _offsets for bots no longer in active relay set
-                _cleanup_counter += 1
-                if _cleanup_counter >= 20:  # every ~10 minutes
-                    _cleanup_counter = 0
-                    stale = set(_offsets.keys()) - active_bot_ids
-                    for stale_id in stale:
-                        _offsets.pop(stale_id, None)
-                    if stale:
-                        log.info(
-                            "relay: evicted %d stale offset entries: %s",
-                            len(stale),
-                            stale,
-                        )
-
-                await asyncio.gather(
-                    *(
-                        _process_bot(pool, http, b["bot_id"], b["token"], b["added_by"])
-                        for b in bots
-                    ),
-                    return_exceptions=True,
-                )
+            active_bot_ids = {b["bot_id"] for b in bots}
+            stale = set(_offsets.keys()) - active_bot_ids
+            for stale_id in stale:
+                _offsets.pop(stale_id, None)
         except Exception:
-            log.exception("Relay loop error")
-        await asyncio.sleep(30)
+            log.exception("Relay cleanup error")
+        await asyncio.sleep(300)
