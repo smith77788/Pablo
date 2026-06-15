@@ -338,73 +338,70 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
 async def cb_main(
     callback: CallbackQuery, callback_data: BmCb, pool: asyncpg.Pool
 ) -> None:
-    log.info("BotMother cb_main from user %s", callback.from_user.id)
+    from bot.utils import menu_cache
     await callback.answer()
     user_id = callback.from_user.id
 
-    # Append live platform stats for today (all queries in parallel)
-    status_line = ""
-    try:
-        from services import infra_pressure as _ip
+    # Check 30-second cache — serve instantly on repeat visits
+    cache_key = f"u:{user_id}:main_stats"
+    cached = menu_cache.get(cache_key, ttl=30.0)
+    if cached is not None:
+        await _edit(callback, _MAIN_MENU_TEXT + cached, _main_menu_kb())
+        return
 
-        async def _stats_query() -> object:
-            return await pool.fetchrow(
-                """SELECT
-                    (
-                        SELECT COUNT(*) FROM operation_audit
-                        WHERE owner_id=$1 AND occurred_at >= CURRENT_DATE
-                    ) +
-                    (
-                        SELECT COUNT(*) FROM operation_queue
-                        WHERE owner_id=$1 AND created_at >= CURRENT_DATE
-                          AND status IN ('pending', 'running')
-                    ) AS today_ops,
-                    COUNT(DISTINCT ta.id) FILTER (
-                        WHERE ta.is_active = TRUE
-                    ) AS active_accs,
-                    COUNT(DISTINCT ta.id) FILTER (
-                        WHERE ta.cooldown_until > now()
-                    ) AS in_cooldown,
-                    COUNT(DISTINCT re.id) FILTER (
-                        WHERE re.created_at > now() - INTERVAL '24 hours'
-                    ) AS new_alerts
-                FROM (SELECT 1) x
-                LEFT JOIN tg_accounts ta ON ta.owner_id=$1
-                LEFT JOIN restriction_events re ON re.owner_id=$1""",
-                user_id,
+    # Show menu immediately without stats, then enrich in background
+    await _edit(callback, _MAIN_MENU_TEXT, _main_menu_kb())
+
+    # Build stats in background and push a follow-up edit
+    async def _push_stats() -> None:
+        status_line = ""
+        try:
+            from services import infra_pressure as _ip
+
+            row, pdata = await asyncio.gather(
+                pool.fetchrow(
+                    """SELECT
+                        (SELECT COUNT(*) FROM operation_audit
+                         WHERE owner_id=$1 AND occurred_at >= CURRENT_DATE)
+                        + (SELECT COUNT(*) FROM operation_queue
+                           WHERE owner_id=$1 AND created_at >= CURRENT_DATE
+                             AND status IN ('pending','running')) AS today_ops,
+                        COUNT(DISTINCT ta.id) FILTER (WHERE ta.is_active = TRUE) AS active_accs,
+                        COUNT(DISTINCT ta.id) FILTER (WHERE ta.cooldown_until > now()) AS in_cooldown,
+                        COUNT(DISTINCT re.id) FILTER (WHERE re.created_at > now() - INTERVAL '24h') AS new_alerts
+                    FROM (SELECT 1) x
+                    LEFT JOIN tg_accounts ta ON ta.owner_id=$1
+                    LEFT JOIN restriction_events re ON re.owner_id=$1""",
+                    user_id,
+                ),
+                _ip.compute_pressure(pool, user_id),
+                return_exceptions=True,
             )
+            if isinstance(row, BaseException):
+                row = None
+            if isinstance(pdata, BaseException):
+                pdata = {}
+            if row:
+                today_ops = row["today_ops"] or 0
+                active_accs = row["active_accs"] or 0
+                in_cooldown = row["in_cooldown"] or 0
+                new_alerts = row["new_alerts"] or 0
+                p_score = pdata.get("score", 0) if isinstance(pdata, dict) else 0
+                p_emoji = pdata.get("level_emoji", "🟢") if isinstance(pdata, dict) else "🟢"
+                pressure_str = f" · Давление: {p_emoji} {p_score}" if p_score else ""
+                alert_str = f" · 🔔 {new_alerts} алертов" if new_alerts else ""
+                cooldown_str = f" · ⏳ {in_cooldown} на паузе" if in_cooldown else ""
+                status_line = (
+                    f"\n\n<i>📈 Сегодня: {today_ops} операций · {active_accs} аккаунтов"
+                    f"{pressure_str}{cooldown_str}{alert_str}</i>"
+                )
+        except Exception:
+            log_exc_swallow(log, "cb_main: stats fetch failed")
+        menu_cache.set(cache_key, status_line)
+        if status_line:
+            await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
 
-        row, pdata = await asyncio.gather(
-            _stats_query(),
-            _ip.compute_pressure(pool, user_id),
-            return_exceptions=True,
-        )
-        if isinstance(row, BaseException):
-            row = None
-        if isinstance(pdata, BaseException):
-            pdata = {}
-
-        if row:
-            today_ops = row["today_ops"] or 0
-            active_accs = row["active_accs"] or 0
-            in_cooldown = row["in_cooldown"] or 0
-            new_alerts = row["new_alerts"] or 0
-
-            p_score = pdata.get("score", 0) if isinstance(pdata, dict) else 0
-            p_emoji = (
-                pdata.get("level_emoji", "🟢") if isinstance(pdata, dict) else "🟢"
-            )
-            pressure_str = f" · Давление: {p_emoji} {p_score}" if p_score else ""
-            alert_str = f" · 🔔 {new_alerts} алертов" if new_alerts else ""
-            cooldown_str = f" · ⏳ {in_cooldown} на паузе" if in_cooldown else ""
-            status_line = (
-                f"\n\n<i>📈 Сегодня: {today_ops} операций · {active_accs} аккаунтов"
-                f"{pressure_str}{cooldown_str}{alert_str}</i>"
-            )
-    except Exception:
-        log_exc_swallow(log, "Не удалось получить статус-строку главного меню")
-
-    await _edit(callback, _MAIN_MENU_TEXT + status_line, _main_menu_kb())
+    asyncio.create_task(_push_stats())
 
 
 # ── Assets ────────────────────────────────────────────────────────────────

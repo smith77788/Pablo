@@ -92,19 +92,31 @@ async def safe_edit(
     reply_markup=None,
     parse_mode: str = "HTML",
 ) -> None:
-    """Edit message only if content changed, otherwise answer silently."""
+    """Edit message. Dismisses the button spinner immediately, then updates content."""
+    # Dismiss spinner right away — user gets instant feedback
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+
     msg = callback.message
     if not isinstance(msg, Message):
-        await callback.answer()
-        return
-    current = msg.text or msg.caption or ""
-    if current == text and msg.reply_markup == reply_markup:
-        await callback.answer()
         return
     try:
         await msg.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
-        if "message is not modified" in str(e).lower():
-            await callback.answer()
-        else:
-            raise
+        err = str(e).lower()
+        if "message is not modified" in err:
+            return
+        if "there is no text in the message to edit" in err:
+            try:
+                await msg.edit_caption(caption=text, parse_mode=parse_mode, reply_markup=reply_markup)
+            except Exception:
+                pass
+        elif "message to edit not found" in err or "message can't be edited" in err:
+            try:
+                await callback.bot.send_message(
+                    callback.from_user.id, text, parse_mode=parse_mode, reply_markup=reply_markup
+                )
+            except Exception:
+                pass

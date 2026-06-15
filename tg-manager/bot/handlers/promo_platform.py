@@ -934,67 +934,78 @@ async def fsm_bot_notes(message: Message, state: FSMContext, pool: asyncpg.Pool)
 @router.callback_query(PromoCb.filter(F.action == "bot_parse"))
 async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer("⏳ Парсю ботов из BotFather...")
+    user_id = callback.from_user.id
 
-    # Select best account for the user
+    # Fetch ALL active accounts — not just one, since any account may own bots
     try:
-        from services.resource_selector import select_account
-        acc = await select_account(pool, callback.from_user.id, action_type="read")
-    except Exception as exc:
-        await callback.message.answer(
-            f"⚠️ Нет доступных аккаунтов для парсинга BotFather.\n"
-            f"Добавьте аккаунт в /accounts и попробуйте снова.\n"
-            f"<code>{html.escape(str(exc)[:200])}</code>"
-        )
-        return
-
-    if not acc:
-        await callback.message.answer(
-            "⚠️ Нет подходящего аккаунта для парсинга BotFather.\n"
-            "Добавьте аккаунт в /accounts."
-        )
-        return
-
-    try:
-        from services import account_manager
-        result = await account_manager.list_bots_via_botfather(
-            acc["session_str"], _acc=dict(acc)
+        accounts = await pool.fetch(
+            """SELECT id, session_str, first_name, username, phone, proxy_id
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL
+               ORDER BY trust_score DESC NULLS LAST
+               LIMIT 20""",
+            user_id,
         )
     except Exception as exc:
         await callback.message.answer(
-            f"⚠️ Ошибка парсинга BotFather:\n<code>{html.escape(str(exc)[:300])}</code>"
+            f"⚠️ Ошибка получения аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>"
         )
         return
 
-    if result.get("error"):
+    if not accounts:
         await callback.message.answer(
-            f"❌ BotFather ответил ошибкой:\n<code>{html.escape(str(result['error'])[:300])}</code>"
+            "⚠️ Нет подключённых аккаунтов.\nДобавьте аккаунт в /accounts и попробуйте снова."
         )
         return
 
-    bots_found = result.get("bots", [])
-    if not bots_found:
-        await callback.message.answer(
-            "ℹ️ У этого аккаунта нет ботов в BotFather, или список пуст."
-        )
-        return
+    progress_msg = await callback.message.answer(
+        f"⏳ <b>Парсинг BotFather</b>\n\nПроверяю {len(accounts)} аккаунт(ов)...\n"
+        "<i>Это может занять 1–2 минуты</i>"
+    )
 
+    from services import account_manager as _am
+
+    all_bots: dict[str, dict] = {}  # username → bot dict (deduplicated)
+    errors: list[str] = []
+    checked = 0
+
+    for acc in accounts:
+        acc_label = f"@{acc['username']}" if acc.get("username") else acc.get("phone", f"id{acc['id']}")
+        try:
+            result = await _am.list_bots_via_botfather(
+                acc["session_str"], _acc=dict(acc)
+            )
+        except Exception as exc:
+            errors.append(f"{acc_label}: {str(exc)[:80]}")
+            continue
+
+        checked += 1
+        if result.get("error"):
+            errors.append(f"{acc_label}: {result['error'][:80]}")
+            continue
+
+        for b in result.get("bots", []):
+            uname = (b.get("username") or "").lstrip("@").lower()
+            if uname:
+                all_bots[uname] = b
+
+    bots_found = list(all_bots.values())
     added = 0
     skipped = 0
     for b in bots_found:
-        uname = b.get("username", "").lstrip("@")
+        uname = (b.get("username") or "").lstrip("@")
         if not uname:
             continue
-        # Check if already in warehouse
-        existing = await pool.fetch(
+        existing = await pool.fetchrow(
             "SELECT id FROM bot_warehouse WHERE owner_id=$1 AND LOWER(bot_username)=LOWER($2)",
-            callback.from_user.id, uname
+            user_id, uname,
         )
         if existing:
             skipped += 1
             continue
         await db.warehouse_add_bot(
             pool,
-            owner_id=callback.from_user.id,
+            owner_id=user_id,
             bot_username=uname,
             bot_token_enc=b.get("token"),
             registered_at=datetime.now(tz=timezone.utc),
@@ -1002,21 +1013,34 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         added += 1
 
-    await db.promo_log(pool, callback.from_user.id, "parser",
-                       f"BotFather parser: найдено {len(bots_found)}, добавлено {added}, пропущено {skipped}")
+    await db.promo_log(pool, user_id, "parser",
+                       f"BotFather parser: acc={checked}/{len(accounts)}, "
+                       f"найдено={len(bots_found)}, добавлено={added}, пропущено={skipped}")
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🤖 Склад ботов", callback_data=PromoCb(action="warehouse"))
     kb.adjust(1)
-    await callback.message.answer(
-        f"✅ <b>Парсинг BotFather завершён</b>\n\n"
-        f"Найдено ботов: {len(bots_found)}\n"
+
+    err_text = ""
+    if errors:
+        err_lines = "\n".join(f"• {e}" for e in errors[:5])
+        err_text = f"\n\n⚠️ Ошибок при подключении ({len(errors)}):\n{html.escape(err_lines)}"
+
+    result_text = (
+        f"{'✅' if added or skipped else 'ℹ️'} <b>Парсинг BotFather завершён</b>\n\n"
+        f"Проверено аккаунтов: {checked}/{len(accounts)}\n"
+        f"Найдено уникальных ботов: {len(bots_found)}\n"
         f"Добавлено на склад: {added}\n"
-        f"Уже было на складе: {skipped}\n\n"
-        f"<i>Боты добавлены со статусом «Созревает» (дата рег. = сегодня).\n"
-        f"Если боты старше 21 дня — обновите дату в деталях бота.</i>",
-        reply_markup=kb.as_markup(),
+        f"Уже было на складе: {skipped}"
+        + (f"\n\n<i>Боты добавлены со статусом «Созревает».\n"
+           f"Если боты старше 21 дня — обновите дату в деталях бота.</i>" if added else "")
+        + err_text
     )
+
+    try:
+        await progress_msg.edit_text(result_text, reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(result_text, reply_markup=kb.as_markup())
 
 
 # ── Bot transfer via BotFather ─────────────────────────────────────────────────

@@ -18,6 +18,7 @@ from database.db import create_pool
 from services.logger import configure_root_logger, get_logger, log_exc_swallow
 from bot.middlewares.user_activity import UserActivityLogMiddleware
 from bot.middlewares.subscription_gate import SubscriptionGateMiddleware, set_gate_enabled, set_gate_channels
+from bot.middlewares.latency import LatencyMiddleware
 from bot.utils.button_styles import install_button_style_patch
 
 install_button_style_patch()
@@ -186,10 +187,13 @@ async def main() -> None:
     dp = Dispatcher(storage=fsm_storage)
     activity_log_middleware = UserActivityLogMiddleware()
     gate_middleware = SubscriptionGateMiddleware()
+    latency_middleware = LatencyMiddleware()
     dp.message.outer_middleware(gate_middleware)
     dp.callback_query.outer_middleware(gate_middleware)
     dp.message.outer_middleware(activity_log_middleware)
     dp.callback_query.outer_middleware(activity_log_middleware)
+    dp.message.middleware(latency_middleware)
+    dp.callback_query.middleware(latency_middleware)
 
     dp.include_router(bm_handler.router)
     dp.include_router(bot_factory_handler.router)
