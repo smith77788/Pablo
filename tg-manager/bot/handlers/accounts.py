@@ -274,14 +274,14 @@ def _cancel_markup():
 
 @router.message(Command("accounts"))
 async def cmd_accounts(message: Message) -> None:
-    from bot.callbacks import BmCb
-
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Открыть BotMother OS", callback_data=BmCb(action="main"))
+    kb.button(text="📱 Мои аккаунты", callback_data=AccCb(action="menu"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1)
     await message.answer(
-        "📱 <b>Аккаунты</b>\n\n"
-        "Откройте BotMother OS и перейдите в:\n"
-        "<code>/menu → 📱 Активы → 📱 Аккаунты</code>",
+        "📱 <b>TG-аккаунты</b>\n\n"
+        "Управление личными Telegram-аккаунтами для операций:\n"
+        "вступление, публикация, парсинг, воронки.",
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
