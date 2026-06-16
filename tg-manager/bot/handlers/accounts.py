@@ -3062,17 +3062,29 @@ async def handle_import_tdata(
                 zf.extractall(extract_dir)
         except zipfile.BadZipFile:
             await state.clear()
-            await msg.edit_text("❌ Файл повреждён или не является ZIP-архивом.")
+            _err_kb = InlineKeyboardBuilder()
+            _err_kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+            _err_kb.adjust(1)
+            await msg.edit_text(
+                "❌ <b>Файл повреждён или не является ZIP-архивом.</b>\n\n"
+                "Убедитесь, что файл скачан полностью и является корректным архивом.",
+                parse_mode="HTML",
+                reply_markup=_err_kb.as_markup(),
+            )
             return
 
         # Locate tdata folder inside the extract
         tdata_path = _find_tdata_root(extract_dir)
         if not tdata_path:
             await state.clear()
+            _err_kb = InlineKeyboardBuilder()
+            _err_kb.button(text="◀️ К аккаунтам", callback_data=AccCb(action="menu"))
+            _err_kb.adjust(1)
             await msg.edit_text(
-                "❌ Папка <code>tdata</code> не найдена в архиве.\n\n"
+                "❌ <b>Папка <code>tdata</code> не найдена в архиве.</b>\n\n"
                 "Убедитесь что архив содержит папку <code>tdata</code> с файлом <code>key_datas</code>.",
                 parse_mode="HTML",
+                reply_markup=_err_kb.as_markup(),
             )
             return
 

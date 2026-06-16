@@ -809,9 +809,14 @@ async def cb_qp_publish(
     media_type: str | None = sd.get("media_type")
 
     if not post_text or not selected_chan_ids:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✍️ Создать пост", callback_data=QuickPostCb(action="start"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="broadcasts"))
+        kb.adjust(1)
         await callback.message.edit_text(
-            "⚠️ Данные сессии не найдены. Начните заново: /post",
+            "⚠️ <b>Данные сессии не найдены.</b>\n\nНачните заново или создайте новый пост:",
             parse_mode="HTML",
+            reply_markup=kb.as_markup(),
         )
         return
 
