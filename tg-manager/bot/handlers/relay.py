@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 import aiohttp
 import asyncpg
-from bot.callbacks import RelayCb
+from bot.callbacks import RelayCb, BmCb
 from bot.keyboards import relay_menu, relay_session_view, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
@@ -41,7 +41,7 @@ async def cb_relay_menu(
         await callback.message.edit_text(
             locked_text("Диалоги / Relay", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -63,7 +63,7 @@ async def cb_relay_toggle(
         await callback.message.edit_text(
             locked_text("Диалоги / Relay", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)

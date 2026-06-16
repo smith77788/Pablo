@@ -163,7 +163,7 @@ async def cb_dm_new(
         await callback.message.edit_text(
             locked_text("DM-кампании", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
     await callback.answer()
@@ -677,7 +677,7 @@ async def cb_dm_launch_or_draft(
         await callback.message.edit_text(
             locked_text("DM-кампании", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
     await callback.answer()
@@ -979,7 +979,7 @@ async def cb_dm_resume(
         await callback.message.edit_text(
             locked_text("DM-кампании", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
     campaign_id = callback_data.campaign_id

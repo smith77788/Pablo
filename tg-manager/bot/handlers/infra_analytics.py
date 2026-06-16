@@ -23,7 +23,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb
+from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb, BmCb
 from services import infra_pressure
 from services.logger import log_exc_swallow
 
@@ -611,7 +611,7 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         await callback.message.edit_text(
             "🔒 <b>Реестр ассетов — Starter+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer()
@@ -1033,7 +1033,7 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         await callback.message.edit_text(
             "🔒 <b>Авто-балансировка — Starter+</b>\n\nОформите подписку: /subscription",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer("⏳ Применяю...")

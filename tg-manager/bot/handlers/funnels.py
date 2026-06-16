@@ -211,7 +211,7 @@ async def cb_fn_create(
         await callback.message.edit_text(
             locked_text("Воронки", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )
         return
     await callback.answer()
@@ -559,7 +559,7 @@ async def cb_fn_broadcast(
         await callback.message.edit_text(
             locked_text("Воронки", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )
         return
 

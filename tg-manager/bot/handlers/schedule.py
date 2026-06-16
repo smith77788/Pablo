@@ -6,7 +6,7 @@ import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.callbacks import ScheduleCb
+from bot.callbacks import ScheduleCb, BmCb
 from bot.keyboards import (
     schedule_menu,
     back_to_bot,
@@ -43,7 +43,7 @@ async def cb_schedule_menu(
         await callback.message.edit_text(
             locked_text("Расписание рассылок", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="broadcasts")),
         )
         return
 
@@ -125,7 +125,7 @@ async def msg_schedule_datetime(
         await message.answer(
             locked_text("Расписание рассылок", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="broadcasts")),
         )
         return
     data = await state.get_data()
