@@ -392,7 +392,7 @@ async def _show_accounts_menu(
         if status_filter == "problem":
             text = "📱 <b>Telegram-аккаунты</b>\n\n✅ Проблемных аккаунтов нет!"
         elif status_filter == "active":
-            text = "📱 <b>Telegram-аккаунты</b>\n\n⚠️ Нет активных аккаунтов."
+            text = "📱 <b>Telegram-аккаунты</b>\n\n⚠️ Нет активных аккаунтов.\n\n<i>Переключитесь на «Все», чтобы увидеть неактивные аккаунты, или добавьте новый ↓</i>"
         else:
             text = (
                 "📱 <b>Личные Telegram-аккаунты</b>\n\n"
