@@ -724,7 +724,7 @@ async def cb_comms(
         await _edit(
             callback,
             locked_text("Рассылки и связь", "paid"),
-            subscription_locked_markup("paid"),
+            subscription_locked_markup("paid", back_callback=BmCb(action="main")),
         )
         return
     await _edit(
@@ -753,7 +753,7 @@ async def cb_broadcasts(
         await _edit(
             callback,
             locked_text("Рассылки и связь", "paid"),
-            subscription_locked_markup("paid"),
+            subscription_locked_markup("paid", back_callback=BmCb(action="main")),
         )
         return
     await _edit(
@@ -782,7 +782,7 @@ async def cb_inbox(
         await _edit(
             callback,
             locked_text("Inbox и диалоги", "starter"),
-            subscription_locked_markup("starter"),
+            subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
     await _edit(
@@ -826,7 +826,7 @@ async def cb_ai_assistant(
         await _edit(
             callback,
             locked_text("AI-помощник", "enterprise"),
-            subscription_locked_markup("enterprise"),
+            subscription_locked_markup("enterprise", back_callback=BmCb(action="settings")),
         )
         return
     kb = InlineKeyboardBuilder()
