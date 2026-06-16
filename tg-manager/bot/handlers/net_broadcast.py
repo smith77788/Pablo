@@ -34,7 +34,7 @@ async def cb_net_bc_cluster(
         await callback.message.edit_text(
             locked_text("Рассылка по кластеру", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="broadcasts")),
         )
         return
 

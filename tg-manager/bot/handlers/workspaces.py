@@ -67,7 +67,7 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
         await callback.answer()
         await callback.message.edit_text(
             locked_text("Workspaces", "enterprise"),
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="settings")),
         )
         return
     await callback.answer()
@@ -214,7 +214,7 @@ async def msg_ws_desc(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         await message.answer(
             locked_text("Workspaces", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="settings")),
         )
         return
     description = (message.text or "").strip()[:256]

@@ -97,7 +97,7 @@ async def cb_gp_menu(
         await callback.answer()
         await callback.message.edit_text(
             locked_text("Global Presence Factory", "enterprise"),
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="visibility")),
         )
         return
     await callback.answer()
@@ -1858,7 +1858,7 @@ async def cb_gp_retry(
         await callback.message.edit_text(
             locked_text("Global Presence", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="visibility")),
         )
         return
     plan_id = callback_data.plan_id

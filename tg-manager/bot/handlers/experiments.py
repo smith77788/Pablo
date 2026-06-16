@@ -210,7 +210,7 @@ async def cb_exp_create(
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="analytics")),
         )
         return
     await callback.answer()
@@ -350,7 +350,7 @@ async def cb_exp_start(
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="analytics")),
         )
         return
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
@@ -423,7 +423,7 @@ async def cb_exp_resume(
         await callback.message.edit_text(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="analytics")),
         )
         return
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):

@@ -43,7 +43,7 @@ async def comp_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) ->
         await cb.message.edit_text(
             locked_text("Мониторинг конкурентов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     await cb.answer()
@@ -244,7 +244,7 @@ async def comp_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         await cb.message.edit_text(
             locked_text("Мониторинг конкурентов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     await cb.answer()

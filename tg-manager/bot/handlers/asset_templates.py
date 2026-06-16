@@ -22,6 +22,7 @@ import aiohttp
 import asyncpg
 
 from bot.callbacks import (
+    BmCb,
     AssetTplCb,
     BotCustomizeCb,
     ChanFactCb,
@@ -410,7 +411,7 @@ async def cb_create(
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     await callback.answer()
@@ -581,7 +582,7 @@ async def cb_save(
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     await callback.answer()
@@ -903,7 +904,7 @@ async def cb_delete(
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     deleted = await _delete_template(pool, callback_data.tpl_id, callback.from_user.id)
@@ -1082,7 +1083,7 @@ async def cb_apply_bot_exec(
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     await callback.answer("⏳ Применяю шаблон...")
@@ -1246,7 +1247,7 @@ async def cb_lib_clone(
         await callback.message.edit_text(
             locked_text("Шаблоны активов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     await callback.answer()

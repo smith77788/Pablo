@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import EngageCb, CrmCb
+from bot.callbacks import EngageCb, CrmCb, BmCb
 from bot.keyboards import engagement_menu, back_to_bot, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from bot.states import ReactivateBroadcast
@@ -97,7 +97,7 @@ async def cb_reactivate_cold(
         await callback.message.edit_text(
             locked_text("Реактивация аудитории", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer()
@@ -132,7 +132,7 @@ async def cb_reactivate_lost(
         await callback.message.edit_text(
             locked_text("Реактивация аудитории", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer()
@@ -222,7 +222,7 @@ async def cb_engage_heatmap(
         await callback.message.edit_text(
             locked_text("Аналитика активности", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer()
@@ -251,7 +251,7 @@ async def cb_engage_top(
         await callback.message.edit_text(
             locked_text("Аналитика активности", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer()
@@ -287,7 +287,7 @@ async def cb_engage_autotag(
         await callback.message.edit_text(
             locked_text("Авто-теги по активности", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
         )
         return
     await callback.answer("⏳ Присваиваю теги...")

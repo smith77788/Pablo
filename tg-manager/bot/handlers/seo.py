@@ -941,7 +941,7 @@ async def cb_seo_chan_export_txt(
         await callback.message.edit_text(
             locked_text("Экспорт SEO-анализа", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     chan_id = callback_data.chan_id
@@ -1042,7 +1042,7 @@ async def cb_seo_chan_ai(
         await callback.message.edit_text(
             locked_text("AI SEO-оптимизация", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     chan_id = callback_data.chan_id
@@ -1712,7 +1712,7 @@ async def cb_seo_apply(
         await callback.message.edit_text(
             locked_text("SEO-оптимизация", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     chan_id = callback_data.chan_id
@@ -2036,7 +2036,7 @@ async def cb_seo_preview(
         await callback.message.edit_text(
             locked_text("SEO-превью", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     try:
@@ -2132,7 +2132,7 @@ async def cb_seo_chan_preview(
         await callback.message.edit_text(
             locked_text("SEO-превью канала", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     chan_id = callback_data.chan_id
@@ -2204,7 +2204,7 @@ async def cb_seo_momentum(
         await callback.message.edit_text(
             locked_text("Динамика позиций", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     bot_id = callback_data.bot_id
@@ -2333,7 +2333,7 @@ async def cb_seo_content_gap(
         await callback.message.edit_text(
             locked_text("Keyword Gap анализ", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     bot_id = callback_data.bot_id
@@ -2431,7 +2431,7 @@ async def cb_seo_chan_content_gap(
         await callback.message.edit_text(
             locked_text("Keyword Gap — канал", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     chan_id = callback_data.chan_id
@@ -2559,7 +2559,7 @@ async def cb_seo_uname_alts(
         await callback.message.edit_text(
             locked_text("Альтернативы username", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     is_chan = callback_data.action == "chan_uname_alts"

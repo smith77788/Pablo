@@ -82,7 +82,7 @@ async def cb_swarm_toggle(
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     try:
@@ -205,7 +205,7 @@ async def cb_swarm_role(
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     role = callback_data.action.replace("role_", "")
@@ -279,7 +279,7 @@ async def cb_set_mode(
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     await callback.answer()
@@ -319,7 +319,7 @@ async def cb_change_mode(
         await callback.message.edit_text(
             locked_text("Swarm-роутинг", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise"),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     mode = callback_data.action.removeprefix("mode_")

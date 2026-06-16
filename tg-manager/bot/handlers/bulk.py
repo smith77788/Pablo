@@ -77,7 +77,7 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Массовые операции с ботами", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="bulk_ops")),
         )
         return
     await callback.answer()
@@ -567,7 +567,7 @@ async def msg_import_tokens(
         await message.answer(
             locked_text("Массовый импорт ботов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="bulk_ops")),
         )
         return
     await state.clear()

@@ -24,7 +24,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AssetTplCb, QuickPostCb
+from bot.callbacks import AssetTplCb, QuickPostCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.states import QuickPostFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -795,7 +795,7 @@ async def cb_qp_publish(
         await callback.message.edit_text(
             locked_text("Публикация в каналы", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="broadcasts")),
         )
         return
     await callback.answer("⏳ Запускаю публикацию…")

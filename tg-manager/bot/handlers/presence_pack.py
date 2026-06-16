@@ -71,7 +71,7 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await _edit(
             callback,
             locked_text("Presence Packs", "starter"),
-            subscription_locked_markup("starter"),
+            subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
 
@@ -574,7 +574,7 @@ async def cb_pack_confirm_create(
         await callback.message.edit_text(
             locked_text("Presence Pack", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
     await callback.answer("⏳ Создаю пакет...")
@@ -748,7 +748,7 @@ async def cb_pack_seed(
         await callback.message.edit_text(
             locked_text("Presence Pack", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="visibility")),
         )
         return
     owner_id = callback.from_user.id

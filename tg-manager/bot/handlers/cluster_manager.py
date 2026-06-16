@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ClustMCb, BotCb, NetBcCb
+from bot.callbacks import ClustMCb, BotCb, NetBcCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from services.logger import log_exc_swallow
 from bot.states import CreateClusterFSM
@@ -60,7 +60,7 @@ async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FS
         await callback.message.edit_text(
             locked_text("Кластеры ботов", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="bulk_ops")),
         )
         return
     await callback.answer()
@@ -187,7 +187,7 @@ async def cb_cluster_create(
         await callback.message.edit_text(
             locked_text("Кластеры ботов", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="bulk_ops")),
         )
         return
     await callback.answer()

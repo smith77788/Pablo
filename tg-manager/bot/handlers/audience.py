@@ -11,7 +11,7 @@ from openpyxl.utils import get_column_letter
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
-from bot.callbacks import AudCb, BotCb
+from bot.callbacks import AudCb, BotCb, BmCb
 from bot.keyboards import (
     audience_menu,
     bots_pick,
@@ -474,7 +474,7 @@ async def cb_bot_export_audience(
         await callback.message.edit_text(
             locked_text("Экспорт аудитории", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="monitoring")),
         )
         return
 

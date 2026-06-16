@@ -327,7 +327,7 @@ async def cb_rank_history(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     await callback.answer()
@@ -405,7 +405,7 @@ async def cb_rank_check_now(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     await callback.answer("⏳ Запускаю проверку...")
@@ -613,7 +613,7 @@ async def cb_rank_check_all(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     await callback.answer("⏳ Проверяю все ключевые слова...")
@@ -824,7 +824,7 @@ async def cb_rank_toggle_keyword(
         await callback.message.edit_text(
             locked_text("Трекер позиций в поиске", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
         return
     keyword_id = callback_data.keyword_id

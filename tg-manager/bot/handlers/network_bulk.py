@@ -9,7 +9,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import NetworkCb
+from bot.callbacks import NetworkCb, BmCb
 from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup
 from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text, is_platform_admin
@@ -81,7 +81,7 @@ async def _check_enterprise(callback: CallbackQuery, pool: asyncpg.Pool) -> bool
     await callback.message.edit_text(
         locked_text("Массовые операции", "enterprise"),
         parse_mode="HTML",
-        reply_markup=subscription_locked_markup("enterprise"),
+        reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
     )
     return False
 

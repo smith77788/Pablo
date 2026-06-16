@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
-from bot.callbacks import TemplateCb
+from bot.callbacks import TemplateCb, BmCb
 from bot.keyboards import (
     templates_list,
     template_actions,
@@ -428,7 +428,7 @@ async def cb_template_ai_gen(
         await callback.message.edit_text(
             locked_text("AI-генерация шаблонов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     bot_id = callback_data.bot_id
@@ -462,7 +462,7 @@ async def msg_ai_template_prompt(
         await message.answer(
             locked_text("AI-генерация шаблонов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
 
@@ -512,7 +512,7 @@ async def cb_template_ai_regen(
         await callback.message.edit_text(
             locked_text("AI-генерация шаблонов", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     data = await state.get_data()

@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import MultigeoCb, BotCb
+from bot.callbacks import MultigeoCb, BotCb, BmCb
 from bot.keyboards import (
     multigeo_menu,
     multigeo_field,
@@ -203,7 +203,7 @@ async def cb_lang_name(
         await callback.message.edit_text(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
     await callback.answer()
@@ -232,7 +232,7 @@ async def msg_multigeo_name(
         await message.answer(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
     data = await state.get_data()
@@ -268,7 +268,7 @@ async def cb_lang_short(
         await callback.message.edit_text(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
     await callback.answer()
@@ -297,7 +297,7 @@ async def msg_multigeo_short(
         await message.answer(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
     data = await state.get_data()
@@ -333,7 +333,7 @@ async def cb_lang_desc(
         await callback.message.edit_text(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
     await callback.answer()
@@ -362,7 +362,7 @@ async def msg_multigeo_desc(
         await message.answer(
             locked_text("Мультигео", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="visibility")),
         )
         return
     data = await state.get_data()

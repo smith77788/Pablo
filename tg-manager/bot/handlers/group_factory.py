@@ -84,7 +84,7 @@ async def cb_group_create_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await callback.message.edit_text(
             locked_text("Создание групп", "pro"),
-            reply_markup=subscription_locked_markup("pro"),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="assets")),
         )
         return
     accounts = await _get_active_accounts(pool, callback.from_user.id)
@@ -760,7 +760,7 @@ async def cb_group_announce_start(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await callback.message.edit_text(
             locked_text("Объявление во все группы", "starter"),
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="assets")),
         )
         return
     accounts = await _get_active_accounts(pool, callback.from_user.id)
