@@ -86,7 +86,7 @@ async def cb_eco_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await _edit(
             callback,
             locked_text("Ecosystem Brain", "starter"),
-            subscription_locked_markup("starter"),
+            subscription_locked_markup("starter", back_callback=BmCb(action="main")),
         )
         return
 

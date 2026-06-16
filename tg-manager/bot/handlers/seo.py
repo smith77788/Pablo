@@ -245,7 +245,9 @@ async def cb_seo_analyze(
         await callback.message.edit_text(
             locked_text("SEO-анализ", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="analytics")
+            ),
         )
         return
 
@@ -374,7 +376,9 @@ async def cb_seo_keywords(
         await callback.message.edit_text(
             locked_text("SEO — ключевые слова", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="analytics")
+            ),
         )
         return
 
@@ -784,7 +788,9 @@ async def cb_seo_chan_analyze(
         await callback.message.edit_text(
             locked_text("SEO-анализ канала", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=BmCb(action="analytics")
+            ),
         )
         return
     chan_id = callback_data.chan_id

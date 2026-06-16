@@ -71,7 +71,9 @@ async def _require_proxy_manager(callback: CallbackQuery, pool: asyncpg.Pool) ->
     await callback.message.edit_text(
         locked_text("Управление прокси", _PROXY_PLAN),
         parse_mode="HTML",
-        reply_markup=subscription_locked_markup(_PROXY_PLAN),
+        reply_markup=subscription_locked_markup(
+            _PROXY_PLAN, back_callback=BmCb(action="monitoring")
+        ),
     )
     return False
 

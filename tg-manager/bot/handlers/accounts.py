@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
 
-from bot.callbacks import AccCb, BotCb, ChanCb, MassOpCb
+from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils.event_status import mark_handled_error
@@ -324,7 +324,7 @@ async def _show_accounts_menu(
             locked_text("Личные Telegram-аккаунты", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BotCb(action="main")
+                "starter", back_callback=BmCb(action="main")
             ),
         )
         return
@@ -514,7 +514,9 @@ async def cb_add_account(
         await callback.message.edit_text(
             locked_text("Личные аккаунты Telegram", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=AccCb(action="menu")
+            ),
         )
         return
 
@@ -527,7 +529,9 @@ async def cb_add_account(
             f"(<b>{plan.upper()}</b>: {limit_label} аккаунт{'ов' if limit != 1 else ''}).\n\n"
             f"Обновите подписку, чтобы добавить больше аккаунтов.",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup(upgrade_plan),
+            reply_markup=subscription_locked_markup(
+                upgrade_plan, back_callback=AccCb(action="menu")
+            ),
         )
         return
 
@@ -2839,7 +2843,9 @@ async def cb_import_menu(
         await callback.message.edit_text(
             locked_text("Личные аккаунты Telegram", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter"),
+            reply_markup=subscription_locked_markup(
+                "starter", back_callback=AccCb(action="menu")
+            ),
         )
         return
     accounts = await db.get_tg_accounts(pool, callback.from_user.id)
@@ -2850,7 +2856,9 @@ async def cb_import_menu(
             f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
             "Обновите подписку для добавления новых аккаунтов.",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup(upgrade_plan),
+            reply_markup=subscription_locked_markup(
+                upgrade_plan, back_callback=AccCb(action="menu")
+            ),
         )
         return
 
@@ -3317,7 +3325,9 @@ async def _finalize_import(
             f"⚠️ Достигнут лимит аккаунтов (<b>{plan.upper()}</b>: {limit_label}).\n\n"
             "Обновите подписку для добавления новых аккаунтов.",
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup(upgrade_plan),
+            reply_markup=subscription_locked_markup(
+                upgrade_plan, back_callback=AccCb(action="menu")
+            ),
         )
         return
 
