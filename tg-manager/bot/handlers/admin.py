@@ -1886,21 +1886,17 @@ async def handle_admin_message(
             )
         else:
             try:
-                await pool.execute(
-                    """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-                       VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-                       ON CONFLICT(user_id) DO UPDATE
-                       SET plan      = EXCLUDED.plan,
-                           is_active = true,
-                           expires_at = CASE
-                               WHEN subscriptions.expires_at > now()
-                                   THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                               ELSE now() + ($3 || ' months')::INTERVAL
-                           END""",
-                    uid,
-                    plan,
-                    str(months),
+                # Единая точка выдачи: пишет subscriptions + platform_users +
+                # фиксирует подтверждённую оплату (выручка) + audit log.
+                await db.grant_plan_to_user(
+                    pool, uid, message.from_user.id, plan, months
                 )
+                try:
+                    from bot.utils.subscription import invalidate_plan_cache
+
+                    invalidate_plan_cache(uid)
+                except Exception:
+                    log_exc_swallow(log, "grant: invalidate_plan_cache failed")
             except Exception as e:
                 log.warning("grant execute failed: %s", e)
                 await message.answer(
@@ -2002,21 +1998,22 @@ async def handle_admin_message(
                 fail_list.append(f"❌ {line[:30]}: {e}")
                 continue
             try:
-                await pool.execute(
-                    """INSERT INTO subscriptions(user_id, plan, expires_at, is_active)
-                       VALUES($1, $2, now() + ($3 || ' months')::INTERVAL, true)
-                       ON CONFLICT(user_id) DO UPDATE
-                       SET plan      = EXCLUDED.plan,
-                           is_active = true,
-                           expires_at = CASE
-                               WHEN subscriptions.expires_at > now()
-                                   THEN subscriptions.expires_at + ($3 || ' months')::INTERVAL
-                               ELSE now() + ($3 || ' months')::INTERVAL
-                           END""",
+                # Bulk = промо-подарки: без записи оплаты (record_payment=False),
+                # но через единую точку → platform_users + subscriptions + audit.
+                await db.grant_plan_to_user(
+                    pool,
                     uid,
+                    message.from_user.id,
                     plan,
-                    str(months),
+                    months,
+                    record_payment=False,
                 )
+                try:
+                    from bot.utils.subscription import invalidate_plan_cache
+
+                    invalidate_plan_cache(uid)
+                except Exception:
+                    log_exc_swallow(log, "bulk_grant: invalidate_plan_cache failed")
                 ok_list.append(f"✅ {uid} → {plan.upper()} {months}м.")
                 try:
                     await message.bot.send_message(

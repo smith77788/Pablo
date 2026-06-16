@@ -767,7 +767,10 @@ async def cb_quick_grant30(
     page = callback_data.page
     try:
         from bot.utils.subscription import invalidate_plan_cache
-        await db.grant_subscription(pool, user_id, "starter", 30, callback.from_user.id)
+        # Промо-триал: без записи оплаты (не считается выручкой).
+        await db.grant_subscription(
+            pool, user_id, "starter", 30, callback.from_user.id, record_payment=False
+        )
         invalidate_plan_cache(user_id)
     except Exception:
         log_exc_swallow(log, "cb_quick_grant30: DB write failed", user_id=user_id)

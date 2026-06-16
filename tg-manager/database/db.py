@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import time
-from config import DATABASE_URL
+from config import DATABASE_URL, PLAN_PRICES_USD, PERIOD_DISCOUNTS
 
 from services.logger import log_exc_swallow, timed
 
@@ -3606,9 +3606,21 @@ async def get_all_platform_users(
 
 
 async def grant_plan_to_user(
-    pool: asyncpg.Pool, user_id: int, admin_id: int, plan: str, months: int
+    pool: asyncpg.Pool,
+    user_id: int,
+    admin_id: int,
+    plan: str,
+    months: int,
+    *,
+    record_payment: bool = True,
 ) -> None:
-    """Выдать план пользователю (админ-действие). Пишет в обе таблицы."""
+    """Выдать план пользователю (админ-действие). Пишет в обе таблицы.
+
+    record_payment=True: фиксирует подтверждённую оплату в payments
+    (ручная выдача обычно делается после получения денег), чтобы выручка
+    и счётчик «Подтверждённых оплат» в админке отражали реальность.
+    Передайте record_payment=False для бесплатной/промо-выдачи.
+    """
     from datetime import datetime, timedelta, timezone
 
     # Обновить platform_users — expires_at продлевается от текущей даты истечения
@@ -3656,6 +3668,33 @@ async def grant_plan_to_user(
         if row:
             expires = row["expires_at"]
 
+        # Зафиксировать подтверждённую оплату, чтобы выручка/счётчики были точными.
+        if record_payment:
+            try:
+                base = PLAN_PRICES_USD.get(plan, 0)
+                disc = PERIOD_DISCOUNTS.get(months, 0)
+                amount_usd = round(base * months * (1 - disc / 100), 2)
+                reference = f"ADMIN-{admin_id}-{user_id}-{int(time.time())}"
+                await pool.execute(
+                    """INSERT INTO payments
+                           (user_id, plan, period_months, currency, amount_crypto,
+                            amount_usd, wallet_address, reference, status, confirmed_at)
+                       VALUES ($1,$2,$3,'USDT_TRC20',$4,$4,'manual',$5,'confirmed', now())
+                       ON CONFLICT (reference) DO NOTHING""",
+                    user_id,
+                    plan,
+                    months,
+                    amount_usd,
+                    reference,
+                )
+            except Exception:
+                log_exc_swallow(
+                    log,
+                    "grant_plan_to_user: failed to record payment",
+                    admin_id=admin_id,
+                    user_id=user_id,
+                )
+
     # Логировать действие
     try:
         await pool.execute(
@@ -3675,11 +3714,19 @@ async def grant_plan_to_user(
 
 
 async def grant_subscription(
-    pool: asyncpg.Pool, user_id: int, plan: str, days: int, granted_by: int
+    pool: asyncpg.Pool,
+    user_id: int,
+    plan: str,
+    days: int,
+    granted_by: int,
+    *,
+    record_payment: bool = True,
 ) -> None:
     """Admin UI alias: grant plan for N days (converts to months, min 1)."""
     months = max(1, days // 30)
-    await grant_plan_to_user(pool, user_id, granted_by, plan, months)
+    await grant_plan_to_user(
+        pool, user_id, granted_by, plan, months, record_payment=record_payment
+    )
 
 
 async def revoke_plan_from_user(
