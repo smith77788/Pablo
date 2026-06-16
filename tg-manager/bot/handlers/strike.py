@@ -19,7 +19,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import StrikeCb, ChanCb, BmCb
+from bot.callbacks import StrikeCb, ChanCb, BmCb, AccCb
 from bot.states import MiniStrikeFSM, StrikeEmailFSM
 from bot.utils.subscription import require_feature
 from bot.utils.event_status import mark_handled_error
@@ -684,7 +684,7 @@ async def cb_strike_rerun(
     active = [a for a in accounts if a["is_active"]]
     if not active:
         _kb_na = InlineKeyboardBuilder()
-        _kb_na.button(text="📱 Перейти к аккаунтам", callback_data="acc:menu")
+        _kb_na.button(text="📱 Перейти к аккаунтам", callback_data=AccCb(action="menu"))
         _kb_na.button(text="◀️ История Strike", callback_data=StrikeCb(action="history"))
         _kb_na.button(text="⚔️ Меню Strike", callback_data=StrikeCb(action="menu"))
         _kb_na.adjust(1)

@@ -2299,8 +2299,13 @@ async def cb_promote_all(
         total_items=int(n_others),
     )
 
+    from bot.callbacks import MassOpCb
+
     kb = InlineKeyboardBuilder()
-    kb.button(text="📋 Статус операции", callback_data="ops:list")
+    kb.button(
+        text="📋 Статус операции",
+        callback_data=MassOpCb(action="queue", op_type="all", page=0),
+    )
     kb.button(
         text="◀️ Назад",
         callback_data=ChanCb(action="manage_admins", acc_id=acc_id, channel_id=ch_id),
