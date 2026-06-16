@@ -22,7 +22,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import MassPubCb
+from bot.callbacks import MassPubCb, BmCb, MassOpCb
 from bot.states import MassPublishFSM2
 from bot.utils.op_helpers import (
     _acc_label,
@@ -69,7 +69,7 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     )
     kb.button(text="🔍 Сухой прогон", callback_data=MassPubCb(action="dry_run"))
     kb.button(text="📋 История", callback_data=MassPubCb(action="history"))
-    kb.button(text="◀️ Назад", callback_data=MassPubCb(action="back_to_factory"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
     kb.adjust(2, 2, 1)
     return kb
 
@@ -589,7 +589,7 @@ async def cb_mpub_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="📋 Открыть очередь", callback_data=MassPubCb(action="back_to_factory")
+        text="📋 Открыть очередь", callback_data=MassOpCb(action="queue", op_type="all", page=0)
     )
     kb.button(text="◀️ Назад", callback_data=MassPubCb(action="menu"))
     kb.adjust(1)
