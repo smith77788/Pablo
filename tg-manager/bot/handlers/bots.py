@@ -328,7 +328,7 @@ async def cb_pset_list(
             text=p["name"],
             callback_data=BotCb(action="pset_view", bot_id=callback_data.bot_id, page=idx),
         )
-    kb.button(text="◀️ Назад", callback_data=BotCb(action="menu", bot_id=callback_data.bot_id))
+    kb.button(text="◀️ Назад", callback_data=BotCb(action="select", bot_id=callback_data.bot_id))
     kb.adjust(1)
     await callback.message.edit_text(
         f"📦 <b>Шаблоны для {bot_label}</b>\n\n"
@@ -465,7 +465,7 @@ async def cb_pset_apply(
     result_lines = "\n".join(applied + errors)
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="◀️ К боту", callback_data=BotCb(action="menu", bot_id=bot_id)
+        text="◀️ К боту", callback_data=BotCb(action="select", bot_id=bot_id)
     )
     kb.adjust(1)
     await callback.message.edit_text(
