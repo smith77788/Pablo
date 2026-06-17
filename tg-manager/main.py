@@ -81,6 +81,7 @@ from bot.handlers import ecosystems as ecosystems_handler
 from bot.handlers import infra_health_center as infra_hc_handler
 from bot.handlers import reg_checker as reg_checker_handler
 from bot.handlers import promo_platform as promo_handler
+from bot.handlers import self_promo as self_promo_handler
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -256,6 +257,7 @@ async def main() -> None:
     dp.include_router(infra_hc_handler.router)
     dp.include_router(reg_checker_handler.router)
     dp.include_router(promo_handler.router)
+    dp.include_router(self_promo_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)

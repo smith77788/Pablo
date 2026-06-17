@@ -46,6 +46,7 @@ from bot.callbacks import (
     RelayCb,
     RegCb,
     ScheduleCb,
+    SelfPromoCb,
     SubCb,
     AutoReplyCb,
     DmCb,
@@ -127,6 +128,7 @@ def _main_menu_kb():
     kb.button(text="🛡️ Мониторинг", callback_data=BmCb(action="monitoring"))
     kb.button(text="🌐 Сети & Кластеры", callback_data=EcoCb(action="menu"))
     kb.button(text="🚀 Продвижение ботов", callback_data=PromoCb(action="menu"))
+    kb.button(text="🎯 Самопиар", callback_data=SelfPromoCb(action="menu"))
     kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
     kb.adjust(1, 2, 2, 2, 2, 1)
     return kb.as_markup()

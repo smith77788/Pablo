@@ -455,3 +455,15 @@ class PromoCb(CallbackData, prefix="promo"):
     page: int = 0
     value: Optional[str] = None  # status filter, log level
 
+
+class SelfPromoCb(CallbackData, prefix="sp"):
+    """Self-promotion system — BotMother рекламирует себя через каналы и DM."""
+
+    action: str  # menu|list|view|add_ask|add_style|add_skip_cta|add_skip_url
+                 # del_confirm|del_do
+                 # launch_channel|run_confirm|run_now
+                 # share_link|history
+    item_id: int = 0   # template_id | run_id
+    page: int = 0
+    style: str = ""    # 'direct' | 'native'
+
