@@ -81,6 +81,22 @@ async def _check_membership(bot, user_id: int, channels: list[dict]) -> list[dic
     return not_subscribed
 
 
+# Public API — for use by admin broadcast
+async def check_membership(bot, user_id: int, channels: list[dict]) -> list[dict]:
+    """Public wrapper: returns list of channels user is NOT subscribed to."""
+    return await _check_membership(bot, user_id, channels)
+
+
+def build_gate_text(channels: list[dict]) -> str:
+    """Public wrapper: returns gate message text."""
+    return _gate_text(channels)
+
+
+def build_gate_markup(channels: list[dict]):
+    """Public wrapper: returns gate InlineKeyboardMarkup."""
+    return _gate_markup(channels)
+
+
 class SubscriptionGateMiddleware(BaseMiddleware):
     async def __call__(
         self,

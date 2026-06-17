@@ -24,6 +24,10 @@ from bot.middlewares.subscription_gate import (
     get_gate_enabled,
     set_gate_enabled,
     set_gate_channels,
+    get_gate_channels,
+    check_membership as gate_check_membership,
+    build_gate_text,
+    build_gate_markup,
 )
 from bot.states import GateAddFSM
 from config import ADMIN_SECRET
@@ -3037,6 +3041,8 @@ def _gate_kb(channels: list, gate_on: bool):
     toggle_text = "🔴 Выключить гейт" if gate_on else "🟢 Включить гейт"
     kb.button(text=toggle_text, callback_data="adm:gate_toggle")
     kb.button(text="➕ Добавить канал", callback_data="adm:gate_add_ask")
+    if gate_on and channels:
+        kb.button(text="📢 Оповестить всех незарегистрированных", callback_data="adm:gate_notify_all")
     for ch in channels:
         safe = _html.escape(ch["channel_title"] or ch["channel_username"])
         kb.button(
@@ -3189,4 +3195,81 @@ async def cb_adm_gate_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         _gate_text(gate_on, channels),
         parse_mode="HTML",
         reply_markup=_gate_kb(channels, gate_on),
+    )
+
+
+async def _gate_notify_all_task(
+    bot,
+    pool: asyncpg.Pool,
+    admin_id: int,
+    user_ids: list[int],
+    channels: list[dict],
+) -> None:
+    """Background: check & notify every platform user who isn't subscribed."""
+    text = build_gate_text(channels)
+    markup = build_gate_markup(channels)
+    sent = skipped = errors = 0
+
+    for uid in user_ids:
+        try:
+            missing = await gate_check_membership(bot, uid, channels)
+            if not missing:
+                skipped += 1
+            else:
+                await bot.send_message(uid, text, reply_markup=markup, parse_mode="HTML")
+                sent += 1
+        except Exception:
+            errors += 1
+        # ~20 msg/sec to stay under Telegram flood limits
+        await asyncio.sleep(0.05)
+
+    try:
+        await bot.send_message(
+            admin_id,
+            f"✅ <b>Рассылка гейта завершена</b>\n\n"
+            f"📢 Уведомлено: <b>{sent}</b>\n"
+            f"✅ Уже подписаны: <b>{skipped}</b>\n"
+            f"⚠️ Ошибок (бот заблокирован и т.п.): <b>{errors}</b>\n"
+            f"Всего обработано: <b>{sent + skipped + errors}</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "adm:gate_notify_all")
+async def cb_adm_gate_notify_all(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    channels = get_gate_channels()
+    if not get_gate_enabled() or not channels:
+        await callback.answer("Гейт не включён или нет каналов!", show_alert=True)
+        return
+
+    await callback.answer("⏳ Запускаю…")
+
+    rows = await pool.fetch(
+        "SELECT user_id FROM platform_users WHERE NOT COALESCE(is_banned, false) ORDER BY user_id"
+    )
+    user_ids = [r["user_id"] for r in rows]
+    total = len(user_ids)
+
+    asyncio.create_task(
+        _gate_notify_all_task(callback.bot, pool, callback.from_user.id, user_ids, channels)
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К настройкам гейта", callback_data="adm:gate")
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"⏳ <b>Рассылка запущена</b>\n\n"
+        f"Всего пользователей в очереди: <b>{total}</b>\n"
+        f"Проверяю подписку и отправляю уведомления незарегистрированным…\n\n"
+        f"<i>Отчёт придёт сюда по завершении (~{total // 20 + 1} сек).</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
     )
