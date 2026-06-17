@@ -3215,13 +3215,14 @@ async def _gate_notify_all_task(
             missing = await gate_check_membership(bot, uid, channels)
             if not missing:
                 skipped += 1
+                await asyncio.sleep(0.1)  # небольшая пауза между API-проверками
             else:
                 await bot.send_message(uid, text, reply_markup=markup, parse_mode="HTML")
                 sent += 1
+                await asyncio.sleep(1.0)  # 1 сообщение/сек — безопасный темп
         except Exception:
             errors += 1
-        # ~20 msg/sec to stay under Telegram flood limits
-        await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
 
     try:
         await bot.send_message(
@@ -3269,7 +3270,7 @@ async def cb_adm_gate_notify_all(
         f"⏳ <b>Рассылка запущена</b>\n\n"
         f"Всего пользователей в очереди: <b>{total}</b>\n"
         f"Проверяю подписку и отправляю уведомления незарегистрированным…\n\n"
-        f"<i>Отчёт придёт сюда по завершении (~{total // 20 + 1} сек).</i>",
+        f"<i>Темп: 1 сообщение/сек. Отчёт придёт по завершении.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
