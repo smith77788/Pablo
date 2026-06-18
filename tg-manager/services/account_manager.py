@@ -3618,7 +3618,14 @@ async def report_peer_deep_v2(  # noqa: C901
                     entity = _inv_result.chats[0]
                     R["joined"] = True
                     await asyncio.sleep(random.uniform(1.5, 3.0))
-                    entity = await _timed(client.get_entity(entity.id), 15.0)
+                    # Refresh via InputChannel (id+access_hash) — bare integer ID fails
+                    # for supergroups/channels without access_hash in the Telethon lookup.
+                    try:
+                        from telethon.tl.types import InputChannel as _IC_inv
+                        _ie_inv = _IC_inv(entity.id, getattr(entity, "access_hash", 0))
+                        entity = await _timed(client.get_entity(_ie_inv), 15.0)
+                    except Exception:
+                        pass  # keep entity from join response — already has access_hash
                 except Exception:
                     # Already a member (or other join error) — use CheckChatInviteRequest
                     # to get entity. ImportChatInviteRequest fails for existing members,

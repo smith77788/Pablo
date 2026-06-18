@@ -351,7 +351,8 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
 
 @router.callback_query(F.data.startswith("adm:") & ~F.data.startswith("adm:gate"))
 async def cb_admin(
-    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession
+    callback: CallbackQuery, pool: asyncpg.Pool, http: aiohttp.ClientSession,
+    state: FSMContext,
 ) -> None:
     if not _is_admin(callback.from_user.id):
         await callback.answer("⛔️ Нет доступа.", show_alert=True)
