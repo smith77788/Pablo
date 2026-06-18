@@ -5607,3 +5607,143 @@ async def promo_get_logs(
         f"SELECT * FROM promo_logs WHERE {where} ORDER BY created_at DESC LIMIT ${idx}",
         *vals,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GROWTH ENGINE — амбассадоры, комиссии, контент-сидер
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def get_growth_platform_stats(pool: asyncpg.Pool) -> dict:
+    """Агрегированная статистика платформы для контент-пакетов."""
+    row = await pool.fetchrow(
+        """SELECT
+            (SELECT COUNT(*) FROM platform_users)                            AS total_users,
+            (SELECT COUNT(*) FROM operation_queue WHERE status='done')       AS total_ops,
+            (SELECT COUNT(*) FROM managed_channels)                          AS total_channels,
+            (SELECT COUNT(*) FROM platform_users
+             WHERE COALESCE(registered_at, first_seen) >= now() - INTERVAL '7 days') AS week_users
+        """
+    )
+    return dict(row) if row else {"total_users": 0, "total_ops": 0, "total_channels": 0, "week_users": 0}
+
+
+async def get_ambassador_status(pool: asyncpg.Pool, user_id: int) -> dict:
+    """Возвращает текущий тир, реф-статистику и баланс комиссии пользователя."""
+    ref_stats = await get_referral_stats(pool, user_id)
+    tiers = await pool.fetch(
+        "SELECT * FROM ambassador_tiers ORDER BY sort_order"
+    )
+    # Определяем текущий тир
+    current_tier = None
+    next_tier = None
+    for tier in tiers:
+        qualifies = True
+        if tier["min_active_refs"] > 0 and ref_stats["active"] < tier["min_active_refs"]:
+            qualifies = False
+        if tier["min_paid_refs"] > 0 and ref_stats["paid"] < tier["min_paid_refs"]:
+            qualifies = False
+        if qualifies:
+            current_tier = dict(tier)
+        elif next_tier is None:
+            next_tier = dict(tier)
+
+    commission_balance = await pool.fetchval(
+        """SELECT COALESCE(SUM(commission_usd),0) FROM commission_ledger
+           WHERE referrer_id=$1 AND status='pending'""",
+        user_id,
+    ) or 0.0
+    paid_out = await pool.fetchval(
+        """SELECT COALESCE(SUM(commission_usd),0) FROM commission_ledger
+           WHERE referrer_id=$1 AND status='paid'""",
+        user_id,
+    ) or 0.0
+    return {
+        "ref_stats": ref_stats,
+        "current_tier": current_tier,
+        "next_tier": next_tier,
+        "tiers": [dict(t) for t in tiers],
+        "commission_balance": float(commission_balance),
+        "paid_out": float(paid_out),
+    }
+
+
+async def record_commission(
+    pool: asyncpg.Pool,
+    referrer_id: int,
+    referred_id: int,
+    payment_amount: float,
+    commission_pct: float,
+) -> float:
+    """Начисляет комиссию реферера. Возвращает сумму начисления."""
+    commission_usd = round(payment_amount * commission_pct / 100, 4)
+    if commission_usd <= 0:
+        return 0.0
+    await pool.execute(
+        """INSERT INTO commission_ledger(referrer_id, referred_id, payment_amount,
+               commission_pct, commission_usd)
+           VALUES($1,$2,$3,$4,$5)""",
+        referrer_id, referred_id, payment_amount, commission_pct, commission_usd,
+    )
+    await pool.execute(
+        """INSERT INTO ambassador_status(user_id, total_commission)
+           VALUES($1,$2)
+           ON CONFLICT(user_id) DO UPDATE
+           SET total_commission = ambassador_status.total_commission + $2,
+               updated_at = NOW()""",
+        referrer_id, commission_usd,
+    )
+    return commission_usd
+
+
+async def create_payout_request(
+    pool: asyncpg.Pool, user_id: int, amount_usd: float, method: str, wallet: str
+) -> int:
+    """Создаёт заявку на выплату. Возвращает id запроса."""
+    return await pool.fetchval(
+        """INSERT INTO payout_requests(user_id, amount_usd, method, wallet)
+           VALUES($1,$2,$3,$4) RETURNING id""",
+        user_id, amount_usd, method, wallet,
+    )
+
+
+async def get_referral_leaderboard_monthly(pool: asyncpg.Pool, limit: int = 10) -> list[dict]:
+    """Топ рефереров за текущий месяц (по платящим рефералам)."""
+    rows = await pool.fetch(
+        """SELECT pr.referrer_id,
+                  COALESCE(pu.first_name, 'Аноним') AS name,
+                  pu.username,
+                  COUNT(*) FILTER (WHERE pr.paid_at IS NOT NULL)    AS paid_count,
+                  COUNT(*) FILTER (WHERE pr.activated_at IS NOT NULL) AS active_count,
+                  COUNT(*) AS total_count
+           FROM platform_referrals pr
+           LEFT JOIN platform_users pu ON pu.user_id = pr.referrer_id
+           WHERE pr.created_at >= date_trunc('month', now())
+           GROUP BY pr.referrer_id, pu.first_name, pu.username
+           ORDER BY paid_count DESC, active_count DESC
+           LIMIT $1""",
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_growth_content_seeds(pool: asyncpg.Pool) -> list[dict]:
+    """Возвращает активные контент-пакеты."""
+    rows = await pool.fetch(
+        "SELECT * FROM growth_content_seeds WHERE is_active ORDER BY id"
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_commission_history(pool: asyncpg.Pool, user_id: int, limit: int = 20) -> list[dict]:
+    """История начислений комиссии."""
+    rows = await pool.fetch(
+        """SELECT c.id, c.payment_amount, c.commission_pct, c.commission_usd,
+                  c.status, c.created_at,
+                  COALESCE(pu.first_name, 'Пользователь') AS ref_name
+           FROM commission_ledger c
+           LEFT JOIN platform_users pu ON pu.user_id = c.referred_id
+           WHERE c.referrer_id=$1
+           ORDER BY c.created_at DESC LIMIT $2""",
+        user_id, limit,
+    )
+    return [dict(r) for r in rows]

@@ -467,3 +467,13 @@ class SelfPromoCb(CallbackData, prefix="sp"):
     page: int = 0
     style: str = ""    # 'direct' | 'native'
 
+
+class GrowthCb(CallbackData, prefix="gh"):
+    """Growth Engine — амбассадор-программа, контент-сидер, комиссии, лидерборд."""
+
+    action: str  # menu | dashboard | content | content_deploy | content_confirm
+                 # leaderboard | commission | payout_ask | payout_confirm
+                 # outreach
+    item_id: int = 0   # seed_id | payout_request_id
+    page: int = 0
+

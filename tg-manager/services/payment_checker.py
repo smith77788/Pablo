@@ -229,6 +229,30 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
         referrer_id = await _db.mark_referral_paid(pool, user_id)
         if referrer_id:
             await _db.check_and_grant_rewards(pool, referrer_id, bot)
+            # Начислить комиссию если тир позволяет
+            try:
+                amb = await _db.get_ambassador_status(pool, referrer_id)
+                tier = amb.get("current_tier")
+                comm_pct = float(tier["commission_pct"]) if tier and tier.get("commission_pct") else 0.0
+                if comm_pct > 0:
+                    amount_usd = float(payment.get("amount_usd") or 0)
+                    if amount_usd > 0:
+                        earned = await _db.record_commission(
+                            pool, referrer_id, user_id, amount_usd, comm_pct
+                        )
+                        if earned > 0:
+                            try:
+                                await bot.send_message(
+                                    referrer_id,
+                                    f"💰 <b>Начислена комиссия ${earned:.2f}!</b>\n\n"
+                                    f"Реферал оплатил ${amount_usd:.2f} → ваша доля {comm_pct:.0f}%.\n"
+                                    f"Баланс пополнен. /growth — управление выплатами.",
+                                    parse_mode="HTML",
+                                )
+                            except Exception:
+                                pass
+            except Exception as _ce:
+                log.warning("commission accrual error: %s", _ce)
             # Notify referrer about the paid conversion
             try:
                 await bot.send_message(
