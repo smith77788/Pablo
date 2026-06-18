@@ -1245,8 +1245,8 @@ async def cb_ai_retry(
         kb.button(text="🗑 Очистить историю", callback_data=AiCb(action="clear_history"))
         kb.button(text="❌ Выйти из чата", callback_data=AiCb(action="stop"))
         kb.adjust(2)
-    await callback.message.edit_text(
-        str_reply[:4000], parse_mode="HTML", reply_markup=kb.as_markup()
+    await _edit_or_answer_long(
+        callback.message, callback.message, str_reply, reply_markup=kb.as_markup()
     )
 
 
