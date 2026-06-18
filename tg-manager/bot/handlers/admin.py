@@ -3348,11 +3348,11 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
         "<i>Автоматически: ротирующий промо-пост раз в 3 дня.\n"
         "Бот должен быть администратором канала.</i>"
     )
-    target = event if hasattr(event, "answer") else event.message
+    msg = event.message if hasattr(event, "message") else event
     try:
-        await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
-        await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 @router.message(BotMotherChannelFSM.set_channel_id)

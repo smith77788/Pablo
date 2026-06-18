@@ -1313,8 +1313,10 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         )
         return
 
+    n_total = len(accounts)
     await callback.message.edit_text(
-        f"🔍 <b>Проверяю {len(accounts)} аккаунтов…</b>\n\nЭто займёт 20-60 секунд.",
+        f"🔍 <b>Проверяю {n_total} аккаунтов…</b>\n\n"
+        f"⏱ 0 / {n_total} — это займёт 10-30 секунд.",
         parse_mode="HTML",
     )
 
@@ -1324,74 +1326,92 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     ok_count = 0
     problem_count = 0
     no_session_count = 0
+    _done = 0
+    _BATCH = 5  # параллельные проверки по 5 аккаунтов за раз
 
-    for acc in accounts:
+    async def _check_one(acc: dict) -> tuple[int, str, dict]:
         acc_id = acc["id"]
         session_str = acc.get("session_str") or ""
-
         if not session_str or len(session_str.strip()) < 10:
-            no_session_count += 1
-            continue
-
-        res: dict = {}
+            return acc_id, "no_session", {}
         try:
             res = await asyncio.wait_for(
                 check_account_status_full(session_str, dict(acc), check_spambot=False),
-                timeout=20.0,
+                timeout=15.0,
             )
-            status = res.get("status", "error")
+            return acc_id, res.get("status", "error"), res
         except asyncio.TimeoutError:
-            status = "error"
+            return acc_id, "error", {}
         except Exception as exc:
             log.debug("health_check acc=%d: %s", acc_id, exc)
-            status = "error"
+            return acc_id, "error", {}
 
-        try:
-            if should_persist_account_status(
-                status,
-                auth_error=bool(res.get("auth_error")),
-                has_session=not res.get("no_session", False),
-            ):
-                await pool.execute(
-                    "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+    for batch_start in range(0, n_total, _BATCH):
+        batch = accounts[batch_start: batch_start + _BATCH]
+        batch_results = await asyncio.gather(*[_check_one(a) for a in batch])
+
+        for acc_id, status, res in batch_results:
+            if status == "no_session":
+                no_session_count += 1
+                _done += 1
+                continue
+            try:
+                if should_persist_account_status(
                     status,
-                    acc_id,
-                )
-                if status in ("banned", "deactivated") and res.get("auth_error"):
+                    auth_error=bool(res.get("auth_error")),
+                    has_session=not res.get("no_session", False),
+                ):
                     await pool.execute(
-                        "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
-                    )
-                if status == "spamblock":
-                    await pool.execute(
-                        "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0),0.3) WHERE id=$1",
+                        "UPDATE tg_accounts SET acc_status=$1, last_real_check_at=now() WHERE id=$2",
+                        status,
                         acc_id,
                     )
+                    if status in ("banned", "deactivated") and res.get("auth_error"):
+                        await pool.execute(
+                            "UPDATE tg_accounts SET is_active=FALSE WHERE id=$1", acc_id
+                        )
+                    if status == "spamblock":
+                        await pool.execute(
+                            "UPDATE tg_accounts SET trust_score=LEAST(COALESCE(trust_score,1.0),0.3) WHERE id=$1",
+                            acc_id,
+                        )
+                else:
+                    await pool.execute(
+                        "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1", acc_id
+                    )
+            except Exception as exc:
+                log.debug("health_check DB update acc=%d: %s", acc_id, exc)
+
+            if status == "active":
+                ok_count += 1
             else:
-                await pool.execute(
-                    "UPDATE tg_accounts SET last_real_check_at=now() WHERE id=$1", acc_id
+                problem_count += 1
+
+            try:
+                from services.op_worker import write_op_audit as _audit
+                await _audit(
+                    pool,
+                    owner_id=uid,
+                    action="health_check",
+                    result="success" if status == "active" else "error",
+                    target=f"acc_{acc_id}",
+                    account_id=acc_id,
+                    error_msg=None if status == "active" else status,
                 )
-        except Exception as exc:
-            log.debug("health_check DB update acc=%d: %s", acc_id, exc)
+            except Exception:
+                pass
+            _done += 1
 
-        if status == "active":
-            ok_count += 1
-        else:
-            problem_count += 1
-
-        # Log to operation_audit
-        try:
-            from services.op_worker import write_op_audit as _audit
-            await _audit(
-                pool,
-                owner_id=uid,
-                action="health_check",
-                result="success" if status == "active" else "error",
-                target=f"acc_{acc_id}",
-                account_id=acc_id,
-                error_msg=None if status == "active" else status,
-            )
-        except Exception:
-            pass
+        # Прогресс-апдейт после каждого батча
+        if batch_start + _BATCH < n_total:
+            try:
+                await callback.message.edit_text(
+                    f"🔍 <b>Проверяю {n_total} аккаунтов…</b>\n\n"
+                    f"⏱ {_done} / {n_total} готово…",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Проверить снова", callback_data=InfraCb(action="health_check"))
