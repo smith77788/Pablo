@@ -111,6 +111,7 @@ from services import anomaly_detector
 from services import proxy_scraper
 from services import activity_logger
 from services import promo_scheduler
+from services import growth_scheduler
 
 configure_root_logger(
     level=logging.DEBUG if os.environ.get("DEBUG") else logging.INFO,
@@ -398,6 +399,9 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("promo_scheduler", promo_scheduler.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("growth_scheduler", growth_scheduler.run, pool, bot)
         )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http, drop_pending_updates=True)

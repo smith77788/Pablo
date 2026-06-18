@@ -880,7 +880,12 @@ async def cb_clone_confirm(
     # Fetch source bot token
     src_row = await db.get_bot(pool, src_bot_id, callback.from_user.id)
     if not src_row:
-        await callback.message.edit_text("❌ Источник не найден.")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BotFactCb(action="menu"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "❌ Источник не найден.", reply_markup=kb.as_markup()
+        )
         await state.clear()
         return
 

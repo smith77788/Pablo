@@ -5747,3 +5747,86 @@ async def get_commission_history(pool: asyncpg.Pool, user_id: int, limit: int = 
         user_id, limit,
     )
     return [dict(r) for r in rows]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GROWTH ENGINE v2 — расписание, watermark-настройки, outreach
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def get_growth_settings(pool: asyncpg.Pool, user_id: int) -> dict:
+    row = await pool.fetchrow("SELECT * FROM growth_settings WHERE user_id=$1", user_id)
+    return dict(row) if row else {"user_id": user_id, "watermark_enabled": False}
+
+
+async def set_watermark_enabled(pool: asyncpg.Pool, user_id: int, enabled: bool) -> None:
+    await pool.execute(
+        """INSERT INTO growth_settings(user_id, watermark_enabled)
+           VALUES($1,$2)
+           ON CONFLICT(user_id) DO UPDATE
+           SET watermark_enabled=$2, updated_at=NOW()""",
+        user_id, enabled,
+    )
+
+
+async def get_user_growth_schedules(pool: asyncpg.Pool, user_id: int) -> list[dict]:
+    rows = await pool.fetch(
+        """SELECT gs.*, gc.title AS seed_title, gc.content_type
+           FROM growth_schedule gs
+           LEFT JOIN growth_content_seeds gc ON gc.id = gs.seed_id
+           WHERE gs.user_id=$1
+           ORDER BY gs.created_at DESC""",
+        user_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def create_growth_schedule(
+    pool: asyncpg.Pool, user_id: int, seed_id: int, interval_h: int
+) -> int:
+    return await pool.fetchval(
+        """INSERT INTO growth_schedule(user_id, seed_id, interval_h,
+               next_run_at)
+           VALUES($1,$2,$3, NOW() + ($4 || ' hours')::INTERVAL)
+           RETURNING id""",
+        user_id, seed_id, interval_h, str(interval_h),
+    )
+
+
+async def toggle_growth_schedule(
+    pool: asyncpg.Pool, schedule_id: int, user_id: int
+) -> bool:
+    row = await pool.fetchrow(
+        """UPDATE growth_schedule SET is_active = NOT is_active
+           WHERE id=$1 AND user_id=$2 RETURNING is_active""",
+        schedule_id, user_id,
+    )
+    return bool(row["is_active"]) if row else False
+
+
+async def delete_growth_schedule(pool: asyncpg.Pool, schedule_id: int, user_id: int) -> None:
+    await pool.execute(
+        "DELETE FROM growth_schedule WHERE id=$1 AND user_id=$2", schedule_id, user_id
+    )
+
+
+async def get_due_growth_schedules(pool: asyncpg.Pool) -> list[dict]:
+    """Возвращает все активные расписания у которых next_run_at <= NOW()."""
+    rows = await pool.fetch(
+        """SELECT gs.*, gc.template, gc.content_type
+           FROM growth_schedule gs
+           JOIN growth_content_seeds gc ON gc.id = gs.seed_id
+           WHERE gs.is_active = TRUE AND gs.next_run_at <= NOW()
+           FOR UPDATE SKIP LOCKED""",
+    )
+    return [dict(r) for r in rows]
+
+
+async def advance_growth_schedule(pool: asyncpg.Pool, schedule_id: int, interval_h: int, sent: int) -> None:
+    await pool.execute(
+        """UPDATE growth_schedule
+           SET last_run_at = NOW(),
+               next_run_at = NOW() + ($2 || ' hours')::INTERVAL,
+               total_sent  = total_sent + $3
+           WHERE id = $1""",
+        schedule_id, str(interval_h), sent,
+    )

@@ -536,7 +536,10 @@ async def msg_import_tokens(
         )
     except Exception:
         log_exc_swallow(log, "msg_import_tokens: gather failed")
-        await progress.edit_text("❌ Ошибка проверки токенов. Попробуйте позже.")
+        await progress.edit_text(
+            "❌ Ошибка проверки токенов. Попробуйте позже.",
+            reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
+        )
         return
     added, skipped, failed = [], [], []
     for token, info in zip(lines, results):

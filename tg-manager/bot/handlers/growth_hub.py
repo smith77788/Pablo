@@ -43,6 +43,7 @@ def _is_admin(uid: int) -> bool:
 class GrowthFSM(StatesGroup):
     payout_method = State()
     payout_wallet = State()
+    schedule_interval = State()
 
 
 # ─── Keyboards ────────────────────────────────────────────────────────────────
@@ -54,6 +55,8 @@ def _menu_kb() -> InlineKeyboardMarkup:
     kb.button(text="🏆 Лидерборд", callback_data=GrowthCb(action="leaderboard"))
     kb.button(text="💰 Комиссии & Выплаты", callback_data=GrowthCb(action="commission"))
     kb.button(text="🔗 Реферальный пакет", callback_data=GrowthCb(action="outreach"))
+    kb.button(text="⏰ Авто-расписание", callback_data=GrowthCb(action="schedule"))
+    kb.button(text="🏷️ Watermark", callback_data=GrowthCb(action="watermark_toggle"))
     kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb.as_markup()
@@ -646,3 +649,236 @@ async def cb_growth_outreach(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
     except Exception:
         await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+# ─── 6. Авто-расписание ───────────────────────────────────────────────────────
+
+async def _show_schedule_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    user_id = callback.from_user.id
+    try:
+        schedules = await db.get_user_growth_schedules(pool, user_id)
+    except Exception:
+        schedules = []
+
+    type_emoji = {"stats": "📊", "native": "💡", "direct": "🚀", "case": "📈"}
+    kb = InlineKeyboardBuilder()
+    lines = []
+    for s in schedules:
+        active_icon = "✅" if s["is_active"] else "⏸"
+        title = (s.get("seed_title") or "Пакет")[:20]
+        ctype_e = type_emoji.get(s.get("content_type"), "•")
+        lines.append(
+            f"{active_icon} {ctype_e} <b>{_html.escape(title)}</b> · "
+            f"каждые {s['interval_h']}ч · постов: {s['total_sent']}"
+        )
+        kb.button(
+            text=f"{'⏸ Пауза' if s['is_active'] else '▶️ Пуск'}: {title}",
+            callback_data=GrowthCb(action="schedule_toggle", item_id=s["id"]),
+        )
+        kb.button(
+            text="🗑 Удалить",
+            callback_data=GrowthCb(action="schedule_del", item_id=s["id"]),
+        )
+
+    if not lines:
+        lines = ["<i>Расписаний нет. Создайте первое!</i>"]
+
+    kb.button(text="➕ Создать расписание", callback_data=GrowthCb(action="schedule_new"))
+    kb.button(text="◀️ Назад", callback_data=GrowthCb(action="menu"))
+    adjusts = [2] * len(schedules) + [1, 1]
+    kb.adjust(*adjusts)
+
+    text = (
+        "⏰ <b>Авто-расписание</b>\n\n"
+        "Контент-пакеты публикуются автоматически во всех ваших каналах.\n\n"
+        + "\n".join(lines)
+    )
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.callback_query(GrowthCb.filter(F.action == "schedule"))
+async def cb_growth_schedule(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    await _show_schedule_list(callback, pool)
+
+
+@router.callback_query(GrowthCb.filter(F.action == "schedule_new"))
+async def cb_growth_schedule_new(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    try:
+        seeds = await db.get_growth_content_seeds(pool)
+    except Exception:
+        seeds = []
+    if not seeds:
+        await callback.answer("Контент-пакеты ещё не готовы. Попробуйте позже.", show_alert=True)
+        return
+
+    type_emoji = {"stats": "📊", "native": "💡", "direct": "🚀", "case": "📈"}
+    kb = InlineKeyboardBuilder()
+    for s in seeds:
+        emoji = type_emoji.get(s["content_type"], "•")
+        kb.button(
+            text=f"{emoji} {s['title']}",
+            callback_data=GrowthCb(action="schedule_sel", item_id=s["id"]),
+        )
+    kb.button(text="◀️ Назад", callback_data=GrowthCb(action="schedule"))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(
+            "⏰ <b>Новое расписание</b>\n\nВыберите контент-пакет для автопостинга:",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(GrowthCb.filter(F.action == "schedule_sel"))
+async def cb_growth_schedule_sel(
+    callback: CallbackQuery, callback_data: GrowthCb, state: FSMContext
+) -> None:
+    await callback.answer()
+    await state.set_state(GrowthFSM.schedule_interval)
+    await state.update_data(sched_seed_id=callback_data.item_id)
+    kb = InlineKeyboardBuilder()
+    for h in [6, 12, 24, 48, 72]:
+        kb.button(text=f"каждые {h}ч", callback_data=GrowthCb(action="schedule_quick", item_id=h))
+    kb.button(text="◀️ Отмена", callback_data=GrowthCb(action="schedule"))
+    kb.adjust(3, 2, 1)
+    try:
+        await callback.message.edit_text(
+            "⏰ <b>Интервал публикации</b>\n\n"
+            "Выберите готовый интервал или введите число часов (1–720):",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(GrowthCb.filter(F.action == "schedule_quick"))
+async def cb_growth_schedule_quick(
+    callback: CallbackQuery, callback_data: GrowthCb, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    seed_id = data.get("sched_seed_id")
+    interval_h = callback_data.item_id
+    await state.clear()
+    if not seed_id:
+        await callback.answer("Сессия устарела. Начните заново.", show_alert=True)
+        return
+    try:
+        sched_id = await db.create_growth_schedule(pool, callback.from_user.id, seed_id, interval_h)
+    except Exception as e:
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏰ Мои расписания", callback_data=GrowthCb(action="schedule"))
+    kb.button(text="◀️ Центр роста", callback_data=GrowthCb(action="menu"))
+    kb.adjust(1)
+    try:
+        await callback.message.edit_text(
+            f"✅ <b>Расписание #{sched_id} создано!</b>\n\n"
+            f"Первый авто-пост выйдет через <b>{interval_h}ч</b>.\n"
+            f"Далее — каждые {interval_h}ч во всех ваших каналах автоматически.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        pass
+
+
+@router.message(GrowthFSM.schedule_interval)
+async def fsm_growth_schedule_interval(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit() or not (1 <= int(text) <= 720):
+        await message.answer("Введите целое число часов от 1 до 720:")
+        return
+    data = await state.get_data()
+    seed_id = data.get("sched_seed_id")
+    interval_h = int(text)
+    await state.clear()
+    if not seed_id:
+        await message.answer("Сессия устарела. Начните заново через /growth")
+        return
+    try:
+        sched_id = await db.create_growth_schedule(pool, message.from_user.id, seed_id, interval_h)
+    except Exception as e:
+        await message.answer(f"Ошибка создания расписания: {e}")
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏰ Мои расписания", callback_data=GrowthCb(action="schedule"))
+    kb.button(text="◀️ Центр роста", callback_data=GrowthCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ <b>Расписание #{sched_id} создано!</b>\n\n"
+        f"Первый авто-пост выйдет через <b>{interval_h}ч</b>.\n"
+        f"Далее — каждые {interval_h}ч во всех ваших каналах автоматически.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(GrowthCb.filter(F.action == "schedule_toggle"))
+async def cb_growth_schedule_toggle(
+    callback: CallbackQuery, callback_data: GrowthCb, pool: asyncpg.Pool
+) -> None:
+    new_active = await db.toggle_growth_schedule(pool, callback_data.item_id, callback.from_user.id)
+    status = "▶️ запущено" if new_active else "⏸ на паузе"
+    await callback.answer(f"Расписание {status}", show_alert=False)
+    await _show_schedule_list(callback, pool)
+
+
+@router.callback_query(GrowthCb.filter(F.action == "schedule_del"))
+async def cb_growth_schedule_del(
+    callback: CallbackQuery, callback_data: GrowthCb, pool: asyncpg.Pool
+) -> None:
+    await callback.answer("Удалено", show_alert=False)
+    await db.delete_growth_schedule(pool, callback_data.item_id, callback.from_user.id)
+    await _show_schedule_list(callback, pool)
+
+
+# ─── 7. Watermark ────────────────────────────────────────────────────────────
+
+@router.callback_query(GrowthCb.filter(F.action == "watermark_toggle"))
+async def cb_growth_watermark_toggle(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    user_id = callback.from_user.id
+    try:
+        settings = await db.get_growth_settings(pool, user_id)
+        current = settings.get("watermark_enabled", False)
+        new_val = not current
+        await db.set_watermark_enabled(pool, user_id, new_val)
+    except Exception:
+        await callback.answer("Ошибка. Попробуйте позже.", show_alert=True)
+        return
+
+    icon = "✅ включён" if new_val else "❌ выключен"
+    await callback.answer(f"Watermark {icon}", show_alert=False)
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🔕 Выключить watermark" if new_val else "🔔 Включить watermark",
+        callback_data=GrowthCb(action="watermark_toggle"),
+    )
+    kb.button(text="◀️ Центр роста", callback_data=GrowthCb(action="menu"))
+    kb.adjust(1)
+    wm_status = "✅ <b>включён</b>" if new_val else "❌ <b>выключен</b>"
+    try:
+        await callback.message.edit_text(
+            f"🏷️ <b>Watermark</b>\n\n"
+            f"Статус: {wm_status}\n\n"
+            f"Когда watermark включён, каждый авто-пост заканчивается ссылкой "
+            f"на BotMother с вашим реф-кодом.\n\n"
+            f"<i>Влияет на все расписания и ручные публикации из Центра роста.</i>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+    except Exception:
+        pass

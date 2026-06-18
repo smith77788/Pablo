@@ -149,7 +149,12 @@ async def cb_exp_list(
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
-        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML")
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            "❌ Бот не найден.", parse_mode="HTML", reply_markup=kb.as_markup()
+        )
         return
     exps = await db.get_experiments(pool, callback_data.bot_id)
     label = f"@{row['username']}" if row["username"] else row["first_name"]

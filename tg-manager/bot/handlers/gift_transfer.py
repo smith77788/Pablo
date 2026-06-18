@@ -40,6 +40,7 @@ class GiftTransferFSM(StatesGroup):
     preview = State()
     executing = State()
     report = State()
+    adding_saved_recipient = State()
 
 
 # ─── Callbacks ─────────────────────────────────────────────────────────────────
@@ -490,6 +491,58 @@ async def cb_enter_username(callback: CallbackQuery, state: FSMContext):
         ),
     )
     await state.set_state(GiftTransferFSM.selecting_recipient)
+
+
+@router.callback_query(F.data == "gt:ignore")
+async def cb_gt_ignore(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+
+@router.callback_query(F.data == "gt:save_recipient", GiftTransferFSM.selecting_recipient)
+async def cb_save_recipient(callback: CallbackQuery, state: FSMContext) -> None:
+    """Prompt user to enter @username to save as a persistent recipient."""
+    await callback.answer()
+    await state.set_state(GiftTransferFSM.adding_saved_recipient)
+    await callback.message.edit_text(
+        "💾 <b>Сохранить получателя</b>\n\n"
+        "Введите @username — он будет сохранён в ваши контакты:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="gt:select_recipient")]]
+        ),
+    )
+
+
+@router.message(F.text & ~F.text.startswith("/"), GiftTransferFSM.adding_saved_recipient)
+async def msg_add_saved_recipient(message: Message, state: FSMContext, pool) -> None:
+    text = message.text.strip()
+    username = text.lstrip("@").split("/")[-1].split("?")[0]
+    if not username or len(username) < 4:
+        await message.answer("❌ Неверный формат. Введите @username:")
+        return
+    await db.save_gift_recipient(pool, message.from_user.id, f"@{username}", username)
+    await state.set_state(GiftTransferFSM.selecting_recipient)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К выбору получателя", callback_data="gt:select_recipient")
+    kb.adjust(1)
+    await message.answer(
+        f"✅ Получатель <b>@{username}</b> сохранён!\n\nТеперь выберите его для трансфера.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "gt:add_recipient", GiftTransferFSM.main_menu)
+async def cb_add_recipient(callback: CallbackQuery, state: FSMContext) -> None:
+    """Add a new saved recipient from the recipients management screen."""
+    await callback.answer()
+    await state.set_state(GiftTransferFSM.adding_saved_recipient)
+    await callback.message.edit_text(
+        "➕ <b>Добавить получателя</b>\n\n"
+        "Введите @username для сохранения в контакты:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="gt:recipients")]]
+        ),
+    )
 
 
 @router.message(F.text & ~F.text.startswith("/"), GiftTransferFSM.selecting_recipient)
