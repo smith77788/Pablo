@@ -61,11 +61,15 @@ async def _fire(pool: asyncpg.Pool, bot: Bot, sched: dict) -> None:
         ref_link=ref_link,
     )
 
-    # Watermark если включён
+    # Брендинг: free-tier → всегда @MEXAHI3MBOT; paid → watermark если включён
     try:
-        settings = await db.get_growth_settings(pool, user_id)
-        if settings.get("watermark_enabled"):
-            content += f'\n\n📤 <a href="{ref_link}">BotMother</a>'
+        from services import brand_injection as _bi
+        if await _bi.is_user_free_tier(pool, user_id):
+            content = _bi.add_promo(content, html=True, context="channel")
+        else:
+            settings = await db.get_growth_settings(pool, user_id)
+            if settings.get("watermark_enabled"):
+                content += f'\n\n📤 <a href="{ref_link}">BotMother</a>'
     except Exception:
         pass
 

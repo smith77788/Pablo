@@ -4779,6 +4779,15 @@ async def _exec_bulk_chan_exec(
     base_uname: str = params.get("base_uname", "")
     value: str = params.get("value", "")
 
+    # Brand injection for free-tier users editing channel descriptions
+    if op == "chan_about":
+        try:
+            from services import brand_injection as _bi
+            if await _bi.is_user_free_tier(pool, owner_id):
+                value = _bi.add_promo_to_description(value)
+        except Exception:
+            pass
+
     if not channel_acc_pairs or op not in ("chan_uname", "chan_about"):
         return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}
 

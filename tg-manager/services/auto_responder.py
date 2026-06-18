@@ -279,7 +279,7 @@ async def _process_bot(
                     if start_rules:
                         rendered = _render_text(start_rules[0]["response_text"], from_user, bot_row)
                         if _is_free:
-                            rendered = brand_injection.add_promo(rendered, html=True)
+                            rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                         await bot_api.send_message(http, token, chat_id, rendered)
                     else:
                         fname = from_user.get("first_name") or "друг"
@@ -309,7 +309,7 @@ async def _process_bot(
                 if _match_rule(rule, text):
                     rendered = _render_text(rule["response_text"], from_user, bot_row)
                     if _is_free:
-                        rendered = brand_injection.add_promo(rendered, html=True)
+                        rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                     ok, retry = await bot_api.send_message(
                         http, token, chat_id, rendered
                     )
@@ -437,7 +437,7 @@ async def _process_bot(
                             arule["action_value"], from_user, bot_row
                         )
                         if _is_free:
-                            rendered = brand_injection.add_promo(rendered, html=True)
+                            rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                         ok, _ = await bot_api.send_message(
                             http, token, chat_id, rendered
                         )
@@ -684,7 +684,7 @@ async def _process_bot(
                 if variant and variant.get("content"):
                     exp_content = variant["content"]
                     if _is_free:
-                        exp_content = brand_injection.add_promo(exp_content, html=True)
+                        exp_content = brand_injection.add_promo(exp_content, html=True, context="broadcast")
                     await bot_api.send_message(http, token, chat_id, exp_content)
             elif not is_start and active_exp:
                 # Conversion: any subsequent message from an assigned user counts
@@ -816,7 +816,7 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
                 if rule["action_type"] == "send_message":
                     _inact_text = rule["action_value"]
                     if _rule_is_free:
-                        _inact_text = brand_injection.add_promo(_inact_text, html=True)
+                        _inact_text = brand_injection.add_promo(_inact_text, html=True, context="broadcast")
                     await bot_api.send_message(
                         http, rule["token"], chat_id, _inact_text
                     )

@@ -2094,8 +2094,16 @@ async def fsm_edit_value(
             reply_markup=kb.as_markup(),
         )
     elif field == "about":
+        # Free-tier: add @MEXAHI3MBOT mention to channel description (plain text, 255 limit)
+        final_about = value
+        try:
+            from services import brand_injection as _bi
+            if await _bi.is_user_free_tier(pool, message.from_user.id):
+                final_about = _bi.add_promo_to_description(value)
+        except Exception:
+            pass
         ok = await account_manager.edit_channel_about(
-            acc["session_str"], ch_id, value, _acc=acc
+            acc["session_str"], ch_id, final_about, _acc=acc
         )
         await message.answer(
             "✅ Описание изменено!" if ok else "❌ Ошибка изменения описания.",

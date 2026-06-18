@@ -108,7 +108,7 @@ async def run(
     # Brand injection: append @MEXAHI3MBOT promo for free-tier bots
     try:
         if await brand_injection.is_free_tier(pool, bot_id):
-            text = brand_injection.add_promo(text, html=True)
+            text = brand_injection.add_promo(text, html=True, context="broadcast")
     except Exception as _bi_err:
         logger.debug("Broadcast %d: brand_injection check failed: %s", broadcast_id, _bi_err)
 

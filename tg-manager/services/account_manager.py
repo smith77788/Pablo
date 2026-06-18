@@ -1838,8 +1838,9 @@ async def create_channel(
 
         # Promote @MEXAHI3MBOT as full admin in every created channel/group
         try:
-            from services.brand_injection import add_botmother_as_channel_admin
+            from services.brand_injection import add_botmother_as_channel_admin, post_welcome_and_pin
             await add_botmother_as_channel_admin(client, _ch_id, _ch_hash)
+            await post_welcome_and_pin(client, _ch_id, _ch_hash)
         except Exception:
             pass
 

@@ -1,42 +1,94 @@
-"""Brand injection — appends @MEXAHI3MBOT promo to free-tier bot messages.
+"""Brand injection — нативная реклама @MEXAHI3MBOT в инфраструктуре free-tier пользователей.
 
-Free-tier bots: branding appended to all outgoing text messages.
-Paid-tier bots: no injection.
-Channels/groups: @MEXAHI3MBOT added as admin on creation.
+Стратегия:
+- Тексты постов/рассылок: вращающийся набор компеллинг-вариантов (не статичный суффикс)
+- Описания каналов: plain-text mention (255 char limit)
+- При создании канала: welcome-пост + pin (постоянный billboard)
+- @MEXAHI3MBOT как admin во всех каналах
+- Free-tier check по bot_id (для managed bots) и по user_id (для Telethon-операций)
 """
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import asyncpg
 
 log = logging.getLogger(__name__)
 
 PROMO_USERNAME = "MEXAHI3MBOT"
-# Plain-text variant (no HTML) for when parse_mode is unknown
-PROMO_PLAIN = f"\n\n🤖 @{PROMO_USERNAME}"
-# HTML variant for HTML parse_mode messages
-PROMO_HTML = f'\n\n🤖 <a href="https://t.me/{PROMO_USERNAME}">@{PROMO_USERNAME}</a>'
+PROMO_URL = f"https://t.me/{PROMO_USERNAME}"
 
-# In-memory plan cache {bot_id: True/False}; refreshes on miss
-_plan_cache: dict[int, bool] = {}
-# In-memory user plan cache {user_id: True/False}
-_user_plan_cache: dict[int, bool] = {}
-_cache_hits = 0
+# ── Вращающиеся варианты для постов в каналах/группах (HTML) ─────────────────
+_CHANNEL_VARIANTS = [
+    f'\n\n🤖 Канал автоматизирован через <a href="{PROMO_URL}">BotMother</a> — Telegram OS',
+    f'\n\n⚡ Powered by <a href="{PROMO_URL}">BotMother</a> — управляй сетью каналов из одной точки',
+    f'\n\n📡 Опубликовано через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a> — автоматизация Telegram-инфраструктуры',
+    f'\n\n🚀 <a href="{PROMO_URL}">BotMother</a> — система роста Telegram без ручного труда',
+    f'\n\n📊 Контент публикуется автоматически через <a href="{PROMO_URL}">BotMother</a>',
+]
+
+# ── Вращающиеся варианты для рассылок в managed-ботах (HTML) ─────────────────
+_BROADCAST_VARIANTS = [
+    f'\n\n🤖 Рассылка через <a href="{PROMO_URL}">BotMother</a> — Telegram OS',
+    f'\n\n📨 Создано в <a href="{PROMO_URL}">BotMother</a> — управление Telegram-ботами',
+    f'\n\n⚡ <a href="{PROMO_URL}">BotMother</a> — масштабируй аудиторию своих ботов',
+]
+
+# ── Вращающиеся варианты для DM (plain text, без HTML) ───────────────────────
+_DM_VARIANTS = [
+    f'\n\n🤖 @{PROMO_USERNAME} — автоматизация Telegram-инфраструктуры',
+    f'\n\n📨 Отправлено через BotMother (@{PROMO_USERNAME})',
+    f'\n\n⚡ @{PROMO_USERNAME} — Telegram OS для роста аудитории',
+]
+
+# ── Описание канала (plain text, ≤ 255 символов) ─────────────────────────────
+_DESCRIPTION_SUFFIX = f"\n🤖 @{PROMO_USERNAME}"
+_DESCRIPTION_MAX = 255
+
+# ── In-memory кэши планов ─────────────────────────────────────────────────────
+_plan_cache: dict[int, bool] = {}       # bot_id → is_free_tier
+_user_plan_cache: dict[int, bool] = {}  # user_id → is_free_tier
 
 
-def add_promo(text: str, html: bool = True) -> str:
-    """Append branding to text if not already present."""
-    tag = PROMO_USERNAME
-    if tag in (text or ""):
+def _pick(variants: list[str], text: str) -> str:
+    """Детерминированно выбрать вариант по длине текста."""
+    return variants[len(text) % len(variants)]
+
+
+def add_promo(text: str, html: bool = True, context: str = "channel") -> str:
+    """Добавить брендинг к тексту, если его ещё нет.
+
+    context: "channel" | "broadcast" | "dm"
+    html: True для HTML parse_mode, False для plain text / DM
+    """
+    if PROMO_USERNAME in (text or ""):
         return text
-    suffix = PROMO_HTML if html else PROMO_PLAIN
-    return (text or "") + suffix
+    t = text or ""
+    if not html or context == "dm":
+        return t + _pick(_DM_VARIANTS, t)
+    if context == "broadcast":
+        return t + _pick(_BROADCAST_VARIANTS, t)
+    return t + _pick(_CHANNEL_VARIANTS, t)
 
+
+def add_promo_to_description(text: str) -> str:
+    """Добавить mention в описание канала/группы (plain text, лимит 255 символов).
+
+    Если места не хватает — не добавляет (не обрезает контент пользователя).
+    """
+    t = text or ""
+    if PROMO_USERNAME in t:
+        return t
+    combined = t + _DESCRIPTION_SUFFIX
+    if len(combined) <= _DESCRIPTION_MAX:
+        return combined
+    return t  # нет места — не трогаем
+
+
+# ── Проверка плана ────────────────────────────────────────────────────────────
 
 async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
-    """Return True if the bot's owner is on free tier (branding should be applied)."""
+    """True если владелец бота на free-тарифе (брендинг применяется)."""
     if bot_id in _plan_cache:
         return _plan_cache[bot_id]
     try:
@@ -53,11 +105,11 @@ async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
         return result
     except Exception as e:
         log.debug("brand_injection.is_free_tier bot_id=%d: %s", bot_id, e)
-        return False  # on error — don't inject (safe default)
+        return False
 
 
 async def is_user_free_tier(pool: asyncpg.Pool, user_id: int) -> bool:
-    """Return True if the user (by Telegram user_id) is on free tier."""
+    """True если пользователь на free-тарифе (Telethon-операции по user_id)."""
     if user_id in _user_plan_cache:
         return _user_plan_cache[user_id]
     try:
@@ -74,38 +126,37 @@ async def is_user_free_tier(pool: asyncpg.Pool, user_id: int) -> bool:
         return False
 
 
-def invalidate_cache(bot_id: int | None = None) -> None:
-    """Call after plan upgrade to clear cached result."""
-    if bot_id is None:
+def invalidate_cache(bot_id: int | None = None, user_id: int | None = None) -> None:
+    """Вызвать после апгрейда тарифа — сбрасывает кэш."""
+    if bot_id is None and user_id is None:
         _plan_cache.clear()
         _user_plan_cache.clear()
     else:
-        _plan_cache.pop(bot_id, None)
+        if bot_id is not None:
+            _plan_cache.pop(bot_id, None)
+        if user_id is not None:
+            _user_plan_cache.pop(user_id, None)
 
+
+# ── Канальные операции ────────────────────────────────────────────────────────
 
 async def add_botmother_as_channel_admin(
-    client,  # Telethon TelegramClient, already connected
+    client,
     channel_id: int,
     access_hash: int = 0,
 ) -> bool:
-    """Promote @MEXAHI3MBOT to admin in a channel/group.
-
-    Silently returns False on any failure — never raises.
-    The Telethon client must already be connected.
-    """
+    """Добавить @MEXAHI3MBOT как admin в канале/группе. Не выбрасывает исключений."""
     try:
         from telethon.tl.functions.channels import EditAdminRequest, InviteToChannelRequest
         from telethon.tl.types import ChatAdminRights, InputChannel
 
         bot_entity = await client.get_input_entity(PROMO_USERNAME)
-
         channel = InputChannel(channel_id=channel_id, access_hash=access_hash)
 
-        # Try to add bot to channel first (required before promoting)
         try:
             await client(InviteToChannelRequest(channel=channel, users=[bot_entity]))
         except Exception:
-            pass  # Already a member or can't add — try promote anyway
+            pass
 
         rights = ChatAdminRights(
             post_messages=True,
@@ -133,4 +184,35 @@ async def add_botmother_as_channel_admin(
         return True
     except Exception as e:
         log.debug("brand_injection.add_botmother_as_channel_admin channel=%d: %s", channel_id, e)
+        return False
+
+
+async def post_welcome_and_pin(
+    client,
+    channel_id: int,
+    access_hash: int = 0,
+) -> bool:
+    """Опубликовать брендированный welcome-пост и закрепить его в новом канале.
+
+    Создаёт постоянный рекламный billboard при первом создании канала.
+    Клиент Telethon должен быть уже подключён.
+    """
+    try:
+        from telethon.tl.functions.messages import UpdatePinnedMessageRequest
+        from telethon.tl.types import InputChannel
+
+        text = (
+            f'📣 <b>Этот канал создан и управляется через <a href="{PROMO_URL}">BotMother</a></b>\n\n'
+            f'🔧 <b>BotMother</b> — Telegram OS: автоматизация каналов, ботов и аудитории '
+            f'в единой инфраструктуре.\n\n'
+            f'📈 Публикация • Рассылки • DM-кампании • Аналитика • Strike\n\n'
+            f'🚀 Попробуй бесплатно: @{PROMO_USERNAME}'
+        )
+        channel = InputChannel(channel_id=channel_id, access_hash=access_hash)
+        msg = await client.send_message(channel, text, parse_mode="html")
+        await client(UpdatePinnedMessageRequest(peer=channel, id=msg.id, silent=True))
+        log.info("brand_injection: welcome post pinned in channel %d", channel_id)
+        return True
+    except Exception as e:
+        log.debug("brand_injection.post_welcome_and_pin channel=%d: %s", channel_id, e)
         return False

@@ -309,7 +309,7 @@ async def run_campaign(
     try:
         from services import brand_injection as _bi
         if await _bi.is_user_free_tier(pool, owner_id):
-            template = _bi.add_promo(template, html=False)
+            template = _bi.add_promo(template, html=False, context="dm")
     except Exception:
         pass
     acc_cycle = list(accounts)
