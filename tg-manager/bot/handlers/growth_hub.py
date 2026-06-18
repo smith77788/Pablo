@@ -101,7 +101,20 @@ def _menu_text() -> str:
 @router.callback_query(GrowthCb.filter(F.action == "dashboard"))
 async def cb_growth_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    status = await db.get_ambassador_status(pool, callback.from_user.id)
+    try:
+        status = await db.get_ambassador_status(pool, callback.from_user.id)
+    except Exception:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=GrowthCb(action="menu"))
+        kb.adjust(1)
+        try:
+            await callback.message.edit_text(
+                "📊 <b>Мой прогресс</b>\n\n⏳ Система инициализируется после деплоя. Попробуйте через минуту.",
+                parse_mode="HTML", reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        return
     ref = status["ref_stats"]
     tier = status["current_tier"]
     nxt = status["next_tier"]
@@ -180,11 +193,29 @@ def _progress(done: int, total: int, label: str) -> str:
 @router.callback_query(GrowthCb.filter(F.action == "content"))
 async def cb_growth_content(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    seeds = await db.get_growth_content_seeds(pool)
+    try:
+        seeds = await db.get_growth_content_seeds(pool)
+    except Exception:
+        seeds = []
     if not seeds:
-        await callback.answer("Нет контент-пакетов.", show_alert=True)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=GrowthCb(action="menu"))
+        kb.adjust(1)
+        try:
+            await callback.message.edit_text(
+                "📦 <b>Контент-пакеты</b>\n\n"
+                "⏳ Система инициализируется после деплоя.\n"
+                "Попробуйте через минуту — контент-пакеты появятся автоматически.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
         return
-    stats = await db.get_growth_platform_stats(pool)
+    try:
+        stats = await db.get_growth_platform_stats(pool)
+    except Exception:
+        stats = {"total_users": 0, "total_ops": 0, "total_channels": 0, "week_users": 0}
     type_emoji = {"stats": "📊", "native": "💡", "direct": "🚀", "case": "📈"}
     kb = InlineKeyboardBuilder()
     for s in seeds:
@@ -359,7 +390,10 @@ async def _post_content_bg(
 @router.callback_query(GrowthCb.filter(F.action == "leaderboard"))
 async def cb_growth_leaderboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    rows = await db.get_referral_leaderboard_monthly(pool, limit=10)
+    try:
+        rows = await db.get_referral_leaderboard_monthly(pool, limit=10)
+    except Exception:
+        rows = []
     my_id = callback.from_user.id
 
     if not rows:
@@ -408,10 +442,23 @@ async def cb_growth_leaderboard(callback: CallbackQuery, pool: asyncpg.Pool) -> 
 async def cb_growth_commission(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     user_id = callback.from_user.id
-    status = await db.get_ambassador_status(pool, user_id)
-    balance = status["commission_balance"]
-    paid_out = status["paid_out"]
-    history = await db.get_commission_history(pool, user_id, limit=8)
+    try:
+        status = await db.get_ambassador_status(pool, user_id)
+        balance = status["commission_balance"]
+        paid_out = status["paid_out"]
+        history = await db.get_commission_history(pool, user_id, limit=8)
+    except Exception:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=GrowthCb(action="menu"))
+        kb.adjust(1)
+        try:
+            await callback.message.edit_text(
+                "💰 <b>Комиссии & Выплаты</b>\n\n⏳ Система инициализируется после деплоя. Попробуйте через минуту.",
+                parse_mode="HTML", reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        return
 
     tier = status["current_tier"]
     comm_pct = float(tier["commission_pct"]) if tier and tier.get("commission_pct") else 0.0
