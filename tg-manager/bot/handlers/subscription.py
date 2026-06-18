@@ -152,20 +152,18 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     tron_ok = "✅" if _tron_wallet() else "❌"
     pay_status = f"TON {ton_ok}  USDT {tron_ok}"
 
-    # Социальное доказательство
+    # Активность платформы (только операции — не показываем кол-во подписок)
     try:
         stats_row = await pool.fetchrow(
             """SELECT
-                (SELECT COUNT(*) FROM subscriptions WHERE is_active=TRUE AND expires_at > now()) AS active_subs,
                 (SELECT COUNT(*) FROM operation_queue WHERE created_at >= NOW() - INTERVAL '7 days') AS weekly_ops,
-                (SELECT COUNT(*) FROM platform_users) AS total_users
+                (SELECT COUNT(*) FROM operation_queue WHERE created_at >= NOW() - INTERVAL '1 day') AS today_ops
             """
         )
-        active_subs = int(stats_row["active_subs"] or 0) if stats_row else 0
         weekly_ops = int(stats_row["weekly_ops"] or 0) if stats_row else 0
-        total_users = int(stats_row["total_users"] or 0) if stats_row else 0
+        today_ops = int(stats_row["today_ops"] or 0) if stats_row else 0
     except Exception:
-        active_subs = weekly_ops = total_users = 0
+        weekly_ops = today_ops = 0
 
     # Блок информации о текущем плане
     is_paid = plan == "paid"
@@ -199,15 +197,13 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
 
     price_paid = PLAN_PRICES_USD["paid"]
 
-    # Строчки социального доказательства (показываем только если данные есть)
+    # Активность: показываем только операции (не число подписок)
     social_lines = []
-    if total_users > 10:
-        social_lines.append(f"👥 {total_users} пользователей в системе")
-    if active_subs > 0:
-        social_lines.append(f"🔥 {active_subs} активных подписок прямо сейчас")
-    if weekly_ops > 50:
+    if today_ops > 5:
+        social_lines.append(f"⚡ {today_ops} операций выполнено сегодня")
+    elif weekly_ops > 20:
         wops = f"{weekly_ops:,}".replace(",", " ")
-        social_lines.append(f"⚡ {wops} операций выполнено за 7 дней")
+        social_lines.append(f"⚡ {wops} операций за 7 дней")
     social_block = ("\n<i>" + " · ".join(social_lines) + "</i>\n") if social_lines else "\n"
 
     text = (

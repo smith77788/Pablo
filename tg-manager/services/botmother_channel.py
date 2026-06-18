@@ -6,6 +6,7 @@ ID канала хранится в platform_settings['botmother_channel_id'].
 from __future__ import annotations
 
 import logging
+import random
 from datetime import datetime, timezone
 
 import asyncpg
@@ -17,7 +18,6 @@ _SETTING_KEY = "botmother_channel_id"
 
 
 async def get_channel_id(pool: asyncpg.Pool) -> str | None:
-    """Вернуть ID/username канала из настроек платформы."""
     try:
         row = await pool.fetchrow(
             "SELECT value FROM platform_settings WHERE key=$1", _SETTING_KEY
@@ -30,7 +30,6 @@ async def get_channel_id(pool: asyncpg.Pool) -> str | None:
 
 
 async def set_channel_id(pool: asyncpg.Pool, channel_id: str) -> None:
-    """Сохранить ID/username канала в настройках платформы."""
     await pool.execute(
         """INSERT INTO platform_settings (key, value, updated_at)
            VALUES ($1, $2, NOW())
@@ -70,71 +69,124 @@ async def post_changelog(
     now = datetime.now(timezone.utc)
     date_str = now.strftime("%d.%m.%Y")
     ver_str = f" <code>{version}</code>" if version else ""
-
     bullets = "\n".join(f"• {c}" for c in changes)
     text = (
         f"🔧 <b>{title}</b>{ver_str}\n"
         f"<i>{date_str}</i>\n\n"
         f"{bullets}\n\n"
-        f"📊 Ваша инфраструктура Telegram работает на BotMother\n"
+        f"📊 Управляй своей Telegram-инфраструктурой на автопилоте\n"
         f"👉 @MEXAHI3MBOT"
     )
     return await post(pool, bot, text)
 
 
-async def post_stats_update(pool: asyncpg.Pool, bot: Bot) -> bool:
-    """Публикует пост со статистикой роста платформы."""
+# Ротирующие рекламные посты — создают FOMO через демонстрацию возможностей
+_PROMO_POSTS = [
+    (
+        "🚀 <b>Что умеет BotMother прямо сейчас</b>\n\n"
+        "За 5 минут ты можешь:\n"
+        "• Опубликовать пост во все свои каналы одновременно\n"
+        "• Запустить DM-кампанию на тысячи пользователей\n"
+        "• Спарсить аудиторию из любого канала конкурента\n"
+        "• Настроить авто-расписание публикаций на неделю вперёд\n\n"
+        "Всё это без открытия каждого бота и канала вручную.\n\n"
+        "💎 <b>Подписка — $29/мес</b>\n"
+        "👉 @MEXAHI3MBOT"
+    ),
+    (
+        "📩 <b>DM-кампании в Telegram — самый высокий CTR</b>\n\n"
+        "Почему личные сообщения работают лучше постов:\n"
+        "• Открываемость 80%+ vs 5-15% в каналах\n"
+        "• Персонализация с именем, сегментом, историей\n"
+        "• Printax ({Привет|Здравствуйте|Добрый день})\n"
+        "• Ротация аккаунтов — безопасность без флуд-банов\n"
+        "• Аналитика: доставлено / прочитано / ответили\n\n"
+        "BotMother автоматизирует весь процесс.\n\n"
+        "💎 <b>Попробуй — $29/мес</b>\n"
+        "👉 @MEXAHI3MBOT"
+    ),
+    (
+        "📢 <b>Фабрика каналов в Telegram</b>\n\n"
+        "Хочешь 10, 50, 100 каналов?\n"
+        "BotMother создаёт, настраивает и ведёт их массово:\n\n"
+        "⚡ Создание каналов через сеть аккаунтов\n"
+        "✏️ Bulk-редактирование: названия, описания, юзернеймы\n"
+        "📅 Авто-расписание публикаций в каждый канал\n"
+        "📊 Централизованная аналитика по всей сети\n"
+        "🤖 @MEXAHI3MBOT как co-admin — контроль инфраструктуры\n\n"
+        "💎 <b>Запусти свою сеть — $29/мес</b>\n"
+        "👉 @MEXAHI3MBOT"
+    ),
+    (
+        "🧠 <b>AI-ассистент для Telegram-маркетинга</b>\n\n"
+        "Claude AI прямо внутри BotMother:\n\n"
+        "📝 Анализ контента канала — что работает, что нет\n"
+        "✍️ Генерация постов по теме и стилю\n"
+        "📊 Разбор аудитории и сегментов\n"
+        "💡 Идеи для DM-кампаний и воронок\n"
+        "🔍 Анализ конкурентов по @username\n\n"
+        "Безлимитные запросы — без отдельной подписки на AI.\n\n"
+        "💎 <b>Включено в подписку — $29/мес</b>\n"
+        "👉 @MEXAHI3MBOT"
+    ),
+    (
+        "🌐 <b>Global Presence — массовое присутствие в Telegram</b>\n\n"
+        "Твои аккаунты подписываются, вступают, реагируют — автоматически.\n\n"
+        "Зачем это нужно:\n"
+        "• Органический рост без покупки рекламы\n"
+        "• Репосты и реакции поднимают охват постов\n"
+        "• Присутствие в нужных группах и каналах\n"
+        "• Сеть аккаунтов работает 24/7 пока ты спишь\n\n"
+        "Настройка: 5 минут. Результат: постоянный входящий трафик.\n\n"
+        "💎 <b>Запусти — $29/мес</b>\n"
+        "👉 @MEXAHI3MBOT"
+    ),
+    (
+        "⚔️ <b>Strike — защита и мониторинг каналов</b>\n\n"
+        "Автоматический инструмент для активного продвижения:\n\n"
+        "👁 Мониторинг упоминаний в реальном времени\n"
+        "💬 Автоматические реакции и комментарии\n"
+        "🤖 Выявление и нейтрализация ботов в аудитории\n"
+        "📈 Буст охвата через синхронные действия сети\n\n"
+        "Один запуск — работает на всю твою сеть каналов.\n\n"
+        "💎 <b>Активируй Strike — $29/мес</b>\n"
+        "👉 @MEXAHI3MBOT"
+    ),
+]
+
+
+async def post_promo(pool: asyncpg.Pool, bot: Bot) -> bool:
+    """Публикует ротирующий промо-пост в канал (FOMO через функции, не через числа)."""
     try:
-        row = await pool.fetchrow(
-            """SELECT
-                (SELECT COUNT(*) FROM platform_users) AS users,
-                (SELECT COUNT(*) FROM managed_bots WHERE is_active=TRUE) AS bots,
-                (SELECT COUNT(*) FROM managed_channels) AS channels,
-                (SELECT COUNT(*) FROM operation_queue WHERE created_at >= NOW() - INTERVAL '7 days') AS weekly_ops
-            """
+        # Берём следующий по счётчику пост (детерминировано, не случайно)
+        idx_raw = await pool.fetchval(
+            "SELECT value FROM platform_settings WHERE key='bm_promo_idx'"
+        )
+        idx = (int(idx_raw) + 1) % len(_PROMO_POSTS) if idx_raw else 0
+        await pool.execute(
+            """INSERT INTO platform_settings (key, value, updated_at)
+               VALUES ('bm_promo_idx', $1, NOW())
+               ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()""",
+            str(idx),
         )
     except Exception:
-        row = None
+        idx = random.randint(0, len(_PROMO_POSTS) - 1)
 
-    users = int(row["users"] or 0) if row else 0
-    bots = int(row["bots"] or 0) if row else 0
-    channels = int(row["channels"] or 0) if row else 0
-    weekly_ops = int(row["weekly_ops"] or 0) if row else 0
-
-    text = (
-        f"📊 <b>BotMother — статистика платформы</b>\n\n"
-        f"👥 Пользователей: <b>{users:,}".replace(",", " ") + f"</b>\n"
-        f"🤖 Активных ботов: <b>{bots:,}".replace(",", " ") + f"</b>\n"
-        f"📢 Каналов в управлении: <b>{channels:,}".replace(",", " ") + f"</b>\n"
-        f"⚡ Операций за неделю: <b>{weekly_ops:,}".replace(",", " ") + f"</b>\n\n"
-        f"🚀 Присоединяйся — автоматизируй свой Telegram\n"
-        f"👉 @MEXAHI3MBOT"
-    )
-    return await post(pool, bot, text)
+    return await post(pool, bot, _PROMO_POSTS[idx])
 
 
 async def post_promo_offer(pool: asyncpg.Pool, bot: Bot) -> bool:
-    """Публикует рекламное предложение в канал."""
-    try:
-        row = await pool.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM platform_users"
-        )
-        users = int(row["cnt"] or 0) if row else 0
-    except Exception:
-        users = 0
-
+    """Публикует рекламный оффер для рекламодателей в канал."""
     text = (
-        f"📣 <b>Реклама в BotMother</b>\n\n"
-        f"Наш бот используют <b>{users:,}".replace(",", " ") + f"</b> владельцев Telegram-каналов и ботов.\n\n"
-        f"<b>Аудитория:</b>\n"
-        f"• Владельцы каналов и ботов\n"
-        f"• Маркетологи и предприниматели\n"
-        f"• Специалисты по Telegram-автоматизации\n\n"
-        f"<b>Форматы рекламы:</b>\n"
-        f"📌 Пост в канале\n"
-        f"🤖 Упоминание в боте\n"
-        f"📨 DM-кампания по нашей базе\n\n"
-        f"💬 Для сотрудничества: @MEXAHI3MBOT\n\n"
-        f"<i>BotMother — Telegram OS для роста вашей инфраструктуры</i>"
+        "📣 <b>Реклама через BotMother</b>\n\n"
+        "<b>Аудитория:</b> владельцы Telegram-каналов, ботов и Telegram-маркетологи\n\n"
+        "<b>Форматы:</b>\n"
+        "📌 Пост в информационном канале\n"
+        "🤖 Интеграция в бот BotMother\n"
+        "📨 DM-рассылка по нашей пользовательской базе\n\n"
+        "Аудитория активно вкладывает в развитие своих Telegram-активов — "
+        "высокая конверсия в B2B и инструментальных нишах.\n\n"
+        "💬 По вопросам сотрудничества: @MEXAHI3MBOT\n\n"
+        "<i>BotMother — Telegram OS для роста инфраструктуры</i>"
     )
     return await post(pool, bot, text)

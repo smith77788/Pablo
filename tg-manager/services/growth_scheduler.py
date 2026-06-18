@@ -224,16 +224,15 @@ async def _drip_upsell(pool: asyncpg.Pool, bot: Bot) -> None:
 
 # ── Автопост в канал BotMother ────────────────────────────────────────────────
 
-_CHANNEL_PROMO_INTERVAL_DAYS = 7
+_CHANNEL_PROMO_INTERVAL_DAYS = 3  # промо-пост раз в 3 дня
 
 async def _maybe_post_channel_promo(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Раз в 7 дней публикует статистику в официальный канал BotMother."""
+    """Раз в 3 дня публикует ротирующий промо-пост о возможностях BotMother."""
     try:
         last_str = await pool.fetchval(
             "SELECT value FROM platform_settings WHERE key='bm_channel_last_promo'"
         )
         if last_str:
-            from datetime import datetime, timezone
             last_dt = datetime.fromisoformat(last_str)
             if last_dt.tzinfo is None:
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
@@ -244,7 +243,7 @@ async def _maybe_post_channel_promo(pool: asyncpg.Pool, bot: Bot) -> None:
         pass
 
     from services import botmother_channel as _bmc
-    ok = await _bmc.post_stats_update(pool, bot)
+    ok = await _bmc.post_promo(pool, bot)
     if ok:
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -256,4 +255,4 @@ async def _maybe_post_channel_promo(pool: asyncpg.Pool, bot: Bot) -> None:
             )
         except Exception:
             pass
-        log.info("growth_scheduler: posted stats to BotMother channel")
+        log.info("growth_scheduler: posted promo to BotMother channel")

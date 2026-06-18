@@ -908,17 +908,17 @@ async def cb_admin(
             reply_markup=kb2.as_markup(),
         )
 
-    elif action == "bm_post_stats":
+    elif action == "bm_post_feature":
         from services import botmother_channel as _bmc
-        ok = await _bmc.post_stats_update(pool, callback.bot)
-        status = "✅ Опубликовано!" if ok else "❌ Ошибка (канал не настроен?)"
+        ok = await _bmc.post_promo(pool, callback.bot)
+        status = "✅ Промо-пост опубликован!" if ok else "❌ Ошибка (канал не настроен?)"
         await callback.answer(status, show_alert=True)
         await _adm_bm_channel(callback, pool)
 
-    elif action == "bm_post_promo":
+    elif action == "bm_post_adoffer":
         from services import botmother_channel as _bmc
         ok = await _bmc.post_promo_offer(pool, callback.bot)
-        status = "✅ Рекламный пост опубликован!" if ok else "❌ Ошибка (канал не настроен?)"
+        status = "✅ Рекламный оффер опубликован!" if ok else "❌ Ошибка (канал не настроен?)"
         await callback.answer(status, show_alert=True)
         await _adm_bm_channel(callback, pool)
 
@@ -3332,8 +3332,8 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="⚙️ Задать ID канала", callback_data="adm:bm_channel_set_id")
     if channel_id:
-        kb.button(text="📊 Пост: Статистика платформы", callback_data="adm:bm_post_stats")
-        kb.button(text="📣 Пост: Реклама в BotMother", callback_data="adm:bm_post_promo")
+        kb.button(text="🚀 Промо: Возможности системы", callback_data="adm:bm_post_feature")
+        kb.button(text="📣 Промо: Реклама в BotMother", callback_data="adm:bm_post_adoffer")
         kb.button(text="📝 Пост: Произвольный текст", callback_data="adm:bm_post_update")
     kb.button(text="◀️ Админка", callback_data="adm:main")
     kb.adjust(1)
@@ -3341,11 +3341,12 @@ async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
     text = (
         "📢 <b>Канал BotMother</b>\n\n"
         f"Канал: {ch_label}\n\n"
-        "<b>Что можно публиковать:</b>\n"
-        "📊 <b>Статистика</b> — пользователи, боты, операции за неделю\n"
-        "📣 <b>Реклама</b> — оффер для рекламодателей с охватом аудитории\n"
-        "📝 <b>Произвольный пост</b> — changelog, новости, анонсы\n\n"
-        "<i>Бот должен быть администратором канала с правами публикации.</i>"
+        "<b>Типы публикаций:</b>\n"
+        "🚀 <b>Возможности</b> — показывает конкретную фичу (6 ротирующих вариантов)\n"
+        "📣 <b>Реклама</b> — оффер для рекламодателей\n"
+        "📝 <b>Произвольный</b> — changelog, обновления, анонсы\n\n"
+        "<i>Автоматически: ротирующий промо-пост раз в 3 дня.\n"
+        "Бот должен быть администратором канала.</i>"
     )
     target = event if hasattr(event, "answer") else event.message
     try:
