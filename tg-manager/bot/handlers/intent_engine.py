@@ -44,7 +44,6 @@ router = Router(name="intent_engine")
 
 _PRESET_LABELS: dict[str, tuple[str, str]] = {
     "presence": ("🌍", "Гео-присутствие"),
-    "growth": ("📈", "Рост сети"),
     "sync": ("🔁", "Синхронизация контента"),
     "audit": ("🩺", "Аудит инфраструктуры"),
     "network": ("🕸", "Карта сети"),
@@ -54,7 +53,6 @@ _PRESET_LABELS: dict[str, tuple[str, str]] = {
 
 _PRESET_DESCRIPTIONS: dict[str, str] = {
     "presence": "Создать гео-присутствие и распределить ресурсы по городам",
-    "growth": "Подготовить рост сети через существующие каналы и аккаунты",
     "sync": "Синхронизировать контент между активами проекта",
     "audit": "Проверить здоровье аккаунтов, прокси, очередей и операций",
     "network": "Показать карту связей и состояние активов",
@@ -118,7 +116,6 @@ def _plan_kb(intent_id: int, plan: dict[str, Any], current_strategy: str) -> obj
     if plan.get("executable") and action in {
         "execute_gp",
         "run_audit",
-        "execute_growth",
         "execute_sync",
         "run_visibility",
         "execute_op",
@@ -157,7 +154,6 @@ def _history_kb(intents: list[Any]) -> object:
         "network": "🕸",
         "audit": "🩺",
         "sync": "🔁",
-        "growth": "📈",
         "strike": "⚔️",
         "visibility": "🔎",
         "custom": "✍️",
@@ -326,7 +322,6 @@ async def _show_plan_card(
         "network": "🕸 Карта сети",
         "audit": "🩺 Аудит",
         "sync": "🔁 Синхронизация",
-        "growth": "📈 Рост",
         "strike": "⚔️ STRIKE",
         "visibility": "🔎 Видимость",
         "custom": "✍️ Своя цель",
@@ -420,10 +415,6 @@ async def cb_intent_confirm(
         await _execute_gp_intent(callback, pool, intent_id, plan, owner_id)
     elif action == "run_audit":
         await _execute_audit_intent(callback, pool, intent_id, owner_id)
-    elif action == "execute_growth":
-        await _execute_growth_intent(
-            callback, pool, intent_id, plan, strategy, owner_id
-        )
     elif action == "execute_sync":
         await _execute_sync_intent(callback, pool, intent_id, plan, owner_id)
     elif action == "run_visibility":
@@ -550,41 +541,6 @@ async def _execute_audit_intent(
         await _show_manual_hint(
             callback, f"Аудит упал: {type(exc).__name__}", "health_dashboard"
         )
-
-
-async def _execute_growth_intent(
-    callback: CallbackQuery,
-    pool: asyncpg.Pool,
-    intent_id: int,
-    plan: dict[str, Any],
-    strategy: str,
-    owner_id: int,
-) -> None:
-    from services import operation_bus
-
-    try:
-        rows = await pool.fetch(
-            "SELECT DISTINCT channel_id FROM managed_channels WHERE owner_id=$1 LIMIT 20",
-            owner_id,
-        )
-    except Exception as exc:
-        log_exc_swallow(log, f"_execute_growth_intent: fetch channels failed: {exc}")
-        rows = []
-    channel_ids = [str(row["channel_id"]) for row in rows]
-    if not channel_ids:
-        await _navigate_to_tool(callback, plan)
-        return
-
-    op_id = await operation_bus.submit(
-        pool,
-        owner_id,
-        "bulk_join",
-        {"targets": channel_ids, "strategy": strategy, "via_intent": intent_id},
-        total_items=len(channel_ids),
-    )
-    await db.link_intent_operation(pool, intent_id, op_id)
-    await db.update_intent_status(pool, intent_id, owner_id, "executing")
-    await _show_operation_started(callback, op_id, f"Целей в плане: {len(channel_ids)}")
 
 
 async def _execute_sync_intent(

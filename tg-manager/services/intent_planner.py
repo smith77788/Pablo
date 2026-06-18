@@ -45,10 +45,6 @@ _INTENT_PATTERNS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
-        "growth",
-        ["масштаб", "growth", "расширить", "усилить", "увелич", "развить", "scale"],
-    ),
-    (
         "visibility",
         [
             "видимость",
@@ -169,7 +165,6 @@ async def build_plan(
         "network": _build_network_plan,
         "audit": _build_audit_plan,
         "sync": _build_sync_plan,
-        "growth": _build_growth_plan,
         "strike": _build_strike_plan,
         "visibility": _build_visibility_plan,
     }
@@ -374,53 +369,6 @@ async def _build_sync_plan(pool, owner_id, description, resources):
     }
 
 
-async def _build_growth_plan(pool, owner_id, description, resources):
-    geo_preset = detect_geo_preset(description)
-    preset_info = GEO_PRESETS.get(geo_preset) or GEO_PRESETS["eu_capitals"]
-
-    channels_cnt = (
-        await pool.fetchval(
-            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", owner_id
-        )
-        or 0
-    )
-
-    n_accs = resources["accounts_available"]
-    can_execute = n_accs > 0 and channels_cnt > 0
-
-    steps = [
-        f"1. Анализ {channels_cnt} каналов текущего присутствия",
-        f"2. Оценка ресурсов: {n_accs} аккаунтов, {resources['proxies_available']} прокси",
-        "3. Подбор оптимальных аккаунтов для операции",
-    ]
-    if can_execute:
-        target_count = min(channels_cnt, 20)
-        steps.append(f"4. Массовое вступление аккаунтов в {target_count} каналов")
-        steps.append("5. Обновление trust score и поведенческих метрик")
-    else:
-        steps.append("4. Переход к Ecosystem Factory для создания новых активов")
-
-    return {
-        "intent_type": "growth",
-        "goal": "Масштабирование и усиление экосистемы",
-        "geo_preset": geo_preset,
-        "geo_label": preset_info["label"],
-        "n_targets": max(channels_cnt, 1),
-        "n_channels": channels_cnt,
-        "n_accounts_available": n_accs,
-        "n_proxies_available": resources["proxies_available"],
-        "steps": steps,
-        "risks": (
-            ["⚠️ Масштабирование требует достаточного числа аккаунтов и прокси"]
-            if n_accs < 3
-            else ["✅ Ресурсов достаточно для масштабирования"]
-        ),
-        "executable": can_execute,
-        "action": "execute_growth" if can_execute else "navigate",
-        "navigate_to": "ecosystems",
-    }
-
-
 async def _build_strike_plan(pool, owner_id, description, resources):
     return {
         "intent_type": "strike",
@@ -578,7 +526,6 @@ def format_plan_card(plan: dict, forecast: dict, strategy: str) -> str:
         "network": "🕸",
         "audit": "🔍",
         "sync": "🔄",
-        "growth": "📈",
         "strike": "⚔️",
         "visibility": "👁️",
         "custom": "🎯",
