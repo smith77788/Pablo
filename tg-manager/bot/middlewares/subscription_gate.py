@@ -3,6 +3,7 @@
 from __future__ import annotations
 import logging
 import os
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -14,6 +15,31 @@ log = logging.getLogger(__name__)
 
 _gate_enabled: bool = False
 _gate_channels: list[dict] = []
+
+# ─── Membership result cache ──────────────────────────────────────────────────
+# Keyed by user_id → (expires_at, is_allowed)
+# Avoids a Telegram API call on every message/callback.
+_gate_cache: dict[int, tuple[float, bool]] = {}
+_GATE_CACHE_TTL = 60.0  # seconds
+
+
+def _cache_get(user_id: int) -> bool | None:
+    entry = _gate_cache.get(user_id)
+    if entry is None:
+        return None
+    exp, allowed = entry
+    if time.monotonic() > exp:
+        _gate_cache.pop(user_id, None)
+        return None
+    return allowed
+
+
+def _cache_set(user_id: int, allowed: bool) -> None:
+    _gate_cache[user_id] = (time.monotonic() + _GATE_CACHE_TTL, allowed)
+
+
+def _cache_invalidate(user_id: int) -> None:
+    _gate_cache.pop(user_id, None)
 
 
 def set_gate_enabled(value: bool) -> None:
@@ -121,10 +147,12 @@ class SubscriptionGateMiddleware(BaseMiddleware):
         if not bot:
             return await handler(event, data)
 
-        # Handle "check" button — re-verify and unblock if subscribed
+        # Handle "check" button — always re-verify against Telegram API, invalidate cache
         if isinstance(event, CallbackQuery) and event.data == "gate:check":
+            _cache_invalidate(user.id)
             missing = await _check_membership(bot, user.id, _gate_channels)
             if not missing:
+                _cache_set(user.id, True)
                 await event.answer("✅ Подписка подтверждена!")
                 try:
                     await event.message.edit_text(
@@ -134,6 +162,7 @@ class SubscriptionGateMiddleware(BaseMiddleware):
                 except Exception:
                     pass
             else:
+                _cache_set(user.id, False)
                 names = ", ".join(
                     ch.get("channel_title") or ch["channel_username"] for ch in missing
                 )
@@ -142,7 +171,30 @@ class SubscriptionGateMiddleware(BaseMiddleware):
                 )
             return None
 
+        # Fast path: serve from cache (avoids Telegram API call per request)
+        cached = _cache_get(user.id)
+        if cached is True:
+            return await handler(event, data)
+        if cached is False:
+            # Still blocked — show gate without API call
+            text = _gate_text(_gate_channels)
+            markup = _gate_markup(_gate_channels)
+            if isinstance(event, Message):
+                await event.answer(text, reply_markup=markup, parse_mode="HTML")
+            elif isinstance(event, CallbackQuery):
+                try:
+                    await event.answer("Необходима подписка на каналы!", show_alert=True)
+                except Exception:
+                    pass
+                try:
+                    await event.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+                except Exception:
+                    pass
+            return None
+
+        # Cache miss — check Telegram API, then cache the result
         missing = await _check_membership(bot, user.id, _gate_channels)
+        _cache_set(user.id, len(missing) == 0)
         if not missing:
             return await handler(event, data)
 
