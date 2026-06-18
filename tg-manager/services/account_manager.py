@@ -3620,8 +3620,25 @@ async def report_peer_deep_v2(  # noqa: C901
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                     entity = await _timed(client.get_entity(entity.id), 15.0)
                 except Exception:
-                    # Already a member — try get_entity directly
-                    entity = await _timed(client.get_entity(peer), 15.0)
+                    # Already a member (or other join error) — use CheckChatInviteRequest
+                    # to get entity. ImportChatInviteRequest fails for existing members,
+                    # but get_entity("+hash") mis-parses the hash as a phone number.
+                    try:
+                        from telethon.tl.functions.messages import (
+                            CheckChatInviteRequest as _CCIR,
+                        )
+                        from telethon.tl.types import ChatInviteAlready as _CIA
+
+                        _check = await _timed(client(_CCIR(hash=_invite_hash)), 10.0)
+                        if isinstance(_check, _CIA):
+                            entity = _check.chat
+                            R["joined"] = True
+                        elif hasattr(_check, "chat") and _check.chat:
+                            entity = _check.chat
+                        else:
+                            raise ValueError("CheckChatInvite returned no chat")
+                    except Exception:
+                        entity = await _timed(client.get_entity(peer), 15.0)
             else:
                 entity = await _timed(client.get_entity(peer))
         except Exception as e:
