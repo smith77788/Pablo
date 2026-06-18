@@ -670,14 +670,36 @@ async def _one_account_strike(
                         log_exc_swallow(log, "strike: record peer_flood failed")
                     return result
 
-                # Фиксируем успех в Infrastructure Memory
+                # Entity could not be resolved — account did nothing, no cooldown needed.
+                if result.get("_entity_error"):
+                    log.warning(
+                        "strike acc %s wave %d: entity error — no cooldown applied",
+                        acc.get("id"),
+                        wave_num,
+                    )
+                    try:
+                        from services.infra_memory import record_account_op
+
+                        record_account_op(
+                            acc["id"], "strike", success=False, error="entity_error"
+                        )
+                    except Exception:
+                        pass
+                    return result
+
+                # Фиксируем успех в Infrastructure Memory только если были реальные действия.
+                _did_action = bool(
+                    result.get("peer_reported")
+                    or result.get("msgs_fetched")
+                    or result.get("joined")
+                )
                 try:
                     from services.infra_memory import record_account_op
 
                     record_account_op(
                         acc["id"],
                         "strike",
-                        success=True,
+                        success=_did_action,
                         duration_s=time.monotonic() - t0_strike,
                     )
                 except Exception as e:
@@ -686,9 +708,8 @@ async def _one_account_strike(
                         acc.get("id"),
                         e,
                     )
-                # Protective rest cooldown so the same account isn't driven into
-                # another wave/strike too soon (per-account rate limit, §4/§6).
-                if pool is not None and acc.get("id"):
+                # Protective rest cooldown только когда аккаунт реально действовал.
+                if _did_action and pool is not None and acc.get("id"):
                     try:
                         from services.flood_engine import apply_post_action_cooldown
 

@@ -3332,6 +3332,7 @@ async def report_peer_deep_v2(  # noqa: C901
         "bots_reported": 0,
         "forwarded": 0,
         "blocked": False,
+        "_entity_error": False,  # entity could not be resolved — no actions taken
         "joined": False,
         "rate_limited": False,
         "_peer_flood": False,
@@ -3625,6 +3626,7 @@ async def report_peer_deep_v2(  # noqa: C901
                 entity = await _timed(client.get_entity(peer))
         except Exception as e:
             log.warning("rpv2[0/entity] acc=%s target=%s: %s", acc_id, peer, e)
+            R["_entity_error"] = True
             return R
 
         is_channel = isinstance(entity, Channel)
