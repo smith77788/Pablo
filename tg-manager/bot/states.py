@@ -534,3 +534,9 @@ class BotTplCustomizeFSM(StatesGroup):
     operator = State()       # @username оператора (или /skip)
 
 
+class BotMotherChannelFSM(StatesGroup):
+    set_channel_id = State()   # ввод ID/username канала
+    write_post = State()       # текст нового поста
+    confirm_post = State()     # подтверждение перед публикацией
+
+

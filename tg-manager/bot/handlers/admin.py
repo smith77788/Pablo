@@ -29,7 +29,7 @@ from bot.middlewares.subscription_gate import (
     build_gate_text,
     build_gate_markup,
 )
-from bot.states import GateAddFSM
+from bot.states import GateAddFSM, BotMotherChannelFSM
 from config import ADMIN_SECRET
 from database import db
 from services import railway_api
@@ -121,9 +121,10 @@ def _admin_main_kb(new_error_reports: int = 0):
     kb.button(text="⚙️ Операции", callback_data="adm:section_ops")
     kb.button(text="🧠 AI / провайдеры", callback_data="adm:section_ai")
     kb.button(text="🛠 Система", callback_data="adm:section_system")
+    kb.button(text="📢 Канал BotMother", callback_data="adm:bm_channel")
     kb.button(text=err_label, callback_data="adm:error_reports")
     kb.button(text="🚪 Выйти", callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2)
     return kb.as_markup()
 
 
@@ -878,6 +879,48 @@ async def cb_admin(
             "👋 Вышли из админки.",
             reply_markup=main_menu(is_admin=True),
         )
+
+    elif action == "bm_channel":
+        await _adm_bm_channel(callback, pool)
+
+    elif action == "bm_channel_set_id":
+        await state.set_state(BotMotherChannelFSM.set_channel_id)
+        await callback.message.edit_text(
+            "📢 <b>Настройка канала BotMother</b>\n\n"
+            "Введите ID или @username канала:\n"
+            "<i>Примеры: @BotMotherChannel или -1001234567890</i>\n\n"
+            "Бот должен быть администратором канала с правом публикации.",
+            parse_mode="HTML",
+        )
+
+    elif action == "bm_post_update":
+        await state.set_state(BotMotherChannelFSM.write_post)
+        await state.update_data(post_type="custom")
+        kb2 = InlineKeyboardBuilder()
+        kb2.button(text="❌ Отмена", callback_data="adm:bm_channel")
+        kb2.adjust(1)
+        await callback.message.edit_text(
+            "📝 <b>Новый пост в канал BotMother</b>\n\n"
+            "Напишите текст поста (HTML поддерживается):\n\n"
+            "<i>Совет: используйте <b>жирный</b>, <i>курсив</i>, <code>код</code>, "
+            "ссылки через &lt;a href=&quot;...&quot;&gt;текст&lt;/a&gt;</i>",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+
+    elif action == "bm_post_stats":
+        from services import botmother_channel as _bmc
+        ok = await _bmc.post_stats_update(pool, callback.bot)
+        status = "✅ Опубликовано!" if ok else "❌ Ошибка (канал не настроен?)"
+        await callback.answer(status, show_alert=True)
+        await _adm_bm_channel(callback, pool)
+
+    elif action == "bm_post_promo":
+        from services import botmother_channel as _bmc
+        ok = await _bmc.post_promo_offer(pool, callback.bot)
+        status = "✅ Рекламный пост опубликован!" if ok else "❌ Ошибка (канал не настроен?)"
+        await callback.answer(status, show_alert=True)
+        await _adm_bm_channel(callback, pool)
 
 
 # ── Sub-screens ───────────────────────────────────────────────────────────────
@@ -3274,3 +3317,105 @@ async def cb_adm_gate_notify_all(
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ── BotMother Channel Management ─────────────────────────────────────────────
+
+
+async def _adm_bm_channel(event, pool: asyncpg.Pool) -> None:
+    """Показать раздел управления каналом BotMother."""
+    from services import botmother_channel as _bmc
+
+    channel_id = await _bmc.get_channel_id(pool)
+    ch_label = f"<code>{channel_id}</code>" if channel_id else "❌ не настроен"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚙️ Задать ID канала", callback_data="adm:bm_channel_set_id")
+    if channel_id:
+        kb.button(text="📊 Пост: Статистика платформы", callback_data="adm:bm_post_stats")
+        kb.button(text="📣 Пост: Реклама в BotMother", callback_data="adm:bm_post_promo")
+        kb.button(text="📝 Пост: Произвольный текст", callback_data="adm:bm_post_update")
+    kb.button(text="◀️ Админка", callback_data="adm:main")
+    kb.adjust(1)
+
+    text = (
+        "📢 <b>Канал BotMother</b>\n\n"
+        f"Канал: {ch_label}\n\n"
+        "<b>Что можно публиковать:</b>\n"
+        "📊 <b>Статистика</b> — пользователи, боты, операции за неделю\n"
+        "📣 <b>Реклама</b> — оффер для рекламодателей с охватом аудитории\n"
+        "📝 <b>Произвольный пост</b> — changelog, новости, анонсы\n\n"
+        "<i>Бот должен быть администратором канала с правами публикации.</i>"
+    )
+    target = event if hasattr(event, "answer") else event.message
+    try:
+        await target.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+    except Exception:
+        await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
+@router.message(BotMotherChannelFSM.set_channel_id)
+async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        await state.clear()
+        return
+    value = (message.text or "").strip()
+    if not value:
+        await message.answer("⚠️ Введите ID или @username канала.")
+        return
+    from services import botmother_channel as _bmc
+    await _bmc.set_channel_id(pool, value)
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📢 К настройкам канала", callback_data="adm:bm_channel")
+    kb.adjust(1)
+    await message.answer(
+        f"✅ <b>Канал сохранён:</b> <code>{value}</code>\n\n"
+        f"Теперь бот будет публиковать посты в этот канал.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(BotMotherChannelFSM.write_post)
+async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("⚠️ Текст не может быть пустым.")
+        return
+    await state.update_data(post_text=text)
+    await state.set_state(BotMotherChannelFSM.confirm_post)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Опубликовать", callback_data="adm:bm_post_confirm")
+    kb.button(text="✏️ Исправить", callback_data="adm:bm_post_update")
+    kb.button(text="❌ Отмена", callback_data="adm:bm_channel")
+    kb.adjust(1)
+    await message.answer(
+        f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"
+        f"<i>Опубликовать в канал BotMother?</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "adm:bm_post_confirm")
+async def cb_bm_post_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("⛔️ Нет доступа.", show_alert=True)
+        return
+    await callback.answer()
+    data = await state.get_data()
+    await state.clear()
+    text = data.get("post_text", "")
+    if not text:
+        await callback.answer("❌ Текст поста не найден.", show_alert=True)
+        return
+    from services import botmother_channel as _bmc
+    ok = await _bmc.post(pool, callback.bot, text)
+    status = "✅ Пост опубликован!" if ok else "❌ Ошибка публикации (канал не настроен?)"
+    await callback.answer(status, show_alert=True)
+    await _adm_bm_channel(callback, pool)

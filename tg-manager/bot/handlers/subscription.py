@@ -152,6 +152,21 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
     tron_ok = "✅" if _tron_wallet() else "❌"
     pay_status = f"TON {ton_ok}  USDT {tron_ok}"
 
+    # Социальное доказательство
+    try:
+        stats_row = await pool.fetchrow(
+            """SELECT
+                (SELECT COUNT(*) FROM subscriptions WHERE is_active=TRUE AND expires_at > now()) AS active_subs,
+                (SELECT COUNT(*) FROM operation_queue WHERE created_at >= NOW() - INTERVAL '7 days') AS weekly_ops,
+                (SELECT COUNT(*) FROM platform_users) AS total_users
+            """
+        )
+        active_subs = int(stats_row["active_subs"] or 0) if stats_row else 0
+        weekly_ops = int(stats_row["weekly_ops"] or 0) if stats_row else 0
+        total_users = int(stats_row["total_users"] or 0) if stats_row else 0
+    except Exception:
+        active_subs = weekly_ops = total_users = 0
+
     # Блок информации о текущем плане
     is_paid = plan == "paid"
     if plan == "free":
@@ -167,16 +182,13 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             now_utc = datetime.now(timezone.utc)
             if expires_at.tzinfo is None:
                 from datetime import timezone as tz
-
                 expires_utc = expires_at.replace(tzinfo=tz.utc)
             else:
                 expires_utc = expires_at
             days_left = (expires_utc - now_utc).days
             expire_str = expires_utc.strftime("%d.%m.%Y")
             if days_left <= 3:
-                days_badge = (
-                    f"⚠️ <b>Осталось {days_left} дн.</b> — продлите до {expire_str}"
-                )
+                days_badge = f"⚠️ <b>Осталось {days_left} дн.</b> — продлите до {expire_str}"
             elif days_left <= 14:
                 days_badge = f"⏳ Осталось <b>{days_left} дн.</b> (до {expire_str})"
             else:
@@ -186,18 +198,31 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов"
 
     price_paid = PLAN_PRICES_USD["paid"]
+
+    # Строчки социального доказательства (показываем только если данные есть)
+    social_lines = []
+    if total_users > 10:
+        social_lines.append(f"👥 {total_users} пользователей в системе")
+    if active_subs > 0:
+        social_lines.append(f"🔥 {active_subs} активных подписок прямо сейчас")
+    if weekly_ops > 50:
+        wops = f"{weekly_ops:,}".replace(",", " ")
+        social_lines.append(f"⚡ {wops} операций выполнено за 7 дней")
+    social_block = ("\n<i>" + " · ".join(social_lines) + "</i>\n") if social_lines else "\n"
+
     text = (
-        f"💳 <b>Подписка</b>\n\n"
-        f"{plan_info}\n\n"
+        f"💳 <b>Подписка BotMother</b>\n\n"
+        f"{plan_info}\n"
+        f"{social_block}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🆓 <b>БЕСПЛАТНО</b> — навсегда\n"
-        f"<i>До 5 ботов · До 5 каналов/чатов\n"
-        f"Описание, приветствие, рассылка по боту</i>\n\n"
+        f"<i>До 5 ботов · До 5 каналов\n"
+        f"Описание, приветствие, базовая рассылка</i>\n\n"
         f"💎 <b>ПОДПИСКА</b> — ${price_paid}/мес\n"
-        f"<i>∞ ботов и каналов, все функции без ограничений:\n"
-        f"CRM, воронки, аккаунты, AI-ассистент, рассылки,\n"
-        f"аналитика, фабрики каналов и групп, парсер, и многое другое</i>\n"
-        f"<i>При годовой оплате: скидка 20%</i>\n"
+        f"<i>∞ ботов и каналов · CRM · Воронки\n"
+        f"DM-кампании · AI-ассистент · Рассылки по сети\n"
+        f"Парсер · Фабрики · Аналитика · Strike · и всё остальное</i>\n\n"
+        f"<i>💰 Оплата на 12 мес — скидка 20%</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"<i>Оплата: {pay_status}</i>"
     )
