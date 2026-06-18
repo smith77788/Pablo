@@ -348,6 +348,13 @@ async def _post_content_bg(
     channels: list,
     content: str,
 ) -> None:
+    # Brand injection for free-tier users
+    try:
+        from services import brand_injection as _bi
+        if await _bi.is_user_free_tier(pool, user_id):
+            content = _bi.add_promo(content, html=True)
+    except Exception:
+        pass
     sent = failed = 0
     for ch in channels:
         try:

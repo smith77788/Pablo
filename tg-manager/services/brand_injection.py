@@ -21,6 +21,8 @@ PROMO_HTML = f'\n\n🤖 <a href="https://t.me/{PROMO_USERNAME}">@{PROMO_USERNAME
 
 # In-memory plan cache {bot_id: True/False}; refreshes on miss
 _plan_cache: dict[int, bool] = {}
+# In-memory user plan cache {user_id: True/False}
+_user_plan_cache: dict[int, bool] = {}
 _cache_hits = 0
 
 
@@ -54,10 +56,29 @@ async def is_free_tier(pool: asyncpg.Pool, bot_id: int) -> bool:
         return False  # on error — don't inject (safe default)
 
 
+async def is_user_free_tier(pool: asyncpg.Pool, user_id: int) -> bool:
+    """Return True if the user (by Telegram user_id) is on free tier."""
+    if user_id in _user_plan_cache:
+        return _user_plan_cache[user_id]
+    try:
+        row = await pool.fetchrow(
+            "SELECT current_plan FROM platform_users WHERE user_id=$1",
+            user_id,
+        )
+        plan = (row["current_plan"] if row else "free") or "free"
+        result = plan.lower() in ("free", "")
+        _user_plan_cache[user_id] = result
+        return result
+    except Exception as e:
+        log.debug("brand_injection.is_user_free_tier user_id=%d: %s", user_id, e)
+        return False
+
+
 def invalidate_cache(bot_id: int | None = None) -> None:
     """Call after plan upgrade to clear cached result."""
     if bot_id is None:
         _plan_cache.clear()
+        _user_plan_cache.clear()
     else:
         _plan_cache.pop(bot_id, None)
 

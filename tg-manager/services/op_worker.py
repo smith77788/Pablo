@@ -1241,6 +1241,13 @@ async def _exec_mass_publish(
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
+    # Brand injection: free-tier users get @MEXAHI3MBOT appended to every channel post
+    try:
+        from services import brand_injection as _bi
+        if await _bi.is_user_free_tier(pool, owner_id):
+            mp_text = _bi.add_promo(mp_text, html=True)
+    except Exception:
+        pass
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
