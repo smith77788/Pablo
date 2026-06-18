@@ -3832,11 +3832,34 @@ async def cb_br_mode_batch(
 
 
 def _normalize_peer(p: str) -> str:
+    """Normalise a user-supplied Telegram target.
+
+    Returns:
+      +HASH         for invite links (https://t.me/+HASH or t.me/+HASH)
+      @username     for public channels/bots/users
+    """
     p = p.strip().rstrip("/")
-    if p.startswith("https://t.me/"):
-        p = "@" + p.split("t.me/")[-1].split("?")[0].rstrip("/")
-    elif not p.startswith("@"):
-        p = "@" + p.lstrip("@")
+    for pfx in ("https://t.me/", "http://t.me/", "t.me/"):
+        if p.startswith(pfx):
+            slug = p[len(pfx):].split("?")[0].rstrip("/")
+            if slug.startswith("+"):
+                return slug  # invite link → +HASH (no @)
+            return "@" + slug.lstrip("@")
+    if p.startswith("+") and len(p) > 5:
+        return p  # already +HASH
+    if not p.startswith("@"):
+        return "@" + p.lstrip("@")
+    return p
+
+
+def _display_peer(p: str) -> str:
+    """Human-readable display for a normalised peer.
+
+    +HASH       → https://t.me/+HASH
+    @username   → @username
+    """
+    if p.startswith("+"):
+        return f"https://t.me/{p}"
     return p
 
 
@@ -3863,7 +3886,7 @@ async def fsm_bulk_report_peer(message: Message, state: FSMContext) -> None:
     await state.update_data(peer=peer, peers=[peer])
     await state.set_state(BulkReportFSM.choosing_reason)
     await message.answer(
-        f"🚨 Жалоба на: <code>{html.escape(peer)}</code>\n\nВыберите тип нарушения:",
+        f"🚨 Жалоба на: <code>{html.escape(_display_peer(peer))}</code>\n\nВыберите тип нарушения:",
         parse_mode="HTML",
         reply_markup=_reason_kb().as_markup(),
     )
@@ -3880,7 +3903,7 @@ async def fsm_bulk_report_peers_batch(message: Message, state: FSMContext) -> No
     peers = list(dict.fromkeys(p for p in peers if len(p) > 1))  # дедупликация
     await state.update_data(peer=peers[0], peers=peers)
     await state.set_state(BulkReportFSM.choosing_reason)
-    preview = "\n".join(f"• <code>{html.escape(p)}</code>" for p in peers[:5])
+    preview = "\n".join(f"• <code>{html.escape(_display_peer(p))}</code>" for p in peers[:5])
     if len(peers) > 5:
         preview += f"\n<i>...и ещё {len(peers) - 5}</i>"
     await message.answer(
@@ -3956,7 +3979,7 @@ async def _show_bulk_report_account_picker(
     label = REPORT_REASONS.get(reason, reason)
     lines = [
         "🚨 <b>Выберите аккаунты для жалобы</b>",
-        f"Объект: <code>{html.escape(peer)}</code>",
+        f"Объект: <code>{html.escape(_display_peer(peer))}</code>",
     ]
     if extra_info:
         lines.append(extra_info)
