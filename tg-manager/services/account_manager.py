@@ -3605,10 +3605,21 @@ async def report_peer_deep_v2(  # noqa: C901
         await _timed(client.connect(), _CONNECT_TIMEOUT)
 
         # Resolve entity — без этого вся атака невозможна
-        # Для приватных invite-ссылок (+HASH) сразу вступаем через ImportChatInviteRequest
+        # Для приватных invite-ссылок сразу вступаем через ImportChatInviteRequest.
+        # Поддерживаемые форматы: +HASH, t.me/+HASH, https://t.me/+HASH,
+        #   t.me/joinchat/HASH, https://telegram.me/joinchat/HASH
+        import re as _re_inv
         _invite_hash: str | None = None
-        if peer.startswith("+") and not peer.lstrip("+").isdigit():
-            _invite_hash = peer.lstrip("+")
+        _peer_s = peer.strip()
+        if _peer_s.startswith("+") and not _peer_s.lstrip("+").isdigit():
+            _invite_hash = _peer_s.lstrip("+")
+        else:
+            _m_inv = _re_inv.match(
+                r"(?:https?://)?(?:t\.me|telegram\.me)/(?:\+|joinchat/)([A-Za-z0-9_-]+)",
+                _peer_s,
+            )
+            if _m_inv:
+                _invite_hash = _m_inv.group(1)
         try:
             if _invite_hash:
                 from telethon.tl.functions.messages import (

@@ -1928,12 +1928,26 @@ async def cb_reset_cooldown_one(
 
     try:
         await pool.execute(
-            "UPDATE tg_accounts SET cooldown_until=NULL WHERE id=$1 AND owner_id=$2",
+            """UPDATE tg_accounts
+               SET cooldown_until=NULL,
+                   acc_status = CASE
+                       WHEN COALESCE(acc_status,'active') = 'cooldown' THEN 'active'
+                       ELSE COALESCE(acc_status,'active')
+                   END
+               WHERE id=$1 AND owner_id=$2""",
             acc_id,
             user_id,
         )
     except Exception:
         log_exc_swallow(log, f"reset_cooldown_one: execute failed acc_id={acc_id}")
+
+    # Сбросить in-memory cooldown (flood_engine) — иначе preflight_accounts
+    # продолжает фильтровать аккаунт даже после очистки DB.
+    try:
+        from services.flood_engine import clear_account_cooldown
+        clear_account_cooldown(acc_id)
+    except Exception:
+        pass
 
     try:
         acc = await pool.fetchrow(
@@ -1968,9 +1982,26 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     await callback.answer()
     user_id = callback.from_user.id
 
+    # Собрать ID аккаунтов с кулдауном ДО очистки — для сброса in-memory.
+    cooled_ids: list[int] = []
+    try:
+        cooled_rows = await pool.fetch(
+            "SELECT id FROM tg_accounts WHERE owner_id=$1 AND cooldown_until > NOW()",
+            user_id,
+        )
+        cooled_ids = [r["id"] for r in cooled_rows]
+    except Exception:
+        pass
+
     try:
         result = await pool.execute(
-            "UPDATE tg_accounts SET cooldown_until=NULL WHERE owner_id=$1 AND cooldown_until > NOW()",
+            """UPDATE tg_accounts
+               SET cooldown_until=NULL,
+                   acc_status = CASE
+                       WHEN COALESCE(acc_status,'active') = 'cooldown' THEN 'active'
+                       ELSE COALESCE(acc_status,'active')
+                   END
+               WHERE owner_id=$1 AND cooldown_until > NOW()""",
             user_id,
         )
     except Exception:
@@ -1981,6 +2012,14 @@ async def cb_reset_cooldown_all(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         count = int(str(result).split()[-1])
     except (ValueError, IndexError):
         count = 0
+
+    # Сбросить in-memory cooldown — DB-reset без этого не помогает,
+    # preflight_accounts проверяет flood_engine.is_account_cooling() независимо.
+    try:
+        from services.flood_engine import clear_all_cooldowns
+        clear_all_cooldowns(cooled_ids)
+    except Exception:
+        pass
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К дашборду", callback_data=HealthCb(action="menu"))

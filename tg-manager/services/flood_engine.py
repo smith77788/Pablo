@@ -65,6 +65,22 @@ def get_account_state(account_id: int) -> _AccountFloodState:
     return _flood_state[account_id]
 
 
+def clear_account_cooldown(account_id: int) -> None:
+    """Clear in-memory cooldown for one account (call after DB reset)."""
+    state = get_account_state(account_id)
+    state.cooldown_until = 0.0
+
+
+def clear_all_cooldowns(account_ids: list[int]) -> int:
+    """Clear in-memory cooldowns for a list of accounts. Returns count cleared."""
+    cleared = 0
+    for aid in account_ids:
+        if aid in _flood_state and _flood_state[aid].cooldown_until > time.monotonic():
+            _flood_state[aid].cooldown_until = 0.0
+            cleared += 1
+    return cleared
+
+
 def is_account_cooling(account_id: int) -> bool:
     state = get_account_state(account_id)
     return state.cooldown_until > time.monotonic()
