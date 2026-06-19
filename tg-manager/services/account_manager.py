@@ -3400,7 +3400,8 @@ async def report_peer_deep_v2(  # noqa: C901
     msg_pool: list[str] = [t for t in _raw_pool if t.strip()] or [
         "Report: inappropriate content"
     ]
-    peer = peer_username.lstrip("@")
+    _ref_kind, _ref_val = normalize_telegram_join_ref(peer_username)
+    peer = f"+{_ref_val}" if _ref_kind == "invite" else _ref_val.lstrip("@")
     acc_id = (_acc or {}).get("id", "?")
 
     def _record_error(stage: str, err: object) -> None:
