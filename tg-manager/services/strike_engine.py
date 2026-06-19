@@ -1069,7 +1069,7 @@ async def _run_email_escalation(
     _fn_dmca = getattr(_mod, "_build_dmca_gdpr_email", None)
     _fn_ncmec = getattr(_mod, "_build_ncmec_email", None)
 
-    if not _email_targets or not _fn_send or not _fn_abuse or not _fn_dmca:
+    if not _email_targets or not _fn_send or not _fn_abuse or not _fn_dmca or not _fn_ncmec:
         return {
             "total_sent": 0,
             "emails": [],
@@ -1152,7 +1152,7 @@ async def _run_email_escalation(
     # NCMEC только для CSAM
     if cat.get("ncmec") and db_emails:
         ncmec_addr = "cybertipline@ncmec.org"
-        body_ncmec = _build_ncmec_email(target_clean, report_time)
+        body_ncmec = _fn_ncmec(target_clean, report_time)
         for ea in db_emails:
             smtp_secret, auth_type = await _email_secret_for_account(pool, ea)
             ok_n, err_n = await _send_email(
@@ -1949,6 +1949,9 @@ def aggregate_results(results: list[dict]) -> dict:
             continue
         if r.get("peer_reported"):
             s["peer"] += 1
+        elif r.get("rate_limited"):
+            s.setdefault("rate_limited", 0)
+            s["rate_limited"] += 1
         else:
             s["failed"] += 1
         s["multi"] += r.get("multi_reason_sent", 0)
@@ -2960,7 +2963,7 @@ async def execute_mini_strike(
             1,  # accounts_used
             1 if tg_data.get("peer_reported") else 0,
             int(tg_data.get("msg_reported") or 0),
-            0,  # msgs_fetched
+            int(tg_data.get("msgs_fetched") or 0),
             int(tg_data.get("pinned_reported") or 0),
             int(tg_data.get("admins_reported") or 0),
             0,  # network_nodes

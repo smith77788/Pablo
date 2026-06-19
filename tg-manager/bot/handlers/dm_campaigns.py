@@ -819,6 +819,10 @@ async def cb_dm_launch_or_draft(
                 "dm_campaign",
                 {"campaign_id": campaign_id},
             )
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='running' WHERE id=$1",
+                campaign_id,
+            )
         except Exception as exc:
             await _edit(
                 callback,

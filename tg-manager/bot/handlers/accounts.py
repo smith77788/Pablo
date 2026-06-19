@@ -2141,7 +2141,7 @@ async def cb_pools_bulk_assign(
     no_pool_cnt = len(acc_ids)
     total_cnt = len(accounts)
 
-    await state.update_data(bulk_pool_acc_ids=[a["id"] for a in accounts], existing_pools=existing_pools)
+    await state.update_data(bulk_pool_acc_ids=acc_ids, existing_pools=existing_pools)
     await state.set_state(AccountTagsPoolFSM.waiting_pool)
 
     await callback.message.edit_text(
@@ -2176,8 +2176,7 @@ async def cb_bulk_pool_set(
             await db.update_account_pool(pool, acc_id, uid, pool_name)
             updated += 1
     await callback.answer(f"✅ Назначен пул «{pool_name}» для {updated} аккаунтов", show_alert=True)
-    new_cd = AccCb(action="pools_view")
-    await cb_pools_view(callback, pool)
+    await cb_pools_view(callback, pool, state)
 
 
 @router.callback_query(AccCb.filter(F.action == "bulk_pool_manual"))

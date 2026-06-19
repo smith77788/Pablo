@@ -20,12 +20,13 @@ _GET_ME_TTL = 300  # 5 minutes cache
 
 def _get_cached_me(session_id: int, me: Any) -> Optional[Any]:
     """Get cached get_me() result if still valid."""
+    import time as _tm
+    now = _tm.monotonic()
     if session_id in _GET_ME_CACHE:
         cached_me, cached_at = _GET_ME_CACHE[session_id]
-        if asyncio.get_event_loop().time() - cached_at < _GET_ME_TTL:
+        if now - cached_at < _GET_ME_TTL:
             return cached_me
-    # Cache miss or expired - update cache
-    _GET_ME_CACHE[session_id] = (me, asyncio.get_event_loop().time())
+    _GET_ME_CACHE[session_id] = (me, now)
     return None
 
 

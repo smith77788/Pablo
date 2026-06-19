@@ -876,19 +876,6 @@ async def cb_do_create(
 # ══════════════════════════════════════════════════════════════════════════
 
 
-@router.callback_query(ChanCb.filter(F.action == "bulk_menu"))
-async def cb_bulk_menu(callback: CallbackQuery) -> None:
-    """Show bulk operations sub-menu. Used by "⚡ Массовые операции" button
-    and all "◀️ Назад" / "❌ Отмена" buttons inside bulk operation wizards."""
-    await callback.answer()
-    await callback.message.edit_text(
-        "⚡ <b>Массовые операции</b>\n\n"
-        "Выберите операцию для выполнения на всех аккаунтах:",
-        parse_mode="HTML",
-        reply_markup=_bulk_menu_kb().as_markup(),
-    )
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # BULK CREATE (all active accounts)
 # ══════════════════════════════════════════════════════════════════════════

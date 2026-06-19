@@ -367,13 +367,13 @@ async def _maybe_requeue(
             SET status='pending',
                 retry_count=$1,
                 last_error=$2,
-                scheduled_for=now() + ($4 * interval '1 second'),
+                scheduled_for=now() + make_interval(secs => $4::numeric),
                 started_at=NULL
             WHERE id=$3""",
         retry_count,
         str(exc)[:300],
         op_id,
-        backoff,
+        float(backoff),
     )
     log.info(
         "op_worker: op %d queued for retry %d/%d in %ds",
@@ -567,17 +567,16 @@ async def _watchdog_stale(pool: asyncpg.Pool) -> None:
         async with _active_lock:
             active_now: frozenset[int] = frozenset(_active_op_ids)
 
-        exclude_clause = ""
-        if active_now:
-            id_csv = ",".join(str(x) for x in active_now)
-            exclude_clause = f" AND id NOT IN ({id_csv})"
+        active_ids_list = list(active_now) if active_now else None
 
         result = await pool.execute(
-            f"""UPDATE operation_queue
+            """UPDATE operation_queue
                 SET status = 'pending', started_at = NULL
                 WHERE status = 'running'
-                  AND started_at < now() - INTERVAL '{_STALE_RUNNING_TIMEOUT_MIN} minutes'
-                  {exclude_clause}""",
+                  AND started_at < now() - make_interval(mins => $1)
+                  AND ($2::bigint[] IS NULL OR id != ALL($2::bigint[]))""",
+            _STALE_RUNNING_TIMEOUT_MIN,
+            active_ids_list,
         )
         count = int((result or "UPDATE 0").split()[-1])
         if count:
@@ -2802,7 +2801,7 @@ async def _exec_global_presence_bot(
             if token and ":" in token:
                 bot_id_int = int(token.split(":")[0])
                 await _db.add_bot(
-                    pool, token, bot_id_int, actual_username, bot_name, owner_id
+                    pool, token, bot_id_int, actual_username, bot_name, owner_id, bot=bot
                 )
         except Exception as e:
             log.warning("op_worker gp_bot: managed_bots insert failed: %s", e)
@@ -3556,11 +3555,12 @@ async def _exec_bot_factory(
                         actual_uname = result2.get("username", username_base)
                         created_tokens.append(token)
                         try:
+                            _retry_bot_id = int(token.split(":")[0]) if ":" in token else 0
                             await pool.execute(
                                 """INSERT INTO managed_bots(added_by, token, bot_id, username, first_name, is_active)
-                                   VALUES($1,$2,0,$3,$4,TRUE)
-                                   ON CONFLICT(token) DO UPDATE SET username=$3, is_active=TRUE""",
-                                owner_id, token, actual_uname, display_name,
+                                   VALUES($1,$2,$3,$4,$5,TRUE)
+                                   ON CONFLICT(token) DO UPDATE SET bot_id=$3, username=$4, is_active=TRUE""",
+                                owner_id, token, _retry_bot_id, actual_uname, display_name,
                             )
                         except Exception:
                             pass
