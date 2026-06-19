@@ -24,7 +24,7 @@ import asyncpg
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Document, Message
+from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, PromoCb, RankCb
@@ -34,7 +34,6 @@ from bot.states import (
     PromoOrderFSM,
     PromoTopCheckFSM,
     PromoTransferFSM,
-    PromoSessionUploadFSM,
 )
 from bot.utils.op_helpers import safe_edit
 from bot.utils.subscription import require_plan
@@ -127,23 +126,30 @@ async def _show_menu(target, pool: asyncpg.Pool, edit: bool = True) -> None:
     active_panels = [p for p in panels if p["is_active"]]
 
     text = (
-        "🎯 <b>Платформа продвижения ботов</b>\n\n"
-        f"📋 Заказов активных: <b>{len(active_orders)}</b>"
-        + (f" · 🚀 накручивается: <b>{len(boosting_orders)}</b>" if boosting_orders else "")
-        + f"\n🤖 Ботов на складе: <b>{len(bots)}</b> "
-        f"(✅ {len(ready_bots)} готовы · 🕐 {len(aging_bots)} созревают)\n"
-        f"📡 SMM-панелей: <b>{len(active_panels)}</b> активных из {len(panels)}\n"
+        "🚀 <b>Продвижение ботов</b>\n\n"
+        "Полный цикл вывода бота в топ Telegram Search:\n\n"
+        "📦 <b>Склад ботов</b> — регистрируйте боты и отслеживайте статус.\n"
+        "  Новый бот → 21 день созревания → готов к продвижению\n\n"
+        "📋 <b>Заказы</b> — накрутка подписчиков через SMM-панели.\n"
+        "  Заказ: ключевое слово → позиция → SMM-сервис\n\n"
+        "📡 <b>SMM-панели</b> — подключите GlobalSMM-совместимую панель\n\n"
+        "🔍 <b>Чекер топа</b> — позиции бота по ключевым словам\n"
+        "  (данные из Аналитика → Позиции в поиске)\n\n"
+        f"<i>Склад: {len(bots)} ботов · "
+        f"✅ {len(ready_bots)} готовы · ⏳ {len(aging_bots)} созревают\n"
+        f"Заказов: {len(active_orders)} активных"
+        + (f" · 🚀 {len(boosting_orders)} накручивается" if boosting_orders else "")
+        + f"\nSMM-панелей: {len(active_panels)} из {len(panels)}</i>"
     )
 
     kb = InlineKeyboardBuilder()
+    kb.button(text="📦 Склад ботов", callback_data=PromoCb(action="warehouse"))
     kb.button(text="📋 Заказы", callback_data=PromoCb(action="orders"))
-    kb.button(text="🤖 Склад ботов", callback_data=PromoCb(action="warehouse"))
     kb.button(text="📡 SMM-панели", callback_data=PromoCb(action="panels"))
     kb.button(text="🔍 Чекер топа", callback_data=PromoCb(action="topcheck"))
-    kb.button(text="📁 Загрузить сессию", callback_data=PromoCb(action="session_upload"))
     kb.button(text="📜 Логи", callback_data=PromoCb(action="logs"))
     kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 1, 1)
 
     if edit and isinstance(target, CallbackQuery):
         await safe_edit(target, text, reply_markup=kb.as_markup())
@@ -692,9 +698,15 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
         f"{_BOT_STATUS.get(s, s)}: {c}" for s, c in sorted(counts.items())
     ) or "пусто"
 
-    header = f"🤖 <b>Склад ботов</b>\n\n{status_line}\n"
+    header = (
+        f"📦 <b>Склад ботов</b>\n\n"
+        f"Боты на продвижении проходят 21-дневное созревание.\n"
+        f"После этого статус меняется на ✅ Готов — можно создавать заказ.\n\n"
+        f"<b>Статусы:</b> ⏳ Созревает → ✅ Готов → 🔄 В работе → 🏆 В топе\n\n"
+        f"<b>Сейчас:</b> {status_line}\n"
+    )
     if updated:
-        header += f"<i>✅ {updated} бот(а) созрели → готовы к работе</i>\n"
+        header += f"<i>✅ {updated} бот(а) только что перешли в статус «Готов»</i>\n"
 
     if not bots:
         text = header + "\nБотов нет. Добавьте или спарсите из BotFather."
@@ -1561,80 +1573,6 @@ async def fsm_topcheck_keyword(message: Message, state: FSMContext, pool: asyncp
     await message.answer(text, reply_markup=kb.as_markup())
 
 
-# ── Session upload ─────────────────────────────────────────────────────────────
-
-_SESSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "sessions")
-
-
-@router.callback_query(PromoCb.filter(F.action == "session_upload"))
-async def cb_session_upload_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
-    await callback.answer()
-    if not await require_plan(pool, callback.from_user.id, _PRO):
-        await callback.message.edit_text("🔒 <b>Менеджер сессий — 💎 ПОДПИСКА</b>\n\nОформите: /subscription")
-        return
-    await state.set_state(PromoSessionUploadFSM.waiting_file)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=PromoCb(action="menu"))
-    await safe_edit(
-        callback,
-        "📁 <b>Загрузить .session файл</b>\n\n"
-        "Отправьте <b>файл</b> с расширением <code>.session</code>\n\n"
-        "Поддерживаемые форматы:\n"
-        "• Telethon (.session)\n"
-        "• Pyrogram (.session)\n\n"
-        "После загрузки сессия будет сохранена и её можно привязать к боту в складе.\n\n"
-        "<i>Отмена: /cancel</i>",
-        reply_markup=kb.as_markup(),
-    )
-
-
-@router.message(PromoSessionUploadFSM.waiting_file)
-async def fsm_session_file(message: Message, state: FSMContext, pool: asyncpg.Pool, bot: Bot) -> None:
-    doc: Document | None = message.document
-    if not doc:
-        await message.answer("❌ Отправьте файл .session (не текст, а именно файл).")
-        return
-
-    fname = doc.file_name or ""
-    if not fname.endswith(".session"):
-        await message.answer(f"❌ Файл должен иметь расширение .session, получен: {html.escape(fname)}")
-        return
-
-    await state.clear()
-
-    # Ensure sessions directory exists
-    try:
-        os.makedirs(_SESSION_DIR, exist_ok=True)
-    except OSError:
-        pass
-
-    safe_name = f"{message.from_user.id}_{fname.replace('/', '_').replace('..', '_')}"
-    dest = os.path.join(_SESSION_DIR, safe_name)
-
-    try:
-        file_info = await bot.get_file(doc.file_id)
-        await bot.download_file(file_info.file_path, dest)
-    except Exception as exc:
-        await message.answer(
-            f"❌ Ошибка загрузки файла:\n<code>{html.escape(str(exc)[:200])}</code>"
-        )
-        return
-
-    await db.promo_log(pool, message.from_user.id, "autoreg",
-                       f"Сессия загружена: {fname} → {safe_name}")
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🤖 Привязать к боту", callback_data=PromoCb(action="warehouse"))
-    kb.button(text="◀️ Платформа", callback_data=PromoCb(action="menu"))
-    kb.adjust(1)
-    await message.answer(
-        f"✅ <b>Сессия загружена!</b>\n\n"
-        f"Файл: <code>{html.escape(fname)}</code>\n"
-        f"Сохранён как: <code>{html.escape(safe_name)}</code>\n\n"
-        "Привяжите сессию к боту на складе: выберите бота → редактировать → указать путь к сессии.\n\n"
-        f"<i>Путь: sessions/{html.escape(safe_name)}</i>",
-        reply_markup=kb.as_markup(),
-    )
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────────

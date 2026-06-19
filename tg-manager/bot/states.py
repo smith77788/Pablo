@@ -524,9 +524,6 @@ class PromoTransferFSM(StatesGroup):
     new_owner = State()         # @username нового владельца бота
 
 
-class PromoSessionUploadFSM(StatesGroup):
-    waiting_file = State()      # ожидаем .session файл
-
 
 class BotTplCustomizeFSM(StatesGroup):
     company_name = State()   # название компании / сервиса

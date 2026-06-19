@@ -38,7 +38,6 @@ from bot.callbacks import (
     NetBcCb,
     NetworkCb,
     ParserCb,
-    GrowthCb,
     PromoCb,
     ProxyCb,
     QuickPostCb,
@@ -129,9 +128,8 @@ def _main_menu_kb():
     kb.button(text="🛡️ Мониторинг", callback_data=BmCb(action="monitoring"))
     kb.button(text="🌐 Сети & Кластеры", callback_data=EcoCb(action="menu"))
     kb.button(text="🚀 Продвижение ботов", callback_data=PromoCb(action="menu"))
-    kb.button(text="🌱 Центр роста", callback_data=GrowthCb(action="menu"))
     kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
-    kb.adjust(1, 2, 2, 2, 2, 1)
+    kb.adjust(1, 2, 2, 2, 2)
     return kb.as_markup()
 
 

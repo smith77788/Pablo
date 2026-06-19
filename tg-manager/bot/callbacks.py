@@ -468,14 +468,4 @@ class SelfPromoCb(CallbackData, prefix="sp"):
     style: str = ""    # 'direct' | 'native'
 
 
-class GrowthCb(CallbackData, prefix="gh"):
-    """Growth Engine — амбассадор-программа, контент-сидер, комиссии, лидерборд."""
-
-    action: str  # menu | dashboard | content | content_deploy | content_confirm
-                 # leaderboard | commission | payout_ask | payout_confirm
-                 # outreach
-                 # schedule | schedule_new | schedule_sel | schedule_quick | schedule_toggle | schedule_del
-                 # watermark_toggle
-    item_id: int = 0   # seed_id | payout_request_id | schedule_id | interval_h
-    page: int = 0
 
