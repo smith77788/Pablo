@@ -388,12 +388,15 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
         text="📢 Создать канал/группу (bulk)",
         callback_data=ChanCb(action="bulk_create"),
     )
-    # ── Вступление / выход
+    # ── Вступление / выход / инвайт
     kb.button(
         text="🔗 Вступить в каналы (список)", callback_data=ChanCb(action="bulk_join")
     )
     kb.button(
         text="🚪 Выйти из каналов (список)", callback_data=ChanCb(action="bulk_leave")
+    )
+    kb.button(
+        text="👥 Инвайт из контактов", callback_data=ChanCb(action="contact_invite")
     )
     # ── Публикация
     kb.button(
@@ -4486,15 +4489,34 @@ async def cb_bulk_confirm_selection(
 
     elif op == "join":
         await state.update_data(bulk_op=op)
-        await state.set_state(JoinChannelFSM.waiting_invite)
+        # Check how many selected accounts have a bound proxy
+        try:
+            proxy_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
+                "AND proxy_url IS NOT NULL AND proxy_url != ''",
+                callback.from_user.id,
+                list(selected_ids),
+            ) or 0
+        except Exception:
+            proxy_count = 0
         kb = InlineKeyboardBuilder()
+        kb.button(text="🔐 Через прокси аккаунтов", callback_data="chan:bjproxy:bound")
+        kb.button(text="☁️ Через CF relay (без прокси)", callback_data="chan:bjproxy:relay")
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        kb.adjust(1)
+        proxy_note = (
+            f"\n\n⚠️ {proxy_count} из {len(selected_ids)} аккаунтов имеют привязанный прокси."
+            if proxy_count
+            else f"\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
+        )
         await callback.message.edit_text(
-            f"🔗 <b>Вступить в канал</b>\n\n"
-            f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
-            "Введите username или ссылку-приглашение:\n"
-            "• <code>@channelname</code>\n"
-            "• <code>https://t.me/+AbcHash</code>",
+            f"🔗 <b>Вступить в канал — выбор режима подключения</b>\n\n"
+            f"Аккаунтов: <b>{len(selected_ids)}</b>{proxy_note}\n\n"
+            "🔐 <b>Прокси аккаунтов</b> — каждый аккаунт использует свой прокси.\n"
+            "   При ошибке прокси автоматически переключается на CF relay.\n\n"
+            "☁️ <b>CF relay</b> — все аккаунты через Cloudflare IP, прокси игнорируются.\n"
+            "   Используйте если прокси недоступны или не настроены.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -4761,6 +4783,34 @@ async def fsm_bulk_post_text(
             )
 
 
+# ── Proxy mode selection for bulk join ───────────────────────────────────
+
+
+@router.callback_query(F.data.startswith("chan:bjproxy:"))
+async def cb_bulk_join_proxy_mode(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await callback.answer()
+    mode = callback.data.split(":")[-1]  # "bound" or "relay"
+    await state.update_data(bulk_proxy_mode=mode)
+    await state.set_state(JoinChannelFSM.waiting_invite)
+    data = await state.get_data()
+    selected_ids = data.get("bulk_selected", [])
+    mode_label = "🔐 привязанные прокси" if mode == "bound" else "☁️ CF relay"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+    await callback.message.edit_text(
+        f"🔗 <b>Вступить в канал</b>\n\n"
+        f"Аккаунтов: <b>{len(selected_ids)}</b> · Режим: {mode_label}\n\n"
+        "Введите username или ссылку-приглашение:\n"
+        "• <code>@channelname</code>\n"
+        "• <code>https://t.me/+AbcHash</code>\n"
+        "• <code>https://t.me/joinchat/Hash</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 # ── FSM: bulk join (uses selected accounts from state) ────────────────────
 
 
@@ -4792,17 +4842,25 @@ async def fsm_join_invite_combined(
         if not count:
             await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
             return
+        proxy_mode = data.get("bulk_proxy_mode", "bound")
         op_id = await operation_bus.submit(
             pool,
             message.from_user.id,
             "bulk_join",
-            {"links": [invite], "account_ids": [int(i) for i in selected_ids], "delay_mode": "smart"},
+            {
+                "links": [invite],
+                "account_ids": [int(i) for i in selected_ids],
+                "delay_mode": "smart",
+                "proxy_mode": proxy_mode,
+            },
             total_items=int(count),
         )
+        mode_label = "☁️ CF relay" if proxy_mode == "relay" else "🔐 прокси аккаунтов"
         await message.answer(
             f"✅ Массовое вступление в <code>{html.escape(invite)}</code> поставлено в очередь\n"
-            f"📋 Операция #{op_id} • {count} аккаунт(ов)\n\n"
-            "Прогресс и результаты: /ops",
+            f"📋 Операция #{op_id} · {count} аккаунт(ов) · {mode_label}\n\n"
+            "Прогресс и результаты: /ops\n\n"
+            "💡 После вступления используйте <b>👥 Инвайт из контактов</b> для приглашения участников.",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )

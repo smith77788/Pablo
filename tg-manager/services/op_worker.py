@@ -1696,8 +1696,16 @@ async def _exec_bulk_join_inner(
             "summary": "Список ссылок пуст — нечего выполнять.",
         }
 
+    # proxy_mode: "bound" (default) = use account's bound proxy
+    #             "relay" = strip proxy, force CF relay for all accounts
+    proxy_mode = params.get("proxy_mode", "bound")
+
     for acc_idx, acc in enumerate(accounts):
-        acc_dict = dict(acc)
+        if proxy_mode == "relay":
+            # Strip bound proxy — Telethon will use CF relay instead
+            acc_dict = {**dict(acc), "proxy_url": None, "enforce_proxy": False}
+        else:
+            acc_dict = dict(acc)
         try:
             joins_today = await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_audit "
@@ -1732,6 +1740,22 @@ async def _exec_bulk_join_inner(
                 res = await account_manager.join_channel(
                     acc["session_str"], link, _acc=acc_dict
                 )
+                # Proxy error → retry transparently via CF relay
+                if res.get("proxy_error") and proxy_mode == "bound":
+                    log.warning(
+                        "bulk_join: прокси недоступен acc=%s, повтор через CF relay",
+                        acc_dict.get("phone", "?"),
+                    )
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                        " VALUES($1,$2,$3,'warn',$4)",
+                        op_id, step, link,
+                        f"⚠️ Прокси недоступен — повтор через CF relay (acc={acc_dict.get('phone','?')})",
+                    )
+                    _acc_relay = {**acc_dict, "proxy_url": None, "enforce_proxy": False}
+                    res = await account_manager.join_channel(
+                        acc["session_str"], link, _acc=_acc_relay
+                    )
                 # peer_flood=True means account-level join rate-limit (PEER_FLOOD).
                 # This is NOT a channel ban — apply a cooldown and skip remaining
                 # links for this account to avoid escalation to a real spamblock.
