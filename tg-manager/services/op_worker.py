@@ -1979,11 +1979,15 @@ async def _exec_bulk_leave(
     skipped_by_limit = 0
     failed_channels: list[str] = []
     delay_mode = params.get("delay_mode", "smart")
+    proxy_mode = params.get("proxy_mode", "bound")
     _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
     day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
 
     for acc_idx, acc in enumerate(accounts):
-        acc_dict = dict(acc)
+        if proxy_mode == "relay":
+            acc_dict = {**dict(acc), "proxy_url": None, "enforce_proxy": False}
+        else:
+            acc_dict = dict(acc)
         try:
             leaves_today = await pool.fetchval(
                 "SELECT COUNT(*) FROM operation_audit "
@@ -2016,11 +2020,27 @@ async def _exec_bulk_leave(
             t0 = time.monotonic()
             flood_wait = 0
             try:
-                left = await account_manager.leave_channel(
+                res = await account_manager.leave_channel(
                     acc["session_str"], channel, _acc=acc_dict
                 )
-                if not left:
-                    raise Exception(f"leave_channel returned False for {channel}")
+                # Proxy error → retry transparently via CF relay
+                if res.get("proxy_error") and proxy_mode == "bound":
+                    log.warning(
+                        "bulk_leave: прокси недоступен acc=%s, повтор через CF relay",
+                        acc_dict.get("phone", "?"),
+                    )
+                    await pool.execute(
+                        "INSERT INTO operation_log(op_id, step_num, target, status, message)"
+                        " VALUES($1,$2,$3,'warn',$4)",
+                        op_id, step, str(channel),
+                        f"⚠️ Прокси недоступен — повтор через CF relay (acc={acc_dict.get('phone','?')})",
+                    )
+                    _acc_relay = {**acc_dict, "proxy_url": None, "enforce_proxy": False}
+                    res = await account_manager.leave_channel(
+                        acc["session_str"], channel, _acc=_acc_relay
+                    )
+                if not res.get("ok"):
+                    raise Exception(res.get("error") or f"leave_channel failed for {channel}")
                 ok_count += 1
                 dur_ms = int((time.monotonic() - t0) * 1000)
                 await pool.execute(

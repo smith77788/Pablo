@@ -1962,11 +1962,16 @@ async def join_channel(
 
 async def leave_channel(
     session_string: str, channel_id: int | str, _acc: dict | None = None
-) -> bool:
-    """Leave a channel/group by internal Telegram channel_id."""
+) -> dict:
+    """Leave a channel/group by internal Telegram channel_id.
+
+    Returns dict: {"ok": True} on success, {"ok": False, "proxy_error": True} on
+    network/proxy failure, {"ok": False, "error": str} on other errors.
+    FloodWaitError is re-raised so callers can handle cooldowns.
+    """
     if not session_string:
         log.warning("leave_channel: session_str отсутствует — сессия недоступна")
-        return False
+        return {"ok": False, "error": "session_str missing"}
     from telethon.tl.functions.channels import LeaveChannelRequest
 
     client = _make_client(session_string, _acc)
@@ -1974,15 +1979,15 @@ async def leave_channel(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         entity = await client.get_entity(channel_id)
         await client(LeaveChannelRequest(channel=entity))
-        return True
+        return {"ok": True}
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "leave")
         log.warning("leave_channel: connect timeout — proxy may be dead")
-        return False
+        return {"ok": False, "error": "Timeout при подключении — прокси недоступен", "proxy_error": True}
     except (OSError, ConnectionError) as e:
         _record_proxy_fail(_acc, "leave")
         log.warning("leave_channel: network error (proxy?): %s", e)
-        return False
+        return {"ok": False, "error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
         from telethon.errors import FloodWaitError
 
@@ -1992,7 +1997,7 @@ async def leave_channel(
             )
             raise
         log.exception("leave_channel error: %s", e)
-        return False
+        return {"ok": False, "error": str(e)}
     finally:
         try:
             await client.disconnect()

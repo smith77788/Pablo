@@ -1256,7 +1256,7 @@ async def cb_health_recommendations(
 
     for acc in accounts:
         trust = float(acc["trust_score"] or 1.0)
-        name = acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}"
+        name = html.escape(acc["username"] or acc["first_name"] or acc["phone"] or f"id{acc['id']}")
         flood_cnt = int(acc["flood_count_7d"] or 0)
         in_cooldown = bool(
             acc["cooldown_until"]

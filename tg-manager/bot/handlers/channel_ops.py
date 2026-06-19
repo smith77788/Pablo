@@ -462,18 +462,19 @@ def _bulk_select_kb(
 ) -> InlineKeyboardBuilder:
     """Account selection keyboard with toggles."""
     kb = InlineKeyboardBuilder()
-    for acc in accounts:
-        icon = "✅" if acc["id"] in selected else "☐"
-        label = f"{icon} {_acc_label(acc)}"
-        kb.button(text=label, callback_data=f"chan:bsel:{op}:{acc['id']}")
     n = len(selected)
-    kb.button(text="✅ Выбрать все", callback_data=f"chan:bsall:{op}")
-    kb.button(text="☐ Снять все", callback_data=f"chan:bsnone:{op}")
+    # Control buttons at the TOP so they're always visible regardless of account count
     if n > 0:
         kb.button(
             text=f"▶️ Продолжить с {n} аккаунт{'ом' if n == 1 else 'ами'}",
             callback_data=f"chan:bsdone:{op}",
         )
+    kb.button(text="✅ Выбрать все", callback_data=f"chan:bsall:{op}")
+    kb.button(text="☐ Снять все", callback_data=f"chan:bsnone:{op}")
+    for acc in accounts:
+        icon = "✅" if acc["id"] in selected else "☐"
+        label = f"{icon} {_acc_label(acc)}"
+        kb.button(text=label, callback_data=f"chan:bsel:{op}:{acc['id']}")
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_menu").pack())
     kb.adjust(1)
     return kb
@@ -1698,10 +1699,10 @@ async def cb_do_leave(
     await callback.answer("⏳ Выхожу...")
     from services import account_manager
 
-    ok = await account_manager.leave_channel(
+    res = await account_manager.leave_channel(
         acc["session_str"], callback_data.channel_id, _acc=acc
     )
-    if ok:
+    if res.get("ok"):
         await callback.message.edit_text(
             "✅ <b>Вышел из канала</b>",
             parse_mode="HTML",
@@ -4523,13 +4524,33 @@ async def cb_bulk_confirm_selection(
 
     elif op == "leave":
         await state.update_data(bulk_op=op)
-        await state.set_state(PostToChannelFSM.waiting_channel_id)
+        try:
+            proxy_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts "
+                "WHERE owner_id=$1 AND id = ANY($2::bigint[]) "
+                "AND proxy_url IS NOT NULL AND proxy_url != ''",
+                callback.from_user.id,
+                list(selected_ids),
+            ) or 0
+        except Exception:
+            proxy_count = 0
         kb = InlineKeyboardBuilder()
+        kb.button(text="🔐 Через прокси аккаунтов", callback_data="chan:blproxy:bound")
+        kb.button(text="☁️ Через CF relay (без прокси)", callback_data="chan:blproxy:relay")
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+        kb.adjust(1)
+        proxy_note = (
+            f"\n\n⚠️ {proxy_count} из {len(selected_ids)} аккаунтов имеют привязанный прокси."
+            if proxy_count
+            else f"\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
+        )
         await callback.message.edit_text(
-            f"🚪 <b>Выйти из канала</b>\n\n"
-            f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
-            "Введите username или числовой ID канала:",
+            f"🚪 <b>Выйти из канала — выбор режима подключения</b>\n\n"
+            f"Аккаунтов: <b>{len(selected_ids)}</b>{proxy_note}\n\n"
+            "🔐 <b>Прокси аккаунтов</b> — каждый аккаунт использует свой прокси.\n"
+            "   При ошибке прокси автоматически переключается на CF relay.\n\n"
+            "☁️ <b>CF relay</b> — все аккаунты через Cloudflare IP, прокси игнорируются.\n"
+            "   Используйте если прокси недоступны или не настроены.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -4644,17 +4665,20 @@ async def fsm_bulk_channel_id(
         from services import operation_bus
 
         total = len(accounts)
+        proxy_mode = data.get("bulk_proxy_mode", "bound")
+        mode_label = "🔐 прокси" if proxy_mode == "bound" else "☁️ CF relay"
         op_id = await operation_bus.submit(
             pool, message.from_user.id, "bulk_leave",
             {
                 "channels": [channel_ref],
                 "account_ids": [int(a["id"]) for a in accounts],
+                "proxy_mode": proxy_mode,
             },
             total_items=total,
         )
         await message.answer(
             f"✅ <b>Выход из канала запущен</b>\n\n"
-            f"Канал: <code>{html.escape(channel_ref)}</code> · {total} аккаунтов\n"
+            f"Канал: <code>{html.escape(channel_ref)}</code> · {total} аккаунтов · {mode_label}\n"
             f"📋 Операция <code>#{op_id}</code> в очереди\n"
             f"💡 Статус: /ops",
             parse_mode="HTML",
@@ -4806,6 +4830,30 @@ async def cb_bulk_join_proxy_mode(
         "• <code>@channelname</code>\n"
         "• <code>https://t.me/+AbcHash</code>\n"
         "• <code>https://t.me/joinchat/Hash</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("chan:blproxy:"))
+async def cb_bulk_leave_proxy_mode(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    await callback.answer()
+    mode = callback.data.split(":")[-1]  # "bound" or "relay"
+    await state.update_data(bulk_proxy_mode=mode)
+    await state.set_state(PostToChannelFSM.waiting_channel_id)
+    data = await state.get_data()
+    selected_ids = data.get("bulk_selected", [])
+    mode_label = "🔐 привязанные прокси" if mode == "bound" else "☁️ CF relay"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
+    await callback.message.edit_text(
+        f"🚪 <b>Выйти из канала</b>\n\n"
+        f"Аккаунтов: <b>{len(selected_ids)}</b> · Режим: {mode_label}\n\n"
+        "Введите username или числовой ID канала:\n"
+        "• <code>@channelname</code>\n"
+        "• <code>-100123456789</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -5717,7 +5765,7 @@ async def cb_my_chans_leave(
     progress = await callback.message.edit_text(
         "⏳ Покидаю канал...", parse_mode="HTML"
     )
-    ok = await account_manager.leave_channel(
+    res = await account_manager.leave_channel(
         session, str(callback_data.channel_id), _acc=dict(acc) if acc else None
     )
     kb = InlineKeyboardBuilder()
@@ -5729,7 +5777,7 @@ async def cb_my_chans_leave(
     )
     await progress.edit_text(
         "✅ Вы покинули канал!"
-        if ok
+        if res.get("ok")
         else "❌ Не удалось покинуть канал. Проверьте права.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
