@@ -3851,7 +3851,9 @@ def _normalize_peer(p: str) -> str:
         if p.startswith(pfx):
             slug = p[len(pfx):].split("?")[0].rstrip("/")
             if slug.startswith("+"):
-                return slug  # invite link → +HASH (no @)
+                return slug  # t.me/+HASH → +HASH
+            if slug.startswith("joinchat/"):
+                return "+" + slug[len("joinchat/"):]  # t.me/joinchat/HASH → +HASH
             return "@" + slug.lstrip("@")
     if p.startswith("+") and len(p) > 5:
         return p  # already +HASH

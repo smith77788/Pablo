@@ -32,6 +32,7 @@ from typing import Any
 
 import aiohttp
 
+from services.account_manager import normalize_telegram_join_ref
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -2602,15 +2603,8 @@ async def execute_mini_strike(
     from services import account_manager
 
     cat = MINI_CATEGORIES.get(category, MINI_CATEGORIES["fraud"])
-    target_clean = (
-        target.strip()
-        .lstrip("@")
-        .replace("https://t.me/", "")
-        .replace("http://t.me/", "")
-        .split("?")[0]
-        .split("/")[0]
-        .strip()
-    )
+    _ref_kind, _ref_value = normalize_telegram_join_ref(target.strip())
+    target_clean = f"+{_ref_value}" if _ref_kind == "invite" else _ref_value.lstrip("@")
     report_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     result: dict = {

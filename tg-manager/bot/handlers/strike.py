@@ -808,9 +808,12 @@ async def cb_mini_strike_start(
     kb.button(text="❌ Отмена", callback_data=StrikeCb(action="menu"))
     await callback.message.edit_text(
         "⚡ <b>Мини-страйк</b>\n\n"
-        "Введите username или ссылку на канал:\n"
-        "<code>@channelname</code> или <code>https://t.me/channelname</code>\n\n"
-        "Ты находишь — система бьёт по всем официальным каналам одновременно.",
+        "Введите username или ссылку на цель:\n"
+        "• <code>@channelname</code>\n"
+        "• <code>https://t.me/channelname</code>\n"
+        "• <code>https://t.me/+HASH</code> — приватный канал по инвайт-ссылке\n"
+        "• <code>https://t.me/joinchat/HASH</code> — старый формат инвайта\n\n"
+        "Система бьёт по всем официальным каналам одновременно.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

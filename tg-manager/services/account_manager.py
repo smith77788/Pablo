@@ -3645,6 +3645,9 @@ async def report_peer_deep_v2(  # noqa: C901
                         else:
                             raise ValueError("CheckChatInvite returned no chat")
                     except Exception:
+                        if peer.startswith("+"):
+                            # peer is "+HASH" — get_entity mis-parses "+" as phone prefix
+                            raise
                         entity = await _timed(client.get_entity(peer), 15.0)
             else:
                 entity = await _timed(client.get_entity(peer))
