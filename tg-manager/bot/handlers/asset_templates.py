@@ -1098,8 +1098,15 @@ async def cb_apply_bot_exec(
     if preset_key:
         from services.preset_templates import get_preset_by_key
         preset = get_preset_by_key(preset_key)
-        data = preset["template"] if preset else {}
+        raw_tpl = preset["template"] if preset else {}
         tpl_name = preset["name"] if preset else "preset"
+        # Apply default substitutions for customizable fields ({{COMPANY}} etc.)
+        customize_fields = preset.get("customize_fields", []) if preset else []
+        if customize_fields:
+            subs = {f["key"]: (f.get("default") or "") for f in customize_fields}
+            data = _substitute_placeholders(raw_tpl, subs)
+        else:
+            data = raw_tpl
     else:
         tpl = await _get_template(pool, tpl_id, user_id)
         if not tpl:

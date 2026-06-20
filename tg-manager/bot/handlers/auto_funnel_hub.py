@@ -48,7 +48,7 @@ def _back_to_menu():
 async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     funnels = await pool.fetch(
-        "SELECT f.*, b.username AS bot_uname, b.first_name AS bot_name FROM auto_funnels f LEFT JOIN bots b ON b.id = f.bot_id WHERE f.owner_id=$1 ORDER BY f.id",
+        "SELECT f.*, b.username AS bot_uname, b.first_name AS bot_name FROM auto_funnels f LEFT JOIN managed_bots b ON b.bot_id = f.bot_id WHERE f.owner_id=$1 ORDER BY f.id",
         callback.from_user.id,
     )
     kb = InlineKeyboardBuilder()
@@ -112,7 +112,7 @@ async def msg_af_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     await state.update_data(name=name)
     await state.set_state(AutoFunnelFSM.picking_bot)
     bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         message.from_user.id,
     )
     if not bots:
@@ -125,10 +125,10 @@ async def msg_af_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         return
     kb = InlineKeyboardBuilder()
     for b in bots:
-        label = html.escape(b["username"] or b["first_name"] or f"id{b['id']}")
+        label = html.escape(b["username"] or b["first_name"] or f"id{b['bot_id']}")
         kb.button(
             text=f"🤖 @{label}",
-            callback_data=AutoFunnelCb(action="pick_bot", extra=str(b["id"])),
+            callback_data=AutoFunnelCb(action="pick_bot", extra=str(b["bot_id"])),
         )
     kb.button(text="❌ Отмена", callback_data=AutoFunnelCb(action="menu"))
     kb.adjust(1)
@@ -204,7 +204,7 @@ async def _show_funnel(msg_or_cb, pool, funnel, edit: bool = True) -> None:
     steps = await pool.fetch(
         "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
     )
-    bot_row = await pool.fetchrow("SELECT username, first_name FROM bots WHERE id=$1", funnel["bot_id"])
+    bot_row = await pool.fetchrow("SELECT username, first_name FROM managed_bots WHERE bot_id=$1", funnel["bot_id"])
     bot_label = ""
     if bot_row:
         bot_label = html.escape(bot_row["username"] or bot_row["first_name"] or f"id{funnel['bot_id']}")

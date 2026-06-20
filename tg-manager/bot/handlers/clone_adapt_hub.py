@@ -70,13 +70,13 @@ def _targets_kb(all_bots, targets: list, source_bot_id: int, page: int = 0) -> I
     start = page * _PAGE_SIZE
     chunk = all_bots[start: start + _PAGE_SIZE]
     for b in chunk:
-        if b["id"] == source_bot_id:
+        if b["bot_id"] == source_bot_id:
             continue
-        mark = "✅" if b["id"] in targets else "☐"
-        label = html.escape(b["username"] or b["first_name"] or f"id{b['id']}")
+        mark = "✅" if b["bot_id"] in targets else "☐"
+        label = html.escape(b["username"] or b["first_name"] or f"id{b['bot_id']}")
         kb.button(
             text=f"{mark} @{label}",
-            callback_data=CloneAdaptCb(action="toggle_target", bot_id=source_bot_id, extra=str(b["id"])),
+            callback_data=CloneAdaptCb(action="toggle_target", bot_id=source_bot_id, extra=str(b["bot_id"])),
         )
     n_sel = len(targets)
     nav = []
@@ -104,8 +104,8 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
         """
         SELECT h.*, sb.username AS src_uname, tb.username AS tgt_uname
         FROM clone_adapt_history h
-        LEFT JOIN bots sb ON sb.id = h.source_bot_id
-        LEFT JOIN bots tb ON tb.id = h.target_bot_id
+        LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
+        LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
         WHERE h.owner_id = $1
         ORDER BY h.created_at DESC LIMIT 10
         """,
@@ -148,7 +148,7 @@ async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
     await callback.answer()
     await state.set_data(_default_state())
     bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         callback.from_user.id,
     )
     if not bots:
@@ -162,10 +162,10 @@ async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
         return
     kb = InlineKeyboardBuilder()
     for b in bots:
-        label = html.escape(b["username"] or b["first_name"] or f"id{b['id']}")
+        label = html.escape(b["username"] or b["first_name"] or f"id{b['bot_id']}")
         kb.button(
             text=f"🤖 @{label}",
-            callback_data=CloneAdaptCb(action="source", bot_id=b["id"]),
+            callback_data=CloneAdaptCb(action="source", bot_id=b["bot_id"]),
         )
     kb.button(text="◀️ Назад", callback_data=CloneAdaptCb(action="menu"))
     kb.adjust(1)
@@ -194,7 +194,7 @@ async def cb_ca_source(
         await callback.answer("Бот не найден.", show_alert=True)
         return
 
-    label = html.escape(bot_row["username"] or bot_row["first_name"] or f"id{bot_row['id']}")
+    label = html.escape(bot_row["username"] or bot_row["first_name"] or f"id{bot_row['bot_id']}")
     # Load current profile
     try:
         name = await bot_api.get_my_name(http, bot_row["token"])
@@ -245,7 +245,7 @@ async def cb_ca_toggle_field(
 
 @router.callback_query(CloneAdaptCb.filter(F.action == "suffix_ask"))
 async def cb_ca_suffix_ask(
-    callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext
+    callback: CallbackQuery, callback_data: CloneAdaptCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
     data = await _ensure_state(state)
@@ -254,7 +254,7 @@ async def cb_ca_suffix_ask(
         return
     if "name" not in data.get("fields", []):
         # No name field — skip suffix step
-        await _show_targets(callback, state, data, callback_data.bot_id, pool=None)
+        await _show_targets(callback, state, data, callback_data.bot_id, pool)
         return
     await state.set_state(CloneAdaptFSM.waiting_suffix)
     kb = InlineKeyboardBuilder()
@@ -304,7 +304,7 @@ async def cb_ca_no_suffix(
 
 async def _show_targets(callback: CallbackQuery, state: FSMContext, data: dict, source_id: int, pool, page: int = 0) -> None:
     bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         callback.from_user.id,
     )
     targets = data.get("targets", [])
@@ -320,7 +320,7 @@ async def _show_targets(callback: CallbackQuery, state: FSMContext, data: dict, 
 
 async def _show_targets_msg(message: Message, state: FSMContext, data: dict, source_id: int, pool: asyncpg.Pool, page: int = 0) -> None:
     bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         message.from_user.id,
     )
     targets = data.get("targets", [])
@@ -352,7 +352,7 @@ async def cb_ca_toggle_target(
     data["targets"] = targets
     await state.set_data(data)
     bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         callback.from_user.id,
     )
     await callback.answer(f"{'✅' if tid in targets else '☐'}")
@@ -367,14 +367,14 @@ async def cb_ca_targets_all(
 ) -> None:
     data = await _ensure_state(state)
     bots = await pool.fetch(
-        "SELECT id FROM bots WHERE owner_id=$1 ORDER BY id", callback.from_user.id
+        "SELECT bot_id FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id", callback.from_user.id
     )
-    targets = [b["id"] for b in bots if b["id"] != callback_data.bot_id]
+    targets = [b["bot_id"] for b in bots if b["bot_id"] != callback_data.bot_id]
     data["targets"] = targets
     await state.set_data(data)
     await callback.answer(f"✅ Выбрано {len(targets)}")
     all_bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         callback.from_user.id,
     )
     await callback.message.edit_reply_markup(
@@ -391,7 +391,7 @@ async def cb_ca_targets_none(
     await state.set_data(data)
     await callback.answer("☐ Снято")
     all_bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         callback.from_user.id,
     )
     await callback.message.edit_reply_markup(
@@ -406,7 +406,7 @@ async def cb_ca_targets_page(
     await callback.answer()
     data = await _ensure_state(state)
     bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE owner_id=$1 ORDER BY id",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE added_by=$1 AND is_active=TRUE ORDER BY bot_id",
         callback.from_user.id,
     )
     targets = data.get("targets", [])
@@ -439,15 +439,15 @@ async def cb_ca_preview(
         return
 
     target_bots = await pool.fetch(
-        "SELECT id, username, first_name FROM bots WHERE id = ANY($1::bigint[]) AND owner_id=$2",
+        "SELECT bot_id, username, first_name FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2 AND is_active=TRUE",
         targets, callback.from_user.id,
     )
     source_bot = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
-    src_label = html.escape(source_bot["username"] or source_bot["first_name"] or f"id{source_bot['id']}") if source_bot else "?"
+    src_label = html.escape(source_bot["username"] or source_bot["first_name"] or f"id{source_bot['bot_id']}") if source_bot else "?"
 
     fields_str = " • ".join(_FIELD_LABELS[f] for f in fields if f in _FIELD_LABELS)
     tgt_list = "\n".join(
-        f"  🤖 @{html.escape(b['username'] or b['first_name'] or str(b['id']))}"
+        f"  🤖 @{html.escape(b['username'] or b['first_name'] or str(b['bot_id']))}"
         for b in target_bots
     )
     suffix_info = f"\n  Суффикс к имени: <code>{html.escape(suffix)}</code>" if suffix else ""
@@ -596,7 +596,7 @@ async def cb_ca_run(
 
     # Get target bots
     target_bots = await pool.fetch(
-        "SELECT * FROM bots WHERE id = ANY($1::bigint[]) AND owner_id=$2",
+        "SELECT * FROM managed_bots WHERE bot_id = ANY($1::bigint[]) AND added_by=$2 AND is_active=TRUE",
         targets, callback.from_user.id,
     )
 
@@ -608,18 +608,18 @@ async def cb_ca_run(
                 source, dict(tb), fields, suffix,
                 src_name, src_desc, src_short, src_photo_bytes, src_commands,
             )
-            label = tb["username"] or tb["first_name"] or f"id{tb['id']}"
+            label = tb["username"] or tb["first_name"] or f"id{tb['bot_id']}"
             results.append((label, ok, detail))
             await pool.execute(
                 """
                 INSERT INTO clone_adapt_history (owner_id, source_bot_id, target_bot_id, fields, status, details)
                 VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                callback.from_user.id, source_bot_id, tb["id"],
+                callback.from_user.id, source_bot_id, tb["bot_id"],
                 ",".join(fields), "ok" if ok else "error", detail,
             )
         except Exception as e:
-            label = tb["username"] or tb["first_name"] or f"id{tb['id']}"
+            label = tb["username"] or tb["first_name"] or f"id{tb['bot_id']}"
             results.append((label, False, str(e)[:80]))
 
     await state.clear()
