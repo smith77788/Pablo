@@ -150,6 +150,16 @@ async def _exec_gift_transfer(pool, op_id: int, params: dict) -> None:
         transferred_count,
         failed_count,
     )
+    return {
+        "status": "done",
+        "summary": (
+            f"✅ Подарки отправлены: {transferred_count} / {len(plan['items'])} "
+            f"(не удалось: {failed_count})"
+        ),
+        "transferred": transferred_count,
+        "failed": failed_count,
+        "total": len(plan["items"]),
+    }
 
 
 async def _transfer_single_gift(

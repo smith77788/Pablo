@@ -2635,15 +2635,22 @@ async def _ob_show_preview(
         target_filter = sd.get("ob_target", "")
         chan_count = 0
         try:
-            if target_filter in ("channels", "both"):
-                chan_count += (
+            if target_filter == "channels":
+                chan_count = (
                     await pool.fetchval(
-                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
+                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=FALSE", uid
                     )
                     or 0
                 )
-            if target_filter in ("groups", "both"):
-                chan_count += (
+            elif target_filter == "groups":
+                chan_count = (
+                    await pool.fetchval(
+                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=TRUE", uid
+                    )
+                    or 0
+                )
+            elif target_filter == "both":
+                chan_count = (
                     await pool.fetchval(
                         "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid
                     )

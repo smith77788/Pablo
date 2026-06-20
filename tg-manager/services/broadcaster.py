@@ -50,7 +50,7 @@ def _render_for_user(text: str, user_info: dict, bot_name: str = "") -> str:
 
 async def run(
     pool: asyncpg.Pool,
-    session: aiohttp.ClientSession,
+    session: aiohttp.ClientSession | None,
     broadcast_id: int,
     token: str,
     bot_id: int,
@@ -64,6 +64,12 @@ async def run(
     # so they don't all hammer Telegram at the same instant.
     if start_delay > 0:
         await asyncio.sleep(start_delay)
+
+    # If no session was provided (e.g. called from op_worker where the outer session
+    # would already be closed by the time this task runs), create our own.
+    _own_session = session is None
+    if _own_session:
+        session = aiohttp.ClientSession()
 
     if user_ids is None:
         user_ids = await db.get_audience_user_ids(pool, bot_id)
@@ -249,6 +255,8 @@ async def run(
         )
     finally:
         _running.pop(broadcast_id, None)
+        if _own_session:
+            await session.close()
 
     if _loop_exc is not None:
         raise _loop_exc
@@ -277,7 +285,7 @@ def _on_broadcast_done(broadcast_id: int, task: asyncio.Task) -> None:
 
 def start(
     pool: asyncpg.Pool,
-    session: aiohttp.ClientSession,
+    session: aiohttp.ClientSession | None,
     broadcast_id: int,
     token: str,
     bot_id: int,

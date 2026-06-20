@@ -76,6 +76,18 @@ async def create_pool() -> asyncpg.Pool:
 # ── Managed bots ───────────────────────────────────────────────────────────
 
 
+def _dec_bot_rows(rows) -> list[dict]:
+    """Post-process managed_bots query results: decrypt token field in every row."""
+    from services.token_vault import decrypt_token as _dt
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("token"):
+            d["token"] = _dt(d["token"])
+        out.append(d)
+    return out
+
+
 async def add_bot(
     pool: asyncpg.Pool,
     token: str,
@@ -86,11 +98,12 @@ async def add_bot(
     bot=None,
 ) -> bool:
     """Return True if inserted, False if token already exists."""
+    from services.token_vault import encrypt_token as _enc_tok
     try:
         await pool.execute(
             """INSERT INTO managed_bots (token, bot_id, username, first_name, added_by)
                VALUES ($1, $2, $3, $4, $5)""",
-            token,
+            _enc_tok(token),
             bot_id,
             username,
             first_name,
@@ -117,8 +130,8 @@ async def add_bot(
     return True
 
 
-async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
+async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
+    rows = await pool.fetch(
         """SELECT m.*,
                   COALESCE(aud.cnt, 0) AS audience_count,
                   COALESCE(ar.ar_cnt, 0) AS active_replies_count
@@ -135,16 +148,20 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
            ORDER BY m.added_at DESC""",
         added_by,
     )
+    return _dec_bot_rows(rows)
 
 
 async def get_bot(
     pool: asyncpg.Pool, bot_id: int, added_by: int
-) -> asyncpg.Record | None:
-    return await pool.fetchrow(
+) -> dict | None:
+    row = await pool.fetchrow(
         "SELECT * FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
         bot_id,
         added_by,
     )
+    if row is None:
+        return None
+    return _dec_bot_rows([row])[0]
 
 
 async def delete_bot(pool: asyncpg.Pool, bot_id: int, added_by: int) -> bool:
@@ -477,13 +494,14 @@ async def create_scheduled(
     )
 
 
-async def get_pending_scheduled(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    return await pool.fetch(
+async def get_pending_scheduled(pool: asyncpg.Pool) -> list[dict]:
+    rows = await pool.fetch(
         """SELECT s.*, m.token FROM scheduled_broadcasts s
            JOIN managed_bots m ON m.bot_id=s.bot_id AND m.is_active=true
            WHERE s.status='pending' AND s.execute_at <= NOW()
            ORDER BY s.execute_at ASC LIMIT 100""",
     )
+    return _dec_bot_rows(rows)
 
 
 async def mark_scheduled_done(pool: asyncpg.Pool, schedule_id: int) -> None:
@@ -579,18 +597,20 @@ async def set_update_offset(pool: asyncpg.Pool, bot_id: int, offset: int) -> Non
     )
 
 
-async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    return await pool.fetch(
+async def get_bots_with_auto_replies(pool: asyncpg.Pool) -> list[dict]:
+    rows = await pool.fetch(
         "SELECT DISTINCT b.bot_id, b.token FROM managed_bots b "
         "JOIN auto_replies ar ON ar.bot_id=b.bot_id WHERE ar.is_active=true"
     )
+    return _dec_bot_rows(rows)
 
 
-async def get_bots_for_polling(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+async def get_bots_for_polling(pool: asyncpg.Pool) -> list[dict]:
     """Return all active managed bots for polling (activity, deep links, swarm, A/B, etc.)."""
-    return await pool.fetch(
+    rows = await pool.fetch(
         "SELECT bot_id, token FROM managed_bots WHERE is_active=true"
     )
+    return _dec_bot_rows(rows)
 
 
 # ── Hermes Relay ───────────────────────────────────────────────────────────
@@ -612,11 +632,12 @@ async def enable_relay(
         )
 
 
-async def get_bots_with_relay(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    return await pool.fetch(
+async def get_bots_with_relay(pool: asyncpg.Pool) -> list[dict]:
+    rows = await pool.fetch(
         "SELECT bot_id, token, added_by FROM managed_bots "
         "WHERE relay_enabled=true AND is_active=true"
     )
+    return _dec_bot_rows(rows)
 
 
 async def get_or_create_relay_session(
@@ -669,8 +690,8 @@ async def save_relay_message(
 
 async def find_session_by_forwarded_msg(
     pool: asyncpg.Pool, forwarded_msg_id: int
-) -> asyncpg.Record | None:
-    return await pool.fetchrow(
+) -> dict | None:
+    row = await pool.fetchrow(
         """SELECT rs.bot_id, rs.user_id, mb.token
            FROM relay_messages rm
            JOIN relay_sessions rs ON rs.id = rm.session_id
@@ -678,6 +699,9 @@ async def find_session_by_forwarded_msg(
            WHERE rm.forwarded_msg_id=$1""",
         forwarded_msg_id,
     )
+    if row is None:
+        return None
+    return _dec_bot_rows([row])[0]
 
 
 async def get_relay_sessions(
@@ -859,9 +883,9 @@ async def subscribe_to_funnel(pool: asyncpg.Pool, funnel_id: int, user_id: int) 
             pass  # column may not exist yet — schema migration will add it
 
 
-async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[dict]:
     """Returns subscriptions where next step is due (excluding completed and dropped)."""
-    return await pool.fetch(
+    rows = await pool.fetch(
         """SELECT fs.id as sub_id, fs.funnel_id, fs.user_id, fs.current_step,
                   fst.message_text, fst.delay_minutes,
                   f.bot_id, mb.token,
@@ -874,6 +898,7 @@ async def get_due_funnel_steps(pool: asyncpg.Pool) -> list[asyncpg.Record]:
              AND COALESCE(fs.dropped, false) = false
              AND fs.next_send_at<=now()""",
     )
+    return _dec_bot_rows(rows)
 
 
 async def advance_funnel_step(
@@ -1009,11 +1034,12 @@ async def get_bot_stats(pool: asyncpg.Pool, bot_id: int) -> dict:
     }
 
 
-async def get_bots_with_funnels(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    return await pool.fetch(
+async def get_bots_with_funnels(pool: asyncpg.Pool) -> list[dict]:
+    rows = await pool.fetch(
         "SELECT DISTINCT b.bot_id, b.token, b.added_by FROM managed_bots b "
         "JOIN funnels f ON f.bot_id=b.bot_id WHERE f.is_active=true AND b.is_active=true"
     )
+    return _dec_bot_rows(rows)
 
 
 async def update_bot_token(
@@ -1025,13 +1051,14 @@ async def update_bot_token(
     username: str,
     first_name: str,
 ) -> None:
+    from services.token_vault import encrypt_token as _enc_tok
     await pool.execute(
         """UPDATE managed_bots
            SET token=$3, bot_id=$4, username=$5, first_name=$6
            WHERE bot_id=$1 AND added_by=$2""",
         bot_id,
         added_by,
-        new_token,
+        _enc_tok(new_token),
         new_bot_id,
         username,
         first_name,
@@ -1517,9 +1544,9 @@ async def delete_experiment(pool, exp_id: int, bot_id: int) -> None:
 
 async def get_best_conversion_bot(
     pool, cluster: str, exclude_bot_id: int
-) -> asyncpg.Record | None:
+) -> dict | None:
     """Get highest-scoring conversion/retention bot in the same cluster."""
-    return await pool.fetchrow(
+    row = await pool.fetchrow(
         """SELECT m.bot_id, m.token, m.username, m.first_name,
                   COALESCE(bm.score, 0) as score
            FROM managed_bots m
@@ -1534,6 +1561,9 @@ async def get_best_conversion_bot(
         cluster,
         exclude_bot_id,
     )
+    if row is None:
+        return None
+    return _dec_bot_rows([row])[0]
 
 
 async def log_routing_decision(
@@ -2097,8 +2127,8 @@ async def get_bot_ranking(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Rec
     )
 
 
-async def get_network_health(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Record]:
-    return await pool.fetch(
+async def get_network_health(pool: asyncpg.Pool, added_by: int) -> list[dict]:
+    rows = await pool.fetch(
         """SELECT m.bot_id, m.username, m.first_name, m.token, m.swarm_enabled, m.cluster,
                   COALESCE(o.last_update_id,0) as last_update_id,
                   COALESCE(aud.cnt,0) as audience
@@ -2111,6 +2141,7 @@ async def get_network_health(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.
            ORDER BY aud.cnt DESC""",
         added_by,
     )
+    return _dec_bot_rows(rows)
 
 
 async def get_unique_network_users(pool: asyncpg.Pool, added_by: int) -> list[dict]:
@@ -2125,7 +2156,7 @@ async def get_unique_network_users(pool: asyncpg.Pool, added_by: int) -> list[di
            ORDER BY bu.user_id, bu.last_seen DESC""",
         added_by,
     )
-    return [dict(r) for r in rows]
+    return _dec_bot_rows(rows)
 
 
 async def get_bot_overlap_stats(pool: asyncpg.Pool, added_by: int) -> dict:
@@ -2254,11 +2285,11 @@ async def clone_bot_settings(pool: asyncpg.Pool, src_id: int, dst_id: int) -> di
 
 async def get_weighted_routing_target(
     pool: asyncpg.Pool, cluster: str, exclude_bot_id: int
-) -> asyncpg.Record | None:
+) -> dict | None:
     """Weighted random selection of routing target bot."""
     import random as _random
 
-    candidates = await pool.fetch(
+    raw_candidates = await pool.fetch(
         """SELECT m.bot_id, m.token, m.username, m.first_name,
                   COALESCE(bm.score,0) as score,
                   COALESCE(rw.weight,1.0) as weight
@@ -2271,8 +2302,9 @@ async def get_weighted_routing_target(
         cluster,
         exclude_bot_id,
     )
-    if not candidates:
+    if not raw_candidates:
         return None
+    candidates = _dec_bot_rows(raw_candidates)
     total = sum(float(c["weight"]) for c in candidates)
     if total <= 0:
         return candidates[0]

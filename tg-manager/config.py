@@ -22,6 +22,9 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-6")
 ADMIN_SECRET: str = os.getenv("ADMIN_SECRET", "")
+# AES-256-GCM key for encrypting bot tokens and credentials at rest.
+# Must be set in env. If absent, falls back to MANAGER_BOT_TOKEN (deterministic).
+TOKEN_ENCRYPTION_KEY: str = os.getenv("TOKEN_ENCRYPTION_KEY", "")
 TG_API_ID: int = int(os.getenv("TG_API_ID", "0") or "0")
 TG_API_HASH: str = os.getenv("TG_API_HASH", "")
 # Optional SOCKS5 proxy for Telethon (needed on datacenter IPs like Railway)
