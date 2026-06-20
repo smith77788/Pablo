@@ -4616,13 +4616,21 @@ async def _exec_bulk_post_to_channel(
             }
 
         label = _html.escape(acc.get("first_name") or acc.get("phone") or str(acc["id"]))
-        result = await account_manager.post_to_channel(
-            acc["session_str"],
-            channel_ref,
-            text_to_post,
-            access_hash=bulk_access_hash,
-            _acc=acc,
-        )
+        try:
+            result = await account_manager.post_to_channel(
+                acc["session_str"],
+                channel_ref,
+                text_to_post,
+                access_hash=bulk_access_hash,
+                _acc=acc,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as _post_exc:
+            log.warning("_exec_bulk_post_to_channel acc=%s: %s", acc.get("id"), _post_exc)
+            err_list.append(f"❌ {label}: {_html.escape(str(_post_exc)[:60])}")
+            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            continue
         if result.get("banned"):
             await _db.deactivate_account(pool, acc["id"], "banned detected in bulk op")
             err_list.append(f"❌ {label}: забанен")
