@@ -14,8 +14,8 @@ log = logging.getLogger(__name__)
 async def create_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=8,
-        max_size=32,
+        min_size=15,
+        max_size=50,
         max_inactive_connection_lifetime=300,
         command_timeout=30,
     )

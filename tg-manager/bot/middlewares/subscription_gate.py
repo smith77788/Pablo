@@ -20,7 +20,7 @@ _gate_channels: list[dict] = []
 # Keyed by user_id → (expires_at, is_allowed)
 # Avoids a Telegram API call on every message/callback.
 _gate_cache: dict[int, tuple[float, bool]] = {}
-_GATE_CACHE_TTL = 60.0  # seconds
+_GATE_CACHE_TTL = 300.0  # seconds — 5 min; reduces Telegram API calls by 5x
 
 
 def _cache_get(user_id: int) -> bool | None:

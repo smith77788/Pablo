@@ -739,6 +739,8 @@ async def _process_bot(
 
 async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) -> None:
     asyncio.get_event_loop().create_task(run_inactivity_sweep(pool, http))
+    # Stagger startup — don't hammer DB immediately alongside other services
+    await asyncio.sleep(10)
     while True:
         try:
             bots = await db.get_bots_for_polling(pool)
@@ -752,7 +754,7 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                 )
         except Exception:
             log.exception("Auto-responder loop error")
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
 
 
 async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:

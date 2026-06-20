@@ -315,13 +315,20 @@ async def main() -> None:
     ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
-    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+    connector = aiohttp.TCPConnector(ssl=ssl_ctx, limit=200, limit_per_host=50)
     http = aiohttp.ClientSession(connector=connector)
+
+    _svc_stagger_index = 0
 
     async def _resilient(name: str, fn, *args):
         """Wrap a background service factory with auto-restart on crash.
         fn(*args) is called fresh each restart so the coroutine is never reused.
+        Stagger startup so all services don't hit DB simultaneously.
         """
+        nonlocal _svc_stagger_index
+        _svc_stagger_index += 1
+        delay = _svc_stagger_index * 2  # 2s gap between each service
+        await asyncio.sleep(delay)
         while True:
             try:
                 await fn(*args)
@@ -418,7 +425,15 @@ async def main() -> None:
             _resilient("auto_funnel", auto_funnel_svc.run, pool, bot)
         )
         log.info("TG Manager started")
-        await dp.start_polling(bot, pool=pool, http=http, drop_pending_updates=True)
+        await dp.start_polling(
+            bot,
+            pool=pool,
+            http=http,
+            drop_pending_updates=True,
+            polling_timeout=30,
+            allowed_updates=["message", "callback_query", "inline_query",
+                             "chosen_inline_result", "pre_checkout_query"],
+        )
     finally:
         await pool.close()
         await http.close()
