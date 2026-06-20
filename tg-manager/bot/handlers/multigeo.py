@@ -246,6 +246,12 @@ async def msg_multigeo_name(
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
+    if value and len(value) > 64:
+        await message.answer(
+            f"⚠️ Имя слишком длинное: {len(value)}/64 символов. Сократите и отправьте снова.",
+            parse_mode="HTML",
+        )
+        return
     ok = await bot_api.set_name(http, token, value, language_code=lang)
     await message.answer(
         "✅ Обновлено." if ok else "❌ Не удалось обновить.",
@@ -311,6 +317,12 @@ async def msg_multigeo_short(
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
+    if value and len(value) > 120:
+        await message.answer(
+            f"⚠️ Краткое описание слишком длинное: {len(value)}/120 символов. Сократите и отправьте снова.",
+            parse_mode="HTML",
+        )
+        return
     ok = await bot_api.set_short_description(http, token, value, language_code=lang)
     await message.answer(
         "✅ Обновлено." if ok else "❌ Не удалось обновить.",
@@ -376,6 +388,12 @@ async def msg_multigeo_desc(
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
+    if value and len(value) > 512:
+        await message.answer(
+            f"⚠️ Описание слишком длинное: {len(value)}/512 символов. Сократите и отправьте снова.",
+            parse_mode="HTML",
+        )
+        return
     ok = await bot_api.set_description(http, token, value, language_code=lang)
     await message.answer(
         "✅ Обновлено." if ok else "❌ Не удалось обновить.",

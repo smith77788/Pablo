@@ -7,10 +7,10 @@ import aiohttp
 import asyncpg
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import NetworkCb, BmCb
-from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup
+from bot.keyboards import network_ops_menu, main_menu, subscription_locked_markup, LANGUAGES
 from bot.states import BulkEdit, ImportBots
 from bot.utils.subscription import require_plan, locked_text, is_platform_admin
 from database import db
@@ -20,10 +20,18 @@ from services.logger import log_exc_swallow
 router = Router()
 log = logging.getLogger(__name__)
 
-_LANG_HINT = (
-    "Введите код языка (<code>ru</code>, <code>en</code>, <code>uk</code>, <code>de</code>…) "
-    "или <code>-</code> чтобы сбросить до дефолтного."
-)
+_GEO_LIMITS = {"name": 64, "short": 120, "desc": 512}
+
+
+def _geo_lang_kb(field: str) -> InlineKeyboardMarkup:
+    """Inline keyboard for GEO language selection (name/desc/short/cmd)."""
+    from aiogram.types import InlineKeyboardMarkup
+    kb = InlineKeyboardBuilder()
+    for code, flag, lang_name in LANGUAGES:
+        kb.button(text=f"{flag} {lang_name}", callback_data=f"netgeo:{field}:{code}")
+    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
+    kb.adjust(2)
+    return kb.as_markup()
 
 
 async def _apply_all(
@@ -162,6 +170,9 @@ async def msg_bulk_name(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     name = message.text.strip()
+    if len(name) > 64:
+        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.")
+        return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     log.info("network_bulk: set_name user=%s", message.from_user.id)
@@ -180,31 +191,13 @@ async def msg_bulk_name(
 async def cb_bulk_name_lang(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
-    await state.set_state(BulkEdit.waiting_name_lang)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
+    await callback.answer()
     await callback.message.edit_text(
-        f"🌍 <b>Имя по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        "🌍 <b>Имя по GEO — выберите язык</b>\n\nКакому языку задать имя?",
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
-
-
-@router.message(BulkEdit.waiting_name_lang, F.text)
-async def msg_bulk_name_lang(message: Message, state: FSMContext) -> None:
-    await state.update_data(lang=message.text.strip())
-    await state.set_state(BulkEdit.waiting_localized_name)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
-    await message.answer(
-        f"✏️ Введите имя для языка <code>{message.text.strip()}</code>:",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=_geo_lang_kb("name"),
     )
 
 
@@ -212,9 +205,12 @@ async def msg_bulk_name_lang(message: Message, state: FSMContext) -> None:
 async def msg_bulk_localized_name(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    data = await state.get_data()
-    lang = "" if data["lang"] == "-" else data["lang"]
     name = message.text.strip()
+    if len(name) > 64:
+        await message.answer(f"⚠️ Имя слишком длинное: {len(name)}/64 символов. Сократите.")
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "")
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     ok, fail, total = await _apply_all(
@@ -250,6 +246,9 @@ async def msg_bulk_desc(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     desc = message.text.strip()
+    if len(desc) > 512:
+        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.")
+        return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     ok, fail, total = await _apply_all(
@@ -266,37 +265,26 @@ async def msg_bulk_desc(
 async def cb_bulk_desc_lang(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
-    await state.set_state(BulkEdit.waiting_desc_lang)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
+    await callback.answer()
     await callback.message.edit_text(
-        f"🌍 <b>Описание по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        "🌍 <b>Описание по GEO — выберите язык</b>\n\nКакому языку задать описание?",
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=_geo_lang_kb("desc"),
     )
-
-
-@router.message(BulkEdit.waiting_desc_lang, F.text)
-async def msg_bulk_desc_lang(message: Message, state: FSMContext) -> None:
-    await state.update_data(lang=message.text.strip())
-    await state.set_state(BulkEdit.waiting_localized_desc)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
-    await message.answer("📄 Введите описание:", reply_markup=kb.as_markup())
 
 
 @router.message(BulkEdit.waiting_localized_desc, F.text)
 async def msg_bulk_localized_desc(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    data = await state.get_data()
-    lang = "" if data["lang"] == "-" else data["lang"]
     desc = message.text.strip()
+    if len(desc) > 512:
+        await message.answer(f"⚠️ Описание слишком длинное: {len(desc)}/512 символов. Сократите.")
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "")
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     ok, fail, total = await _apply_all(
@@ -332,6 +320,9 @@ async def msg_bulk_short(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
     short = message.text.strip()
+    if len(short) > 120:
+        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.")
+        return
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     ok, fail, total = await _apply_all(
@@ -348,37 +339,26 @@ async def msg_bulk_short(
 async def cb_bulk_short_lang(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
-    await state.set_state(BulkEdit.waiting_short_lang)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
+    await callback.answer()
     await callback.message.edit_text(
-        f"🌍 <b>Краткое по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        "🌍 <b>Краткое описание по GEO — выберите язык</b>\n\nКакому языку задать краткое описание?",
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=_geo_lang_kb("short"),
     )
-
-
-@router.message(BulkEdit.waiting_short_lang, F.text)
-async def msg_bulk_short_lang(message: Message, state: FSMContext) -> None:
-    await state.update_data(lang=message.text.strip())
-    await state.set_state(BulkEdit.waiting_localized_short)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
-    await message.answer("📃 Введите краткое описание:", reply_markup=kb.as_markup())
 
 
 @router.message(BulkEdit.waiting_localized_short, F.text)
 async def msg_bulk_localized_short(
     message: Message, state: FSMContext, pool: asyncpg.Pool, http: aiohttp.ClientSession
 ) -> None:
-    data = await state.get_data()
-    lang = "" if data["lang"] == "-" else data["lang"]
     short = message.text.strip()
+    if len(short) > 120:
+        await message.answer(f"⚠️ Краткое описание слишком длинное: {len(short)}/120 символов. Сократите.")
+        return
+    data = await state.get_data()
+    lang = data.get("lang", "")
     await state.clear()
     msg = await message.answer("⏳ Применяю ко всем ботам...")
     ok, fail, total = await _apply_all(
@@ -440,32 +420,43 @@ async def msg_bulk_commands(
 async def cb_bulk_commands_lang(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
-    await callback.answer()
     if not await _check_enterprise(callback, pool):
         return
-    await state.set_state(BulkEdit.waiting_commands_lang)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
+    await callback.answer()
     await callback.message.edit_text(
-        f"🌍 <b>Команды по языку — для всех ботов</b>\n\n{_LANG_HINT}",
+        "🌍 <b>Команды по GEO — выберите язык</b>\n\nДля какого языка задать команды?",
         parse_mode="HTML",
-        reply_markup=kb.as_markup(),
+        reply_markup=_geo_lang_kb("cmd"),
     )
 
 
-@router.message(BulkEdit.waiting_commands_lang, F.text)
-async def msg_bulk_commands_lang(message: Message, state: FSMContext) -> None:
-    await state.update_data(lang=message.text.strip())
-    await state.set_state(BulkEdit.waiting_localized_commands)
+@router.callback_query(F.data.startswith("netgeo:"))
+async def cb_netgeo_lang_select(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    """Handle GEO language selection from inline keyboard (netgeo:field:lang_code)."""
+    parts = callback.data.split(":", 2)
+    if len(parts) != 3:
+        await callback.answer("Неверный формат.", show_alert=True)
+        return
+    _, field, code = parts
+    await callback.answer()
+    await state.update_data(lang=code)
+
+    _state_map = {
+        "name": (BulkEdit.waiting_localized_name, f"✏️ Введите <b>имя</b> для языка <code>{code.upper()}</code> (макс. 64 символа):"),
+        "desc": (BulkEdit.waiting_localized_desc, f"📄 Введите <b>описание</b> для языка <code>{code.upper()}</code> (макс. 512 символов):"),
+        "short": (BulkEdit.waiting_localized_short, f"📃 Введите <b>краткое описание</b> для языка <code>{code.upper()}</code> (макс. 120 символов):"),
+        "cmd": (BulkEdit.waiting_localized_commands, f"🤖 Введите <b>команды</b> для языка <code>{code.upper()}</code>:\n\n<code>start - Главное меню\nhelp - Помощь</code>"),
+    }
+    if field not in _state_map:
+        await callback.answer("Неизвестный тип поля.", show_alert=True)
+        return
+    next_state, prompt = _state_map[field]
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=NetworkCb(action="menu"))
-    kb.adjust(1)
-    await message.answer(
-        "🤖 Отправьте список команд:\n\n<code>start - Главное меню\nhelp - Помощь</code>",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
+    await callback.message.edit_text(prompt, parse_mode="HTML", reply_markup=kb.as_markup())
+    await state.set_state(next_state)
 
 
 @router.message(BulkEdit.waiting_localized_commands, F.text)
@@ -475,7 +466,7 @@ async def msg_bulk_localized_commands(
     from bot.handlers.commands import _parse_commands
 
     data = await state.get_data()
-    lang = "" if data["lang"] == "-" else data["lang"]
+    lang = data.get("lang", "")
     commands = _parse_commands(message.text or "")
     if not commands:
         await message.answer(
