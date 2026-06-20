@@ -567,3 +567,7 @@ class AutoFunnelFSM(StatesGroup):
     waiting_step_button = State()  # текст|URL кнопки (опционально)
 
 
+class ApiKeyFSM(StatesGroup):
+    waiting_name = State()  # название нового API-ключа
+
+

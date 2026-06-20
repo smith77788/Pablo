@@ -58,6 +58,10 @@ from bot.callbacks import (
     WarmupCb,
     WorkspaceCb,
     EcoCb,
+    PhysicsCb,
+    GraphCb,
+    ApiHubCb,
+    ComplianceCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -198,10 +202,11 @@ def _analytics_kb(plan: str = "free"):
     kb.button(text=f"{_lock(plan,'starter')}📋 Отчёты", callback_data=BmCb(action="vis_reports"))
     kb.button(text=f"{_lock(plan,'enterprise')}🧠 Поведение пользов.", callback_data=BmCb(action="behavioral"))
     kb.button(text="🕸️ Граф связей", callback_data=TopoCb(action="menu"))
+    kb.button(text="🌐 Граф аудитории", callback_data=GraphCb(action="menu"))
     kb.button(text="📅 Дата регистрации", callback_data=RegCb(action="start"))
     kb.button(text="🔬 Полный анализ", callback_data=RegCb(action="analyze_start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -214,8 +219,9 @@ def _monitoring_kb():
     kb.button(text="🌐 Прокси", callback_data=ProxyCb(action="menu"))
     kb.button(text="📊 Инфра-аналитика", callback_data=InfraCb(action="menu"))
     kb.button(text="👻 Ghost Engine", callback_data=GhostCb(action="menu"))
+    kb.button(text="⚛️ Physics Engine", callback_data=PhysicsCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -228,9 +234,11 @@ def _settings_kb(plan: str = "free"):
     kb.button(text="🤖 Команды бота", callback_data=BmCb(action="pick_bot_for", sub="cmd"))
     kb.button(text=f"{_lock(plan,'starter')}📄 Шаблоны", callback_data=AssetTplCb(action="menu"))
     kb.button(text=f"{_lock(plan,'enterprise')}🏢 Пространства", callback_data=WorkspaceCb(action="menu"))
+    kb.button(text="🔑 API доступ", callback_data=ApiHubCb(action="menu"))
+    kb.button(text="📋 Compliance", callback_data=ComplianceCb(action="menu"))
     kb.button(text="🐛 Сообщить об ошибке", callback_data=ErrorReportCb(action="start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

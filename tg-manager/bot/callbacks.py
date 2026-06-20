@@ -505,4 +505,33 @@ class AutoFunnelCb(CallbackData, prefix="afn"):
     extra: str = ""    # bot_id or segment or step_id
 
 
+class PhysicsCb(CallbackData, prefix="phys"):
+    """Physics Engine — account risk scores and safety envelopes."""
+
+    action: str         # menu|detail
+    account_id: int = 0
+    page: int = 0
+
+
+class GraphCb(CallbackData, prefix="grph"):
+    """Social Graph Engine — audience overlap and channel relationship map."""
+
+    action: str         # menu|overlaps|my_nodes
+    page: int = 0
+
+
+class ApiHubCb(CallbackData, prefix="apih"):
+    """Compute API Hub — per-user API key management."""
+
+    action: str         # menu|create|revoke|revoke_confirm|docs
+    item_id: int = 0
+
+
+class ComplianceCb(CallbackData, prefix="cmpl"):
+    """Compliance Engine — cryptographic audit trail."""
+
+    action: str         # menu|history|export
+    page: int = 0
+
+
 

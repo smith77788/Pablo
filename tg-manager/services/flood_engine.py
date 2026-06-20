@@ -212,6 +212,16 @@ async def record_flood(
         except Exception as e:
             log.warning("flood_engine DB write failed: %s", e)
 
+        # Physics Engine telemetry (fire-and-forget)
+        try:
+            from services import physics_engine as _pe
+            loop = asyncio.get_event_loop()
+            loop.create_task(
+                _pe.record_telemetry(pool, account_id, None, action_type, "flood_wait", wait_seconds, 0)
+            )
+        except Exception:
+            pass
+
     return actual_wait
 
 

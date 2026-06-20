@@ -86,9 +86,15 @@ from bot.handlers import ghost_hub as ghost_hub_handler
 from bot.handlers import content_mesh_hub as content_mesh_handler
 from bot.handlers import clone_adapt_hub as clone_adapt_handler
 from bot.handlers import auto_funnel_hub as auto_funnel_handler
+from bot.handlers import physics_hub as physics_handler
+from bot.handlers import graph_hub as graph_handler
+from bot.handlers import api_hub as api_handler
+from bot.handlers import compliance_hub as compliance_handler
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
 from services import content_mesh
+from services import physics_engine
+from services import graph_engine
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -269,6 +275,10 @@ async def main() -> None:
     dp.include_router(content_mesh_handler.router)
     dp.include_router(clone_adapt_handler.router)
     dp.include_router(auto_funnel_handler.router)
+    dp.include_router(physics_handler.router)
+    dp.include_router(graph_handler.router)
+    dp.include_router(api_handler.router)
+    dp.include_router(compliance_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
@@ -423,6 +433,12 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("auto_funnel", auto_funnel_svc.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("physics_engine", physics_engine.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("graph_engine", graph_engine.run, pool, bot)
         )
         log.info("TG Manager started")
         await dp.start_polling(

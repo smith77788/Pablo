@@ -907,6 +907,27 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     operation_id=op_id,
                     duration_ms=int(duration_seconds * 1000),
                 )
+
+            # Physics Engine + Compliance telemetry (fire-and-forget)
+            try:
+                from services import physics_engine as _pe
+                from services import compliance_engine as _ce
+                _dur_ms = int(duration_seconds * 1000)
+                _outcome = result.get("status", "success")
+                _comp_outcome = "success" if _outcome == "done" else _outcome
+                if _acc_ids_done:
+                    for _tid in _acc_ids_done:
+                        asyncio.create_task(
+                            _pe.record_telemetry(
+                                pool, int(_tid), owner_id, op_type, "success", 0, _dur_ms
+                            )
+                        )
+                asyncio.create_task(
+                    _ce.record(pool, owner_id, None, op_type, _comp_outcome, op_id)
+                )
+            except Exception:
+                pass
+
             summary = _op_summary
             from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot.callbacks import BmCb, StrikeCb
