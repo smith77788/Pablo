@@ -50,7 +50,6 @@ async def _menu_text_kb(
     total = int(total or 0)
     pages = max(1, (total + _PAGE_SIZE - 1) // _PAGE_SIZE)
 
-    stats = await physics_engine.get_account_risk.__doc__ and None  # dummy access for import
     try:
         global_row = await pool.fetchrow(
             """SELECT
