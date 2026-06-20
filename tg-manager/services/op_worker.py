@@ -1070,10 +1070,12 @@ async def _exec_bulk_bot_edit(
     field = params.get("field", "")
     value = params.get("value", "")
 
-    bots_rows = await pool.fetch(
+    from services.token_vault import decrypt_token as _dt_bots
+    _raw_rows = await pool.fetch(
         "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
         owner_id,
     )
+    bots_rows = [{"id": r["id"], "token": _dt_bots(r["token"] or "")} for r in _raw_rows]
     if not bots_rows:
         return {"status": "failed", "summary": "⚠️ Bulk Bot Edit: нет активных ботов"}
 
@@ -4097,7 +4099,8 @@ async def _exec_seed_presence_pack(
                 pack["bot_id"], owner_id,
             )
             if bot_row:
-                bot_token = bot_row["token"]
+                from services.token_vault import decrypt_token as _dt_sp
+                bot_token = _dt_sp(bot_row["token"] or "")
         except Exception:
             log.warning("_exec_seed_presence_pack op=%d: failed to fetch bot token", op_id)
 

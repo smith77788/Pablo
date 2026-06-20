@@ -956,7 +956,8 @@ async def _apply_bot_template_data(
         await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_menu_kb())
         return
 
-    token = bot_row["token"]
+    from services.token_vault import decrypt_token as _dt_at
+    token = _dt_at(bot_row["token"] or "")
     results: list[str] = []
 
     if data.get("name"):

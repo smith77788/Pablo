@@ -596,8 +596,9 @@ async def execute_action(
         ids = [r["user_id"] for r in user_ids_rows]
         if not ids:
             return "⚠️ Аудитория пуста — нет активных получателей"
+        from services.token_vault import decrypt_token as _dt_ai
         bc_id = await db.create_broadcast(pool, bot_id, text, len(ids), user_id)
-        broadcaster.start(pool, http, bc_id, row["token"], bot_id, text, None, ids)
+        broadcaster.start(pool, http, bc_id, _dt_ai(row["token"] or ""), bot_id, text, None, ids)
         return f"✅ Рассылка #{bc_id} запущена! Получателей: {len(ids)}"
 
     elif name == "update_bot_profile":
@@ -613,10 +614,12 @@ async def execute_action(
         if not row or not http:
             return "❌ Ошибка: бот не найден"
         from services import bot_api
+        from services.token_vault import decrypt_token as _dt_ai2
 
         results = []
+        _dec_tok = _dt_ai2(row["token"] or "")
         if new_name:
-            ok = await bot_api.set_name(http, row["token"], new_name)
+            ok = await bot_api.set_name(http, _dec_tok, new_name)
             if ok:
                 await pool.execute(
                     "UPDATE managed_bots SET first_name=$1 WHERE bot_id=$2",
@@ -627,7 +630,7 @@ async def execute_action(
             else:
                 results.append("❌ Не удалось обновить имя")
         if description:
-            ok = await bot_api.set_description(http, row["token"], description)
+            ok = await bot_api.set_description(http, _dec_tok, description)
             if ok:
                 await pool.execute(
                     "UPDATE managed_bots SET description=$1 WHERE bot_id=$2",
@@ -638,7 +641,7 @@ async def execute_action(
             else:
                 results.append("❌ Не удалось обновить описание")
         if short_desc:
-            ok = await bot_api.set_short_description(http, row["token"], short_desc)
+            ok = await bot_api.set_short_description(http, _dec_tok, short_desc)
             if ok:
                 await pool.execute(
                     "UPDATE managed_bots SET short_description=$1 WHERE bot_id=$2",

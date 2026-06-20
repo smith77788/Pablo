@@ -1685,10 +1685,13 @@ async def handle_admin_message(
         from services import bot_api
 
         try:
-            bots = await pool.fetch(
+            from services.token_vault import decrypt_token as _dt_adm
+            _raw_bots = await pool.fetch(
                 "SELECT bot_id, token, username, first_name FROM managed_bots "
                 "WHERE token IS NOT NULL AND token <> '' ORDER BY bot_id"
             )
+            bots = [{"bot_id": r["bot_id"], "token": _dt_adm(r["token"] or ""),
+                      "username": r["username"], "first_name": r["first_name"]} for r in _raw_bots]
         except Exception:
             bots = []
             log_exc_swallow(log, "broadcast_bots fetch bots failed")
