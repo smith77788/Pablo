@@ -461,6 +461,28 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         "confirmed": "✅ Подтверждён — доступ активирован!",
         "expired": "❌ Истёк",
     }
+
+    if row["status"] == "confirmed":
+        await _ensure_table(pool)
+        try:
+            await pool.execute(
+                "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $1) "
+                "ON CONFLICT (user_id) DO NOTHING",
+                callback.from_user.id,
+            )
+            log.info("strike_access granted via payment user=%s", callback.from_user.id)
+        except Exception:
+            log_exc_swallow(log, "cb_strike_check_pay: strike_access insert failed")
+        kb2 = InlineKeyboardBuilder()
+        kb2.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
+        kb2.adjust(1)
+        await callback.message.edit_text(
+            "✅ <b>Оплата подтверждена. Strike активирован!</b>\n\nДобро пожаловать.",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+        return
+
     await callback.message.edit_text(
         f"⚔️ <b>Статус платежа</b>\n\n"
         f"Статус: <b>{labels.get(row['status'], row['status'])}</b>\n"
@@ -1443,7 +1465,9 @@ async def msg_password_input(
 
     try:
         await asyncio.to_thread(_test_smtp)
-        # Сохранить в БД
+        from services.token_vault import encrypt_token as _enc
+        encrypted_pass = _enc(password)
+        # Сохранить в БД (пароль зашифрован AES-256-GCM)
         await pool.execute(
             """INSERT INTO strike_email_accounts
                (owner_id, email, smtp_host, smtp_port, smtp_pass, auth_type)
@@ -1461,7 +1485,7 @@ async def msg_password_input(
             email,
             smtp_host,
             smtp_port,
-            password,
+            encrypted_pass,
         )
         _kb_ok = InlineKeyboardBuilder()
         _kb_ok.button(

@@ -12,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import GeoPresenceCb
+from bot.callbacks import BmCb, GeoPresenceCb
 from bot.states import GlobalPresenceFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
@@ -2198,8 +2198,6 @@ async def cb_gp_back_preview(
 async def cb_gp_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
-    from bot.callbacks import BmCb
-
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
     kb.button(text="🌍 Мои планы", callback_data=GeoPresenceCb(action="plans_list"))

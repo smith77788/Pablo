@@ -3055,9 +3055,24 @@ async def handle_import_tdata(
             )
             return
 
-        # Extract
+        # Extract — zip-bomb guard: reject if uncompressed > 200 MB or any path traversal
+        _MAX_UNCOMPRESSED = 200 * 1024 * 1024  # 200 MB
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
+                total_size = sum(i.file_size for i in zf.infolist())
+                if total_size > _MAX_UNCOMPRESSED:
+                    await state.clear()
+                    await msg.edit_text(
+                        f"❌ Архив слишком большой ({total_size // 1024 // 1024} МБ). "
+                        "Максимум 200 МБ в распакованном виде.",
+                        parse_mode="HTML",
+                    )
+                    return
+                for member in zf.infolist():
+                    if os.path.isabs(member.filename) or ".." in member.filename.replace("\\", "/"):
+                        await state.clear()
+                        await msg.edit_text("❌ Архив содержит подозрительные пути (path traversal). Отклонено.")
+                        return
                 zf.extractall(extract_dir)
         except zipfile.BadZipFile:
             await state.clear()

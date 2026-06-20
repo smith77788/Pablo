@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { prisma } from '@platform/db';
 import { CreateClusterDto } from './dto/create-cluster.dto';
 import { UpdateClusterDto } from './dto/update-cluster.dto';
@@ -47,6 +47,9 @@ export class ClustersService {
 
   async addAsset(tenantId: string, clusterId: string, assetId: string) {
     await this.findOne(tenantId, clusterId);
+    const asset = await (prisma as any).asset.findFirst({ where: { id: assetId } });
+    if (!asset) throw new NotFoundException('Asset not found');
+    if (asset.tenantId !== tenantId) throw new ForbiddenException('Asset does not belong to this tenant');
     return (prisma as any).asset.update({
       where: { id: assetId },
       data: { clusterId },
@@ -55,6 +58,9 @@ export class ClustersService {
 
   async removeAsset(tenantId: string, clusterId: string, assetId: string) {
     await this.findOne(tenantId, clusterId);
+    const asset = await (prisma as any).asset.findFirst({ where: { id: assetId } });
+    if (!asset) throw new NotFoundException('Asset not found');
+    if (asset.tenantId !== tenantId) throw new ForbiddenException('Asset does not belong to this tenant');
     await (prisma as any).asset.update({
       where: { id: assetId },
       data: { clusterId: null },
