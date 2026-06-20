@@ -11,7 +11,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import NetBcCb, NetworkCb
+from bot.callbacks import NetBcCb, NetworkCb, BmCb
 from bot.keyboards import net_broadcast_target_menu, net_broadcast_lang_menu
 from bot.states import NetworkBroadcastV2
 from bot.utils.subscription import require_plan, locked_text
@@ -54,9 +54,12 @@ async def cb_net_bc_cluster(
             callback.from_user.id,
             cluster_name,
         )
-    except Exception:
+    except Exception as _e:
         log.exception("cb_net_bc_cluster: pool.fetch failed")
-        await callback.message.edit_text("⚠️ Ошибка загрузки ботов кластера.", parse_mode="HTML")
+        await callback.message.edit_text(
+            f"⚠️ Ошибка загрузки ботов кластера.\n<code>{_html.escape(str(_e)[:200])}</code>",
+            parse_mode="HTML",
+        )
         return
 
     if not bots:

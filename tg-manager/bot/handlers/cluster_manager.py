@@ -288,7 +288,7 @@ async def cb_cluster_view(
     try:
         rows = await pool.fetch(
             """
-            SELECT id, bot_id, username, first_name
+            SELECT bot_id, username, first_name
             FROM managed_bots
             WHERE added_by=$1 AND cluster=$2 AND is_active=TRUE
             ORDER BY first_name
