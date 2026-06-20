@@ -13,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import SubCb
-from bot.states import PaymentSettingsFSM
+from bot.states import PaymentSettingsFSM, PromoSettingsFSM
 from bot.utils import subscription as sub_utils
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
 from services.logger import log_exc_swallow
@@ -101,14 +101,39 @@ def _usdt_reference_offset(reference: str) -> float:
     return round(cents / 100, 2)
 
 
-def _calc(plan: str, months: int, currency: str) -> tuple[float, float]:
+def _calc(plan: str, months: int, currency: str, promo: int = 0) -> tuple[float, float]:
     """Returns (usd_total, crypto_amount)."""
     base = PLAN_PRICES_USD.get(plan, 0)
-    disc = PERIOD_DISCOUNTS.get(months, 0)
+    disc = promo if (promo and months > 1) else PERIOD_DISCOUNTS.get(months, 0)
     usd = round(base * months * (1 - disc / 100), 2)
     if currency == "TON":
         return usd, round(usd / _get_ton_rate(), 2)
     return usd, usd  # USDT 1:1
+
+
+def _promo_active(disc: int, until: str) -> bool:
+    if not disc or not until:
+        return False
+    try:
+        from datetime import datetime, timezone, timedelta
+        end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+        return datetime.now(timezone.utc) < end
+    except ValueError:
+        return False
+
+
+async def _get_promo(pool: asyncpg.Pool) -> tuple[int, str]:
+    """Returns (discount_pct, until_YYYY-MM-DD). disc=0 means inactive."""
+    from database.db import get_platform_setting
+    try:
+        disc_str = await get_platform_setting(pool, "promo_discount", "0")
+        until = await get_platform_setting(pool, "promo_until", "")
+        disc = int(disc_str or "0")
+    except Exception:
+        disc, until = 0, ""
+    if not _promo_active(disc, until):
+        disc = 0
+    return disc, until
 
 
 def _mask(val: str) -> str:
@@ -140,7 +165,7 @@ async def _get_plan_expiry(pool: asyncpg.Pool, user_id: int):
     return "free", None
 
 
-async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
+async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: int = 0, promo_until: str = ""):
     from datetime import datetime, timezone
 
     plan, expires_at = await _get_plan_expiry(pool, user_id)
@@ -196,6 +221,14 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
             plan_info = f"Текущий план: <b>{emoji} ПЛАТНЫЙ</b> · ∞ ботов и каналов"
 
     price_paid = PLAN_PRICES_USD["paid"]
+    promo_disc = promo_disc or 0
+    promo_banner = ""
+    if promo_disc and promo_until:
+        price_3m = round(price_paid * 3 * (1 - promo_disc / 100), 2)
+        promo_banner = (
+            f"\n🔥 <b>АКЦИЯ −{promo_disc}% на 3, 6, 12 мес.</b>\n"
+            f"<i>3 мес. всего за ${price_3m} · Действует до {promo_until}</i>\n"
+        )
 
     # Активность: показываем только операции (не число подписок)
     social_lines = []
@@ -206,10 +239,16 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
         social_lines.append(f"⚡ {wops} операций за 7 дней")
     social_block = ("\n<i>" + " · ".join(social_lines) + "</i>\n") if social_lines else "\n"
 
+    if promo_disc:
+        period_hint = f"🔥 Акция −{promo_disc}% · 1 мес — скидки нет"
+    else:
+        period_hint = "💰 Оплата на 12 мес — скидка 20%"
+
     text = (
         f"💳 <b>Подписка BotMother</b>\n\n"
         f"{plan_info}\n"
-        f"{social_block}\n"
+        f"{social_block}"
+        f"{promo_banner}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🆓 <b>БЕСПЛАТНО</b> — навсегда\n"
         f"<i>До 5 ботов · До 5 каналов\n"
@@ -218,7 +257,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
         f"<i>∞ ботов и каналов · CRM · Воронки\n"
         f"DM-кампании · AI-ассистент · Рассылки по сети\n"
         f"Парсер · Фабрики · Аналитика · Strike · и всё остальное</i>\n\n"
-        f"<i>💰 Оплата на 12 мес — скидка 20%</i>\n"
+        f"<i>{period_hint}</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
         f"<i>Оплата: {pay_status}</i>"
     )
@@ -248,7 +287,8 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int):
 
 @router.message(Command("subscription"))
 async def cmd_subscription(message: Message, pool: asyncpg.Pool) -> None:
-    text, markup = await _build_menu_text_and_kb(pool, message.from_user.id)
+    disc, until = await _get_promo(pool)
+    text, markup = await _build_menu_text_and_kb(pool, message.from_user.id, disc, until)
     await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
@@ -258,7 +298,8 @@ async def cb_sub_menu(
 ) -> None:
     await callback.answer()
     await state.clear()
-    text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id)
+    disc, until = await _get_promo(pool)
+    text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id, disc, until)
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
 
 
@@ -333,26 +374,46 @@ async def cb_plan_features(
 
 
 @router.callback_query(SubCb.filter(F.action == "choose_plan"))
-async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb) -> None:
+async def cb_choose_plan(callback: CallbackQuery, callback_data: SubCb, pool: asyncpg.Pool) -> None:
     plan = sub_utils.coerce_plan(callback_data.plan or "paid")
     if plan not in PLAN_PRICES_USD:
         plan = "paid"
     await callback.answer()
     base = PLAN_PRICES_USD[plan]
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
+    promo, promo_until = await _get_promo(pool)
     kb = InlineKeyboardBuilder()
-    for months, disc in [(1, 0), (3, 10), (6, 15), (12, 20)]:
-        total = round(base * months * (1 - disc / 100), 2)
-        disc_txt = f" (-{disc}%)" if disc else ""
-        kb.button(
-            text=f"{months} мес. — ${total}{disc_txt}",
-            callback_data=SubCb(action="choose_period", plan=plan, months=months),
-        )
+    for months, std_disc in [(1, 0), (3, 10), (6, 15), (12, 20)]:
+        if promo and months > 1:
+            total = round(base * months * (1 - promo / 100), 2)
+            std_total = round(base * months * (1 - std_disc / 100), 2)
+            label = f"{months} мес. — <s>${std_total}</s> 🔥 ${total} (-{promo}%)"
+            kb.button(
+                text=f"🔥 {months} мес. — ${total} (-{promo}%)",
+                callback_data=SubCb(action="choose_period", plan=plan, months=months),
+            )
+        else:
+            total = round(base * months * (1 - std_disc / 100), 2)
+            disc_txt = f" (-{std_disc}%)" if std_disc else ""
+            kb.button(
+                text=f"{months} мес. — ${total}{disc_txt}",
+                callback_data=SubCb(action="choose_period", plan=plan, months=months),
+            )
     kb.button(text="◀️ Назад", callback_data=SubCb(action="menu"))
     kb.adjust(1)
+    if promo:
+        header = (
+            f"💳 {em} <b>{plan.upper()}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
+            f"🔥 <b>АКЦИЯ −{promo}%</b> на 3, 6, 12 мес. — до {promo_until}\n"
+            f"<i>Чем дольше — тем выгоднее (1 мес — без акции)</i>"
+        )
+    else:
+        header = (
+            f"💳 {em} <b>{plan.upper()}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
+            f"📅 Выберите период (чем дольше — тем дешевле):"
+        )
     await callback.message.edit_text(
-        f"💳 {em} <b>{plan.upper()}</b>\nБазовая цена: <b>${base}/мес</b>\n\n"
-        f"📅 Выберите период (чем дольше — тем дешевле):",
+        header,
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -369,11 +430,12 @@ async def cb_choose_period(
     em = sub_utils.PLAN_EMOJIS.get(plan, "💎")
     ton = _ton_wallet()
     tron = _tron_wallet()
+    promo, _ = await _get_promo(pool)
     await callback.answer()
 
     if not ton and not tron:
         # No wallets configured
-        usd, _ = _calc(plan, months, "TON")
+        usd, _ = _calc(plan, months, "TON", promo)
         kb = InlineKeyboardBuilder()
         if sub_utils.is_platform_admin(callback.from_user.id):
             kb.button(
@@ -403,13 +465,13 @@ async def cb_choose_period(
     # Wallets configured — show currency selection
     kb = InlineKeyboardBuilder()
     if ton:
-        usd_ton, crypto_ton = _calc(plan, months, "TON")
+        usd_ton, crypto_ton = _calc(plan, months, "TON", promo)
         kb.button(
             text=f"💎 TON — {crypto_ton:.2f} TON (≈${usd_ton})",
             callback_data=SubCb(action="pay", plan=plan, months=months, currency="TON"),
         )
     if tron:
-        usd_usdt, _ = _calc(plan, months, "USDT_TRC20")
+        usd_usdt, _ = _calc(plan, months, "USDT_TRC20", promo)
         kb.button(
             text=f"💵 USDT TRC-20 — {usd_usdt:.2f} USDT",
             callback_data=SubCb(
@@ -418,9 +480,10 @@ async def cb_choose_period(
         )
     kb.button(text="◀️ Назад", callback_data=SubCb(action="choose_plan", plan=plan))
     kb.adjust(1)
-    usd_show, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20")
+    usd_show, _ = _calc(plan, months, "TON" if ton else "USDT_TRC20", promo)
+    promo_line = f"\n🔥 <i>Включена скидка −{promo}%</i>" if promo and months > 1 else ""
     await callback.message.edit_text(
-        f"💳 <b>{em} Подписка × {months} мес.</b>\n\n"
+        f"💳 <b>{em} Подписка × {months} мес.</b>{promo_line}\n\n"
         f"Итого: <b>${usd_show}</b>\n\nВыберите способ оплаты:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -447,7 +510,8 @@ async def cb_pay(
         return
     await callback.answer()
 
-    usd, crypto = _calc(plan, months, currency)
+    promo, _ = await _get_promo(pool)
+    usd, crypto = _calc(plan, months, currency, promo)
 
     ref = _gen_ref()
     for _ in range(5):
@@ -726,6 +790,7 @@ def _payment_settings_kb() -> object:
             text=f"{label}: {_mask(val)}",
             callback_data=SubCb(action="pay_edit", plan=key),
         )
+    kb.button(text="🎁 Управление акцией", callback_data=SubCb(action="promo_settings"))
     kb.button(text="◀️ Назад к подписке", callback_data=SubCb(action="menu"))
     kb.adjust(1)
     return kb.as_markup()
@@ -884,6 +949,150 @@ async def msg_payment_setting_value(
     kb.adjust(1)
     await message.answer(
         f"✅ <b>{label}</b> обновлён{note}",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── promo management (admin) ─────────────────────────────────────────────────
+
+
+async def _promo_settings_text_kb(pool: asyncpg.Pool) -> tuple[str, object]:
+    from database.db import get_platform_setting
+    disc_str = await get_platform_setting(pool, "promo_discount", "0")
+    until = await get_platform_setting(pool, "promo_until", "")
+    try:
+        disc = int(disc_str or "0")
+    except (ValueError, TypeError):
+        disc = 0
+    active = _promo_active(disc, until)
+    if active:
+        status = f"🟢 <b>АКТИВНА</b> — скидка <b>−{disc}%</b> · до <b>{until}</b>"
+        status += "\n<i>1 месяц — без акции. 3, 6, 12 мес — со скидкой.</i>"
+    elif disc and until:
+        status = f"🔴 Акция завершена (была −{disc}%, до {until})"
+    else:
+        status = "⚫️ Акция не настроена"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✏️ Установить акцию", callback_data=SubCb(action="promo_set"))
+    if disc:
+        kb.button(text="🗑 Отключить акцию", callback_data=SubCb(action="promo_clear"))
+    kb.button(text="◀️ Назад к настройкам", callback_data=SubCb(action="payment_settings"))
+    kb.adjust(1)
+    text = f"🎁 <b>Управление акцией</b>\n\n{status}"
+    return text, kb.as_markup()
+
+
+@router.callback_query(SubCb.filter(F.action == "promo_settings"))
+async def cb_promo_settings(
+    callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
+) -> None:
+    if not sub_utils.is_platform_admin(callback.from_user.id):
+        await callback.answer("⛔️ Только для администратора.", show_alert=True)
+        return
+    await callback.answer()
+    await state.clear()
+    text, markup = await _promo_settings_text_kb(pool)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.callback_query(SubCb.filter(F.action == "promo_clear"))
+async def cb_promo_clear(
+    callback: CallbackQuery, pool: asyncpg.Pool
+) -> None:
+    if not sub_utils.is_platform_admin(callback.from_user.id):
+        await callback.answer("⛔️", show_alert=True)
+        return
+    await callback.answer()
+    from database.db import set_platform_setting
+    await set_platform_setting(pool, "promo_discount", "0")
+    await set_platform_setting(pool, "promo_until", "")
+    text, markup = await _promo_settings_text_kb(pool)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.callback_query(SubCb.filter(F.action == "promo_set"))
+async def cb_promo_set(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    if not sub_utils.is_platform_admin(callback.from_user.id):
+        await callback.answer("⛔️", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(PromoSettingsFSM.waiting_discount)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=SubCb(action="promo_settings"))
+    await callback.message.edit_text(
+        "🎁 <b>Установить акцию</b>\n\n"
+        "Шаг 1/2: введите процент скидки (только цифры).\n"
+        "Например: <code>51</code>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(PromoSettingsFSM.waiting_discount, F.text)
+async def msg_promo_discount(
+    message: Message, state: FSMContext
+) -> None:
+    try:
+        disc = int(message.text.strip())
+        if not (1 <= disc <= 99):
+            raise ValueError
+    except (ValueError, TypeError):
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=SubCb(action="promo_settings"))
+        await message.answer(
+            "❌ Введите целое число от 1 до 99. Пример: <code>51</code>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    await state.update_data(promo_disc=disc)
+    await state.set_state(PromoSettingsFSM.waiting_until)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=SubCb(action="promo_settings"))
+    await message.answer(
+        f"🎁 Скидка <b>−{disc}%</b> сохранена.\n\n"
+        "Шаг 2/2: введите дату окончания акции в формате <code>ГГГГ-ММ-ДД</code>.\n"
+        "Например: <code>2026-06-22</code> (конец воскресенья)",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(PromoSettingsFSM.waiting_until, F.text)
+async def msg_promo_until(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    raw = message.text.strip()
+    from datetime import datetime
+    try:
+        datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=SubCb(action="promo_settings"))
+        await message.answer(
+            "❌ Неверный формат. Введите дату как <code>ГГГГ-ММ-ДД</code>, например <code>2026-06-22</code>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    data = await state.get_data()
+    disc = data.get("promo_disc", 0)
+    await state.clear()
+    from database.db import set_platform_setting
+    await set_platform_setting(pool, "promo_discount", str(disc))
+    await set_platform_setting(pool, "promo_until", raw)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🎁 К управлению акцией", callback_data=SubCb(action="promo_settings"))
+    kb.button(text="💳 К подписке", callback_data=SubCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"✅ <b>Акция запущена!</b>\n\n"
+        f"Скидка: <b>−{disc}%</b> на 3, 6, 12 месяцев\n"
+        f"Действует до: <b>{raw}</b> (включительно)\n\n"
+        f"<i>Пользователи увидят новые цены немедленно.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

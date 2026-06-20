@@ -236,6 +236,11 @@ class PaymentSettingsFSM(StatesGroup):
     waiting_value = State()
 
 
+class PromoSettingsFSM(StatesGroup):
+    waiting_discount = State()
+    waiting_until = State()
+
+
 class ContactInviteFSM(StatesGroup):
     entering_channel = State()
     choosing_accounts = State()
