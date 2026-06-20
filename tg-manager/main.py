@@ -85,6 +85,8 @@ from bot.handlers import self_promo as self_promo_handler
 from bot.handlers import ghost_hub as ghost_hub_handler
 from bot.handlers import content_mesh_hub as content_mesh_handler
 from bot.handlers import clone_adapt_hub as clone_adapt_handler
+from bot.handlers import auto_funnel_hub as auto_funnel_handler
+from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
 from services import content_mesh
 from services import scheduler
@@ -266,6 +268,7 @@ async def main() -> None:
     dp.include_router(ghost_hub_handler.router)
     dp.include_router(content_mesh_handler.router)
     dp.include_router(clone_adapt_handler.router)
+    dp.include_router(auto_funnel_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
@@ -410,6 +413,9 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("content_mesh", content_mesh.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("auto_funnel", auto_funnel_svc.run, pool, bot)
         )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http, drop_pending_updates=True)

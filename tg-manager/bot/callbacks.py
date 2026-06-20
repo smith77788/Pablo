@@ -496,4 +496,13 @@ class CloneAdaptCb(CallbackData, prefix="cla"):
     extra: str = ""    # field name or target bot id (str)
 
 
+class AutoFunnelCb(CallbackData, prefix="afn"):
+    """Auto-Funnel — automated message sequences for bot audience segments."""
+
+    action: str        # menu|create|view|toggle|steps|add_step|del_step|step_no_btn|launch|launch_confirm|stats|del|del_confirm|pick_bot|pick_segment
+    funnel_id: int = 0
+    page: int = 0
+    extra: str = ""    # bot_id or segment or step_id
+
+
 

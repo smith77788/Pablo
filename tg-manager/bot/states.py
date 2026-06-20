@@ -554,3 +554,11 @@ class CloneAdaptFSM(StatesGroup):
     waiting_suffix = State()   # необязательный суффикс к имени (напр. " [RU]")
 
 
+class AutoFunnelFSM(StatesGroup):
+    waiting_name        = State()  # название воронки
+    picking_bot         = State()  # выбор бота (button-based)
+    waiting_step_delay  = State()  # задержка шага в часах
+    waiting_step_text   = State()  # текст сообщения шага
+    waiting_step_button = State()  # текст|URL кнопки (опционально)
+
+

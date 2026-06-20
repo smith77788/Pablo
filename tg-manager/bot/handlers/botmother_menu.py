@@ -169,6 +169,8 @@ def _operations_kb(plan: str = "free"):
 
 
 def _comms_kb():
+    from bot.callbacks import AutoFunnelCb
+
     kb = InlineKeyboardBuilder()
     kb.button(text="📢 Рассылка через бота", callback_data=BotCb(action="list", page=0))
     kb.button(text="🌐 Рассылка по сети", callback_data=NetBcCb(action="choose_target"))
@@ -178,8 +180,9 @@ def _comms_kb():
     kb.button(text="🤖 Авто-ответы бота", callback_data=BmCb(action="pick_bot_for", sub="ar"))
     kb.button(text="🔗 Воронки (цепочки)", callback_data=BmCb(action="pick_bot_for", sub="fn"))
     kb.button(text="🕸️ Content Mesh", callback_data=ContentMeshCb(action="menu"))
+    kb.button(text="⚡ Auto-Funnel", callback_data=AutoFunnelCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
