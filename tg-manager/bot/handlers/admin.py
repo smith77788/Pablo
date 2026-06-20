@@ -396,23 +396,19 @@ async def cb_admin(
 
     elif action == "broadcast":
         kb = InlineKeyboardBuilder()
-        kb.button(text="👥 Все пользователи", callback_data="adm:bc_seg:all")
+        kb.button(text="👥 Все пользователи платформы", callback_data="adm:bc_seg:all")
         kb.button(text="🆓 Только Free", callback_data="adm:bc_seg:free")
-        kb.button(text="⭐ Только Starter+", callback_data="adm:bc_seg:paid")
-        kb.button(text="🚀 Только Pro+", callback_data="adm:bc_seg:pro")
-        kb.button(text="👑 Только Enterprise", callback_data="adm:bc_seg:enterprise")
+        kb.button(text="💎 Только платные", callback_data="adm:bc_seg:paid")
         kb.button(text="🤖 Аудиториям всех ботов", callback_data="adm:bc_botusers")
         kb.button(text="📢 Во все каналы/группы", callback_data="adm:bc_channels")
         kb.button(text="◀️ Главное меню админки", callback_data="adm:main")
         kb.adjust(1)
         await callback.message.edit_text(
             "📨 <b>Рассылка владельца сервиса</b>\n\n"
-            "Выберите <b>сегмент</b> пользователей платформы:\n\n"
-            "👥 <b>Все</b> — всем зарегистрированным\n"
-            "🆓 <b>Free</b> — только на бесплатном плане\n"
-            "⭐ <b>Starter+</b> — платные подписчики (starter/pro/enterprise)\n"
-            "🚀 <b>Pro+</b> — pro и enterprise\n"
-            "👑 <b>Enterprise</b> — только enterprise\n\n"
+            "Выберите <b>сегмент</b> получателей:\n\n"
+            "👥 <b>Все</b> — все зарегистрированные пользователи\n"
+            "🆓 <b>Free</b> — пользователи без подписки\n"
+            "💎 <b>Платные</b> — пользователи с активной подпиской\n\n"
             "🤖 <b>Аудиториям ботов</b> — подписчики всех управляемых ботов\n"
             "📢 <b>Каналы/группы</b> — пост во все подключённые каналы",
             parse_mode="HTML",
@@ -422,11 +418,9 @@ async def cb_admin(
     elif action.startswith("bc_seg:"):
         seg = action.removeprefix("bc_seg:")
         seg_labels = {
-            "all": "всем пользователям платформы",
-            "free": "пользователям на плане FREE",
-            "paid": "пользователям на планах Starter/Pro/Enterprise",
-            "pro": "пользователям на планах Pro/Enterprise",
-            "enterprise": "пользователям на плане Enterprise",
+            "all":  "всем пользователям платформы",
+            "free": "пользователям без подписки (Free)",
+            "paid": "платным пользователям",
         }
         seg_label = seg_labels.get(seg, seg)
         await callback.message.edit_text(
@@ -1631,15 +1625,12 @@ async def handle_admin_message(
     if state == "broadcast":
         seg = state_row["data"] or "all"
         _seg_conditions = {
-            "all":        "COALESCE(is_banned, false) = false",
-            "free":       "COALESCE(is_banned, false) = false AND (current_plan='free' OR current_plan IS NULL)",
-            "paid":       "COALESCE(is_banned, false) = false AND current_plan IN ('starter','pro','enterprise')",
-            "pro":        "COALESCE(is_banned, false) = false AND current_plan IN ('pro','enterprise')",
-            "enterprise": "COALESCE(is_banned, false) = false AND current_plan = 'enterprise'",
+            "all":  "COALESCE(is_banned, false) = false",
+            "free": "COALESCE(is_banned, false) = false AND (current_plan='free' OR current_plan IS NULL)",
+            "paid": "COALESCE(is_banned, false) = false AND current_plan IN ('paid','starter','pro','enterprise')",
         }
         _seg_labels = {
-            "all": "все пользователи", "free": "Free", "paid": "Starter+",
-            "pro": "Pro+", "enterprise": "Enterprise",
+            "all": "все пользователи", "free": "Free", "paid": "Платные",
         }
         where = _seg_conditions.get(seg, _seg_conditions["all"])
         seg_label = _seg_labels.get(seg, seg)
