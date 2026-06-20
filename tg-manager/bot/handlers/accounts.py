@@ -315,8 +315,10 @@ async def _show_accounts_menu(
 ) -> None:
     from aiogram.types import InlineKeyboardButton
 
-    plan, limit = await _get_account_limit(pool, user_id)
-    all_accounts = await db.get_tg_accounts(pool, user_id)
+    (plan, limit), all_accounts = await asyncio.gather(
+        _get_account_limit(pool, user_id),
+        db.get_tg_accounts(pool, user_id),
+    )
     total = len(all_accounts) if all_accounts else 0
 
     if limit == 0 and total == 0:

@@ -1114,8 +1114,8 @@ async def cb_alerts_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(BmCb.filter(F.action == "vis_reports"))
 async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
         await _edit(
             callback,
             locked_text("Отчёты", "starter"),
@@ -1124,7 +1124,7 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             ),
         )
         return
-    await callback.answer()
+    await _edit(callback, "⏳ <b>Загружаю отчёты…</b>")
     user_id = callback.from_user.id
 
     # ── Section 1: Operation audit summary (last 7 days) ──────────────────
@@ -1295,8 +1295,10 @@ async def cb_vis_reports(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(BmCb.filter(F.action == "vis_reports_csv"))
 async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer("⏳ Генерирую CSV…")
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer("🔒 Требуется 💎 подписка", show_alert=True)
+        await _edit(callback, locked_text("Экспорт отчётов", "starter"),
+                    subscription_locked_markup("starter", back_callback=BmCb(action="vis_reports")))
         return
     import csv
     import io
@@ -1412,8 +1414,8 @@ async def cb_op_planner(
     pool: asyncpg.Pool,
     state: FSMContext,
 ) -> None:
+    await callback.answer()
     if not await require_plan(pool, callback.from_user.id, "starter"):
-        await callback.answer()
         await _edit(
             callback,
             locked_text("Планировщик операций", "starter"),
@@ -1422,7 +1424,6 @@ async def cb_op_planner(
             ),
         )
         return
-    await callback.answer()
     await _show_planner_menu(callback, pool, state)
 
 
