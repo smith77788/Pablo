@@ -116,6 +116,7 @@ def _admin_main_kb(new_error_reports: int = 0):
     )
     kb.button(text="📊 Обзор", callback_data="adm:main")
     kb.button(text="👥 Пользователи", callback_data="adm:section_users")
+    kb.button(text="📨 Рассылка", callback_data="adm:broadcast")
     kb.button(text="💳 Деньги", callback_data="adm:section_billing")
     kb.button(text="🤖 Боты / токены", callback_data="adm:section_assets")
     kb.button(text="⚙️ Операции", callback_data="adm:section_ops")
@@ -124,7 +125,7 @@ def _admin_main_kb(new_error_reports: int = 0):
     kb.button(text="📢 Канал BotMother", callback_data="adm:bm_channel")
     kb.button(text=err_label, callback_data="adm:error_reports")
     kb.button(text="🚪 Выйти", callback_data="adm:exit")
-    kb.adjust(2, 2, 2, 2, 2)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -137,9 +138,10 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="✅ Разблокировать", callback_data="adm:unblock_ask")
         kb.button(text="🗑 Удалить данные", callback_data="adm:delete_ask")
         kb.button(text="📋 Экспорт CSV", callback_data="adm:users_csv")
+        kb.button(text="📨 Рассылка пользователям", callback_data="adm:broadcast")
         kb.button(text="🔔 Уведомления", callback_data="adm:notify_toggle")
         kb.button(text="🏠 Админка", callback_data="adm:main")
-        kb.adjust(2, 2, 2, 1, 1)
+        kb.adjust(2, 2, 2, 2, 1)
     elif section == "billing":
         kb.button(text="💳 Активные подписки", callback_data="adm:subs")
         kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
@@ -154,9 +156,8 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
         kb.button(text="📁 Экспорт токенов", callback_data="adm:tokens_file")
         kb.button(text="⚔️ Выдать Strike", callback_data="adm:strike_grant_ask")
         kb.button(text="⚔️ Забрать Strike", callback_data="adm:strike_revoke_ask")
-        kb.button(text="📨 Рассылка всем", callback_data="adm:broadcast")
         kb.button(text="🏠 Админка", callback_data="adm:main")
-        kb.adjust(2, 2, 1, 1)
+        kb.adjust(2, 2, 1)
     elif section == "ops":
         kb.button(text="📊 Логи действий", callback_data="adm:logs")
         kb.button(text="📈 Очередь операций", callback_data="adm:platform_ops")
