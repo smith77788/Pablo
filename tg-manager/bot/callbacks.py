@@ -478,4 +478,13 @@ class GhostCb(CallbackData, prefix="ghst"):
     extra: str = ""    # personality slug or hours/cap value
 
 
+class ContentMeshCb(CallbackData, prefix="cmesh"):
+    """Content Mesh — automated content distribution network."""
+
+    action: str        # menu|create|view|toggle|set_source|pick_account|targets|add_target|del_target|settings|logs|del|del_confirm
+    mesh_id: int = 0
+    page: int = 0
+    extra: str = ""    # account_id (str) or target_id (str)
+
+
 

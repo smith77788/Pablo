@@ -542,3 +542,11 @@ class GhostConfigFSM(StatesGroup):
     waiting_cap = State()     # ввод суточного лимита действий (1-50)
 
 
+class ContentMeshFSM(StatesGroup):
+    waiting_name = State()           # название новой сетки
+    waiting_source_channel = State() # @username или ID канала-источника
+    waiting_source_account = State() # выбор аккаунта (handled via callback)
+    waiting_target_channel = State() # @username или ID канала-цели
+    waiting_delay = State()          # задержка + CTA суффикс
+
+
