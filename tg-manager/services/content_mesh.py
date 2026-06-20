@@ -41,16 +41,20 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
 
     acc = await pool.fetchrow(
         """
-        SELECT id, session_string, session_encrypted, proxy_url, proxy_type,
-               proxy_user, proxy_pass, cooldown_until, banned
-        FROM tg_accounts WHERE id = $1 AND banned = FALSE
+        SELECT a.id, a.session_str, a.cooldown_until, a.banned,
+               a.device_model, a.system_version, a.app_version,
+               a.lang_code, a.system_lang_code,
+               p.proxy_url
+        FROM tg_accounts a
+        LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+        WHERE a.id = $1 AND a.banned = FALSE
         """,
         account_id,
     )
     if not acc:
         return
 
-    session = acc["session_string"] or acc["session_encrypted"]
+    session = acc["session_str"]
     if not session:
         return
 
@@ -138,13 +142,22 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
 
     account_id = mesh["source_account_id"]
     acc = await pool.fetchrow(
-        "SELECT * FROM tg_accounts WHERE id=$1 AND banned=FALSE", account_id
+        """
+        SELECT a.id, a.session_str, a.banned,
+               a.device_model, a.system_version, a.app_version,
+               a.lang_code, a.system_lang_code,
+               p.proxy_url
+        FROM tg_accounts a
+        LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+        WHERE a.id = $1 AND a.banned = FALSE
+        """,
+        account_id,
     )
     if not acc:
         await pool.execute("UPDATE mesh_queue SET status='error', error_msg='no_account' WHERE id=$1", item["id"])
         return
 
-    session = acc["session_string"] or acc["session_encrypted"]
+    session = acc["session_str"]
     if not session:
         await pool.execute("UPDATE mesh_queue SET status='error', error_msg='no_session' WHERE id=$1", item["id"])
         return
