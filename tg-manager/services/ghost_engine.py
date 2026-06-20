@@ -215,10 +215,13 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
 
     acc = await pool.fetchrow(
         """
-        SELECT id, session_string, session_encrypted, proxy_url, proxy_type,
-               proxy_user, proxy_pass, cooldown_until
-        FROM tg_accounts
-        WHERE id = $1 AND in_operation = FALSE AND banned = FALSE
+        SELECT a.id, a.session_str, a.cooldown_until,
+               a.device_model, a.system_version, a.app_version,
+               a.lang_code, a.system_lang_code,
+               p.proxy_url
+        FROM tg_accounts a
+        LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+        WHERE a.id = $1 AND a.in_operation = FALSE AND a.banned = FALSE
         """,
         account_id,
     )
@@ -228,7 +231,7 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
     if acc["cooldown_until"] and acc["cooldown_until"].replace(tzinfo=timezone.utc) > now:
         return
 
-    session = acc["session_string"] or acc["session_encrypted"]
+    session = acc["session_str"]
     if not session:
         return
 
