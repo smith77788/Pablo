@@ -916,11 +916,15 @@ async def fsm_bot_notes(message: Message, state: FSMContext, pool: asyncpg.Pool)
     except ValueError:
         reg_dt = datetime.now(tz=timezone.utc)
 
+    _raw_tok = data.get("token")
+    if _raw_tok:
+        from services.token_vault import encrypt_token as _enc_tok_pp
+        _raw_tok = _enc_tok_pp(_raw_tok)
     bot_id = await db.warehouse_add_bot(
         pool,
         owner_id=message.from_user.id,
         bot_username=data["username"],
-        bot_token_enc=data.get("token"),
+        bot_token_enc=_raw_tok,
         registered_at=reg_dt,
         notes=notes,
     )
@@ -1018,11 +1022,15 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         if existing:
             skipped += 1
             continue
+        _btok = b.get("token")
+        if _btok:
+            from services.token_vault import encrypt_token as _enc_tok_pp2
+            _btok = _enc_tok_pp2(_btok)
         await db.warehouse_add_bot(
             pool,
             owner_id=user_id,
             bot_username=uname,
-            bot_token_enc=b.get("token"),
+            bot_token_enc=_btok,
             registered_at=datetime.now(tz=timezone.utc),
             notes="спарсен из BotFather",
         )
