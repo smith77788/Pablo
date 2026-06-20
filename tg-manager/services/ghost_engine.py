@@ -240,7 +240,7 @@ async def _process_profile(pool: asyncpg.Pool, profile: asyncpg.Record) -> None:
     fn = _ACTION_FNS[action]
 
     try:
-        client = await _make_client(session, acc_dict)
+        client = _make_client(session, acc_dict)
         async with client:
             await fn(client, pool, profile_id, account_id)
     except FloodWaitError as e:
