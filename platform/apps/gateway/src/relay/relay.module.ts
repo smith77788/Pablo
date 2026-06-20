@@ -8,6 +8,7 @@ import { TelegramClient } from './telegram.client';
   imports: [
     BullModule.registerQueue({ name: 'updates' }),
     BullModule.registerQueue({ name: 'outbound' }),
+    BullModule.registerQueue({ name: 'automation' }),
   ],
   providers: [RelayProcessor, RelayService, TelegramClient],
   exports: [RelayService, TelegramClient],

@@ -60,11 +60,12 @@ model Operator {
   passwordHash String
   name         String
   avatarUrl    String?
-  role         OperatorRole @default(AGENT)
-  isActive     Boolean      @default(true)
-  lastSeenAt   DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  role             OperatorRole @default(AGENT)
+  isActive         Boolean      @default(true)
+  lastSeenAt       DateTime?
+  telegramChatId   String?      // для получения AI-брифингов в Telegram
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   assignedConversations Conversation[]     @relation("AssignedOperator")
