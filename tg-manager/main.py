@@ -84,6 +84,7 @@ from bot.handlers import promo_platform as promo_handler
 from bot.handlers import self_promo as self_promo_handler
 from bot.handlers import ghost_hub as ghost_hub_handler
 from bot.handlers import content_mesh_hub as content_mesh_handler
+from bot.handlers import clone_adapt_hub as clone_adapt_handler
 from services import ghost_engine
 from services import content_mesh
 from services import scheduler
@@ -264,6 +265,7 @@ async def main() -> None:
     dp.include_router(self_promo_handler.router)
     dp.include_router(ghost_hub_handler.router)
     dp.include_router(content_mesh_handler.router)
+    dp.include_router(clone_adapt_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)

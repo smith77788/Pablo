@@ -550,3 +550,7 @@ class ContentMeshFSM(StatesGroup):
     waiting_delay = State()          # задержка + CTA суффикс
 
 
+class CloneAdaptFSM(StatesGroup):
+    waiting_suffix = State()   # необязательный суффикс к имени (напр. " [RU]")
+
+

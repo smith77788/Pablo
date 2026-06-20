@@ -148,7 +148,7 @@ def _assets_kb():
 
 
 def _operations_kb(plan: str = "free"):
-    from bot.callbacks import PackCb
+    from bot.callbacks import PackCb, CloneAdaptCb
 
     kb = InlineKeyboardBuilder()
     kb.button(text=f"{_lock(plan,'enterprise')}⚔️ Strike (зачистка)", callback_data=StrikeCb(action="menu"))
@@ -161,9 +161,10 @@ def _operations_kb(plan: str = "free"):
     kb.button(text="📊 Дашборд", callback_data=BmCb(action="ops"))
     kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
     kb.button(text=f"{_lock(plan,'pro')}🛠️ Конструктор опер.", callback_data=MassOpCb(action="menu"))
+    kb.button(text="🔀 Clone & Adapt", callback_data=CloneAdaptCb(action="menu"))
     kb.button(text="🎁 Подарки", callback_data="gt:main")
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

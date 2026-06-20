@@ -487,4 +487,13 @@ class ContentMeshCb(CallbackData, prefix="cmesh"):
     extra: str = ""    # account_id (str) or target_id (str)
 
 
+class CloneAdaptCb(CallbackData, prefix="cla"):
+    """Clone & Adapt — clone bot profiles to multiple target bots."""
+
+    action: str        # menu|start|source|toggle_field|suffix_ask|no_suffix|toggle_target|targets_all|targets_none|targets_page|preview|run
+    bot_id: int = 0    # source bot id
+    page: int = 0
+    extra: str = ""    # field name or target bot id (str)
+
+
 
