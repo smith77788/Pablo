@@ -294,8 +294,8 @@ async def run_campaign(
             await pool.execute(
                 "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
             )
-        except Exception:
-            pass
+        except Exception as _e:
+            log.warning("dm_engine: failed to set total_items for op=%s: %s", op_id, _e)
 
     if not targets:
         await pool.execute(
