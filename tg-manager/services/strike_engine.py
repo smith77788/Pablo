@@ -1848,7 +1848,11 @@ async def verify_target_takedown(
     """
     from services import account_manager
 
-    clean = target_username.lstrip("@")
+    _ref_kind, _ref_value = normalize_telegram_join_ref(target_username.strip())
+    _is_invite = _ref_kind == "invite"
+    # For invite-hash targets use CheckChatInviteRequest; get_entity("+hash")
+    # mis-parses the hash as a phone number in Telethon.
+    clean = _ref_value if not _is_invite else target_username.lstrip("@")
 
     for attempt in range(max_attempts):
         delay = random.uniform(*delay_range) * (1 + attempt * 0.5)
@@ -1857,9 +1861,24 @@ async def verify_target_takedown(
         client = account_manager._make_client(acc["session_str"], acc)
         try:
             await asyncio.wait_for(client.connect(), timeout=15)
-            entity = await client.get_entity(clean)
+            if _is_invite:
+                from telethon.tl.functions.messages import CheckChatInviteRequest as _CCIR
+                from telethon.tl.types import ChatInviteAlready as _CIA
+                _check = await asyncio.wait_for(client(_CCIR(hash=_ref_value)), 10)
+                if isinstance(_check, _CIA):
+                    entity = _check.chat
+                elif hasattr(_check, "chat") and _check.chat:
+                    entity = _check.chat
+                else:
+                    entity = None
+            else:
+                entity = await client.get_entity(clean)
 
             # Проверка на бан/ограничение
+            if entity is None:
+                # CheckChatInvite returned no chat — link invalid/removed
+                await client.disconnect()
+                return True
             if hasattr(entity, "restricted") and entity.restricted:
                 await client.disconnect()
                 return True

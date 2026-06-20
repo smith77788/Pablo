@@ -481,6 +481,11 @@ async def cb_pay(
         )
     except Exception:
         log_exc_swallow(log, "cb_pay: failed to insert payment record")
+        await callback.message.edit_text(
+            "❌ <b>Ошибка создания платежа.</b>\n\nПожалуйста, попробуйте позже или обратитесь в поддержку.",
+            parse_mode="HTML",
+        )
+        return
 
     if currency == "TON":
         crypto_str = f"{crypto:.2f} TON"
