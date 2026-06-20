@@ -33,6 +33,7 @@ from services.account_manager import (
     should_persist_account_status,
 )
 from services.logger import log_exc_swallow
+from database.db import fetch_bots
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -804,7 +805,8 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     user_id = callback.from_user.id
 
     try:
-        bots = await pool.fetch(
+        bots = await fetch_bots(
+            pool,
             """
             SELECT b.bot_id, b.username, b.first_name, b.token,
                    COALESCE(aud.cnt, 0) AS user_count

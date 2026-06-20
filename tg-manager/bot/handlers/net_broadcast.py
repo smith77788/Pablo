@@ -17,6 +17,7 @@ from bot.states import NetworkBroadcastV2
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from database import db
+from database.db import fetch_bots
 from services import operation_bus
 
 router = Router()
@@ -40,7 +41,8 @@ async def cb_net_bc_cluster(
 
     # Get bots in this cluster
     try:
-        bots = await pool.fetch(
+        bots = await fetch_bots(
+            pool,
             """SELECT bot_id, username, first_name, token,
                       COALESCE(aud.cnt, 0) AS audience_count
                FROM managed_bots m

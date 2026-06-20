@@ -9,6 +9,7 @@ import asyncpg
 import json
 import logging
 from services import operation_bus
+from database.db import fetchrow_bot
 
 log = logging.getLogger(__name__)
 
@@ -306,7 +307,8 @@ async def get_broadcast_history(
 async def action_launch_broadcast(
     pool: asyncpg.Pool, user_id: int, bot_id: int, text: str
 ) -> dict:
-    row = await pool.fetchrow(
+    row = await fetchrow_bot(
+        pool,
         "SELECT bot_id, token, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
         bot_id,
         user_id,
@@ -339,7 +341,8 @@ async def action_update_bot_profile(
     description: str | None = None,
     short_description: str | None = None,
 ) -> dict:
-    row = await pool.fetchrow(
+    row = await fetchrow_bot(
+        pool,
         "SELECT bot_id, token, first_name, username FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
         bot_id,
         user_id,
@@ -579,7 +582,8 @@ async def execute_action(
     if name == "launch_broadcast":
         bot_id = action_data["bot_id"]
         text = action_data["text"]
-        row = await pool.fetchrow(
+        row = await fetchrow_bot(
+            pool,
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id,
             user_id,
@@ -596,9 +600,8 @@ async def execute_action(
         ids = [r["user_id"] for r in user_ids_rows]
         if not ids:
             return "⚠️ Аудитория пуста — нет активных получателей"
-        from services.token_vault import decrypt_token as _dt_ai
         bc_id = await db.create_broadcast(pool, bot_id, text, len(ids), user_id)
-        broadcaster.start(pool, http, bc_id, _dt_ai(row["token"] or ""), bot_id, text, None, ids)
+        broadcaster.start(pool, http, bc_id, row["token"] or "", bot_id, text, None, ids)
         return f"✅ Рассылка #{bc_id} запущена! Получателей: {len(ids)}"
 
     elif name == "update_bot_profile":
@@ -606,7 +609,8 @@ async def execute_action(
         new_name = action_data.get("name")
         description = action_data.get("description")
         short_desc = action_data.get("short_description")
-        row = await pool.fetchrow(
+        row = await fetchrow_bot(
+            pool,
             "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
             bot_id,
             user_id,
@@ -614,10 +618,9 @@ async def execute_action(
         if not row or not http:
             return "❌ Ошибка: бот не найден"
         from services import bot_api
-        from services.token_vault import decrypt_token as _dt_ai2
 
         results = []
-        _dec_tok = _dt_ai2(row["token"] or "")
+        _dec_tok = row["token"] or ""
         if new_name:
             ok = await bot_api.set_name(http, _dec_tok, new_name)
             if ok:

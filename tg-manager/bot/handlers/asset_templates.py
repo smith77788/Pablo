@@ -948,7 +948,9 @@ async def _apply_bot_template_data(
 
     user_id = callback.from_user.id
 
-    bot_row = await pool.fetchrow(
+    from database.db import fetchrow_bot as _fetchrow_bot_at
+    bot_row = await _fetchrow_bot_at(
+        pool,
         "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
         bot_id, user_id,
     )
@@ -956,8 +958,7 @@ async def _apply_bot_template_data(
         await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_menu_kb())
         return
 
-    from services.token_vault import decrypt_token as _dt_at
-    token = _dt_at(bot_row["token"] or "")
+    token = bot_row["token"] or ""
     results: list[str] = []
 
     if data.get("name"):

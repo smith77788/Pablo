@@ -1373,12 +1373,12 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
-        from services.token_vault import decrypt_token as _dt_tok
-        _raw = await pool.fetch(
+        from database.db import fetch_bots as _fetch_bots_adm
+        bots = await _fetch_bots_adm(
+            pool,
             "SELECT bot_id, username, first_name, token, added_by, added_at "
             "FROM managed_bots ORDER BY added_by, added_at"
         )
-        bots = [{**dict(r), "token": _dt_tok(r["token"] or "")} for r in _raw]
     except Exception as e:
         log_exc_swallow(log, "_adm_send_tokens_file fetch failed")
         await callback.message.answer(
@@ -1687,13 +1687,12 @@ async def handle_admin_message(
         from services import bot_api
 
         try:
-            from services.token_vault import decrypt_token as _dt_adm
-            _raw_bots = await pool.fetch(
+            from database.db import fetch_bots as _fetch_bots_adm2
+            bots = await _fetch_bots_adm2(
+                pool,
                 "SELECT bot_id, token, username, first_name FROM managed_bots "
                 "WHERE token IS NOT NULL AND token <> '' ORDER BY bot_id"
             )
-            bots = [{"bot_id": r["bot_id"], "token": _dt_adm(r["token"] or ""),
-                      "username": r["username"], "first_name": r["first_name"]} for r in _raw_bots]
         except Exception:
             bots = []
             log_exc_swallow(log, "broadcast_bots fetch bots failed")

@@ -44,6 +44,7 @@ from bot.utils.op_helpers import (
 )
 
 from services import task_registry as _treg
+from database.db import fetch_bots
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1379,7 +1380,8 @@ async def cb_bbe_confirm(
 
     # Fetch all active bots for this user (same filter as op_worker uses)
     try:
-        bots = await pool.fetch(
+        bots = await fetch_bots(
+            pool,
             "SELECT id, token FROM managed_bots WHERE added_by=$1 AND is_active=TRUE",
             callback.from_user.id,
         )
