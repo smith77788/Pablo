@@ -9,6 +9,7 @@ from bot.callbacks import RelayCb, BmCb
 from bot.keyboards import relay_menu, relay_session_view, subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
+from database.db import fetchrow_bot
 from services import bot_api
 
 log = logging.getLogger(__name__)
@@ -210,7 +211,8 @@ async def cb_relay_quick_reply(
 
     # Get session details
     try:
-        sess = await pool.fetchrow(
+        sess = await fetchrow_bot(
+            pool,
             """SELECT rs.*, mb.token
                FROM relay_sessions rs
                JOIN managed_bots mb ON mb.bot_id=rs.bot_id
