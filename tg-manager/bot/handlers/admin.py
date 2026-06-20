@@ -923,6 +923,19 @@ async def cb_admin(
         await callback.answer(status, show_alert=True)
         await _adm_bm_channel(callback, pool)
 
+    elif action == "bm_post_confirm":
+        data = await state.get_data()
+        await state.clear()
+        text = data.get("post_text", "")
+        if not text:
+            await callback.answer("❌ Текст поста не найден.", show_alert=True)
+            return
+        from services import botmother_channel as _bmc
+        ok = await _bmc.post(pool, callback.bot, text)
+        status = "✅ Пост опубликован!" if ok else "❌ Ошибка публикации (канал не настроен?)"
+        await callback.answer(status, show_alert=True)
+        await _adm_bm_channel(callback, pool)
+
 
 # ── Sub-screens ───────────────────────────────────────────────────────────────
 

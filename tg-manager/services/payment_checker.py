@@ -210,8 +210,9 @@ async def _confirm(pool, bot: Bot, payment, tx_hash: str) -> None:
             payment["reference"],
         )
     if payment["plan"] != "strike":
+        period_months = int(payment["period_months"] or 1)
         await _activate_subscription(
-            pool, user_id, payment["plan"], payment["period_months"]
+            pool, user_id, payment["plan"], period_months
         )
     log.info(
         "Payment confirmed: user=%s plan=%s months=%s ref=%s tx=%s",

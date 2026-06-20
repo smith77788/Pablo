@@ -198,11 +198,15 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
 
         if not plan:
             log.warning("payment_webhook: can't determine plan from %s", data)
-            return web.Response(status=200, text="OK")
+            return web.Response(status=422, text="Unknown plan")
 
-        await _activate_subscription(
-            pool, bot, user_id, plan, months, tx_ref, currency, amount
-        )
+        try:
+            await _activate_subscription(
+                pool, bot, user_id, plan, int(months or 1), tx_ref, currency, amount
+            )
+        except Exception:
+            log.exception("payment_webhook: _activate_subscription failed user=%d", user_id)
+            return web.Response(status=500, text="Internal error")
         return web.Response(status=200, text="OK")
 
     async def cryptopay_webhook(request: web.Request) -> web.Response:
@@ -248,9 +252,13 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         if plan not in ("paid",):
             return web.Response(status=200, text="OK")
 
-        await _activate_subscription(
-            pool, bot, user_id, plan, months, tx_ref, currency, amount
-        )
+        try:
+            await _activate_subscription(
+                pool, bot, user_id, plan, int(months or 1), tx_ref, currency, amount
+            )
+        except Exception:
+            log.exception("cryptopay_webhook: _activate_subscription failed user=%d", user_id)
+            return web.Response(status=500, text="Internal error")
         return web.Response(status=200, text="OK")
 
     async def deploy_webhook(request: web.Request) -> web.Response:
