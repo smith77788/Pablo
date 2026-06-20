@@ -109,7 +109,11 @@ async def _process_bot(
         )
         active_exp = await db.get_active_experiment(pool, bot_id, "start_message")
 
-        _is_free = False  # brand injection removed
+        # Brand injection: cache free-tier status once per polling cycle
+        try:
+            _is_free = await brand_injection.is_free_tier(pool, bot_id)
+        except Exception:
+            _is_free = False
 
         # Reset per-cycle rate-limit counters for this bot
         keys_to_clear = [k for k in _cycle_rule_counts if k[0] == bot_id]
@@ -274,6 +278,8 @@ async def _process_bot(
                     start_rules = [r for r in rules if r["trigger_type"] == "start"]
                     if start_rules:
                         rendered = _render_text(start_rules[0]["response_text"], from_user, bot_row)
+                        if _is_free:
+                            rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                         await bot_api.send_message(http, token, chat_id, rendered)
                     else:
                         fname = from_user.get("first_name") or "друг"
@@ -302,6 +308,8 @@ async def _process_bot(
             for rule in rules:
                 if _match_rule(rule, text):
                     rendered = _render_text(rule["response_text"], from_user, bot_row)
+                    if _is_free:
+                        rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                     ok, retry = await bot_api.send_message(
                         http, token, chat_id, rendered
                     )
@@ -428,6 +436,8 @@ async def _process_bot(
                         rendered = _render_text(
                             arule["action_value"], from_user, bot_row
                         )
+                        if _is_free:
+                            rendered = brand_injection.add_promo(rendered, html=True, context="broadcast")
                         ok, _ = await bot_api.send_message(
                             http, token, chat_id, rendered
                         )
@@ -673,6 +683,8 @@ async def _process_bot(
                 )
                 if variant and variant.get("content"):
                     exp_content = variant["content"]
+                    if _is_free:
+                        exp_content = brand_injection.add_promo(exp_content, html=True, context="broadcast")
                     await bot_api.send_message(http, token, chat_id, exp_content)
             elif not is_start and active_exp:
                 # Conversion: any subsequent message from an assigned user counts
@@ -797,13 +809,18 @@ async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> 
         )
 
         _rule_is_free = False
-        _rule_is_free = False  # brand injection removed
+        try:
+            _rule_is_free = await brand_injection.is_free_tier(pool, rule["bot_id"])
+        except Exception:
+            pass
 
         for user in inactive_users:
             chat_id = user["user_id"]
             try:
                 if rule["action_type"] == "send_message":
                     _inact_text = rule["action_value"]
+                    if _rule_is_free:
+                        _inact_text = brand_injection.add_promo(_inact_text, html=True, context="broadcast")
                     await bot_api.send_message(
                         http, rule["token"], chat_id, _inact_text
                     )

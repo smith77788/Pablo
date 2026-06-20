@@ -305,6 +305,13 @@ async def run_campaign(
         return
 
     template = campaign["text_template"]
+    # Brand injection for free-tier users (plain text — DMs don't use HTML parse_mode)
+    try:
+        from services import brand_injection as _bi
+        if await _bi.is_user_free_tier(pool, owner_id):
+            template = _bi.add_promo(template, html=False, context="dm")
+    except Exception:
+        pass
     acc_cycle = list(accounts)
     acc_idx = 0
     sent = 0
