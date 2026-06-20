@@ -65,6 +65,7 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     """
     try:
         due = await db.get_due_funnel_steps(pool)
+        _steps_cache: dict[int, list] = {}
         for row in due:
             try:
                 # Try up to 3 times with backoff before giving up on this step
@@ -128,7 +129,10 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                     continue
 
                 next_step = row["current_step"] + 1
-                steps = await db.get_funnel_steps(pool, row["funnel_id"])
+                fid = row["funnel_id"]
+                if fid not in _steps_cache:
+                    _steps_cache[fid] = await db.get_funnel_steps(pool, fid)
+                steps = _steps_cache[fid]
                 is_last = next_step >= row["total_steps"]
                 next_delay = (
                     steps[next_step]["delay_minutes"]

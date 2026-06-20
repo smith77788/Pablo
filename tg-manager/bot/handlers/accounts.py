@@ -3055,11 +3055,20 @@ async def handle_import_tdata(
             )
             return
 
-        # Extract — zip-bomb guard: reject if uncompressed > 200 MB or any path traversal
+        # Extract — zip-bomb guard: size, file count, path traversal
         _MAX_UNCOMPRESSED = 200 * 1024 * 1024  # 200 MB
+        _MAX_FILES = 5_000
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                total_size = sum(i.file_size for i in zf.infolist())
+                members = zf.infolist()
+                if len(members) > _MAX_FILES:
+                    await state.clear()
+                    await msg.edit_text(
+                        f"❌ Архив содержит {len(members)} файлов. Максимум {_MAX_FILES}.",
+                        parse_mode="HTML",
+                    )
+                    return
+                total_size = sum(i.file_size for i in members)
                 if total_size > _MAX_UNCOMPRESSED:
                     await state.clear()
                     await msg.edit_text(
@@ -3068,8 +3077,9 @@ async def handle_import_tdata(
                         parse_mode="HTML",
                     )
                     return
-                for member in zf.infolist():
-                    if os.path.isabs(member.filename) or ".." in member.filename.replace("\\", "/"):
+                for member in members:
+                    fname = member.filename.replace("\\", "/")
+                    if os.path.isabs(fname) or ".." in fname.split("/"):
                         await state.clear()
                         await msg.edit_text("❌ Архив содержит подозрительные пути (path traversal). Отклонено.")
                         return

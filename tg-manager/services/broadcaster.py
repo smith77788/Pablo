@@ -111,13 +111,6 @@ async def run(
     except Exception as _e:
         logger.warning("Broadcast %d: failed to mark running: %s", broadcast_id, _e)
 
-    # Brand injection: append @MEXAHI3MBOT promo for free-tier bots
-    try:
-        if await brand_injection.is_free_tier(pool, bot_id):
-            text = brand_injection.add_promo(text, html=True, context="broadcast")
-    except Exception as _bi_err:
-        logger.debug("Broadcast %d: brand_injection check failed: %s", broadcast_id, _bi_err)
-
     # Pre-load user data for placeholder rendering if needed
     has_placeholders = "{{" in text
     user_map: dict[int, dict] = {}

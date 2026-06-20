@@ -1277,13 +1277,6 @@ async def _exec_mass_publish(
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
-    # Brand injection: free-tier users get @MEXAHI3MBOT appended to every channel post
-    try:
-        from services import brand_injection as _bi
-        if await _bi.is_user_free_tier(pool, owner_id):
-            mp_text = _bi.add_promo(mp_text, html=True)
-    except Exception:
-        pass
     # Optional media attachment (from Quick Post Wizard step 3)
     media_file_id: str | None = params.get("media_file_id") or None
     media_type: str | None = params.get("media_type") or None
@@ -4873,15 +4866,6 @@ async def _exec_bulk_chan_exec(
     op: str = params.get("op", "")
     base_uname: str = params.get("base_uname", "")
     value: str = params.get("value", "")
-
-    # Brand injection for free-tier users editing channel descriptions
-    if op == "chan_about":
-        try:
-            from services import brand_injection as _bi
-            if await _bi.is_user_free_tier(pool, owner_id):
-                value = _bi.add_promo_to_description(value)
-        except Exception:
-            pass
 
     if not channel_acc_pairs or op not in ("chan_uname", "chan_about"):
         return {"status": "failed", "reason": "Не указаны channel_acc_pairs или неверный op"}

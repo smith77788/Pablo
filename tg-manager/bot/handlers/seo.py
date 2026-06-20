@@ -1681,6 +1681,13 @@ async def _apply_chan_field(
         ok = await account_manager.edit_channel_about(
             acc["session_str"], tg_chan_id, value, _acc=acc
         )
+        if ok:
+            try:
+                await pool.execute(
+                    "UPDATE managed_channels SET about=$1 WHERE id=$2", value, chan_id
+                )
+            except Exception:
+                pass
         return ok, "" if ok else "Ошибка обновления описания"
     elif field == "username":
         err = await account_manager.set_channel_username(
