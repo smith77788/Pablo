@@ -29,6 +29,7 @@ from bot.callbacks import (
     ErrorReportCb,
     FunnelCb,
     GeoPresenceCb,
+    GhostCb,
     GroupFCb,
     HealthCb,
     InfraCb,
@@ -206,8 +207,9 @@ def _monitoring_kb():
     kb.button(text="🧹 Очиститель акк.", callback_data=CleanerCb(action="menu"))
     kb.button(text="🌐 Прокси", callback_data=ProxyCb(action="menu"))
     kb.button(text="📊 Инфра-аналитика", callback_data=InfraCb(action="menu"))
+    kb.button(text="👻 Ghost Engine", callback_data=GhostCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 

@@ -82,6 +82,8 @@ from bot.handlers import infra_health_center as infra_hc_handler
 from bot.handlers import reg_checker as reg_checker_handler
 from bot.handlers import promo_platform as promo_handler
 from bot.handlers import self_promo as self_promo_handler
+from bot.handlers import ghost_hub as ghost_hub_handler
+from services import ghost_engine
 from services import scheduler
 from services import auto_responder
 from services import relay as relay_service
@@ -258,6 +260,7 @@ async def main() -> None:
     dp.include_router(reg_checker_handler.router)
     dp.include_router(promo_handler.router)
     dp.include_router(self_promo_handler.router)
+    dp.include_router(ghost_hub_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
@@ -396,6 +399,9 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("promo_scheduler", promo_scheduler.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("ghost_engine", ghost_engine.run, pool, bot)
         )
         log.info("TG Manager started")
         await dp.start_polling(bot, pool=pool, http=http, drop_pending_updates=True)

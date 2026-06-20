@@ -537,3 +537,8 @@ class BotMotherChannelFSM(StatesGroup):
     confirm_post = State()     # подтверждение перед публикацией
 
 
+class GhostConfigFSM(StatesGroup):
+    waiting_hours = State()   # ввод окна активности "HH-HH" (напр. "09-23")
+    waiting_cap = State()     # ввод суточного лимита действий (1-50)
+
+

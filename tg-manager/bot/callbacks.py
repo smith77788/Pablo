@@ -468,4 +468,14 @@ class SelfPromoCb(CallbackData, prefix="sp"):
     style: str = ""    # 'direct' | 'native'
 
 
+class GhostCb(CallbackData, prefix="ghst"):
+    """Ghost Engine — autonomous background presence for TG accounts."""
+
+    action: str        # menu|add|pick_acc|view|toggle|personality|set_p|hours|set_hours|cap|set_cap|logs|del|del_confirm
+    profile_id: int = 0
+    account_id: int = 0
+    page: int = 0
+    extra: str = ""    # personality slug or hours/cap value
+
+
 
