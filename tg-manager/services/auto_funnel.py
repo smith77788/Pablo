@@ -81,8 +81,9 @@ async def _process_run(pool: asyncpg.Pool, http: aiohttp.ClientSession, run) -> 
         return
 
     # Get bot token
-    bot_row = await pool.fetchrow(
-        "SELECT token FROM managed_bots WHERE bot_id=$1", run["bot_id"]
+    from database.db import fetchrow_bot as _fetchrow_bot_af
+    bot_row = await _fetchrow_bot_af(
+        pool, "SELECT token FROM managed_bots WHERE bot_id=$1", run["bot_id"]
     )
     if not bot_row:
         await pool.execute(

@@ -769,13 +769,15 @@ async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) 
 async def _inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
     """Find users inactive for N days and fire matching rules."""
     # Get all active inactivity rules
-    rules = await pool.fetch(
+    from database.db import fetch_bots as _fetch_bots_ar
+    rules = await _fetch_bots_ar(
+        pool,
         """SELECT ar.*, mb.token
            FROM automation_rules ar
            JOIN managed_bots mb ON mb.bot_id = ar.bot_id
            WHERE ar.trigger_type = 'inactivity'
              AND ar.is_active = true
-             AND mb.is_active = true"""
+             AND mb.is_active = true""",
     )
     if not rules:
         return
