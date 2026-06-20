@@ -4452,6 +4452,7 @@ async def add_strike_email_account(
     smtp_pass: str,
 ) -> int:
     """Добавить email-аккаунт (или обновить если уже существует). Возвращает id."""
+    from services.token_vault import encrypt_token as _enc_tok
     row = await pool.fetchrow(
         """INSERT INTO strike_email_accounts
                (owner_id, email, smtp_host, smtp_port, smtp_pass, auth_type)
@@ -4467,7 +4468,7 @@ async def add_strike_email_account(
         email,
         smtp_host,
         smtp_port,
-        smtp_pass,
+        _enc_tok(smtp_pass),
     )
     return row["id"]
 

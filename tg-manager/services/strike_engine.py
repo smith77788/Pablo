@@ -1041,7 +1041,8 @@ async def _run_email_escalation(
                ORDER BY last_used_at ASC NULLS FIRST""",
             owner_id,
         )
-        db_emails = [dict(r) for r in rows]
+        from services.token_vault import decrypt_token as _dt
+        db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
     except Exception as e:
         log.debug("staggered_strike: email accounts fetch skipped: %s", e)
         return {
@@ -2778,7 +2779,8 @@ async def execute_mini_strike(
                ORDER BY last_used_at ASC NULLS FIRST""",
             owner_id,
         )
-        db_emails = [dict(r) for r in rows]
+        from services.token_vault import decrypt_token as _dt
+        db_emails = [{**dict(r), "smtp_pass": _dt(r["smtp_pass"] or "")} for r in rows]
     except Exception as e:
         log.debug("mini_strike: email accounts fetch skipped: %s", e)
 

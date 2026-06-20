@@ -475,6 +475,8 @@ async def _progress_monitor(
 ) -> None:
     """Периодически проверяет прогресс и уведомляет на 25/50/75% (один раз каждый milestone)."""
     _progress_milestones[op_id] = 0
+    _heartbeat_sent = False
+    _ticks_without_total = 0
     try:
         while True:
             await asyncio.sleep(15)
@@ -488,7 +490,18 @@ async def _progress_monitor(
                 total = row["total_items"] or 0
                 done = row["done_items"] or 0
                 if total <= 0:
+                    # total_items not set yet — send a "still running" heartbeat
+                    # every ~2 min (8 ticks × 15s) so user knows it's alive
+                    _ticks_without_total += 1
+                    if _ticks_without_total >= 8 and not _heartbeat_sent:
+                        _heartbeat_sent = True
+                        await db.notify_if_enabled(
+                            pool, bot, owner_id, "op_complete",
+                            f"⏳ <b>Операция #{op_id}</b> — в процессе…\n"
+                            f"<code>{op_type}</code>",
+                        )
                     continue
+                _ticks_without_total = 0
                 pct = int(done * 100 / total)
 
                 last = _progress_milestones.get(op_id, 0)
