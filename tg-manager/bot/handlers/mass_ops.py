@@ -1529,17 +1529,16 @@ async def _count_targets(
         if target == "channels":
             db_count = (
                 await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=FALSE AND acc_id = ANY($2::bigint[])",
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND (type='channel' OR type IS NULL) AND acc_id = ANY($2::bigint[])",
                     owner_id, acc_ids,
                 )
                 or 0
             )
             if db_count > 0:
                 return db_count
-            # Fallback: channels for owner (ignoring account filter — no data yet)
             return (
                 await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=FALSE",
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND (type='channel' OR type IS NULL)",
                     owner_id,
                 )
                 or 0
@@ -1547,7 +1546,7 @@ async def _count_targets(
         elif target == "groups":
             db_count = (
                 await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=TRUE AND acc_id = ANY($2::bigint[])",
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND type IN ('megagroup','supergroup','group','chat') AND acc_id = ANY($2::bigint[])",
                     owner_id, acc_ids,
                 )
                 or 0
@@ -1556,7 +1555,7 @@ async def _count_targets(
                 return db_count
             return (
                 await pool.fetchval(
-                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=TRUE",
+                    "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND type IN ('megagroup','supergroup','group','chat')",
                     owner_id,
                 )
                 or 0
@@ -2627,14 +2626,14 @@ async def _ob_show_preview(
             if target_filter == "channels":
                 chan_count = (
                     await pool.fetchval(
-                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=FALSE", uid
+                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND (type='channel' OR type IS NULL)", uid
                     )
                     or 0
                 )
             elif target_filter == "groups":
                 chan_count = (
                     await pool.fetchval(
-                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND is_group=TRUE", uid
+                        "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1 AND type IN ('megagroup','supergroup','group','chat')", uid
                     )
                     or 0
                 )
