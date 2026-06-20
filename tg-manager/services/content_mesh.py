@@ -67,7 +67,7 @@ async def _poll_source(pool: asyncpg.Pool, mesh: asyncpg.Record) -> None:
 
     acc_dict = dict(acc)
     try:
-        client = await _make_client(session, acc_dict)
+        client = _make_client(session, acc_dict)
         async with client:
             entity = await client.get_entity(source_channel)
             messages = await client.get_messages(entity, limit=_MAX_NEW_PER_CYCLE, min_id=last_id)
@@ -142,15 +142,13 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
 
     account_id = mesh["source_account_id"]
     acc = await pool.fetchrow(
-        """
-        SELECT a.id, a.session_str, a.banned,
-               a.device_model, a.system_version, a.app_version,
-               a.lang_code, a.system_lang_code,
-               p.proxy_url
-        FROM tg_accounts a
-        LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
-        WHERE a.id = $1 AND a.banned = FALSE
-        """,
+        """SELECT a.id, a.session_str, a.cooldown_until, a.banned,
+                  a.device_model, a.system_version, a.app_version,
+                  a.lang_code, a.system_lang_code,
+                  p.proxy_url
+           FROM tg_accounts a
+           LEFT JOIN user_proxies p ON p.id = a.proxy_id AND p.is_active = TRUE
+           WHERE a.id = $1 AND a.banned = FALSE""",
         account_id,
     )
     if not acc:
@@ -163,7 +161,7 @@ async def _process_delivery(pool: asyncpg.Pool, item: asyncpg.Record) -> None:
         return
 
     try:
-        client = await _make_client(session, dict(acc))
+        client = _make_client(session, dict(acc))
         async with client:
             source_entity = await client.get_entity(mesh["source_channel"])
             source_msgs = await client.get_messages(source_entity, ids=item["source_msg_id"])
