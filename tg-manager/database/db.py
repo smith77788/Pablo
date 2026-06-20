@@ -88,6 +88,24 @@ def _dec_bot_rows(rows) -> list[dict]:
     return out
 
 
+async def fetchrow_bot(pool: asyncpg.Pool, query: str, *args) -> dict | None:
+    """pool.fetchrow for managed_bots that auto-decrypts the token field."""
+    row = await pool.fetchrow(query, *args)
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("token"):
+        from services.token_vault import decrypt_token as _dt
+        d["token"] = _dt(d["token"])
+    return d
+
+
+async def fetch_bots(pool: asyncpg.Pool, query: str, *args) -> list[dict]:
+    """pool.fetch for managed_bots that auto-decrypts the token field in each row."""
+    rows = await pool.fetch(query, *args)
+    return _dec_bot_rows(rows)
+
+
 async def add_bot(
     pool: asyncpg.Pool,
     token: str,

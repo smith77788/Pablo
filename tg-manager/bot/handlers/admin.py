@@ -1373,10 +1373,12 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
-        bots = await pool.fetch(
+        from services.token_vault import decrypt_token as _dt_tok
+        _raw = await pool.fetch(
             "SELECT bot_id, username, first_name, token, added_by, added_at "
             "FROM managed_bots ORDER BY added_by, added_at"
         )
+        bots = [{**dict(r), "token": _dt_tok(r["token"] or "")} for r in _raw]
     except Exception as e:
         log_exc_swallow(log, "_adm_send_tokens_file fetch failed")
         await callback.message.answer(
