@@ -82,7 +82,7 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             locked_text("Парсер аудитории", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "pro", back_callback=BmCb(action="main")
+                "pro", back_callback=BmCb(action="monitoring")
             ),
         )
         return

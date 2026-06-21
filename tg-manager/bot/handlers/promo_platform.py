@@ -121,7 +121,7 @@ async def _show_menu(target, pool: asyncpg.Pool, edit: bool = True) -> None:
     except Exception as e:
         log.error("promo_platform._show_menu DB error: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Рост & Продвижение", callback_data=BmCb(action="growth"))
         msg = target.message if isinstance(target, CallbackQuery) else target
         await msg.answer(
             "🚀 <b>Продвижение ботов</b>\n\n"

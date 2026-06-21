@@ -25,7 +25,7 @@ def _ws_main_kb() -> ...:
     kb = InlineKeyboardBuilder()
     kb.button(text="➕ Создать workspace", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
-    kb.button(text="⬅️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -81,7 +81,7 @@ async def cb_ws_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCont
         )
     kb.button(text="➕ Создать workspace", callback_data=WorkspaceCb(action="create"))
     kb.button(text="🔗 Войти по коду", callback_data=WorkspaceCb(action="join"))
-    kb.button(text="⬅️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="⬅️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
     text = (
         "🏢 <b>Workspaces</b>\n\n"

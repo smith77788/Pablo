@@ -89,7 +89,7 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if total == 0:
         kb = InlineKeyboardBuilder()
         kb.button(text="🤖 Перейти к ботам", callback_data=BotCb(action="list", page=0))
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
         kb.adjust(1)
         await callback.message.edit_text(
             "📦 <b>Массовые операции</b>\n\n"

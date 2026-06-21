@@ -55,7 +55,7 @@ def _main_kb() -> InlineKeyboardBuilder:
     kb.button(text="💡 Рекомендации", callback_data=AdIntelCb(action="recommendations"))
     kb.button(text="🔍 Рекламодатели", callback_data=AdIntelCb(action="advertisers"))
     kb.button(text="📊 Рыночный отчёт", callback_data=AdIntelCb(action="market_report"))
-    kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Меню", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     return kb
 

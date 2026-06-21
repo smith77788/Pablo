@@ -74,7 +74,7 @@ def _main_kb() -> object:
     kb.button(text="🔍 Начать проверку", callback_data=RegCb(action="start"))
     kb.button(text="📋 История проверок", callback_data=RegCb(action="history"))
     kb.button(text="⚙️ Настройки пула", callback_data=RegCb(action="settings"))
-    kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Меню", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -104,7 +104,7 @@ def _result_kb(entity_id: int, entity_type: str) -> object:
     kb.button(text="🔄 Проверить ещё", callback_data=RegCb(action="start"))
     kb.button(text="⚙️ Пул аккаунтов", callback_data=RegCb(action="settings"))
     kb.button(text="📋 История", callback_data=RegCb(action="history"))
-    kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Меню", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -134,7 +134,7 @@ def _result_kb_retry_exact(entity_id: int, entity_type: str) -> object:
         callback_data=RegCb(action="analyze", entity_id=entity_id, entity_type=entity_type, page=0),
     )
     kb.button(text="🔄 Проверить ещё", callback_data=RegCb(action="start"))
-    kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Меню", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -862,7 +862,7 @@ async def _handle_batch(
     kb = InlineKeyboardBuilder()
     kb.button(text="🔍 Проверить ещё", callback_data=RegCb(action="start"))
     kb.button(text="📋 История", callback_data=RegCb(action="history"))
-    kb.button(text="◀️ Меню", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Меню", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
 
     try:

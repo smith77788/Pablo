@@ -69,14 +69,14 @@ async def cb_crm_menu(
             locked_text("CRM & автоматизация", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="main")
+                "starter", back_callback=BmCb(action="assets")
             ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
         await callback.message.edit_text(
             "❌ Бот не найден.", reply_markup=kb.as_markup()
         )
@@ -251,14 +251,14 @@ async def cb_auto_menu(
             locked_text("Автоматизация", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="main")
+                "starter", back_callback=BmCb(action="assets")
             ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
         await callback.message.edit_text(
             "❌ Бот не найден.", reply_markup=kb.as_markup()
         )

@@ -126,7 +126,7 @@ async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception as e:
         log.error("persona_hub cb_persona_menu: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
         await callback.message.edit_text(
             "🎭 <b>Persona Ecosystem</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
@@ -163,7 +163,7 @@ async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             )
 
     kb.button(text="➕ Создать персону", callback_data=PersonaCb(action="create"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())

@@ -39,7 +39,7 @@ def _hub_menu(bot_id: int) -> object:
     kb.button(text="🔍 Поиск по user_id", callback_data=MemCb(action="search", bot_id=bot_id))
     kb.button(text="📊 Статистика памяти", callback_data=MemCb(action="stats", bot_id=bot_id))
     kb.button(text="⚙️ Настройки памяти", callback_data=MemCb(action="settings", bot_id=bot_id))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
     kb.adjust(1)
     return kb.as_markup()
 

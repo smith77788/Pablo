@@ -1068,7 +1068,7 @@ async def cb_bot_admin_panel(
         text="🔑 Обновить токен доступа",
         callback_data=BotAdminCb(action="regen_token", bot_id=bot_id),
     )
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
     kb.adjust(1)
     await _edit(
         callback,
@@ -1158,7 +1158,7 @@ async def cb_bot_regen_token(
         text="🔑 Обновить токен доступа",
         callback_data=BotAdminCb(action="regen_token", bot_id=bot_id),
     )
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
     kb.adjust(1)
     await _edit(
         callback,

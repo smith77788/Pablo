@@ -59,7 +59,7 @@ async def cb_group_menu(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="📋 Мои группы", callback_data=GroupFCb(action="list"))
     kb.button(text="👥 Участники", callback_data=GroupFCb(action="members"))
     kb.button(text="📢 Объявление", callback_data=GroupFCb(action="announce"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
     kb.adjust(2, 2, 2, 1)
     await callback.message.edit_text(
         "👥 <b>Менеджер групп</b>\n\n"

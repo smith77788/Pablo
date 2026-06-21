@@ -42,7 +42,7 @@ async def cb_relay_menu(
         await callback.message.edit_text(
             locked_text("Диалоги / Relay", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -64,7 +64,7 @@ async def cb_relay_toggle(
         await callback.message.edit_text(
             locked_text("Диалоги / Relay", "starter"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="main")),
+            reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)

@@ -76,7 +76,7 @@ async def cb_dm_menu(
         await _edit(
             callback,
             locked_text("DM-кампании", "enterprise"),
-            subscription_locked_markup("enterprise", back_callback=BmCb(action="main")),
+            subscription_locked_markup("enterprise", back_callback=BmCb(action="comms")),
         )
         return
     await callback.answer()
@@ -123,7 +123,7 @@ async def cb_dm_menu(
                 text="🗑", callback_data=DmCb(action="delete", campaign_id=c["id"])
             )
 
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
     # Adjust: [new], then [detail, action] pairs, then [back]
     if campaigns:
         kb.adjust(1, *([2] * len(campaigns)), 1)

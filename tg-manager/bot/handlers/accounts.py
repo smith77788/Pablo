@@ -326,7 +326,7 @@ async def _show_accounts_menu(
             locked_text("Личные Telegram-аккаунты", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="main")
+                "starter", back_callback=BmCb(action="assets")
             ),
         )
         return

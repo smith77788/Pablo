@@ -163,11 +163,11 @@ def _menu_kb(has_access: bool) -> InlineKeyboardBuilder:
         kb.button(text="📋 Список целей", callback_data=ChanCb(action="br_mode_batch"))
         kb.button(text="⚙️ Настройки атаки", callback_data=StrikeCb(action="settings"))
         kb.button(text="📜 История", callback_data=StrikeCb(action="history"))
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
         kb.adjust(1, 2, 1, 1, 1)
     else:
         kb.button(text="💳 Купить за $250 USDT", callback_data=StrikeCb(action="buy"))
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
         kb.adjust(1, 1)
     return kb
 
