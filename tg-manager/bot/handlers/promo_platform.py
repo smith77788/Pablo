@@ -114,9 +114,23 @@ async def _show_menu(target, pool: asyncpg.Pool, edit: bool = True) -> None:
     else:
         user_id = target.from_user.id
 
-    orders = await db.promo_list_orders(pool, user_id, limit=200)
-    bots = await db.warehouse_list_bots(pool, user_id, limit=200)
-    panels = await db.smm_list_panels(pool, user_id)
+    try:
+        orders = await db.promo_list_orders(pool, user_id, limit=200)
+        bots = await db.warehouse_list_bots(pool, user_id, limit=200)
+        panels = await db.smm_list_panels(pool, user_id)
+    except Exception as e:
+        log.error("promo_platform._show_menu DB error: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+        msg = target.message if isinstance(target, CallbackQuery) else target
+        await msg.answer(
+            "🚀 <b>Продвижение ботов</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v99.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
 
     active_orders = [o for o in orders if o["status"] not in ("cancelled", "transferred")]
     boosting_orders = [o for o in orders if o["status"] == "boosting"]

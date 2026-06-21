@@ -51,10 +51,28 @@ async def _get_account_name(pool: asyncpg.Pool, account_id: int | None) -> str:
 @router.callback_query(ContentMeshCb.filter(F.action == "menu"))
 async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    meshes = await pool.fetch(
-        "SELECT * FROM content_meshes WHERE owner_id=$1 ORDER BY id",
-        callback.from_user.id,
-    )
+    try:
+        meshes = await pool.fetch(
+            "SELECT * FROM content_meshes WHERE owner_id=$1 ORDER BY id",
+            callback.from_user.id,
+        )
+        pending = await pool.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM mesh_queue WHERE status='pending' AND mesh_id IN (SELECT id FROM content_meshes WHERE owner_id=$1)",
+            callback.from_user.id,
+        )
+    except Exception as e:
+        log.error("content_mesh_hub cb_mesh_menu: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
+        await callback.message.edit_text(
+            "🕸️ <b>Content Mesh</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v106.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     kb = InlineKeyboardBuilder()
     for m in meshes:
         status = "🟢" if m["enabled"] else "🔴"
@@ -68,10 +86,6 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
 
     active = sum(1 for m in meshes if m["enabled"])
-    pending = await pool.fetchrow(
-        "SELECT COUNT(*) AS cnt FROM mesh_queue WHERE status='pending' AND mesh_id IN (SELECT id FROM content_meshes WHERE owner_id=$1)",
-        callback.from_user.id,
-    )
     pend_cnt = pending["cnt"] if pending else 0
 
     await callback.message.edit_text(

@@ -47,10 +47,34 @@ def _back_to_menu():
 @router.callback_query(AutoFunnelCb.filter(F.action == "menu"))
 async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    funnels = await pool.fetch(
-        "SELECT f.*, b.username AS bot_uname, b.first_name AS bot_name FROM auto_funnels f LEFT JOIN managed_bots b ON b.bot_id = f.bot_id WHERE f.owner_id=$1 ORDER BY f.id",
-        callback.from_user.id,
-    )
+    try:
+        funnels = await pool.fetch(
+            "SELECT f.*, b.username AS bot_uname, b.first_name AS bot_name FROM auto_funnels f LEFT JOIN managed_bots b ON b.bot_id = f.bot_id WHERE f.owner_id=$1 ORDER BY f.id",
+            callback.from_user.id,
+        )
+        active_runs = await pool.fetchrow(
+            """
+            SELECT COUNT(*) FILTER (WHERE r.status='active') AS active_cnt,
+                   COUNT(*) FILTER (WHERE r.status='completed') AS completed_cnt
+            FROM auto_funnel_runs r
+            JOIN auto_funnels f ON f.id = r.funnel_id
+            WHERE f.owner_id = $1
+            """,
+            callback.from_user.id,
+        )
+    except Exception as e:
+        log.error("auto_funnel_hub cb_af_menu: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
+        await callback.message.edit_text(
+            "⚡ <b>Auto-Funnel</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v108.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     kb = InlineKeyboardBuilder()
     for f in funnels:
         status = "🟢" if f["enabled"] else "🔴"
@@ -64,16 +88,6 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
     kb.adjust(1)
 
-    active_runs = await pool.fetchrow(
-        """
-        SELECT COUNT(*) FILTER (WHERE r.status='active') AS active_cnt,
-               COUNT(*) FILTER (WHERE r.status='completed') AS completed_cnt
-        FROM auto_funnel_runs r
-        JOIN auto_funnels f ON f.id = r.funnel_id
-        WHERE f.owner_id = $1
-        """,
-        callback.from_user.id,
-    )
     a = active_runs["active_cnt"] if active_runs else 0
     c = active_runs["completed_cnt"] if active_runs else 0
 
