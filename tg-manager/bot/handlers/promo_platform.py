@@ -7,10 +7,9 @@
   4. Чекер топа (через ranking tracker)
   5. Парсер ботов из BotFather
   6. Трансфер ботов через BotFather
-  7. Загрузка .session файлов
-  8. Логи (INFO/WARN/ERROR, фильтр по заказу)
-  9. Запуск накрутки (прямой вызов SMM API)
- 10. Уведомления (через promo_scheduler)
+  7. Логи (INFO/WARN/ERROR, фильтр по заказу)
+  8. Запуск накрутки (прямой вызов SMM API)
+  9. Уведомления (через promo_scheduler)
 """
 from __future__ import annotations
 

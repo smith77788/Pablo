@@ -471,14 +471,13 @@ async def main() -> None:
         log.info("TG Manager started")
 
         # ── Webhook or long-polling ───────────────────────────────────────────
-        # If RAILWAY_PUBLIC_DOMAIN or WEBHOOK_URL is set — use webhooks.
-        # Webhook delivers updates instantly (no polling round-trip), cutting
-        # response latency from ~1-2s to ~200-400ms for simple navigation.
+        # Webhook only if WEBHOOK_URL is explicitly set (not auto-detected).
+        # RAILWAY_PUBLIC_DOMAIN alone is NOT enough: Railway worker processes
+        # don't expose HTTP ports, so Telegram can't reach the webhook endpoint.
+        # Set WEBHOOK_URL manually only if the service is configured as a web
+        # service with a routed port (e.g. Railway web service with Generate Domain).
         _webhook_path = "/webhook"
-        _webhook_url = os.getenv("WEBHOOK_URL") or (
-            f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}{_webhook_path}"
-            if os.getenv("RAILWAY_PUBLIC_DOMAIN") else None
-        )
+        _webhook_url = os.getenv("WEBHOOK_URL") or None
         _allowed_updates = [
             "message", "callback_query", "inline_query",
             "chosen_inline_result", "pre_checkout_query",
