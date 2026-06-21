@@ -406,7 +406,7 @@ async def cb_detail(
         await callback.answer("Рассылка не найдена.", show_alert=True)
         return
     await callback.answer()
-    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "partial": "⚠️", "cancelled": "❌", "failed": "❌"}
     emoji = status_emoji.get(bc["status"], "❓")
     preview = bc["message_text"][:300] if bc["message_text"] else ""
     success_rate = (
@@ -463,7 +463,7 @@ async def cb_bc_summary(
     label = f"@{row['username']}" if row["username"] else row["first_name"]
     safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "partial": "⚠️", "cancelled": "❌", "failed": "❌"}
     lines = []
     total_sent = 0
     total_users = 0

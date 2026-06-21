@@ -523,10 +523,8 @@ async def run_campaign(
             unprocessed,
         )
 
-    status_final = "partial" if unprocessed > 0 else "done"
     await pool.execute(
-        "UPDATE dm_campaigns SET status=$1, finished_at=now() WHERE id=$2",
-        status_final,
+        "UPDATE dm_campaigns SET status='done', finished_at=now() WHERE id=$1",
         campaign_id,
     )
 
