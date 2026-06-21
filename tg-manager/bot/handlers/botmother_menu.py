@@ -2045,10 +2045,12 @@ async def cb_op_reports(
         )
 
     total_pages = max(1, -(-total // limit))
+    legend = "\n<i>✅ завершено · ❌ ошибка · 🚫 отменено (рестарт) · 🔄 выполняется</i>"
     text = (
         f"<b>📊 Отчёты по операциям</b>  стр. {page + 1}/{total_pages}"
         + summary_line
         + ("\n" + "\n".join(lines) if lines else "")
+        + legend
     )
 
     nav_count = 0
