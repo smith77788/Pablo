@@ -565,3 +565,11 @@ class StarsCb(CallbackData, prefix="strs"):
     bot_id: int = 0
 
 
+class AdIntelCb(CallbackData, prefix="adi"):
+    """Ad Intelligence — разведка рекламного рынка Telegram."""
+
+    action: str         # menu|add_channel|top_channels|recommendations|advertisers|market_report
+    placement_id: int = 0
+    page: int = 0
+
+
