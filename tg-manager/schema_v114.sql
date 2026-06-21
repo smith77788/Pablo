@@ -39,4 +39,5 @@ CREATE TABLE IF NOT EXISTS growth_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_growth_goals_owner_active ON growth_goals(owner_id) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_growth_goals_updated ON growth_goals(updated_at ASC NULLS FIRST) WHERE status='active';
 CREATE INDEX IF NOT EXISTS idx_growth_actions_goal ON growth_actions(goal_id, executed_at DESC);

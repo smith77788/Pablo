@@ -41,6 +41,7 @@ async def create_persona(
     interests: list[str],
     niche: str,
     speech_style: str = "neutral",
+    tone: str = "positive",
     backstory: str = "",
 ) -> int:
     """Insert a new persona profile and return its id."""
@@ -48,14 +49,15 @@ async def create_persona(
         """
         INSERT INTO persona_profiles
                (account_id, owner_id, persona_name, bio, interests, niche,
-                speech_style, backstory)
-        VALUES ($1, $2, $3, $4, $5::TEXT[], $6, $7, $8)
+                speech_style, tone, backstory)
+        VALUES ($1, $2, $3, $4, $5::TEXT[], $6, $7, $8, $9)
         ON CONFLICT (account_id) DO UPDATE
             SET persona_name = EXCLUDED.persona_name,
                 bio          = EXCLUDED.bio,
                 interests    = EXCLUDED.interests,
                 niche        = EXCLUDED.niche,
                 speech_style = EXCLUDED.speech_style,
+                tone         = EXCLUDED.tone,
                 backstory    = EXCLUDED.backstory,
                 updated_at   = NOW()
         RETURNING id
@@ -67,6 +69,7 @@ async def create_persona(
         interests,
         niche,
         speech_style,
+        tone,
         backstory,
     )
     return persona_id

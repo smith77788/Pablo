@@ -243,17 +243,17 @@ async def compute_dna(
     try:
         mem_rows = await pool.fetch(
             """
-            SELECT value
-            FROM bot_user_memory
+            SELECT fact_value
+            FROM bot_user_facts
             WHERE bot_id = $1
-              AND key = 'interests'
+              AND fact_key = 'interests'
             LIMIT 500
             """,
             bot_id,
         )
         topic_counter: Counter[str] = Counter()
         for r in mem_rows:
-            raw = r["value"]
+            raw = r["fact_value"]
             if isinstance(raw, str):
                 for t in raw.split(","):
                     t = t.strip().lower()

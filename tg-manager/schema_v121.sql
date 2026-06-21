@@ -30,5 +30,6 @@ CREATE TABLE IF NOT EXISTS narrative_posts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_narrative_campaigns_owner ON narrative_campaigns(owner_id, status);
+CREATE INDEX IF NOT EXISTS idx_narrative_campaigns_owner_time ON narrative_campaigns(owner_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_narrative_posts_scheduled ON narrative_posts(scheduled_at) WHERE status='pending';
 CREATE INDEX IF NOT EXISTS idx_narrative_posts_campaign ON narrative_posts(campaign_id, status);

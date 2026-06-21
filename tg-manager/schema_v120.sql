@@ -41,3 +41,4 @@ CREATE TABLE IF NOT EXISTS ad_advertisers (
 CREATE INDEX IF NOT EXISTS idx_ad_placements_owner_score ON ad_placements(owner_id, quality_score DESC);
 CREATE INDEX IF NOT EXISTS idx_ad_placements_niche ON ad_placements USING GIN(niches);
 CREATE INDEX IF NOT EXISTS idx_ad_posts_placement ON ad_posts_log(placement_id, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ad_advertisers_owner_seen ON ad_advertisers(owner_id, last_seen_at DESC);
