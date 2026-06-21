@@ -111,14 +111,25 @@ async def cb_mem_menu(
     await callback.answer()
     bot_id = callback_data.bot_id
 
-    # If no bot_id supplied, show a generic entry without bot-specific stats
+    # If no bot_id supplied, show list of user's bots to pick from
     if not bot_id:
-        await callback.message.edit_text(
+        bots = await db.get_bots(pool, callback.from_user.id)
+        kb = InlineKeyboardBuilder()
+        for b in bots[:20]:
+            label = b.get("username") or b.get("first_name") or str(b["bot_id"])
+            kb.button(
+                text=f"🤖 @{label}" if b.get("username") else f"🤖 {label}",
+                callback_data=MemCb(action="menu", bot_id=b["bot_id"]),
+            )
+        kb.button(text="◀️ Аналитика", callback_data=BmCb(action="analytics"))
+        kb.adjust(1)
+        text = (
             "🧠 <b>Semantic Memory CRM</b>\n\n"
-            "Выберите бота в меню ботов, чтобы управлять памятью его пользователей.",
-            parse_mode="HTML",
-            reply_markup=_back_to_hub(0),
+            "Память позволяет боту помнить каждого пользователя — "
+            "его имя, интересы, прошлые вопросы — и отвечать с полным контекстом.\n\n"
+            + ("Выберите бота:" if bots else "У вас нет ботов. Добавьте бота через /start.")
         )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
         return
 
     row = await _resolve_bot(pool, bot_id, callback.from_user.id)
