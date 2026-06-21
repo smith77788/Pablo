@@ -173,19 +173,16 @@ async def cmd_growth(message: Message, pool: asyncpg.Pool, state: FSMContext) ->
     await _send_goal_list(pool, message, message.from_user.id)
 
 
-# ── Goal detail ───────────────────────────────────────────────────────────────
+# ── Goal detail (shared helper + callback) ────────────────────────────────────
 
 
-@router.callback_query(GrowthCb.filter(F.action == "detail"))
-async def cb_growth_detail(
+async def _show_goal_detail(
     callback: CallbackQuery,
-    callback_data: GrowthCb,
     pool: asyncpg.Pool,
+    goal_id: int,
 ) -> None:
-    await callback.answer()
-    goal_id = callback_data.goal_id
+    """Отрисовать детали цели в текущем сообщении."""
     owner_id = callback.from_user.id
-
     status_data = await growth_agent.get_goal_status(pool, goal_id)
     if not status_data:
         await callback.message.edit_text(
@@ -195,7 +192,6 @@ async def cb_growth_detail(
         )
         return
 
-    # Проверка владельца
     if int(status_data["owner_id"]) != owner_id:
         await callback.answer("⛔ Доступ запрещён.", show_alert=True)
         return
@@ -222,19 +218,17 @@ async def cb_growth_detail(
         lines.append(f"⏰ <b>Осталось дней:</b> {days_left}")
 
     deadline = status_data.get("deadline_at")
-    if deadline:
-        if hasattr(deadline, "strftime"):
-            lines.append(f"📅 <b>Дедлайн:</b> {deadline.strftime('%d.%m.%Y')}")
+    if deadline and hasattr(deadline, "strftime"):
+        lines.append(f"📅 <b>Дедлайн:</b> {deadline.strftime('%d.%m.%Y')}")
 
     strategy = status_data.get("strategy", "balanced")
     lines.append(f"🔧 <b>Стратегия:</b> <code>{strategy}</code>")
 
-    # Последние действия
     recent = status_data.get("recent_actions", [])
     if recent:
         lines.append("\n<b>📋 Последние 5 действий:</b>")
         for act in recent:
-            icon = _OUTCOME_ICONS.get(act["outcome"], "•")
+            icon = _OUTCOME_ICONS.get(act.get("outcome", ""), "•")
             atype = html.escape(str(act.get("action_type", "")))
             adesc = html.escape(str(act.get("description", ""))[:60])
             executed = act.get("executed_at")
@@ -243,27 +237,18 @@ async def cb_growth_detail(
                 ts = executed.strftime(" %d.%m %H:%M")
             lines.append(f"  {icon} <code>{atype}</code> — {adesc}{ts}")
 
-    # Последний отчёт
     last_report = status_data.get("last_report")
     if last_report:
         lines.append("\n<b>📝 Последний отчёт:</b>")
         commentary = html.escape(str(last_report.get("ai_commentary", "")))
         lines.append(f"  {commentary}")
 
-    # Прогноз завершения
-    if days_left is not None and days_left > 0 and pct > 0:
-        if pct < 100:
-            remaining_pct = 100.0 - pct
-            rate_per_day = pct / max(1, (
-                (target - current) and 1
-            ))
-            # Простая линейная экстраполяция
-            days_needed = (target - current) / max(1, current) * days_left if current > 0 else days_left
-            days_needed = round(days_needed)
-            if days_needed < days_left:
-                lines.append(f"\n🔮 <b>Прогноз:</b> достижимо за ~{days_needed} дн. (осталось {days_left} дн.)")
-            else:
-                lines.append(f"\n⚠️ <b>Прогноз:</b> может не уложиться в дедлайн (нужно ~{days_needed} дн.)")
+    if days_left is not None and days_left > 0 and pct > 0 and pct < 100 and current > 0:
+        days_needed = round((target - current) / max(1, current) * days_left)
+        if days_needed < days_left:
+            lines.append(f"\n🔮 <b>Прогноз:</b> достижимо за ~{days_needed} дн. (осталось {days_left} дн.)")
+        else:
+            lines.append(f"\n⚠️ <b>Прогноз:</b> может не уложиться в дедлайн (нужно ~{days_needed} дн.)")
 
     text = "\n".join(lines)
     await callback.message.edit_text(
@@ -271,6 +256,16 @@ async def cb_growth_detail(
         parse_mode="HTML",
         reply_markup=_detail_kb(goal_id, status_data["status"]),
     )
+
+
+@router.callback_query(GrowthCb.filter(F.action == "detail"))
+async def cb_growth_detail(
+    callback: CallbackQuery,
+    callback_data: GrowthCb,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    await _show_goal_detail(callback, pool, callback_data.goal_id)
 
 
 # ── Pause / Resume / Delete ───────────────────────────────────────────────────
@@ -282,16 +277,12 @@ async def cb_growth_pause(
     callback_data: GrowthCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     ok = await growth_agent.pause_goal(pool, callback_data.goal_id, callback.from_user.id)
-    if ok:
-        await callback.answer("⏸ Цель поставлена на паузу.", show_alert=True)
-    else:
-        await callback.answer("❌ Не удалось поставить на паузу.", show_alert=True)
-    # Обновим детали
-    from aiogram.types import CallbackQuery as CQ
-    fake = type("_FakeCallbackData", (), {"goal_id": callback_data.goal_id})()
-    await cb_growth_detail(callback, fake, pool)
+    await callback.answer(
+        "⏸ Цель поставлена на паузу." if ok else "❌ Не удалось поставить на паузу.",
+        show_alert=True,
+    )
+    await _show_goal_detail(callback, pool, callback_data.goal_id)
 
 
 @router.callback_query(GrowthCb.filter(F.action == "resume"))
@@ -300,14 +291,12 @@ async def cb_growth_resume(
     callback_data: GrowthCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     ok = await growth_agent.resume_goal(pool, callback_data.goal_id, callback.from_user.id)
-    if ok:
-        await callback.answer("▶️ Цель возобновлена.", show_alert=True)
-    else:
-        await callback.answer("❌ Не удалось возобновить.", show_alert=True)
-    fake = type("_FakeCallbackData", (), {"goal_id": callback_data.goal_id})()
-    await cb_growth_detail(callback, fake, pool)
+    await callback.answer(
+        "▶️ Цель возобновлена." if ok else "❌ Не удалось возобновить.",
+        show_alert=True,
+    )
+    await _show_goal_detail(callback, pool, callback_data.goal_id)
 
 
 @router.callback_query(GrowthCb.filter(F.action == "confirm_delete"))
