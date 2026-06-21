@@ -137,7 +137,7 @@ async def cb_adi_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
     )
 
     kb = _main_kb()
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Команда входа ─────────────────────────────────────────────────────────
@@ -171,7 +171,7 @@ async def cmd_ad_intel(message: Message, pool: asyncpg.Pool, state: FSMContext) 
     )
 
     kb = _main_kb()
-    await message.answer(text, reply_markup=kb.as_markup())
+    await message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Добавить канал ────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ async def cb_adi_add_channel(
         "Бот просканирует последние 100 постов, найдёт рекламу и "
         "оценит качество аудитории."
     )
-    await callback.message.edit_text(text, reply_markup=_cancel_kb().as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_cancel_kb().as_markup())
 
 
 @router.message(AdIntelFSM.waiting_channel)
@@ -206,6 +206,7 @@ async def msg_adi_channel_input(
         await message.answer(
             "⚠️ Неверный формат. Отправь <code>@username</code> или "
             "<code>t.me/channelname</code>.",
+            parse_mode="HTML",
             reply_markup=_cancel_kb().as_markup(),
         )
         return
@@ -223,13 +224,15 @@ async def msg_adi_channel_input(
         await message.answer(
             "⚠️ Нет активных аккаунтов Telegram в пуле.\n"
             "Добавь аккаунт в разделе <b>Аккаунты</b> для сканирования каналов.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
     status_msg = await message.answer(
         f"🔍 Сканирую <b>@{html.escape(username)}</b>...\n"
-        "<i>Читаю последние 100 постов, ищу рекламу...</i>"
+        "<i>Читаю последние 100 постов, ищу рекламу...</i>",
+        parse_mode="HTML",
     )
 
     from services.ad_intelligence import scan_channel_ads
@@ -242,6 +245,7 @@ async def msg_adi_channel_input(
     except asyncio.TimeoutError:
         await status_msg.edit_text(
             "⏱ Превышено время ожидания при сканировании канала.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -249,6 +253,7 @@ async def msg_adi_channel_input(
         log.exception("msg_adi_channel_input: scan_channel_ads error")
         await status_msg.edit_text(
             f"❌ Ошибка при сканировании: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -257,6 +262,7 @@ async def msg_adi_channel_input(
         await status_msg.edit_text(
             f"❌ Не удалось просканировать канал.\n"
             f"<code>{html.escape(result.get('error', 'Неизвестная ошибка'))}</code>",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -286,7 +292,7 @@ async def msg_adi_channel_input(
     kb.button(text="➕ Добавить ещё", callback_data=AdIntelCb(action="add_channel"))
     kb.button(text="◀️ Дашборд", callback_data=AdIntelCb(action="menu"))
     kb.adjust(1)
-    await status_msg.edit_text(text, reply_markup=kb.as_markup())
+    await status_msg.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Топ каналов ───────────────────────────────────────────────────────────
@@ -326,6 +332,7 @@ async def cb_adi_top_channels(
         await callback.message.edit_text(
             "📭 Каналов в базе пока нет.\n\n"
             "Добавь первый канал для анализа через <b>Добавить канал</b>.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -360,7 +367,7 @@ async def cb_adi_top_channels(
     kb.button(text="◀️ Дашборд", callback_data=AdIntelCb(action="menu"))
     kb.adjust(2, 1)
 
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Детали канала ─────────────────────────────────────────────────────────
@@ -421,7 +428,7 @@ async def cb_adi_placement_detail(
     kb.button(text="◀️ К топу", callback_data=AdIntelCb(action="top_channels"))
     kb.adjust(1)
 
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Ресканировать канал ───────────────────────────────────────────────────
@@ -453,12 +460,14 @@ async def cb_adi_rescan_channel(
     if not acc:
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов для сканирования.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
 
     await callback.message.edit_text(
         f"🔍 Ресканирую <b>@{html.escape(row['channel_username'])}</b>...",
+        parse_mode="HTML",
     )
 
     from services.ad_intelligence import scan_channel_ads
@@ -470,12 +479,13 @@ async def cb_adi_rescan_channel(
         )
     except asyncio.TimeoutError:
         await callback.message.edit_text(
-            "⏱ Таймаут при сканировании.", reply_markup=_back_kb().as_markup()
+            "⏱ Таймаут при сканировании.", parse_mode="HTML", reply_markup=_back_kb().as_markup()
         )
         return
     except Exception as exc:
         await callback.message.edit_text(
             f"❌ Ошибка: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -483,6 +493,7 @@ async def cb_adi_rescan_channel(
     if result.get("status") == "error":
         await callback.message.edit_text(
             f"❌ {html.escape(result.get('error', 'Ошибка'))}",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -493,6 +504,7 @@ async def cb_adi_rescan_channel(
         f"✅ Ресканирование завершено!\n\n"
         f"⭐ Quality Score: <b>{qs:.1f}/100</b> {_quality_label(qs)}\n"
         f"📝 Рекламных постов найдено: <b>{ad_posts}</b>",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardBuilder()
         .button(
             text="🔎 Обновлённые детали",
@@ -521,6 +533,7 @@ async def cb_adi_recommendations(
         "Укажи бюджет в Stars (Telegram) или отправь <code>0</code> для "
         "рекомендаций без ограничения бюджета.\n\n"
         "<i>Например: 5000</i>",
+        parse_mode="HTML",
         reply_markup=_cancel_kb().as_markup(),
     )
 
@@ -537,6 +550,7 @@ async def msg_adi_budget_input(
     except (ValueError, TypeError):
         await message.answer(
             "⚠️ Введи число (количество Stars) или <code>0</code> без ограничения.",
+            parse_mode="HTML",
             reply_markup=_cancel_kb().as_markup(),
         )
         return
@@ -551,6 +565,7 @@ async def msg_adi_budget_input(
         log.exception("msg_adi_budget_input: get_recommendations error")
         await message.answer(
             f"❌ Ошибка при получении рекомендаций: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -560,6 +575,7 @@ async def msg_adi_budget_input(
         await message.answer(
             f"📭 Нет рекомендаций ({budget_str}).\n\n"
             "Добавь больше каналов в базу для получения рекомендаций.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -589,6 +605,7 @@ async def msg_adi_budget_input(
 
     await message.answer(
         "\n".join(lines),
+        parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
 
@@ -634,6 +651,7 @@ async def cb_adi_advertisers(
         await callback.message.edit_text(
             "📭 Активных рекламодателей за последние 30 дней не найдено.\n\n"
             "Сканируй каналы, чтобы собирать данные о рекламодателях.",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -664,7 +682,7 @@ async def cb_adi_advertisers(
     kb.button(text="◀️ Дашборд", callback_data=AdIntelCb(action="menu"))
     kb.adjust(2, 1)
 
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Рыночный отчёт ────────────────────────────────────────────────────────
@@ -681,6 +699,7 @@ async def cb_adi_market_report(
         "📊 <b>Рыночный отчёт</b>\n\n"
         "Введи нишу для фильтрации (например: <code>крипто</code>, <code>новости</code>)\n"
         "или отправь <code>-</code> для общего отчёта по всем каналам.",
+        parse_mode="HTML",
         reply_markup=_cancel_kb().as_markup(),
     )
 
@@ -702,6 +721,7 @@ async def msg_adi_niche_input(
         log.exception("msg_adi_niche_input: get_market_report error")
         await message.answer(
             f"❌ Ошибка при получении отчёта: <code>{html.escape(str(exc)[:200])}</code>",
+            parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -738,5 +758,6 @@ async def msg_adi_niche_input(
 
     await message.answer(
         "\n".join(lines),
+        parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )

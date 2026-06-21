@@ -273,7 +273,7 @@ async def cb_dna_history(
     await callback.answer()
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
-        await callback.message.edit_text("❌ Бот не найден.", reply_markup=_back_to_list())
+        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())
         return
 
     bot_name = _bot_label(bot_row)
@@ -283,6 +283,7 @@ async def cb_dna_history(
         await callback.message.edit_text(
             f"📊 <b>История DNA — {bot_name}</b>\n\n"
             "Нет исторических данных.",
+            parse_mode="HTML",
             reply_markup=_back_to_dna(callback_data.bot_id),
         )
         return
@@ -325,5 +326,6 @@ async def cb_dna_history(
 
     await callback.message.edit_text(
         "\n\n".join(lines),
+        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
