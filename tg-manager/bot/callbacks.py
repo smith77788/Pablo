@@ -542,3 +542,10 @@ class GrowthCb(CallbackData, prefix="ga"):
     page: int = 0
 
 
+class ShieldCb(CallbackData, prefix="sh"):
+    """Account Shield — proactive ban prediction and auto-cooling."""
+
+    action: str         # menu|top10|settings|history|toggle_ap|toggle_na
+    account_id: int = 0
+
+
