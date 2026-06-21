@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery
 import asyncpg
-from bot.callbacks import CallbackData
+from aiogram.filters.callback_data import CallbackData
 from bot.utils.subscription import is_platform_admin
 from database import db
 from services.logger import log_exc_swallow
