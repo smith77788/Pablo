@@ -375,26 +375,17 @@ async def fsm_waiting_name(message: Message, state: FSMContext) -> None:
     for ctype, label in CONTENT_TYPES.items():
         kb.button(
             text=label,
-            callback_data=StarsCb(action="create_pick_ctype", experiment_id=0, bot_id=0),
-        )
-    # We embed ctype selection in state via next callback — use inline buttons with extra data
-    # Simpler: use message with button for each type
-    kb2 = InlineKeyboardBuilder()
-    for ctype, label in CONTENT_TYPES.items():
-        # Encode ctype in bot_id slot (hack) — cleaner: use FSM data
-        kb2.button(
-            text=label,
             callback_data=StarsCb(
                 action=f"create_ctype_{ctype}",
                 experiment_id=0,
                 bot_id=0,
             ),
         )
-    kb2.adjust(2)
+    kb.adjust(2)
     await message.answer(
         "🧪 Шаг 3/5 — Выберите тип контента:",
         parse_mode="HTML",
-        reply_markup=kb2.as_markup(),
+        reply_markup=kb.as_markup(),
     )
 
 

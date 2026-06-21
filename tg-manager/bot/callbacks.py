@@ -579,3 +579,18 @@ class PersonaCb(CallbackData, prefix="prsa"):
     action: str   # menu|create|view|edit|delete|delete_confirm
     persona_id: int = 0
     page: int = 0
+
+
+class MemCb(CallbackData, prefix="mem"):
+    """Semantic Memory CRM — per-user per-bot conversational memory."""
+
+    action: str         # menu|search|stats|settings|toggle_enabled|toggle_extract|set_days|view_user
+    bot_id: int = 0
+    user_id: int = 0
+
+
+class DnaCb(CallbackData, prefix="dna"):
+    """Audience DNA — deep behavioral profiling."""
+
+    action: str         # menu|report|recs|compute|history
+    bot_id: int = 0

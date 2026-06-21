@@ -11,23 +11,13 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import BotCb
+from bot.callbacks import BotCb, DnaCb
 from database import db
 from services import audience_dna as dna_svc
 from services.audience_dna import AudienceDNA, generate_recommendations
 
 log = logging.getLogger(__name__)
 router = Router()
-
-
-# ── CallbackData ──────────────────────────────────────────────────────────────
-
-from aiogram.filters.callback_data import CallbackData
-
-
-class DnaCb(CallbackData, prefix="dna"):
-    action: str
-    bot_id: int = 0
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

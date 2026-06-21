@@ -333,17 +333,8 @@ async def cb_narr_type_pick(
     await state.set_state(NarrativeFSM.choosing_type)
 
     kb = InlineKeyboardBuilder()
-    for ctype, label in _TYPE_LABELS.items():
-        kb.button(
-            text=label,
-            callback_data=NarrCb(action="spread_pick", campaign_id=0),
-        )
-    # Используем отдельные callbacks для каждого типа
-    kb = InlineKeyboardBuilder()
     for ctype in ["trend", "launch", "awareness", "counter"]:
         label = _TYPE_LABELS[ctype]
-        # Кодируем тип в campaign_id: хэшируем строку в маленькое число не подходит
-        # Используем отдельный экран - передаём тип через FSM
         kb.button(
             text=label,
             callback_data=NarrCb(action=f"set_type_{ctype}"),

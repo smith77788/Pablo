@@ -6,28 +6,18 @@ import logging
 from html import escape as he
 
 from aiogram import F, Router
-from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 
-from bot.callbacks import BmCb
+from bot.callbacks import BmCb, MemCb
 from database import db
 from services import semantic_memory
 
 router = Router()
 log = logging.getLogger(__name__)
-
-
-# ── Callback data ────────────────────────────────────────────────────────────
-
-
-class MemCb(CallbackData, prefix="mem"):
-    action: str
-    bot_id: int = 0
-    user_id: int = 0
 
 
 # ── FSM states ───────────────────────────────────────────────────────────────

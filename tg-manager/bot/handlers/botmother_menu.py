@@ -16,6 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import (
     AccCb,
+    AdIntelCb,
     AiCb,
     AssetTplCb,
     BmCb,
@@ -27,19 +28,24 @@ from bot.callbacks import (
     CommandsCb,
     CompCb,
     ContentMeshCb,
+    DnaCb,
     ErrorReportCb,
     FunnelCb,
     GeoPresenceCb,
     GhostCb,
     GroupFCb,
+    GrowthCb,
     HealthCb,
     InfraCb,
     IntentCb,
     MassOpCb,
     MassPubCb,
+    MemCb,
     NetBcCb,
     NetworkCb,
+    NarrCb,
     ParserCb,
+    PersonaCb,
     PromoCb,
     ProxyCb,
     QuickPostCb,
@@ -49,6 +55,8 @@ from bot.callbacks import (
     RegCb,
     ScheduleCb,
     SelfPromoCb,
+    ShieldCb,
+    StarsCb,
     SubCb,
     AutoReplyCb,
     DmCb,
@@ -167,8 +175,10 @@ def _operations_kb(plan: str = "free"):
     kb.button(text=f"{_lock(plan,'pro')}🛠️ Конструктор опер.", callback_data=MassOpCb(action="menu"))
     kb.button(text="🔀 Clone & Adapt", callback_data=CloneAdaptCb(action="menu"))
     kb.button(text="🎁 Подарки", callback_data="gt:main")
+    kb.button(text="🌱 Growth Agent", callback_data=GrowthCb(action="menu"))
+    kb.button(text="⭐ Stars Optimizer", callback_data=StarsCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -185,8 +195,9 @@ def _comms_kb():
     kb.button(text="🔗 Воронки (цепочки)", callback_data=BmCb(action="pick_bot_for", sub="fn"))
     kb.button(text="🕸️ Content Mesh", callback_data=ContentMeshCb(action="menu"))
     kb.button(text="⚡ Auto-Funnel", callback_data=AutoFunnelCb(action="menu"))
+    kb.button(text="📖 Narrative Hub", callback_data=NarrCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -205,8 +216,11 @@ def _analytics_kb(plan: str = "free"):
     kb.button(text="🌐 Граф аудитории", callback_data=GraphCb(action="menu"))
     kb.button(text="📅 Дата регистрации", callback_data=RegCb(action="start"))
     kb.button(text="🔬 Полный анализ", callback_data=RegCb(action="analyze_start"))
+    kb.button(text="🎯 Ad Intelligence", callback_data=AdIntelCb(action="menu"))
+    kb.button(text="🧬 Audience DNA", callback_data=DnaCb(action="menu"))
+    kb.button(text="🧠 Semantic Memory", callback_data=MemCb(action="menu", bot_id=0))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -220,8 +234,9 @@ def _monitoring_kb():
     kb.button(text="📊 Инфра-аналитика", callback_data=InfraCb(action="menu"))
     kb.button(text="👻 Ghost Engine", callback_data=GhostCb(action="menu"))
     kb.button(text="⚛️ Physics Engine", callback_data=PhysicsCb(action="menu"))
+    kb.button(text="🛡️ Account Shield", callback_data=ShieldCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -236,9 +251,10 @@ def _settings_kb(plan: str = "free"):
     kb.button(text=f"{_lock(plan,'enterprise')}🏢 Пространства", callback_data=WorkspaceCb(action="menu"))
     kb.button(text="🔑 API доступ", callback_data=ApiHubCb(action="menu"))
     kb.button(text="📋 Compliance", callback_data=ComplianceCb(action="menu"))
+    kb.button(text="🎭 Persona Ecosystem", callback_data=PersonaCb(action="menu"))
     kb.button(text="🐛 Сообщить об ошибке", callback_data=ErrorReportCb(action="start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 
