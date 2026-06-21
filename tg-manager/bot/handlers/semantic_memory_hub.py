@@ -382,13 +382,13 @@ async def cb_mem_toggle_enabled(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     bot_id = callback_data.bot_id
 
     row = await _resolve_bot(pool, bot_id, callback.from_user.id)
     if not row:
         await callback.answer("❌ Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     settings = await semantic_memory.get_settings(pool, bot_id)
     new_enabled = not settings.get("enabled", True)
@@ -426,13 +426,13 @@ async def cb_mem_toggle_extract(
     callback_data: MemCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     bot_id = callback_data.bot_id
 
     row = await _resolve_bot(pool, bot_id, callback.from_user.id)
     if not row:
         await callback.answer("❌ Бот не найден.", show_alert=True)
         return
+    await callback.answer()
 
     settings = await semantic_memory.get_settings(pool, bot_id)
     new_extract = not settings.get("auto_extract_facts", True)

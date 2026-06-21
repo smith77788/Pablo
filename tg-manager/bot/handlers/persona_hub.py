@@ -478,12 +478,67 @@ def _build_preview(sd: dict) -> str:
 async def cb_persona_do_create(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
+    """Create or update a persona.
+
+    If FSM data contains ``_edit_persona_id`` (set by the edit flow), the
+    existing record is updated instead of inserting a new one.
+    """
     await callback.answer()
     sd = await state.get_data()
     await state.clear()
 
     owner_id = callback.from_user.id
 
+    # ── Edit path ─────────────────────────────────────────────────────────────
+    edit_persona_id: int | None = sd.get("_edit_persona_id")
+    if edit_persona_id:
+        try:
+            await pool.execute(
+                """
+                UPDATE persona_profiles
+                SET persona_name = $1, bio = $2, interests = $3::TEXT[],
+                    niche = $4, speech_style = $5, backstory = $6, updated_at = NOW()
+                WHERE id = $7 AND owner_id = $8
+                """,
+                sd.get("persona_name", ""),
+                sd.get("bio", ""),
+                sd.get("interests", []),
+                sd.get("niche", ""),
+                sd.get("speech_style", "neutral"),
+                sd.get("backstory", ""),
+                edit_persona_id,
+                owner_id,
+            )
+        except Exception as e:
+            log.warning("persona_hub do_update error: %s", e)
+            kb = InlineKeyboardBuilder()
+            kb.button(
+                text="◀️ Назад",
+                callback_data=PersonaCb(action="view", persona_id=edit_persona_id),
+            )
+            await callback.message.edit_text(
+                f"❌ Ошибка обновления персоны: {html.escape(str(e)[:200])}",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+            return
+
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="👁 Посмотреть",
+            callback_data=PersonaCb(action="view", persona_id=edit_persona_id),
+        )
+        kb.button(text="◀️ К списку", callback_data=PersonaCb(action="menu"))
+        kb.adjust(1)
+        name = html.escape(sd.get("persona_name", ""))
+        await callback.message.edit_text(
+            f"✅ <b>Персона «{name}» обновлена!</b>",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    # ── Create path ───────────────────────────────────────────────────────────
     # Pick first available account (not already used by another persona)
     used_accounts = {
         r["account_id"]
@@ -676,60 +731,6 @@ async def cb_persona_edit(
         f"✏️ <b>Редактирование: {html.escape(p['persona_name'])}</b>\n\n"
         "Шаг 1/6 — Введите новое <b>имя</b> персоны\n"
         f"(текущее: <code>{html.escape(p['persona_name'])}</code>):",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup(),
-    )
-
-
-@router.callback_query(PersonaCb.filter(F.action == "do_create"), PersonaCreateFSM.confirming)
-async def cb_persona_do_update(
-    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
-) -> None:
-    """Reuse do_create — if _edit_persona_id is set, update instead of insert."""
-    await callback.answer()
-    sd = await state.get_data()
-    persona_id = sd.get("_edit_persona_id")
-    if not persona_id:
-        # fall through to normal create
-        return await cb_persona_do_create(callback, state, pool)
-
-    await state.clear()
-    owner_id = callback.from_user.id
-    try:
-        await pool.execute(
-            """
-            UPDATE persona_profiles
-            SET persona_name = $1, bio = $2, interests = $3::TEXT[],
-                niche = $4, speech_style = $5, backstory = $6, updated_at = NOW()
-            WHERE id = $7 AND owner_id = $8
-            """,
-            sd.get("persona_name", ""),
-            sd.get("bio", ""),
-            sd.get("interests", []),
-            sd.get("niche", ""),
-            sd.get("speech_style", "neutral"),
-            sd.get("backstory", ""),
-            persona_id,
-            owner_id,
-        )
-    except Exception as e:
-        log.warning("persona_hub do_update error: %s", e)
-        kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=PersonaCb(action="view", persona_id=persona_id))
-        await callback.message.edit_text(
-            f"❌ Ошибка обновления персоны: {html.escape(str(e)[:200])}",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
-        )
-        return
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="👁 Посмотреть", callback_data=PersonaCb(action="view", persona_id=persona_id))
-    kb.button(text="◀️ К списку", callback_data=PersonaCb(action="menu"))
-    kb.adjust(1)
-    name = html.escape(sd.get("persona_name", ""))
-    await callback.message.edit_text(
-        f"✅ <b>Персона «{name}» обновлена!</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
