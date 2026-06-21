@@ -87,7 +87,7 @@ async def cb_dna_menu(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Главное меню", callback_data=BotCb(action="list"))
         await callback.message.edit_text(
-            "❌ У вас нет активных ботов.", reply_markup=kb.as_markup()
+            "❌ У вас нет активных ботов.", parse_mode="HTML", reply_markup=kb.as_markup()
         )
         return
 
@@ -104,6 +104,7 @@ async def cb_dna_menu(
     await callback.message.edit_text(
         "🧬 <b>Audience DNA</b>\n\n"
         "Выберите бота для просмотра поведенческого профиля аудитории:",
+        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -118,7 +119,7 @@ async def cb_dna_report(
     await callback.answer()
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
-        await callback.message.edit_text("❌ Бот не найден.", reply_markup=_back_to_list())
+        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())
         return
 
     bot_name = _bot_label(bot_row)
@@ -146,12 +147,13 @@ async def cb_dna_report(
             f"🧬 <b>Audience DNA — {bot_name}</b>\n\n"
             "📭 DNA-профиль ещё не вычислен.\n\n"
             "Нажмите <b>«Пересчитать DNA»</b> для первичного анализа аудитории.",
+            parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
 
     text = _format_dna_report(dna, bot_name)
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
 # ── Рекомендации ─────────────────────────────────────────────────────────────
