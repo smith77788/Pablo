@@ -66,21 +66,33 @@ async def cb_ghost_menu(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    profiles = await pool.fetch(
-        """
-        SELECT gp.*, a.phone, a.username, a.first_name
-        FROM ghost_profiles gp
-        JOIN tg_accounts a ON a.id = gp.account_id
-        WHERE gp.owner_id = $1
-        ORDER BY gp.id
-        """,
-        callback.from_user.id,
-    )
+    try:
+        profiles = await pool.fetch(
+            """
+            SELECT gp.*, a.phone, a.username, a.first_name
+            FROM ghost_profiles gp
+            JOIN tg_accounts a ON a.id = gp.account_id
+            WHERE gp.owner_id = $1
+            ORDER BY gp.id
+            """,
+            callback.from_user.id,
+        )
+    except Exception as e:
+        log.error("cb_ghost_menu: DB error: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="monitoring"))
+        await callback.message.edit_text(
+            "👻 <b>Ghost Engine</b>\n\n"
+            "⚠️ Модуль недоступен — база данных не содержит нужных таблиц.\n\n"
+            "Обратитесь к администратору для применения миграции <code>schema_v105.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     kb = InlineKeyboardBuilder()
     for p in profiles:
         name = html.escape(p["username"] or p["first_name"] or p["phone"] or f"id{p['account_id']}")
         status = "🟢" if p["enabled"] else "🔴"
-        _, p_desc = _PERSONALITY.get(p["personality"], ("?", ""))
         kb.button(
             text=f"{status} {name} — {_PERSONALITY.get(p['personality'], ('?',))[0]}",
             callback_data=GhostCb(action="view", profile_id=p["id"]),

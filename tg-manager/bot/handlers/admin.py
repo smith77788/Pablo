@@ -333,7 +333,7 @@ async def _show_admin_main(msg_or_cb, pool: asyncpg.Pool, edit: bool = True) -> 
         f"✅ Оплат подтверждено: <b>{total_payments}</b>\n"
         f"💰 Выручка (USD): <b>${float(revenue):.2f}</b>"
         f"{queue_str}\n\n"
-        f"📅 {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M')} UTC"
+        f"📅 {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M:%S')} UTC"
     )
     kb = _admin_main_kb(new_error_reports=int(new_error_reports))
     if edit and hasattr(msg_or_cb, "message"):
