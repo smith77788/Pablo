@@ -63,7 +63,7 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception as e:
         log.error("content_mesh_hub cb_mesh_menu: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
             "🕸️ <b>Content Mesh</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
@@ -82,7 +82,7 @@ async def cb_mesh_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             callback_data=ContentMeshCb(action="view", mesh_id=m["id"]),
         )
     kb.button(text="➕ Создать Mesh", callback_data=ContentMeshCb(action="create"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
 
     active = sum(1 for m in meshes if m["enabled"])

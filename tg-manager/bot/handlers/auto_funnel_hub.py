@@ -65,7 +65,7 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception as e:
         log.error("auto_funnel_hub cb_af_menu: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
             "⚡ <b>Auto-Funnel</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
@@ -85,7 +85,7 @@ async def cb_af_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             callback_data=AutoFunnelCb(action="view", funnel_id=f["id"]),
         )
     kb.button(text="➕ Создать воронку", callback_data=AutoFunnelCb(action="create"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
 
     a = active_runs["active_cnt"] if active_runs else 0

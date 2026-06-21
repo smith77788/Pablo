@@ -115,7 +115,7 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
     except Exception as e:
         log.error("clone_adapt_hub cb_ca_menu: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
             "🔀 <b>Clone & Adapt</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
@@ -127,7 +127,7 @@ async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Новое клонирование", callback_data=CloneAdaptCb(action="start"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
 
     if rows:

@@ -114,7 +114,7 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         log.error("stars_hub cb_dashboard: %s", e)
         from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
             "⭐ <b>Stars Yield Optimizer</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"

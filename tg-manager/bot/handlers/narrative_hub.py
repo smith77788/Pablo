@@ -141,7 +141,7 @@ async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
     except Exception as e:
         log.error("narrative_hub cb_narr_menu: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
             "📖 <b>Narrative Engine</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
@@ -172,7 +172,7 @@ async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
         label = f"{icon} {html.escape(c['topic'][:30])}"
         kb.button(text=label, callback_data=NarrCb(action="detail", campaign_id=c["id"]))
 
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
     kb.adjust(1)
 
     active_cnt = len(active)

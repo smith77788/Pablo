@@ -88,7 +88,7 @@ def _goals_kb(goals: list[dict], page: int = 0) -> object:
             callback_data=GrowthCb(action="detail", goal_id=g["id"]),
         )
     kb.button(text="➕ Новая цель", callback_data=GrowthCb(action="create"))
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Рост & Продвижение", callback_data=BmCb(action="growth"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -135,7 +135,7 @@ async def _send_goal_list(pool: asyncpg.Pool, target: Message | CallbackQuery, o
     except Exception as e:
         log.error("growth_agent_hub._send_goal_list: %s", e)
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         text = (
             "🤖 <b>Autonomous Growth Agent</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
