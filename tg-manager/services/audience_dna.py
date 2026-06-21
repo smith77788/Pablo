@@ -115,12 +115,12 @@ async def compute_dna(
         heatmap_rows = await pool.fetch(
             """
             SELECT
-                EXTRACT(HOUR FROM last_active)::INT AS hour,
-                EXTRACT(DOW FROM last_active)::INT  AS dow,
+                EXTRACT(HOUR FROM last_seen)::INT AS hour,
+                EXTRACT(DOW FROM last_seen)::INT  AS dow,
                 COUNT(*) AS cnt
             FROM user_activity
             WHERE bot_id = $1
-              AND last_active IS NOT NULL
+              AND last_seen IS NOT NULL
             GROUP BY 1, 2
             ORDER BY cnt DESC
             """,
@@ -152,7 +152,7 @@ async def compute_dna(
             SELECT
                 COUNT(*) AS total,
                 COUNT(*) FILTER (
-                    WHERE last_active < NOW() - INTERVAL '14 days'
+                    WHERE last_seen < NOW() - INTERVAL '14 days'
                 )::FLOAT AS inactive_cnt
             FROM user_activity
             WHERE bot_id = $1

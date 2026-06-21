@@ -9,9 +9,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import aiohttp
 import asyncpg
 from aiogram import Bot
 
+from services import bot_api
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
@@ -400,20 +402,33 @@ async def cancel_campaign(pool: asyncpg.Pool, campaign_id: int, owner_id: int) -
 # ── Execution loop ────────────────────────────────────────────────────────────
 
 
-async def _publish_post(bot: Bot, post: dict) -> tuple[bool, str]:
+async def _publish_post(pool: asyncpg.Pool, http: aiohttp.ClientSession, post: dict) -> tuple[bool, str]:
     """
-    Публикует один пост в канал через управляемого бота.
+    Публикует один пост в канал через managed bot (по bot_id из поста).
     Возвращает (success, error_text).
     """
     channel = post["channel_username"]
     content = post["content"]
+    bot_id = post.get("bot_id")
+
+    if not bot_id:
+        return False, "bot_id не задан для поста"
 
     try:
-        # Нормализуем username канала
+        from database.db import fetchrow_bot as _fetchrow_bot
+        bot_row = await _fetchrow_bot(
+            pool, "SELECT token FROM managed_bots WHERE bot_id=$1 AND is_active=TRUE", bot_id
+        )
+        if not bot_row:
+            return False, f"managed bot {bot_id} не найден или неактивен"
+
         if not channel.startswith("@") and not channel.startswith("-"):
             channel = f"@{channel}"
-        await bot.send_message(chat_id=channel, text=content, parse_mode=None)
-        return True, ""
+
+        ok, retry = await bot_api.send_message(http, bot_row["token"], channel, content)
+        if ok:
+            return True, ""
+        return False, f"Telegram API error (retry={retry})"
     except Exception as e:
         err = str(e)
         log.warning("narrative_engine: failed to publish post %d to %s: %s", post["id"], channel, err)
@@ -441,11 +456,17 @@ async def execute_pending_posts(pool: asyncpg.Pool, bot: Bot) -> int:
     if not posts:
         return 0
 
-    published_count = 0
+    async with aiohttp.ClientSession() as http:
+        return await _execute_with_session(pool, http, posts)
 
+
+async def _execute_with_session(
+    pool: asyncpg.Pool, http: aiohttp.ClientSession, posts: list
+) -> int:
+    published_count = 0
     for post in posts:
         post_dict = dict(post)
-        success, error = await _publish_post(bot, post_dict)
+        success, error = await _publish_post(pool, http, post_dict)
 
         if success:
             await pool.execute(
