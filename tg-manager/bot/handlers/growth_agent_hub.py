@@ -19,6 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, GrowthCb
 from bot.states import GrowthAgentFSM
+from database import db
 from services import growth_agent
 
 log = logging.getLogger(__name__)
@@ -113,10 +114,75 @@ def _confirm_delete_kb(goal_id: int) -> object:
     return kb.as_markup()
 
 
+_ENTITY_TYPES: dict[str, tuple[str, str]] = {
+    "bot":     ("🤖", "Бот"),
+    "channel": ("📡", "Канал"),
+    "group":   ("👥", "Группу"),
+}
+
+_STRATEGIES: dict[str, tuple[str, str, str]] = {
+    "aggressive": ("⚡", "Агрессивная",    "максимум действий, больше ресурсов"),
+    "balanced":   ("⚖️", "Сбалансированная", "умеренный темп, средние ресурсы"),
+    "conservative":("🐌","Консервативная",  "осторожно, минимум рисков"),
+}
+
+
+def _entity_type_kb() -> object:
+    kb = InlineKeyboardBuilder()
+    for key, (icon, label) in _ENTITY_TYPES.items():
+        kb.button(text=f"{icon} {label}", callback_data=f"ga_etype:{key}")
+    kb.button(text="❌ Отмена", callback_data=GrowthCb(action="menu"))
+    kb.adjust(3, 1)
+    return kb.as_markup()
+
+
+async def _entity_list_kb(pool, owner_id: int, entity_type: str) -> object:
+    kb = InlineKeyboardBuilder()
+    if entity_type == "bot":
+        rows = await db.get_bots(pool, owner_id)
+        for r in rows:
+            name = r.get("username") or r.get("first_name") or f"id{r['bot_id']}"
+            kb.button(text=f"🤖 @{name}", callback_data=f"ga_entity:{r['bot_id']}:{name[:30]}")
+    elif entity_type == "channel":
+        rows = await pool.fetch(
+            "SELECT id, title, username FROM channels WHERE owner_id=$1 ORDER BY title LIMIT 30",
+            owner_id,
+        )
+        for r in rows:
+            name = r.get("username") or r.get("title") or f"id{r['id']}"
+            kb.button(text=f"📡 {name[:30]}", callback_data=f"ga_entity:{r['id']}:{name[:30]}")
+    elif entity_type == "group":
+        rows = await pool.fetch(
+            "SELECT id, title FROM groups WHERE owner_id=$1 ORDER BY title LIMIT 30",
+            owner_id,
+        )
+        for r in rows:
+            name = r.get("title") or f"id{r['id']}"
+            kb.button(text=f"👥 {name[:30]}", callback_data=f"ga_entity:{r['id']}:{name[:30]}")
+    if not kb.buttons:
+        icon, label = _ENTITY_TYPES.get(entity_type, ("❓", entity_type))
+        kb.button(text=f"⚠️ Нет {label.lower()} — добавьте", callback_data=f"ga_etype:{entity_type}")
+    kb.button(text="◀️ Назад", callback_data="ga_back_etype")
+    kb.button(text="❌ Отмена", callback_data=GrowthCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def _strategy_kb() -> object:
+    kb = InlineKeyboardBuilder()
+    for key, (icon, label, _) in _STRATEGIES.items():
+        kb.button(text=f"{icon} {label}", callback_data=f"ga_strategy:{key}")
+    kb.button(text="◀️ Назад", callback_data="ga_back_metric")
+    kb.button(text="❌ Отмена", callback_data=GrowthCb(action="menu"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
 def _metrics_kb() -> object:
     kb = InlineKeyboardBuilder()
     for key, (icon, label) in _METRICS.items():
         kb.button(text=f"{icon} {label}", callback_data=f"ga_metric:{key}")
+    kb.button(text="◀️ Назад", callback_data="ga_back_entity")
     kb.button(text="❌ Отмена", callback_data=GrowthCb(action="menu"))
     kb.adjust(2)
     return kb.as_markup()
@@ -219,10 +285,18 @@ async def _show_goal_detail(
     days_left = status_data.get("days_left")
     desc = html.escape(status_data["description"])
 
+    entity_type = status_data.get("target_entity_type") or ""
+    entity_label = status_data.get("target_entity_label") or ""
+    e_icon = _ENTITY_TYPES.get(entity_type, ("🎯", ""))[0] if entity_type else "🎯"
+
     lines = [
         f"🎯 <b>Цель роста #{goal_id}</b>",
         f"{desc}",
         "",
+    ]
+    if entity_label:
+        lines.append(f"📍 <b>Объект:</b> {e_icon} {html.escape(entity_label)}")
+    lines += [
         f"📊 <b>Метрика:</b> {metric}",
         f"📈 <b>Прогресс:</b> {_progress_bar(pct)}",
         f"   {current} / {target}",
@@ -376,11 +450,88 @@ async def fsm_description(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(description=description)
-    await state.set_state(GrowthAgentFSM.waiting_metric)
+    await state.set_state(GrowthAgentFSM.waiting_entity_type)
     await message.answer(
-        "📊 <b>Выберите метрику цели:</b>",
+        "🎯 <b>Шаг 1 из 5 — Что вы хотите вырастить?</b>\n\n"
+        "Выберите тип объекта, для которого ставится цель:",
+        parse_mode="HTML",
+        reply_markup=_entity_type_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("ga_etype:"), StateFilter(GrowthAgentFSM.waiting_entity_type))
+async def cb_pick_entity_type(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    entity_type = callback.data.split(":", 1)[1]
+    if entity_type not in _ENTITY_TYPES:
+        await callback.answer("❌ Неверный тип.", show_alert=True)
+        return
+
+    await state.update_data(entity_type=entity_type)
+    await state.set_state(GrowthAgentFSM.waiting_entity_id)
+
+    icon, label = _ENTITY_TYPES[entity_type]
+    markup = await _entity_list_kb(pool, callback.from_user.id, entity_type)
+    await callback.message.edit_text(
+        f"🎯 <b>Шаг 2 из 5 — Выберите {label.lower()}</b>\n\n"
+        f"Выберите {label.lower()}, для которой ставится цель роста:",
+        parse_mode="HTML",
+        reply_markup=markup,
+    )
+
+
+@router.callback_query(F.data == "ga_back_etype", StateFilter(GrowthAgentFSM.waiting_entity_id))
+async def cb_back_to_etype(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(GrowthAgentFSM.waiting_entity_type)
+    await callback.message.edit_text(
+        "🎯 <b>Шаг 1 из 5 — Что вы хотите вырастить?</b>\n\n"
+        "Выберите тип объекта:",
+        parse_mode="HTML",
+        reply_markup=_entity_type_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("ga_entity:"), StateFilter(GrowthAgentFSM.waiting_entity_id))
+async def cb_pick_entity(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    parts = callback.data.split(":", 2)
+    entity_id = int(parts[1])
+    entity_label = parts[2] if len(parts) > 2 else str(entity_id)
+
+    await state.update_data(entity_id=entity_id, entity_label=entity_label)
+    await state.set_state(GrowthAgentFSM.waiting_metric)
+    await callback.message.edit_text(
+        f"✅ <b>Цель:</b> {entity_label}\n\n"
+        "📊 <b>Шаг 3 из 5 — Выберите метрику роста:</b>",
         parse_mode="HTML",
         reply_markup=_metrics_kb(),
+    )
+
+
+@router.callback_query(F.data == "ga_back_entity", StateFilter(GrowthAgentFSM.waiting_metric))
+async def cb_back_to_entity(
+    callback: CallbackQuery,
+    pool: asyncpg.Pool,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    entity_type = data.get("entity_type", "bot")
+    await state.set_state(GrowthAgentFSM.waiting_entity_id)
+    icon, label = _ENTITY_TYPES.get(entity_type, ("🎯", "объект"))
+    markup = await _entity_list_kb(pool, callback.from_user.id, entity_type)
+    await callback.message.edit_text(
+        f"🎯 <b>Шаг 2 из 5 — Выберите {label.lower()}</b>",
+        parse_mode="HTML",
+        reply_markup=markup,
     )
 
 
@@ -400,9 +551,10 @@ async def cb_pick_metric(
 
     icon, label = _METRICS[metric]
     await callback.message.edit_text(
-        f"🎯 <b>Метрика:</b> {icon} {label}\n\n"
-        f"Введите целевое значение (только число).\n"
-        f"<i>Например: 10000</i>",
+        f"📊 <b>Метрика:</b> {icon} {label}\n\n"
+        "🎯 <b>Шаг 4 из 5 — Целевое значение</b>\n\n"
+        "Введите сколько вы хотите набрать (только число).\n"
+        "<i>Например: 1000</i>",
         parse_mode="HTML",
         reply_markup=_cancel_kb(),
     )
@@ -417,15 +569,52 @@ async def fsm_target(message: Message, state: FSMContext) -> None:
             raise ValueError("must be positive")
     except ValueError:
         await message.answer(
-            "❌ Введите целое положительное число.\n<i>Например: 10000</i>",
+            "❌ Введите целое положительное число.\n<i>Например: 1000</i>",
             parse_mode="HTML",
             reply_markup=_cancel_kb(),
         )
         return
 
     await state.update_data(target_value=target_value)
-    await state.set_state(GrowthAgentFSM.waiting_deadline)
+    await state.set_state(GrowthAgentFSM.waiting_strategy)
     await message.answer(
+        "⚙️ <b>Шаг 5 из 5 — Стратегия роста</b>\n\n"
+        "Выберите как агрессивно Growth Agent будет действовать:\n\n"
+        "⚡ <b>Агрессивная</b> — максимум действий, быстрее результат\n"
+        "⚖️ <b>Сбалансированная</b> — умеренный темп, средние риски\n"
+        "🐌 <b>Консервативная</b> — осторожно, минимум рисков",
+        parse_mode="HTML",
+        reply_markup=_strategy_kb(),
+    )
+
+
+@router.callback_query(F.data == "ga_back_metric", StateFilter(GrowthAgentFSM.waiting_strategy))
+async def cb_back_to_metric(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(GrowthAgentFSM.waiting_metric)
+    await callback.message.edit_text(
+        "📊 <b>Шаг 3 из 5 — Выберите метрику роста:</b>",
+        parse_mode="HTML",
+        reply_markup=_metrics_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("ga_strategy:"), StateFilter(GrowthAgentFSM.waiting_strategy))
+async def cb_pick_strategy(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    await callback.answer()
+    strategy = callback.data.split(":", 1)[1]
+    if strategy not in _STRATEGIES:
+        await callback.answer("❌ Неверная стратегия.", show_alert=True)
+        return
+
+    await state.update_data(strategy=strategy)
+    await state.set_state(GrowthAgentFSM.waiting_deadline)
+    icon, label, desc = _STRATEGIES[strategy]
+    await callback.message.edit_text(
+        f"⚙️ <b>Стратегия:</b> {icon} {label}\n\n"
         "⏰ <b>Дедлайн</b>\n\n"
         "Через сколько дней вы хотите достичь цели?\n"
         "<i>Введите число от 1 до 365</i>",
@@ -454,15 +643,16 @@ async def fsm_deadline(message: Message, state: FSMContext) -> None:
 
     data = await state.get_data()
     metric_key = data.get("metric", "subscribers")
-    icon, metric_label = _METRICS.get(metric_key, ("📊", metric_key))
+    m_icon, metric_label = _METRICS.get(metric_key, ("📊", metric_key))
     description = html.escape(data.get("description", ""))
     target_value = data.get("target_value", 0)
+    entity_type = data.get("entity_type", "bot")
+    entity_label = html.escape(data.get("entity_label", "—"))
+    strategy = data.get("strategy", "balanced")
+    s_icon, s_label, _ = _STRATEGIES.get(strategy, ("⚖️", "Сбалансированная", ""))
+    e_icon = _ENTITY_TYPES.get(entity_type, ("🎯", ""))[0]
 
-    deadline_date = (
-        datetime.now(timezone.utc).date()
-        if deadline_days == 0
-        else (datetime.now(timezone.utc) + timedelta(days=deadline_days)).date()
-    )
+    deadline_date = (datetime.now(timezone.utc) + timedelta(days=deadline_days)).date()
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Создать цель", callback_data=GrowthCb(action="confirm_create"))
@@ -472,8 +662,10 @@ async def fsm_deadline(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"📋 <b>Подтверждение новой цели</b>\n\n"
         f"📝 <b>Описание:</b> {description}\n"
-        f"📊 <b>Метрика:</b> {icon} {metric_label}\n"
-        f"🎯 <b>Таргет:</b> {target_value:,}\n"
+        f"🎯 <b>Объект:</b> {e_icon} {entity_label}\n"
+        f"📊 <b>Метрика:</b> {m_icon} {metric_label}\n"
+        f"🔢 <b>Таргет:</b> {target_value:,}\n"
+        f"⚙️ <b>Стратегия:</b> {s_icon} {s_label}\n"
         f"⏰ <b>Дедлайн:</b> {deadline_days} дней ({deadline_date})\n\n"
         f"Создать эту цель?",
         parse_mode="HTML",
@@ -495,9 +687,13 @@ async def cb_growth_confirm_create(
     metric = data.get("metric", "subscribers")
     target_value = data.get("target_value", 0)
     deadline_days = data.get("deadline_days", 30)
+    entity_type = data.get("entity_type", "bot")
+    entity_id = data.get("entity_id")
+    entity_label = data.get("entity_label", "")
+    strategy = data.get("strategy", "balanced")
     owner_id = callback.from_user.id
 
-    if not description or not target_value:
+    if not description or not target_value or not entity_id:
         await callback.message.edit_text(
             "❌ Данные формы устарели. Начните создание заново.",
             parse_mode="HTML",
@@ -513,6 +709,10 @@ async def cb_growth_confirm_create(
             target_metric=metric,
             target_value=int(target_value),
             deadline_days=int(deadline_days),
+            target_entity_type=entity_type,
+            target_entity_id=int(entity_id),
+            target_entity_label=entity_label,
+            strategy=strategy,
         )
     except Exception as exc:
         log.error("growth_agent_hub: create_goal failed owner=%d: %s", owner_id, exc)

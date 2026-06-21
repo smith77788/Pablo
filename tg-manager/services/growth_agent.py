@@ -28,14 +28,19 @@ async def create_goal(
     target_metric: str,
     target_value: int,
     deadline_days: int,
+    target_entity_type: str = "bot",
+    target_entity_id: int | None = None,
+    target_entity_label: str | None = None,
+    strategy: str = "balanced",
 ) -> int:
     """Создать новую цель роста. Возвращает goal_id."""
     deadline = datetime.now(timezone.utc) + timedelta(days=deadline_days)
     row = await pool.fetchrow(
         """
         INSERT INTO growth_goals
-            (owner_id, description, target_metric, target_value, deadline_at, status)
-        VALUES ($1, $2, $3, $4, $5, 'active')
+            (owner_id, description, target_metric, target_value, deadline_at, status,
+             target_entity_type, target_entity_id, target_entity_label, strategy)
+        VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8, $9)
         RETURNING id
         """,
         owner_id,
@@ -43,6 +48,10 @@ async def create_goal(
         target_metric,
         target_value,
         deadline,
+        target_entity_type,
+        target_entity_id,
+        target_entity_label,
+        strategy,
     )
     goal_id: int = row["id"]
     log.info(
