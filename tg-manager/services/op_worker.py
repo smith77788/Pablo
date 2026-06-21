@@ -4156,10 +4156,18 @@ async def _exec_seed_presence_pack(
         log.error("_exec_seed_presence_pack op=%d: fetch channels failed: %s", op_id, exc)
         return {"status": "failed", "summary": "❌ Ошибка при загрузке каналов из БД"}
 
+    missing_count = len(ch_ids) - len(channels)
+    if missing_count > 0:
+        log.warning(
+            "_exec_seed_presence_pack op=%d: %d/%d channels not found in managed_channels "
+            "(possibly deleted after pack was created)",
+            op_id, missing_count, len(ch_ids),
+        )
+
     success = 0
     fail = 0
     fail_names: list[str] = []
-    total = len(channels)
+    total = len(ch_ids)  # use original count for accurate progress reporting
 
     async with _aiohttp.ClientSession() as http:
         for idx, ch in enumerate(channels, 1):
@@ -4174,17 +4182,19 @@ async def _exec_seed_presence_pack(
             chan_name = ch.get("title") or (
                 f"@{ch['username']}" if ch.get("username") else f"id{ch['channel_id']}"
             )
+            # Prefer @username for both methods — avoids access_hash requirement
+            chan_username = f"@{ch['username']}" if ch.get("username") else None
             posted = False
             if bot_token:
-                chan_target = (
-                    f"@{ch['username']}"
-                    if ch.get("username")
-                    else int(f"-100{ch['channel_id']}")
-                )
+                chan_target = chan_username or int(f"-100{ch['channel_id']}")
                 posted = await _ps.seed_channel_post(http, bot_token, chan_target, post_text)
             if not posted:
+                # For account method: use @username if available (no access_hash needed),
+                # else fall back to numeric ID + access_hash
+                acc_target: int | str = chan_username or ch["channel_id"]
+                acc_hash = 0 if chan_username else (ch.get("access_hash") or 0)
                 posted = await _ps.seed_channel_via_account(
-                    pool, owner_id, ch["channel_id"], ch.get("access_hash") or 0, post_text
+                    pool, owner_id, acc_target, acc_hash, post_text
                 )
             if posted:
                 success += 1
@@ -4192,11 +4202,11 @@ async def _exec_seed_presence_pack(
                 fail += 1
                 fail_names.append(chan_name)
 
-            # Update progress in operation_queue
+            # Update progress in operation_queue (offset by missing so bar is accurate)
             try:
                 await pool.execute(
                     "UPDATE operation_queue SET done_items=$1 WHERE id=$2",
-                    idx, op_id,
+                    missing_count + idx, op_id,
                 )
             except Exception:
                 pass
@@ -4211,20 +4221,22 @@ async def _exec_seed_presence_pack(
                 "_exec_seed_presence_pack op=%d: mark_presence_pack_seeded failed", op_id
             )
 
+    missing_hint = f"\n⚠️ Не найдено в БД: {missing_count} канал(ов) — возможно удалены" if missing_count else ""
     fail_hint = ""
     if fail_names:
         names = ", ".join(fail_names[:3])
         extra = f" (+{len(fail_names) - 3})" if len(fail_names) > 3 else ""
-        fail_hint = f"\n⚠️ Не удалось: {names}{extra}"
+        fail_hint = f"\n❌ Не удалось: {names}{extra}"
 
+    status = "done" if success > 0 or (len(channels) == 0 and missing_count == total) else "done"
     return {
-        "status": "done",
+        "status": status,
         "ok": success,
         "fail": fail,
         "total": total,
         "summary": (
             f"🌱 Посев постов Presence Pack #{pack_id}\n"
-            f"✅ Опубликовано: {success}/{total}{fail_hint}"
+            f"✅ Опубликовано: {success}/{len(channels)} найденных{missing_hint}{fail_hint}"
         ),
     }
 

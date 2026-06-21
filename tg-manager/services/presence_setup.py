@@ -98,7 +98,7 @@ async def seed_channel_post(
 async def seed_channel_via_account(
     pool: asyncpg.Pool,
     owner_id: int,
-    channel_id: int,
+    channel_id: int | str,
     access_hash: int,
     text: str,
 ) -> bool:
