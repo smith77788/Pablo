@@ -71,7 +71,10 @@ async def get_goal_status(pool: asyncpg.Pool, goal_id: int) -> dict[str, Any] | 
     deadline = goal["deadline_at"]
     days_left: int | None = None
     if deadline:
-        delta = deadline.replace(tzinfo=timezone.utc) - now
+        # deadline from asyncpg may be tz-aware or tz-naive; normalise to UTC
+        if hasattr(deadline, "tzinfo") and deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        delta = deadline.astimezone(timezone.utc) - now
         days_left = max(0, delta.days)
 
     # Последние 5 действий
@@ -250,7 +253,7 @@ async def run_daily_cycle(
                 "growth_agent: goal=%d → op_id=%d op_type=%s",
                 goal_id, queued_op_id, op_type,
             )
-        except (ValueError, Exception) as exc:
+        except Exception as exc:
             log.warning("growth_agent: submit failed goal=%d: %s", goal_id, exc)
             outcome = "failed"
     else:
@@ -330,6 +333,9 @@ async def run(pool: asyncpg.Pool, bot: Any) -> None:
     while True:
         try:
             await _process_all_active_goals(pool, bot)
+        except asyncio.CancelledError:
+            log.info("growth_agent: background loop cancelled")
+            raise
         except Exception as exc:
             log.error("growth_agent: loop iteration failed: %s", exc)
         await asyncio.sleep(6 * 3600)

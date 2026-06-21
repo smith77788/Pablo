@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -384,17 +384,12 @@ async def fsm_description(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data.startswith("ga_metric:"))
+@router.callback_query(F.data.startswith("ga_metric:"), StateFilter(GrowthAgentFSM.waiting_metric))
 async def cb_pick_metric(
     callback: CallbackQuery,
     state: FSMContext,
 ) -> None:
     await callback.answer()
-    current_state = await state.get_state()
-    if current_state != GrowthAgentFSM.waiting_metric:
-        await callback.answer("Сначала начните создание цели.", show_alert=True)
-        return
-
     metric = callback.data.split(":", 1)[1]
     if metric not in _METRICS:
         await callback.answer("❌ Неверная метрика.", show_alert=True)
@@ -486,7 +481,7 @@ async def fsm_deadline(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(GrowthCb.filter(F.action == "confirm_create"))
+@router.callback_query(GrowthCb.filter(F.action == "confirm_create"), StateFilter(GrowthAgentFSM.confirming))
 async def cb_growth_confirm_create(
     callback: CallbackQuery,
     pool: asyncpg.Pool,

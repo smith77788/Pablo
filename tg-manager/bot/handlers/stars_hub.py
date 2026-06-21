@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from aiogram import Router, F
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -242,7 +243,7 @@ async def cb_detail(callback: CallbackQuery, callback_data: StarsCb, pool: async
 
 @router.callback_query(StarsCb.filter(F.action == "evaluate"))
 async def cb_evaluate(callback: CallbackQuery, callback_data: StarsCb, pool: asyncpg.Pool) -> None:
-    await callback.answer("Пересчитываем...")
+    # Answer immediately to avoid Telegram timeout; show result via alert
     result = await stars_optimizer.evaluate_experiment(pool, callback_data.experiment_id)
     p = round(result.get("p_value", 1.0), 4)
     cr_a = round(result.get("cr_a", 0) * 100, 1)
@@ -250,12 +251,11 @@ async def cb_evaluate(callback: CallbackQuery, callback_data: StarsCb, pool: asy
     winner = result.get("winner")
     if winner:
         wl = "A" if winner == "a" else "B"
-        msg = f"✅ Победитель — вариант <b>{wl}</b>! CR-A: {cr_a}%, CR-B: {cr_b}%, p={p}"
+        msg = f"✅ Победитель — вариант {wl}! CR-A: {cr_a}%, CR-B: {cr_b}%, p={p}"
     else:
-        msg = f"📊 Данных пока недостаточно для вывода. CR-A: {cr_a}%, CR-B: {cr_b}%, p={p}"
+        msg = f"📊 Данных пока недостаточно. CR-A: {cr_a}%, CR-B: {cr_b}%, p={p}"
     await callback.answer(msg, show_alert=True)
-    # refresh detail
-    fake = type("FakeCb", (), {"experiment_id": callback_data.experiment_id, "bot_id": 0})()
+    # refresh detail view
     from types import SimpleNamespace
     await cb_detail(callback, SimpleNamespace(experiment_id=callback_data.experiment_id, bot_id=0), pool)
 
@@ -412,7 +412,7 @@ async def fsm_waiting_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data.startswith("strs:create_ctype_"), StarsExperimentFSM.waiting_ctype)
+@router.callback_query(F.data.startswith("strs:create_ctype_"), StateFilter(StarsExperimentFSM.waiting_ctype))
 async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     # Extract ctype from callback data string

@@ -310,6 +310,9 @@ async def run(pool: asyncpg.Pool, bot) -> None:
                         "[StarsOptimizer] evaluate exp %s failed: %s",
                         row["id"], exp_err,
                     )
+        except asyncio.CancelledError:
+            log.info("[StarsOptimizer] background loop cancelled")
+            raise
         except Exception as err:
             log.error("[StarsOptimizer] loop error: %s", err)
         await asyncio.sleep(6 * 3600)
