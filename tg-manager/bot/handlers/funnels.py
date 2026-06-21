@@ -936,7 +936,6 @@ async def cb_fn_step_delete(
     if not await _owns_funnel(pool, funnel_id, callback.from_user.id):
         await callback.answer("⛔ Нет доступа.", show_alert=True)
         return
-    await callback.answer()
     step_to_delete = callback_data.step
     steps = await db.get_funnel_steps(pool, funnel_id)
 
