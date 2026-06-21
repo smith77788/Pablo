@@ -597,3 +597,11 @@ class NarrativeFSM(StatesGroup):
     confirming           = State()  # финальное подтверждение
 
 
+class PersonaCreateFSM(StatesGroup):
+    entering_name = State()        # шаг 1: имя персоны
+    entering_bio = State()         # шаг 2: биография
+    entering_interests = State()   # шаг 3: интересы (через запятую)
+    entering_niche = State()       # шаг 4: ниша
+    entering_speech_style = State()  # шаг 5: стиль речи (кнопки)
+    entering_backstory = State()   # шаг 6: предыстория (опционально)
+    confirming = State()           # шаг 7: подтверждение

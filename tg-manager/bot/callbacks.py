@@ -573,3 +573,9 @@ class AdIntelCb(CallbackData, prefix="adi"):
     page: int = 0
 
 
+class PersonaCb(CallbackData, prefix="prsa"):
+    """Persona Ecosystem — AI personas with persistent memory."""
+
+    action: str   # menu|create|view|edit|delete|delete_confirm
+    persona_id: int = 0
+    page: int = 0
