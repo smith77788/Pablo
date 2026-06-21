@@ -303,7 +303,7 @@ async def cmd_menu(message: Message) -> None:
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
-async def _edit(callback: CallbackQuery, text: str, markup) -> None:
+async def _edit(callback: CallbackQuery, text: str, markup=None) -> None:
     """Edit existing message or send new one only if message is truly gone."""
     try:
         if callback.message:
