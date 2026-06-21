@@ -54,60 +54,73 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
     uid = callback.from_user.id
 
-    # Revenue last 30 days
-    revenue_row = await pool.fetchrow(
-        """
-        SELECT COALESCE(SUM(stars_amount), 0) AS total,
-               COALESCE(AVG(stars_amount), 0) AS avg_price
-        FROM stars_transactions
-        WHERE user_id = $1
-          AND created_at >= NOW() - INTERVAL '30 days'
-        """,
-        uid,
-    )
-    total_stars = int(revenue_row["total"]) if revenue_row else 0
-    avg_price = round(float(revenue_row["avg_price"]), 1) if revenue_row else 0.0
+    try:
+        # Revenue last 30 days
+        revenue_row = await pool.fetchrow(
+            """
+            SELECT COALESCE(SUM(stars_amount), 0) AS total,
+                   COALESCE(AVG(stars_amount), 0) AS avg_price
+            FROM stars_transactions
+            WHERE user_id = $1
+              AND created_at >= NOW() - INTERVAL '30 days'
+            """,
+            uid,
+        )
+        total_stars = int(revenue_row["total"]) if revenue_row else 0
+        avg_price = round(float(revenue_row["avg_price"]), 1) if revenue_row else 0.0
 
-    # Top-3 content by conversion rate (from completed experiments)
-    top_rows = await pool.fetch(
-        """
-        SELECT name,
-               CASE WHEN winner = 'a' THEN conversions_a::float / NULLIF(impressions_a, 0)
-                    WHEN winner = 'b' THEN conversions_b::float / NULLIF(impressions_b, 0)
-                    ELSE GREATEST(
-                        conversions_a::float / NULLIF(impressions_a, 0),
-                        conversions_b::float / NULLIF(impressions_b, 0)
-                    )
-               END AS best_cr
-        FROM stars_experiments
-        WHERE owner_id = $1
-        ORDER BY best_cr DESC NULLS LAST
-        LIMIT 3
-        """,
-        uid,
-    )
+        # Top-3 content by conversion rate (from completed experiments)
+        top_rows = await pool.fetch(
+            """
+            SELECT name,
+                   CASE WHEN winner = 'a' THEN conversions_a::float / NULLIF(impressions_a, 0)
+                        WHEN winner = 'b' THEN conversions_b::float / NULLIF(impressions_b, 0)
+                        ELSE GREATEST(
+                            conversions_a::float / NULLIF(impressions_a, 0),
+                            conversions_b::float / NULLIF(impressions_b, 0)
+                        )
+                   END AS best_cr
+            FROM stars_experiments
+            WHERE owner_id = $1
+            ORDER BY best_cr DESC NULLS LAST
+            LIMIT 3
+            """,
+            uid,
+        )
 
-    top_text = ""
-    for i, r in enumerate(top_rows, 1):
-        cr = round((r["best_cr"] or 0) * 100, 1)
-        top_text += f"\n  {i}. <b>{r['name']}</b> — CR {cr}%"
+        top_text = ""
+        for i, r in enumerate(top_rows, 1):
+            cr = round((r["best_cr"] or 0) * 100, 1)
+            top_text += f"\n  {i}. <b>{r['name']}</b> — CR {cr}%"
 
-    # Active experiments count
-    active_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM stars_experiments WHERE owner_id = $1 AND status = 'active'",
-        uid,
-    )
+        # Active experiments count
+        active_count = await pool.fetchval(
+            "SELECT COUNT(*) FROM stars_experiments WHERE owner_id = $1 AND status = 'active'",
+            uid,
+        )
 
-    text = (
-        "⭐ <b>Stars Yield Optimizer</b>\n\n"
-        f"📅 Доход за 30 дней: <b>{total_stars} Stars</b>\n"
-        f"📊 Средняя цена: <b>{avg_price} Stars</b>\n"
-        f"🧪 Активных экспериментов: <b>{active_count}</b>\n"
-    )
-    if top_text:
-        text += f"\n🏆 Топ контент по конверсии:{top_text}\n"
+        text = (
+            "⭐ <b>Stars Yield Optimizer</b>\n\n"
+            f"📅 Доход за 30 дней: <b>{total_stars} Stars</b>\n"
+            f"📊 Средняя цена: <b>{avg_price} Stars</b>\n"
+            f"🧪 Активных экспериментов: <b>{active_count}</b>\n"
+        )
+        if top_text:
+            text += f"\n🏆 Топ контент по конверсии:{top_text}\n"
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_main_kb().as_markup())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_main_kb().as_markup())
+    except Exception as e:
+        log.error("stars_hub cb_dashboard: %s", e)
+        from bot.callbacks import BmCb
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        await callback.message.edit_text(
+            "⭐ <b>Stars Yield Optimizer</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v118.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
 
 
 # ── List experiments ──────────────────────────────────────────────────────────
@@ -117,17 +130,27 @@ async def cb_list_experiments(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     await callback.answer()
     uid = callback.from_user.id
 
-    rows = await pool.fetch(
-        """
-        SELECT id, name, status, winner, price_a, price_b,
-               impressions_a, impressions_b, conversions_a, conversions_b
-        FROM stars_experiments
-        WHERE owner_id = $1
-        ORDER BY created_at DESC
-        LIMIT 30
-        """,
-        uid,
-    )
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT id, name, status, winner, price_a, price_b,
+                   impressions_a, impressions_b, conversions_a, conversions_b
+            FROM stars_experiments
+            WHERE owner_id = $1
+            ORDER BY created_at DESC
+            LIMIT 30
+            """,
+            uid,
+        )
+    except Exception as e:
+        log.error("stars_hub cb_list_experiments: %s", e)
+        await callback.message.edit_text(
+            "🧪 <b>Эксперименты</b>\n\n"
+            "⚠️ Таблицы не созданы. Применить <code>schema_v118.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=_back_btn().as_markup(),
+        )
+        return
 
     kb = InlineKeyboardBuilder()
     if not rows:

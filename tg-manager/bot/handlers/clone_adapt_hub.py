@@ -100,17 +100,31 @@ def _targets_kb(all_bots, targets: list, source_bot_id: int, page: int = 0) -> I
 async def cb_ca_menu(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     await callback.answer()
     await state.clear()
-    rows = await pool.fetch(
-        """
-        SELECT h.*, sb.username AS src_uname, tb.username AS tgt_uname
-        FROM clone_adapt_history h
-        LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
-        LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
-        WHERE h.owner_id = $1
-        ORDER BY h.created_at DESC LIMIT 10
-        """,
-        callback.from_user.id,
-    )
+    try:
+        rows = await pool.fetch(
+            """
+            SELECT h.*, sb.username AS src_uname, tb.username AS tgt_uname
+            FROM clone_adapt_history h
+            LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
+            LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
+            WHERE h.owner_id = $1
+            ORDER BY h.created_at DESC LIMIT 10
+            """,
+            callback.from_user.id,
+        )
+    except Exception as e:
+        log.error("clone_adapt_hub cb_ca_menu: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        await callback.message.edit_text(
+            "🔀 <b>Clone & Adapt</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v107.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Новое клонирование", callback_data=CloneAdaptCb(action="start"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))

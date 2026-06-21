@@ -130,7 +130,22 @@ def _cancel_kb() -> object:
 
 
 async def _send_goal_list(pool: asyncpg.Pool, target: Message | CallbackQuery, owner_id: int) -> None:
-    goals = await growth_agent.list_goals(pool, owner_id, limit=20)
+    try:
+        goals = await growth_agent.list_goals(pool, owner_id, limit=20)
+    except Exception as e:
+        log.error("growth_agent_hub._send_goal_list: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="operations"))
+        text = (
+            "🤖 <b>Autonomous Growth Agent</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v114.sql</code>."
+        )
+        if isinstance(target, CallbackQuery):
+            await target.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        else:
+            await target.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+        return
 
     lines = ["🤖 <b>Autonomous Growth Agent</b>\n"]
     if not goals:
