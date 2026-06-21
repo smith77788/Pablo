@@ -104,14 +104,14 @@ async def cb_chanf_menu(callback: CallbackQuery) -> None:
 
 @router.callback_query(ChanFactCb.filter(F.action == "back_to_ops"))
 async def cb_chanf_back_ops(callback: CallbackQuery) -> None:
-    """Redirect back to the channel ops main menu."""
+    from bot.callbacks import BmCb, MassPubCb
     await callback.answer()
-    from bot.callbacks import ChanCb
-
     kb = InlineKeyboardBuilder()
-    kb.button(text="📡 Перейти в операции", callback_data=ChanCb(action="menu"))
+    kb.button(text="📤 Публикация", callback_data=MassPubCb(action="menu"))
+    kb.button(text="⚡ Все операции", callback_data=BmCb(action="operations"))
+    kb.adjust(1)
     await callback.message.edit_text(
-        "◀️ Вернитесь в главное меню операций через /ops",
+        "◀️ <b>Channel Factory</b>\n\nВыберите куда вернуться:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

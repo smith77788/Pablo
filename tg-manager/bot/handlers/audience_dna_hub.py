@@ -11,7 +11,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import BotCb, DnaCb
+from bot.callbacks import BotCb, DnaCb, BmCb
 from database import db
 from services import audience_dna as dna_svc
 from services.audience_dna import AudienceDNA, generate_recommendations
@@ -85,7 +85,7 @@ async def cb_dna_menu(
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Главное меню", callback_data=BotCb(action="list"))
+        kb.button(text="◀️ Аналитика", callback_data=BmCb(action="analytics"))
         await callback.message.edit_text(
             "❌ У вас нет активных ботов.", parse_mode="HTML", reply_markup=kb.as_markup()
         )
@@ -98,7 +98,7 @@ async def cb_dna_menu(
             text=f"🤖 {label}",
             callback_data=DnaCb(action="report", bot_id=b["bot_id"]),
         )
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="list"))
+    kb.button(text="◀️ Аналитика", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
 
     await callback.message.edit_text(

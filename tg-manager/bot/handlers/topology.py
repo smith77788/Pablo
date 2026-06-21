@@ -23,7 +23,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import AccCb, BotCb, TopoCb
+from bot.callbacks import AccCb, BotCb, TopoCb, BmCb
 from database import db
 from services.account_manager import effective_account_status
 from services import behavioral_engine
@@ -64,7 +64,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb.button(text="📱 Добавить аккаунт", callback_data=AccCb(action="menu"))
         kb.button(text="🤖 Добавить бота", callback_data=BotCb(action="list"))
         kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="menu"))
-        kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
         kb.adjust(1)
         await callback.message.edit_text(
             "🗺️ <b>Topology Map — граф связей</b>\n\n"
@@ -84,7 +84,7 @@ async def cb_topo_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(text="📡 По каналам", callback_data=TopoCb(action="chan_list", page=0))
     kb.button(text="🔄 Обновить граф", callback_data=TopoCb(action="rebuild"))
     kb.button(text="📤 Экспорт графа", callback_data=TopoCb(action="export"))
-    kb.button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
 
     await callback.message.edit_text(

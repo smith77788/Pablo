@@ -32,7 +32,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="➕ Создать кластер", callback_data=ClustMCb(action="create"))
     kb.button(text="📋 Мои кластеры", callback_data=ClustMCb(action="list"))
     kb.button(text="📊 Статистика", callback_data=ClustMCb(action="stats"))
-    kb.button(text="◀️ Назад", callback_data=BotCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="assets"))
     kb.adjust(2, 1, 1)
     return kb
 
@@ -60,7 +60,7 @@ async def cb_cluster_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FS
         await callback.message.edit_text(
             locked_text("Кластеры ботов", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="bulk_ops")),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="assets")),
         )
         return
     await callback.answer()
@@ -187,7 +187,7 @@ async def cb_cluster_create(
         await callback.message.edit_text(
             locked_text("Кластеры ботов", "pro"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="bulk_ops")),
+            reply_markup=subscription_locked_markup("pro", back_callback=BmCb(action="assets")),
         )
         return
     await callback.answer()
