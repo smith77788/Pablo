@@ -571,3 +571,11 @@ class ApiKeyFSM(StatesGroup):
     waiting_name = State()  # название нового API-ключа
 
 
+class GrowthAgentFSM(StatesGroup):
+    waiting_description = State()  # описание цели в свободной форме
+    waiting_metric = State()       # метрика: subscribers / views / revenue_usd
+    waiting_target = State()       # числовое значение цели
+    waiting_deadline = State()     # дедлайн в днях
+    confirming = State()           # финальное подтверждение перед созданием
+
+

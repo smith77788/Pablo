@@ -534,4 +534,11 @@ class ComplianceCb(CallbackData, prefix="cmpl"):
     page: int = 0
 
 
+class GrowthCb(CallbackData, prefix="ga"):
+    """Autonomous Growth Agent — цели роста, цикл, отчёты."""
+
+    action: str         # menu|create|detail|pause|resume|delete|confirm_delete|back
+    goal_id: int = 0
+    page: int = 0
+
 
