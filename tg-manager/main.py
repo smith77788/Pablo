@@ -460,6 +460,14 @@ async def main() -> None:
         asyncio.create_task(
             _resilient("narrative_engine", narrative_engine.run, pool, bot)
         )
+        from services import growth_agent as _growth_agent
+        from services import account_shield as _account_shield
+        from services import stars_optimizer as _stars_optimizer
+        from services import audience_dna as _audience_dna
+        asyncio.create_task(_resilient("growth_agent", _growth_agent.run, pool, bot))
+        asyncio.create_task(_resilient("account_shield", _account_shield.run, pool, bot))
+        asyncio.create_task(_resilient("stars_optimizer", _stars_optimizer.run, pool, bot))
+        asyncio.create_task(_resilient("audience_dna", _audience_dna.run, pool, bot))
         log.info("TG Manager started")
 
         # ── Webhook or long-polling ───────────────────────────────────────────
