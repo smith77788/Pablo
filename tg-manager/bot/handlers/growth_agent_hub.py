@@ -145,7 +145,9 @@ async def _entity_list_kb(pool, owner_id: int, entity_type: str) -> object:
             kb.button(text=f"🤖 @{name}", callback_data=f"ga_entity:{r['bot_id']}:{name[:30]}")
     elif entity_type == "channel":
         rows = await pool.fetch(
-            "SELECT id, title, username FROM channels WHERE owner_id=$1 ORDER BY title LIMIT 30",
+            """SELECT channel_id AS id, title, username
+               FROM managed_channels WHERE owner_id=$1
+               ORDER BY title LIMIT 30""",
             owner_id,
         )
         for r in rows:
@@ -153,11 +155,13 @@ async def _entity_list_kb(pool, owner_id: int, entity_type: str) -> object:
             kb.button(text=f"📡 {name[:30]}", callback_data=f"ga_entity:{r['id']}:{name[:30]}")
     elif entity_type == "group":
         rows = await pool.fetch(
-            "SELECT id, title FROM groups WHERE owner_id=$1 ORDER BY title LIMIT 30",
+            """SELECT channel_id AS id, title, username
+               FROM managed_channels WHERE owner_id=$1
+               ORDER BY title LIMIT 30""",
             owner_id,
         )
         for r in rows:
-            name = r.get("title") or f"id{r['id']}"
+            name = r.get("title") or r.get("username") or f"id{r['id']}"
             kb.button(text=f"👥 {name[:30]}", callback_data=f"ga_entity:{r['id']}:{name[:30]}")
     if not kb.buttons:
         icon, label = _ENTITY_TYPES.get(entity_type, ("❓", entity_type))
