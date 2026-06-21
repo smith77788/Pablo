@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import BotCb, RefCb
+from bot.callbacks import BotCb, RefCb, BmCb
 from bot.utils.op_helpers import _progress_bar
 from database import db
 
@@ -73,7 +73,7 @@ def _dashboard_keyboard(share_url: str | None = None) -> object:
             url=f"https://t.me/share/url?url={share_url}&text=Присоединяйся+к+BotMother+по+моей+реферальной+ссылке!",
         )
     kb.button(text="🏆 Топ рефереров", callback_data=RefCb(action="leaderboard"))
-    kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+    kb.button(text="◀️ Настройки", callback_data=BmCb(action="settings"))
     kb.adjust(1)
     return kb.as_markup()
 

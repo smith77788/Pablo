@@ -88,7 +88,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Аналитика сети", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     ov = await db.get_network_overview(pool, callback.from_user.id)
@@ -140,7 +140,7 @@ async def cb_net_clusters(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Кластеры", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     clusters = await db.get_cluster_list(pool, callback.from_user.id)
@@ -349,7 +349,7 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Рейтинг ботов", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     bots = await db.get_bot_ranking(pool, callback.from_user.id)
@@ -387,7 +387,7 @@ async def cb_net_routing(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Веса роутинга", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     weights = await db.get_routing_weights_for_user(pool, callback.from_user.id)
@@ -507,7 +507,7 @@ async def cb_net_health(
         await callback.message.edit_text(
             locked_text("Здоровье сети", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     bots = await db.get_network_health(pool, callback.from_user.id)
@@ -566,7 +566,7 @@ async def cb_net_broadcast(
         await callback.message.edit_text(
             locked_text("Сетевая рассылка (legacy)", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     users = await db.get_unique_network_users(pool, callback.from_user.id)
@@ -691,7 +691,7 @@ async def cb_net_clone(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Клонирование настроек", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     bots = await db.get_bots(pool, callback.from_user.id)
@@ -799,7 +799,7 @@ async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(
             locked_text("Пересечение аудиторий", "enterprise"),
             parse_mode="HTML",
-            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="monitoring")),
+            reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )
         return
     stats = await db.get_bot_overlap_stats(pool, callback.from_user.id)

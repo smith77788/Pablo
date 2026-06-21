@@ -12,7 +12,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.callbacks import SubCb
+from bot.callbacks import SubCb, BmCb
 from bot.states import PaymentSettingsFSM, PromoSettingsFSM
 from bot.utils import subscription as sub_utils
 from config import PLAN_PRICES_USD, PERIOD_DISCOUNTS
@@ -271,16 +271,14 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
         text="❓ Что входит в подписку",
         callback_data=SubCb(action="plan_features", plan="paid"),
     )
-    from bot.callbacks import BotCb
-
     if sub_utils.is_platform_admin(user_id):
         kb.button(
             text="⚙️ Настройка оплаты", callback_data=SubCb(action="payment_settings")
         )
-        kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+        kb.button(text="◀️ Настройки", callback_data=BmCb(action="settings"))
         kb.adjust(1, 1, 2)
     else:
-        kb.button(text="◀️ Главное меню", callback_data=BotCb(action="main"))
+        kb.button(text="◀️ Настройки", callback_data=BmCb(action="settings"))
         kb.adjust(1, 1, 1)
     return text, kb.as_markup()
 
