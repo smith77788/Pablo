@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 
@@ -13,7 +13,7 @@ export class AnalyticsController {
   }
 
   @Get('bots/:botId/metrics')
-  botMetrics(@Req() req: any, @Query('botId') botId: string, @Query('days') days?: string) {
+  botMetrics(@Req() req: any, @Param('botId') botId: string, @Query('days') days?: string) {
     return this.svc.getBotMetrics(req.user.tenantId, botId, parseInt(days ?? '30'));
   }
 }

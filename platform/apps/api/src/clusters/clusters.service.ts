@@ -51,7 +51,7 @@ export class ClustersService {
     if (!asset) throw new NotFoundException('Asset not found');
     if (asset.tenantId !== tenantId) throw new ForbiddenException('Asset does not belong to this tenant');
     return (prisma as any).asset.update({
-      where: { id: assetId },
+      where: { id: assetId, tenantId },
       data: { clusterId },
     });
   }
@@ -62,7 +62,7 @@ export class ClustersService {
     if (!asset) throw new NotFoundException('Asset not found');
     if (asset.tenantId !== tenantId) throw new ForbiddenException('Asset does not belong to this tenant');
     await (prisma as any).asset.update({
-      where: { id: assetId },
+      where: { id: assetId, tenantId },
       data: { clusterId: null },
     });
     return { ok: true };

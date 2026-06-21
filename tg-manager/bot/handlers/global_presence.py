@@ -1007,7 +1007,7 @@ async def _show_accounts_step(
             )
         except Exception as _e2:
             _e2s = str(_e2).lower()
-            if "message to edit not found" in _e2s or "message can't be edited" in _e2s:
+            if ("message to edit not found" in _e2s or "message can't be edited" in _e2s) and hasattr(callback, "bot"):
                 await callback.bot.send_message(
                     callback.from_user.id, text, reply_markup=kb.as_markup(), parse_mode="HTML"
                 )
@@ -1310,7 +1310,10 @@ async def _cb_gp_confirm_preview_impl(
             f"Это займёт значительное время. Убедитесь что у вас достаточно аккаунтов ({n_accs})."
         )
 
-    # Intelligence block
+    # Intelligence block — fetch and decision check are separated so that
+    # a failure in go_decision UI (e.g. edit_text raises) cannot swallow the block.
+    intel = None
+    intel_text = ""
     try:
         intel = await asyncio.wait_for(
             intelligence_engine.get_pre_launch_intelligence(
@@ -1323,28 +1326,28 @@ async def _cb_gp_confirm_preview_impl(
             timeout=30.0,
         )
         intel_text = intelligence_engine.format_pre_launch_block(intel)
-        if not intel.go_decision:
-            # Callback already answered — can't use show_alert; edit message instead
-            await state.set_state(GlobalPresenceFSM.previewing)
-            kb_err = InlineKeyboardBuilder()
-            kb_err.button(
-                text="◀️ Назад к предпросмотру",
-                callback_data=GeoPresenceCb(action="back_to_preview"),
-            )
-            kb_err.button(
-                text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel")
-            )
-            kb_err.adjust(1)
-            await _edit(
-                callback,
-                f"🚫 <b>Запуск заблокирован</b>\n\n"
-                f"{html.escape(intel.go_reason)}\n\n"
-                f"Исправьте проблему и попробуйте снова.",
-                markup=kb_err.as_markup(),
-            )
-            return
     except (asyncio.TimeoutError, Exception):
         intel_text = ""
+
+    if intel is not None and not intel.go_decision:
+        await state.set_state(GlobalPresenceFSM.previewing)
+        kb_err = InlineKeyboardBuilder()
+        kb_err.button(
+            text="◀️ Назад к предпросмотру",
+            callback_data=GeoPresenceCb(action="back_to_preview"),
+        )
+        kb_err.button(
+            text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel")
+        )
+        kb_err.adjust(1)
+        await _edit(
+            callback,
+            f"🚫 <b>Запуск заблокирован</b>\n\n"
+            f"{html.escape(intel.go_reason)}\n\n"
+            f"Исправьте проблему и попробуйте снова.",
+            markup=kb_err.as_markup(),
+        )
+        return
 
     await state.set_state(GlobalPresenceFSM.confirming)
 
@@ -1439,9 +1442,12 @@ async def cb_gp_launch(
     elif asset_type == "full_package":
         _op_type = "global_presence_full_package"
         _effective_asset = "full_package"
+    elif asset_type == "group":
+        _op_type = "global_presence_group"
+        _effective_asset = "group"
     else:
         _op_type = "global_presence_channel"
-        _effective_asset = asset_type  # "channel" or "group"
+        _effective_asset = asset_type
 
     # Build targets (for package/full_package: channel targets first)
     targets = build_targets(

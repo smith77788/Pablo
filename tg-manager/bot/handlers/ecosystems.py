@@ -704,6 +704,9 @@ async def cb_eco_autodiscover(
 
     # Refresh members view
     eco = await _eb.get_ecosystem(pool, eco_id, callback.from_user.id)
+    if not eco:
+        await callback.message.edit_text("❌ Экосистема не найдена.")
+        return
     members = await _eb.get_members(pool, eco_id)
     if added:
         added_str = " | ".join(
@@ -903,7 +906,8 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     lines = ["🌐 <b>Сводка всех экосистем</b>\n"]
     total_health = 0.0
-    for e in ecosystems[:10]:
+    fetched = ecosystems[:10]
+    for e in fetched:
         icon = _ECO_TYPES.get(e["ecosystem_type"], ("🌐", ""))[0]
         risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}.get(
             e.get("risk_level", "low"), "🟢"
@@ -915,7 +919,7 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             f"{icon} <b>{html.escape(e['name'])}</b>\n"
             f"   Здоровье: {h}%  Давление: {pressure}  {risk_icon}"
         )
-    avg_health = int(total_health / len(ecosystems))
+    avg_health = int(total_health / len(fetched))
     lines.append(
         f"\n<b>Средн. здоровье:</b> {avg_health}%  •  Экосистем: {len(ecosystems)}"
     )

@@ -466,20 +466,20 @@ async def cb_strike_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         await _ensure_table(pool)
         try:
             await pool.execute(
-                "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $1) "
+                "INSERT INTO strike_access (user_id, granted_by) VALUES ($1, $2) "
                 "ON CONFLICT (user_id) DO NOTHING",
                 callback.from_user.id,
+                0,
             )
             log.info("strike_access granted via payment user=%s", callback.from_user.id)
         except Exception:
             log_exc_swallow(log, "cb_strike_check_pay: strike_access insert failed")
-        kb2 = InlineKeyboardBuilder()
-        kb2.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
-        kb2.adjust(1)
+        kb_open = InlineKeyboardBuilder()
+        kb_open.button(text="⚔️ Открыть Strike", callback_data=StrikeCb(action="menu"))
         await callback.message.edit_text(
-            "✅ <b>Оплата подтверждена. Strike активирован!</b>\n\nДобро пожаловать.",
+            "✅ <b>Strike Module активирован!</b>\n\nДоступ открыт. Добро пожаловать.",
             parse_mode="HTML",
-            reply_markup=kb2.as_markup(),
+            reply_markup=kb_open.as_markup(),
         )
         return
 

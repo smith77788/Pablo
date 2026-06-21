@@ -1,5 +1,6 @@
 """Funnel (message chain) management handlers."""
 
+import asyncio
 import html as _html
 import logging
 from aiogram import Router, F
@@ -93,7 +94,7 @@ async def _show_funnel_view(
     if not steps_text:
         steps_text = "\n  (нет шагов)"
     # Fetch per-funnel counters (entered/completed/dropped)
-    entered = funnel.get("entered_count") or len(sub_ids)
+    entered = funnel.get("entered_count") or 0
     completed = funnel.get("completed_count") or 0
     dropped = funnel.get("dropped_count") or 0
     active_subs = len(sub_ids)
@@ -512,11 +513,11 @@ async def msg_fn_step_delay(
 async def cb_fn_toggle(
     callback: CallbackQuery, callback_data: FunnelCb, pool: asyncpg.Pool
 ) -> None:
+    await callback.answer("✅ Статус изменён.")
     await db.toggle_funnel(pool, callback_data.funnel_id, callback_data.bot_id)
     await _show_funnel_view(
         callback.message, pool, callback_data.bot_id, callback_data.funnel_id
     )
-    await callback.answer("✅ Статус изменён.")
 
 
 # ── Delete ─────────────────────────────────────────────────────────────────
@@ -613,8 +614,9 @@ async def msg_fn_broadcast(
     bc_id = await db.create_broadcast(
         pool, data["bot_id"], text, len(user_ids), message.from_user.id, None
     )
-    broadcaster.start(
-        pool, http, bc_id, row["token"], data["bot_id"], text, None, user_ids
+    asyncio.create_task(
+        broadcaster.start(pool, http, bc_id, row["token"], data["bot_id"], text, None, user_ids),
+        name=f"fn-broadcast-{bc_id}",
     )
 
     await message.answer(
@@ -988,20 +990,22 @@ async def _swap_step_content(
     if not row_a or not row_b:
         return
     try:
-        await pool.execute(
-            "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
-            row_b["message_text"],
-            row_b["delay_minutes"],
-            funnel_id,
-            order_a,
-        )
-        await pool.execute(
-            "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
-            row_a["message_text"],
-            row_a["delay_minutes"],
-            funnel_id,
-            order_b,
-        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
+                    row_b["message_text"],
+                    row_b["delay_minutes"],
+                    funnel_id,
+                    order_a,
+                )
+                await conn.execute(
+                    "UPDATE funnel_steps SET message_text=$1, delay_minutes=$2 WHERE funnel_id=$3 AND step_order=$4",
+                    row_a["message_text"],
+                    row_a["delay_minutes"],
+                    funnel_id,
+                    order_b,
+                )
     except Exception:
         log_exc_swallow(log, "_swap_step_content execute failed")
 
