@@ -90,6 +90,7 @@ from bot.handlers import physics_hub as physics_handler
 from bot.handlers import graph_hub as graph_handler
 from bot.handlers import api_hub as api_handler
 from bot.handlers import compliance_hub as compliance_handler
+from bot.handlers import ad_intelligence_hub as ad_intel_handler
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
 from services import content_mesh
@@ -279,6 +280,7 @@ async def main() -> None:
     dp.include_router(graph_handler.router)
     dp.include_router(api_handler.router)
     dp.include_router(compliance_handler.router)
+    dp.include_router(ad_intel_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
