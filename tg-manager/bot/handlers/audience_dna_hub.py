@@ -166,7 +166,7 @@ async def cb_dna_recs(
     await callback.answer()
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
-        await callback.message.edit_text("❌ Бот не найден.", reply_markup=_back_to_list())
+        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())
         return
 
     bot_name = _bot_label(bot_row)
@@ -174,6 +174,7 @@ async def cb_dna_recs(
     if not dna:
         await callback.message.edit_text(
             "❌ DNA не найден. Сначала запустите пересчёт.",
+            parse_mode="HTML",
             reply_markup=_back_to_dna(callback_data.bot_id),
         )
         return
@@ -190,6 +191,7 @@ async def cb_dna_recs(
 
     await callback.message.edit_text(
         f"💡 <b>Рекомендации — {bot_name}</b>\n\n{rec_text}",
+        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
@@ -204,14 +206,15 @@ async def cb_dna_compute(
     await callback.answer("⏳ Анализирую аудиторию…", show_alert=False)
     bot_row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not bot_row:
-        await callback.message.edit_text("❌ Бот не найден.", reply_markup=_back_to_list())
+        await callback.message.edit_text("❌ Бот не найден.", parse_mode="HTML", reply_markup=_back_to_list())
         return
 
     bot_name = _bot_label(bot_row)
 
     await callback.message.edit_text(
         f"⏳ <b>Вычисляю Audience DNA — {bot_name}…</b>\n\n"
-        "Анализирую активность аудитории, вовлечённость и паттерны контента."
+        "Анализирую активность аудитории, вовлечённость и паттерны контента.",
+        parse_mode="HTML",
     )
 
     try:
@@ -220,6 +223,7 @@ async def cb_dna_compute(
         log.error("cb_dna_compute: error for bot_id=%s: %s", callback_data.bot_id, exc)
         await callback.message.edit_text(
             "❌ Ошибка при вычислении DNA. Попробуйте позже.",
+            parse_mode="HTML",
             reply_markup=_back_to_dna(callback_data.bot_id),
         )
         return
@@ -243,6 +247,7 @@ async def cb_dna_compute(
 
     await callback.message.edit_text(
         f"✅ <b>DNA обновлён!</b>\n\n{text}",
+        parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
