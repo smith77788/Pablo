@@ -91,6 +91,14 @@ from bot.handlers import graph_hub as graph_handler
 from bot.handlers import api_hub as api_handler
 from bot.handlers import compliance_hub as compliance_handler
 from bot.handlers import ad_intelligence_hub as ad_intel_handler
+from bot.handlers import growth_agent_hub as growth_agent_handler
+from bot.handlers import account_shield_hub as account_shield_handler
+from bot.handlers import semantic_memory_hub as semantic_memory_handler
+from bot.handlers import persona_hub as persona_handler
+from bot.handlers import stars_hub as stars_handler
+from bot.handlers import audience_dna_hub as audience_dna_handler
+from bot.handlers import narrative_hub as narrative_handler
+from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
 from services import content_mesh
@@ -281,6 +289,13 @@ async def main() -> None:
     dp.include_router(api_handler.router)
     dp.include_router(compliance_handler.router)
     dp.include_router(ad_intel_handler.router)
+    dp.include_router(growth_agent_handler.router)
+    dp.include_router(account_shield_handler.router)
+    dp.include_router(semantic_memory_handler.router)
+    dp.include_router(persona_handler.router)
+    dp.include_router(stars_handler.router)
+    dp.include_router(audience_dna_handler.router)
+    dp.include_router(narrative_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)
@@ -441,6 +456,9 @@ async def main() -> None:
         )
         asyncio.create_task(
             _resilient("graph_engine", graph_engine.run, pool, bot)
+        )
+        asyncio.create_task(
+            _resilient("narrative_engine", narrative_engine.run, pool, bot)
         )
         log.info("TG Manager started")
 
