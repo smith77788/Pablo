@@ -412,7 +412,7 @@ async def fsm_waiting_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data.startswith("strs:create_ctype_"))
+@router.callback_query(F.data.startswith("strs:create_ctype_"), StarsExperimentFSM.waiting_ctype)
 async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     # Extract ctype from callback data string

@@ -333,7 +333,6 @@ async def cb_growth_delete(
     callback_data: GrowthCb,
     pool: asyncpg.Pool,
 ) -> None:
-    await callback.answer()
     ok = await growth_agent.delete_goal(pool, callback_data.goal_id, callback.from_user.id)
     if ok:
         await callback.answer("🗑 Цель удалена.", show_alert=True)
