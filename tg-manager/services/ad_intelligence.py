@@ -296,8 +296,9 @@ async def scan_channel_ads(
     if not acc:
         return {"status": "error", "error": "Нет доступных аккаунтов Telegram"}
 
-    client = account_manager._make_client(acc["session_str"], acc)
+    client = None
     try:
+        client = account_manager._make_client(acc["session_str"], acc)
         await asyncio.wait_for(client.connect(), timeout=15)
 
         # Получаем метаданные канала
@@ -379,10 +380,11 @@ async def scan_channel_ads(
         log.exception("scan_channel_ads unexpected error")
         return {"status": "error", "error": str(exc)[:200]}
     finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
 
 
 # ── DB-хелперы ───────────────────────────────────────────────────────────

@@ -285,7 +285,7 @@ async def msg_narr_core(message: Message, state: FSMContext, pool: asyncpg.Pool)
 # ── Create — Step 3: Channel toggle ───────────────────────────────────────────
 
 
-@router.callback_query(NarrCb.filter(F.action == "channel_toggle"))
+@router.callback_query(NarrCb.filter(F.action == "channel_toggle"), NarrativeFSM.choosing_channels)
 async def cb_narr_channel_toggle(
     callback: CallbackQuery, callback_data: NarrCb, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
@@ -331,6 +331,43 @@ async def cb_narr_channel_toggle(
 # ── Create — Step 4: Campaign type ────────────────────────────────────────────
 
 
+@router.callback_query(NarrCb.filter(F.action == "channels_back"))
+async def cb_narr_channels_back(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    """Back navigation to channel selection step, preserving FSM data."""
+    await callback.answer()
+    data = await state.get_data()
+    selected: list[int] = data.get("selected_channels", [])
+
+    await state.set_state(NarrativeFSM.choosing_channels)
+
+    channels = await _get_user_channels(pool, callback.from_user.id)
+    kb = InlineKeyboardBuilder()
+    for ch in channels[:20]:
+        ch_id = ch.get("channel_id", 0)
+        title = ch.get("title") or ch.get("username") or f"id{ch_id}"
+        mark = "✅" if ch_id in selected else "⬜"
+        kb.button(
+            text=f"{mark} {html.escape(title[:30])}",
+            callback_data=NarrCb(action="channel_toggle", campaign_id=ch_id),
+        )
+    cnt = len(selected)
+    label = f"✅ Выбрано ({cnt}) → Далее" if cnt > 0 else "⬜ Выберите каналы"
+    kb.button(text=label, callback_data=NarrCb(action="type_pick"))
+    kb.button(text="❌ Отмена", callback_data=NarrCb(action="menu"))
+    kb.adjust(1)
+
+    await _edit(
+        callback,
+        f"<b>Шаг 3/5 — Выбор каналов</b>\n\n"
+        f"Выбрано: <b>{cnt}</b> канал(ов)\n\n"
+        "Каждый канал получит уникальный пост с разным углом подачи.\n"
+        "<i>Рекомендуется: 3–6 каналов</i>",
+        kb.as_markup(),
+    )
+
+
 @router.callback_query(NarrCb.filter(F.action == "type_pick"))
 async def cb_narr_type_pick(
     callback: CallbackQuery, state: FSMContext
@@ -352,7 +389,7 @@ async def cb_narr_type_pick(
             text=label,
             callback_data=NarrCb(action=f"set_type_{ctype}"),
         )
-    kb.button(text="◀️ Назад", callback_data=NarrCb(action="menu"))
+    kb.button(text="◀️ Назад", callback_data=NarrCb(action="channels_back"))
     kb.adjust(1)
 
     await _edit(
