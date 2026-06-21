@@ -2469,7 +2469,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not bots:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Назад", callback_data=BmCb(action="broadcasts"))
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
         await _edit(
             callback,
             "<b>📅 Расписание рассылок</b>\n\nУ вас нет ботов.\n"
@@ -2487,7 +2487,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             text=f"🤖 @{name}",
             callback_data=ScheduleCb(action="menu", bot_id=bot["bot_id"]),
         )
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="broadcasts"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
     kb.adjust(1)
     await _edit(
         callback, "<b>📅 Расписание рассылок</b>\n\nВыберите бота:", kb.as_markup()
@@ -2610,7 +2610,7 @@ def _behavioral_kb(sub: str = "attention") -> object:
         kb.button(
             text=f"{marker}{label}", callback_data=BmCb(action="behavioral", sub=key)
         )
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
     kb.adjust(1)
     return kb.as_markup()
 
@@ -2806,7 +2806,7 @@ async def cb_behavioral(
                 text=f"{marker}{label}",
                 callback_data=BmCb(action="behavioral", sub=key),
             )
-        kb2.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        kb2.button(text="◀️ Назад", callback_data=BmCb(action="analytics"))
         kb2.adjust(2, *([1] * (len(_BEHAV_VIEWS) + 1)))
         await _edit(callback, text, kb2.as_markup())
         return
