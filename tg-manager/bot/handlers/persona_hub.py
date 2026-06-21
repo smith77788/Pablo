@@ -121,7 +121,20 @@ def _ts(dt: datetime | None) -> str:
 @router.callback_query(PersonaCb.filter(F.action == "menu"))
 async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
-    personas = await _list_personas(pool, callback.from_user.id)
+    try:
+        personas = await _list_personas(pool, callback.from_user.id)
+    except Exception as e:
+        log.error("persona_hub cb_persona_menu: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text(
+            "🎭 <b>Persona Ecosystem</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v117.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
     kb = InlineKeyboardBuilder()
 
     if not personas:

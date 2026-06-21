@@ -123,7 +123,18 @@ async def cb_dna_report(
         return
 
     bot_name = _bot_label(bot_row)
-    dna = await dna_svc.get_dna(pool, callback_data.bot_id)
+    try:
+        dna = await dna_svc.get_dna(pool, callback_data.bot_id)
+    except Exception as e:
+        log.error("audience_dna_hub cb_dna_report: %s", e)
+        await callback.message.edit_text(
+            "🧬 <b>Audience DNA</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v119.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=_back_to_list(),
+        )
+        return
 
     kb = InlineKeyboardBuilder()
     if dna:

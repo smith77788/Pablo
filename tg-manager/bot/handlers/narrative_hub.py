@@ -136,7 +136,20 @@ async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
     await callback.answer()
     await state.clear()
 
-    campaigns = await narrative_engine.list_campaigns(pool, callback.from_user.id, limit=15)
+    try:
+        campaigns = await narrative_engine.list_campaigns(pool, callback.from_user.id, limit=15)
+    except Exception as e:
+        log.error("narrative_hub cb_narr_menu: %s", e)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+        await callback.message.edit_text(
+            "📖 <b>Narrative Engine</b>\n\n"
+            "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
+            "Администратору необходимо применить миграцию <code>schema_v121.sql</code>.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
 
     active = [c for c in campaigns if c["status"] == "active"]
     paused = [c for c in campaigns if c["status"] == "paused"]
