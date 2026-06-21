@@ -33,7 +33,7 @@ async def cb_swarm_menu(
             locked_text("Swarm (умный роутинг трафика)", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "enterprise", back_callback=BmCb(action="main")
+                "enterprise", back_callback=BmCb(action="assets")
             ),
         )
         return

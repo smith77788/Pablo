@@ -143,14 +143,14 @@ async def cb_exp_list(
             locked_text("A/B тесты", "pro"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "pro", back_callback=BmCb(action="main")
+                "pro", back_callback=BmCb(action="assets")
             ),
         )
         return
     row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     if not row:
         kb = InlineKeyboardBuilder()
-        kb.button(text="◀️ Главное меню", callback_data=BmCb(action="main"))
+        kb.button(text="◀️ Мои боты", callback_data=BmCb(action="assets"))
         kb.adjust(1)
         await callback.message.edit_text(
             "❌ Бот не найден.", parse_mode="HTML", reply_markup=kb.as_markup()

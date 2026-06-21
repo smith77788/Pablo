@@ -101,7 +101,7 @@ async def cb_gift_transfer_main(callback: CallbackQuery, state: FSMContext, pool
     kb.button(text="👥 Сохранённые получатели", callback_data="gt:recipients")
     kb.button(text="📊 Отчёты", callback_data="gt:reports")
     kb.button(text="❓ Помощь", callback_data="gt:help")
-    kb.button(text="◀️ Назад в BotMother", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
     kb.adjust(1)
 
     await callback.message.edit_text(
@@ -1079,7 +1079,7 @@ async def cmd_gifts(message: Message, state: FSMContext) -> None:
     kb.button(text="👥 Получатели", callback_data="gt:recipients")
     kb.button(text="📊 Отчёты", callback_data="gt:reports")
     kb.button(text="❓ Помощь", callback_data="gt:help")
-    kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
+    kb.button(text="◀️ Операции", callback_data=BmCb(action="operations"))
     kb.adjust(1)
     await message.answer(
         "🎁 <b>Менеджер передачи подарков</b>\n\n"

@@ -35,7 +35,7 @@ async def cb_dl_menu(
             locked_text("Диплинки и рефералы", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
-                "starter", back_callback=BmCb(action="main")
+                "starter", back_callback=BmCb(action="assets")
             ),
         )
         return
