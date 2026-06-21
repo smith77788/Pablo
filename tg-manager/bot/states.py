@@ -587,3 +587,13 @@ class StarsExperimentFSM(StatesGroup):
     waiting_price_b = State()  # цена варианта B
 
 
+class NarrativeFSM(StatesGroup):
+    waiting_topic        = State()  # тема кампании
+    waiting_core_message = State()  # ключевое сообщение
+    choosing_channels    = State()  # выбор каналов (multi-select через callbacks)
+    choosing_type        = State()  # тип кампании: trend/launch/awareness/counter
+    choosing_spread      = State()  # интервал распространения (часы)
+    previewing           = State()  # предпросмотр сгенерированных постов
+    confirming           = State()  # финальное подтверждение
+
+

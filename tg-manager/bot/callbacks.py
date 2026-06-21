@@ -542,6 +542,13 @@ class GrowthCb(CallbackData, prefix="ga"):
     page: int = 0
 
 
+class NarrCb(CallbackData, prefix="narr"):
+    """Narrative Engine — координированные кросс-сетевые кампании для создания трендов."""
+
+    action: str          # menu|create|detail|preview|pause|resume|cancel|confirm_cancel|channel_toggle|type_pick|spread_pick|launch
+    campaign_id: int = 0
+
+
 class ShieldCb(CallbackData, prefix="sh"):
     """Account Shield — proactive ban prediction and auto-cooling."""
 

@@ -5,27 +5,18 @@ from __future__ import annotations
 import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 
 from bot.callbacks import StarsCb
+from bot.states import StarsExperimentFSM
 from database import db
 from services import stars_optimizer
 
 log = logging.getLogger(__name__)
 
 router = Router()
-
-# ── FSM ───────────────────────────────────────────────────────────────────────
-
-class StarsExperimentFSM(StatesGroup):
-    choosing_bot   = State()
-    waiting_name   = State()
-    waiting_ctype  = State()
-    waiting_price_a = State()
-    waiting_price_b = State()
 
 
 # ── Content types ─────────────────────────────────────────────────────────────
