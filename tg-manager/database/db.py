@@ -11,6 +11,41 @@ from services.logger import log_exc_swallow, timed
 log = logging.getLogger(__name__)
 
 
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a SQL file into individual statements, correctly handling dollar-quoted blocks."""
+    stmts: list[str] = []
+    buf: list[str] = []
+    in_dollar = False
+    i = 0
+    while i < len(sql):
+        # Detect $$ or $tag$ opening/closing
+        if sql[i] == "$" and not in_dollar:
+            # Find matching closing $...$
+            j = sql.find("$", i + 1)
+            if j != -1:
+                tag = sql[i:j + 1]
+                closing = sql.find(tag, j + 1)
+                if closing != -1:
+                    # Consume entire dollar-quoted block
+                    end = closing + len(tag)
+                    buf.append(sql[i:end])
+                    i = end
+                    continue
+        if sql[i] == ";" and not in_dollar:
+            stmt = "".join(buf).strip()
+            if stmt:
+                stmts.append(stmt)
+            buf = []
+            i += 1
+            continue
+        buf.append(sql[i])
+        i += 1
+    last = "".join(buf).strip()
+    if last:
+        stmts.append(last)
+    return stmts
+
+
 async def create_pool() -> asyncpg.Pool:
     pool = await asyncpg.create_pool(
         DATABASE_URL,
@@ -43,18 +78,40 @@ async def create_pool() -> asyncpg.Pool:
             if bn not in seen:
                 seen.add(bn)
                 schema_files.append(p)
+
+        applied = 0
+        failed = 0
         for path in schema_files:
             with open(path, encoding="utf-8") as f:
                 sql = f.read().strip()
-            if sql:
+            if not sql:
+                continue
+            # Split into individual top-level statements. We split on ";"
+            # only OUTSIDE dollar-quoted blocks (DO $$ ... $$ blocks contain
+            # their own semicolons that must not be split).
+            statements = _split_sql_statements(sql)
+            file_ok = True
+            for stmt in statements:
                 try:
-                    await conn.execute(sql)
+                    await conn.execute(stmt)
                 except Exception as exc:
+                    err = str(exc)
+                    # Ignore "already exists" — idempotent re-runs are fine
+                    if any(k in err.lower() for k in (
+                        "already exists", "duplicate key",
+                    )):
+                        continue
                     log.warning(
-                        "Schema %s failed (may already exist): %s",
-                        os.path.basename(path),
-                        exc,
+                        "Schema %s statement failed: %s | stmt: %.200s",
+                        os.path.basename(path), exc, stmt,
                     )
+                    file_ok = False
+            if file_ok:
+                applied += 1
+            else:
+                failed += 1
+
+        log.info("Schema migration: %d files OK, %d with warnings", applied, failed)
 
         # Verify critical tables exist after migration — log ERROR if missing
         _CRITICAL_TABLES = ["activity_log", "operation_audit", "operation_queue"]
