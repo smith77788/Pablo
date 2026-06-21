@@ -162,9 +162,8 @@ async def cb_shield_top10(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 # ─── Настройки ────────────────────────────────────────────────────────────────
 
 
-@router.callback_query(ShieldCb.filter(F.action == "settings"))
-async def cb_shield_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await callback.answer()
+async def _show_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Render settings screen (shared by settings handler and toggle handlers)."""
     owner_id = callback.from_user.id
     cfg = await account_shield.get_shield_config(pool, owner_id)
 
@@ -189,6 +188,12 @@ async def cb_shield_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 
+@router.callback_query(ShieldCb.filter(F.action == "settings"))
+async def cb_shield_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await callback.answer()
+    await _show_settings(callback, pool)
+
+
 @router.callback_query(ShieldCb.filter(F.action == "toggle_ap"))
 async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.answer()
@@ -205,8 +210,7 @@ async def cb_shield_toggle_ap(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         )
     except Exception as exc:
         log.debug("shield_hub.toggle_ap: %s", exc)
-    # Show updated settings
-    await cb_shield_settings.__wrapped__(callback, pool)  # type: ignore[attr-defined]
+    await _show_settings(callback, pool)
 
 
 @router.callback_query(ShieldCb.filter(F.action == "toggle_na"))
@@ -225,7 +229,7 @@ async def cb_shield_toggle_na(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         )
     except Exception as exc:
         log.debug("shield_hub.toggle_na: %s", exc)
-    await cb_shield_settings.__wrapped__(callback, pool)  # type: ignore[attr-defined]
+    await _show_settings(callback, pool)
 
 
 # ─── История ──────────────────────────────────────────────────────────────────
