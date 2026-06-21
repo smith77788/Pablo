@@ -549,3 +549,12 @@ class ShieldCb(CallbackData, prefix="sh"):
     account_id: int = 0
 
 
+class StarsCb(CallbackData, prefix="strs"):
+    """Stars Yield Optimizer — A/B тестирование монетизации через Telegram Stars."""
+
+    action: str         # menu|dashboard|list_experiments|detail|create_start|create_pick_bot
+                        # create_ctype_*|evaluate|pause|resume|delete_confirm|delete_do|recommendations
+    experiment_id: int = 0
+    bot_id: int = 0
+
+

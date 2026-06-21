@@ -579,3 +579,11 @@ class GrowthAgentFSM(StatesGroup):
     confirming = State()           # финальное подтверждение перед созданием
 
 
+class StarsExperimentFSM(StatesGroup):
+    choosing_bot    = State()  # выбор бота
+    waiting_name    = State()  # название эксперимента
+    waiting_ctype   = State()  # тип контента
+    waiting_price_a = State()  # цена варианта A
+    waiting_price_b = State()  # цена варианта B
+
+
