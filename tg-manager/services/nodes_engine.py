@@ -134,17 +134,19 @@ async def enable_forum_mode(
             return False
 
         client = _make_client(account.get("session_str", ""), account)
-        await client.connect()
+        await asyncio.wait_for(client.connect(), timeout=30.0)
         try:
-            entity = await client.get_entity(tg_chat_id)
-            await client(ToggleForumRequest(channel=entity, enabled=True))
+            entity = await asyncio.wait_for(client.get_entity(tg_chat_id), timeout=20.0)
+            await asyncio.wait_for(
+                client(ToggleForumRequest(channel=entity, enabled=True)), timeout=20.0
+            )
             log.info(
                 "nodes_engine: forum enabled on chat=%d via account=%d",
                 tg_chat_id, account["id"],
             )
             return True
         finally:
-            await client.disconnect()
+            await asyncio.wait_for(client.disconnect(), timeout=10.0)
     except Exception as exc:
         log.error("nodes_engine: enable_forum_mode failed chat=%d: %s", tg_chat_id, exc)
         return False
