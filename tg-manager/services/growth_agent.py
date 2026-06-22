@@ -209,13 +209,21 @@ async def run_daily_cycle(
     description = goal_row["description"]
     strategy_str = goal_row["strategy"] or "balanced"
 
+    # Маппинг user-facing стратегий → внутренние стратегии autonomous_engine
+    _STRATEGY_MAP = {
+        "aggressive":   "fastest",
+        "balanced":     "balanced",
+        "conservative": "safest",
+    }
+    engine_strategy = _STRATEGY_MAP.get(strategy_str, "balanced")
+
     # Строим контракт через Autonomous Engine
     try:
         contract = await autonomous_engine.build_autonomous_contract(
             pool=pool,
             owner_id=owner_id,
             description=description,
-            requested_strategy=strategy_str,  # type: ignore[arg-type]
+            requested_strategy=engine_strategy,
         )
     except Exception as exc:
         log.warning("growth_agent: build_autonomous_contract failed goal=%d: %s", goal_id, exc)
