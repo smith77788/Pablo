@@ -52,6 +52,8 @@ async def run(pool: asyncpg.Pool, bot=None) -> None:
             if cycle % _PRUNE_INTERVAL_CYCLES == 0 and cycle > 0:
                 await _prune_old_events(pool)
             cycle += 1
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("behavioral_engine error")
         elapsed = asyncio.get_event_loop().time() - started_at
@@ -91,6 +93,8 @@ async def _prune_old_events(pool: asyncpg.Pool) -> None:
                 break
             # Yield between batches so other queries are not blocked
             await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.warning("behavioral_engine: prune error: %s", e)
             break

@@ -259,6 +259,8 @@ async def run(pool: asyncpg.Pool, bot=None) -> None:
                 await _cleanup_old_history(pool)
             cycle += 1
             log.debug("trust_engine: scores updated (cycle %d)", cycle)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.exception("trust_engine error: %s", exc)
         await asyncio.sleep(_INTERVAL)

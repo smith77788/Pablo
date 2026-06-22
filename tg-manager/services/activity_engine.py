@@ -528,6 +528,8 @@ async def run_activity_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None
             for row in rows:
                 await run_resource_activity_session(pool, dict(row))
                 await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.warning("activity loop error: %s", e)
         await asyncio.sleep(interval_hours * 3600)

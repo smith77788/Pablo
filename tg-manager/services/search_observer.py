@@ -588,6 +588,8 @@ async def run_confirmation_loop(pool: asyncpg.Pool, bot: Bot) -> None:
     while True:
         try:
             await run_confirmation_pass(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.exception("search_observer confirmation_loop error: %s", exc)
         await asyncio.sleep(_CONFIRMATION_LOOP_INTERVAL)

@@ -124,6 +124,8 @@ async def run_follow_checker(pool: asyncpg.Pool, bot) -> None:
     while True:
         try:
             await _check_round(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.warning("follow_checker: error in round: %s", e)
         await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)

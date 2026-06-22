@@ -27,6 +27,8 @@ async def run(pool: asyncpg.Pool, bot) -> None:
     while True:
         try:
             await _check_all(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("drift_detector cycle error")
         await asyncio.sleep(_INTERVAL)
