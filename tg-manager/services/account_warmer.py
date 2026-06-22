@@ -2010,6 +2010,8 @@ async def run_warmup_loop(pool: asyncpg.Pool, interval_hours: int = 1) -> None:
                 ]
                 await asyncio.gather(*tasks, return_exceptions=True)
 
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.warning("warmup loop error: %s", e)
         await asyncio.sleep(interval_hours * 3600)

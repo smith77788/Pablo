@@ -329,6 +329,8 @@ async def run_scraper_loop(pool: asyncpg.Pool) -> None:
     while True:
         try:
             await scrape_and_refresh(pool)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.error("proxy_scraper: loop error: %s", e)
         await asyncio.sleep(_REFRESH_INTERVAL_H * 3600)
