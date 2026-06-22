@@ -2770,10 +2770,10 @@ async def get_keyword_notify_enabled(
 
 async def upsert_managed_channels(
     pool: asyncpg.Pool, owner_id: int, acc_id: int, channels: list[dict]
-) -> None:
-    """Сохраняет/обновляет список каналов аккаунта в managed_channels."""
+) -> int:
+    """Сохраняет/обновляет список каналов аккаунта в managed_channels. Возвращает кол-во строк."""
     if not channels:
-        return
+        return 0
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(
@@ -2801,6 +2801,7 @@ async def upsert_managed_channels(
                     for ch in channels
                 ],
             )
+    return len(channels)
 
 
 async def get_managed_channels(

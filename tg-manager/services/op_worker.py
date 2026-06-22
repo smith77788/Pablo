@@ -152,7 +152,14 @@ _FATAL_MSG_PATTERNS = re.compile(
 _FLOOD_PATTERNS = re.compile(r"flood.wait|FLOOD_WAIT|FloodWait", re.IGNORECASE)
 _PEER_FLOOD_PATTERNS = re.compile(r"peer.flood|PEER_FLOOD|PeerFlood", re.IGNORECASE)
 _NETWORK_PATTERNS = re.compile(
-    r"connection to telegram failed|general socks server failure|proxy недоступен|timeout при подключении|ошибка сети",
+    r"connection to telegram failed|general socks server failure|proxy недоступен|"
+    r"timeout при подключении|ошибка сети|"
+    r"connection reset|connection refused|connection timed out|"
+    r"network is unreachable|broken pipe|eof occurred|"
+    r"socks5|socks4|proxy error|proxy connect|"
+    r"OSError|TimeoutError|ConnectionReset|ConnectionRefused|"
+    r"timed out|could not connect|failed to connect|"
+    r"connection aborted|no route to host|transport closed",
     re.IGNORECASE,
 )
 
@@ -5165,9 +5172,9 @@ async def _exec_bulk_post_chans(
         return {"status": "failed", "reason": "Аккаунт не найден или неактивен"}
     acc = dict(row)
 
-    # Fetch channels with access_hash from DB (never pass session_str in params)
+    # Fetch channels with access_hash and username from DB
     ch_rows = await pool.fetch(
-        "SELECT id, channel_id, access_hash FROM managed_channels "
+        "SELECT id, channel_id, access_hash, username FROM managed_channels "
         "WHERE owner_id=$1 AND id = ANY($2::bigint[])",
         owner_id, channel_ids,
     )
@@ -5194,9 +5201,11 @@ async def _exec_bulk_post_chans(
 
         ch_id = ch["channel_id"]
         access_hash = ch.get("access_hash", 0) or 0
+        ch_username = ch.get("username") or ""
         try:
             last_result = await account_manager.post_to_channel(
-                acc["session_str"], ch_id, text, access_hash=access_hash, _acc=acc
+                acc["session_str"], ch_id, text,
+                access_hash=access_hash, username=ch_username, _acc=acc
             )
             if last_result.get("banned"):
                 await _db.deactivate_account(pool, acc_id, "banned detected in bulk_post_chans")
@@ -5205,6 +5214,17 @@ async def _exec_bulk_post_chans(
                 err_count += 1
             else:
                 ok_count += 1
+                # Persist resolved access_hash for future fast-path
+                _rhash = last_result.get("resolved_access_hash", 0)
+                if _rhash and not access_hash:
+                    try:
+                        await pool.execute(
+                            "UPDATE managed_channels SET access_hash=$1 "
+                            "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
+                            _rhash, owner_id, int(ch_id),
+                        )
+                    except Exception:
+                        pass
         except asyncio.CancelledError:
             raise
         except Exception as exc:
