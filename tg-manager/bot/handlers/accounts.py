@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
 
-from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb
+from bot.callbacks import AccCb, BmCb, BotCb, ChanCb, MassOpCb, AutoRegCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils.event_status import mark_handled_error
@@ -447,6 +447,12 @@ async def _show_accounts_menu(
             InlineKeyboardButton(
                 text="📥 Импорт сессии",
                 callback_data=AccCb(action="import_menu").pack(),
+            )
+        )
+        kb.row(
+            InlineKeyboardButton(
+                text="🤖 Авторег (SMS API)",
+                callback_data=AutoRegCb(action="menu").pack(),
             )
         )
 

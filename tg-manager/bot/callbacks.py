@@ -643,3 +643,10 @@ class ContentClonerCb(CallbackData, prefix="ccl"):
 
     action: str          # menu|set_source|set_targets|add_target|del_target|set_count|mode_*|confirm
     sub: str = ""        # forward|copy (режим клонирования)
+
+
+class AutoRegCb(CallbackData, prefix="areg"):
+    """Авторег — регистрация аккаунтов через SMS API."""
+
+    action: str          # menu|set_service|set_country|pick_country|start|cancel_order|settings|set_key
+    sub: str = ""        # service name or country code
