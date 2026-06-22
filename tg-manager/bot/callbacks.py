@@ -610,3 +610,10 @@ class BoostCb(CallbackData, prefix="bst"):
 
     action: str          # menu|views|reactions|stories|confirm
     sub: str = ""        # views|reactions|stories (for confirm)
+
+
+class InviterCb(CallbackData, prefix="inv"):
+    """Инвайтер — массовое добавление пользователей в группу."""
+
+    action: str          # menu|start|src_parser|src_manual|src_phones|pick_run|confirm
+    item: str = ""       # parse_run_id или "all"

@@ -861,6 +861,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_boost_reactions(pool, bot, op_id, owner_id, params)
             elif op_type == "boost_stories":
                 result = await _exec_boost_stories(pool, bot, op_id, owner_id, params)
+            elif op_type == "mass_invite":
+                result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -5916,3 +5918,121 @@ async def _exec_boost_stories(
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+# ── Инвайтер ──────────────────────────────────────────────────────────────────
+
+async def _exec_mass_invite(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовое добавление пользователей в группу.
+
+    Распределяет user_refs и phones между аккаунтами равномерно.
+    При PeerFlood у аккаунта — переключается на следующий.
+    """
+    from services import mass_inviter_engine as inv
+
+    group = params.get("group", "")
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+    user_refs: list[str] = list(params.get("user_refs") or [])
+    phones: list[str] = list(params.get("phones") or [])
+    batch_size: int = int(params.get("batch_size") or 5)
+
+    if not group or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры mass_invite"}
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+        "AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    total_ok, total_fail = 0, 0
+    all_users = list(user_refs)
+    all_phones = list(phones)
+    n_accs = len(accounts)
+
+    # Разбиваем пользователей по аккаунтам
+    def _chunks(lst, n):
+        size = max(1, (len(lst) + n - 1) // n)
+        for i in range(0, len(lst), size):
+            yield lst[i:i + size]
+
+    acc_user_chunks = list(_chunks(all_users, n_accs)) if all_users else [[] for _ in accounts]
+    acc_phone_chunks = list(_chunks(all_phones, n_accs)) if all_phones else [[] for _ in accounts]
+
+    # Выравниваем длину списков
+    while len(acc_user_chunks) < n_accs:
+        acc_user_chunks.append([])
+    while len(acc_phone_chunks) < n_accs:
+        acc_phone_chunks.append([])
+
+    step = 0
+    for acc_idx, acc in enumerate(accounts):
+        if await _is_cancelled(pool, op_id):
+            break
+
+        u_chunk = acc_user_chunks[acc_idx]
+        p_chunk = acc_phone_chunks[acc_idx]
+
+        if not u_chunk and not p_chunk:
+            continue
+
+        # Инвайт по user_refs батчами
+        if u_chunk:
+            for i in range(0, len(u_chunk), batch_size):
+                if await _is_cancelled(pool, op_id):
+                    break
+                batch = u_chunk[i:i + batch_size]
+                try:
+                    res = await inv.invite_batch(acc["session_str"], dict(acc), group, batch)
+                    total_ok += res["ok"]
+                    total_fail += res["failed"]
+                    step += len(batch)
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                        op_id, len(batch),
+                    )
+                    if res["peer_flood"]:
+                        log.warning("mass_invite op=%d acc=%s PeerFlood — switching", op_id, acc.get("id"))
+                        break
+                    await asyncio.sleep(3.0)
+                except Exception as exc:
+                    log.warning("mass_invite op=%d acc=%s batch error: %s", op_id, acc.get("id"), exc)
+                    total_fail += len(batch)
+
+        # Инвайт по телефонам батчами
+        if p_chunk:
+            for i in range(0, len(p_chunk), batch_size):
+                if await _is_cancelled(pool, op_id):
+                    break
+                batch = p_chunk[i:i + batch_size]
+                try:
+                    res = await inv.invite_by_phones(acc["session_str"], dict(acc), group, batch)
+                    total_ok += res["ok"]
+                    total_fail += res["failed"]
+                    step += len(batch)
+                    await pool.execute(
+                        "UPDATE operation_queue SET done_items=done_items+$2 WHERE id=$1",
+                        op_id, len(batch),
+                    )
+                    if res["peer_flood"]:
+                        break
+                    await asyncio.sleep(3.0)
+                except Exception as exc:
+                    log.warning("mass_invite op=%d acc=%s phones error: %s", op_id, acc.get("id"), exc)
+                    total_fail += len(batch)
+
+        await asyncio.sleep(5.0)
+
+    total = total_ok + total_fail
+    summary = (
+        f"👥 Инвайтер: {group}\n"
+        f"✅ Добавлено: {total_ok}/{total}"
+        + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
+    )
+    return {"status": "done", "ok": total_ok, "failed": total_fail, "summary": summary}
