@@ -821,7 +821,7 @@ async def _render_steps_manage(
     funnel = next((f for f in funnels if f["id"] == callback_data.funnel_id), None)
     if not funnel:
         _err_kb = InlineKeyboardBuilder()
-        _err_kb.button(text="◀️ К воронкам", callback_data=FunnelCb(action="menu", bot_id=callback_data.bot_id))
+        _err_kb.button(text="◀️ К воронкам", callback_data=FunnelCb(action="list", bot_id=callback_data.bot_id))
         _err_kb.adjust(1)
         await callback.message.edit_text(
             "❌ Цепочка не найдена.",
