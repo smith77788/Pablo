@@ -4120,15 +4120,15 @@ async def cb_scan_connect(
     user_id = callback.from_user.id
     acc_id = callback_data.acc_id
 
-    # Check channel limit before importing
-    from bot.utils.subscription import get_channel_limit
+    # Check channel limit before importing (counts across linked abuse accounts)
+    from bot.utils.subscription import get_channel_limit, get_effective_channel_count
     chan_limit = await get_channel_limit(pool, user_id)
     try:
+        current_count = await get_effective_channel_count(pool, user_id)
+    except Exception:
         current_count = await pool.fetchval(
             "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
         ) or 0
-    except Exception:
-        current_count = 0
     slots_free = chan_limit - current_count
     if slots_free <= 0:
         from bot.callbacks import SubCb

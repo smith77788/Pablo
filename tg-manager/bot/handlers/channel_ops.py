@@ -1166,17 +1166,12 @@ async def cb_do_bulk_create(
         )
         return
 
-    # ── Pre-flight: лимит каналов по тарифу ──────────────────────────────────
-    from bot.utils.subscription import get_channel_limit
+    # ── Pre-flight: лимит каналов по тарифу (с учётом связанных аккаунтов) ──────
+    from bot.utils.subscription import get_channel_limit, get_effective_channel_count
 
     try:
         chan_limit = await get_channel_limit(pool, user_id)
-        current_chans = (
-            await pool.fetchval(
-                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
-            )
-            or 0
-        )
+        current_chans = await get_effective_channel_count(pool, user_id)
     except Exception:
         chan_limit, current_chans = 9999, 0
         log_exc_swallow(log, "bulk_create channel limit check failed")

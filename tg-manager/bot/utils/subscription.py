@@ -229,6 +229,33 @@ async def get_channel_limit(pool: asyncpg.Pool, user_id: int) -> int:
     return CHANNEL_LIMITS[coerce_plan(plan)]
 
 
+async def get_effective_bot_count(pool: asyncpg.Pool, user_id: int) -> int:
+    """Кол-во ботов с учётом связанных аккаунтов (защита от multi-account abuse)."""
+    if is_platform_admin(user_id):
+        return 0
+    plan = await get_plan(pool, user_id)
+    if coerce_plan(plan) != "free":
+        from database import db as _db
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", user_id
+        ) or 0
+    from database import db as _db
+    return await _db.count_bots_across_linked(pool, user_id)
+
+
+async def get_effective_channel_count(pool: asyncpg.Pool, user_id: int) -> int:
+    """Кол-во каналов с учётом связанных аккаунтов (защита от multi-account abuse)."""
+    if is_platform_admin(user_id):
+        return 0
+    plan = await get_plan(pool, user_id)
+    if coerce_plan(plan) != "free":
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", user_id
+        ) or 0
+    from database import db as _db
+    return await _db.count_channels_across_linked(pool, user_id)
+
+
 def locked_text(feature: str, required_plan: str) -> str:
     required_plan = coerce_plan(required_plan)
     emoji = PLAN_EMOJIS.get(required_plan, "💎")

@@ -78,7 +78,7 @@ async def _save_account(
     info: dict,
 ) -> int:
     """Сохраняет/обновляет аккаунт в tg_accounts, возвращает id."""
-    return await pool.fetchval(
+    acc_id = await pool.fetchval(
         """INSERT INTO tg_accounts
            (owner_id, phone, session_str, tg_user_id, first_name, username,
             device_model, system_version, app_version, lang_code, system_lang_code,
@@ -96,6 +96,12 @@ async def _save_account(
         info.get("first_name", ""),
         info.get("username", ""),
     )
+    # Регистрируем связь телефон→владелец для анти-абуз системы
+    try:
+        await db.record_phone_link(pool, phone, owner_id)
+    except Exception:
+        pass
+    return acc_id
 
 
 def _menu_kb() -> object:

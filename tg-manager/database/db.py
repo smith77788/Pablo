@@ -2508,7 +2508,10 @@ async def add_tg_account(
         lang_code,
         system_lang_code,
     )
-    return row["id"]
+    acc_id = row["id"]
+    # Регистрируем связь телефон→владелец для анти-абуз системы
+    await record_phone_link(pool, phone, owner_id)
+    return acc_id
 
 
 async def remove_tg_account(pool: asyncpg.Pool, acc_id: int, owner_id: int) -> bool:
@@ -5939,3 +5942,87 @@ async def advance_growth_schedule(pool: asyncpg.Pool, schedule_id: int, interval
            WHERE id = $1""",
         schedule_id, str(interval_h), sent,
     )
+
+
+# ── Anti-abuse: phone → owner linking (schema_v124) ──────────────────────────
+
+
+async def record_phone_link(
+    pool: asyncpg.Pool,
+    phone: str,
+    owner_id: int,
+) -> list[int]:
+    """Записать связь телефон→владелец и вернуть других владельцев с тем же телефоном.
+
+    При первом обнаружении общего телефона автоматически создаёт запись в
+    linked_platform_users для использования в проверках лимитов.
+    """
+    if not phone:
+        return []
+
+    try:
+        await pool.execute(
+            "INSERT INTO phone_owner_links (phone, owner_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+            phone, owner_id,
+        )
+        rows = await pool.fetch(
+            "SELECT owner_id FROM phone_owner_links WHERE phone=$1 AND owner_id!=$2",
+            phone, owner_id,
+        )
+        other_ids = [r["owner_id"] for r in rows]
+        for other_id in other_ids:
+            a, b = min(owner_id, other_id), max(owner_id, other_id)
+            await pool.execute(
+                """INSERT INTO linked_platform_users (owner_id_a, owner_id_b, link_type)
+                   VALUES ($1,$2,'shared_phone') ON CONFLICT DO NOTHING""",
+                a, b,
+            )
+        return other_ids
+    except Exception:
+        return []
+
+
+async def get_linked_owner_ids(pool: asyncpg.Pool, owner_id: int) -> list[int]:
+    """Вернуть список owner_id, связанных с данным (через общие телефоны)."""
+    try:
+        rows = await pool.fetch(
+            """SELECT CASE WHEN owner_id_a=$1 THEN owner_id_b ELSE owner_id_a END AS lid
+               FROM linked_platform_users
+               WHERE owner_id_a=$1 OR owner_id_b=$1""",
+            owner_id,
+        )
+        return [r["lid"] for r in rows]
+    except Exception:
+        return []
+
+
+async def count_bots_across_linked(pool: asyncpg.Pool, owner_id: int) -> int:
+    """Суммарное количество управляемых ботов у данного владельца + всех связанных."""
+    linked = await get_linked_owner_ids(pool, owner_id)
+    all_ids = [owner_id] + linked
+    try:
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by = ANY($1::bigint[])",
+            all_ids,
+        ) or 0
+    except Exception:
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1",
+            owner_id,
+        ) or 0
+
+
+async def count_channels_across_linked(pool: asyncpg.Pool, owner_id: int) -> int:
+    """Суммарное количество управляемых каналов у данного владельца + всех связанных."""
+    linked = await get_linked_owner_ids(pool, owner_id)
+    all_ids = [owner_id] + linked
+    try:
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id = ANY($1::bigint[])",
+            all_ids,
+        ) or 0
+    except Exception:
+        return await pool.fetchval(
+            "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1",
+            owner_id,
+        ) or 0

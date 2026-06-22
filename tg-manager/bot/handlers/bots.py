@@ -98,10 +98,13 @@ async def cb_add(
     await callback.answer()
     from bot.utils.subscription import get_plan
 
+    from bot.utils.subscription import get_effective_bot_count
+
     current_plan = await get_plan(pool, callback.from_user.id)
     limit = await get_bot_limit(pool, callback.from_user.id)
+    effective_count = await get_effective_bot_count(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
-    if len(current_bots) >= limit:
+    if effective_count >= limit:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         kb = InlineKeyboardBuilder()
@@ -112,10 +115,16 @@ async def cb_add(
                 callback_data=SubCb(action="choose_plan", plan="paid"),
             )
             kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
+            abuse_note = (
+                f"\n\n⚠️ <i>Обнаружены связанные аккаунты. "
+                f"Лимит считается суммарно: {effective_count} из {limit}.</i>"
+                if effective_count > len(current_bots)
+                else ""
+            )
             upgrade_text = (
                 f"⛔️ <b>Достигнут лимит FREE плана</b>\n\n"
                 f"На бесплатном плане можно добавить максимум <b>{limit}</b> ботов.\n"
-                f"У вас уже добавлено: <b>{len(current_bots)}</b>\n\n"
+                f"У вас добавлено: <b>{len(current_bots)}</b>{abuse_note}\n\n"
                 "💎 <b>ПОДПИСКА</b> — без ограничений\n"
                 "<i>∞ ботов и каналов, CRM, воронки, аккаунты, AI, рассылки, аналитика</i>\n\n"
                 "Оформите подписку, чтобы продолжить добавлять ботов."
