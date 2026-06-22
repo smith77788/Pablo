@@ -863,13 +863,21 @@ async def get_snapshot(
         return_exceptions=True,
     )
 
-    if isinstance(health, Exception):
+    if isinstance(health, asyncio.CancelledError):
+        raise health
+    if isinstance(health, BaseException):
         health = EcosystemHealth()
-    if isinstance(pressure, Exception):
+    if isinstance(pressure, asyncio.CancelledError):
+        raise pressure
+    if isinstance(pressure, BaseException):
         pressure = EcosystemPressure()
-    if isinstance(risk, Exception):
+    if isinstance(risk, asyncio.CancelledError):
+        raise risk
+    if isinstance(risk, BaseException):
         risk = EcosystemRisk()
-    if isinstance(drifts, Exception):
+    if isinstance(drifts, asyncio.CancelledError):
+        raise drifts
+    if isinstance(drifts, BaseException):
         drifts = []
 
     # Member counts by type
@@ -1368,11 +1376,17 @@ async def sync_ecosystem_scores(
         return_exceptions=True,
     )
 
-    if isinstance(health, Exception):
+    if isinstance(health, asyncio.CancelledError):
+        raise health
+    if isinstance(health, BaseException):
         health = EcosystemHealth()
-    if isinstance(pressure, Exception):
+    if isinstance(pressure, asyncio.CancelledError):
+        raise pressure
+    if isinstance(pressure, BaseException):
         pressure = EcosystemPressure()
-    if isinstance(risk, Exception):
+    if isinstance(risk, asyncio.CancelledError):
+        raise risk
+    if isinstance(risk, BaseException):
         risk = EcosystemRisk()
 
     await pool.execute(
@@ -1608,11 +1622,17 @@ async def generate_recommendations(
             compute_risk(pool, ecosystem_id, owner_id),
             return_exceptions=True,
         )
-        if isinstance(health, Exception):
+        if isinstance(health, asyncio.CancelledError):
+            raise health
+        if isinstance(health, BaseException):
             health = EcosystemHealth()
-        if isinstance(pressure, Exception):
+        if isinstance(pressure, asyncio.CancelledError):
+            raise pressure
+        if isinstance(pressure, BaseException):
             pressure = EcosystemPressure()
-        if isinstance(risk, Exception):
+        if isinstance(risk, asyncio.CancelledError):
+            raise risk
+        if isinstance(risk, BaseException):
             risk = EcosystemRisk()
 
         counts_rows = await pool.fetch(
