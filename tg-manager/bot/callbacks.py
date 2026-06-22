@@ -629,3 +629,10 @@ class PhoneCheckerCb(CallbackData, prefix="phchk"):
     """Чекер номеров телефонов."""
 
     action: str          # menu|start
+
+
+class ReporterCb(CallbackData, prefix="rpt"):
+    """Репортер — массовые жалобы."""
+
+    action: str          # menu|start_peer|start_msg|reason_*|confirm
+    sub: str = ""        # режим: peer|msg

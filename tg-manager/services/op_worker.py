@@ -865,6 +865,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
             elif op_type == "bulk_set_profile":
                 result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
+            elif op_type == "mass_report":
+                result = await _exec_mass_report(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6112,6 +6114,79 @@ async def _exec_bulk_set_profile(
     summary = (
         f"🎨 Сеттер: {op_labels.get(op, op)}\n"
         f"✅ Успешно: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+# ── Репортер ──────────────────────────────────────────────────────────────────
+
+async def _exec_mass_report(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовые жалобы на профиль/канал или сообщения."""
+    from services import reporter_engine as rep
+
+    mode = params.get("mode", "peer")
+    target = params.get("target", "")
+    reason = params.get("reason", "spam")
+    report_text = params.get("report_text", "")
+    msg_ids = [int(i) for i in (params.get("msg_ids") or [])]
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+
+    if not target or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры mass_report"}
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+        "AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    ok_count, fail_count = 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            if mode == "msg" and msg_ids:
+                res = await rep.report_message(
+                    acc["session_str"], dict(acc), target, msg_ids, reason, report_text
+                )
+            else:
+                res = await rep.report_peer(
+                    acc["session_str"], dict(acc), target, reason, report_text
+                )
+            if res["ok"]:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+        except Exception as exc:
+            log.warning("mass_report op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(2.5)
+
+    from services.reporter_engine import REPORT_REASONS
+    reason_label = REPORT_REASONS.get(reason, ("?", ""))[0]
+    summary = (
+        f"🚨 Жалобы на {target} [{reason_label}]\n"
+        f"✅ Отправлено: {ok_count}/{total}"
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
