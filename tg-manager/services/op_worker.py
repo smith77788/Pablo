@@ -3136,7 +3136,9 @@ async def _exec_bulk_create_channels_multi(
     from services import account_manager, session_simulator
     import random
 
-    account_ids = [int(x) for x in params["account_ids"]]
+    account_ids = [int(x) for x in (params.get("account_ids") or [])]
+    if not account_ids:
+        return {"status": "failed", "reason": "Не указаны account_ids"}
     title_base = params.get("title", "Channel")
     name_mode = params.get("name_mode", "none")
     channel_count = int(params.get("channel_count", 1))
