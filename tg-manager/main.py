@@ -98,6 +98,7 @@ from bot.handlers import persona_hub as persona_handler
 from bot.handlers import stars_hub as stars_handler
 from bot.handlers import audience_dna_hub as audience_dna_handler
 from bot.handlers import narrative_hub as narrative_handler
+from bot.handlers import nodes_hub as nodes_handler
 from services import narrative_engine
 from services import auto_funnel as auto_funnel_svc
 from services import ghost_engine
@@ -296,6 +297,7 @@ async def main() -> None:
     dp.include_router(stars_handler.router)
     dp.include_router(audience_dna_handler.router)
     dp.include_router(narrative_handler.router)
+    dp.include_router(nodes_handler.router)
     dp.include_router(relay_handler.router)  # relay last — catches F.reply_to_message
     # admin message handler AFTER relay so FSM handlers take priority
     dp.include_router(admin_users_handler.router)

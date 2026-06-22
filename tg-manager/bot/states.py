@@ -608,3 +608,23 @@ class PersonaCreateFSM(StatesGroup):
     entering_speech_style = State()  # шаг 5: стиль речи (кнопки)
     entering_backstory = State()   # шаг 6: предыстория (опционально)
     confirming = State()           # шаг 7: подтверждение
+
+
+class NodesAddFSM(StatesGroup):
+    waiting_chat_id   = State()   # шаг 1: ввод chat_id форум-группы
+    waiting_name      = State()   # шаг 2: название воркспейса
+
+
+class NodesProvisionFSM(StatesGroup):
+    waiting_entity_type = State()   # шаг 1: выбор типа сущности
+    waiting_entity_id   = State()   # шаг 2: ввод ID сущности
+    waiting_topic_name  = State()   # шаг 3: название топика
+
+
+class NodesBulkFSM(StatesGroup):
+    waiting_entity_type = State()   # шаг 1: тип сущностей
+    waiting_ids         = State()   # шаг 2: список ID через запятую
+
+
+class NodesBroadcastFSM(StatesGroup):
+    waiting_message = State()       # текст алерта

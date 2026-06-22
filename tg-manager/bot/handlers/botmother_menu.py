@@ -70,6 +70,7 @@ from bot.callbacks import (
     GraphCb,
     ApiHubCb,
     ComplianceCb,
+    NodesCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -221,8 +222,9 @@ def _monitoring_kb():
     kb.button(text="👻 Ghost Engine", callback_data=GhostCb(action="menu"))
     kb.button(text="⚛️ Physics Engine", callback_data=PhysicsCb(action="menu"))
     kb.button(text="🛡️ Account Shield", callback_data=ShieldCb(action="menu"))
+    kb.button(text="📡 Nodes (форум-воркспейс)", callback_data=NodesCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup()
 
 

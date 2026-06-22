@@ -594,3 +594,12 @@ class DnaCb(CallbackData, prefix="dna"):
 
     action: str         # menu|report|recs|compute|history
     bot_id: int = 0
+
+
+class NodesCb(CallbackData, prefix="nd"):
+    """BotMother Nodes — Telegram Forum Workspace management."""
+
+    action: str          # menu|add|view|threads|provision|broadcast|bulk_close|remove|thread_close|enable_forum
+    node_id: int = 0
+    thread_id: int = 0
+    entity_type: str = ""
