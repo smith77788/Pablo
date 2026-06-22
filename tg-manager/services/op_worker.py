@@ -4477,6 +4477,9 @@ async def _exec_bulk_edit_channels(
     ok_total = 0
     err_total = 0
     step = 0
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(accounts), op_id
+    )
 
     for acc in accounts:
         if await _is_cancelled(pool, op_id):
