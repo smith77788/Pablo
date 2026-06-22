@@ -2916,9 +2916,20 @@ async def _exec_global_presence_bot(
             )
 
         if result.get("error"):
+            _gp_bot_err = str(result["error"])
+            if _is_dead_session_error(_gp_bot_err):
+                try:
+                    await pool.execute(
+                        """UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',
+                               status_reason=$2 WHERE id=$1 AND is_active=TRUE""",
+                        acc["id"], f"Dead session (gp_bot): {_gp_bot_err[:180]}",
+                    )
+                    log.warning("op_worker gp_bot: deactivated dead session account_id=%s", acc["id"])
+                except Exception as _dbe:
+                    log.warning("op_worker gp_bot: deactivate failed: %s", _dbe)
             await pool.execute(
                 "UPDATE global_presence_targets SET status='failed', error_message=$1 WHERE id=$2",
-                str(result["error"])[:500],
+                _gp_bot_err[:500],
                 target["id"],
             )
             failed_count += 1
@@ -2926,7 +2937,7 @@ async def _exec_global_presence_bot(
                 acc["id"],
                 "global_presence_bot",
                 success=False,
-                error=str(result["error"])[:100],
+                error=_gp_bot_err[:100],
             )
             await _audit(
                 pool,
@@ -2936,7 +2947,7 @@ async def _exec_global_presence_bot(
                 operation_id=op_id,
                 account_id=acc["id"],
                 target=bot_name[:100],
-                error_msg=str(result["error"])[:200],
+                error_msg=_gp_bot_err[:200],
             )
             await pool.execute(
                 "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
