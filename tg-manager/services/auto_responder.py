@@ -757,6 +757,8 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, main_bot=None) ->
                     ),
                     return_exceptions=True,
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("Auto-responder loop error")
         await asyncio.sleep(10)
@@ -768,6 +770,8 @@ async def run_inactivity_sweep(pool: asyncpg.Pool, http: aiohttp.ClientSession) 
     while True:
         try:
             await _inactivity_sweep(pool, http)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("inactivity_sweep error")
         await asyncio.sleep(3600)  # hourly

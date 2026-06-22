@@ -31,6 +31,8 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession, bot: Bot) -> None
     while True:
         try:
             await _check_pending(pool, http, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.exception("payment_checker error: %s", e)
         await asyncio.sleep(30)

@@ -302,6 +302,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             # Ping Telegram sessions every cycle to detect dead sessions
             await _check_dead_sessions(pool, bot)
             cycle += 1
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.exception("account_monitor error: %s", exc)
         await asyncio.sleep(_INTERVAL)

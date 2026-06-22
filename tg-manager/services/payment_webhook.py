@@ -377,6 +377,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         # Держать живым
         while True:
             await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         log.exception("Payment webhook server error: %s", e)
     finally:

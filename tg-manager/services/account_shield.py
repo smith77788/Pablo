@@ -221,6 +221,8 @@ async def run(pool: asyncpg.Pool, bot) -> None:
     while True:
         try:
             await _run_cycle(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.error("Account Shield loop error: %s", exc)
         await asyncio.sleep(_LOOP_INTERVAL)
@@ -232,6 +234,8 @@ async def _run_cycle(pool: asyncpg.Pool, bot) -> None:
         owners = await pool.fetch(
             "SELECT DISTINCT owner_id FROM tg_accounts WHERE is_active=TRUE"
         )
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         log.debug("account_shield._run_cycle owners: %s", exc)
         return

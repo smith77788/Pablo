@@ -8,7 +8,7 @@ from datetime import timezone
 
 import asyncpg
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BotCb, DnaCb, BmCb
@@ -23,7 +23,7 @@ router = Router()
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _back_to_dna(bot_id: int) -> "InlineKeyboardMarkup":  # type: ignore[name-defined]
+def _back_to_dna(bot_id: int) -> InlineKeyboardMarkup:
     return (
         InlineKeyboardBuilder()
         .button(text="◀️ К DNA-отчёту", callback_data=DnaCb(action="report", bot_id=bot_id))
@@ -31,7 +31,7 @@ def _back_to_dna(bot_id: int) -> "InlineKeyboardMarkup":  # type: ignore[name-de
     )
 
 
-def _back_to_list() -> "InlineKeyboardMarkup":  # type: ignore[name-defined]
+def _back_to_list() -> InlineKeyboardMarkup:
     return (
         InlineKeyboardBuilder()
         .button(text="◀️ К списку ботов", callback_data=DnaCb(action="menu"))

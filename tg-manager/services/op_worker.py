@@ -606,6 +606,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     while True:
         try:
             await _process_pending(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.exception("op_worker error: %s", e)
         _watchdog_tick += 1

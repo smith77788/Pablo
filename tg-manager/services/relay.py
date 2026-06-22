@@ -228,6 +228,8 @@ async def run(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
             stale = set(_offsets.keys()) - active_bot_ids
             for stale_id in stale:
                 _offsets.pop(stale_id, None)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("Relay cleanup error")
         await asyncio.sleep(300)

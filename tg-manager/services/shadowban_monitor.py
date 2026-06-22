@@ -225,6 +225,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         try:
             await _check_search_visibility(pool, bot)
             await _check_account_restrictions(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.exception("shadowban_monitor error: %s", exc)
         await asyncio.sleep(_INTERVAL)

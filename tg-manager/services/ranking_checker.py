@@ -418,6 +418,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
     while True:
         try:
             await _check_all(pool, bot)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             log.exception("ranking_checker._check_all error: %s", exc)
         await asyncio.sleep(_INTERVAL)
