@@ -869,6 +869,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_mass_report(pool, bot, op_id, owner_id, params)
             elif op_type == "content_clone":
                 result = await _exec_content_clone(pool, bot, op_id, owner_id, params)
+            elif op_type == "niche_growth_post":
+                result = await _exec_niche_growth_post(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6279,5 +6281,163 @@ async def _exec_content_clone(
         "ok": ok_count,
         "failed": fail_count,
         "cloned_to": cloned_to[:50],
+        "summary": summary,
+    }
+
+
+async def _exec_niche_growth_post(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Growth Agent: ищет группы в нише → вступает → постит рекламный текст."""
+    from services import niche_searcher, resource_selector, account_manager
+
+    niche: str = params.get("niche", "")
+    promo_text: str = params.get("promo_text", "")
+    max_groups: int = int(params.get("max_groups") or 50)
+
+    if not niche or not promo_text:
+        return {"status": "failed", "reason": "Нет ниши или рекламного текста"}
+
+    # Выбираем до 5 активных аккаунтов для постинга
+    accounts = await resource_selector.select_accounts(pool, owner_id, 5, action_type="post")
+    if not accounts:
+        return {
+            "status": "failed",
+            "reason": "Нет активных аккаунтов",
+            "summary": "❌ Нет активных аккаунтов для Growth Agent",
+        }
+
+    # Берём лучший аккаунт для поиска групп
+    search_acc = accounts[0]
+    session_str = search_acc.get("session_str", "")
+    if not session_str:
+        return {"status": "failed", "reason": "Аккаунт без сессии"}
+
+    # Генерируем ключевые слова для ниши
+    try:
+        keywords = await niche_searcher.generate_keywords(niche)
+        log.info("niche_growth_post op_id=%d: keywords=%s", op_id, keywords)
+    except Exception as exc:
+        log.warning("niche_growth_post: keyword gen failed: %s", exc)
+        keywords = [niche]
+
+    # Ищем группы
+    try:
+        groups = await niche_searcher.search_niche_groups(
+            session_str,
+            keywords,
+            min_members=50,
+            max_per_keyword=20,
+            _acc=search_acc,
+        )
+    except Exception as exc:
+        log.warning("niche_growth_post: group search failed: %s", exc)
+        return {
+            "status": "failed",
+            "reason": f"Поиск групп не удался: {exc}",
+            "summary": "❌ Не удалось найти группы в нише",
+        }
+
+    if not groups:
+        return {
+            "status": "done",
+            "ok": 0,
+            "fail": 0,
+            "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить описание.",
+        }
+
+    groups = groups[:max_groups]
+    total = len(groups)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    ok_count = 0
+    err_count = 0
+    acc_idx = 0
+
+    for idx, grp in enumerate(groups):
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "fail": err_count,
+                "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+            }
+
+        # Round-robin по аккаунтам
+        acc = accounts[acc_idx % len(accounts)]
+        acc_idx += 1
+
+        join_ref = grp.get("join_ref", "")
+        grp_id = grp.get("id", 0)
+        grp_title = grp.get("title", "")
+        username = grp.get("username", "")
+        access_hash = grp.get("access_hash", 0)
+
+        # Шаг 1: Вступить в группу
+        try:
+            join_result = await account_manager.join_channel(
+                acc["session_str"], join_ref, _acc=acc
+            )
+            if "error" in join_result and not join_result.get("already_member"):
+                log.info(
+                    "niche_growth_post: join failed grp=%s: %s",
+                    join_ref, join_result.get("error"),
+                )
+                err_count += 1
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                continue
+        except Exception as exc:
+            log.warning("niche_growth_post: join exc grp=%s: %s", join_ref, exc)
+            err_count += 1
+            await pool.execute(
+                "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+            )
+            continue
+
+        # Пауза после вступления
+        await asyncio.sleep(3)
+
+        # Шаг 2: Опубликовать текст
+        try:
+            post_result = await account_manager.post_to_channel(
+                acc["session_str"],
+                grp_id,
+                promo_text,
+                access_hash=access_hash,
+                username=username,
+                _acc=acc,
+            )
+            if "error" in post_result:
+                log.info(
+                    "niche_growth_post: post failed grp=%s title=%r: %s",
+                    join_ref, grp_title, post_result.get("error"),
+                )
+                err_count += 1
+            else:
+                ok_count += 1
+                log.info(
+                    "niche_growth_post: posted to grp=%s title=%r msg_id=%s",
+                    join_ref, grp_title, post_result.get("msg_id"),
+                )
+        except Exception as exc:
+            log.warning("niche_growth_post: post exc grp=%s: %s", join_ref, exc)
+            err_count += 1
+
+        await pool.execute(
+            "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+        )
+
+        # Пауза между группами (4–7 сек, чтобы не спамить)
+        if idx < total - 1:
+            await asyncio.sleep(5)
+
+    summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "fail": err_count,
+        "groups_found": total,
         "summary": summary,
     }

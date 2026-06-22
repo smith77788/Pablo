@@ -572,14 +572,9 @@ class ApiKeyFSM(StatesGroup):
 
 
 class GrowthAgentFSM(StatesGroup):
-    waiting_description = State()  # описание цели в свободной форме
-    waiting_entity_type = State()  # тип сущности: bot/channel/group
-    waiting_entity_id   = State()  # выбор конкретного бота/канала/группы
-    waiting_metric      = State()  # метрика: subscribers / views / revenue_usd
-    waiting_target      = State()  # числовое значение цели
-    waiting_strategy    = State()  # стратегия: aggressive/balanced/conservative
-    waiting_deadline    = State()  # дедлайн в днях
-    confirming          = State()  # финальное подтверждение перед созданием
+    waiting_niche      = State()  # ниша/тематика (куда ищем аудиторию)
+    waiting_promo_text = State()  # рекламный текст для постинга в чужих группах
+    confirming         = State()  # подтверждение запуска
 
 
 class StarsExperimentFSM(StatesGroup):
