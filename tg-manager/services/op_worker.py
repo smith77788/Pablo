@@ -4093,6 +4093,10 @@ async def _exec_network_broadcast(
     total_users = 0
     _BOT_START_DELAY_S = 2.0
 
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(bots), op_id
+    )
+
     # Pass None for session — broadcaster.run() creates its own session per task
     # (avoids closed-session bug when ClientSession exits before background tasks start)
     if segment in ("all_each", "selected_bots", "cluster"):
