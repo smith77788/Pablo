@@ -2735,14 +2735,15 @@ async def post_to_channel(
             import io as _io
             file_obj = _io.BytesIO(media_bytes)
             file_obj.name = media_filename
-            msg = await client.send_file(
-                peer,
-                file=file_obj,
-                caption=text,
-                parse_mode="html",
+            msg = await asyncio.wait_for(
+                client.send_file(peer, file=file_obj, caption=text, parse_mode="html"),
+                timeout=_OP_TIMEOUT,
             )
         else:
-            msg = await client.send_message(peer, text, parse_mode="html")
+            msg = await asyncio.wait_for(
+                client.send_message(peer, text, parse_mode="html"),
+                timeout=_OP_TIMEOUT,
+            )
         # Return resolved access_hash so caller can persist it to DB (avoids repeated dialog scans)
         resolved_hash = getattr(peer, "access_hash", 0) if hasattr(peer, "access_hash") else 0
         return {"msg_id": msg.id, "resolved_access_hash": resolved_hash or 0}
