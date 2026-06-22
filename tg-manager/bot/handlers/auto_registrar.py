@@ -334,12 +334,6 @@ async def cb_autoreg_batch_country(cb: CallbackQuery, callback_data: AutoRegCb, 
     sub = callback_data.sub or "5"
     cnt = int(sub) if sub.isdigit() else 5
     await state.update_data(batch_cnt=cnt)
-    # Переиспользуем pick_country с mode="batch"
-    from aiogram.types import CallbackQuery as CQ
-    # Передаём mode=batch через pick_country
-    class _FakeCbd:
-        sub = "batch"
-    cb2 = cb
     await cb.answer()
     client, _ = await _get_sms_client(pool)
     if not client:
