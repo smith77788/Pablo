@@ -73,6 +73,7 @@ from bot.callbacks import (
     NodesCb,
     BoostCb,
     InviterCb,
+    ProfileSetterCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -221,6 +222,7 @@ def _monitoring_kb():
     kb.button(text="🔥 Прогрев акк.", callback_data=WarmupCb(action="menu"))
     kb.button(text="👥 Парсер аудитории", callback_data=ParserCb(action="menu"))
     kb.button(text="🧹 Очиститель акк.", callback_data=CleanerCb(action="menu"))
+    kb.button(text="🎨 Сеттер профилей", callback_data=ProfileSetterCb(action="menu"))
     kb.button(text="🌐 Прокси", callback_data=ProxyCb(action="menu"))
     kb.button(text="📊 Инфра-аналитика", callback_data=InfraCb(action="menu"))
     kb.button(text="👻 Ghost Engine", callback_data=GhostCb(action="menu"))

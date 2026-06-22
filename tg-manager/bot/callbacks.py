@@ -617,3 +617,9 @@ class InviterCb(CallbackData, prefix="inv"):
 
     action: str          # menu|start|src_parser|src_manual|src_phones|pick_run|confirm
     item: str = ""       # parse_run_id или "all"
+
+
+class ProfileSetterCb(CallbackData, prefix="pset"):
+    """Сеттер профилей — массовое оформление аккаунтов."""
+
+    action: str          # menu|set_name|set_avatar|set_2fa|confirm

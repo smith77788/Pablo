@@ -863,6 +863,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_boost_stories(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_invite":
                 result = await _exec_mass_invite(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_set_profile":
+                result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6036,3 +6038,80 @@ async def _exec_mass_invite(
         + (f"\n⚠️ Ошибок: {total_fail}" if total_fail else "")
     )
     return {"status": "done", "ok": total_ok, "failed": total_fail, "summary": summary}
+
+
+# ── Сеттер профилей ───────────────────────────────────────────────────────────
+
+async def _exec_bulk_set_profile(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Массовое оформление аккаунтов: имя/bio, аватар, 2FA."""
+    from services import profile_setter_engine as pse
+
+    op = params.get("op", "")
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+        "AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    ok_count, fail_count = 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            if op == "name":
+                name_data = params.get("name_data", {})
+                # Раскрываем спинтакс для каждого аккаунта отдельно
+                fn = pse.expand_spintax(name_data.get("first_name", ""))
+                ln = pse.expand_spintax(name_data.get("last_name", ""))
+                ab = pse.expand_spintax(name_data.get("about", ""))
+                res = await pse.set_name_bio(acc["session_str"], dict(acc), fn, ln, ab)
+            elif op == "avatar":
+                url = params.get("avatar_url", "")
+                res = await pse.set_avatar_from_url(acc["session_str"], dict(acc), url)
+            elif op == "2fa":
+                res = await pse.set_2fa_password(
+                    acc["session_str"], dict(acc),
+                    new_password=params.get("new_password", ""),
+                    current_password=params.get("current_password", ""),
+                    hint=params.get("hint", ""),
+                )
+            else:
+                res = {"ok": False, "error": f"unknown op: {op}"}
+
+            if res["ok"]:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+        except Exception as exc:
+            log.warning("bulk_set_profile op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(2.0)
+
+    op_labels = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
+    summary = (
+        f"🎨 Сеттер: {op_labels.get(op, op)}\n"
+        f"✅ Успешно: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
