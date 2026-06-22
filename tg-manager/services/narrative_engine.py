@@ -195,7 +195,9 @@ async def generate_campaign_posts(
 
     posts = []
     for i, (angle, content) in enumerate(zip(angles, contents)):
-        if isinstance(content, Exception):
+        if isinstance(content, asyncio.CancelledError):
+            raise content
+        if isinstance(content, BaseException):
             log.warning("narrative_engine post %d generation error: %s", i, content)
             content = f"[Ошибка генерации: {type(content).__name__}]"
         posts.append({

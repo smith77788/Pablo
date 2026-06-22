@@ -121,7 +121,9 @@ class GiftInventoryService:
 
         all_gifts: list[dict] = []
         for i, result in enumerate(results):
-            if isinstance(result, Exception):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, BaseException):
                 log.error(
                     "scan_accounts: failed for account %d: %s",
                     account_ids[i],
