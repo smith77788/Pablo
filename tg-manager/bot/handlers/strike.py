@@ -643,18 +643,6 @@ async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     await _show_strike_history(callback, pool)
 
 
-# Обработчик кнопки "История" из финального отчёта (callback_data="strike:history")
-@router.callback_query(F.data == "strike:history")
-async def cb_strike_history_shortcut(
-    callback: CallbackQuery, pool: asyncpg.Pool
-) -> None:
-    if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
-    await callback.answer()
-    await _show_strike_history(callback, pool)
-
-
 # ── re-run: повтор удара по той же цели ──────────────────────────────────────
 
 

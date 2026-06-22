@@ -958,8 +958,8 @@ async def cb_dm_pause(
             callback.from_user.id,
             str(campaign_id),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("dm_pause: operation_queue cancel failed campaign_id=%d: %s", campaign_id, e)
     # Also update dm_campaigns status so dm_engine loop exits on next poll
     try:
         await pool.execute(
@@ -967,8 +967,8 @@ async def cb_dm_pause(
             campaign_id,
             callback.from_user.id,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log.error("dm_pause: failed to set campaign status=paused campaign_id=%d: %s", campaign_id, e)
     await cb_dm_detail(callback, callback_data, pool)
 
 
