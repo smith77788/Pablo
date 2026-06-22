@@ -527,8 +527,8 @@ async def _growth_search_and_join(
     groups = await niche_searcher.search_niche_groups(
         session_string=search_acc["session_str"],
         keywords=keywords,
-        min_members=200,
-        max_per_keyword=15,
+        min_members=50,
+        max_per_keyword=20,
         exclude_ids=already_joined,
         _acc=dict(search_acc),
     )

@@ -126,12 +126,12 @@ def _keywords_rule_based(description: str) -> list[str]:
 async def search_niche_groups(
     session_string: str,
     keywords: list[str],
-    min_members: int = 200,
-    max_per_keyword: int = 15,
+    min_members: int = 50,
+    max_per_keyword: int = 20,
     exclude_ids: set[int] | None = None,
     _acc: dict | None = None,
 ) -> list[dict[str, Any]]:
-    """Поиск публичных мегагрупп в Telegram по списку ключевых слов.
+    """Поиск публичных групп в Telegram по списку ключевых слов.
 
     Возвращает дедуплицированный список:
       {id, title, username, access_hash, members, join_ref}
@@ -154,11 +154,26 @@ async def search_niche_groups(
                         continue
                     if g["id"] not in found:
                         found[g["id"]] = g
-                # Небольшая пауза между запросами
                 await asyncio.sleep(1.5)
             except Exception as exc:
                 log.warning("niche_searcher: keyword=%r failed: %s", kw, exc)
                 continue
+
+        # Если ничего не нашли → повторяем с relaxed min_members=0
+        if not found:
+            log.info("niche_searcher: no results with min=%d, retrying with min=0", min_members)
+            for kw in keywords[:6]:
+                try:
+                    groups = await _search_one_keyword(client, kw, max_per_keyword, 0)
+                    for g in groups:
+                        if exclude_ids and g["id"] in exclude_ids:
+                            continue
+                        if g["id"] not in found:
+                            found[g["id"]] = g
+                    await asyncio.sleep(1.5)
+                except Exception as exc:
+                    log.warning("niche_searcher relaxed: keyword=%r failed: %s", kw, exc)
+                    continue
 
     except Exception as exc:
         log.warning("niche_searcher: connect/search failed: %s", exc)
@@ -170,8 +185,8 @@ async def search_niche_groups(
 
     results = sorted(found.values(), key=lambda g: g["members"], reverse=True)
     log.info(
-        "niche_searcher: %d keywords → %d unique groups (min_members=%d)",
-        len(keywords), len(results), min_members,
+        "niche_searcher: %d keywords → %d unique groups",
+        len(keywords), len(results),
     )
     return results
 
@@ -183,7 +198,7 @@ async def _search_one_keyword(
     min_members: int,
 ) -> list[dict[str, Any]]:
     from telethon.tl.functions.contacts import SearchRequest  # type: ignore
-    from telethon.tl.types import Channel  # type: ignore
+    from telethon.tl.types import Channel, Chat  # type: ignore
 
     result = await asyncio.wait_for(
         client(SearchRequest(q=keyword, limit=limit)),
@@ -192,25 +207,32 @@ async def _search_one_keyword(
 
     groups = []
     for chat in getattr(result, "chats", []):
-        if not isinstance(chat, Channel):
+        # Принимаем Channel (supergroup/megagroup) и базовые Chat-группы
+        is_channel = isinstance(chat, Channel)
+        is_basic   = isinstance(chat, Chat)
+        if not (is_channel or is_basic):
             continue
-        if not getattr(chat, "megagroup", False):
-            continue  # только мегагруппы, не каналы
+        # Исключаем каналы-вещалки (broadcast=True), но НЕ megagroup=False
+        if is_channel and getattr(chat, "broadcast", False):
+            continue
         if getattr(chat, "restricted", False) or getattr(chat, "scam", False):
             continue
         members = getattr(chat, "participants_count", 0) or 0
-        if members < min_members:
+        # Фильтруем по участникам только если значение известно (> 0)
+        if members > 0 and members < min_members:
             continue
+        # Предпочитаем группы с username, но берём и без (invite link)
         username = getattr(chat, "username", "") or ""
-        if not username:
-            continue  # только публичные (есть username)
+        join_ref = f"@{username}" if username else None
+        if not join_ref:
+            continue  # без username bulk_join не умеет вступать
         groups.append({
             "id":          int(chat.id),
             "title":       getattr(chat, "title", "") or "",
             "username":    username,
             "access_hash": getattr(chat, "access_hash", 0) or 0,
             "members":     members,
-            "join_ref":    f"@{username}",
+            "join_ref":    join_ref,
         })
     return groups
 
