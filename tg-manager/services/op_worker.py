@@ -867,6 +867,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
             elif op_type == "mass_report":
                 result = await _exec_mass_report(pool, bot, op_id, owner_id, params)
+            elif op_type == "content_clone":
+                result = await _exec_content_clone(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6190,3 +6192,92 @@ async def _exec_mass_report(
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
     )
     return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+# ── Content Clone executor ──────────────────────────────────────────────────
+
+
+async def _exec_content_clone(
+    pool: asyncpg.Pool,
+    bot,
+    op_id: int,
+    owner_id: int,
+    params: dict,
+) -> dict:
+    """Клонирует сообщения из канала-источника в список каналов-целей."""
+    from services.content_cloner_engine import clone_to_channel, get_last_msg_ids
+
+    source_ref: str = params.get("source_ref", "")
+    target_refs: list[str] = params.get("target_refs", [])
+    mode: str = params.get("mode", "forward")       # forward | copy
+    msg_ids: list[int] = params.get("msg_ids", [])
+    msg_count: int = int(params.get("msg_count", 10))
+    account_ids: list[int] = params.get("account_ids", [])
+
+    if not source_ref or not target_refs:
+        return {"status": "failed", "summary": "⚠️ Не указан источник или цели"}
+
+    accounts = await pool.fetch(
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE "
+        "WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) AND a.is_active=TRUE AND a.session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    acc = dict(accounts[0])
+
+    # Если msg_ids не переданы — получаем последние msg_count сообщений
+    if not msg_ids:
+        msg_ids = await get_last_msg_ids(acc["session_str"], acc, source_ref, msg_count)
+    if not msg_ids:
+        return {"status": "failed", "summary": "⚠️ Не удалось получить сообщения источника"}
+
+    total = len(target_refs)
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1, done_items=0 WHERE id=$2",
+        total, op_id,
+    )
+
+    ok_count = 0
+    fail_count = 0
+    cloned_to: list[str] = []
+
+    for idx, target_ref in enumerate(target_refs, 1):
+        try:
+            res = await clone_to_channel(
+                acc["session_str"], acc, source_ref, target_ref, msg_ids, mode,
+            )
+            if res["ok"] > 0:
+                ok_count += 1
+                cloned_to.append(target_ref)
+            else:
+                fail_count += 1
+                log.warning(
+                    "content_clone op=%d target=%s: ok=0 errors=%s",
+                    op_id, target_ref, res["errors"][:2],
+                )
+        except Exception as exc:
+            log.warning("content_clone op=%d target=%s: %s", op_id, target_ref, exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(1.5)
+
+    mode_label = "Пересылка" if mode == "forward" else "Копирование"
+    summary = (
+        f"📋 {mode_label} из {source_ref}\n"
+        f"📨 Сообщений: {len(msg_ids)} → {total} канал(ов)\n"
+        f"✅ Успешно: {ok_count}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {
+        "status": "done",
+        "ok": ok_count,
+        "failed": fail_count,
+        "cloned_to": cloned_to[:50],
+        "summary": summary,
+    }

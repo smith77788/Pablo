@@ -76,6 +76,7 @@ from bot.callbacks import (
     ProfileSetterCb,
     PhoneCheckerCb,
     ReporterCb,
+    ContentClonerCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -175,13 +176,14 @@ def _operations_kb(plan: str = "free"):
     kb.button(text=f"{_lock(plan,'starter')}✍️ Быстрый пост", callback_data=QuickPostCb(action="start"))
     kb.button(text="🚀 Накрутка", callback_data=BoostCb(action="menu"))
     kb.button(text="👥 Инвайтер", callback_data=InviterCb(action="menu"))
+    kb.button(text="📋 Контент-клонер", callback_data=ContentClonerCb(action="menu"))
     kb.button(text="⚡ Массовые действия", callback_data=BmCb(action="bulk_ops"))
     kb.button(text=f"{_lock(plan,'starter')}📦 Пакеты присутствия", callback_data=PackCb(action="menu"))
     kb.button(text="🎁 Подарки", callback_data="gt:main")
     kb.button(text="📋 Очередь задач", callback_data=MassOpCb(action="queue"))
     kb.button(text=f"{_lock(plan,'starter')}⏱️ Планировщик", callback_data=BmCb(action="op_planner"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 

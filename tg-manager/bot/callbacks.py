@@ -636,3 +636,10 @@ class ReporterCb(CallbackData, prefix="rpt"):
 
     action: str          # menu|start_peer|start_msg|reason_*|confirm
     sub: str = ""        # режим: peer|msg
+
+
+class ContentClonerCb(CallbackData, prefix="ccl"):
+    """Контент-клонер — копирование сообщений из канала в каналы."""
+
+    action: str          # menu|set_source|set_targets|add_target|del_target|set_count|mode_*|confirm
+    sub: str = ""        # forward|copy (режим клонирования)
