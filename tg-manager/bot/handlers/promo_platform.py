@@ -1553,11 +1553,16 @@ async def fsm_topcheck_keyword(message: Message, state: FSMContext, pool: asyncp
 
     try:
         rows = await pool.fetch(
-            """SELECT k.keyword, k.target_username, r.position, r.checked_at
-               FROM ranking_keywords k
-               LEFT JOIN ranking_results r ON r.keyword_id = k.id
+            """SELECT DISTINCT k.keyword,
+                      mb.username AS target_username,
+                      ph.position,
+                      ph.checked_at
+               FROM search_keywords k
+               JOIN managed_bots mb ON mb.bot_id = k.bot_id
+               LEFT JOIN position_history ph
+                   ON ph.bot_id = k.bot_id AND LOWER(ph.keyword) = LOWER(k.keyword)
                WHERE LOWER(k.keyword) = LOWER($1)
-               ORDER BY r.checked_at DESC LIMIT 10""",
+               ORDER BY ph.checked_at DESC NULLS LAST LIMIT 10""",
             keyword,
         )
     except Exception:

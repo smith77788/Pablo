@@ -643,11 +643,12 @@ async def cb_parser_geo_radius(
 
     # Запускаем парсинг
     acc = await pool.fetchrow(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND is_active=TRUE "
-        "AND session_str IS NOT NULL AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
-        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, p.proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id "
+        "WHERE a.owner_id=$1 AND a.is_active=TRUE "
+        "AND a.session_str IS NOT NULL AND (a.cooldown_until IS NULL OR a.cooldown_until < NOW()) "
+        "ORDER BY a.trust_score DESC NULLS LAST LIMIT 1",
         callback.from_user.id,
     )
     if not acc:

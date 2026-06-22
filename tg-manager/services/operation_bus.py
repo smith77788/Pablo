@@ -200,6 +200,48 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 1,
         "icon": "👑",
     },
+    "boost_views": {
+        "description": "Накрутка просмотров постов",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "👁",
+    },
+    "boost_reactions": {
+        "description": "Накрутка реакций на посты",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "❤️",
+    },
+    "boost_stories": {
+        "description": "Накрутка просмотров историй",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "📖",
+    },
+    "mass_invite": {
+        "description": "Массовый инвайт участников в группы",
+        "min_plan": "pro",
+        "max_retries": 2,
+        "icon": "📨",
+    },
+    "bulk_set_profile": {
+        "description": "Массовая установка профилей аккаунтов",
+        "min_plan": "starter",
+        "max_retries": 1,
+        "icon": "🖼",
+    },
+    "mass_report": {
+        "description": "Массовая жалоба на контент",
+        "min_plan": "pro",
+        "max_retries": 1,
+        "icon": "🚩",
+    },
+    "content_clone": {
+        "description": "Клонирование контента между каналами",
+        "min_plan": "starter",
+        "max_retries": 2,
+        "icon": "📋",
+    },
 }
 
 
