@@ -44,6 +44,8 @@ _PAGE_SIZE = 10
 class ParserFSM(StatesGroup):
     waiting_source = State()
     waiting_limit = State()
+    geo_coords = State()   # широта,долгота для гео-парсинга
+    geo_radius = State()   # радиус в метрах
 
 
 def _back_kb() -> InlineKeyboardBuilder:
@@ -60,6 +62,10 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(
         text="⚡ Парсить активных (группа)",
         callback_data=ParserCb(action="start_active"),
+    )
+    kb.button(
+        text="📍 Гео-парсинг (Nearby)",
+        callback_data=ParserCb(action="start_geo"),
     )
     kb.button(text="📋 История запусков", callback_data=ParserCb(action="runs"))
     kb.button(text="📊 Моя аудитория", callback_data=ParserCb(action="audience"))
@@ -576,3 +582,172 @@ async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )
+
+
+# ── Гео-парсинг (Nearby People) ───────────────────────────────────────────────
+
+@router.callback_query(ParserCb.filter(F.action == "start_geo"))
+async def cb_parser_geo_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(ParserFSM.geo_coords)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    await callback.message.edit_text(
+        "📍 <b>Гео-парсинг (Nearby People)</b>\n\n"
+        "Собирает пользователей Telegram, находящихся поблизости.\n\n"
+        "Введите координаты через запятую:\n"
+        "<code>55.7558, 37.6173</code>\n\n"
+        "<i>Совет: откройте любую карту, найдите нужный район и скопируйте координаты.</i>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.message(ParserFSM.geo_coords)
+async def msg_parser_geo_coords(message: Message, state: FSMContext) -> None:
+    import re
+    text = message.text or ""
+    m = re.search(r"([-+]?\d+\.?\d*)[,\s]+([-+]?\d+\.?\d*)", text)
+    if not m:
+        await message.answer("⚠️ Не удалось распознать координаты.\nВведите: 55.7558, 37.6173")
+        return
+    lat, lon = float(m.group(1)), float(m.group(2))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        await message.answer("⚠️ Неверные координаты. Широта: -90..90, долгота: -180..180")
+        return
+    await state.update_data(geo_lat=lat, geo_lon=lon)
+    await state.set_state(ParserFSM.geo_radius)
+    kb = InlineKeyboardBuilder()
+    for label, val in [("500м", 500), ("1км", 1000), ("2км", 2000), ("5км", 5000)]:
+        kb.button(text=label, callback_data=f"prs:geo_r:{val}")
+    kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
+    kb.adjust(4, 1)
+    await message.answer(
+        f"📌 Координаты: <code>{lat}, {lon}</code>\n\n"
+        "Выберите радиус поиска:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("prs:geo_r:"))
+async def cb_parser_geo_radius(
+    callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    await callback.answer()
+    radius = int(callback.data.split(":")[-1])
+    await state.update_data(geo_radius=radius)
+    data = await state.get_data()
+    lat = data.get("geo_lat", 0)
+    lon = data.get("geo_lon", 0)
+
+    # Запускаем парсинг
+    acc = await pool.fetchrow(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "AND session_str IS NOT NULL AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
+        "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
+        callback.from_user.id,
+    )
+    if not acc:
+        await callback.message.edit_text(
+            "⚠️ Нет доступных аккаунтов.",
+            reply_markup=_back_kb().as_markup(),
+        )
+        await state.clear()
+        return
+
+    await callback.message.edit_text(
+        f"⏳ Ищу людей в радиусе <b>{radius}м</b> от <code>{lat}, {lon}</code>...",
+        parse_mode="HTML",
+    )
+    await state.clear()
+
+    try:
+        results = await _exec_geo_parse(dict(acc), lat, lon, radius)
+    except Exception as exc:
+        await callback.message.edit_text(
+            f"❌ Ошибка гео-парсинга: <code>{exc}</code>",
+            parse_mode="HTML",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    if not results:
+        await callback.message.edit_text(
+            "📍 Рядом никого не найдено (Nearby People отключён у пользователей).",
+            reply_markup=_back_kb().as_markup(),
+        )
+        return
+
+    # Сохраняем в parsed_audiences
+    owner_id = callback.from_user.id
+    saved = 0
+    import time
+    run_id = int(time.time())
+    for user in results:
+        try:
+            await pool.execute(
+                """INSERT INTO parsed_audiences(
+                    owner_id, source_type, source_title, parse_run_id,
+                    tg_user_id, username, first_name, last_name, geo_city
+                ) VALUES($1,'geo','Nearby',$2,$3,$4,$5,$6,$7)
+                ON CONFLICT (owner_id, source_id, tg_user_id) DO NOTHING""",
+                owner_id, run_id,
+                user.get("user_id"), user.get("username", ""),
+                user.get("first_name", ""), user.get("last_name", ""),
+                f"{lat},{lon}",
+            )
+            saved += 1
+        except Exception:
+            pass
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Посмотреть аудиторию", callback_data=ParserCb(action="audience"))
+    kb.button(text="◀️ В меню парсера", callback_data=ParserCb(action="menu"))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"✅ <b>Гео-парсинг завершён</b>\n\n"
+        f"📍 Координаты: <code>{lat}, {lon}</code>\n"
+        f"📏 Радиус: <b>{radius}м</b>\n"
+        f"👥 Найдено: <b>{len(results)}</b> пользователей\n"
+        f"💾 Сохранено: <b>{saved}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+async def _exec_geo_parse(acc: dict, lat: float, lon: float, radius: int) -> list[dict]:
+    """Выполнить GetLocatedRequest и вернуть список пользователей."""
+    import asyncio
+    from services.account_manager import _make_client
+    from telethon.tl.functions.contacts import GetLocatedRequest
+    from telethon.tl.types import InputGeoPoint, User
+
+    client = _make_client(acc.get("session_str", ""), acc)
+    users = []
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15.0)
+        result = await asyncio.wait_for(
+            client(GetLocatedRequest(
+                geo_point=InputGeoPoint(lat=lat, long=lon, accuracy_radius=radius),
+                self_expires=0,  # не публиковать своё местоположение
+            )),
+            timeout=15.0,
+        )
+        for update in getattr(result, "updates", []):
+            for entity in getattr(update, "users", []):
+                if isinstance(entity, User) and not entity.bot:
+                    users.append({
+                        "user_id": int(entity.id),
+                        "username": getattr(entity, "username", "") or "",
+                        "first_name": getattr(entity, "first_name", "") or "",
+                        "last_name": getattr(entity, "last_name", "") or "",
+                    })
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    return users
