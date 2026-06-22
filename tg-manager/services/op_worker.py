@@ -1122,6 +1122,9 @@ async def _exec_bulk_bot_edit(
 
     ok_count = 0
     fail_count = 0
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", len(bots_rows), op_id
+    )
 
     field_to_method = {
         "name": "setMyName",
