@@ -34,6 +34,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
         while True:
             try:
                 await _process_due_runs(pool, http)
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 log.error("Auto-Funnel loop error: %s", e)
             await asyncio.sleep(_LOOP_INTERVAL)

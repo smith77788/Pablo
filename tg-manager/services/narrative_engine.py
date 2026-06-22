@@ -531,6 +531,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             published = await execute_pending_posts(pool, bot)
             if published:
                 log.info("narrative_engine: published %d narrative posts", published)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log_exc_swallow(log, f"narrative_engine loop error: {e}")
         await asyncio.sleep(15 * 60)  # 15 минут

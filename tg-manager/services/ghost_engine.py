@@ -270,9 +270,13 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             for profile in profiles:
                 try:
                     await _process_profile(pool, profile)
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     log.debug("Ghost Engine: unhandled error in profile %d: %s", profile["id"], e)
                 await asyncio.sleep(random.uniform(_STAGGER_MIN, _STAGGER_MAX))
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             log.error("Ghost Engine loop error: %s", e)
         await asyncio.sleep(_LOOP_INTERVAL)

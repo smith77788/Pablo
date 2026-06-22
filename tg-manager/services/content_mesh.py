@@ -246,6 +246,8 @@ async def run(pool: asyncpg.Pool, bot: Bot) -> None:
             for mesh in meshes:
                 try:
                     await _poll_source(pool, mesh)
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     log.debug("Content Mesh: poll error mesh %d: %s", mesh["id"], e)
                 await asyncio.sleep(5)
