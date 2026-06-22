@@ -623,3 +623,9 @@ class ProfileSetterCb(CallbackData, prefix="pset"):
     """Сеттер профилей — массовое оформление аккаунтов."""
 
     action: str          # menu|set_name|set_avatar|set_2fa|confirm
+
+
+class PhoneCheckerCb(CallbackData, prefix="phchk"):
+    """Чекер номеров телефонов."""
+
+    action: str          # menu|start

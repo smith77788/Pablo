@@ -71,6 +71,7 @@ from bot.handlers import infra_analytics as infra_analytics_handler
 from bot.handlers import boost as boost_handler
 from bot.handlers import mass_inviter as mass_inviter_handler
 from bot.handlers import profile_setter as profile_setter_handler
+from bot.handlers import phone_checker as phone_checker_handler
 from bot.handlers import account_cleaner as account_cleaner_handler
 from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
@@ -285,6 +286,7 @@ async def main() -> None:
     dp.include_router(boost_handler.router)
     dp.include_router(mass_inviter_handler.router)
     dp.include_router(profile_setter_handler.router)
+    dp.include_router(phone_checker_handler.router)
     dp.include_router(promo_handler.router)
     dp.include_router(self_promo_handler.router)
     dp.include_router(ghost_hub_handler.router)
