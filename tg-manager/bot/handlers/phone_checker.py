@@ -46,7 +46,7 @@ async def _get_best_account(pool: asyncpg.Pool, owner_id: int) -> asyncpg.Record
     return await pool.fetchrow(
         "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
         "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND is_active=TRUE "
+        "FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE "
         "AND session_str IS NOT NULL AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
         "ORDER BY trust_score DESC NULLS LAST LIMIT 1",
         owner_id,

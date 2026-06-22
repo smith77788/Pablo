@@ -47,7 +47,7 @@ def _cancel_kb():
 
 async def _total_accs(pool: asyncpg.Pool, owner_id: int) -> int:
     row = await pool.fetchrow(
-        "SELECT COUNT(*) AS cnt FROM telegram_accounts "
+        "SELECT COUNT(*) AS cnt FROM tg_accounts "
         "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
         "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
         owner_id,
@@ -213,7 +213,7 @@ async def cb_setter_confirm(
     op = data.get("op", "")
 
     rows = await pool.fetch(
-        "SELECT id FROM telegram_accounts "
+        "SELECT id FROM tg_accounts "
         "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
         "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
         "ORDER BY trust_score DESC NULLS LAST LIMIT $2",

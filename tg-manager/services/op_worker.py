@@ -5744,10 +5744,10 @@ async def _exec_boost_views(
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_views"}
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-        "AND is_active=TRUE AND session_str IS NOT NULL",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         owner_id, account_ids,
     )
     if not accounts:
@@ -5809,10 +5809,10 @@ async def _exec_boost_reactions(
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_reactions"}
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-        "AND is_active=TRUE AND session_str IS NOT NULL",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         owner_id, account_ids,
     )
     if not accounts:
@@ -5873,10 +5873,10 @@ async def _exec_boost_stories(
         return {"status": "failed", "summary": "⚠️ Неполные параметры boost_stories"}
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-        "AND is_active=TRUE AND session_str IS NOT NULL",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         owner_id, account_ids,
     )
     if not accounts:
@@ -5946,10 +5946,10 @@ async def _exec_mass_invite(
         return {"status": "failed", "summary": "⚠️ Неполные параметры mass_invite"}
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-        "AND is_active=TRUE AND session_str IS NOT NULL",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         owner_id, account_ids,
     )
     if not accounts:
@@ -6054,10 +6054,10 @@ async def _exec_bulk_set_profile(
     account_ids = [int(i) for i in (params.get("account_ids") or [])]
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-        "AND is_active=TRUE AND session_str IS NOT NULL",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         owner_id, account_ids,
     )
     if not accounts:
@@ -6138,10 +6138,10 @@ async def _exec_mass_report(
         return {"status": "failed", "summary": "⚠️ Неполные параметры mass_report"}
 
     accounts = await pool.fetch(
-        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
-        "app_version, lang_code, system_lang_code, proxy_url "
-        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
-        "AND is_active=TRUE AND session_str IS NOT NULL",
+        "SELECT a.id, a.session_str, a.device_model, a.system_version, "
+        "a.app_version, a.lang_code, a.system_lang_code, COALESCE(p.proxy_url, NULL) AS proxy_url "
+        "FROM tg_accounts a LEFT JOIN user_proxies p ON p.id=a.proxy_id AND p.is_active=TRUE WHERE a.owner_id=$1 AND a.id=ANY($2::bigint[]) "
+        "AND a.is_active=TRUE AND a.session_str IS NOT NULL",
         owner_id, account_ids,
     )
     if not accounts:
