@@ -2239,6 +2239,16 @@ async def cb_op_detail(
             skipped = res.get("skipped_accounts", 0)
             if skipped:
                 lines.append(f"⚠️ Пропущено аккаунтов (лимит): {skipped}")
+            published_to = res.get("published_to") or []
+            if published_to:
+                sample = published_to[:8]
+                more = len(published_to) - len(sample)
+                pub_txt = "\n".join(
+                    f"  • {html.escape(str(g)[:50])}" for g in sample
+                )
+                if more:
+                    pub_txt += f"\n  <i>...ещё {more}</i>"
+                lines.append(f"\n📢 <b>Опубликовано в:</b>\n{pub_txt}")
             failed_links = res.get("failed_links") or res.get("failed_channels") or []
             if failed_links:
                 sample = failed_links[:5]

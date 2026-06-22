@@ -1519,6 +1519,7 @@ async def _exec_mass_publish(
     ok_count = 0
     fail_count = 0
     failed_channels: list[str] = []
+    published_to: list[str] = []
     isolated_accounts: set[int] = set()
 
     for idx, target_entry in enumerate(targets, 1):
@@ -1588,7 +1589,13 @@ async def _exec_mass_publish(
                     raise Exception(str(result.get("error", "publish error")))
                 ok_count += 1
                 _published = True
+                _ch_title = str(dialog.get("title") or dialog.get("username") or dialog["id"])[:60]
+                published_to.append(_ch_title)
                 _infra_mem.record_account_op(acc["id"], "publish", success=True)
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, _ch_title,
+                )
                 await _audit(
                     pool,
                     owner_id,
@@ -1596,7 +1603,7 @@ async def _exec_mass_publish(
                     "success",
                     operation_id=op_id,
                     account_id=acc["id"],
-                    target=str(dialog.get("title") or dialog["id"])[:100],
+                    target=_ch_title,
                 )
                 try:
                     from services.flood_engine import record_success
@@ -1825,6 +1832,7 @@ async def _exec_mass_publish(
         "ok": ok_count,
         "failed": fail_count,
         "failed_channels": failed_channels[:50],
+        "published_to": published_to[:50],
         "summary": ", ".join(parts),
     }
 
