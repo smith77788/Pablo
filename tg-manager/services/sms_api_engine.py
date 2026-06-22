@@ -41,8 +41,11 @@ class FiveSimClient:
     async def get_countries(self) -> list[dict]:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as s:
             async with s.get(f"{self.BASE}/guest/countries", headers=self._headers()) as r:
-                data = await r.json()
-                return [{"code": k, "name": k.title()} for k in data.keys()]
+                try:
+                    data = await r.json(content_type=None)
+                except Exception:
+                    data = {}
+                return [{"code": k, "name": k.replace("-", " ").title()} for k in data.keys()]
 
     async def buy_number(self, country: str) -> dict:
         """Заказать номер. Возвращает {"id": str, "phone": str}."""
@@ -58,8 +61,8 @@ class FiveSimClient:
     async def get_sms(self, order_id: str, timeout_sec: int = 120) -> str | None:
         """Ждёт SMS с кодом. Возвращает код или None если таймаут."""
         url = f"{self.BASE}/user/check/{order_id}"
-        deadline = asyncio.get_event_loop().time() + timeout_sec
-        while asyncio.get_event_loop().time() < deadline:
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        while asyncio.get_running_loop().time() < deadline:
             async with aiohttp.ClientSession(timeout=_TIMEOUT) as s:
                 async with s.get(url, headers=self._headers()) as r:
                     if r.status != 200:
@@ -132,8 +135,8 @@ class SmsActivateClient:
 
     async def get_sms(self, order_id: str, timeout_sec: int = 120) -> str | None:
         import re
-        deadline = asyncio.get_event_loop().time() + timeout_sec
-        while asyncio.get_event_loop().time() < deadline:
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        while asyncio.get_running_loop().time() < deadline:
             text = await self._get({"action": "getStatus", "id": order_id})
             text = text.strip()
             if text.startswith("STATUS_OK"):
