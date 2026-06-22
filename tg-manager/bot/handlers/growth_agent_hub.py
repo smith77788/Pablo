@@ -147,6 +147,7 @@ async def _entity_list_kb(pool, owner_id: int, entity_type: str) -> object:
         rows = await pool.fetch(
             """SELECT channel_id AS id, title, username
                FROM managed_channels WHERE owner_id=$1
+               AND (type = 'channel' OR type IS NULL)
                ORDER BY title LIMIT 30""",
             owner_id,
         )
@@ -157,6 +158,7 @@ async def _entity_list_kb(pool, owner_id: int, entity_type: str) -> object:
         rows = await pool.fetch(
             """SELECT channel_id AS id, title, username
                FROM managed_channels WHERE owner_id=$1
+               AND type IN ('megagroup', 'supergroup', 'group', 'chat')
                ORDER BY title LIMIT 30""",
             owner_id,
         )
