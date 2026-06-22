@@ -98,7 +98,7 @@ from bot.handlers import graph_hub as graph_handler
 from bot.handlers import api_hub as api_handler
 from bot.handlers import compliance_hub as compliance_handler
 from bot.handlers import ad_intelligence_hub as ad_intel_handler
-from bot.handlers import growth_agent_hub as growth_agent_handler
+
 from bot.handlers import account_shield_hub as account_shield_handler
 from bot.handlers import semantic_memory_hub as semantic_memory_handler
 from bot.handlers import persona_hub as persona_handler
@@ -304,7 +304,7 @@ async def main() -> None:
     dp.include_router(api_handler.router)
     dp.include_router(compliance_handler.router)
     dp.include_router(ad_intel_handler.router)
-    dp.include_router(growth_agent_handler.router)
+
     dp.include_router(account_shield_handler.router)
     dp.include_router(semantic_memory_handler.router)
     dp.include_router(persona_handler.router)

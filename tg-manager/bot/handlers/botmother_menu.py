@@ -34,7 +34,7 @@ from bot.callbacks import (
     GeoPresenceCb,
     GhostCb,
     GroupFCb,
-    GrowthCb,
+
     HealthCb,
     InfraCb,
     IntentCb,
@@ -265,14 +265,13 @@ def _growth_kb(plan: str = "free"):
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Продвижение ботов", callback_data=PromoCb(action="menu"))
-    kb.button(text="🌱 Growth Agent", callback_data=GrowthCb(action="menu"))
     kb.button(text="⭐ Stars Optimizer", callback_data=StarsCb(action="menu"))
     kb.button(text="🕸️ Content Mesh", callback_data=ContentMeshCb(action="menu"))
     kb.button(text="⚡ Auto-Funnel", callback_data=AutoFunnelCb(action="menu"))
     kb.button(text="📖 Narrative Hub", callback_data=NarrCb(action="menu"))
     kb.button(text="🔀 Clone & Adapt", callback_data=CloneAdaptCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
