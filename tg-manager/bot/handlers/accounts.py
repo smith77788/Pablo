@@ -470,9 +470,13 @@ async def _show_accounts_menu(
         if expired_cnt > 0:
             kb.row(
                 InlineKeyboardButton(
-                    text=f"🧹 Удалить expired сессии ({expired_cnt})",
+                    text=f"🔄 Переавторизатор ({expired_cnt})",
+                    callback_data=AccCb(action="reauth_list").pack(),
+                ),
+                InlineKeyboardButton(
+                    text=f"🧹 Удалить expired ({expired_cnt})",
                     callback_data=AccCb(action="purge_expired").pack(),
-                )
+                ),
             )
 
     kb.row(
@@ -1993,14 +1997,25 @@ async def cb_check_health(
     reason = escape(result.get("reason", ""))
     extra = ""
     if status == "session_expired":
-        extra = "\n\n💡 <i>Удалите этот аккаунт и добавьте заново через «Добавить аккаунт».</i>"
+        extra = "\n\n💡 <i>Нажмите «🔄 Релог» чтобы переавторизоваться без удаления аккаунта.</i>"
 
-    kb = _acc_menu_markup(callback_data.acc_id)
-    await callback.message.edit_text(
-        f"{status_icon} <b>{status_title}</b>\n\n{reason}{extra}",
-        parse_mode="HTML",
-        reply_markup=kb,
-    )
+    if status == "session_expired":
+        kb2 = InlineKeyboardBuilder()
+        kb2.button(text="🔄 Релог (переавторизация)", callback_data=AccCb(action="relog", acc_id=callback_data.acc_id))
+        kb2.button(text="◀️ Назад", callback_data=AccCb(action="view", acc_id=callback_data.acc_id))
+        kb2.adjust(1)
+        await callback.message.edit_text(
+            f"{status_icon} <b>{status_title}</b>\n\n{reason}{extra}",
+            parse_mode="HTML",
+            reply_markup=kb2.as_markup(),
+        )
+    else:
+        kb = _acc_menu_markup(callback_data.acc_id)
+        await callback.message.edit_text(
+            f"{status_icon} <b>{status_title}</b>\n\n{reason}{extra}",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
 
 
 # ── Check all accounts status ─────────────────────────────────────────────────
@@ -2238,6 +2253,59 @@ async def cb_scan_all_resources(
         f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
         f"⏱ Ожидаемое время: ~{len(accounts) * 8} сек.\n\n"
         "Уведомление придёт по окончании. Статус: /ops",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+# ── Reauth List — показывает expired аккаунты и кнопки Релог ─────────────────
+
+
+@router.callback_query(AccCb.filter(F.action == "reauth_list"))
+async def cb_reauth_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Переавторизатор: список аккаунтов с истёкшей сессией + кнопка Релог."""
+    uid = callback.from_user.id
+    await callback.answer()
+
+    expired = await pool.fetch(
+        """SELECT id, first_name, phone, username FROM tg_accounts
+           WHERE owner_id=$1 AND acc_status='session_expired'
+           ORDER BY added_at DESC""",
+        uid,
+    )
+    if not expired:
+        await callback.message.edit_text(
+            "✅ <b>Нет аккаунтов с истёкшей сессией</b>\n\nВсе аккаунты активны.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardBuilder()
+            .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
+            .as_markup(),
+        )
+        return
+
+    lines = [f"🔄 <b>Переавторизатор</b> — {len(expired)} аккаунт(ов)\n"]
+    lines.append("Нажмите <b>Релог</b> рядом с нужным аккаунтом:\n")
+
+    kb = InlineKeyboardBuilder()
+    for acc in expired[:20]:
+        label = escape(
+            acc.get("first_name") or acc.get("username") or acc.get("phone") or f"id{acc['id']}"
+        )
+        phone_str = acc.get("phone") or ""
+        display = f"🔑 {label}"
+        if phone_str:
+            display += f" ({phone_str})"
+        kb.button(
+            text=f"🔄 {label}",
+            callback_data=AccCb(action="relog", acc_id=acc["id"]),
+        )
+        lines.append(f"• {display}")
+
+    kb.button(text="◀️ Назад к аккаунтам", callback_data=AccCb(action="menu"))
+    kb.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
