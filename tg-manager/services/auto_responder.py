@@ -701,7 +701,7 @@ async def _process_bot(
                     )
 
             # Relay: forward message to operator if relay is enabled for this bot
-            if bot_row and bot_row.get("relay_enabled") and bot_row.get("added_by"):
+            if bot_row and bot_row.get("relay_enabled") and bot_row.get("added_by") and main_bot:
                 try:
                     operator_id = bot_row["added_by"]
                     username = from_user.get("username")
@@ -725,8 +725,13 @@ async def _process_bot(
                         f"{text}\n\n"
                         f"<i>← Reply здесь чтобы ответить пользователю</i>"
                     )
-                    fwd_msg_id = await _relay_forward(http, operator_id, fwd_text)
-                    await db.save_relay_message(pool, session_id, "in", text, fwd_msg_id)
+                    sent = await main_bot.send_message(
+                        operator_id, fwd_text, parse_mode="HTML"
+                    )
+                    await db.save_relay_message(
+                        pool, session_id, "in", text,
+                        sent.message_id if sent else None,
+                    )
                 except Exception as _relay_err:
                     log.warning("auto_responder: relay forward failed bot=%d: %s", bot_id, _relay_err)
 
