@@ -1068,7 +1068,7 @@ async def get_account_info(session_string: str, _acc: dict | None = None) -> dic
 
 
 async def get_dialogs(
-    session_string: str, limit: int = 50, offset: int = 0, _acc: dict | None = None
+    session_string: str, limit: int | None = 50, offset: int = 0, _acc: dict | None = None
 ) -> list[dict]:
     """Возвращает каналы и группы аккаунта с поддержкой пагинации."""
     if not session_string:

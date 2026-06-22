@@ -1478,6 +1478,44 @@ async def _exec_mass_publish(
         "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
     )
 
+    # Pre-scan: for channels without access_hash AND without username,
+    # do one full dialog scan per account to resolve missing hashes before the main loop.
+    # Persists resolved hashes to DB so future runs use the fast path (Strategy 1).
+    _needs_hash = [t for t in targets if not t["dialog"]["access_hash"] and not t["dialog"].get("username")]
+    if _needs_hash:
+        _prescan_accs: dict[int, dict] = {}
+        for _t in _needs_hash:
+            for _a in _t["accounts"]:
+                if _a["id"] not in _prescan_accs:
+                    _prescan_accs[_a["id"]] = _a
+        log.info("mass_publish op=%d: pre-scanning %d accounts for %d channels without access_hash",
+                 op_id, len(_prescan_accs), len(_needs_hash))
+        for _pa in _prescan_accs.values():
+            try:
+                _all_dlg = await account_manager.get_dialogs(_pa["session_str"], limit=None, _acc=_pa) or []
+                _dlg_map: dict[int, int] = {
+                    int(d["id"]): int(d["access_hash"])
+                    for d in _all_dlg
+                    if d.get("access_hash")
+                }
+                for _t in targets:
+                    _d = _t["dialog"]
+                    _cid = int(_d["id"])
+                    if not _d["access_hash"] and _cid in _dlg_map:
+                        _d["access_hash"] = _dlg_map[_cid]
+                        try:
+                            await pool.execute(
+                                "UPDATE managed_channels SET access_hash=$1 "
+                                "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
+                                _dlg_map[_cid], owner_id, _cid,
+                            )
+                        except Exception:
+                            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as _pe:
+                log.warning("mass_publish op=%d: pre-scan failed for acc=%s: %s", op_id, _pa.get("id"), _pe)
+
     ok_count = 0
     fail_count = 0
     failed_channels: list[str] = []
