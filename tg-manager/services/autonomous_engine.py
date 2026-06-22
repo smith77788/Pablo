@@ -412,7 +412,8 @@ def _intent_to_op_type(intent_type: str, plan: dict[str, Any]) -> str:
     if intent_type == "visibility":
         return "visibility_audit"
     if intent_type == "growth":
-        return "bulk_join"
+        # growth_agent.run_daily_cycle handles "growth" before op_type is used
+        return "mass_publish"
     # For custom goals, try to infer op_type from the description keywords
     goal = (plan.get("goal") or "").lower()
     if any(kw in goal for kw in ("создать канал", "создай канал", "создать каналы", "создай каналы",

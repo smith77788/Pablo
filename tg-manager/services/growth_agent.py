@@ -244,30 +244,159 @@ async def run_daily_cycle(
     # собственным каналам не привлекает новых подписчиков к целевому объекту.
     if contract.intent_type == "custom" and op_type == "mass_publish":
         log.info(
-            "growth_agent: goal=%d intent=custom → mass_publish заблокирован "
-            "(неподходящий инструмент для роста подписчиков)",
+            "growth_agent: goal=%d intent=custom → mass_publish заблокирован",
             goal_id,
         )
         await _record_action(
             pool, goal_id, owner_id,
             action_type="plan",
             description=(
-                "Цель требует уточнения: укажите тип намерения "
-                "(присутствие/видимость/вступление в группы). "
-                "Автоматическая рассылка по своим каналам не привлекает подписчиков."
+                "Цель требует уточнения: укажите тип намерения. "
+                "Рассылка по своим каналам не привлекает подписчиков."
             ),
             outcome="skipped",
             delta_value=0,
         )
         await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
         return {
-            "ok": True,
-            "goal_id": goal_id,
-            "op_id": None,
-            "outcome": "skipped",
-            "op_type": op_type,
+            "ok": True, "goal_id": goal_id, "op_id": None,
+            "outcome": "skipped", "op_type": op_type,
             "reason": "custom_intent_mass_publish_blocked",
         }
+
+    # ── Для "growth" intent: промо-постинг в группах ──────────────────────────
+    # Аккаунты постят в ГРУППАХ (где они участники), а не в своих каналах.
+    # Текст поста содержит ссылку на целевой ресурс → новые подписчики.
+    if contract.intent_type == "growth":
+        entity_label = (goal_row.get("target_entity_label") or "").strip()
+        entity_type  = (goal_row.get("target_entity_type") or "channel").strip()
+        acc_ids = contract.resource_plan.get("primary_account_ids") or []
+
+        # Считаем доступные группы для продвижения
+        group_count = 0
+        if acc_ids:
+            try:
+                cnt_row = await pool.fetchrow(
+                    "SELECT COUNT(*) AS cnt FROM managed_channels "
+                    "WHERE owner_id=$1 AND acc_id = ANY($2::bigint[]) "
+                    "AND type IN ('megagroup', 'supergroup', 'group', 'chat')",
+                    owner_id, acc_ids,
+                )
+                group_count = int((cnt_row or {}).get("cnt") or 0)
+            except Exception as _exc:
+                log.warning("growth_agent: group_count query failed goal=%d: %s", goal_id, _exc)
+
+        if group_count == 0:
+            # Нет групп для постинга → даём инструкцию пользователю
+            advice = (
+                "Нет групп для продвижения. "
+                "Вступите в тематические группы через "
+                "«Массовые операции → Вступить в группы», "
+                "затем Growth Agent начнёт постить промо-контент."
+            )
+            log.info("growth_agent: goal=%d intent=growth → нет групп", goal_id)
+            await _record_action(pool, goal_id, owner_id, "plan", advice, "skipped", 0)
+            await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
+            if bot:
+                try:
+                    await bot.send_message(
+                        owner_id,
+                        f"🤖 <b>Growth Agent</b> — требуется действие\n\n"
+                        f"🎯 Цель: {description[:60]}\n\n"
+                        f"⚠️ {advice}",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+            return {
+                "ok": True, "goal_id": goal_id, "op_id": None,
+                "outcome": "skipped", "reason": "no_groups_to_promote_in",
+            }
+
+        # Строим промо-текст с упоминанием целевого ресурса
+        type_emoji = {"channel": "📡", "bot": "🤖", "group": "👥"}.get(entity_type, "🎯")
+        target_ref = f"@{entity_label}" if entity_label and not entity_label.startswith("@") else entity_label
+        if target_ref:
+            promo_text = (
+                f"{type_emoji} <b>{target_ref}</b>\n\n"
+                f"💬 {description[:120]}\n\n"
+                f"👉 Подписывайтесь: {target_ref}"
+            )
+        else:
+            promo_text = description[:300]
+        display_label = target_ref or entity_label or "—"
+
+        try:
+            queued_op_id = await operation_bus.submit(
+                pool=pool,
+                owner_id=owner_id,
+                op_type="mass_publish",
+                params={
+                    "goal_id":     goal_id,
+                    "text":        promo_text,
+                    "target":      "groups",
+                    "account_ids": acc_ids,
+                    "description": description,
+                },
+                total_items=group_count,
+            )
+            outcome = "queued"
+            log.info(
+                "growth_agent: goal=%d → growth promo op_id=%d in %d groups",
+                goal_id, queued_op_id, group_count,
+            )
+        except Exception as exc:
+            log.warning("growth_agent: growth submit failed goal=%d: %s", goal_id, exc)
+            outcome = "failed"
+            queued_op_id = None
+
+        await _record_action(
+            pool, goal_id, owner_id,
+            action_type="mass_publish",
+            description=f"Промо {display_label} в {group_count} группах",
+            outcome=outcome,
+            delta_value=0,
+        )
+        await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
+
+        target_val = int(goal_row["target_value"] or 1)
+        current_val = int(goal_row["current_value"] or 0)
+        progress_pct = round(min(100.0, current_val / target_val * 100), 1)
+        forecast_txt = (
+            f"Growth: промо в {group_count} группах. "
+            f"Стратегия: {contract.strategy}. "
+            f"Риск: {int(contract.forecast.get('risk_score', 0) * 100)}%."
+        )
+        await _upsert_report(
+            pool=pool, goal_id=goal_id, owner_id=owner_id,
+            progress_pct=progress_pct, actions_count=1, delta_value=0,
+            ai_commentary=forecast_txt,
+        )
+
+        if bot and queued_op_id and outcome == "queued":
+            try:
+                await bot.send_message(
+                    owner_id,
+                    f"🤖 <b>Growth Agent</b> — продвижение запущено\n\n"
+                    f"🎯 <b>Ресурс:</b> {display_label}\n"
+                    f"📊 <b>Прогресс:</b> {progress_pct}%\n"
+                    f"📣 Промо-пост в <b>{group_count}</b> группах (операция #{queued_op_id})\n"
+                    f"📝 {forecast_txt}",
+                    parse_mode="HTML",
+                )
+            except Exception as exc:
+                log.warning("growth_agent: notify failed owner=%d: %s", owner_id, exc)
+
+        return {
+            "ok": True,
+            "goal_id": goal_id,
+            "op_id": queued_op_id,
+            "outcome": outcome,
+            "op_type": "mass_publish",
+            "progress_pct": progress_pct,
+            "strategy": contract.strategy,
+        }
+    # ── Конец growth handler ──────────────────────────────────────────────────
 
     # Определяем action_description для лога
     steps_summary = "; ".join(contract.execution_plan[:3]) if contract.execution_plan else description
