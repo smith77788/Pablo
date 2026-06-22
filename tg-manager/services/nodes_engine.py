@@ -133,7 +133,7 @@ async def enable_forum_mode(
             log.warning("nodes_engine: no account available for owner=%d", owner_id)
             return False
 
-        client = await _make_client(account, pool)
+        client = _make_client(account.get("session_str", ""), account)
         await client.connect()
         try:
             entity = await client.get_entity(tg_chat_id)
