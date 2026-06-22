@@ -1420,7 +1420,7 @@ async def _exec_mass_publish(
         fetch_params.append(explicit_channel_ids)
     db_pairs = await pool.fetch(
         f"SELECT "
-        f"mc.channel_id AS id, mc.title, mc.access_hash, mc.type, "
+        f"mc.channel_id AS id, mc.title, mc.username, mc.access_hash, mc.type, "
         f"a.id AS acc_id, a.session_str, a.first_name, a.phone, "
         f"a.device_model, a.system_version, a.app_version, "
         f"a.lang_code, a.system_lang_code, a.proxy_id, p.proxy_url, p.geo_country "
@@ -1453,6 +1453,7 @@ async def _exec_mass_publish(
                 "dialog": {
                     "id": row["id"],
                     "title": row["title"],
+                    "username": row["username"] or "",
                     "access_hash": row["access_hash"] or 0,
                     "type": row["type"] or "channel",
                 },
@@ -1511,11 +1512,17 @@ async def _exec_mass_publish(
         flood_wait = 0
         _published = False
         last_error = ""
+        # Use @username as channel ref if access_hash is 0 (faster than iter_dialogs)
+        _ch_ref = (
+            f"@{dialog['username']}"
+            if not dialog["access_hash"] and dialog.get("username")
+            else dialog["id"]
+        )
         for _attempt in range(2):  # per-item retry: 1 initial + 1 retry on FloodWait
             try:
                 result = await account_manager.post_to_channel(
                     acc["session_str"],
-                    dialog["id"],
+                    _ch_ref,
                     mp_text,
                     access_hash=dialog["access_hash"],
                     _acc=acc,
@@ -1589,7 +1596,7 @@ async def _exec_mass_publish(
                         try:
                             fallback_result = await account_manager.post_to_channel(
                                 fallback_acc["session_str"],
-                                dialog["id"],
+                                _ch_ref,
                                 mp_text,
                                 access_hash=dialog["access_hash"],
                                 _acc=fallback_acc,
