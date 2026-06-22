@@ -510,6 +510,8 @@ async def run_health_check_loop(pool: asyncpg.Pool, interval_s: int = 3600) -> N
                     log_exc_swallow(log, "account_health: spambot check cycle failed")
 
             cycle += 1
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("account_health loop error")
         elapsed = time.monotonic() - started_at
