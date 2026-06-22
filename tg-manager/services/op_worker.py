@@ -1963,7 +1963,17 @@ async def _exec_bulk_join_inner(
                 _infra_mem.record_account_op(
                     acc["id"], "join", success=False, error=err_str[:100]
                 )
-                if flood_wait:
+                if _is_dead_session_error(err_str):
+                    try:
+                        await pool.execute(
+                            """UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',
+                                   status_reason=$2 WHERE id=$1 AND is_active=TRUE""",
+                            acc["id"], f"Dead session (bulk_join): {err_str[:180]}",
+                        )
+                        log.warning("op_worker bulk_join: deactivated dead session acc_id=%s", acc["id"])
+                    except Exception:
+                        pass
+                elif flood_wait:
                     try:
                         from services.flood_engine import record_flood
 
