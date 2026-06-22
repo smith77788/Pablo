@@ -68,6 +68,7 @@ from bot.handlers import cluster_manager as cluster_handler
 from bot.handlers import audience_parser as audience_parser_handler
 from bot.handlers import account_warmup as account_warmup_handler
 from bot.handlers import infra_analytics as infra_analytics_handler
+from bot.handlers import boost as boost_handler
 from bot.handlers import account_cleaner as account_cleaner_handler
 from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
@@ -279,6 +280,7 @@ async def main() -> None:
     dp.include_router(error_report_handler.router)
     dp.include_router(infra_hc_handler.router)
     dp.include_router(reg_checker_handler.router)
+    dp.include_router(boost_handler.router)
     dp.include_router(promo_handler.router)
     dp.include_router(self_promo_handler.router)
     dp.include_router(ghost_hub_handler.router)

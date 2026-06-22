@@ -855,6 +855,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_scan_owned_resources(pool, bot, op_id, owner_id, params)
             elif op_type == "promote_all_admins":
                 result = await _exec_promote_all_admins(pool, bot, op_id, owner_id, params)
+            elif op_type == "boost_views":
+                result = await _exec_boost_views(pool, bot, op_id, owner_id, params)
+            elif op_type == "boost_reactions":
+                result = await _exec_boost_reactions(pool, bot, op_id, owner_id, params)
+            elif op_type == "boost_stories":
+                result = await _exec_boost_stories(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -5714,3 +5720,199 @@ async def _exec_promote_all_admins(
         + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
     )
     return {"status": "done", "ok": ok_count, "fail": fail_count, "total": n, "summary": summary}
+
+
+# ── Накрутка: просмотры, реакции, сторис ─────────────────────────────────────
+
+async def _exec_boost_views(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Накрутка просмотров: каждый аккаунт вызывает GetMessagesViewsRequest."""
+    from services import boost_engine
+
+    channel = params.get("channel", "")
+    msg_ids = [int(i) for i in (params.get("msg_ids") or [])]
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+
+    if not channel or not msg_ids or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры boost_views"}
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+        "AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    ok_count, fail_count = 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await boost_engine.boost_views(
+                acc["session_str"],
+                dict(acc),
+                channel,
+                msg_ids,
+            )
+            if res["ok"]:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+        except Exception as exc:
+            log.warning("boost_views op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(1.5)
+
+    summary = (
+        f"👁 Просмотры: {channel} × {len(msg_ids)} сообщений\n"
+        f"✅ Аккаунтов: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_boost_reactions(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Накрутка реакций: каждый аккаунт ставит реакцию emoji на msg_id."""
+    from services import boost_engine
+
+    channel = params.get("channel", "")
+    msg_id = int(params.get("msg_id") or 0)
+    emoji = params.get("emoji") or "❤"
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+
+    if not channel or not msg_id or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры boost_reactions"}
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+        "AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    ok_count, fail_count = 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await boost_engine.boost_reaction(
+                acc["session_str"],
+                dict(acc),
+                channel,
+                msg_id,
+                emoji,
+            )
+            if res["ok"]:
+                ok_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+        except Exception as exc:
+            log.warning("boost_reactions op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(2.0)
+
+    summary = (
+        f"{emoji} Реакции: {channel} сообщение #{msg_id}\n"
+        f"✅ Аккаунтов: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}
+
+
+async def _exec_boost_stories(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Просмотр сторис: каждый аккаунт просматривает все активные сторис target."""
+    from services import boost_engine
+
+    target = params.get("target", "")
+    account_ids = [int(i) for i in (params.get("account_ids") or [])]
+
+    if not target or not account_ids:
+        return {"status": "failed", "summary": "⚠️ Неполные параметры boost_stories"}
+
+    accounts = await pool.fetch(
+        "SELECT id, session_str, api_id, api_hash, device_model, system_version, "
+        "app_version, lang_code, system_lang_code, proxy_url "
+        "FROM telegram_accounts WHERE owner_id=$1 AND id=ANY($2::bigint[]) "
+        "AND is_active=TRUE AND session_str IS NOT NULL",
+        owner_id, account_ids,
+    )
+    if not accounts:
+        return {"status": "failed", "summary": "⚠️ Нет доступных аккаунтов"}
+
+    ok_count, fail_count, stories_seen = 0, 0, 0
+    total = len(accounts)
+
+    for idx, acc in enumerate(accounts, 1):
+        if await _is_cancelled(pool, op_id):
+            break
+        try:
+            res = await boost_engine.boost_stories(
+                acc["session_str"],
+                dict(acc),
+                target,
+            )
+            if res["ok"]:
+                ok_count += 1
+                stories_seen = max(stories_seen, res.get("stories_count", 0))
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status) VALUES($1,$2,$3,'ok')",
+                    op_id, idx, f"acc#{acc['id']}",
+                )
+            else:
+                fail_count += 1
+                await pool.execute(
+                    "INSERT INTO operation_log(op_id, step_num, target, status, message) VALUES($1,$2,$3,'error',$4)",
+                    op_id, idx, f"acc#{acc['id']}", (res.get("error") or "")[:200],
+                )
+        except Exception as exc:
+            log.warning("boost_stories op=%d acc=%s: %s", op_id, acc.get("id"), exc)
+            fail_count += 1
+
+        await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+        if idx < total:
+            await asyncio.sleep(1.0)
+
+    summary = (
+        f"📖 Сторис: {target}"
+        + (f" ({stories_seen} шт.)" if stories_seen else "")
+        + f"\n✅ Аккаунтов: {ok_count}/{total}"
+        + (f"\n⚠️ Ошибок: {fail_count}" if fail_count else "")
+    )
+    return {"status": "done", "ok": ok_count, "failed": fail_count, "summary": summary}

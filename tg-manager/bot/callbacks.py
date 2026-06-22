@@ -603,3 +603,10 @@ class NodesCb(CallbackData, prefix="nd"):
     node_id: int = 0
     thread_id: int = 0
     entity_type: str = ""
+
+
+class BoostCb(CallbackData, prefix="bst"):
+    """Накрутка — просмотры, реакции, сторис."""
+
+    action: str          # menu|views|reactions|stories|confirm
+    sub: str = ""        # views|reactions|stories (for confirm)
