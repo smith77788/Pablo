@@ -90,9 +90,11 @@ async def _recover_owner(
 
     actions: list[RecoveryAction] = []
     for r in results:
-        if isinstance(r, list):
+        if isinstance(r, asyncio.CancelledError):
+            raise r
+        elif isinstance(r, list):
             actions.extend(r)
-        elif isinstance(r, Exception):
+        elif isinstance(r, BaseException):
             log.debug("recovery_engine sub-task failed owner=%d: %s", owner_id, r)
 
     return actions

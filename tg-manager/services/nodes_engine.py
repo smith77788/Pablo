@@ -442,7 +442,9 @@ async def strike_broadcast_to_threads(
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for r in results:
-            if isinstance(r, Exception):
+            if isinstance(r, BaseException):
+                if isinstance(r, asyncio.CancelledError):
+                    raise r
                 failed += 1
                 log.debug("nodes_engine: broadcast send error: %s", r)
             else:

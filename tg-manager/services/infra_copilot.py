@@ -124,7 +124,9 @@ async def run_full_analysis(
 
         insights: list[CopilotInsight] = []
         for r in results:
-            if isinstance(r, Exception):
+            if isinstance(r, BaseException):
+                if isinstance(r, asyncio.CancelledError):
+                    raise r
                 log.warning("infra_copilot analyzer failed owner=%d: %s", owner_id, r)
                 continue
             insights.extend(r)
