@@ -1508,8 +1508,9 @@ async def _exec_mass_publish(
                     mp_text,
                     access_hash=dialog["access_hash"],
                     _acc=acc,
-                    media_file_id=media_file_id,
+                    media_bytes=media_bytes,
                     media_type=media_type,
+                    media_filename=media_filename,
                 )
                 if result.get("proxy_error"):
                     raise ConnectionError(
@@ -1563,8 +1564,9 @@ async def _exec_mass_publish(
                                 mp_text,
                                 access_hash=dialog["access_hash"],
                                 _acc=fallback_acc,
-                                media_file_id=media_file_id,
+                                media_bytes=media_bytes,
                                 media_type=media_type,
+                                media_filename=media_filename,
                             )
                             if fallback_result.get("proxy_error"):
                                 raise ConnectionError(

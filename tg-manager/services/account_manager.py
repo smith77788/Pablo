@@ -2650,12 +2650,14 @@ async def post_to_channel(
     _acc: dict | None = None,
     media_file_id: str | None = None,
     media_type: str | None = None,
+    media_bytes: bytes | None = None,
+    media_filename: str = "media",
 ) -> dict:
     """Post a text (or media+caption) message to a channel/group.
 
     access_hash: if provided, uses InputPeerChannel directly (fast, no cache needed).
     Without access_hash and without @username, fetches dialogs to populate entity cache.
-    media_file_id: Telegram file_id to attach as photo/video/document.
+    media_bytes: raw file bytes to send as media (preferred over file_id for Telethon).
     media_type: 'photo' | 'video' | 'animation' | 'document'.
 
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
@@ -2711,12 +2713,14 @@ async def post_to_channel(
             if peer is None:
                 return {"error": "Канал не найден в диалогах аккаунта"}
 
-        if media_file_id and media_type:
-            # Send media with caption. Telethon accepts file_id strings directly.
-            # Map media_type to Telethon file argument (file_id strings work for all types).
+        if media_bytes and media_type:
+            # Send media via raw bytes (Bot API file_ids don't work in MTProto/Telethon).
+            import io as _io
+            file_obj = _io.BytesIO(media_bytes)
+            file_obj.name = media_filename
             msg = await client.send_file(
                 peer,
-                file=media_file_id,
+                file=file_obj,
                 caption=text,
                 parse_mode="html",
             )
