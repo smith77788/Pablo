@@ -4501,7 +4501,7 @@ async def cb_bulk_confirm_selection(
         proxy_note = (
             f"\n\n⚠️ {proxy_count} из {len(selected_ids)} аккаунтов имеют привязанный прокси."
             if proxy_count
-            else f"\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
+            else "\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
         )
         await callback.message.edit_text(
             f"🔗 <b>Вступить в канал — выбор режима подключения</b>\n\n"
@@ -4534,7 +4534,7 @@ async def cb_bulk_confirm_selection(
         proxy_note = (
             f"\n\n⚠️ {proxy_count} из {len(selected_ids)} аккаунтов имеют привязанный прокси."
             if proxy_count
-            else f"\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
+            else "\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
         )
         await callback.message.edit_text(
             f"🚪 <b>Выйти из канала — выбор режима подключения</b>\n\n"

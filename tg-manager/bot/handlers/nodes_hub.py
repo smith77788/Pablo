@@ -781,7 +781,6 @@ async def msg_broadcast_text(
         return
 
     threads = await nodes_engine.get_threads(pool, node_id, status="open", limit=1000)
-    entity_ids = [t["entity_id"] for t in threads]
 
     # Determine entity_type from threads (mixed or single)
     entity_types = list({t["entity_type"] for t in threads})
@@ -990,7 +989,6 @@ async def handle_node_thread_message(
     entity_type = ctx["entity_type"]
     entity_id = ctx["entity_id"]
     owner_id = ctx["owner_id"]
-    args = ctx.get("args", "")
 
     log.info(
         "nodes_hub: command /%s in thread entity=%s/%d from user=%d",

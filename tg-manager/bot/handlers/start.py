@@ -402,7 +402,6 @@ async def cmd_stats(message: Message, pool: asyncpg.Pool) -> None:
         + (f"   {pressure_line}\n" if pressure_line else "")
     )
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     kb = InlineKeyboardBuilder()
     kb.button(text="📡 Аналитика инфраструктуры", callback_data=InfraCb(action="menu"))
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))

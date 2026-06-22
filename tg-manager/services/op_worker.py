@@ -1057,7 +1057,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     if rc > 0:
                         retry_info = f"\nПопыток: {rc}/{mr} — лимит исчерпан"
                     else:
-                        retry_info = f"\nОшибка не повторяется (фатальная)"
+                        retry_info = "\nОшибка не повторяется (фатальная)"
                 await db.notify_if_enabled(
                     pool,
                     bot,
@@ -3631,7 +3631,7 @@ async def _exec_bot_factory(
                     display_name,
                 )
             except Exception:
-                log_exc_swallow(log, f"_exec_bot_factory: managed_bots upsert failed")
+                log_exc_swallow(log, "_exec_bot_factory: managed_bots upsert failed")
 
             await pool.execute(
                 "INSERT INTO operation_log(op_id, step_num, target, status, message) "

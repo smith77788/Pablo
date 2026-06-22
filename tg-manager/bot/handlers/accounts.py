@@ -2133,7 +2133,7 @@ async def cb_pools_bulk_assign(
     for p in existing_pools[:6]:
         kb.button(
             text=f"🏊 {p[:25]}",
-            callback_data=AccCb(action=f"bulk_pool_set", page=existing_pools.index(p)),
+            callback_data=AccCb(action="bulk_pool_set", page=existing_pools.index(p)),
         )
     kb.button(text="✏️ Ввести новое название", callback_data=AccCb(action="bulk_pool_manual"))
     kb.button(text="◀️ Назад", callback_data=AccCb(action="pools_view"))
