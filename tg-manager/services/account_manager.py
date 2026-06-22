@@ -2096,11 +2096,11 @@ async def _resolve_channel_peer(client, channel_ref: int | str, access_hash: int
         return InputPeerChannel(channel_id=channel_ref, access_hash=access_hash)
 
     if isinstance(channel_ref, str) and not channel_ref.lstrip("-").isdigit():
-        return await client.get_entity(channel_ref)
+        return await asyncio.wait_for(client.get_entity(channel_ref), timeout=10.0)
 
     target_id = _normalize_channel_id(channel_ref)
     try:
-        return await client.get_entity(target_id)
+        return await asyncio.wait_for(client.get_entity(target_id), timeout=10.0)
     except Exception:
         from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
         _iter = client.iter_dialogs(limit=500)
