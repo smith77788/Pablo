@@ -1838,6 +1838,11 @@ async def _exec_bulk_join_inner(
     #             "relay" = strip proxy, force CF relay for all accounts
     proxy_mode = params.get("proxy_mode", "bound")
 
+    total_steps = len(links) * len(accounts)
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total_steps, op_id
+    )
+
     for acc_idx, acc in enumerate(accounts):
         if proxy_mode == "relay":
             # Strip bound proxy — Telethon will use CF relay instead
@@ -2130,6 +2135,11 @@ async def _exec_bulk_leave(
     proxy_mode = params.get("proxy_mode", "bound")
     _LEAVE_DAY_LIMITS = {"fast": 25, "normal": 20, "slow": 10, "smart": 15}
     day_limit = _LEAVE_DAY_LIMITS.get(delay_mode, 15)
+
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2",
+        len(channels) * len(accounts), op_id,
+    )
 
     for acc_idx, acc in enumerate(accounts):
         if proxy_mode == "relay":
