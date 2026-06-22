@@ -513,6 +513,10 @@ async def cb_add_account(
 ) -> None:
     await callback.answer()
 
+    from bot.utils.phone_gate import require_phone_verified
+    if not await require_phone_verified(pool, callback):
+        return
+
     if not _api_configured():
         await callback.message.edit_text(
             _api_missing_text(),

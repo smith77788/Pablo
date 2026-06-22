@@ -96,7 +96,11 @@ async def cb_add(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
+    from bot.utils.phone_gate import require_phone_verified
     from bot.utils.subscription import get_plan
+
+    if not await require_phone_verified(pool, callback):
+        return
 
     from bot.utils.subscription import get_effective_bot_count
 

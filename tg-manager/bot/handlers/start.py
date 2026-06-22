@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
 import asyncpg
 from bot.keyboards import main_menu
 from bot.utils.subscription import get_plan, PLAN_EMOJIS, is_platform_admin
@@ -493,3 +493,63 @@ async def cmd_find(message: Message) -> None:
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
+
+
+# ── Phone Verification Gate ───────────────────────────────────────────────────
+
+
+@router.message(F.contact)
+async def handle_contact_verification(
+    message: Message, pool: asyncpg.Pool
+) -> None:
+    """Обрабатывает контакт присланный через request_contact.
+
+    Telegram гарантирует: пользователь может поделиться ТОЛЬКО своим номером.
+    Если этот номер уже занят другим аккаунтом — блокируем.
+    """
+    from bot.utils.phone_gate import save_verified_phone, is_phone_verified
+
+    user_id = message.from_user.id
+
+    # Проверяем что это именно телефон данного пользователя (Telegram гарантирует)
+    contact = message.contact
+    if not contact or contact.user_id != user_id:
+        await message.answer(
+            "❌ Пожалуйста, поделитесь своим собственным номером.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return
+
+    # Уже верифицирован?
+    if await is_phone_verified(pool, user_id):
+        await message.answer(
+            "✅ Ваш номер уже подтверждён.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return
+
+    phone = contact.phone_number or ""
+    ok, err = await save_verified_phone(pool, user_id, phone)
+    if ok:
+        log.info("phone_gate: user_id=%d verified phone=%s", user_id, phone)
+        await message.answer(
+            "✅ <b>Номер подтверждён!</b>\n\n"
+            "Теперь вы можете использовать все функции BotMother.\n"
+            "Вернитесь к предыдущему действию.",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    else:
+        log.warning(
+            "phone_gate: blocked user_id=%d, phone=%s already taken", user_id, phone
+        )
+        await message.answer(
+            "🚫 <b>Номер уже используется</b>\n\n"
+            "Этот номер телефона уже зарегистрирован в BotMother под другим аккаунтом.\n\n"
+            "Возможные причины:\n"
+            "• Вы ранее входили с другого Telegram-аккаунта\n"
+            "• Кто-то другой использует этот номер\n\n"
+            "Если это ошибка — напишите в поддержку.",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
