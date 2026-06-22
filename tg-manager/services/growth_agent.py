@@ -240,6 +240,35 @@ async def run_daily_cycle(
     op_type = contract.resource_plan.get("op_type", "mass_publish")
     go = contract.risk_plan.get("go", False)
 
+    # Для "custom" intent mass_publish — не подходящий инструмент: рассылка по
+    # собственным каналам не привлекает новых подписчиков к целевому объекту.
+    if contract.intent_type == "custom" and op_type == "mass_publish":
+        log.info(
+            "growth_agent: goal=%d intent=custom → mass_publish заблокирован "
+            "(неподходящий инструмент для роста подписчиков)",
+            goal_id,
+        )
+        await _record_action(
+            pool, goal_id, owner_id,
+            action_type="plan",
+            description=(
+                "Цель требует уточнения: укажите тип намерения "
+                "(присутствие/видимость/вступление в группы). "
+                "Автоматическая рассылка по своим каналам не привлекает подписчиков."
+            ),
+            outcome="skipped",
+            delta_value=0,
+        )
+        await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
+        return {
+            "ok": True,
+            "goal_id": goal_id,
+            "op_id": None,
+            "outcome": "skipped",
+            "op_type": op_type,
+            "reason": "custom_intent_mass_publish_blocked",
+        }
+
     # Определяем action_description для лога
     steps_summary = "; ".join(contract.execution_plan[:3]) if contract.execution_plan else description
 

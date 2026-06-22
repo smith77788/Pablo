@@ -1807,6 +1807,18 @@ async def _exec_mass_publish(
             await asyncio.sleep(effective_delay)
 
     await release_accounts(mp_used_acc_ids)
+
+    # Обновляем прогресс цели в growth_goals (delta = успешных публикаций)
+    goal_id_param = params.get("goal_id")
+    if goal_id_param and ok_count > 0:
+        try:
+            await pool.execute(
+                "UPDATE growth_goals SET current_value = current_value + $2, updated_at=NOW() WHERE id=$1",
+                int(goal_id_param), ok_count,
+            )
+        except Exception:
+            pass
+
     parts = [f"Опубликовано: {ok_count}", f"ошибок: {fail_count}"]
     return {
         "status": "done",

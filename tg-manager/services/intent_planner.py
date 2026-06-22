@@ -58,6 +58,26 @@ _INTENT_PATTERNS: list[tuple[str, list[str]]] = [
             "усилить присутствие",
         ],
     ),
+    (
+        "growth",
+        [
+            "подписчик",
+            "subscriber",
+            "member",
+            "участник",
+            "члены",
+            "вырасти",
+            "grow",
+            "привлечь",
+            "аудитори",
+            "набрать",
+            "набери",
+            "увеличить аудитор",
+            "увеличить подписч",
+            "прирост",
+            "growth",
+        ],
+    ),
 ]
 
 
@@ -167,6 +187,7 @@ async def build_plan(
         "sync": _build_sync_plan,
         "strike": _build_strike_plan,
         "visibility": _build_visibility_plan,
+        "growth": _build_growth_plan,
     }
     builder = builders.get(intent_type, _build_custom_plan)
     try:
@@ -443,6 +464,37 @@ async def _build_visibility_plan(pool, owner_id, description, resources):
         "executable": True,
         "action": "run_visibility",
         "navigate_to": "ranking",
+    }
+
+
+async def _build_growth_plan(pool, owner_id, description, resources):
+    n_accounts = resources.get("accounts_available", 0)
+    acc_rows = await pool.fetch(
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 AND trust_score >= 0.30 "
+        "AND is_active=TRUE AND session_str IS NOT NULL "
+        "ORDER BY trust_score DESC LIMIT 5",
+        owner_id,
+    )
+    account_ids = [r["id"] for r in acc_rows]
+    risks = []
+    if not account_ids:
+        risks.append("🚫 Нет аккаунтов с trust_score ≥ 0.30 — добавьте или прогрейте аккаунты")
+    if n_accounts < 2:
+        risks.append("⚠️ Мало аккаунтов — добавьте больше для ускорения")
+    return {
+        "intent_type": "growth",
+        "goal": description[:120],
+        "n_accounts_selected": len(account_ids),
+        "n_accounts_available": n_accounts,
+        "n_targets": 30,
+        "steps": [
+            "1. Выбрать аккаунты с trust_score ≥ 0.30",
+            "2. Вступить в тематические группы для увеличения охвата",
+            "3. Записать результаты и скорректировать стратегию",
+        ],
+        "risks": risks or ["ℹ️ Вступление в группы увеличивает видимость — не гарантирует прирост подписчиков"],
+        "executable": bool(account_ids),
+        "action": "execute_op",
     }
 
 

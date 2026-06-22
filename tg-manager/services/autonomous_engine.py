@@ -411,6 +411,8 @@ def _intent_to_op_type(intent_type: str, plan: dict[str, Any]) -> str:
         return "bulk_bot_edit"
     if intent_type == "visibility":
         return "visibility_audit"
+    if intent_type == "growth":
+        return "bulk_join"
     # For custom goals, try to infer op_type from the description keywords
     goal = (plan.get("goal") or "").lower()
     if any(kw in goal for kw in ("создать канал", "создай канал", "создать каналы", "создай каналы",
@@ -422,6 +424,7 @@ def _intent_to_op_type(intent_type: str, plan: dict[str, Any]) -> str:
     if any(kw in goal for kw in ("покинуть", "покинь", "выйти", "выйди", "leave channel",
                                   "bulk leave", "массово покин")):
         return "bulk_leave"
+    # Custom goals without clear intent → don't default to mass_publish
     return "mass_publish"
 
 

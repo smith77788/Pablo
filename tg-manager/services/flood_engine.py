@@ -39,7 +39,7 @@ _ACTION_MIN_TRUST: dict[str, float] = {
     "create_channel": 0.35,
     "create_bot": 0.35,
     "strike": 0.30,  # Strike is heavy — require at least basic trust to protect accounts
-    "mass_publish": 0.25,
+    "mass_publish": 0.30,  # Match critical trust threshold — accounts below 0.3 show warning
     "post": 0.25,
     "parse": 0.20,
     "default": 0.0,
