@@ -417,12 +417,27 @@ async def cb_fn_add_step(
 
 
 @router.message(CreateFunnel.waiting_step_text, F.text)
-async def msg_fn_step_text(message: Message, state: FSMContext) -> None:
+async def msg_fn_step_text(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     text = message.text
     if not text or not text.strip():
         data = await state.get_data()
         await message.answer(
             "⚠️ Текст сообщения не может быть пустым. Введите снова:",
+            reply_markup=_fn_cancel_kb(data.get("bot_id", 0)),
+        )
+        return
+    # Content safety: шаги воронки рассылаются автоматически — блокируем
+    # запрещённый контент (CSAM / терроризм) на этапе создания шага.
+    from services import content_safety
+
+    _v = await content_safety.enforce(pool, message.from_user.id, text, surface="funnel_step")
+    if _v.blocked:
+        data = await state.get_data()
+        await message.answer(
+            content_safety.REFUSAL_TEXT,
+            parse_mode="HTML",
             reply_markup=_fn_cancel_kb(data.get("bot_id", 0)),
         )
         return
@@ -602,6 +617,19 @@ async def msg_fn_broadcast(
             reply_markup=_fn_cancel_kb(data.get("bot_id", 0)),
         )
         return
+    # Content safety: блокируем CSAM / террористический контент на входе.
+    from services import content_safety
+
+    _v = await content_safety.enforce(pool, message.from_user.id, text, surface="funnel_broadcast")
+    if _v.blocked:
+        data = await state.get_data()
+        await message.answer(
+            content_safety.REFUSAL_TEXT,
+            parse_mode="HTML",
+            reply_markup=_fn_cancel_kb(data.get("bot_id", 0)),
+        )
+        return
+
     data = await state.get_data()
     await state.clear()
 

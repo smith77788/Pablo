@@ -820,6 +820,21 @@ async def cb_qp_publish(
         )
         return
 
+    # Content safety: запрещённый контент (CSAM / терроризм) не публикуется в каналы.
+    from services import content_safety
+
+    _v = await content_safety.enforce(pool, callback.from_user.id, post_text, surface="channel_post")
+    if _v.blocked:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="broadcasts"))
+        kb.adjust(1)
+        await callback.message.edit_text(
+            content_safety.REFUSAL_TEXT,
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
     try:
         rows = await pool.fetch(
             "SELECT DISTINCT ON (mc.channel_id) "

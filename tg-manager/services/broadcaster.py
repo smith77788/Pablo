@@ -10,6 +10,7 @@ import asyncpg
 from database import db
 from services import bot_api
 from services import brand_injection
+from services import content_safety
 from config import BROADCAST_DELAY
 
 from bot.utils.template_validator import replace_placeholders
@@ -73,6 +74,39 @@ async def run(
 
     if user_ids is None:
         user_ids = await db.get_audience_user_ids(pool, bot_id)
+
+    # Content safety backstop: ни одна рассылка с запрещённым контентом
+    # (CSAM / терроризм) не уходит подписчикам, даже если её создали в обход UI.
+    _verdict = content_safety.scan_text(text)
+    if _verdict.blocked:
+        logger.warning(
+            "Broadcast %d BLOCKED by content_safety: category=%s rule=%s",
+            broadcast_id,
+            _verdict.category,
+            _verdict.rule,
+        )
+        try:
+            await db.update_broadcast(pool, broadcast_id, 0, 0, "blocked")
+        except Exception:
+            try:
+                await db.update_broadcast(pool, broadcast_id, 0, 0, "failed")
+            except Exception as _e:
+                logger.debug("Broadcast %d: could not mark blocked: %s", broadcast_id, _e)
+        try:
+            from services import compliance_engine
+
+            await compliance_engine.record(
+                pool, None, None,
+                op_type="content_block:broadcast",
+                outcome="blocked",
+                op_id=broadcast_id,
+                params={"category": _verdict.category, "rule": _verdict.rule},
+            )
+        except Exception:
+            pass
+        if _own_session and session is not None:
+            await session.close()
+        return
 
     # Pre-flight: verify token is valid before burning through 10k send attempts
     me = await bot_api.get_me(session, token)

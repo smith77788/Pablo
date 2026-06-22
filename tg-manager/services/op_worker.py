@@ -1275,6 +1275,31 @@ async def _exec_mass_publish(
 
     target = params.get("target", "channels")
     mp_text = str(params.get("text") or params.get("mp_text") or "").strip()
+
+    # Content safety backstop: запрещённый контент (CSAM / терроризм) не публикуется.
+    try:
+        from services import content_safety
+
+        _v = content_safety.scan_text(mp_text)
+        if _v.blocked:
+            log.warning(
+                "_exec_mass_publish op=%d BLOCKED by content_safety: category=%s rule=%s",
+                op_id, _v.category, _v.rule,
+            )
+            try:
+                from services import compliance_engine
+                await compliance_engine.record(
+                    pool, owner_id, None,
+                    op_type="content_block:mass_publish",
+                    outcome="blocked", op_id=op_id,
+                    params={"category": _v.category, "rule": _v.rule},
+                )
+            except Exception:
+                pass
+            return {"status": "failed", "summary": "🚫 Публикация заблокирована: запрещённый контент"}
+    except Exception as _cs_err:
+        log.debug("_exec_mass_publish content_safety check failed: %s", _cs_err)
+
     delay = int(params.get("delay_seconds") or params.get("delay") or 30)
     explicit_channel_ids = [int(i) for i in (params.get("channel_ids") or [])]
     # Optional media attachment (from Quick Post Wizard step 3)

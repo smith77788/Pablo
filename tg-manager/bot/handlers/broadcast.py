@@ -130,6 +130,18 @@ async def msg_broadcast_text(
         )
         return
 
+    # Content safety: блокируем CSAM / террористический контент на входе.
+    from services import content_safety
+
+    _v = await content_safety.enforce(pool, message.from_user.id, text, surface="broadcast")
+    if _v.blocked:
+        await message.answer(
+            content_safety.REFUSAL_TEXT,
+            parse_mode="HTML",
+            reply_markup=_bc_cancel_kb(data.get("bot_id", 0)),
+        )
+        return
+
     await state.update_data(text=text, photo_file_id=photo_file_id)
     await state.set_state(Broadcast.confirming)
 
