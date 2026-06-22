@@ -117,6 +117,8 @@ async def scrape_and_refresh(pool: asyncpg.Pool) -> dict:
 
     raw: set[str] = set()
     for r in results:
+        if isinstance(r, asyncio.CancelledError):
+            raise r
         if isinstance(r, list):
             raw.update(r)
     log.info("proxy_scraper: fetched %d unique raw proxies", len(raw))

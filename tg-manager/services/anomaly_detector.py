@@ -94,6 +94,8 @@ async def _detect_owner(pool: asyncpg.Pool, owner_id: int) -> list[Anomaly]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
     anomalies: list[Anomaly] = []
     for r in results:
+        if isinstance(r, asyncio.CancelledError):
+            raise r
         if isinstance(r, list):
             anomalies.extend(r)
     return anomalies

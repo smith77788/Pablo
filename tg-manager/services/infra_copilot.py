@@ -674,12 +674,14 @@ async def _analyze_capacity_risks(
             ),
             return_exceptions=True,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         log.debug("copilot capacity gather failed: %s", e)
         return insights
 
     # 1. Если < 2 активных аккаунтов — критический риск
-    if not isinstance(active_task, Exception) and active_task:
+    if not isinstance(active_task, BaseException) and active_task:
         total = active_task.get("total") or 0
         ready = active_task.get("ready") or 0
 
@@ -722,9 +724,9 @@ async def _analyze_capacity_risks(
 
     # 2. Если pending_queue > running_capacity * 3
     if (
-        not isinstance(queue_task, Exception)
+        not isinstance(queue_task, BaseException)
         and queue_task
-        and not isinstance(active_task, Exception)
+        and not isinstance(active_task, BaseException)
         and active_task
     ):
         pending = queue_task.get("pending") or 0
@@ -760,9 +762,9 @@ async def _analyze_capacity_risks(
 
     # 3. Если все аккаунты в одном пуле — риск единой точки отказа
     if (
-        not isinstance(pool_task, Exception)
+        not isinstance(pool_task, BaseException)
         and pool_task
-        and not isinstance(active_task, Exception)
+        and not isinstance(active_task, BaseException)
         and active_task
     ):
         total = active_task.get("total") or 0
