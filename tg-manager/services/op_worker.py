@@ -2388,6 +2388,9 @@ async def _exec_global_presence_channel(
     failed_count = 0
     total = len(targets)
     _gp_eco_id: int | None = None  # lazily loaded from plan
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    )
 
     for i, target in enumerate(targets):
         if await _is_cancelled(pool, op_id):
@@ -2898,6 +2901,9 @@ async def _exec_global_presence_bot(
     acc_rr_idx = 0  # round-robin index for fallback only
     total = len(targets)
     _gp_bot_eco_id: int | None = None  # lazily loaded from plan
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    )
 
     for i, target in enumerate(targets):
         if await _is_cancelled(pool, op_id):
