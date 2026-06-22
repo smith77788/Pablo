@@ -287,31 +287,13 @@ async def run_daily_cycle(
                 log.warning("growth_agent: group_count query failed goal=%d: %s", goal_id, _exc)
 
         if group_count == 0:
-            # Нет групп для постинга → даём инструкцию пользователю
-            advice = (
-                "Нет групп для продвижения. "
-                "Вступите в тематические группы через "
-                "«Массовые операции → Вступить в группы», "
-                "затем Growth Agent начнёт постить промо-контент."
+            # Групп нет → автопоиск групп по нише + авто-вступление
+            return await _growth_search_and_join(
+                pool=pool, bot=bot,
+                owner_id=owner_id, goal_id=goal_id,
+                goal_row=goal_row, description=description,
+                contract=contract, acc_ids=acc_ids,
             )
-            log.info("growth_agent: goal=%d intent=growth → нет групп", goal_id)
-            await _record_action(pool, goal_id, owner_id, "plan", advice, "skipped", 0)
-            await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
-            if bot:
-                try:
-                    await bot.send_message(
-                        owner_id,
-                        f"🤖 <b>Growth Agent</b> — требуется действие\n\n"
-                        f"🎯 Цель: {description[:60]}\n\n"
-                        f"⚠️ {advice}",
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    pass
-            return {
-                "ok": True, "goal_id": goal_id, "op_id": None,
-                "outcome": "skipped", "reason": "no_groups_to_promote_in",
-            }
 
         # Строим промо-текст с упоминанием целевого ресурса
         type_emoji = {"channel": "📡", "bot": "🤖", "group": "👥"}.get(entity_type, "🎯")
@@ -496,6 +478,165 @@ async def run_daily_cycle(
         "op_type": op_type,
         "progress_pct": progress_pct,
         "strategy": contract.strategy,
+    }
+
+
+# ── Growth: автопоиск групп по нише ──────────────────────────────────────────
+
+
+async def _growth_search_and_join(
+    *,
+    pool: asyncpg.Pool,
+    bot: Any,
+    owner_id: int,
+    goal_id: int,
+    goal_row: Any,
+    description: str,
+    contract: Any,
+    acc_ids: list[int],
+) -> dict[str, Any]:
+    """Найти тематические группы по нише и поставить bulk_join в очередь."""
+    from services import niche_searcher, resource_selector, ai_providers as _aip
+
+    # Выбираем аккаунт для поиска
+    search_accounts = await resource_selector.select_accounts(
+        pool, owner_id, 1, "parse",
+    )
+    if not search_accounts:
+        advice = "Нет активных аккаунтов для поиска групп."
+        await _record_action(pool, goal_id, owner_id, "plan", advice, "skipped", 0)
+        await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
+        return {"ok": True, "goal_id": goal_id, "op_id": None, "outcome": "skipped"}
+
+    search_acc = search_accounts[0]
+
+    # Получаем AI-провайдер (опционально)
+    try:
+        ai_provider = _aip.configured_providers()[0] if _aip.configured_providers() else None
+    except Exception:
+        ai_provider = None
+
+    # Генерируем ключевые слова
+    keywords = await niche_searcher.generate_keywords(description, ai_provider)
+    log.info("growth_agent: goal=%d niche keywords: %s", goal_id, keywords)
+
+    # Получаем уже вступленные группы (исключаем из поиска)
+    already_joined = await niche_searcher.get_joined_group_ids(pool, owner_id, acc_ids)
+
+    # Ищем группы
+    groups = await niche_searcher.search_niche_groups(
+        session_string=search_acc["session_str"],
+        keywords=keywords,
+        min_members=200,
+        max_per_keyword=15,
+        exclude_ids=already_joined,
+        _acc=dict(search_acc),
+    )
+
+    if not groups:
+        advice = (
+            f"Поиск по нише не дал результатов "
+            f"(запросы: {', '.join(keywords[:4])}). "
+            "Попробуйте изменить описание цели или добавьте группы вручную."
+        )
+        log.info("growth_agent: goal=%d → no groups found for niche", goal_id)
+        await _record_action(pool, goal_id, owner_id, "plan", advice, "skipped", 0)
+        await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
+        if bot:
+            try:
+                await bot.send_message(
+                    owner_id,
+                    f"🤖 <b>Growth Agent</b> — поиск групп\n\n"
+                    f"🎯 {description[:60]}\n\n"
+                    f"⚠️ {advice}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        return {"ok": True, "goal_id": goal_id, "op_id": None, "outcome": "skipped",
+                "reason": "no_niche_groups_found"}
+
+    # Берём топ-30 по числу участников
+    top_groups = groups[:30]
+    links = [g["join_ref"] for g in top_groups if g.get("join_ref")]
+
+    # Ставим bulk_join в очередь
+    queued_op_id: int | None = None
+    outcome = "skipped"
+    try:
+        queued_op_id = await operation_bus.submit(
+            pool=pool,
+            owner_id=owner_id,
+            op_type="bulk_join",
+            params={
+                "goal_id":     goal_id,
+                "links":       links,
+                "account_ids": acc_ids,
+                "delay_mode":  "smart",
+                "description": f"Авто-вступление в группы ниши: {description[:60]}",
+            },
+            total_items=len(links) * max(1, len(acc_ids)),
+        )
+        outcome = "queued"
+        log.info(
+            "growth_agent: goal=%d → bulk_join op_id=%d, %d groups",
+            goal_id, queued_op_id, len(links),
+        )
+    except Exception as exc:
+        log.warning("growth_agent: bulk_join submit failed goal=%d: %s", goal_id, exc)
+        outcome = "failed"
+
+    group_titles = ", ".join(g["title"][:20] for g in top_groups[:5])
+    await _record_action(
+        pool, goal_id, owner_id,
+        action_type="bulk_join",
+        description=(
+            f"Найдено {len(groups)} групп по ключевым словам: {', '.join(keywords[:3])}. "
+            f"Вступление в топ-{len(links)}: {group_titles}..."
+        ),
+        outcome=outcome,
+        delta_value=0,
+    )
+    await pool.execute("UPDATE growth_goals SET updated_at=NOW() WHERE id=$1", goal_id)
+
+    target_val = int(goal_row["target_value"] or 1)
+    current_val = int(goal_row["current_value"] or 0)
+    progress_pct = round(min(100.0, current_val / target_val * 100), 1)
+
+    await _upsert_report(
+        pool=pool, goal_id=goal_id, owner_id=owner_id,
+        progress_pct=progress_pct, actions_count=1, delta_value=0,
+        ai_commentary=(
+            f"Фаза 1: найдено {len(groups)} групп ниши, "
+            f"запущено вступление в {len(links)} групп. "
+            f"Следующий цикл: промо-постинг."
+        ),
+    )
+
+    if bot and queued_op_id:
+        kw_str = ", ".join(keywords[:5])
+        try:
+            await bot.send_message(
+                owner_id,
+                f"🤖 <b>Growth Agent</b> — найдены группы ниши\n\n"
+                f"🎯 Цель: {description[:60]}\n\n"
+                f"🔍 <b>Ключевые слова:</b> {kw_str}\n"
+                f"📦 Найдено групп: <b>{len(groups)}</b>\n"
+                f"🚀 Вступление в топ-<b>{len(links)}</b> групп (операция #{queued_op_id})\n\n"
+                f"⏭ Следующий цикл Growth Agent запустит промо-постинг в этих группах.",
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            log.warning("growth_agent: notify failed owner=%d: %s", owner_id, exc)
+
+    return {
+        "ok": True,
+        "goal_id": goal_id,
+        "op_id": queued_op_id,
+        "outcome": outcome,
+        "op_type": "bulk_join",
+        "groups_found": len(groups),
+        "keywords": keywords,
     }
 
 
