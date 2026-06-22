@@ -4309,6 +4309,9 @@ async def _exec_seed_presence_pack(
     fail = 0
     fail_names: list[str] = []
     total = len(ch_ids)  # use original count for accurate progress reporting
+    await pool.execute(
+        "UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id
+    )
 
     async with _aiohttp.ClientSession() as http:
         for idx, ch in enumerate(channels, 1):
