@@ -222,7 +222,7 @@ async def _show_template_step(
         lib_atype = (
             asset_type if asset_type not in ("package", "full_package") else "channel"
         )
-        lib_presets = get_presets(lib_atype)[:3]
+        lib_presets = get_presets(lib_atype)[:10]
         for p in lib_presets:
             kb.button(
                 text=f"📚 {p['name'][:28]}",
