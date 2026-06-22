@@ -1456,6 +1456,7 @@ async def _exec_mass_publish(
                     "username": row["username"] or "",
                     "access_hash": row["access_hash"] or 0,
                     "type": row["type"] or "channel",
+                    "username": row["username"] or "",
                 },
                 "accounts": [],
             }
@@ -1525,6 +1526,7 @@ async def _exec_mass_publish(
                     _ch_ref,
                     mp_text,
                     access_hash=dialog["access_hash"],
+                    username=dialog.get("username") or "",
                     _acc=acc,
                     media_bytes=media_bytes,
                     media_type=media_type,
@@ -1554,6 +1556,18 @@ async def _exec_mass_publish(
                     await record_success(acc["id"], "publish")
                 except Exception:
                     log_exc_swallow(log, "mass_publish: record_success failed")
+                # Persist resolved access_hash so future publishes use fast path
+                _resolved_hash = result.get("resolved_access_hash", 0)
+                if _resolved_hash and not dialog.get("access_hash"):
+                    try:
+                        await pool.execute(
+                            "UPDATE managed_channels SET access_hash=$1 "
+                            "WHERE owner_id=$2 AND channel_id=$3 AND (access_hash IS NULL OR access_hash=0)",
+                            _resolved_hash, owner_id, int(dialog["id"]),
+                        )
+                        dialog["access_hash"] = _resolved_hash
+                    except Exception:
+                        pass
                 break  # success — stop retry loop
             except Exception as e:
                 err_str = str(e)[:200]
@@ -1599,6 +1613,7 @@ async def _exec_mass_publish(
                                 _ch_ref,
                                 mp_text,
                                 access_hash=dialog["access_hash"],
+                                username=dialog.get("username") or "",
                                 _acc=fallback_acc,
                                 media_bytes=media_bytes,
                                 media_type=media_type,

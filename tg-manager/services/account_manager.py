@@ -2647,6 +2647,7 @@ async def post_to_channel(
     channel_id: int | str,
     text: str,
     access_hash: int = 0,
+    username: str = "",
     _acc: dict | None = None,
     media_file_id: str | None = None,
     media_type: str | None = None,
@@ -2655,10 +2656,12 @@ async def post_to_channel(
 ) -> dict:
     """Post a text (or media+caption) message to a channel/group.
 
-    access_hash: if provided, uses InputPeerChannel directly (fast, no cache needed).
-    Without access_hash and without @username, fetches dialogs to populate entity cache.
+    Peer resolution order (fastest to slowest):
+    1. access_hash → InputPeerChannel directly (zero API calls)
+    2. username → client.get_entity("@username") (one ResolveUsername call)
+    3. channel_id → client.get_entity(id) (one GetChannels call, works for public)
+    4. iter_dialogs(500) fallback (slow, last resort)
     media_bytes: raw file bytes to send as media (preferred over file_id for Telethon).
-    media_type: 'photo' | 'video' | 'animation' | 'document'.
 
     Returns {"msg_id": int} on success or {"error": str, "flood_wait"?: int} on failure.
     """
@@ -2678,40 +2681,52 @@ async def post_to_channel(
     try:
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
 
-        # Resolve peer — 3 strategies in order of speed:
-        # 1. InputPeerChannel with access_hash (no API call needed)
-        # 2. @username string (single API call)
-        # 3. Populate entity cache via get_dialogs (slow but reliable)
-        if access_hash and isinstance(channel_id, int) and channel_id > 0:
-            peer = InputPeerChannel(channel_id=channel_id, access_hash=access_hash)
+        # Strategy 1: access_hash → direct InputPeerChannel (no API call)
+        cid = abs(int(channel_id)) if isinstance(channel_id, (int, str)) else 0
+        if access_hash and cid > 0:
+            peer = InputPeerChannel(channel_id=cid, access_hash=access_hash)
         elif isinstance(channel_id, str) and not channel_id.lstrip("-").isdigit():
-            peer = channel_id  # @username — Telethon resolves via API
+            # Strategy 2a: caller passed @username string directly
+            peer = channel_id
+        elif username:
+            # Strategy 2b: @username from DB — single ResolveUsername API call
+            uname = username.lstrip("@")
+            peer = await asyncio.wait_for(client.get_entity(f"@{uname}"), timeout=10.0)
         else:
-            cid = (
-                abs(int(channel_id)) if isinstance(channel_id, str) else abs(channel_id)
-            )
-            from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
+            # Strategy 3: try get_entity(numeric_id) — works for public channels
+            # and channels already in Telethon's entity cache without full dialog scan
             peer = None
-            _iter = client.iter_dialogs(limit=500)
-            while True:
-                try:
-                    _d = await _iter.__anext__()
-                except StopAsyncIteration:
-                    break
-                except (ChannelPrivateError, ChatAdminRequiredError):
-                    continue
-                except Exception:
-                    continue
-                try:
-                    eid = getattr(_d.entity, "id", None)
-                except Exception:
-                    continue
-                if eid == cid:
-                    peer = InputPeerChannel(
-                        channel_id=cid,
-                        access_hash=getattr(_d.entity, "access_hash", 0),
-                    )
-                    break
+            try:
+                peer = await asyncio.wait_for(
+                    client.get_entity(_normalize_channel_id(channel_id)), timeout=10.0
+                )
+            except Exception:
+                pass
+
+            if peer is None:
+                # Strategy 4: full dialog scan (last resort, slow)
+                from telethon.errors import ChannelPrivateError, ChatAdminRequiredError
+                _iter = client.iter_dialogs(limit=500)
+                while True:
+                    try:
+                        _d = await _iter.__anext__()
+                    except StopAsyncIteration:
+                        break
+                    except (ChannelPrivateError, ChatAdminRequiredError):
+                        continue
+                    except Exception:
+                        continue
+                    try:
+                        eid = getattr(_d.entity, "id", None)
+                    except Exception:
+                        continue
+                    if eid == cid:
+                        peer = InputPeerChannel(
+                            channel_id=cid,
+                            access_hash=getattr(_d.entity, "access_hash", 0),
+                        )
+                        break
+
             if peer is None:
                 return {"error": "Канал не найден в диалогах аккаунта"}
 
@@ -2728,7 +2743,9 @@ async def post_to_channel(
             )
         else:
             msg = await client.send_message(peer, text, parse_mode="html")
-        return {"msg_id": msg.id}
+        # Return resolved access_hash so caller can persist it to DB (avoids repeated dialog scans)
+        resolved_hash = getattr(peer, "access_hash", 0) if hasattr(peer, "access_hash") else 0
+        return {"msg_id": msg.id, "resolved_access_hash": resolved_hash or 0}
     except FloodWaitError as e:
         return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
     except UserBannedInChannelError as e:
