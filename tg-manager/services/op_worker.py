@@ -4752,9 +4752,17 @@ async def _exec_bulk_post_to_channel(
         elif "msg_id" in result:
             ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
         else:
-            err_list.append(
-                f"❌ {label}: {_html.escape(result.get('error', 'ошибка')[:60])}"
-            )
+            err_str = result.get("error", "ошибка")
+            if _is_dead_session_error(err_str):
+                try:
+                    await pool.execute(
+                        "UPDATE tg_accounts SET is_active=FALSE, acc_status='session_expired',"
+                        " status_reason=$2 WHERE id=$1 AND is_active=TRUE",
+                        acc["id"], f"Dead session (bulk_post): {err_str[:160]}",
+                    )
+                except Exception:
+                    pass
+            err_list.append(f"❌ {label}: {_html.escape(err_str[:60])}")
 
         await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
 
