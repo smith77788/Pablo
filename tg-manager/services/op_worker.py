@@ -226,6 +226,17 @@ def _is_network_or_proxy_error(error_text: str) -> bool:
     return bool(_NETWORK_PATTERNS.search(error_text))
 
 
+_DEAD_SESSION_PATTERNS = re.compile(
+    r"AUTH_KEY|SESSION_REVOKED|authorization key|different data center|"
+    r"AuthKeyUnregistered|AuthKeyDuplicated|SessionRevoked",
+    re.IGNORECASE,
+)
+
+
+def _is_dead_session_error(error_text: str) -> bool:
+    return bool(_DEAD_SESSION_PATTERNS.search(error_text))
+
+
 async def _record_network_isolation(
     pool: asyncpg.Pool,
     account_id: int,
@@ -1541,18 +1552,36 @@ async def _exec_mass_publish(
                 err_str = str(e)[:200]
                 last_error = err_str
                 flood_wait = extract_flood_wait(e, err_str)
-                if _is_network_or_proxy_error(err_str):
+                if _is_network_or_proxy_error(err_str) or _is_dead_session_error(err_str):
                     isolated_accounts.add(acc["id"])
-                    try:
-                        await _record_network_isolation(
-                            pool,
-                            acc["id"],
-                            "publish",
-                            op_id,
-                            err_str,
-                        )
-                    except Exception:
-                        log_exc_swallow(log, "mass_publish: network isolation failed")
+                    if _is_dead_session_error(err_str):
+                        # Dead session — deactivate account immediately
+                        try:
+                            await pool.execute(
+                                """UPDATE tg_accounts
+                                   SET is_active=FALSE, acc_status='session_expired',
+                                       status_reason=$2
+                                   WHERE id=$1 AND is_active=TRUE""",
+                                acc["id"],
+                                f"Dead session (mass_publish): {err_str[:180]}",
+                            )
+                            log.warning(
+                                "mass_publish: deactivated dead session account_id=%d: %s",
+                                acc["id"], err_str[:100],
+                            )
+                        except Exception:
+                            log_exc_swallow(log, "mass_publish: dead session deactivate failed")
+                    else:
+                        try:
+                            await _record_network_isolation(
+                                pool,
+                                acc["id"],
+                                "publish",
+                                op_id,
+                                err_str,
+                            )
+                        except Exception:
+                            log_exc_swallow(log, "mass_publish: network isolation failed")
                     for fallback_acc in candidate_accounts[1:]:
                         if fallback_acc["id"] in isolated_accounts:
                             continue
@@ -1613,21 +1642,34 @@ async def _exec_mass_publish(
                         except Exception as fallback_exc:
                             err_str = str(fallback_exc)[:200]
                             last_error = err_str
-                            if _is_network_or_proxy_error(err_str):
+                            if _is_network_or_proxy_error(err_str) or _is_dead_session_error(err_str):
                                 isolated_accounts.add(fallback_acc["id"])
-                                try:
-                                    await _record_network_isolation(
-                                        pool,
-                                        fallback_acc["id"],
-                                        "publish",
-                                        op_id,
-                                        err_str,
-                                    )
-                                except Exception:
-                                    log_exc_swallow(
-                                        log,
-                                        "mass_publish: fallback network isolation failed",
-                                    )
+                                if _is_dead_session_error(err_str):
+                                    try:
+                                        await pool.execute(
+                                            """UPDATE tg_accounts
+                                               SET is_active=FALSE, acc_status='session_expired',
+                                                   status_reason=$2
+                                               WHERE id=$1 AND is_active=TRUE""",
+                                            fallback_acc["id"],
+                                            f"Dead session (mass_publish fallback): {err_str[:160]}",
+                                        )
+                                    except Exception:
+                                        pass
+                                else:
+                                    try:
+                                        await _record_network_isolation(
+                                            pool,
+                                            fallback_acc["id"],
+                                            "publish",
+                                            op_id,
+                                            err_str,
+                                        )
+                                    except Exception:
+                                        log_exc_swallow(
+                                            log,
+                                            "mass_publish: fallback network isolation failed",
+                                        )
                                 continue
                             break
                     break

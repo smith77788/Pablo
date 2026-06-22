@@ -2670,6 +2670,8 @@ async def post_to_channel(
         ChatWriteForbiddenError,
         UserNotParticipantError,
         UserBannedInChannelError,
+        AuthKeyUnregisteredError,
+        ChatAdminRequiredError,
     )
 
     client = _make_client(session_string, _acc)
@@ -2731,10 +2733,14 @@ async def post_to_channel(
         return {"error": f"Флуд-лимит: подождите {e.seconds}с", "flood_wait": e.seconds}
     except UserBannedInChannelError as e:
         return {"error": f"Аккаунт забанен в канале: {e}", "banned": True}
-    except ChatWriteForbiddenError as e:
-        return {"error": f"Нет прав для публикации в этом канале: {e}", "banned": True}
+    except ChatWriteForbiddenError:
+        return {"error": "Нет прав для публикации (аккаунт не является админом канала)", "banned": True}
+    except ChatAdminRequiredError:
+        return {"error": "Требуются права администратора канала", "banned": True}
     except UserNotParticipantError:
         return {"error": "Аккаунт не является участником канала"}
+    except AuthKeyUnregisteredError as e:
+        return {"error": f"AUTH_KEY: сессия недействительна (другой DC или отозвана): {e}"}
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "post")
         return {
@@ -2745,7 +2751,7 @@ async def post_to_channel(
         _record_proxy_fail(_acc, "post")
         return {"error": f"Ошибка сети (прокси?): {e}", "proxy_error": True}
     except Exception as e:
-        log.exception("post_to_channel error: %s", e)
+        log.warning("post_to_channel error: %s", e)
         return {"error": str(e)[:150]}
     finally:
         try:
