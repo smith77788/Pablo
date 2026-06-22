@@ -96,19 +96,17 @@ async def cb_add(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    from bot.utils.phone_gate import require_phone_verified
     from bot.utils.subscription import get_plan
 
-    if not await require_phone_verified(pool, callback):
-        return
-
     from bot.utils.subscription import get_effective_bot_count
+
+    from bot.utils.subscription import is_trial_active, get_trial_days_left
 
     current_plan = await get_plan(pool, callback.from_user.id)
     limit = await get_bot_limit(pool, callback.from_user.id)
     effective_count = await get_effective_bot_count(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
-    if effective_count >= limit:
+    if effective_count >= limit or limit == 0:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         kb = InlineKeyboardBuilder()
@@ -119,20 +117,25 @@ async def cb_add(
                 callback_data=SubCb(action="choose_plan", plan="paid"),
             )
             kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
-            abuse_note = (
-                f"\n\n⚠️ <i>Обнаружены связанные аккаунты. "
-                f"Лимит считается суммарно: {effective_count} из {limit}.</i>"
-                if effective_count > len(current_bots)
-                else ""
-            )
-            upgrade_text = (
-                f"⛔️ <b>Достигнут лимит FREE плана</b>\n\n"
-                f"На бесплатном плане можно добавить максимум <b>{limit}</b> ботов.\n"
-                f"У вас добавлено: <b>{len(current_bots)}</b>{abuse_note}\n\n"
-                "💎 <b>ПОДПИСКА</b> — без ограничений\n"
-                "<i>∞ ботов и каналов, CRM, воронки, аккаунты, AI, рассылки, аналитика</i>\n\n"
-                "Оформите подписку, чтобы продолжить добавлять ботов."
-            )
+            if limit == 0:
+                upgrade_text = (
+                    "⏱ <b>Пробный период завершён</b>\n\n"
+                    "7-дневный триал истёк. Добавленные боты продолжают работать, "
+                    "но добавить новых — нельзя.\n\n"
+                    "💡 <b>Создать ещё один аккаунт бесполезно</b> — "
+                    "потеряете всё что уже настроили, и получите только новые 7 дней.\n\n"
+                    "💎 <b>ПОДПИСКА</b> — без ограничений навсегда\n"
+                    "<i>∞ ботов, каналов, операций + все инструменты</i>"
+                )
+            else:
+                upgrade_text = (
+                    f"⛔️ <b>Достигнут лимит триала</b>\n\n"
+                    f"На триале можно добавить максимум <b>{limit}</b> ботов.\n"
+                    f"У вас добавлено: <b>{len(current_bots)}</b>\n\n"
+                    "💎 <b>ПОДПИСКА</b> — без ограничений\n"
+                    "<i>∞ ботов и каналов, CRM, воронки, аккаунты, AI, рассылки, аналитика</i>\n\n"
+                    "Оформите подписку, чтобы продолжить добавлять ботов."
+                )
         else:
             kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
             upgrade_text = (

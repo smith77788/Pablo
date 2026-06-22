@@ -3653,8 +3653,8 @@ async def register_or_update_user(
     """Регистрировать нового или обновить существующего пользователя."""
     try:
         await pool.execute(
-            """INSERT INTO platform_users (user_id, username, first_name, last_seen)
-               VALUES ($1, $2, $3, now())
+            """INSERT INTO platform_users (user_id, username, first_name, last_seen, trial_started_at)
+               VALUES ($1, $2, $3, now(), now())
                ON CONFLICT (user_id) DO UPDATE
                SET username = COALESCE($2, platform_users.username),
                    first_name = COALESCE($3, platform_users.first_name),

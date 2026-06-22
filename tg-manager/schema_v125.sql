@@ -1,9 +1,10 @@
--- schema_v125: phone gate — один verified_phone на один платформ-пользователь
+-- schema_v125: 7-дневный триал — anti-abuse через потерю прогресса
+-- Создать новый аккаунт для обхода = потерять всё что настроил.
 
 ALTER TABLE platform_users
-    ADD COLUMN IF NOT EXISTS verified_phone TEXT;
+    ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMPTZ DEFAULT now();
 
--- Уникальность: один номер = один владелец (NULL допускается до верификации)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_users_verified_phone
-    ON platform_users(verified_phone)
-    WHERE verified_phone IS NOT NULL;
+-- Для существующих пользователей: триал уже завершён (они не новые)
+UPDATE platform_users
+SET trial_started_at = registered_at - INTERVAL '8 days'
+WHERE trial_started_at IS NULL OR trial_started_at = registered_at;
