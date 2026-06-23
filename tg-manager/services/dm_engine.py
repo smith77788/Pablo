@@ -131,10 +131,16 @@ async def send_dm(
 
 # ── Campaign runner ────────────────────────────────────────────────────────────
 
-_MIN_DELAY = (
-    35.0  # минимум секунд между отправками (< 30s = гарантированный spam block)
-)
-_MAX_DELAY = 90.0  # максимум секунд между отправками
+# Задержки подобраны по типу аудитории: чем незнакомее аудитория, тем длиннее задержка
+_DELAYS_BY_TARGET_TYPE: dict[str, tuple[float, float]] = {
+    "bot_users":       (35.0, 90.0),    # свои подписчики — наиболее безопасно
+    "cohort":          (35.0, 90.0),
+    "all_bots":        (40.0, 100.0),   # агрегат всех своих ботов
+    "crm":             (45.0, 110.0),   # crm-контакты
+    "parsed_audience": (55.0, 130.0),   # спарсенные — незнакомые
+    "import_list":     (70.0, 160.0),   # внешний список — максимальная осторожность
+}
+_DEFAULT_DELAY_RANGE: tuple[float, float] = (45.0, 110.0)
 _FLOOD_PAUSE = 120  # пауза при flood (если нет явного wait)
 
 
@@ -227,6 +233,40 @@ async def _get_targets(pool: asyncpg.Pool, campaign: dict) -> list[dict]:
             for r in rows
             if r["tg_user_id"] not in sent_ids
         ]
+    elif target_type == "all_bots":
+        rows = await pool.fetch(
+            """SELECT DISTINCT ON (bu.user_id) bu.user_id, bu.username
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by=$1 AND bu.user_id > 0
+               ORDER BY bu.user_id, bu.added_at DESC""",
+            campaign["owner_id"],
+        )
+        return [
+            {"user_id": r["user_id"], "username": r["username"] or None}
+            for r in rows
+            if r["user_id"] not in sent_ids
+        ]
+    elif target_type == "import_list":
+        import json as _json
+
+        params = campaign.get("params") or {}
+        if isinstance(params, str):
+            try:
+                params = _json.loads(params)
+            except Exception:
+                params = {}
+        import_items = params.get("import_list", [])
+        targets = []
+        for item in import_items:
+            uid = int(item.get("user_id") or 0)
+            uname = item.get("username") or None
+            if not uid and not uname:
+                continue
+            if uid and uid in sent_ids:
+                continue
+            targets.append({"user_id": uid, "username": uname})
+        return targets
     return []
 
 
@@ -312,6 +352,11 @@ async def run_campaign(
             template = _bi.add_promo(template, html=False, context="dm")
     except Exception:
         pass
+
+    _delay_min, _delay_max = _DELAYS_BY_TARGET_TYPE.get(
+        campaign.get("target_type", ""), _DEFAULT_DELAY_RANGE
+    )
+
     acc_cycle = list(accounts)
     acc_idx = 0
     sent = 0
@@ -447,7 +492,7 @@ async def run_campaign(
                     )
                 except Exception:
                     pass
-            await asyncio.sleep(random.uniform(_MIN_DELAY, _MAX_DELAY))
+            await asyncio.sleep(random.uniform(_delay_min, _delay_max))
             continue
         else:
             # retry — логируем как ошибку
@@ -504,8 +549,8 @@ async def run_campaign(
                             f"dm_engine: progress notification failed campaign={campaign.get('id')} owner={owner_id}",
                         )
 
-        # Humanized delay
-        delay = random.uniform(_MIN_DELAY, _MAX_DELAY)
+        # Humanized delay (per target-type range)
+        delay = random.uniform(_delay_min, _delay_max)
         await asyncio.sleep(delay)
 
     # Учесть необработанные цели (напр., при исчерпании всех аккаунтов)

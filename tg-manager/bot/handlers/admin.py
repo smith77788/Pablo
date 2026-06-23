@@ -2992,6 +2992,13 @@ async def _adm_logs(
                     )
                     if err:
                         lines.append(f"  └ <code>{_html.escape(err[:80])}</code>")
+                elif status == "warning":
+                    err = r.get("error_msg") or ""
+                    lines.append(
+                        f"<code>{dt}</code> {icon} uid:{uid} {action}{detail_str} ⚠️{dur_str}"
+                    )
+                    if err:
+                        lines.append(f"  └ <code>{_html.escape(err[:80])}</code>")
                 else:
                     lines.append(
                         f"<code>{dt}</code> {icon} uid:{uid} {action}{detail_str} ✅{dur_str}"
@@ -3081,9 +3088,19 @@ async def _adm_logs(
         text = text[:3800] + "\n\n<i>...обрезано</i>"
 
     kb = _logs_kb(source, status_filter, page, has_next)
-    await callback.message.edit_text(
-        text, parse_mode="HTML", reply_markup=kb.as_markup()
-    )
+    try:
+        await callback.message.edit_text(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
+    except Exception as _e:
+        _e_str = str(_e).lower()
+        if "not modified" not in _e_str:
+            try:
+                await callback.message.answer(
+                    text, parse_mode="HTML", reply_markup=kb.as_markup()
+                )
+            except Exception:
+                pass
 
 
 # ── Subscription Gate Management ──────────────────────────────────────────────

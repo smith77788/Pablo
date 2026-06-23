@@ -4902,7 +4902,11 @@ async def get_activity_feed(
         conditions.append(f"owner_id=${idx}")
         params.append(owner_id)
         idx += 1
-    if status_filter:
+    if status_filter == "error":
+        # Include both 'error' (unhandled crashes) and 'warning' (handled user-visible errors)
+        # so the "Только ошибки" view shows all problems, not just uncaught exceptions.
+        conditions.append("status IN ('error', 'warning')")
+    elif status_filter:
         conditions.append(f"status=${idx}")
         params.append(status_filter)
         idx += 1

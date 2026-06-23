@@ -18,6 +18,9 @@ _NONCRITICAL_TG_PATTERNS = (
     "message is not modified",
     "query is too old",
     "query id is invalid",
+    "message to edit not found",
+    "message can't be edited",
+    "message is too long",
 )
 
 log = logging.getLogger(__name__)

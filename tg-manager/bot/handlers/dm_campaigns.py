@@ -214,8 +214,12 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🤖 Все подписчики бота",
+        text="🤖 Подписчики одного бота",
         callback_data=DmCb(action="target_type", campaign_id=0),
+    )
+    kb.button(
+        text="🤖 Все подписчики (все боты)",
+        callback_data=DmCb(action="target_all_bots"),
     )
     kb.button(
         text="🎯 По когорте (активность)",
@@ -223,16 +227,21 @@ async def fsm_dm_text(message: Message, state: FSMContext) -> None:
     )
     kb.button(text="👥 CRM-контакты", callback_data=DmCb(action="target_crm"))
     kb.button(text="🔍 Спарсенная аудитория", callback_data=DmCb(action="target_parsed"))
+    kb.button(text="📋 Импорт списка (@username / ID)", callback_data=DmCb(action="target_import"))
     kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
     kb.adjust(1)
     await message.answer(
         "👥 <b>Выберите аудиторию</b>:\n\n"
-        "🎯 <b>По когорте</b> — отправить только активным/неактивным пользователям:\n"
-        "  • 🔥 Hot — активны за последние 24ч\n"
-        "  • 🟡 Warm — активны 1-7 дней назад\n"
-        "  • 🧊 Cold — активны 7-30 дней назад\n"
-        "  • 💀 Lost — неактивны более 30 дней\n\n"
-        "🔍 <b>Спарсенная аудитория</b> — пользователи из Парсера аудитории",
+        "🤖 <b>Подписчики одного бота</b> — выбрать конкретный бот\n"
+        "🤖 <b>Все подписчики (все боты)</b> — агрегат по всем вашим ботам\n\n"
+        "🎯 <b>По когорте</b> — сегмент по активности:\n"
+        "  • 🔥 Hot — активны за 24ч\n"
+        "  • 🟡 Warm — 1-7 дней назад\n"
+        "  • 🧊 Cold — 7-30 дней назад\n"
+        "  • 💀 Lost — неактивны 30+ дней\n\n"
+        "👥 <b>CRM-контакты</b> — ваша CRM-база\n"
+        "🔍 <b>Спарсенная аудитория</b> — результаты парсера\n"
+        "📋 <b>Импорт списка</b> — вставить @usernames или Telegram ID",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -513,6 +522,161 @@ async def cb_dm_target_parsed_pick(
     await _show_dm_preview(callback, state, pool)
 
 
+# ── Create — Step 3e: All bots aggregate ─────────────────────────────────────
+
+
+@router.callback_query(DmCb.filter(F.action == "target_all_bots"))
+async def cb_dm_target_all_bots(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    """Все подписчики всех ботов пользователя — агрегат."""
+    await callback.answer()
+    try:
+        cnt = await pool.fetchval(
+            """SELECT COUNT(DISTINCT bu.user_id)
+               FROM bot_users bu
+               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+               WHERE mb.added_by=$1 AND bu.user_id > 0""",
+            callback.from_user.id,
+        ) or 0
+    except Exception:
+        cnt = 0
+    if not cnt:
+        _no_kb = InlineKeyboardBuilder()
+        _no_kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
+        await _edit(
+            callback,
+            "⚠️ <b>Нет подписчиков ни в одном боте</b>\n\n"
+            "Добавьте подписчиков к вашим ботам, затем попробуйте снова.",
+            _no_kb.as_markup(),
+        )
+        return
+    await state.update_data(dm_target_type="all_bots", dm_target_id=None)
+    await _show_dm_preview(callback, state, pool)
+
+
+# ── Create — Step 3f: Import list ────────────────────────────────────────────
+
+
+@router.callback_query(DmCb.filter(F.action == "target_import"))
+async def cb_dm_target_import(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    """Импорт списка получателей (@username или Telegram ID)."""
+    await callback.answer()
+    await state.set_state(DmCampaignFSM.waiting_import_text)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
+    kb.adjust(1)
+    await _edit(
+        callback,
+        "📋 <b>Импорт списка получателей</b>\n\n"
+        "Введите получателей — каждый с новой строки (или через запятую):\n\n"
+        "• <code>@username</code> — по юзернейму\n"
+        "• <code>123456789</code> — по Telegram ID\n\n"
+        "<b>Пример:</b>\n"
+        "<code>@ivan_petrov\n"
+        "@maria_smirnova\n"
+        "987654321\n"
+        "@user123</code>\n\n"
+        "<i>Максимум 5 000 получателей за раз.</i>",
+        kb.as_markup(),
+    )
+
+
+@router.message(DmCampaignFSM.waiting_import_text)
+async def fsm_dm_import_text(
+    message: Message,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    import re as _re
+
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("⚠️ Список пустой. Введите хотя бы одного получателя:")
+        return
+
+    items: list[dict] = []
+    errors = 0
+    for part in _re.split(r"[\n,;]+", raw):
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith("@"):
+            uname = part.lstrip("@").strip()
+            if uname:
+                items.append({"user_id": 0, "username": uname})
+        elif part.isdigit() and len(part) >= 4:
+            items.append({"user_id": int(part), "username": None})
+        elif part and not part.isspace():
+            # попробовать как username без @
+            clean = part.strip()
+            if clean.isalnum() or "_" in clean:
+                items.append({"user_id": 0, "username": clean})
+            else:
+                errors += 1
+
+    if not items:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
+        await message.answer(
+            "⚠️ Не удалось распознать ни одного получателя.\n"
+            "Используйте формат <code>@username</code> или числовой Telegram ID.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+
+    truncated = len(items) > 5000
+    if truncated:
+        items = items[:5000]
+
+    await state.update_data(
+        dm_target_type="import_list",
+        dm_target_id=None,
+        dm_import_list=items,
+    )
+
+    trunc_note = "\n⚠️ Список обрезан до 5 000 получателей." if truncated else ""
+    err_note = f"\n⚠️ {errors} строк не распознано — пропущены." if errors else ""
+    preview_lines = []
+    for it in items[:5]:
+        if it.get("username"):
+            preview_lines.append(f"• @{it['username']}")
+        else:
+            preview_lines.append(f"• {it['user_id']}")
+    preview_str = "\n".join(preview_lines)
+    if len(items) > 5:
+        preview_str += f"\n<i>... и ещё {len(items) - 5}</i>"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Подтвердить", callback_data=DmCb(action="import_confirm"))
+    kb.button(text="❌ Отмена", callback_data=DmCb(action="menu"))
+    kb.adjust(1)
+    await message.answer(
+        f"📋 <b>Список импортирован: {len(items)} получателей</b>\n\n"
+        f"{preview_str}"
+        f"{trunc_note}{err_note}\n\n"
+        "Подтвердить?",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(DmCb.filter(F.action == "import_confirm"))
+async def cb_dm_import_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    pool: asyncpg.Pool,
+) -> None:
+    await callback.answer()
+    await _show_dm_preview(callback, state, pool)
+
+
 # ── Preview & Confirm ─────────────────────────────────────────────────────────
 
 
@@ -620,6 +784,28 @@ async def _show_dm_preview(
             parse_label = "спарсенная"
         recipients_count = int(cnt)
         audience_str = f"🔍 Спарсенная ({parse_label}): <b>{cnt}</b>"
+    elif target_type == "all_bots":
+        try:
+            cnt = (
+                await pool.fetchval(
+                    """SELECT COUNT(DISTINCT bu.user_id)
+                       FROM bot_users bu
+                       JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+                       WHERE mb.added_by=$1 AND bu.user_id > 0""",
+                    callback.from_user.id,
+                )
+                or 0
+            )
+        except Exception:
+            log_exc_swallow(log, "Ошибка подсчёта аудитории all_bots для DM-кампании")
+            cnt = 0
+        recipients_count = int(cnt)
+        audience_str = f"🤖 Все подписчики (все боты): <b>{cnt}</b>"
+    elif target_type == "import_list":
+        import_list = sd.get("dm_import_list") or []
+        cnt = len(import_list)
+        recipients_count = cnt
+        audience_str = f"📋 Импортированный список: <b>{cnt}</b>"
     else:
         try:
             count_row = await pool.fetchrow(
@@ -741,6 +927,19 @@ async def cb_dm_launch_or_draft(
                         )
                         or 0
                     )
+            elif target_type == "all_bots":
+                audience_cnt = (
+                    await pool.fetchval(
+                        """SELECT COUNT(DISTINCT bu.user_id)
+                           FROM bot_users bu
+                           JOIN managed_bots mb ON mb.bot_id = bu.bot_id
+                           WHERE mb.added_by=$1 AND bu.user_id > 0""",
+                        callback.from_user.id,
+                    )
+                    or 0
+                )
+            elif target_type == "import_list":
+                audience_cnt = len(sd.get("dm_import_list") or [])
             if audience_cnt == 0:
                 _empty_kb = InlineKeyboardBuilder()
                 _empty_kb.button(
@@ -765,6 +964,8 @@ async def cb_dm_launch_or_draft(
     params_dict = {}
     if cohort_type:
         params_dict["cohort_type"] = cohort_type
+    if target_type == "import_list":
+        params_dict["import_list"] = sd.get("dm_import_list") or []
 
     initial_status = "draft"  # всегда создаём как draft, потом меняем
     try:

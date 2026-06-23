@@ -413,10 +413,11 @@ class GlobalPresenceFSM(StatesGroup):
 
 
 class DmCampaignFSM(StatesGroup):
-    waiting_name = State()  # название кампании
-    waiting_text = State()  # текст с spintax
-    choosing_target = State()  # выбор типа аудитории (bot_users/crm)
-    choosing_bot = State()  # выбор бота (для bot_users)
+    waiting_name = State()          # название кампании
+    waiting_text = State()          # текст с spintax
+    choosing_target = State()       # выбор типа аудитории
+    choosing_bot = State()          # выбор бота (для bot_users / cohort)
+    waiting_import_text = State()   # вставить список @username / user_id
 
 
 class PresencePackFSM(StatesGroup):
