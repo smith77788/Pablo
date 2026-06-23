@@ -96,17 +96,13 @@ async def cb_add(
     callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
 ) -> None:
     await callback.answer()
-    from bot.utils.subscription import get_plan
-
-    from bot.utils.subscription import get_effective_bot_count
-
-    from bot.utils.subscription import is_trial_active, get_trial_days_left
+    from bot.utils.subscription import get_plan, get_effective_bot_count
 
     current_plan = await get_plan(pool, callback.from_user.id)
     limit = await get_bot_limit(pool, callback.from_user.id)
     effective_count = await get_effective_bot_count(pool, callback.from_user.id)
     current_bots = await db.get_bots(pool, callback.from_user.id)
-    if effective_count >= limit or limit == 0:
+    if effective_count >= limit:
         from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         kb = InlineKeyboardBuilder()
@@ -117,25 +113,14 @@ async def cb_add(
                 callback_data=SubCb(action="choose_plan", plan="paid"),
             )
             kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
-            if limit == 0:
-                upgrade_text = (
-                    "⏱ <b>Пробный период завершён</b>\n\n"
-                    "7-дневный триал истёк. Добавленные боты продолжают работать, "
-                    "но добавить новых — нельзя.\n\n"
-                    "💡 <b>Создать ещё один аккаунт бесполезно</b> — "
-                    "потеряете всё что уже настроили, и получите только новые 7 дней.\n\n"
-                    "💎 <b>ПОДПИСКА</b> — без ограничений навсегда\n"
-                    "<i>∞ ботов, каналов, операций + все инструменты</i>"
-                )
-            else:
-                upgrade_text = (
-                    f"⛔️ <b>Достигнут лимит триала</b>\n\n"
-                    f"На триале можно добавить максимум <b>{limit}</b> ботов.\n"
-                    f"У вас добавлено: <b>{len(current_bots)}</b>\n\n"
-                    "💎 <b>ПОДПИСКА</b> — без ограничений\n"
-                    "<i>∞ ботов и каналов, CRM, воронки, аккаунты, AI, рассылки, аналитика</i>\n\n"
-                    "Оформите подписку, чтобы продолжить добавлять ботов."
-                )
+            upgrade_text = (
+                f"⛔️ <b>Достигнут лимит ботов</b>\n\n"
+                f"На бесплатном тарифе доступен <b>{limit}</b> бот.\n"
+                f"У вас добавлено: <b>{len(current_bots)}</b>\n\n"
+                "💎 <b>ПОДПИСКА</b> — без ограничений\n"
+                "<i>∞ ботов и каналов, CRM, воронки, аккаунты, AI, рассылки, аналитика</i>\n\n"
+                "Оформите подписку, чтобы продолжить добавлять ботов."
+            )
         else:
             kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
             upgrade_text = (
@@ -219,7 +204,7 @@ async def msg_token(
 
     await state.clear()
 
-    if not added:
+    if added != True:
         safe_uname = (
             (bot_info.get("username") or "")
             .replace("&", "&amp;")
@@ -228,8 +213,16 @@ async def msg_token(
         )
         from bot.utils.subscription import is_platform_admin
 
+        if added == "taken":
+            err_text = (
+                f"🔒 Бот @{safe_uname} уже управляется другим аккаунтом BotMother.\n\n"
+                "Каждый Telegram-бот может быть подключён только к одному аккаунту. "
+                "Если вы хотите перенести бота — сначала удалите его из другого аккаунта."
+            )
+        else:
+            err_text = f"⚠️ Бот @{safe_uname} уже добавлен в ваш аккаунт."
         await info_msg.edit_text(
-            f"⚠️ Бот @{safe_uname} уже добавлен.",
+            err_text,
             parse_mode="HTML",
             reply_markup=main_menu(is_admin=is_platform_admin(message.from_user.id)),
         )

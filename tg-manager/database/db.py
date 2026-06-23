@@ -171,9 +171,16 @@ async def add_bot(
     first_name: str,
     added_by: int,
     bot=None,
-) -> bool:
-    """Return True if inserted, False if token already exists."""
+) -> bool | str:
+    """Return True if inserted, False if already in this account, 'taken' if owned by another account."""
     from services.token_vault import encrypt_token as _enc_tok
+
+    existing = await pool.fetchrow(
+        "SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id
+    )
+    if existing is not None:
+        return False if existing["added_by"] == added_by else "taken"
+
     try:
         await pool.execute(
             """INSERT INTO managed_bots (token, bot_id, username, first_name, added_by)

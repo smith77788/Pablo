@@ -43,8 +43,8 @@ def invalidate_plan_cache(user_id: int) -> None:
 
 
 PLAN_LEVELS: dict[str, int] = {"free": 0, "paid": 1}
-BOT_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
-CHANNEL_LIMITS: dict[str, int] = {"free": 5, "paid": 9999}
+BOT_LIMITS: dict[str, int] = {"free": 1, "paid": 9999}
+CHANNEL_LIMITS: dict[str, int] = {"free": 0, "paid": 9999}
 PLAN_PRICES = {"paid": "$29"}
 PLAN_EMOJIS = {"free": "🆓", "paid": "💎"}
 PLAN_FEATURES = {
@@ -180,48 +180,6 @@ def is_platform_admin(user_id: int) -> bool:
     return False
 
 
-_TRIAL_DAYS = 7  # дней бесплатного триала для новых аккаунтов
-
-
-async def is_trial_active(pool: asyncpg.Pool, user_id: int) -> bool:
-    """Возвращает True если 7-дневный триал ещё не истёк."""
-    if is_platform_admin(user_id):
-        return False
-    try:
-        started = await pool.fetchval(
-            "SELECT trial_started_at FROM platform_users WHERE user_id=$1", user_id
-        )
-        if started is None:
-            return True  # нет записи = новый пользователь
-        import datetime
-        from datetime import timezone
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-        elapsed = (datetime.datetime.now(timezone.utc) - started).total_seconds()
-        return elapsed < _TRIAL_DAYS * 86400
-    except Exception:
-        return True  # при ошибке не блокируем
-
-
-async def get_trial_days_left(pool: asyncpg.Pool, user_id: int) -> int:
-    """Сколько дней осталось в триале (0 = истёк)."""
-    try:
-        started = await pool.fetchval(
-            "SELECT trial_started_at FROM platform_users WHERE user_id=$1", user_id
-        )
-        if started is None:
-            return _TRIAL_DAYS
-        import datetime
-        from datetime import timezone
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-        elapsed_days = (datetime.datetime.now(timezone.utc) - started).total_seconds() / 86400
-        remaining = _TRIAL_DAYS - elapsed_days
-        return max(0, int(remaining))
-    except Exception:
-        return _TRIAL_DAYS
-
-
 async def get_plan(pool: asyncpg.Pool, user_id: int) -> str:
     if is_platform_admin(user_id):
         return "paid"
@@ -261,8 +219,6 @@ async def get_bot_limit(pool: asyncpg.Pool, user_id: int) -> int:
     if is_platform_admin(user_id):
         return 9999
     plan = await get_plan(pool, user_id)
-    if coerce_plan(plan) == "free" and not await is_trial_active(pool, user_id):
-        return 0  # триал истёк — нельзя добавлять новых ботов
     return BOT_LIMITS[coerce_plan(plan)]
 
 
@@ -270,8 +226,6 @@ async def get_channel_limit(pool: asyncpg.Pool, user_id: int) -> int:
     if is_platform_admin(user_id):
         return 9999
     plan = await get_plan(pool, user_id)
-    if coerce_plan(plan) == "free" and not await is_trial_active(pool, user_id):
-        return 0  # триал истёк — нельзя добавлять новые каналы
     return CHANNEL_LIMITS[coerce_plan(plan)]
 
 

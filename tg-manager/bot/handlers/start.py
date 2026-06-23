@@ -157,16 +157,8 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     bot_count = len(bots)
 
     if not bot_count:
-        from bot.utils.subscription import get_trial_days_left, is_trial_active
-        trial_active = await is_trial_active(pool, uid)
-        days_left = await get_trial_days_left(pool, uid)
-        trial_line = (
-            f"\n⏱ <b>Триал: {days_left} дн. осталось</b> — потом нужна подписка\n"
-            if trial_active
-            else "\n⏱ <b>Триал завершён</b> — оформите подписку /subscription\n"
-        )
         await message.answer(
-            f"👋 <b>Добро пожаловать в BotMother!</b>{trial_line}\n"
+            "👋 <b>Добро пожаловать в BotMother!</b>\n\n"
             "Это система управления Telegram-активами:\n"
             "боты, каналы, группы, аккаунты — всё в одном месте.\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
