@@ -818,10 +818,6 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_bot_factory(
                     pool, bot, op_id, owner_id, params
                 )
-            elif op_type in ("global_presence_full_package", "global_presence_package"):
-                result = await _exec_global_presence_channel(
-                    pool, bot, op_id, owner_id, params
-                )
             elif op_type == "strike":
                 result = await _exec_strike(pool, bot, op_id, owner_id, params)
             elif op_type == "gift_transfer":
