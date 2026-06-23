@@ -14,6 +14,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+import os as _os
+from aiogram.types import WebAppInfo as _WebAppInfo
+from config import MINI_APP_URL as _MINI_APP_URL
+
 from bot.callbacks import (
     AccCb,
     AdIntelCb,
@@ -143,6 +147,8 @@ def _format_progress_bar(done: int, total: int, width: int = 10) -> str:
 
 def _main_menu_kb():
     kb = InlineKeyboardBuilder()
+    if _MINI_APP_URL:
+        kb.button(text="🌐 Открыть приложение", web_app=_WebAppInfo(url=_MINI_APP_URL))
     kb.button(text="🎯 Умные цели (ИИ-помощник)", callback_data=IntentCb(action="menu"))
     kb.button(text="🏗 Активы & Сети", callback_data=BmCb(action="assets"))
     kb.button(text="⚡ Операции", callback_data=BmCb(action="operations"))
@@ -151,7 +157,11 @@ def _main_menu_kb():
     kb.button(text="🛡️ Мониторинг & Защита", callback_data=BmCb(action="monitoring"))
     kb.button(text="🚀 Рост & Продвижение", callback_data=BmCb(action="growth"))
     kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
-    kb.adjust(1, 2, 2, 2, 1)
+    # Layout with app button: app(1) | intent(1) | assets+ops(2) | comms+analytics(2) | monitoring+growth(2) | settings(1)
+    if _MINI_APP_URL:
+        kb.adjust(1, 1, 2, 2, 2, 1)  # 9 buttons total
+    else:
+        kb.adjust(1, 2, 2, 2, 1)
     return kb.as_markup()
 
 

@@ -357,10 +357,16 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     app.router.add_post("/webhook/cryptopay", cryptopay_webhook)
     app.router.add_post("/webhook/deploy", deploy_webhook)
 
-    from services import email_oauth, rest_api
+    from services import email_oauth, rest_api, mini_app_api, managed_bot_webhooks
 
     email_oauth.add_routes(app, pool, bot)
     rest_api.add_routes(app, pool, bot)
+
+    # Telegram Mini App API + SSE real-time dashboard
+    mini_app_api.setup_routes(app, pool)
+
+    # Managed bot webhook receiver (item 5: webhooks instead of polling)
+    app.router.add_post("/tgbot/hook/", managed_bot_webhooks.make_webhook_route(pool))
 
     return app
 

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BotMother</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f2f2f7);
+  --text: var(--tg-theme-text-color, #000000);
+  --hint: var(--tg-theme-hint-color, #8e8e93);
+  --link: var(--tg-theme-link-color, #007aff);
+  --btn: var(--tg-theme-button-color, #007aff);
+  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  --sep: rgba(142,142,147,0.18);
+  --tab-h: 56px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:15px}
+
+/* ─── Layout ─────────────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100vh}
+#header{padding:calc(var(--safe-t) + 10px) 16px 10px;background:var(--bg);border-bottom:1px solid var(--sep);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:sticky;top:0;z-index:50}
+#content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + var(--safe-b) + 8px)}
+#tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:rgba(var(--tg-theme-bg-color,255,255,255),.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid var(--sep);display:flex;z-index:100}
+
+/* ─── Header ─────────────────────────────────────────────────── */
+.h-logo{font-size:17px;font-weight:700;letter-spacing:-.3px}
+.h-meta{text-align:right}
+.h-user{font-size:13px;color:var(--hint);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.h-live{font-size:11px;color:#34c759;display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
+.live-dot{width:6px;height:6px;border-radius:50%;background:#34c759;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ─── Pages ──────────────────────────────────────────────────── */
+.page{display:none;padding:12px 16px 4px;animation:fadeIn .2s ease}
+.page.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ─── Section title ──────────────────────────────────────────── */
+.stitle{font-size:12px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;padding:0 4px;margin:14px 0 8px}
+
+/* ─── Stat cards grid ────────────────────────────────────────── */
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}
+.card{background:var(--bg2);border-radius:16px;padding:14px 14px 12px;transition:transform .12s,opacity .12s}
+.card:active{transform:scale(.97);opacity:.8}
+.card-icon{font-size:24px;line-height:1;margin-bottom:6px}
+.card-val{font-size:26px;font-weight:700;line-height:1;letter-spacing:-.5px}
+.card-lbl{font-size:12px;color:var(--hint);margin-top:3px;line-height:1.2}
+
+/* ─── Lists ──────────────────────────────────────────────────── */
+.lst{background:var(--bg2);border-radius:16px;overflow:hidden}
+.lst-item{padding:12px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--sep)}
+.lst-item:last-child{border-bottom:none}
+.lst-ava{width:42px;height:42px;border-radius:12px;background:var(--btn);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;color:var(--btn-text)}
+.lst-ava.green{background:rgba(52,199,89,.15);color:#34c759}
+.lst-ava.blue{background:rgba(0,122,255,.15);color:#007aff}
+.lst-ava.orange{background:rgba(255,159,10,.15);color:#ff9f0a}
+.lst-ava.purple{background:rgba(175,82,222,.15);color:#af52de}
+.lst-info{flex:1;min-width:0}
+.lst-name{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lst-sub{font-size:13px;color:var(--hint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lst-right{font-size:14px;font-weight:600;color:var(--btn);flex-shrink:0}
+
+/* ─── Activity feed ──────────────────────────────────────────── */
+.act-item{padding:10px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--sep)}
+.act-item:last-child{border-bottom:none}
+.act-ico{width:34px;height:34px;border-radius:9px;background:rgba(0,122,255,.12);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.act-body{flex:1;min-width:0}
+.act-action{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-time{font-size:12px;color:var(--hint);margin-top:1px}
+.act-badge{font-size:11px;padding:2px 7px;border-radius:20px;flex-shrink:0;font-weight:500}
+.ok{background:rgba(52,199,89,.15);color:#34c759}
+.warn{background:rgba(255,159,10,.15);color:#ff9f0a}
+.err{background:rgba(255,59,48,.15);color:#ff3b30}
+
+/* ─── Campaign progress ──────────────────────────────────────── */
+.cmp-wrap{padding:12px 14px;border-bottom:1px solid var(--sep)}
+.cmp-wrap:last-child{border-bottom:none}
+.cmp-row{display:flex;align-items:center;gap:10px}
+.cmp-body{flex:1;min-width:0}
+.cmp-name{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmp-sub{font-size:12px;color:var(--hint);margin-top:2px}
+.badge{display:inline-flex;align-items:center;font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;flex-shrink:0}
+.b-run{background:rgba(52,199,89,.15);color:#34c759}
+.b-done{background:rgba(0,122,255,.15);color:#007aff}
+.b-pause{background:rgba(255,159,10,.15);color:#ff9f0a}
+.b-draft{background:rgba(142,142,147,.15);color:#8e8e93}
+.prog{height:3px;background:var(--sep);border-radius:2px;margin-top:7px;overflow:hidden}
+.prog-fill{height:100%;border-radius:2px;background:var(--btn);transition:width .6s ease}
+
+/* ─── Tab bar ────────────────────────────────────────────────── */
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;transition:opacity .1s;user-select:none}
+.tab:active{opacity:.6}
+.tab-ico{font-size:22px;line-height:1;position:relative}
+.tab-lbl{font-size:10px;color:var(--hint);transition:color .15s;font-weight:500}
+.tab.active .tab-lbl{color:var(--btn)}
+.tab.active .tab-ico::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--btn)}
+
+/* ─── Skeleton ───────────────────────────────────────────────── */
+.sk{background:linear-gradient(90deg,rgba(120,120,128,.15) 25%,rgba(120,120,128,.07) 50%,rgba(120,120,128,.15) 75%);background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
+@keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ─── Empty state ────────────────────────────────────────────── */
+.empty{text-align:center;padding:36px 16px;color:var(--hint)}
+.empty-ico{font-size:38px;margin-bottom:10px;opacity:.6}
+.empty-txt{font-size:14px}
+
+/* ─── Toast ──────────────────────────────────────────────────── */
+#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 12px);left:50%;transform:translateX(-50%) translateY(8px);background:var(--btn);color:var(--btn-text);padding:8px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;z-index:200;white-space:nowrap}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ─── Error ──────────────────────────────────────────────────── */
+.err-box{background:rgba(255,59,48,.1);border:1px solid rgba(255,59,48,.25);border-radius:12px;padding:10px 14px;font-size:13px;color:#ff3b30;margin-bottom:12px}
+
+/* ─── Spinner ────────────────────────────────────────────────── */
+.spin-wrap{padding:28px;display:flex;justify-content:center}
+.spin{width:26px;height:26px;border:2.5px solid rgba(0,122,255,.2);border-top-color:var(--btn);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ─── Settings rows ──────────────────────────────────────────── */
+.set-row{padding:13px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--sep)}
+.set-row:last-child{border-bottom:none}
+.set-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.set-text{flex:1}
+.set-name{font-size:15px;font-weight:500}
+.set-val{font-size:13px;color:var(--hint);margin-top:1px}
+.set-arrow{color:var(--hint);font-size:16px}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div id="header">
+  <div class="h-logo">🤖 BotMother</div>
+  <div class="h-meta">
+    <div class="h-user" id="hUser">Загрузка...</div>
+    <div class="h-live" id="hLive" style="display:none">
+      <span class="live-dot"></span><span>Real-time</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Content ─────────────────────────────────────────────────── -->
+<div id="content">
+
+  <!-- Dashboard -->
+  <div class="page active" id="pg-home">
+    <div id="homeErr" style="display:none" class="err-box"></div>
+
+    <div class="cards" id="cards">
+      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:75%"></div></div>
+      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:75%"></div></div>
+      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:75%"></div></div>
+      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:75%"></div></div>
+    </div>
+
+    <div class="stitle"><span class="live-dot" style="display:inline-block;margin-right:5px"></span>Последняя активность</div>
+    <div class="lst" id="actList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+
+  <!-- Bots -->
+  <div class="page" id="pg-bots">
+    <div class="stitle">Управляемые боты</div>
+    <div class="lst" id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+
+  <!-- Channels -->
+  <div class="page" id="pg-channels">
+    <div class="stitle">Мои каналы</div>
+    <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+
+  <!-- Campaigns -->
+  <div class="page" id="pg-campaigns">
+    <div class="stitle">DM-кампании</div>
+    <div class="lst" id="cmpList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="stitle" style="margin-top:18px">Воронки</div>
+    <div class="lst" id="funList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+
+  <!-- Settings / More -->
+  <div class="page" id="pg-more">
+    <div class="stitle">Аккаунт</div>
+    <div class="lst">
+      <div class="set-row">
+        <div class="set-icon" style="background:rgba(0,122,255,.12)">💳</div>
+        <div class="set-text">
+          <div class="set-name">Тариф</div>
+          <div class="set-val" id="planVal">Загрузка...</div>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-icon" style="background:rgba(52,199,89,.12)">📡</div>
+        <div class="set-text">
+          <div class="set-name">Real-time поток</div>
+          <div class="set-val" id="sseVal">Подключение...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stitle" style="margin-top:16px">Платформа</div>
+    <div class="lst">
+      <div class="set-row">
+        <div class="set-icon" style="background:rgba(175,82,222,.12)">🤖</div>
+        <div class="set-text">
+          <div class="set-name">BotMother OS</div>
+          <div class="set-val">Telegram Automation Platform</div>
+        </div>
+      </div>
+      <div class="set-row" id="statsSummary">
+        <div class="set-icon" style="background:rgba(255,159,10,.12)">📊</div>
+        <div class="set-text">
+          <div class="set-name">Статистика</div>
+          <div class="set-val" id="statsVal">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /content -->
+
+<!-- ── Tab bar ──────────────────────────────────────────────────── -->
+<div id="tabbar">
+  <div class="tab active" onclick="go('home')">
+    <span class="tab-ico">🏠</span><span class="tab-lbl">Главная</span>
+  </div>
+  <div class="tab" onclick="go('bots')">
+    <span class="tab-ico">🤖</span><span class="tab-lbl">Боты</span>
+  </div>
+  <div class="tab" onclick="go('channels')">
+    <span class="tab-ico">📡</span><span class="tab-lbl">Каналы</span>
+  </div>
+  <div class="tab" onclick="go('campaigns')">
+    <span class="tab-ico">📨</span><span class="tab-lbl">Рассылки</span>
+  </div>
+  <div class="tab" onclick="go('more')">
+    <span class="tab-ico">⚙️</span><span class="tab-lbl">Ещё</span>
+  </div>
+</div>
+
+<div id="toast">📡 Данные обновлены</div>
+</div><!-- /app -->
+
+<script>
+'use strict';
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+// ── State ──────────────────────────────────────────────────────────────────
+let TOKEN = null;
+let CUR = 'home';
+const LOADED = {};
+let SSE = null;
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+(async function boot() {
+  const u = tg.initDataUnsafe?.user;
+  if (u) {
+    const name = [u.first_name, u.last_name].filter(Boolean).join(' ');
+    document.getElementById('hUser').textContent = name || ('@' + (u.username || 'User'));
+  }
+
+  try {
+    const r = await fetch('/api/miniapp/auth', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({initData: tg.initData || ''}),
+    });
+    if (!r.ok) throw new Error('Auth ' + r.status);
+    const d = await r.json();
+    TOKEN = d.token;
+    await loadDash();
+    openSSE();
+  } catch(e) {
+    showErr('homeErr', '⚠️ ' + e.message);
+    document.getElementById('cards').innerHTML = '<div class="empty"><div class="empty-ico">⚠️</div><div class="empty-txt">Ошибка авторизации</div></div>';
+  }
+})();
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(path) {
+  const r = await fetch(path, {headers: {'Authorization': 'Bearer ' + TOKEN}});
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+function openSSE() {
+  if (SSE) { try { SSE.close(); } catch(_) {} }
+  SSE = new EventSource('/api/miniapp/events?token=' + encodeURIComponent(TOKEN));
+
+  SSE.addEventListener('stats', e => {
+    renderCards(JSON.parse(e.data));
+    toast('📡 Данные обновлены');
+  });
+  SSE.addEventListener('activity', e => {
+    renderAct(JSON.parse(e.data).items || []);
+  });
+
+  SSE.onopen = () => {
+    document.getElementById('hLive').style.display = 'flex';
+    document.getElementById('sseVal').textContent = '🟢 Подключено (real-time)';
+  };
+  SSE.onerror = () => {
+    document.getElementById('sseVal').textContent = '🟡 Переподключение...';
+    setTimeout(openSSE, 5000);
+  };
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+async function loadDash() {
+  try {
+    const d = await api('/api/miniapp/dashboard');
+    renderCards(d);
+    renderAct(d.recent_activity || []);
+    const plan = d.plan || 'free';
+    document.getElementById('planVal').textContent =
+      plan === 'free' ? '🆓 Free (5 ботов / 5 каналов)' :
+      plan === 'paid' ? '⭐ Paid — без ограничений' : plan.toUpperCase();
+    document.getElementById('statsVal').textContent =
+      `${n(d.bots)} бот · ${n(d.channels)} каналов · ${n(d.subscribers)} подп.`;
+  } catch(e) {
+    showErr('homeErr', 'Не удалось загрузить данные: ' + e.message);
+  }
+}
+
+function renderCards(d) {
+  document.getElementById('cards').innerHTML = [
+    {ico:'🤖', val:d.bots,             lbl:'Управляемых ботов'},
+    {ico:'📡', val:d.channels,         lbl:'Каналов'},
+    {ico:'👥', val:d.subscribers,      lbl:'Подписчиков (боты)'},
+    {ico:'📨', val:d.campaigns_active, lbl:'Активных кампаний'},
+  ].map(c => `
+    <div class="card">
+      <div class="card-icon">${c.ico}</div>
+      <div class="card-val">${n(c.val)}</div>
+      <div class="card-lbl">${c.lbl}</div>
+    </div>`).join('');
+  document.getElementById('statsVal').textContent =
+    `${n(d.bots)} бот · ${n(d.channels)} каналов · ${n(d.subscribers)} подп.`;
+}
+
+function renderAct(items) {
+  const el = document.getElementById('actList');
+  if (!items.length) { el.innerHTML = empty('📭','Нет активности'); return; }
+  const ico = {
+    message_sent:'📨',broadcast_sent:'📢',campaign_started:'🚀',
+    campaign_completed:'✅',funnel_subscribed:'🔄',funnel_completed:'🎯',
+    bot_added:'🤖',channel_added:'📡',user_registered:'👤',
+    payment_received:'💳',error:'⚠️',warning:'⚠️',
+  };
+  el.innerHTML = items.map(i => {
+    const cls = i.status==='error'?'err':i.status==='warning'?'warn':'ok';
+    return `<div class="act-item">
+      <div class="act-ico">${ico[i.action]||'•'}</div>
+      <div class="act-body">
+        <div class="act-action">${esc(i.action||'event')}</div>
+        <div class="act-time">${ago(i.created_at)}</div>
+      </div>
+      <span class="act-badge ${cls}">${i.status||'ok'}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Bots ───────────────────────────────────────────────────────────────────
+async function loadBots() {
+  try {
+    const d = await api('/api/miniapp/bots');
+    const el = document.getElementById('botList');
+    if (!d.bots?.length) { el.innerHTML = empty('🤖','Нет ботов'); return; }
+    el.innerHTML = d.bots.map(b => {
+      const name = b.username ? '@'+b.username : (b.first_name||'Бот #'+b.bot_id);
+      return `<div class="lst-item">
+        <div class="lst-ava blue">🤖</div>
+        <div class="lst-info">
+          <div class="lst-name">${esc(name)}</div>
+          <div class="lst-sub">${b.is_active?'🟢 Активен':'🔴 Выкл'} · ${n(b.subscriber_count||0)} подп.</div>
+        </div>
+        <div class="lst-right">${n(b.subscriber_count||0)}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('botList').innerHTML = empty('⚠️','Ошибка загрузки');
+  }
+}
+
+// ── Channels ───────────────────────────────────────────────────────────────
+async function loadChannels() {
+  try {
+    const d = await api('/api/miniapp/channels');
+    const el = document.getElementById('chList');
+    if (!d.channels?.length) { el.innerHTML = empty('📡','Нет каналов'); return; }
+    el.innerHTML = d.channels.map(c => {
+      const name = c.username ? '@'+c.username : (c.title||'Канал #'+c.channel_id);
+      return `<div class="lst-item">
+        <div class="lst-ava green">📡</div>
+        <div class="lst-info">
+          <div class="lst-name">${esc(name)}</div>
+          <div class="lst-sub">${c.member_count?n(c.member_count)+' участников':'Нет данных'}</div>
+        </div>
+        <div class="lst-right">${c.member_count?n(c.member_count):'—'}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('chList').innerHTML = empty('⚠️','Ошибка загрузки');
+  }
+}
+
+// ── Campaigns ──────────────────────────────────────────────────────────────
+async function loadCampaigns() {
+  try {
+    const [cd, fd] = await Promise.all([
+      api('/api/miniapp/campaigns'),
+      api('/api/miniapp/funnels'),
+    ]);
+    renderCmp(cd.campaigns||[]);
+    renderFun(fd.funnels||[]);
+  } catch(e) {
+    document.getElementById('cmpList').innerHTML = empty('⚠️','Ошибка загрузки');
+    document.getElementById('funList').innerHTML = '';
+  }
+}
+
+function renderCmp(items) {
+  const el = document.getElementById('cmpList');
+  if (!items.length) { el.innerHTML = empty('📨','Нет кампаний'); return; }
+  const badges = {
+    running: ['b-run','▶ Работает'],
+    completed:['b-done','✓ Завершена'],
+    paused:   ['b-pause','⏸ Пауза'],
+    draft:    ['b-draft','✏ Черновик'],
+    failed:   ['b-draft','✕ Ошибка'],
+  };
+  el.innerHTML = items.map(c => {
+    const total = (c.sent_count||0)+(c.failed_count||0);
+    const pct = total>0?Math.round((c.sent_count||0)/total*100):0;
+    const [bc, bl] = badges[c.status]||['b-draft',c.status||'—'];
+    return `<div class="cmp-wrap">
+      <div class="cmp-row">
+        <div class="lst-ava purple">📨</div>
+        <div class="cmp-body">
+          <div class="cmp-name">${esc(c.name||'Кампания')}</div>
+          <div class="cmp-sub">✓ ${n(c.sent_count||0)} · ✕ ${n(c.failed_count||0)} · ${esc(c.target_type||'')}</div>
+        </div>
+        <span class="badge ${bc}">${bl}</span>
+      </div>
+      ${c.status==='running'?`<div class="prog"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function renderFun(items) {
+  const el = document.getElementById('funList');
+  if (!items.length) { el.innerHTML = empty('🔄','Нет воронок'); return; }
+  el.innerHTML = items.map(f => `
+    <div class="lst-item">
+      <div class="lst-ava orange">🔄</div>
+      <div class="lst-info">
+        <div class="lst-name">${esc(f.name||'Воронка')}</div>
+        <div class="lst-sub">В процессе: ${n(f.active_subs||0)} · Завершено: ${n(f.completed_subs||0)}</div>
+      </div>
+      <span class="badge ${f.is_active?'b-run':'b-draft'}">${f.is_active?'▶':'⏸'}</span>
+    </div>`).join('');
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function go(tab) {
+  if (tab===CUR) return;
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach((t,i)=>
+    t.classList.toggle('active',['home','bots','channels','campaigns','more'][i]===tab));
+  document.getElementById('pg-'+tab).classList.add('active');
+  CUR = tab;
+  tg.HapticFeedback?.impactOccurred('light');
+  if (!LOADED[tab]) {
+    LOADED[tab]=true;
+    if (tab==='bots') loadBots();
+    else if (tab==='channels') loadChannels();
+    else if (tab==='campaigns') loadCampaigns();
+  }
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function n(v) {
+  if (v===null||v===undefined) return '—';
+  v=+v;
+  if (v>=1e6) return (v/1e6).toFixed(1)+'M';
+  if (v>=1e3) return (v/1e3).toFixed(1)+'K';
+  return String(v);
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function ago(ts) {
+  if (!ts) return '';
+  const s=(Date.now()-new Date(ts))/1000;
+  if (s<60) return 'только что';
+  if (s<3600) return Math.floor(s/60)+' мин назад';
+  if (s<86400) return Math.floor(s/3600)+' ч назад';
+  return Math.floor(s/86400)+' дн назад';
+}
+
+function empty(ico, txt) {
+  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt}</div></div>`;
+}
+
+function showErr(id, msg) {
+  const el=document.getElementById(id);
+  if (el) { el.textContent=msg; el.style.display='block'; }
+}
+
+let _toastT=null;
+function toast(msg) {
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.classList.add('show');
+  clearTimeout(_toastT);
+  _toastT=setTimeout(()=>el.classList.remove('show'),2200);
+}
+</script>
+</body>
+</html>
