@@ -796,6 +796,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_global_presence_channel(
                     pool, bot, op_id, owner_id, params
                 )
+            elif op_type in ("global_presence_package", "global_presence_full_package"):
+                # Package = channels first; bot creation follows as a separate op via the plan
+                result = await _exec_global_presence_channel(
+                    pool, bot, op_id, owner_id, params
+                )
             elif op_type == "global_presence_group":
                 # Force asset_type="group" so wrong params can't silently create channels
                 result = await _exec_global_presence_channel(
