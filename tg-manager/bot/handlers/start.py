@@ -499,24 +499,21 @@ async def cmd_find(message: Message) -> None:
 @router.message(Command("app"))
 async def cmd_app(message: Message) -> None:
     """Открыть BotMother Mini App."""
-    import os as _os
     from config import MINI_APP_URL as _MINI_APP_URL
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from aiogram.types import WebAppInfo
+    from bot.handlers.botmother_menu import _valid_mini_app_url
 
-    url = _MINI_APP_URL.strip()
+    url = _valid_mini_app_url(_MINI_APP_URL)
 
-    # Guard: warn if URL points to Railway marketing site
-    invalid = not url or "railway.app" == url.rstrip("/").split("//")[-1].split("/")[0]
-
-    if not url or invalid:
+    if not url:
         await message.answer(
             "📱 <b>BotMother Mini App</b>\n\n"
             "Приложение не настроено. Добавьте в Railway:\n"
-            "<code>MINI_APP_URL = https://ВАШ-СЕРВИС.railway.app/miniapp/</code>\n\n"
+            "<code>MINI_APP_URL = https://ВАШ-СЕРВИС.up.railway.app</code>\n\n"
             "1. Railway → ваш сервис → Settings → Networking → Generate Domain\n"
-            "2. Скопируйте URL (например <code>abc123.railway.app</code>)\n"
-            "3. Добавьте переменную: <code>MINI_APP_URL=https://abc123.railway.app/miniapp/</code>\n"
+            "2. Скопируйте URL (например <code>abc123.up.railway.app</code>)\n"
+            "3. Добавьте переменную: <code>MINI_APP_URL=https://abc123.up.railway.app</code>\n"
             "4. Перезапустите деплой",
             parse_mode="HTML",
         )

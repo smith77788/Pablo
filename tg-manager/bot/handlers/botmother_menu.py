@@ -19,13 +19,26 @@ from aiogram.types import WebAppInfo as _WebAppInfo
 from config import MINI_APP_URL as _MINI_APP_URL
 
 def _valid_mini_app_url(url: str) -> str:
-    """Return URL only if it's a valid HTTPS app URL (not railway.app marketing site)."""
+    """Validate and normalise Mini App URL.
+    - Rejects non-HTTPS or the railway.app marketing site.
+    - Auto-appends /miniapp/ if user set just the root domain.
+    - Normalises /miniapp → /miniapp/ (adds trailing slash).
+    """
     u = url.strip()
     if not u or not u.startswith("https://"):
         return ""
     host = u.split("//", 1)[-1].split("/")[0]
     if host in ("railway.app", "www.railway.app"):
         return ""  # user accidentally copied the marketing site URL
+    base = u.rstrip("/")   # remove trailing slashes
+    after_scheme = base.split("//", 1)[-1]  # e.g. "abc.railway.app/miniapp"
+    if "/" not in after_scheme:
+        # Just a domain with no path at all → add /miniapp/
+        return base + "/miniapp/"
+    path = after_scheme.split("/", 1)[1]  # e.g. "miniapp" or "miniapp/index.html"
+    if path == "miniapp" or path == "":
+        return base.removesuffix("/miniapp") + "/miniapp/"
+    # Already has a meaningful custom path — return as-is
     return u
 
 _APP_URL = _valid_mini_app_url(_MINI_APP_URL)

@@ -386,7 +386,26 @@ async def main() -> None:
                 )
                 await asyncio.sleep(30)
 
+    async def _web_resilient(name: str, fn, *args):
+        """Like _resilient but starts immediately (no stagger) and restarts in 5s.
+        Used for the HTTP server which must bind to PORT before Railway health checks.
+        """
+        while True:
+            try:
+                await fn(*args)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.error(
+                    "Web service %s crashed: %s — restarting in 5s", name, e, exc_info=True
+                )
+                await asyncio.sleep(5)
+
     try:
+        # HTTP server starts FIRST — must bind to PORT immediately for Railway web services.
+        # All other services use _resilient (staggered) to avoid DB overload at startup.
+        asyncio.create_task(_web_resilient("payment_webhook", payment_webhook.run, pool, bot))
+
         asyncio.create_task(_resilient("scheduler", scheduler.run, pool, http))
         asyncio.create_task(
             _resilient("auto_responder", auto_responder.run, pool, http, bot)

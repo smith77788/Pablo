@@ -154,6 +154,10 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="OK")
 
+    async def root_redirect(request: web.Request) -> web.Response:
+        """Redirect root URL to Mini App so MINI_APP_URL can be set without /miniapp/ suffix."""
+        return web.HTTPFound("/miniapp/")
+
     async def payment_webhook(request: web.Request) -> web.Response:
         """Универсальный webhook для платёжных систем."""
         body = await request.read()
@@ -353,6 +357,7 @@ def make_app(pool: asyncpg.Pool, bot: Bot) -> web.Application:
         return web.Response(status=200, text="deploy-ok")
 
     app.router.add_get("/health", health)
+    app.router.add_get("/", root_redirect)        # root → /miniapp/ redirect
     app.router.add_get("/webhook/deploy", deploy_health)
     app.router.add_post("/webhook/payment", payment_webhook)
     app.router.add_post("/webhook/cryptopay", cryptopay_webhook)
