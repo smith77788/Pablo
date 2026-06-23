@@ -870,6 +870,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_mass_report(pool, bot, op_id, owner_id, params)
             elif op_type == "content_clone":
                 result = await _exec_content_clone(pool, bot, op_id, owner_id, params)
+            elif op_type == "niche_growth_post":
+                result = await _exec_niche_growth_post(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6287,18 +6289,27 @@ async def _exec_content_clone(
 async def _exec_niche_growth_post(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Growth Agent: ищет группы в нише → вступает → постит рекламный текст."""
+    """Growth Agent: ищет группы в нише → вступает → постит рекламный текст.
+
+    Безопасный режим:
+    - Не более 5 групп за один запуск (снижает риск бана)
+    - 3-8 минут между вступлением и постом (имитирует органическое поведение)
+    - 10-20 минут между группами (Telegram не замечает паттерн спама)
+    - Round-robin по аккаунтам с обработкой FloodWait
+    """
+    import random
     from services import niche_searcher, resource_selector, account_manager
 
     niche: str = params.get("niche", "")
     promo_text: str = params.get("promo_text", "")
-    max_groups: int = int(params.get("max_groups") or 50)
+    # Безопасный лимит: не более 5 групп за запуск во избежание блокировки
+    max_groups: int = min(int(params.get("max_groups") or 5), 5)
 
     if not niche or not promo_text:
         return {"status": "failed", "reason": "Нет ниши или рекламного текста"}
 
-    # Выбираем до 5 активных аккаунтов для постинга
-    accounts = await resource_selector.select_accounts(pool, owner_id, 5, action_type="post")
+    # Выбираем до 3 прогретых аккаунтов для постинга
+    accounts = await resource_selector.select_accounts(pool, owner_id, 3, action_type="post")
     if not accounts:
         return {
             "status": "failed",
@@ -6326,7 +6337,7 @@ async def _exec_niche_growth_post(
             session_str,
             keywords,
             min_members=50,
-            max_per_keyword=20,
+            max_per_keyword=5,
             _acc=search_acc,
         )
     except Exception as exc:
@@ -6345,6 +6356,8 @@ async def _exec_niche_growth_post(
             "summary": "⚠️ Групп по нише не найдено. Попробуйте уточнить описание.",
         }
 
+    # Перемешиваем и берём только безопасный лимит
+    random.shuffle(groups)
     groups = groups[:max_groups]
     total = len(groups)
     await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
@@ -6388,6 +6401,17 @@ async def _exec_niche_growth_post(
                 )
                 continue
         except Exception as exc:
+            exc_str = str(exc).lower()
+            if "floodwait" in exc_str or "flood" in exc_str:
+                # При FloodWait останавливаем текущий аккаунт
+                log.warning("niche_growth_post: FloodWait on join grp=%s: %s", join_ref, exc)
+                err_count += 1
+                await pool.execute(
+                    "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
+                )
+                # Большая пауза при флуде — переключиться на следующий аккаунт
+                await asyncio.sleep(random.uniform(300, 600))
+                continue
             log.warning("niche_growth_post: join exc grp=%s: %s", join_ref, exc)
             err_count += 1
             await pool.execute(
@@ -6395,8 +6419,18 @@ async def _exec_niche_growth_post(
             )
             continue
 
-        # Пауза после вступления
-        await asyncio.sleep(3)
+        # Пауза после вступления перед постом: 3-8 минут (имитирует органичное поведение)
+        join_to_post_delay = random.uniform(180, 480)
+        log.debug("niche_growth_post: waiting %.0fs before posting to grp=%s", join_to_post_delay, join_ref)
+        await asyncio.sleep(join_to_post_delay)
+
+        if await _is_cancelled(pool, op_id):
+            return {
+                "status": "cancelled",
+                "ok": ok_count,
+                "fail": err_count,
+                "summary": f"Отменено. Опубликовано: {ok_count}/{total}",
+            }
 
         # Шаг 2: Опубликовать текст
         try:
@@ -6421,16 +6455,26 @@ async def _exec_niche_growth_post(
                     join_ref, grp_title, post_result.get("msg_id"),
                 )
         except Exception as exc:
-            log.warning("niche_growth_post: post exc grp=%s: %s", join_ref, exc)
+            exc_str = str(exc).lower()
+            if "floodwait" in exc_str or "flood" in exc_str:
+                log.warning("niche_growth_post: FloodWait on post grp=%s: %s", join_ref, exc)
+                await asyncio.sleep(random.uniform(300, 600))
+            else:
+                log.warning("niche_growth_post: post exc grp=%s: %s", join_ref, exc)
             err_count += 1
 
         await pool.execute(
             "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id
         )
 
-        # Пауза между группами (4–7 сек, чтобы не спамить)
+        # Пауза между группами: 10-20 минут (критично для безопасности)
         if idx < total - 1:
-            await asyncio.sleep(5)
+            between_groups_delay = random.uniform(600, 1200)
+            log.debug(
+                "niche_growth_post: waiting %.0fs before next group (%d/%d done)",
+                between_groups_delay, idx + 1, total,
+            )
+            await asyncio.sleep(between_groups_delay)
 
     summary = f"🌱 Growth Agent: ✅ {ok_count} ❌ {err_count} из {total} групп"
     return {
