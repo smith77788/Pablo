@@ -18,6 +18,18 @@ import os as _os
 from aiogram.types import WebAppInfo as _WebAppInfo
 from config import MINI_APP_URL as _MINI_APP_URL
 
+def _valid_mini_app_url(url: str) -> str:
+    """Return URL only if it's a valid HTTPS app URL (not railway.app marketing site)."""
+    u = url.strip()
+    if not u or not u.startswith("https://"):
+        return ""
+    host = u.split("//", 1)[-1].split("/")[0]
+    if host in ("railway.app", "www.railway.app"):
+        return ""  # user accidentally copied the marketing site URL
+    return u
+
+_APP_URL = _valid_mini_app_url(_MINI_APP_URL)
+
 from bot.callbacks import (
     AccCb,
     AdIntelCb,
@@ -147,8 +159,8 @@ def _format_progress_bar(done: int, total: int, width: int = 10) -> str:
 
 def _main_menu_kb():
     kb = InlineKeyboardBuilder()
-    if _MINI_APP_URL:
-        kb.button(text="🌐 Открыть приложение", web_app=_WebAppInfo(url=_MINI_APP_URL))
+    if _APP_URL:
+        kb.button(text="🌐 Открыть приложение", web_app=_WebAppInfo(url=_APP_URL))
     kb.button(text="🎯 Умные цели (ИИ-помощник)", callback_data=IntentCb(action="menu"))
     kb.button(text="🏗 Активы & Сети", callback_data=BmCb(action="assets"))
     kb.button(text="⚡ Операции", callback_data=BmCb(action="operations"))
@@ -157,11 +169,11 @@ def _main_menu_kb():
     kb.button(text="🛡️ Мониторинг & Защита", callback_data=BmCb(action="monitoring"))
     kb.button(text="🚀 Рост & Продвижение", callback_data=BmCb(action="growth"))
     kb.button(text="⚙️ Настройки", callback_data=BmCb(action="settings"))
-    # Layout with app button: app(1) | intent(1) | assets+ops(2) | comms+analytics(2) | monitoring+growth(2) | settings(1)
-    if _MINI_APP_URL:
-        kb.adjust(1, 1, 2, 2, 2, 1)  # 9 buttons total
+    # Layout: app(1)|intent(1)|assets+ops(2)|comms+analytics(2)|monitoring+growth(2)|settings(1)
+    if _APP_URL:
+        kb.adjust(1, 1, 2, 2, 2, 1)  # 9 buttons
     else:
-        kb.adjust(1, 2, 2, 2, 1)
+        kb.adjust(1, 2, 2, 2, 1)     # 8 buttons
     return kb.as_markup()
 
 

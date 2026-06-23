@@ -33,7 +33,8 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 
 _WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
-_WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
+# Railway sets PORT env var for web services; WEBHOOK_PORT is our fallback
+_WEBHOOK_PORT = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
 
 _PLAN_MAP = {
     # Current canonical plan names

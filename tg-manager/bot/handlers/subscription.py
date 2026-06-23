@@ -296,9 +296,43 @@ async def cb_sub_menu(
 ) -> None:
     await callback.answer()
     await state.clear()
-    disc, until = await _get_promo(pool)
-    text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id, disc, until)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    try:
+        disc, until = await _get_promo(pool)
+        text, markup = await _build_menu_text_and_kb(pool, callback.from_user.id, disc, until)
+    except Exception as e:
+        log.exception("cb_sub_menu: build failed user=%d", callback.from_user.id)
+        kb = InlineKeyboardBuilder()
+        kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
+        try:
+            await callback.message.edit_text(
+                "⚠️ Не удалось загрузить страницу подписки. Попробуйте ещё раз.",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+        return
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    except Exception as e:
+        err = str(e).lower()
+        if "message is not modified" in err:
+            return
+        if "message to edit not found" in err or "message can't be edited" in err:
+            try:
+                await callback.bot.send_message(
+                    callback.from_user.id, text, parse_mode="HTML", reply_markup=markup
+                )
+            except Exception:
+                log_exc_swallow(log, "cb_sub_menu: send fallback failed")
+        else:
+            log.warning("cb_sub_menu: edit_text error: %s", e)
+            try:
+                await callback.bot.send_message(
+                    callback.from_user.id, text, parse_mode="HTML", reply_markup=markup
+                )
+            except Exception:
+                log_exc_swallow(log, "cb_sub_menu: fallback send failed")
 
 
 # ── plan features ────────────────────────────────────────────────────────────

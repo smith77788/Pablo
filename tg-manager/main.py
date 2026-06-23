@@ -354,6 +354,7 @@ async def main() -> None:
             BotCommand(command="tasks", description="⚡ Активные задачи"),
             BotCommand(command="promo", description="🚀 Продвижение ботов"),
             BotCommand(command="subscription", description="💳 Подписка & Тариф"),
+            BotCommand(command="app", description="📱 Открыть Mini App"),
             BotCommand(command="cancel", description="Отменить текущее действие"),
         ]
     )

@@ -494,3 +494,40 @@ async def cmd_find(message: Message) -> None:
         reply_markup=kb.as_markup(),
     )
 
+
+
+@router.message(Command("app"))
+async def cmd_app(message: Message) -> None:
+    """Открыть BotMother Mini App."""
+    import os as _os
+    from config import MINI_APP_URL as _MINI_APP_URL
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import WebAppInfo
+
+    url = _MINI_APP_URL.strip()
+
+    # Guard: warn if URL points to Railway marketing site
+    invalid = not url or "railway.app" == url.rstrip("/").split("//")[-1].split("/")[0]
+
+    if not url or invalid:
+        await message.answer(
+            "📱 <b>BotMother Mini App</b>\n\n"
+            "Приложение не настроено. Добавьте в Railway:\n"
+            "<code>MINI_APP_URL = https://ВАШ-СЕРВИС.railway.app/miniapp/</code>\n\n"
+            "1. Railway → ваш сервис → Settings → Networking → Generate Domain\n"
+            "2. Скопируйте URL (например <code>abc123.railway.app</code>)\n"
+            "3. Добавьте переменную: <code>MINI_APP_URL=https://abc123.railway.app/miniapp/</code>\n"
+            "4. Перезапустите деплой",
+            parse_mode="HTML",
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🌐 Открыть приложение", web_app=WebAppInfo(url=url))
+    kb.adjust(1)
+    await message.answer(
+        "📱 <b>BotMother Mini App</b>\n\n"
+        "Нажмите кнопку ниже чтобы открыть панель управления:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
