@@ -20,25 +20,25 @@ PROMO_URL = f"https://t.me/{PROMO_USERNAME}"
 
 # ── Вращающиеся варианты для постов в каналах/группах (HTML) ─────────────────
 _CHANNEL_VARIANTS = [
-    f'\n\n🤖 Канал автоматизирован через <a href="{PROMO_URL}">BotMother</a> — Telegram OS',
-    f'\n\n⚡ Powered by <a href="{PROMO_URL}">BotMother</a> — управляй сетью каналов из одной точки',
-    f'\n\n📡 Опубликовано через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a> — автоматизация Telegram-инфраструктуры',
-    f'\n\n🚀 <a href="{PROMO_URL}">BotMother</a> — система роста Telegram без ручного труда',
-    f'\n\n📊 Контент публикуется автоматически через <a href="{PROMO_URL}">BotMother</a>',
+    f'\n\n🤖 Автоматизация через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a>',
+    f'\n\n⚡ Канал работает через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a> — автоматизация Telegram',
+    f'\n\n📡 Опубликовано через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a>',
+    f'\n\n🚀 Автоматизация через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a> — Telegram OS',
+    f'\n\n📊 Контент публикуется автоматически через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a>',
 ]
 
 # ── Вращающиеся варианты для рассылок в managed-ботах (HTML) ─────────────────
 _BROADCAST_VARIANTS = [
-    f'\n\n🤖 Рассылка через <a href="{PROMO_URL}">BotMother</a> — Telegram OS',
-    f'\n\n📨 Создано в <a href="{PROMO_URL}">BotMother</a> — управление Telegram-ботами',
-    f'\n\n⚡ <a href="{PROMO_URL}">BotMother</a> — масштабируй аудиторию своих ботов',
+    f'\n\n🤖 Автоматизация через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a>',
+    f'\n\n📨 Бот работает через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a>',
+    f'\n\n⚡ Автоматизация через <a href="{PROMO_URL}">@{PROMO_USERNAME}</a>',
 ]
 
 # ── Вращающиеся варианты для DM (plain text, без HTML) ───────────────────────
 _DM_VARIANTS = [
-    f'\n\n🤖 @{PROMO_USERNAME} — автоматизация Telegram-инфраструктуры',
-    f'\n\n📨 Отправлено через BotMother (@{PROMO_USERNAME})',
-    f'\n\n⚡ @{PROMO_USERNAME} — Telegram OS для роста аудитории',
+    f'\n\n🤖 Автоматизация через @{PROMO_USERNAME}',
+    f'\n\n📨 Отправлено через @{PROMO_USERNAME}',
+    f'\n\n⚡ Автоматизация через @{PROMO_USERNAME}',
 ]
 
 # ── Описание канала (plain text, ≤ 255 символов) ─────────────────────────────

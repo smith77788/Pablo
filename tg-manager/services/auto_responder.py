@@ -289,6 +289,8 @@ async def _process_bot(
                             f"Добро пожаловать в <b>@{bot_name}</b>.\n\n"
                             "Если вам нужна помощь — нажмите кнопку ниже, чтобы связаться с оператором поддержки."
                         )
+                        if _is_free:
+                            welcome = brand_injection.add_promo(welcome, html=True, context="broadcast")
                         rkb = {
                             "keyboard": [[{"text": "💬 Написать в поддержку"}]],
                             "resize_keyboard": True,
@@ -301,6 +303,8 @@ async def _process_bot(
                         "Оператор поддержки скоро ответит вам. "
                         "Вы можете написать детали вашего вопроса прямо здесь."
                     )
+                    if _is_free:
+                        ack = brand_injection.add_promo(ack, html=True, context="broadcast")
                     await bot_api.send_message(http, token, chat_id, ack)
                 continue
 
@@ -558,6 +562,8 @@ async def _process_bot(
                                         ai_text = ai_data["choices"][0]["message"][
                                             "content"
                                         ].strip()
+                                        if _is_free:
+                                            ai_text = brand_injection.add_promo(ai_text, html=False, context="broadcast")
                                         await bot_api.send_message(
                                             http, token, chat_id, ai_text
                                         )
@@ -572,8 +578,11 @@ async def _process_bot(
                     and arule["trigger_value"] in newly_added_tags
                 ):
                     if arule["action_type"] == "send_message":
+                        _arule_text = arule["action_value"]
+                        if _is_free:
+                            _arule_text = brand_injection.add_promo(_arule_text, html=True, context="broadcast")
                         await bot_api.send_message(
-                            http, token, chat_id, arule["action_value"]
+                            http, token, chat_id, _arule_text
                         )
                     elif arule["action_type"] == "add_tag":
                         await db.add_user_tag(
@@ -656,6 +665,8 @@ async def _process_bot(
                                         ai_text = ai_data["choices"][0]["message"][
                                             "content"
                                         ].strip()
+                                        if _is_free:
+                                            ai_text = brand_injection.add_promo(ai_text, html=False, context="broadcast")
                                         await bot_api.send_message(
                                             http, token, chat_id, ai_text
                                         )

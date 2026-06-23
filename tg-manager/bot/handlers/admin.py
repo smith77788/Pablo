@@ -1016,21 +1016,16 @@ async def _adm_section_billing(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 
 
 async def _adm_section_assets(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
-    try:
-        row = await pool.fetchrow(
-            """SELECT
-                (SELECT COUNT(*) FROM managed_bots)                                                   AS bots,
-                (SELECT COUNT(*) FROM managed_channels)                                               AS channels,
-                (SELECT COUNT(*) FROM tg_accounts WHERE COALESCE(is_active,true)=true)               AS accounts,
-                (SELECT COUNT(*) FROM platform_users WHERE COALESCE(strike_access,false)=true)        AS strike_users"""
-        )
-    except Exception:
-        row = None
-        log_exc_swallow(log, "_adm_section_assets stats query failed")
-    bots = int(row["bots"] or 0) if row else 0
-    channels = int(row["channels"] or 0) if row else 0
-    accounts = int(row["accounts"] or 0) if row else 0
-    strike_users = int(row["strike_users"] or 0) if row else 0
+    async def _safe_count(query: str) -> int:
+        try:
+            return int(await pool.fetchval(query) or 0)
+        except Exception:
+            return 0
+
+    bots = await _safe_count("SELECT COUNT(*) FROM managed_bots")
+    channels = await _safe_count("SELECT COUNT(*) FROM managed_channels")
+    accounts = await _safe_count("SELECT COUNT(*) FROM tg_accounts WHERE COALESCE(is_active,true)=true")
+    strike_users = await _safe_count("SELECT COUNT(*) FROM platform_users WHERE COALESCE(strike_access,false)=true")
     text = (
         "🤖 <b>Боты, токены и Strike</b>\n\n"
         f"Ботов в системе: <b>{bots}</b>\n"
@@ -1305,7 +1300,7 @@ async def _adm_bots_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         log_exc_swallow(log, "_adm_bots_summary fetch failed")
     lines = []
     for b in bots:
-        label = f"@{b['username']}" if b["username"] else b["first_name"]
+        label = _html.escape(f"@{b['username']}" if b["username"] else (b["first_name"] or "unnamed"))
         lines.append(
             f"<code>{b['bot_id']}</code> {label} (owner: <code>{b['added_by']}</code>)"
         )
@@ -2021,7 +2016,7 @@ async def handle_admin_message(
             )
             bot_lines = []
             for b in bots[:10]:
-                label = f"@{b['username']}" if b["username"] else b["first_name"]
+                label = _html.escape(f"@{b['username']}" if b["username"] else (b["first_name"] or "unnamed"))
                 bot_lines.append(f"  • {label} (<code>{b['bot_id']}</code>)")
             body = "\n".join(bot_lines) if bot_lines else "  Нет ботов"
             await message.answer(
@@ -2313,9 +2308,10 @@ async def handle_admin_message(
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, text)
+                _safe_val = _html.escape(text[:80]) + ("..." if len(text) > 80 else "")
                 await message.answer(
                     f"✅ <b>Переменная обновлена</b>\n\n"
-                    f"<code>{key}</code> = <code>{text[:80]}{'...' if len(text) > 80 else ''}</code>\n\n"
+                    f"<code>{_html.escape(key)}</code> = <code>{_safe_val}</code>\n\n"
                     "Railway начнёт переразворачивание автоматически.",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
@@ -2345,7 +2341,7 @@ async def handle_admin_message(
                             "Добавьте его вручную в Railway Dashboard → Variables чтобы зафиксировать."
                         )
                 await message.answer(
-                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{err_str}</code>{hint}",
+                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{_html.escape(err_str[:300])}</code>{hint}",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -2365,9 +2361,10 @@ async def handle_admin_message(
         async with aiohttp.ClientSession() as tmp_http:
             try:
                 await railway_api.set_variable(tmp_http, key, val)
+                _safe_val = _html.escape(val[:80]) + ("..." if len(val) > 80 else "")
                 await message.answer(
                     f"✅ <b>Переменная добавлена</b>\n\n"
-                    f"<code>{key}</code> = <code>{val[:80]}{'...' if len(val) > 80 else ''}</code>\n\n"
+                    f"<code>{_html.escape(key)}</code> = <code>{_safe_val}</code>\n\n"
                     "Railway начнёт переразворачивание автоматически.",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
@@ -2390,7 +2387,7 @@ async def handle_admin_message(
                         "⚠️ После добавления Railway перезапустит сервис (~1 мин)"
                     )
                 await message.answer(
-                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{err_str}</code>{hint}",
+                    f"❌ <b>Ошибка Railway API</b>\n\n<code>{_html.escape(err_str[:300])}</code>{hint}",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -2439,7 +2436,7 @@ async def _adm_env_list(callback: CallbackQuery, http: aiohttp.ClientSession) ->
                 "⬇️ Кнопки ниже работают — нажмите нужную переменную:"
             )
         else:
-            hint = f"⚠️ Ошибка Railway API: <code>{api_error}</code>\n\nПоказаны локальные значения:"
+            hint = f"⚠️ Ошибка Railway API: <code>{_html.escape(str(api_error)[:200])}</code>\n\nПоказаны локальные значения:"
         await callback.message.edit_text(
             f"🔑 <b>Переменные Railway</b>\n\n{hint}",
             parse_mode="HTML",
@@ -2760,7 +2757,7 @@ async def _adm_show_error_report(
         if report.get("created_at")
         else "?"
     )
-    user_label = (
+    user_label = _html.escape(
         f"@{report['username']}" if report.get("username") else f"id{report['user_id']}"
     )
     status_label = _ERR_STATUS_LABELS.get(report["status"], report["status"])

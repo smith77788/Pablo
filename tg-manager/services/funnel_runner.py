@@ -6,7 +6,7 @@ import logging
 import aiohttp
 import asyncpg
 from database import db
-from services import bot_api
+from services import bot_api, brand_injection
 
 log = logging.getLogger(__name__)
 
@@ -72,9 +72,16 @@ async def run_once(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> None:
                 sent_ok = False
                 rate_limited = False
                 permanently_failed = False
+                # Brand injection for free-tier bots
+                _msg_text = row["message_text"]
+                try:
+                    if await brand_injection.is_free_tier(pool, row["bot_id"]):
+                        _msg_text = brand_injection.add_promo(_msg_text, html=True, context="broadcast")
+                except Exception:
+                    pass
                 for attempt in range(3):
                     ok, retry_after = await bot_api.send_message(
-                        http, row["token"], row["user_id"], row["message_text"]
+                        http, row["token"], row["user_id"], _msg_text
                     )
                     if ok:
                         sent_ok = True
