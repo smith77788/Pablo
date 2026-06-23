@@ -14,6 +14,10 @@ from services.mini_app_auth import validate_init_data, make_token, parse_token
 
 log = logging.getLogger(__name__)
 
+# Use the main bot token for initData validation (initData is signed by BotFather with BOT_TOKEN)
+def _bot_token() -> str:
+    return os.getenv("BOT_TOKEN", os.getenv("MANAGER_BOT_TOKEN", ""))
+
 
 def _json_resp(data: Any, status: int = 200) -> web.Response:
     return web.Response(
@@ -37,7 +41,7 @@ def _get_uid(request: web.Request) -> int | None:
     token = auth[7:] if auth.startswith("Bearer ") else request.query.get("token")
     if not token:
         return None
-    return parse_token(token, os.getenv("MANAGER_BOT_TOKEN", ""))
+    return parse_token(token, _bot_token())
 
 
 async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
@@ -80,7 +84,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Invalid JSON")
         init_data = body.get("initData", "")
-        bot_token = os.getenv("MANAGER_BOT_TOKEN", "")
+        bot_token = _bot_token()
         user = validate_init_data(init_data, bot_token)
         if not user:
             return _err("Invalid Telegram initData", 401)
@@ -244,8 +248,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
     # Static file serving for Mini App HTML/JS
     _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mini_app")
+    _index_path = os.path.join(_static_dir, "index.html")
     if os.path.isdir(_static_dir):
-        app.router.add_static("/miniapp", _static_dir, show_index=True)
+        # Explicit route for /miniapp/ and /miniapp (index.html)
+        async def serve_index(request: web.Request) -> web.Response:
+            return web.FileResponse(_index_path)
+        app.router.add_get("/miniapp", serve_index)
+        app.router.add_get("/miniapp/", serve_index)
+        # Static route for any other assets in the directory
+        app.router.add_static("/miniapp", _static_dir, show_index=False)
         log.info("Mini App static served from %s at /miniapp", _static_dir)
     else:
         log.warning("mini_app/ directory not found — static serving skipped")
