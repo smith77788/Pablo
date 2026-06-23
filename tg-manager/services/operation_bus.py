@@ -242,12 +242,6 @@ OP_REGISTRY: dict[str, dict] = {
         "max_retries": 2,
         "icon": "📋",
     },
-    "niche_growth_post": {
-        "description": "Growth Agent — постинг промо-контента в нише",
-        "min_plan": "starter",
-        "max_retries": 1,
-        "icon": "🌱",
-    },
 }
 
 

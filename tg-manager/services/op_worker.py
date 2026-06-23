@@ -870,8 +870,6 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_mass_report(pool, bot, op_id, owner_id, params)
             elif op_type == "content_clone":
                 result = await _exec_content_clone(pool, bot, op_id, owner_id, params)
-            elif op_type == "niche_growth_post":
-                result = await _exec_niche_growth_post(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
