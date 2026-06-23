@@ -644,8 +644,3 @@ class AutoRegCb(CallbackData, prefix="areg"):
     sub: str = ""        # service name or country code
 
 
-class GrowthCb(CallbackData, prefix="gh"):
-    """Growth Agent — продвижение в нише через постинг в чужие группы."""
-
-    action: str   # menu|create|history
-    op_id: int = 0
