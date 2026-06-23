@@ -443,9 +443,7 @@ async def main() -> None:
         asyncio.create_task(
             _resilient("activity_engine", activity_engine.run_activity_loop, pool)
         )
-        asyncio.create_task(
-            _resilient("payment_webhook", payment_webhook.run, pool, bot)
-        )
+        # payment_webhook already started via _web_resilient above (no stagger)
         asyncio.create_task(_resilient("task_registry", task_registry.run_cleanup_loop))
         asyncio.create_task(
             _resilient("proxy_scraper", proxy_scraper.run_scraper_loop, pool)

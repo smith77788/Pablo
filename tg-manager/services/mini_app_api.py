@@ -44,23 +44,37 @@ def _get_uid(request: web.Request) -> int | None:
     return parse_token(token, _bot_token())
 
 
+async def _safe_count(pool: asyncpg.Pool, query: str, *args) -> int:
+    """Execute a count query, returning 0 on any error (missing table/column)."""
+    try:
+        return int(await pool.fetchval(query, *args) or 0)
+    except Exception:
+        return 0
+
+
 async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
-    bots = int(await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid) or 0)
-    channels = int(await pool.fetchval("SELECT COUNT(*) FROM managed_channels WHERE owner_user_id=$1", uid) or 0)
-    subscribers = int(await pool.fetchval(
+    bots = await _safe_count(pool, "SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+    channels = await _safe_count(pool,
+        "SELECT COUNT(*) FROM managed_channels WHERE owner_user_id=$1", uid)
+    subscribers = await _safe_count(pool,
         """SELECT COUNT(DISTINCT bu.user_id)
            FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-           WHERE mb.added_by=$1""", uid
-    ) or 0)
-    campaigns_active = int(await pool.fetchval(
-        "SELECT COUNT(*) FROM dm_campaigns WHERE owner_user_id=$1 AND status='running'", uid
-    ) or 0)
-    funnels_active = int(await pool.fetchval(
-        """SELECT COUNT(*) FROM funnel_subscriptions fs
-           JOIN funnels f ON f.id=fs.funnel_id
-           WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL
-             AND COALESCE(fs.dropped, false)=false""", uid
-    ) or 0)
+           WHERE mb.added_by=$1""", uid)
+    campaigns_active = await _safe_count(pool,
+        "SELECT COUNT(*) FROM dm_campaigns WHERE owner_user_id=$1 AND status='running'", uid)
+    # funnel_subscriptions.dropped may not exist — try with it, fallback without
+    try:
+        funnels_active = int(await pool.fetchval(
+            """SELECT COUNT(*) FROM funnel_subscriptions fs
+               JOIN funnels f ON f.id=fs.funnel_id
+               WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL
+                 AND COALESCE(fs.dropped, false)=false""", uid
+        ) or 0)
+    except Exception:
+        funnels_active = await _safe_count(pool,
+            """SELECT COUNT(*) FROM funnel_subscriptions fs
+               JOIN funnels f ON f.id=fs.funnel_id
+               WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL""", uid)
     return {
         "bots": bots, "channels": channels,
         "subscribers": subscribers, "campaigns_active": campaigns_active,
@@ -97,19 +111,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             stats = await _stats(pool, uid)
+        except Exception:
+            log.exception("miniapp/dashboard _stats uid=%d", uid)
+            stats = {"bots": 0, "channels": 0, "subscribers": 0, "campaigns_active": 0, "funnels_active": 0}
+        try:
             plan_row = await pool.fetchrow(
                 "SELECT current_plan FROM platform_users WHERE user_id=$1", uid
             )
             stats["plan"] = (plan_row["current_plan"] if plan_row else "free") or "free"
+        except Exception:
+            stats["plan"] = "free"
+        try:
             activity = await pool.fetch(
                 """SELECT action, status, created_at FROM activity_log
                    WHERE user_id=$1 ORDER BY created_at DESC LIMIT 8""", uid
             )
             stats["recent_activity"] = [dict(r) for r in activity]
-            return _json_resp(stats)
         except Exception:
-            log.exception("miniapp/dashboard uid=%d", uid)
-            return _err("Internal error", 500)
+            stats["recent_activity"] = []
+        return _json_resp(stats)
 
     async def bots(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -144,9 +164,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    LIMIT 50""", uid
             )
             return _json_resp({"channels": [dict(r) for r in rows]})
+        except asyncpg.exceptions.UndefinedColumnError:
+            # owner_user_id column doesn't exist yet
+            log.warning("miniapp/channels: owner_user_id column missing, returning empty")
+            return _json_resp({"channels": []})
+        except asyncpg.exceptions.UndefinedTableError:
+            return _json_resp({"channels": []})
         except Exception:
             log.exception("miniapp/channels uid=%d", uid)
-            return _err("Internal error", 500)
+            return _json_resp({"channels": []})
 
     async def campaigns(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -161,9 +187,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    LIMIT 20""", uid
             )
             return _json_resp({"campaigns": [dict(r) for r in rows]})
+        except (asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError):
+            log.warning("miniapp/campaigns: missing table/column, returning empty")
+            return _json_resp({"campaigns": []})
         except Exception:
             log.exception("miniapp/campaigns uid=%d", uid)
-            return _err("Internal error", 500)
+            return _json_resp({"campaigns": []})
 
     async def funnels(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -185,9 +214,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    LIMIT 20""", uid
             )
             return _json_resp({"funnels": [dict(r) for r in rows]})
+        except asyncpg.exceptions.UndefinedColumnError:
+            # funnel_subscriptions.dropped might not exist — retry without it
+            try:
+                rows = await pool.fetch(
+                    """SELECT f.id, f.name, f.is_active,
+                              COUNT(fs.id) FILTER (WHERE fs.completed_at IS NULL) AS active_subs,
+                              COUNT(fs.id) FILTER (WHERE fs.completed_at IS NOT NULL) AS completed_subs
+                       FROM funnels f
+                       LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
+                       WHERE f.owner_user_id=$1
+                       GROUP BY f.id, f.name, f.is_active
+                       ORDER BY active_subs DESC
+                       LIMIT 20""", uid
+                )
+                return _json_resp({"funnels": [dict(r) for r in rows]})
+            except Exception:
+                return _json_resp({"funnels": []})
+        except (asyncpg.exceptions.UndefinedTableError,):
+            return _json_resp({"funnels": []})
         except Exception:
             log.exception("miniapp/funnels uid=%d", uid)
-            return _err("Internal error", 500)
+            return _json_resp({"funnels": []})
 
     # ── SSE real-time stream ───────────────────────────────────────────────────
 
@@ -209,24 +257,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             payload = json.dumps(data, ensure_ascii=False, default=str)
             await response.write(f"event: {event}\ndata: {payload}\n\n".encode())
 
+        async def _fetch_activity() -> list:
+            try:
+                rows = await pool.fetch(
+                    "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 8", uid
+                )
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
         try:
             # Initial push
             data = await _stats(pool, uid)
             await push("stats", data)
-            activity = await pool.fetch(
-                "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 8", uid
-            )
-            await push("activity", {"items": [dict(r) for r in activity]})
+            await push("activity", {"items": await _fetch_activity()})
 
             # Push every 30 seconds
             while True:
                 await asyncio.sleep(30)
                 data = await _stats(pool, uid)
                 await push("stats", data)
-                activity = await pool.fetch(
-                    "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 8", uid
-                )
-                await push("activity", {"items": [dict(r) for r in activity]})
+                await push("activity", {"items": await _fetch_activity()})
                 # SSE comment keepalive (prevents proxy timeouts)
                 await response.write(b": keepalive\n\n")
         except (asyncio.CancelledError, ConnectionResetError):
