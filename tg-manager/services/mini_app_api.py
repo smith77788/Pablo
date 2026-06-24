@@ -1208,15 +1208,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             total = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
             active = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", uid)
             recent = await pool.fetch(
-                """SELECT bot_id, username, first_name, is_active, created_at
+                """SELECT bot_id, username, first_name, is_active, added_at
                    FROM managed_bots WHERE added_by=$1
-                   ORDER BY created_at DESC LIMIT 10""",
+                   ORDER BY added_at DESC LIMIT 10""",
                 uid,
             )
             return _json_resp({
                 "total": total, "active": active,
                 "recent": [
-                    {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                    {**dict(r), "added_at": r["added_at"].isoformat() if r["added_at"] else None}
                     for r in recent
                 ],
             })
@@ -1289,9 +1289,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid
             )
             recent = await pool.fetch(
-                """SELECT id, phone, first_name, acc_status, created_at
+                """SELECT id, phone, first_name, acc_status, added_at
                    FROM tg_accounts WHERE owner_id=$1
-                   ORDER BY created_at DESC LIMIT 10""",
+                   ORDER BY added_at DESC LIMIT 10""",
                 uid,
             )
             pending_ops = await pool.fetchval(
@@ -1302,7 +1302,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "total_accounts": total,
                 "pending_registrations": pending_ops,
                 "recent": [
-                    {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                    {**dict(r), "added_at": r["added_at"].isoformat() if r["added_at"] else None}
                     for r in recent
                 ],
             })
@@ -3788,8 +3788,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("auth")
         rows = await pool.fetch(
-            "SELECT id, title, username, type, created_at FROM managed_channels "
-            "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 20",
+            "SELECT id, title, username, type, added_at FROM managed_channels "
+            "WHERE owner_id=$1 ORDER BY added_at DESC LIMIT 20",
             uid,
         )
         return _json_resp([dict(r) for r in rows])

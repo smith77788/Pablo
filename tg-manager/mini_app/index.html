@@ -4389,7 +4389,7 @@ async function openQuickPost() {
         <div class="row-ico" id="qpc-${c.id}" style="background:rgba(59,130,246,.16)">📢</div>
         <div class="row-body">
           <div class="row-name">${esc(c.title||c.username||c.id)}</div>
-          <div class="row-val">@${esc(c.username||'')} · ${c.member_count||c.members_count||0} подп.</div>
+          <div class="row-val">${c.username?'@'+esc(c.username)+' · ':''} ${(c.member_count||c.members_count||0).toLocaleString()} подп.</div>
         </div>
       </div>
     `).join(''));
