@@ -1028,6 +1028,194 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── AI Memory ─────────────────────────────────────────────────────────────
+
+    async def ai_memory_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, kind, title, body, tags, pinned, created_at, updated_at
+                   FROM botmother_memory WHERE owner_id=$1
+                   ORDER BY pinned DESC, updated_at DESC LIMIT 50""",
+                uid,
+            )
+            return _json_resp({"memories": [
+                {
+                    **dict(r),
+                    "tags": list(r["tags"] or []),
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+                }
+                for r in rows
+            ]})
+        except Exception as exc:
+            log.exception("ai_memory_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def ai_memory_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        title = (body.get("title") or "").strip()
+        mem_body = (body.get("body") or "").strip()
+        if not mem_body:
+            return _err("Заполните содержимое", 400)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO botmother_memory(owner_id, kind, title, body, source)
+                   VALUES($1,'note',$2,$3,'miniapp') RETURNING id""",
+                uid, title, mem_body,
+            )
+            return _json_resp({"id": row["id"]})
+        except Exception as exc:
+            log.exception("ai_memory_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def ai_memory_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        mem_id = int(request.match_info["mem_id"])
+        await pool.execute(
+            "DELETE FROM botmother_memory WHERE id=$1 AND owner_id=$2", mem_id, uid
+        )
+        return _json_resp({"ok": True})
+
+    # ── Nodes Hub (Forum Workspaces) ───────────────────────────────────────────
+
+    async def nodes_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            nodes = await pool.fetch(
+                """SELECT n.id, n.tg_chat_id, n.node_type, n.name, n.is_active, n.created_at,
+                          COUNT(t.id) FILTER (WHERE t.status='open') AS open_threads,
+                          COUNT(t.id) AS total_threads
+                   FROM bm_telegram_nodes n
+                   LEFT JOIN bm_node_threads t ON t.node_id=n.id
+                   WHERE n.owner_id=$1
+                   GROUP BY n.id ORDER BY n.created_at DESC""",
+                uid,
+            )
+            return _json_resp({"nodes": [
+                {**dict(n), "created_at": n["created_at"].isoformat() if n["created_at"] else None}
+                for n in nodes
+            ]})
+        except Exception as exc:
+            log.exception("nodes_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def node_threads(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        node_id = int(request.match_info["node_id"])
+        try:
+            node = await pool.fetchrow(
+                "SELECT id, name FROM bm_telegram_nodes WHERE id=$1 AND owner_id=$2",
+                node_id, uid,
+            )
+            if not node:
+                return _err("Не найдено", 404)
+            threads = await pool.fetch(
+                """SELECT id, entity_type, entity_id, topic_name, status, created_at
+                   FROM bm_node_threads WHERE node_id=$1 ORDER BY status, created_at DESC""",
+                node_id,
+            )
+            return _json_resp({
+                "node": dict(node),
+                "threads": [
+                    {**dict(t), "created_at": t["created_at"].isoformat() if t["created_at"] else None}
+                    for t in threads
+                ],
+            })
+        except Exception as exc:
+            log.exception("node_threads uid=%d node=%d", uid, node_id)
+            return _err(str(exc), 500)
+
+    # ── Gift Transfer ──────────────────────────────────────────────────────────
+
+    async def gift_inventory(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            items = await pool.fetch(
+                """SELECT gi.id, gi.gift_type, gi.stars_cost, gi.is_transferable,
+                          gi.is_unique, gi.is_premium, gi.scanned_at,
+                          ta.phone, ta.first_name
+                   FROM gift_inventory gi
+                   JOIN tg_accounts ta ON ta.id=gi.account_id
+                   WHERE gi.owner_id=$1
+                   ORDER BY gi.scanned_at DESC LIMIT 100""",
+                uid,
+            )
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM gift_inventory WHERE owner_id=$1", uid
+            )
+            transferable = await pool.fetchval(
+                "SELECT COUNT(*) FROM gift_inventory WHERE owner_id=$1 AND is_transferable=TRUE", uid
+            )
+            return _json_resp({
+                "total": total, "transferable": transferable,
+                "items": [
+                    {**dict(i), "scanned_at": i["scanned_at"].isoformat() if i.get("scanned_at") else None}
+                    for i in items
+                ],
+            })
+        except Exception as exc:
+            log.exception("gift_inventory uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def gift_scan_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            label = "Сканирование подарков во всех аккаунтах"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'gift_scan','pending','{}',1,$2) RETURNING id",
+                uid, label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("gift_scan_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Mass Inviter ───────────────────────────────────────────────────────────
+
+    async def mass_inviter_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        group = (body.get("group") or "").strip()
+        if not group:
+            return _err("Укажите группу/канал", 400)
+        source = body.get("source", "parsed")
+        try:
+            label = f"Mass Invite → {group}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'mass_invite','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"group": group, "source": source}), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("mass_inviter_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Stars Hub ─────────────────────────────────────────────────────────────
 
     async def stars_overview(request: web.Request) -> web.Response:
@@ -3176,6 +3364,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
     # Health Dashboard
     app.router.add_get("/api/miniapp/health", health_overview)
+    # AI Memory
+    app.router.add_get("/api/miniapp/ai_memory", ai_memory_list)
+    app.router.add_post("/api/miniapp/ai_memory", ai_memory_create)
+    app.router.add_delete("/api/miniapp/ai_memory/{mem_id}", ai_memory_delete)
+    # Nodes Hub
+    app.router.add_get("/api/miniapp/nodes", nodes_list)
+    app.router.add_get("/api/miniapp/node/{node_id}/threads", node_threads)
+    # Gift Transfer
+    app.router.add_get("/api/miniapp/gifts", gift_inventory)
+    app.router.add_post("/api/miniapp/gifts/scan", gift_scan_submit)
+    # Mass Inviter
+    app.router.add_post("/api/miniapp/mass_invite", mass_inviter_submit)
     # Stars Hub
     app.router.add_get("/api/miniapp/stars", stars_overview)
     # Ghost Engine

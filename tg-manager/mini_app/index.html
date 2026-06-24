@@ -404,6 +404,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openNetBcModal()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📣</div><div class="row-body"><div class="row-name">Рассылка по всем ботам</div><div class="row-val">Один текст — все боты</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openDmCampaigns()"><div class="row-ico" style="background:rgba(59,130,246,.16)">✉️</div><div class="row-body"><div class="row-name">DM-кампании</div><div class="row-val" id="m-dm-cnt">Прямые рассылки</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openExperiments()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div><div class="row-body"><div class="row-name">A/B Эксперименты</div><div class="row-val" id="m-exp-cnt">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openAiMemory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🧠</div><div class="row-body"><div class="row-name">AI Память</div><div class="row-val" id="m-aimem-val">Заметки для AI-ассистента</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openNodes()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🖥</div><div class="row-body"><div class="row-name">Nodes Hub</div><div class="row-val" id="m-nodes-val">Forum Workspaces</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openGifts()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🎁</div><div class="row-body"><div class="row-name">Gift Transfer</div><div class="row-val" id="m-gifts-val">Подарки в аккаунтах</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openMassInvite()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📨</div><div class="row-body"><div class="row-name">Mass Inviter</div><div class="row-val">Массовый инвайт</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openParser()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div><div class="row-body"><div class="row-name">Парсер аудитории</div><div class="row-val" id="m-parser-cnt">Участники каналов/групп</div></div><div class="row-right chev">›</div></div>
     </div>
 
@@ -733,6 +737,80 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AI MEMORY ══════════════════════ -->
+<div class="screen" id="s-aimemory">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🧠 AI Память</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openAiMemoryModal()">+ Запись</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="aiMemoryList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: NODES HUB ══════════════════════ -->
+<div class="screen" id="s-nodes">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🖥 Nodes Hub</div>
+  </div>
+  <div class="sub-sb">
+    <div id="nodesStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="lst" id="nodesList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: NODE THREADS ══════════════════════ -->
+<div class="screen" id="s-nodethreads">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="nodethreads-title">🖥 Threads</div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="nodethreadsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: GIFTS ══════════════════════ -->
+<div class="screen" id="s-gifts">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🎁 Gift Transfer</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="scanGifts()">📡 Скан</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="giftsStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="lst" id="giftsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: MASS INVITER ══════════════════════ -->
+<div class="screen" id="s-massinvite">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📨 Mass Inviter</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Настройка инвайта</div>
+    <div style="padding:8px 0">
+      <div class="field"><label>Группа / канал (ссылка или @username)</label><input type="text" id="massInviteGroup" placeholder="@group_username или t.me/group"></div>
+      <div class="field">
+        <label>Источник аудитории</label>
+        <select id="massInviteSrc" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="parsed">Parsed Audience (из парсера)</option>
+          <option value="crm">CRM-контакты</option>
+          <option value="bot_users">Подписчики ботов</option>
+        </select>
+      </div>
+      <div class="field-err" id="massInviteErr"></div>
+      <button class="btn btn-p" id="massInviteBtn" onclick="submitMassInvite()" style="width:100%">🚀 Запустить инвайт</button>
+    </div>
+    <div class="sec" style="margin-top:8px">История операций</div>
+    <div class="lst" id="massInviteHistory"></div>
   </div>
 </div>
 
@@ -1294,6 +1372,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ MODAL: AD INTEL ADD CHANNEL ══════════════════════ -->
+<!-- AI Memory modal -->
+<div class="mbg" id="aiMemMbg" onclick="if(event.target===this)closeAiMemoryModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeAiMemoryModal()">✕</div>
+    <div class="modal-title">🧠 Новая запись в памяти</div>
+    <div class="field"><label>Заголовок (необязательно)</label><input type="text" id="aiMemTitle" placeholder="Краткое описание"></div>
+    <div class="field"><label>Содержимое</label><textarea id="aiMemBody" rows="4" placeholder="Запишите факт, инструкцию или заметку для AI-ассистента..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field-err" id="aiMemErr"></div>
+    <button class="btn btn-p" id="aiMemBtn" onclick="submitAiMemory()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
 <!-- Reg Check modal -->
 <div class="mbg" id="regCheckMbg" onclick="if(event.target===this)closeRegCheckModal()">
   <div class="modal">
@@ -3683,6 +3773,191 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── AI Memory ───────────────────────────────────────────
+function openAiMemoryModal() {
+  document.getElementById('aiMemTitle').value='';
+  document.getElementById('aiMemBody').value='';
+  document.getElementById('aiMemErr').textContent='';
+  document.getElementById('aiMemBtn').disabled=false;
+  document.getElementById('aiMemMbg').style.display='flex';
+}
+function closeAiMemoryModal() { document.getElementById('aiMemMbg').style.display='none'; }
+async function submitAiMemory() {
+  const title = document.getElementById('aiMemTitle').value.trim();
+  const body = document.getElementById('aiMemBody').value.trim();
+  const errEl = document.getElementById('aiMemErr');
+  if (!body) { errEl.textContent='Заполните содержимое'; return; }
+  const btn = document.getElementById('aiMemBtn');
+  btn.disabled=true; btn.textContent='Сохраняю…';
+  try {
+    await api('/api/miniapp/ai_memory',{method:'POST',body:JSON.stringify({title,body})});
+    toast('🧠 Запись сохранена');
+    closeAiMemoryModal();
+    openAiMemory();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
+}
+const MEM_KIND = {note:'📝',instruction:'📋',fact:'💡',rule:'⚙️'};
+async function openAiMemory() {
+  push('s-aimemory');
+  txt('aiMemoryList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/ai_memory');
+    const mems = d.memories||[];
+    txt('m-aimem-val',`${mems.length} записей`);
+    if (!mems.length) { txt('aiMemoryList', empty('🧠','Нет записей','Добавьте заметки для AI-ассистента')); return; }
+    txt('aiMemoryList', mems.map(m=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">${m.pinned?'📌':(MEM_KIND[m.kind]||'📝')}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(m.title||m.body.slice(0,40))}</div>
+          <div class="row-val">${m.title?esc(m.body.slice(0,60)):''} ${(m.tags||[]).map(t=>'#'+esc(t)).join(' ')}</div>
+        </div>
+        <div class="row-right">
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteAiMem(${m.id})">🗑</button>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('aiMemoryList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function deleteAiMem(id) {
+  if (!confirm('Удалить запись из AI-памяти?')) return;
+  try {
+    await api(`/api/miniapp/ai_memory/${id}`,{method:'DELETE'});
+    toast('🗑 Удалено');
+    openAiMemory();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Nodes Hub ───────────────────────────────────────────
+const NODE_TYPE = {proxies:'🌐 Прокси',accounts:'👥 Аккаунты',tasks:'📋 Задачи',alerts:'🔔 Алерты'};
+async function openNodes() {
+  push('s-nodes');
+  txt('nodesStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('nodesList','');
+  try {
+    const d = await api('/api/miniapp/nodes');
+    const nodes = d.nodes||[];
+    const active = nodes.filter(n=>n.is_active).length;
+    txt('nodesStats',`
+      <div class="kpi-card"><div class="kpi-val">${nodes.length}</div><div class="kpi-lbl">Всего нод</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${active}</div><div class="kpi-lbl">Активных</div></div>
+    `);
+    txt('m-nodes-val',`${active} активных нод`);
+    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Создайте Forum Workspace в боте')); return; }
+    txt('nodesList', nodes.map(n=>`
+      <div class="row tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">${n.is_active?'🟢':'⚫'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(n.name||'Node')} ${NODE_TYPE[n.node_type]||n.node_type}</div>
+          <div class="row-val">${n.open_threads||0} открытых топиков · ${n.total_threads||0} всего</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('nodesStats','');
+    txt('nodesList', empty('⚠️','Ошибка',e.message));
+  }
+}
+const THREAD_ENTITY = {proxy:'🌐',account:'👤',worker:'⚙️'};
+async function openNodeThreads(nodeId, nodeName) {
+  push('s-nodethreads');
+  txt('nodethreads-title','🖥 '+esc(nodeName));
+  txt('nodethreadsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/node/${nodeId}/threads`);
+    const threads = d.threads||[];
+    if (!threads.length) { txt('nodethreadsList', empty('📋','Нет топиков','')); return; }
+    txt('nodethreadsList', threads.map(t=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">${THREAD_ENTITY[t.entity_type]||'📌'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(t.topic_name||t.entity_type+' #'+t.entity_id)}</div>
+          <div class="row-val">${t.status==='open'?'🟢 Открыт':'⚫ Закрыт'} · ${t.entity_type}</div>
+        </div>
+        <div class="row-right" style="color:#999;font-size:12px">#${t.tg_thread_id||''}</div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('nodethreadsList', empty('⚠️','Ошибка',e.message));
+  }
+}
+
+// ── Gift Transfer ───────────────────────────────────────
+async function openGifts() {
+  push('s-gifts');
+  txt('giftsStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('giftsList','');
+  try {
+    const d = await api('/api/miniapp/gifts');
+    txt('giftsStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего подарков</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${d.transferable||0}</div><div class="kpi-lbl">Передаваемых</div></div>
+    `);
+    txt('m-gifts-val',`${d.total||0} подарков · ${d.transferable||0} передаваемых`);
+    const items = d.items||[];
+    if (!items.length) { txt('giftsList', empty('🎁','Нет подарков','Нажмите 📡 Скан для поиска')); return; }
+    txt('giftsList', items.map(i=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(239,68,68,.16)">${i.is_unique?'💎':i.is_premium?'⭐':'🎁'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(i.gift_type||'Подарок')}</div>
+          <div class="row-val">${esc(i.first_name||i.phone)} · ${i.stars_cost?'⭐'+i.stars_cost:'—'} · ${i.is_transferable?'✅ Передаваем':'❌ Нельзя'}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('giftsStats','');
+    txt('giftsList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function scanGifts() {
+  try {
+    const r = await api('/api/miniapp/gifts/scan',{method:'POST'});
+    toast(`📡 Сканирование запущено (#${r.op_id})`);
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Mass Inviter ─────────────────────────────────────────
+async function openMassInvite() {
+  push('s-massinvite');
+  txt('massInviteHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/operations');
+    const ops = (d.operations||[]).filter(o=>o.op_type==='mass_invite').slice(0,10);
+    if (!ops.length) { txt('massInviteHistory', empty('📨','Нет истории инвайтов','')); return; }
+    txt('massInviteHistory', ops.map(o=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">📨</div>
+        <div class="row-body">
+          <div class="row-name">${esc(o.label||'mass_invite')}</div>
+          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('massInviteHistory', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function submitMassInvite() {
+  const group = document.getElementById('massInviteGroup').value.trim();
+  const source = document.getElementById('massInviteSrc').value;
+  const errEl = document.getElementById('massInviteErr');
+  if (!group) { errEl.textContent='Укажите группу'; return; }
+  const btn = document.getElementById('massInviteBtn');
+  btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r = await api('/api/miniapp/mass_invite',{method:'POST',body:JSON.stringify({group,source})});
+    toast(`📨 Инвайт запущен (#${r.op_id})`);
+    errEl.textContent='';
+    openMassInvite();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚀 Запустить инвайт'; }
 }
 
 // ── Stars Hub ──────────────────────────────────────────
