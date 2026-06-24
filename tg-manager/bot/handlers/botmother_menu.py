@@ -107,7 +107,6 @@ from bot.callbacks import (
     ReporterCb,
     ContentClonerCb,
     AutoRegCb,
-    GrowthCb,
 )
 from bot.states import OpPlannerFSM
 from bot.utils.subscription import require_plan, locked_text
@@ -300,7 +299,6 @@ def _growth_kb(plan: str = "free"):
     from bot.callbacks import CloneAdaptCb, AutoFunnelCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🌱 Growth Agent", callback_data=GrowthCb(action="menu"))
     kb.button(text="🚀 Продвижение ботов", callback_data=PromoCb(action="menu"))
     kb.button(text="⭐ Stars Optimizer", callback_data=StarsCb(action="menu"))
     kb.button(text="🕸️ Content Mesh", callback_data=ContentMeshCb(action="menu"))
@@ -308,7 +306,7 @@ def _growth_kb(plan: str = "free"):
     kb.button(text="📖 Narrative Hub", callback_data=NarrCb(action="menu"))
     kb.button(text="🔀 Clone & Adapt", callback_data=CloneAdaptCb(action="menu"))
     kb.button(text="◀️ Назад", callback_data=BmCb(action="main"))
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 

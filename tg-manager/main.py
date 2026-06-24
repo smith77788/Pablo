@@ -75,7 +75,8 @@ from bot.handlers import phone_checker as phone_checker_handler
 from bot.handlers import reporter_standalone as reporter_handler
 from bot.handlers import content_cloner as content_cloner_handler
 from bot.handlers import auto_registrar as auto_registrar_handler
-from bot.handlers import growth_hub as growth_hub_handler
+# growth_hub disabled (кнопка убрана из меню — постит промо в чужие группы)
+# from bot.handlers import growth_hub as growth_hub_handler
 from bot.handlers import account_cleaner as account_cleaner_handler
 from bot.handlers import dm_campaigns as dm_campaigns_handler
 from bot.handlers import strike as strike_handler
@@ -294,7 +295,7 @@ async def main() -> None:
     dp.include_router(reporter_handler.router)
     dp.include_router(content_cloner_handler.router)
     dp.include_router(auto_registrar_handler.router)
-    dp.include_router(growth_hub_handler.router)
+    # growth_hub_handler.router — disabled, see import above
     dp.include_router(promo_handler.router)
     dp.include_router(self_promo_handler.router)
     dp.include_router(ghost_hub_handler.router)
