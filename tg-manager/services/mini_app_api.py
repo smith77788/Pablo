@@ -3545,6 +3545,165 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_referrals": count,
         })
 
+    # ── Self Promo ───────────────────────────────────────────────────────────
+
+    async def self_promo_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            "SELECT id, style, title, content, cta_text, cta_url, add_referral, is_active, use_count "
+            "FROM self_promo_templates ORDER BY id"
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def self_promo_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        tpl_id = int(request.match_info["tpl_id"])
+        tpl = await pool.fetchrow("SELECT is_active FROM self_promo_templates WHERE id=$1", tpl_id)
+        if not tpl:
+            return _err("not found", 404)
+        new_state = not tpl["is_active"]
+        await pool.execute("UPDATE self_promo_templates SET is_active=$1 WHERE id=$2", new_state, tpl_id)
+        return _json_resp({"active": new_state})
+
+    async def self_promo_launch(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        tpl_id = int(request.match_info["tpl_id"])
+        tpl = await pool.fetchrow("SELECT id FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
+        if not tpl:
+            return _err("template not found or inactive", 404)
+        await pool.execute(
+            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('self_promo_blast',$1,'pending',$2)",
+            json.dumps({"template_id": tpl_id}), uid,
+        )
+        return _json_resp({"ok": True})
+
+    # ── Semantic Memory ───────────────────────────────────────────────────────
+
+    async def semantic_memory_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT mb.bot_id, mb.username, mb.first_name,
+                   COUNT(DISTINCT bum.user_id) AS conv_users,
+                   COUNT(buf.id) AS fact_count
+            FROM managed_bots mb
+            LEFT JOIN bot_user_memory bum ON bum.bot_id = mb.bot_id
+            LEFT JOIN bot_user_facts buf ON buf.bot_id = mb.bot_id
+            WHERE mb.added_by = $1
+            GROUP BY mb.bot_id, mb.username, mb.first_name
+            ORDER BY fact_count DESC NULLS LAST
+            LIMIT 30
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def semantic_memory_bot(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        bot_id = int(request.match_info["bot_id"])
+        owner = await pool.fetchval("SELECT added_by FROM managed_bots WHERE bot_id=$1", bot_id)
+        if owner != uid:
+            return _err("forbidden", 403)
+        facts = await pool.fetch(
+            "SELECT user_id, fact_key, fact_value, confidence, updated_at "
+            "FROM bot_user_facts WHERE bot_id=$1 ORDER BY updated_at DESC LIMIT 100",
+            bot_id,
+        )
+        return _json_resp([dict(r) for r in facts])
+
+    # ── Audience DNA ─────────────────────────────────────────────────────────
+
+    async def audience_dna_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT ad.id, ad.bot_id, mb.username, mb.first_name,
+                   ad.avg_engagement_rate, ad.churn_risk_pct,
+                   ad.total_users_analyzed, ad.peak_hours, ad.peak_days,
+                   ad.best_content_types, ad.top_topics, ad.computed_at
+            FROM audience_dna ad
+            LEFT JOIN managed_bots mb ON mb.bot_id = ad.bot_id
+            WHERE ad.owner_id = $1
+            ORDER BY ad.computed_at DESC
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    # ── Auto Funnels ──────────────────────────────────────────────────────────
+
+    async def auto_funnels_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT f.id, f.name, f.bot_id, mb.username AS bot_username,
+                   mb.first_name AS bot_name, f.target_segment, f.enabled, f.created_at,
+                   COUNT(DISTINCT fs.id) AS steps_count,
+                   COUNT(DISTINCT fr.id) FILTER (WHERE fr.status='active') AS active_runs
+            FROM auto_funnels f
+            LEFT JOIN managed_bots mb ON mb.bot_id = f.bot_id
+            LEFT JOIN auto_funnel_steps fs ON fs.funnel_id = f.id
+            LEFT JOIN auto_funnel_runs fr ON fr.funnel_id = f.id
+            WHERE f.owner_id = $1
+            GROUP BY f.id, f.name, f.bot_id, mb.username, mb.first_name,
+                     f.target_segment, f.enabled, f.created_at
+            ORDER BY f.id DESC
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def auto_funnel_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        fid = int(request.match_info["funnel_id"])
+        funnel = await pool.fetchrow(
+            "SELECT enabled FROM auto_funnels WHERE id=$1 AND owner_id=$2", fid, uid
+        )
+        if not funnel:
+            return _err("not found", 404)
+        new_state = not funnel["enabled"]
+        await pool.execute(
+            "UPDATE auto_funnels SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, fid
+        )
+        return _json_resp({"enabled": new_state})
+
+    async def auto_funnel_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        fid = int(request.match_info["funnel_id"])
+        funnel = await pool.fetchrow(
+            """
+            SELECT f.*, mb.username AS bot_username, mb.first_name AS bot_name
+            FROM auto_funnels f
+            LEFT JOIN managed_bots mb ON mb.bot_id = f.bot_id
+            WHERE f.id=$1 AND f.owner_id=$2
+            """,
+            fid, uid,
+        )
+        if not funnel:
+            return _err("not found", 404)
+        steps = await pool.fetch(
+            "SELECT * FROM auto_funnel_steps WHERE funnel_id=$1 ORDER BY step_num", fid
+        )
+        return _json_resp({"funnel": dict(funnel), "steps": [dict(s) for s in steps]})
+
     # ── SSE ──────────────────────────────────────────────────────────────────
 
     async def events(request: web.Request) -> web.StreamResponse:
@@ -3784,6 +3943,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reg Checker
     app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
+    # Self Promo
+    app.router.add_get("/api/miniapp/self_promo", self_promo_list)
+    app.router.add_put("/api/miniapp/self_promo/{tpl_id}/toggle", self_promo_toggle)
+    app.router.add_post("/api/miniapp/self_promo/{tpl_id}/launch", self_promo_launch)
+    # Semantic Memory
+    app.router.add_get("/api/miniapp/semantic_memory", semantic_memory_overview)
+    app.router.add_get("/api/miniapp/semantic_memory/{bot_id}", semantic_memory_bot)
+    # Audience DNA
+    app.router.add_get("/api/miniapp/audience_dna", audience_dna_list)
+    # Auto Funnels
+    app.router.add_get("/api/miniapp/auto_funnels", auto_funnels_list)
+    app.router.add_put("/api/miniapp/auto_funnel/{funnel_id}/toggle", auto_funnel_toggle)
+    app.router.add_get("/api/miniapp/auto_funnel/{funnel_id}", auto_funnel_detail)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 

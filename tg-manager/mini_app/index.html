@@ -411,6 +411,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openParser()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div><div class="row-body"><div class="row-name">Парсер аудитории</div><div class="row-val" id="m-parser-cnt">Участники каналов/групп</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openPersonas()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎭</div><div class="row-body"><div class="row-name">Persona Hub</div><div class="row-val" id="m-persona-val">AI-персоны аккаунтов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openReferral()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🤝</div><div class="row-body"><div class="row-name">Реферальная программа</div><div class="row-val" id="m-ref-val">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openSelfPromo()"><div class="row-ico" style="background:rgba(239,68,68,.16)">📣</div><div class="row-body"><div class="row-name">Self Promo</div><div class="row-val" id="m-selfpromo-val">Шаблоны самопиара</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openSemanticMemory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🧬</div><div class="row-body"><div class="row-name">Semantic Memory</div><div class="row-val" id="m-semantic-val">Память по пользователям ботов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openAudienceDna()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🔬</div><div class="row-body"><div class="row-name">Audience DNA</div><div class="row-val" id="m-dna-val">Профилирование аудитории</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openAutoFunnels()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔀</div><div class="row-body"><div class="row-name">Авто-воронки</div><div class="row-val" id="m-af-val">Цепочки сообщений</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Автоматизация</div>
@@ -436,6 +440,56 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
     </div>
   </div>
+</div>
+
+<!-- ══════════════════════ SELF PROMO ══════════════════════ -->
+<div class="screen" id="s-selfpromo">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📣 Self Promo</div></div>
+  <div class="sub-sb">
+    <div class="sec">Шаблоны самопиара</div>
+    <div class="lst" id="spList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SEMANTIC MEMORY ══════════════════════ -->
+<div class="screen" id="s-semantic">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧬 Semantic Memory</div></div>
+  <div class="sub-sb">
+    <div class="sec">Память по ботам</div>
+    <div class="lst" id="semList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SEMANTIC FACTS ══════════════════════ -->
+<div class="screen" id="s-semfacts">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="semfacts-name">Факты</div></div>
+  <div class="sub-sb">
+    <div class="lst" id="semfactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ AUDIENCE DNA ══════════════════════ -->
+<div class="screen" id="s-dna">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🧬 Audience DNA</div></div>
+  <div class="sub-sb">
+    <div class="sec">ДНК аудитории по ботам</div>
+    <div class="lst" id="dnaList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ AUTO FUNNELS ══════════════════════ -->
+<div class="screen" id="s-autofunnels">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔀 Авто-воронки</div></div>
+  <div class="sub-sb">
+    <div class="sec">Цепочки сообщений</div>
+    <div class="lst" id="afList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ FUNNEL STEPS ══════════════════════ -->
+<div class="screen" id="s-afsteps">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="afsteps-name">Воронка</div></div>
+  <div class="sub-sb" id="afsteps-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
@@ -5639,6 +5693,196 @@ async function submitErrReport() {
     loadErrReports();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
+}
+
+// ── Self Promo ─────────────────────────────────────────
+async function openSelfPromo() {
+  push('s-selfpromo');
+  txt('spList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/self_promo');
+    if (!rows.length) { txt('spList', empty('📣','Шаблонов нет','')); return; }
+    const styleLabel = {direct:'🎯 Прямая',native:'💡 Нативная'};
+    txt('spList', rows.map(r => `
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">${styleLabel[r.style]||r.style} · ${esc(r.title)}</div>
+          <div class="row-val">${esc((r.content||'').slice(0,80))}…</div>
+          ${r.cta_text?`<div class="row-val" style="color:var(--accent)">CTA: ${esc(r.cta_text)}</div>`:''}
+          <div class="row-val" style="color:var(--hint)">Использований: ${r.use_count||0} · ${r.is_active?'🟢 Активен':'🔴 Выключен'}</div>
+        </div>
+        <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleSelfPromo(${r.id},this)">${r.is_active?'Выкл':'Вкл'}</button>
+          ${r.is_active?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px" onclick="launchSelfPromo(${r.id},this)">▶ Запуск</button>`:''}
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('spList', empty('⚠️','Ошибка',e.message)); }
+}
+async function toggleSelfPromo(id,btn) {
+  btn.disabled=true;
+  try {
+    const r = await api(`/api/miniapp/self_promo/${id}/toggle`,{method:'PUT'});
+    toast(r.active?'✅ Шаблон включён':'🔴 Шаблон выключен');
+    openSelfPromo();
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+async function launchSelfPromo(id,btn) {
+  btn.disabled=true; btn.textContent='...';
+  try {
+    await api(`/api/miniapp/self_promo/${id}/launch`,{method:'POST'});
+    toast('🚀 Рассылка запущена');
+  } catch(e) { toast('⚠️ '+e.message); }
+  finally { btn.disabled=false; btn.textContent='▶ Запуск'; }
+}
+
+// ── Semantic Memory ────────────────────────────────────
+async function openSemanticMemory() {
+  push('s-semantic');
+  txt('semList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/semantic_memory');
+    if (!rows.length) { txt('semList', empty('🧬','Данных нет','Боты ещё не собрали память о пользователях')); return; }
+    txt('semList', rows.map(r => `
+      <div class="row tap" onclick="openSemFacts(${r.bot_id},'${esc(r.first_name||r.username||'Бот')}')">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
+          <div class="row-val">Диалогов: ${r.conv_users||0} · Фактов: ${r.fact_count||0}</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('semList', empty('⚠️','Ошибка',e.message)); }
+}
+async function openSemFacts(botId, botName) {
+  push('s-semfacts');
+  document.getElementById('semfacts-name').textContent = botName + ' — факты';
+  txt('semfactsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api(`/api/miniapp/semantic_memory/${botId}`);
+    if (!rows.length) { txt('semfactsList', empty('🧬','Фактов нет','')); return; }
+    const byUser = {};
+    rows.forEach(r => { if (!byUser[r.user_id]) byUser[r.user_id]=[]; byUser[r.user_id].push(r); });
+    txt('semfactsList', Object.entries(byUser).map(([uid2, facts]) => `
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">👤 User ${uid2}</div>
+          ${facts.map(f=>`<div class="row-val">${esc(f.fact_key)}: ${esc(String(f.fact_value))} <span style="color:var(--hint)">(${Math.round((f.confidence||1)*100)}%)</span></div>`).join('')}
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('semfactsList', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Audience DNA ───────────────────────────────────────
+async function openAudienceDna() {
+  push('s-dna');
+  txt('dnaList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/audience_dna');
+    if (!rows.length) { txt('dnaList', empty('🔬','Данных ДНК нет','Запустите анализ аудитории в боте')); return; }
+    txt('dnaList', rows.map(r => {
+      const er = r.avg_engagement_rate ? r.avg_engagement_rate.toFixed(1)+'%' : '—';
+      const risk = r.churn_risk_pct||0;
+      const riskE = risk>40?'🔴':risk>20?'🟡':'🟢';
+      const peaks = (r.peak_hours||[]).slice(0,3).map(h=>h+':00').join(', ')||'—';
+      const topics = (r.top_topics||[]).slice(0,3).join(', ')||'—';
+      const types = (r.best_content_types||[]).slice(0,3).join(', ')||'—';
+      return `
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
+          <div class="row-val">ER: ${er} · Отток: ${riskE} ${risk.toFixed(0)}% · Анализировано: ${r.total_users_analyzed||0}</div>
+          <div class="row-val">Пик: ${peaks}</div>
+          <div class="row-val">Контент: ${esc(types)}</div>
+          <div class="row-val">Темы: ${esc(topics)}</div>
+          <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
+        </div>
+      </div>
+    `}).join(''));
+  } catch(e) { txt('dnaList', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Auto Funnels ───────────────────────────────────────
+async function openAutoFunnels() {
+  push('s-autofunnels');
+  txt('afList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/auto_funnels');
+    if (!rows.length) { txt('afList', empty('🔀','Воронок нет','Создайте авто-воронку через бота')); return; }
+    const segLabels = {all:'Все', new_7d:'Новые 7д', new_30d:'Новые 30д', inactive_30d:'Неактивные 30д'};
+    txt('afList', rows.map(r => `
+      <div class="row tap" onclick="openFunnelSteps(${r.id},'${esc(r.name)}')">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">${r.enabled?'🟢':'🔴'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.name)}</div>
+          <div class="row-val">${esc(r.bot_name||r.bot_username||'Бот')} · ${segLabels[r.target_segment]||r.target_segment}</div>
+          <div class="row-val">Шагов: ${r.steps_count||0} · Активных: ${r.active_runs||0}</div>
+        </div>
+        <div class="row-right" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="event.stopPropagation();toggleFunnel(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
+          <span class="chev">›</span>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('afList', empty('⚠️','Ошибка',e.message)); }
+}
+async function toggleFunnel(fid, btn) {
+  btn.disabled=true;
+  try {
+    const r = await api(`/api/miniapp/auto_funnel/${fid}/toggle`,{method:'PUT'});
+    toast(r.enabled?'🟢 Воронка включена':'🔴 Воронка выключена');
+    openAutoFunnels();
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+async function openFunnelSteps(fid, fname) {
+  push('s-afsteps');
+  document.getElementById('afsteps-name').textContent = fname||'Воронка';
+  txt('afsteps-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/auto_funnel/${fid}`);
+    const f = d.funnel;
+    const steps = d.steps||[];
+    const segLabels = {all:'Все', new_7d:'Новые 7д', new_30d:'Новые 30д', inactive_30d:'Неактивные 30д'};
+    let html = `
+      <div class="lst" style="margin:12px 16px 0">
+        <div class="row"><div class="row-body">
+          <div class="row-name">Бот</div>
+          <div class="row-val">${esc(f.bot_name||f.bot_username||'—')}</div>
+        </div></div>
+        <div class="row"><div class="row-body">
+          <div class="row-name">Сегмент</div>
+          <div class="row-val">${segLabels[f.target_segment]||f.target_segment}</div>
+        </div></div>
+        <div class="row"><div class="row-body">
+          <div class="row-name">Статус</div>
+          <div class="row-val">${f.enabled?'🟢 Активна':'🔴 Выключена'}</div>
+        </div></div>
+      </div>
+      <div class="sec" style="margin-top:8px">Шаги воронки (${steps.length})</div>
+    `;
+    if (!steps.length) {
+      html += empty('📭','Шагов нет','Добавьте шаги через бота');
+    } else {
+      html += '<div class="lst" style="margin:0 16px">';
+      steps.forEach(s => {
+        html += `
+          <div class="row">
+            <div class="row-ico" style="background:rgba(59,130,246,.16);font-size:16px;font-weight:700">${s.step_num}</div>
+            <div class="row-body">
+              <div class="row-name">Шаг ${s.step_num} · через ${s.delay_hours}ч</div>
+              <div class="row-val">${esc((s.message_text||'').slice(0,100))}${(s.message_text||'').length>100?'…':''}</div>
+              ${s.button_text?`<div class="row-val" style="color:var(--accent)">🔘 ${esc(s.button_text)}</div>`:''}
+            </div>
+          </div>
+        `;
+      });
+      html += '</div>';
+    }
+    txt('afsteps-body', html);
+  } catch(e) { txt('afsteps-body', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── Utils ──────────────────────────────────────────────
