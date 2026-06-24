@@ -1028,6 +1028,202 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Topology Map ──────────────────────────────────────────────────────────
+
+    async def topology_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            accs = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)
+            channels = await pool.fetchval("SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+            bots = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+            # Channel-to-account links via joined_channels
+            links = await pool.fetchval(
+                """SELECT COUNT(*) FROM joined_channels jc
+                   JOIN tg_accounts ta ON ta.id=jc.account_id
+                   WHERE ta.owner_id=$1""",
+                uid,
+            )
+            # Bot-user relationships
+            bot_users_total = await pool.fetchval(
+                """SELECT COUNT(*) FROM bot_users bu
+                   JOIN managed_bots b ON b.bot_id=bu.bot_id
+                   WHERE b.added_by=$1""",
+                uid,
+            )
+            return _json_resp({
+                "accounts": accs, "channels": channels, "bots": bots,
+                "channel_links": links, "bot_users_total": bot_users_total,
+            })
+        except Exception as exc:
+            log.exception("topology_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Infra Analytics ────────────────────────────────────────────────────────
+
+    async def infra_analytics_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            active_accs = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE", uid
+            )
+            flood_24h = await pool.fetchval(
+                """SELECT COUNT(*) FROM account_flood_log fl
+                   JOIN tg_accounts ta ON ta.id=fl.account_id
+                   WHERE ta.owner_id=$1 AND fl.created_at > NOW()-INTERVAL '24h'""",
+                uid,
+            )
+            ops_24h = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND created_at > NOW()-INTERVAL '24h'",
+                uid,
+            )
+            warmup_active = await pool.fetchval(
+                """SELECT COUNT(*) FROM account_warmup_plans wp
+                   WHERE wp.owner_id=$1 AND wp.status='active'""",
+                uid,
+            )
+            pools = await pool.fetch(
+                """SELECT pool, COUNT(*) AS cnt FROM tg_accounts
+                   WHERE owner_id=$1 AND is_active=TRUE AND pool IS NOT NULL
+                   GROUP BY pool ORDER BY cnt DESC LIMIT 10""",
+                uid,
+            )
+            # Recent audit
+            audit = await pool.fetch(
+                """SELECT action, target, result, occurred_at
+                   FROM operation_audit WHERE owner_id=$1
+                   ORDER BY occurred_at DESC LIMIT 10""",
+                uid,
+            )
+            return _json_resp({
+                "active_accounts": active_accs,
+                "flood_24h": flood_24h,
+                "ops_24h": ops_24h,
+                "warmup_active": warmup_active,
+                "pools": [dict(p) for p in pools],
+                "audit": [
+                    {**dict(a), "occurred_at": a["occurred_at"].isoformat() if a["occurred_at"] else None}
+                    for a in audit
+                ],
+            })
+        except Exception as exc:
+            log.exception("infra_analytics_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Reporter (Report users) ────────────────────────────────────────────────
+
+    async def reporter_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        target = (body.get("target") or "").strip()
+        reason = body.get("reason", "spam")
+        acc_count = int(body.get("acc_count", 5))
+        if not target:
+            return _err("Укажите цель репортинга", 400)
+        try:
+            label = f"Репорт {target} ({reason}) × {acc_count} аккаунтов"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'report_peer','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"target": target, "reason": reason}), acc_count, label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("reporter_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Quick Post ─────────────────────────────────────────────────────────────
+
+    async def quick_post_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        text = (body.get("text") or "").strip()
+        channel_ids = body.get("channel_ids") or []
+        if not text:
+            return _err("Заполните текст поста", 400)
+        if not channel_ids:
+            return _err("Выберите хотя бы один канал", 400)
+        try:
+            label = f"Quick Post в {len(channel_ids)} каналов"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'quick_post','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"text": text, "channel_ids": channel_ids}), len(channel_ids), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("quick_post_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── SEO Overview ───────────────────────────────────────────────────────────
+
+    async def seo_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            suggestions = await pool.fetch(
+                """SELECT s.owner_id, s.chan_id, s.title, s.about, s.username, s.created_at,
+                          c.title AS channel_title, c.username AS channel_username
+                   FROM seo_ai_suggestions s
+                   LEFT JOIN managed_channels c ON c.id=s.chan_id
+                   WHERE s.owner_id=$1 ORDER BY s.created_at DESC LIMIT 20""",
+                uid,
+            )
+            keywords = await pool.fetch(
+                "SELECT keyword, search_count FROM search_memory WHERE owner_id=$1 ORDER BY search_count DESC LIMIT 20",
+                uid,
+            )
+            return _json_resp({
+                "suggestions": [
+                    {**dict(s), "created_at": s["created_at"].isoformat() if s["created_at"] else None}
+                    for s in suggestions
+                ],
+                "keywords": [dict(k) for k in keywords],
+            })
+        except Exception as exc:
+            log.exception("seo_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Bot Factory Overview ───────────────────────────────────────────────────
+
+    async def bot_factory_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            total = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
+            active = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1 AND is_active=TRUE", uid)
+            recent = await pool.fetch(
+                """SELECT bot_id, username, first_name, is_active, created_at
+                   FROM managed_bots WHERE added_by=$1
+                   ORDER BY created_at DESC LIMIT 10""",
+                uid,
+            )
+            return _json_resp({
+                "total": total, "active": active,
+                "recent": [
+                    {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                    for r in recent
+                ],
+            })
+        except Exception as exc:
+            log.exception("bot_factory_status uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Persona Hub ───────────────────────────────────────────────────────────
 
     async def persona_list(request: web.Request) -> web.Response:
@@ -3541,6 +3737,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
     # Health Dashboard
     app.router.add_get("/api/miniapp/health", health_overview)
+    # Topology Map
+    app.router.add_get("/api/miniapp/topology", topology_overview)
+    # Infra Analytics
+    app.router.add_get("/api/miniapp/infra", infra_analytics_overview)
+    # Reporter
+    app.router.add_post("/api/miniapp/reporter", reporter_submit)
+    # Quick Post
+    app.router.add_post("/api/miniapp/quick_post", quick_post_submit)
+    # SEO
+    app.router.add_get("/api/miniapp/seo", seo_overview)
+    # Bot Factory
+    app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
     app.router.add_get("/api/miniapp/personas", persona_list)
     app.router.add_put("/api/miniapp/persona/{persona_id}/toggle", persona_toggle)

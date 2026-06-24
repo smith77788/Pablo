@@ -419,6 +419,16 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openPhoneChecker()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📞</div><div class="row-body"><div class="row-name">Phone Checker</div><div class="row-val">Проверка номеров</div></div><div class="row-right chev">›</div></div>
     </div>
 
+    <div class="sec" style="margin-top:4px">Инструменты</div>
+    <div class="lst">
+      <div class="row tap" onclick="openTopology()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🗺</div><div class="row-body"><div class="row-name">Topology Map</div><div class="row-val">Граф связей активов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openInfra()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⚡</div><div class="row-body"><div class="row-name">Инфра-аналитика</div><div class="row-val" id="m-infra-val">Пулы и флуд-статистика</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openSeo()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">SEO-оптимизация</div><div class="row-val">AI-советы для каналов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openQuickPost()"><div class="row-ico" style="background:rgba(168,85,247,.16)">✍️</div><div class="row-body"><div class="row-name">Quick Post</div><div class="row-val">Быстрая публикация в каналы</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openReporter()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🚨</div><div class="row-body"><div class="row-name">Репортинг</div><div class="row-val">Жалобы на аккаунты/каналы</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openBotFactory()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🏭</div><div class="row-body"><div class="row-name">Bot Factory</div><div class="row-val" id="m-botfactory-val">Создание и импорт ботов</div></div><div class="row-right chev">›</div></div>
+    </div>
+
     <div class="sec" style="margin-top:4px">Платформа</div>
     <div class="lst">
       <div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div><div class="row-body"><div class="row-name">BotMother OS</div><div class="row-val">Telegram Automation Platform</div></div></div>
@@ -745,6 +755,113 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: TOPOLOGY MAP ══════════════════════ -->
+<div class="screen" id="s-topology">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🗺 Topology Map</div>
+  </div>
+  <div class="sub-sb">
+    <div id="topoStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="topoBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: INFRA ANALYTICS ══════════════════════ -->
+<div class="screen" id="s-infra">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⚡ Инфраструктура</div>
+  </div>
+  <div class="sub-sb">
+    <div id="infraStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div class="sec">Пулы аккаунтов</div>
+    <div class="lst" id="infraPools"></div>
+    <div class="sec" style="margin-top:8px">Последние операции (аудит)</div>
+    <div class="lst" id="infraAudit"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: REPORTER ══════════════════════ -->
+<div class="screen" id="s-reporter">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🚨 Репортинг</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Отправить репорт</div>
+    <div style="padding:8px 0">
+      <div class="field"><label>Цель (username, ссылка или ID)</label><input type="text" id="reporterTarget" placeholder="@username или t.me/channel"></div>
+      <div class="field">
+        <label>Причина</label>
+        <select id="reporterReason" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="spam">Спам</option>
+          <option value="violence">Насилие</option>
+          <option value="porn">Неприемлемый контент</option>
+          <option value="child_abuse">Нарушения с детьми</option>
+          <option value="copyright">Нарушение авторских прав</option>
+          <option value="fake_account">Фейковый аккаунт</option>
+          <option value="other">Другое</option>
+        </select>
+      </div>
+      <div class="field"><label>Количество аккаунтов (1–20)</label><input type="number" id="reporterAccCount" value="5" min="1" max="20" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></div>
+      <div class="field-err" id="reporterErr"></div>
+      <button class="btn btn-d" id="reporterBtn" onclick="submitReporter()" style="width:100%">🚨 Отправить репорт</button>
+    </div>
+    <div class="sec" style="margin-top:8px">История задач</div>
+    <div class="lst" id="reporterHistory"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: QUICK POST ══════════════════════ -->
+<div class="screen" id="s-quickpost">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">✍️ Quick Post</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Текст публикации</div>
+    <div style="padding:8px 0">
+      <div class="field"><textarea id="quickPostText" rows="5" placeholder="Текст вашего поста..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    </div>
+    <div class="sec">Выберите каналы</div>
+    <div class="lst" id="quickPostChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="quickPostSelected" style="padding:8px 0;color:#a78bfa;font-size:13px"></div>
+    <div class="field-err" id="quickPostErr"></div>
+    <button class="btn btn-p" id="quickPostBtn" onclick="submitQuickPost()" style="width:100%;margin-top:8px" disabled>📤 Опубликовать (выберите каналы)</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: SEO ══════════════════════ -->
+<div class="screen" id="s-seo">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔍 SEO-оптимизация</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Популярные ключевые слова</div>
+    <div class="lst" id="seoKeywords"></div>
+    <div class="sec" style="margin-top:8px">AI SEO-предложения</div>
+    <div class="lst" id="seoSuggestions"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: BOT FACTORY ══════════════════════ -->
+<div class="screen" id="s-botfactory">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🏭 Bot Factory</div>
+  </div>
+  <div class="sub-sb">
+    <div id="botFactoryStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="sec">Последние боты</div>
+    <div class="lst" id="botFactoryRecent"></div>
+    <div style="padding:12px 0">
+      <button class="btn btn-p" onclick="push('s-bots')" style="width:100%">📋 Все боты</button>
+    </div>
   </div>
 </div>
 
@@ -3865,6 +3982,221 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Topology Map ────────────────────────────────────────
+async function openTopology() {
+  push('s-topology');
+  txt('topoStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('topoBody','');
+  try {
+    const d = await api('/api/miniapp/topology');
+    txt('topoStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.accounts||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.channels||0}</div><div class="kpi-lbl">Каналов</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.bots||0}</div><div class="kpi-lbl">Ботов</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.channel_links||0}</div><div class="kpi-lbl">Связей (вступ)</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.bot_users_total||0}</div><div class="kpi-lbl">Подп. ботов</div></div>
+    `);
+    txt('topoBody',`
+      <div class="lst">
+        <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Сложность инфраструктуры</div><div class="row-val">${d.accounts||0} аккаунтов → ${d.channels||0} каналов / ${d.bots||0} ботов</div></div></div>
+        <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔗</div><div class="row-body"><div class="row-name">Межаккаунтные связи</div><div class="row-val">${d.channel_links||0} аккаунт↔канал · ${d.bot_users_total||0} пользователей ботов</div></div></div>
+      </div>
+    `);
+  } catch(e) {
+    txt('topoStats','');
+    txt('topoBody', empty('⚠️','Ошибка',e.message));
+  }
+}
+
+// ── Infra Analytics ─────────────────────────────────────
+async function openInfra() {
+  push('s-infra');
+  txt('infraStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('infraPools','');
+  txt('infraAudit','');
+  try {
+    const d = await api('/api/miniapp/infra');
+    txt('infraStats',`
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${d.active_accounts||0}</div><div class="kpi-lbl">Активных акк</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#f59e0b">${d.flood_24h||0}</div><div class="kpi-lbl">Флуд 24ч</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.ops_24h||0}</div><div class="kpi-lbl">Операций 24ч</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.warmup_active||0}</div><div class="kpi-lbl">На прогреве</div></div>
+    `);
+    txt('m-infra-val',`${d.active_accounts||0} акк · ${d.flood_24h||0} флуд`);
+    const pools = d.pools||[];
+    txt('infraPools', pools.length ? pools.map(p=>`
+      <div class="row"><div class="row-body"><div class="row-name">Пул: ${esc(p.pool||'default')}</div></div><div class="row-right">${p.cnt} акк</div></div>
+    `).join('') : empty('📦','Нет пулов',''));
+    const audit = d.audit||[];
+    txt('infraAudit', audit.length ? audit.map(a=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(${a.result==='ok'?'34,197,94':'239,68,68'},.16)">${a.result==='ok'?'✅':'❌'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(a.action||'action')}</div>
+          <div class="row-val">${esc(a.target||'')} · ${a.occurred_at?new Date(a.occurred_at).toLocaleString('ru'):''}</div>
+        </div>
+      </div>
+    `).join('') : empty('📋','Нет записей аудита',''));
+  } catch(e) {
+    txt('infraStats','');
+    txt('infraAudit', empty('⚠️','Ошибка',e.message));
+  }
+}
+
+// ── Reporter ─────────────────────────────────────────────
+async function openReporter() {
+  push('s-reporter');
+  txt('reporterHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/operations');
+    const ops = (d.operations||[]).filter(o=>o.op_type==='report_peer').slice(0,10);
+    txt('reporterHistory', ops.length ? ops.map(o=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(239,68,68,.16)">🚨</div>
+        <div class="row-body">
+          <div class="row-name">${esc(o.label||'report_peer')}</div>
+          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0}</div>
+        </div>
+      </div>
+    `).join('') : empty('📋','История пуста',''));
+  } catch(e) {
+    txt('reporterHistory', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function submitReporter() {
+  const target = document.getElementById('reporterTarget').value.trim();
+  const reason = document.getElementById('reporterReason').value;
+  const acc_count = parseInt(document.getElementById('reporterAccCount').value)||5;
+  const errEl = document.getElementById('reporterErr');
+  if (!target) { errEl.textContent='Укажите цель'; return; }
+  if (!confirm(`Отправить ${acc_count} репортов на "${target}"?`)) return;
+  const btn = document.getElementById('reporterBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  try {
+    const r = await api('/api/miniapp/reporter',{method:'POST',body:JSON.stringify({target,reason,acc_count})});
+    toast(`🚨 Репорт поставлен в очередь (#${r.op_id})`);
+    errEl.textContent='';
+    openReporter();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚨 Отправить репорт'; }
+}
+
+// ── Quick Post ───────────────────────────────────────────
+let QUICK_POST_SELECTED = new Set();
+async function openQuickPost() {
+  push('s-quickpost');
+  QUICK_POST_SELECTED = new Set();
+  document.getElementById('quickPostText').value='';
+  txt('quickPostSelected','Выбрано: 0 каналов');
+  txt('quickPostChannels','<div class="spin-wrap"><div class="spin"></div></div>');
+  document.getElementById('quickPostBtn').disabled=true;
+  document.getElementById('quickPostBtn').textContent='📤 Опубликовать (выберите каналы)';
+  try {
+    const d = await api('/api/miniapp/channels');
+    const chs = d.channels||[];
+    if (!chs.length) { txt('quickPostChannels', empty('📢','Нет каналов','Добавьте каналы первым')); return; }
+    txt('quickPostChannels', chs.map(c=>`
+      <div class="row tap" onclick="toggleQpChannel(${c.id})">
+        <div class="row-ico" id="qpc-${c.id}" style="background:rgba(59,130,246,.16)">📢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.title||c.username||c.id)}</div>
+          <div class="row-val">@${esc(c.username||'')} · ${c.member_count||c.members_count||0} подп.</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('quickPostChannels', empty('⚠️','Ошибка',e.message));
+  }
+}
+function toggleQpChannel(id) {
+  const ico = document.getElementById('qpc-'+id);
+  if (QUICK_POST_SELECTED.has(id)) {
+    QUICK_POST_SELECTED.delete(id);
+    if (ico) ico.style.background='rgba(59,130,246,.16)';
+  } else {
+    QUICK_POST_SELECTED.add(id);
+    if (ico) { ico.textContent='✅'; ico.style.background='rgba(34,197,94,.16)'; }
+  }
+  const cnt = QUICK_POST_SELECTED.size;
+  txt('quickPostSelected',`Выбрано: ${cnt} каналов`);
+  const btn = document.getElementById('quickPostBtn');
+  btn.disabled = cnt===0;
+  btn.textContent = cnt>0 ? `📤 Опубликовать в ${cnt} каналов` : '📤 Опубликовать (выберите каналы)';
+}
+async function submitQuickPost() {
+  const text = document.getElementById('quickPostText').value.trim();
+  const errEl = document.getElementById('quickPostErr');
+  if (!text) { errEl.textContent='Введите текст публикации'; return; }
+  if (QUICK_POST_SELECTED.size===0) { errEl.textContent='Выберите каналы'; return; }
+  const btn = document.getElementById('quickPostBtn');
+  btn.disabled=true; btn.textContent='Публикую…';
+  try {
+    const r = await api('/api/miniapp/quick_post',{method:'POST',body:JSON.stringify({text,channel_ids:[...QUICK_POST_SELECTED]})});
+    toast(`✍️ Публикация запущена (#${r.op_id})`);
+    errEl.textContent='';
+    back();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; }
+}
+
+// ── SEO ──────────────────────────────────────────────────
+async function openSeo() {
+  push('s-seo');
+  txt('seoKeywords','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('seoSuggestions','');
+  try {
+    const d = await api('/api/miniapp/seo');
+    const kws = d.keywords||[];
+    txt('seoKeywords', kws.length ? kws.map(k=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div>
+        <div class="row-body"><div class="row-name">${esc(k.keyword)}</div></div>
+        <div class="row-right" style="color:#999">${k.search_count} поисков</div>
+      </div>
+    `).join('') : empty('🔍','Нет ключевых слов','Добавьте в разделе Позиции'));
+    const sug = d.suggestions||[];
+    txt('seoSuggestions', sug.length ? sug.map(s=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">✨</div>
+        <div class="row-body">
+          <div class="row-name">${esc(s.channel_title||s.channel_username||s.chan_id)}</div>
+          <div class="row-val">${s.title?'Название: '+esc(s.title.slice(0,40)):''} ${s.username?'@'+esc(s.username):''}</div>
+        </div>
+      </div>
+    `).join('') : empty('✨','Нет SEO-предложений','Запустите SEO-анализ в боте'));
+  } catch(e) {
+    txt('seoKeywords', empty('⚠️','Ошибка',e.message));
+  }
+}
+
+// ── Bot Factory ──────────────────────────────────────────
+async function openBotFactory() {
+  push('s-botfactory');
+  txt('botFactoryStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('botFactoryRecent','');
+  try {
+    const d = await api('/api/miniapp/bot_factory');
+    txt('botFactoryStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего ботов</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+    `);
+    txt('m-botfactory-val',`${d.total||0} ботов · ${d.active||0} активных`);
+    const recent = d.recent||[];
+    txt('botFactoryRecent', recent.length ? recent.map(b=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">${b.is_active?'🟢':'🔴'}</div>
+        <div class="row-body">
+          <div class="row-name">@${esc(b.username||b.first_name||b.bot_id)}</div>
+          <div class="row-val">${b.created_at?new Date(b.created_at).toLocaleDateString('ru'):''}</div>
+        </div>
+      </div>
+    `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
+  } catch(e) {
+    txt('botFactoryStats','');
+    txt('botFactoryRecent', empty('⚠️','Ошибка',e.message));
+  }
 }
 
 // ── Persona Hub ─────────────────────────────────────────
