@@ -1028,6 +1028,130 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Promo Platform ────────────────────────────────────────────────────────
+
+    async def promo_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            orders = await pool.fetch(
+                "SELECT id, keyword, status, target_position, current_subs, target_subs, created_at "
+                "FROM promo_orders WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
+                uid,
+            )
+            bots = await pool.fetch(
+                "SELECT id, bot_username, status, current_subs, ready_at, created_at "
+                "FROM bot_warehouse WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
+                uid,
+            )
+            panels = await pool.fetch(
+                "SELECT id, name, api_url, is_active FROM smm_panels WHERE owner_id=$1 ORDER BY created_at DESC",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("promo_overview uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({
+            "orders": [
+                {
+                    "id": r["id"], "keyword": r["keyword"] or "",
+                    "status": r["status"] or "waiting",
+                    "target_position": r["target_position"],
+                    "current_subs": r["current_subs"],
+                    "target_subs": r["target_subs"],
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in orders
+            ],
+            "bots": [
+                {
+                    "id": r["id"], "bot_username": r["bot_username"] or "",
+                    "status": r["status"] or "aging",
+                    "current_subs": r["current_subs"] or 0,
+                    "ready_at": r["ready_at"].isoformat() if r["ready_at"] else None,
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in bots
+            ],
+            "panels": [
+                {"id": r["id"], "name": r["name"] or "", "api_url": r["api_url"] or "", "is_active": r["is_active"]}
+                for r in panels
+            ],
+        })
+
+    async def promo_cancel_order(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            order_id = int(request.match_info["order_id"])
+        except (KeyError, ValueError):
+            return _err("bad order_id", 400)
+        res = await pool.execute(
+            "UPDATE promo_orders SET status='cancelled', updated_at=NOW() WHERE id=$1 AND owner_id=$2",
+            order_id, uid,
+        )
+        if res == "UPDATE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True})
+
+    async def promo_create_order_api(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            keyword = str(body.get("keyword", "")).strip()
+            target_position = int(body.get("target_position", 1))
+            target_subs = body.get("target_subs")
+            bot_id = body.get("bot_id")
+            smm_panel_id = body.get("smm_panel_id")
+        except Exception:
+            return _err("bad body", 400)
+        if not keyword:
+            return _err("keyword обязателен", 400)
+        if target_position < 1 or target_position > 50:
+            return _err("target_position 1-50", 400)
+        try:
+            order_id = await pool.fetchval(
+                """INSERT INTO promo_orders(owner_id, keyword, target_position, bot_id, smm_panel_id, target_subs)
+                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                uid, keyword, target_position,
+                int(bot_id) if bot_id else None,
+                int(smm_panel_id) if smm_panel_id else None,
+                int(target_subs) if target_subs else None,
+            )
+        except Exception as exc:
+            log.exception("promo_create_order uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "order_id": order_id})
+
+    async def promo_add_warehouse_bot(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            bot_username = str(body.get("bot_username", "")).strip().lstrip("@")
+        except Exception:
+            return _err("bad body", 400)
+        if not bot_username:
+            return _err("bot_username обязателен", 400)
+        try:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(tz=timezone.utc)
+            ready_at = now + timedelta(days=21)
+            bot_id = await pool.fetchval(
+                """INSERT INTO bot_warehouse(owner_id, bot_username, status, registered_at, ready_at)
+                   VALUES($1,$2,'aging',$3,$4) RETURNING id""",
+                uid, bot_username, now, ready_at,
+            )
+        except Exception as exc:
+            log.exception("promo_add_warehouse_bot uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "bot_id": bot_id, "ready_at": ready_at.isoformat()})
+
     # ── Error Reports ─────────────────────────────────────────────────────────
 
     async def submit_error_report(request: web.Request) -> web.Response:
@@ -1898,6 +2022,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Promo Platform
+    app.router.add_get("/api/miniapp/promo", promo_overview)
+    app.router.add_post("/api/miniapp/promo/order", promo_create_order_api)
+    app.router.add_post("/api/miniapp/promo/order/{order_id}/cancel", promo_cancel_order)
+    app.router.add_post("/api/miniapp/promo/warehouse/bot", promo_add_warehouse_bot)
     # Error Reports
     app.router.add_post("/api/miniapp/error_report", submit_error_report)
     app.router.add_get("/api/miniapp/error_reports", my_error_reports)

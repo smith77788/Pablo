@@ -377,6 +377,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openOps()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⚙️</div><div class="row-body"><div class="row-name">Очередь операций</div><div class="row-val" id="m-ops-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openTemplates()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📝</div><div class="row-body"><div class="row-name">Шаблоны сообщений</div><div class="row-val" id="m-tpl-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openMassPub()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Массовая публикация</div><div class="row-val">Пост во все каналы</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openPromo()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🚀</div><div class="row-body"><div class="row-name">Продвижение в топ</div><div class="row-val" id="m-promo-val">Заказы и склад ботов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openProfileSetter()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎨</div><div class="row-body"><div class="row-name">Сеттер профилей</div><div class="row-val">Имя, аватар, 2FA для аккаунтов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCleaner()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🧹</div><div class="row-body"><div class="row-name">Очистка аккаунтов</div><div class="row-val">Выход из чатов, удаление контактов</div></div><div class="row-right chev">›</div></div>
@@ -720,6 +721,44 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: PROMO PLATFORM ══════════════════════ -->
+<div class="screen" id="s-promo">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🚀 Продвижение в топ</div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
+      Полный цикл вывода бота в топ Telegram Search: склад → созревание → накрутка → топ.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0 10px">
+      <button class="btn btn-p" onclick="showPromoTab('orders')" id="promoTabOrders">📋 Заказы</button>
+      <button class="btn btn-s" onclick="showPromoTab('bots')" id="promoTabBots">📦 Склад</button>
+      <button class="btn btn-s" onclick="showPromoTab('panels')" id="promoTabPanels">📡 Панели</button>
+    </div>
+    <div id="promoOrdersTab">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="sec" style="margin:0">Заказы</div>
+        <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="openPromoOrderModal()">+ Создать</button>
+      </div>
+      <div class="lst" id="promoOrderList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+    <div id="promoBotsTab" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="sec" style="margin:0">Склад ботов</div>
+        <button class="btn btn-p" style="flex:0;padding:6px 12px;min-width:0;font-size:12px" onclick="openPromoBotModal()">+ Добавить</button>
+      </div>
+      <div class="card" style="font-size:12px;color:#aaa;margin-bottom:8px">Новый бот → 21 день созревания → готов к продвижению.<br>Статусы: ⏳ Созревает → ✅ Готов → 🚀 Работает → 🏆 В топе</div>
+      <div class="lst" id="promoBotList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+    <div id="promoPanelsTab" style="display:none">
+      <div class="sec" style="margin-bottom:8px">SMM-панели</div>
+      <div class="card" style="font-size:12px;color:#aaa;margin-bottom:8px">Подключите GlobalSMM-совместимую панель через Telegram-бота (команда /promo).</div>
+      <div class="lst" id="promoPanelList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
 <div class="screen" id="s-errreport">
   <div class="hdr">
@@ -971,6 +1010,31 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="cmdErr"></div>
     <button class="btn btn-p" id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: PROMO ORDER ══════════════════════ -->
+<div class="mbg" id="promoOrderMbg" onclick="if(event.target===this)closePromoOrderModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closePromoOrderModal()">✕</div>
+    <div class="modal-title">📋 Новый заказ</div>
+    <div class="field"><label>Ключевое слово</label><input type="text" id="promoKw" placeholder="Напр: игровой бот"></div>
+    <div class="field"><label>Целевая позиция (1-50)</label><input type="number" id="promoPos" min="1" max="50" value="1"></div>
+    <div class="field"><label>Кол-во подписчиков (целевое)</label><input type="number" id="promoSubs" min="0" placeholder="Не обязательно"></div>
+    <div class="field-err" id="promoOrderErr"></div>
+    <button class="btn btn-p" id="promoOrderBtn" onclick="savePromoOrder()" style="width:100%">➕ Создать заказ</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: PROMO BOT ══════════════════════ -->
+<div class="mbg" id="promoBotMbg" onclick="if(event.target===this)closePromoBotModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closePromoBotModal()">✕</div>
+    <div class="modal-title">📦 Добавить бот в склад</div>
+    <div class="field"><label>Username бота (без @)</label><input type="text" id="promoBotUsername" placeholder="my_bot" oninput="this.value=this.value.replace(/^@/,'')"></div>
+    <div class="field-note">Бот будет «созревать» 21 день перед продвижением</div>
+    <div class="field-err" id="promoBotErr"></div>
+    <button class="btn btn-p" id="promoBotBtn" onclick="savePromoBot()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -3216,6 +3280,122 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Promo Platform ─────────────────────────────────────
+let PROMO_DATA = null;
+const ORDER_STATUS = {waiting:'⏳ Ожидает',aging:'🕐 Созревает',boosting:'🚀 Накрутка',checking:'🔍 Проверка',topped:'🏆 В топе',transferred:'✅ Передан',cancelled:'❌ Отменён'};
+const BOT_STATUS = {aging:'⏳ Созревает',ready:'✅ Готов',working:'🚀 Работает',topped:'🏆 В топе',banned:'🚫 Заблокирован',transferred:'📤 Передан'};
+async function openPromo() {
+  push('s-promo');
+  showPromoTab('orders');
+  loadPromo();
+}
+async function loadPromo() {
+  try {
+    PROMO_DATA = await api('/api/miniapp/promo');
+    renderPromoTab();
+    const cnt = (PROMO_DATA.orders||[]).filter(o=>!['cancelled','transferred'].includes(o.status)).length;
+    txt('m-promo-val', cnt ? `${cnt} активных заказов` : 'Нет активных заказов');
+  } catch(e) {
+    txt('promoOrderList', empty('⚠️','Ошибка',e.message));
+  }
+}
+function showPromoTab(tab) {
+  ['orders','bots','panels'].forEach(t=>{
+    document.getElementById('promoTab'+t.charAt(0).toUpperCase()+t.slice(1)).style.display=t===tab?'':'none';
+    const btn = document.getElementById('promoTab'+t.charAt(0).toUpperCase()+t.slice(1));
+    if (btn) btn.className = t===tab?'btn btn-p':'btn btn-s';
+  });
+  if (PROMO_DATA) renderPromoTab(tab);
+}
+function renderPromoTab(tab) {
+  if (!PROMO_DATA) return;
+  const orders = PROMO_DATA.orders||[];
+  const bots = PROMO_DATA.bots||[];
+  const panels = PROMO_DATA.panels||[];
+  if (!orders.length) txt('promoOrderList', empty('📋','Нет заказов','Создайте первый заказ'));
+  else txt('promoOrderList', orders.map(o=>`
+    <div class="row">
+      <div class="row-ico" style="background:rgba(34,197,94,.16)">🔑</div>
+      <div class="row-body">
+        <div class="row-name">${esc(o.keyword)}</div>
+        <div class="row-val">${ORDER_STATUS[o.status]||o.status} · Топ-${o.target_position}${o.current_subs?` · ${num(o.current_subs)}/${num(o.target_subs)} подп.`:''}</div>
+        <div class="row-val" style="color:#555">${ago(o.created_at)}</div>
+      </div>
+      ${o.status!=='cancelled'&&o.status!=='transferred'?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="cancelPromoOrder(${o.id})">✕</button></div>`:''}
+    </div>
+  `).join(''));
+  if (!bots.length) txt('promoBotList', empty('📦','Склад пуст','Добавьте бот для продвижения'));
+  else txt('promoBotList', bots.map(b=>`
+    <div class="row">
+      <div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div>
+      <div class="row-body">
+        <div class="row-name">@${esc(b.bot_username)}</div>
+        <div class="row-val">${BOT_STATUS[b.status]||b.status}${b.ready_at&&b.status==='aging'?' · готов '+ago(b.ready_at):''}</div>
+      </div>
+    </div>
+  `).join(''));
+  if (!panels.length) txt('promoPanelList', empty('📡','Нет SMM-панелей','Добавьте через Telegram-бота командой /promo'));
+  else txt('promoPanelList', panels.map(p=>`
+    <div class="row">
+      <div class="row-body"><div class="row-name">${esc(p.name)}</div><div class="row-val">${esc(p.api_url)} ${p.is_active?'🟢':'🔴'}</div></div>
+    </div>
+  `).join(''));
+}
+async function cancelPromoOrder(orderId) {
+  if (!confirm('Отменить заказ?')) return;
+  try {
+    await api('/api/miniapp/promo/order/'+orderId+'/cancel', {method:'POST'});
+    toast('Заказ отменён');
+    loadPromo();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+function openPromoOrderModal() {
+  document.getElementById('promoKw').value='';
+  document.getElementById('promoPos').value='1';
+  document.getElementById('promoSubs').value='';
+  document.getElementById('promoOrderErr').textContent='';
+  document.getElementById('promoOrderMbg').classList.add('show');
+}
+function closePromoOrderModal() { document.getElementById('promoOrderMbg').classList.remove('show'); }
+async function savePromoOrder() {
+  const keyword = document.getElementById('promoKw').value.trim();
+  const target_position = parseInt(document.getElementById('promoPos').value)||1;
+  const target_subs = parseInt(document.getElementById('promoSubs').value)||null;
+  const errEl = document.getElementById('promoOrderErr');
+  errEl.textContent='';
+  if (!keyword) { errEl.textContent='Введите ключевое слово'; return; }
+  const btn = document.getElementById('promoOrderBtn');
+  btn.disabled=true; btn.textContent='Создаю…';
+  try {
+    const r = await api('/api/miniapp/promo/order', {method:'POST', body:JSON.stringify({keyword, target_position, target_subs})});
+    closePromoOrderModal();
+    toast(`✅ Заказ #${r.order_id} создан`);
+    loadPromo();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='➕ Создать заказ'; }
+}
+function openPromoBotModal() {
+  document.getElementById('promoBotUsername').value='';
+  document.getElementById('promoBotErr').textContent='';
+  document.getElementById('promoBotMbg').classList.add('show');
+}
+function closePromoBotModal() { document.getElementById('promoBotMbg').classList.remove('show'); }
+async function savePromoBot() {
+  const bot_username = document.getElementById('promoBotUsername').value.trim().replace(/^@/,'');
+  const errEl = document.getElementById('promoBotErr');
+  errEl.textContent='';
+  if (!bot_username) { errEl.textContent='Введите username бота'; return; }
+  const btn = document.getElementById('promoBotBtn');
+  btn.disabled=true; btn.textContent='Добавляю…';
+  try {
+    const r = await api('/api/miniapp/promo/warehouse/bot', {method:'POST', body:JSON.stringify({bot_username})});
+    closePromoBotModal();
+    toast(`✅ @${bot_username} добавлен. Готов к работе: ${ago(r.ready_at)}`);
+    loadPromo();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
 }
 
 // ── Account Cleaner ────────────────────────────────────
