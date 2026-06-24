@@ -1028,6 +1028,124 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Account Shield ─────────────────────────────────────────────────────────
+
+    async def shield_summary(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            row = await pool.fetchrow(
+                """SELECT
+                   COUNT(*) FILTER (WHERE a.is_active = TRUE) AS total_active,
+                   COUNT(*) FILTER (WHERE a.is_active = FALSE AND a.cooldown_until > NOW()) AS cooling,
+                   COUNT(*) FILTER (WHERE r.risk_score >= 0.7) AS threatened,
+                   COUNT(*) FILTER (WHERE r.ban_probability >= 0.5) AS high_ban,
+                   COUNT(*) FILTER (WHERE r.risk_score < 0.7 AND (r.ban_probability < 0.5 OR r.ban_probability IS NULL)) AS ok_count
+                   FROM tg_accounts a
+                   LEFT JOIN account_risk_scores r ON r.account_id = a.id
+                   WHERE a.owner_id = $1""",
+                uid,
+            )
+            history = await pool.fetch(
+                """SELECT sa.action, sa.risk_score, sa.ban_probability, sa.created_at,
+                          a.phone, a.first_name
+                   FROM shield_actions sa
+                   JOIN tg_accounts a ON a.id = sa.account_id
+                   WHERE sa.owner_id=$1 ORDER BY sa.created_at DESC LIMIT 20""",
+                uid,
+            )
+            cfg = await pool.fetchrow(
+                "SELECT * FROM shield_configs WHERE owner_id=$1", uid
+            )
+        except Exception as exc:
+            log.exception("shield_summary uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({
+            "stats": {k: int(row[k] or 0) for k in ("total_active","cooling","threatened","high_ban","ok_count")} if row else {},
+            "config": {
+                "risk_threshold": float(cfg["risk_threshold"]) if cfg else 0.7,
+                "ban_prob_threshold": float(cfg["ban_prob_threshold"]) if cfg else 0.5,
+                "auto_pause": bool(cfg["auto_pause"]) if cfg else True,
+                "notify_admin": bool(cfg["notify_admin"]) if cfg else True,
+            },
+            "history": [
+                {
+                    "action": r["action"], "risk": float(r["risk_score"] or 0),
+                    "ban_prob": float(r["ban_probability"] or 0),
+                    "name": r["first_name"] or r["phone"] or "",
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in history
+            ],
+        })
+
+    # ── Ad Intelligence ────────────────────────────────────────────────────────
+
+    async def ad_intel_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            top = await pool.fetch(
+                """SELECT channel_username, channel_title, subscribers, quality_score, er_rate, ad_price_est
+                   FROM ad_placements WHERE owner_id=$1 ORDER BY quality_score DESC LIMIT 10""",
+                uid,
+            )
+            total = await pool.fetchval("SELECT COUNT(*) FROM ad_placements WHERE owner_id=$1", uid)
+            advertisers = await pool.fetch(
+                """SELECT advertiser_username, placements_count, last_seen_at
+                   FROM ad_advertisers WHERE owner_id=$1 ORDER BY last_seen_at DESC LIMIT 10""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("ad_intel_overview uid=%d", uid)
+            return _err(str(exc), 500)
+        avg_score = sum(r["quality_score"] or 0 for r in top) / max(len(top), 1)
+        return _json_resp({
+            "total_channels": int(total or 0),
+            "avg_quality": round(avg_score, 1),
+            "top_channels": [
+                {
+                    "username": r["channel_username"] or "",
+                    "title": r["channel_title"] or "",
+                    "subscribers": r["subscribers"] or 0,
+                    "quality_score": round(float(r["quality_score"] or 0), 1),
+                    "er_rate": round(float(r["er_rate"] or 0), 2),
+                    "ad_price_est": r["ad_price_est"] or 0,
+                }
+                for r in top
+            ],
+            "top_advertisers": [
+                {
+                    "username": r["advertiser_username"] or "",
+                    "placements": r["placements_count"] or 0,
+                    "last_seen": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+                }
+                for r in advertisers
+            ],
+        })
+
+    async def ad_intel_add_channel(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            channel = str(body.get("channel", "")).strip().lstrip("@")
+        except Exception:
+            return _err("bad body", 400)
+        if not channel:
+            return _err("channel обязателен", 400)
+        import json as _json
+        label = f"Ad Intel scan @{channel}"
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,'ad_intel_scan','pending',$2,1,$3) RETURNING id",
+            uid, _json.dumps({"channel": channel}), label,
+        )
+        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+
     # ── Network / Cluster Overview ─────────────────────────────────────────────
 
     async def network_overview(request: web.Request) -> web.Response:
@@ -2532,6 +2650,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Account Shield
+    app.router.add_get("/api/miniapp/shield", shield_summary)
+    # Ad Intelligence
+    app.router.add_get("/api/miniapp/ad_intel", ad_intel_overview)
+    app.router.add_post("/api/miniapp/ad_intel/channel", ad_intel_add_channel)
     # Network / Cluster
     app.router.add_get("/api/miniapp/network", network_overview)
     app.router.add_put("/api/miniapp/bot/{bot_id}/role", set_bot_role_api)

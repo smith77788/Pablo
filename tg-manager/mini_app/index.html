@@ -384,6 +384,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openApiKeys()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔑</div><div class="row-body"><div class="row-name">API Ключи</div><div class="row-val" id="m-apikey-cnt">Управление ключами</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openStrike()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div><div class="row-body"><div class="row-name">Strike — История</div><div class="row-val">Операции Strike</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openNetwork()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🕸</div><div class="row-body"><div class="row-name">Сеть ботов</div><div class="row-val" id="m-net-cnt">Кластеры и роли</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openShield()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🛡</div><div class="row-body"><div class="row-name">Account Shield</div><div class="row-val" id="m-shield-val">Защита от бана</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openAdIntel()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📡</div><div class="row-body"><div class="row-name">Ad Intelligence</div><div class="row-val" id="m-adintel-val">Анализ рекламы в Telegram</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
@@ -724,6 +726,37 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ACCOUNT SHIELD ══════════════════════ -->
+<div class="screen" id="s-shield">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🛡 Account Shield</div>
+  </div>
+  <div class="sub-sb">
+    <div id="shieldStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div class="sec">Конфигурация</div>
+    <div class="lst" id="shieldConfig"></div>
+    <div class="sec" style="margin-top:8px">История действий</div>
+    <div class="lst" id="shieldHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AD INTELLIGENCE ══════════════════════ -->
+<div class="screen" id="s-adintel">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📡 Ad Intelligence</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openAdIntelModal()">+ Канал</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="adIntelStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="sec">Топ каналов по качеству</div>
+    <div class="lst" id="adIntelChannels"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Топ рекламодателей</div>
+    <div class="lst" id="adIntelAdv"></div>
   </div>
 </div>
 
@@ -1141,6 +1174,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="cmdErr"></div>
     <button class="btn btn-p" id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: AD INTEL ADD CHANNEL ══════════════════════ -->
+<div class="mbg" id="adIntelMbg" onclick="if(event.target===this)closeAdIntelModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeAdIntelModal()">✕</div>
+    <div class="modal-title">📡 Добавить канал для анализа</div>
+    <div class="field"><label>Username канала (без @)</label><input type="text" id="adIntelCh" placeholder="target_channel"></div>
+    <div class="field-note">AI просканирует рекламу в канале и оценит качество аудитории</div>
+    <div class="field-err" id="adIntelErr"></div>
+    <button class="btn btn-p" id="adIntelBtn" onclick="submitAdIntelChannel()" style="width:100%">🚀 Запустить сканирование</button>
   </div>
 </div>
 
@@ -3471,6 +3516,112 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Account Shield ─────────────────────────────────────
+async function openShield() {
+  push('s-shield');
+  txt('shieldStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('shieldConfig','');
+  txt('shieldHistory','');
+  try {
+    const d = await api('/api/miniapp/shield');
+    const risk = d.risk_level||'unknown';
+    const riskColor = risk==='high'?'#ef4444':risk==='medium'?'#f59e0b':'#22c55e';
+    txt('shieldStats',`
+      <div class="kpi-card"><div class="kpi-val" style="color:${riskColor}">${risk==='high'?'⚠️ Высокий':risk==='medium'?'⚡ Средний':'✅ Низкий'}</div><div class="kpi-lbl">Уровень риска</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.total_accounts||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#ef4444">${d.high_risk||0}</div><div class="kpi-lbl">Высокий риск</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.protected||0}</div><div class="kpi-lbl">Под защитой</div></div>
+    `);
+    txt('m-shield-val', `${d.high_risk||0} под угрозой · ${d.total_accounts||0} аккаунтов`);
+    const cfg = d.config||{};
+    txt('shieldConfig', Object.keys(cfg).length ? Object.entries(cfg).map(([k,v])=>`
+      <div class="row"><div class="row-body"><div class="row-name">${esc(k)}</div></div><div class="row-right" style="color:#999;font-size:13px">${typeof v==='boolean'?(v?'✅ Вкл':'❌ Выкл'):esc(String(v))}</div></div>
+    `).join('') : empty('⚙️','Конфигурация не настроена',''));
+    const hist = d.history||[];
+    if (!hist.length) { txt('shieldHistory', empty('📋','История пуста','')); return; }
+    txt('shieldHistory', hist.map(h=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">${h.action_type==='ban_detect'?'🚨':h.action_type==='rotate'?'🔄':'🛡'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(h.action_type||'action')}</div>
+          <div class="row-val">${esc(h.description||'')} · ${h.created_at?new Date(h.created_at).toLocaleDateString('ru'):''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('shieldStats','');
+    txt('shieldHistory', empty('⚠️','Ошибка',e.message));
+  }
+}
+
+// ── Ad Intelligence ─────────────────────────────────────
+function openAdIntelModal() {
+  document.getElementById('adIntelCh').value='';
+  document.getElementById('adIntelErr').textContent='';
+  document.getElementById('adIntelBtn').disabled=false;
+  document.getElementById('adIntelBtn').textContent='🚀 Запустить сканирование';
+  document.getElementById('adIntelMbg').style.display='flex';
+}
+function closeAdIntelModal() {
+  document.getElementById('adIntelMbg').style.display='none';
+}
+async function submitAdIntelChannel() {
+  const ch = document.getElementById('adIntelCh').value.trim().replace(/^@/,'');
+  const errEl = document.getElementById('adIntelErr');
+  if (!ch) { errEl.textContent='Введите username канала'; return; }
+  const btn = document.getElementById('adIntelBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  try {
+    const r = await api('/api/miniapp/ad_intel/channel',{method:'POST',body:JSON.stringify({channel:ch})});
+    toast(`📡 Сканирование запущено (#${r.op_id})`);
+    closeAdIntelModal();
+    openAdIntel();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚀 Запустить сканирование'; }
+}
+async function openAdIntel() {
+  push('s-adintel');
+  txt('adIntelStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('adIntelChannels','');
+  txt('adIntelAdv','');
+  try {
+    const d = await api('/api/miniapp/ad_intel');
+    txt('adIntelStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.total_channels||0}</div><div class="kpi-lbl">Каналов</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.total_advertisers||0}</div><div class="kpi-lbl">Рекламодателей</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.total_placements||0}</div><div class="kpi-lbl">Размещений</div></div>
+    `);
+    txt('m-adintel-val',`${d.total_channels||0} каналов · ${d.total_placements||0} размещений`);
+    const chs = d.top_channels||[];
+    if (!chs.length) { txt('adIntelChannels', empty('📡','Нет данных','Добавьте канал для анализа')); }
+    else txt('adIntelChannels', chs.map(c=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">📺</div>
+        <div class="row-body">
+          <div class="row-name">@${esc(c.channel_username||c.channel_id)}</div>
+          <div class="row-val">${c.placements_count||0} размещений · ER ${(c.avg_er||0).toFixed(1)}%</div>
+        </div>
+        <div class="row-right" style="color:#f59e0b;font-size:13px">${(c.quality_score||0).toFixed(0)}⭐</div>
+      </div>
+    `).join(''));
+    const advs = d.top_advertisers||[];
+    if (!advs.length) { txt('adIntelAdv', empty('🏢','Нет рекламодателей','')); }
+    else txt('adIntelAdv', advs.map(a=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(139,92,246,.16)">🏢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(a.advertiser_name||a.advertiser_id)}</div>
+          <div class="row-val">${a.total_placements||0} размещений</div>
+        </div>
+        <div class="row-right" style="color:#999;font-size:13px">${a.avg_spend?'$'+Number(a.avg_spend).toFixed(0):''}</div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('adIntelStats','');
+    txt('adIntelChannels', empty('⚠️','Ошибка',e.message));
+  }
 }
 
 // ── Network Overview ───────────────────────────────────
