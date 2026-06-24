@@ -388,6 +388,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openAdIntel()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📡</div><div class="row-body"><div class="row-name">Ad Intelligence</div><div class="row-val" id="m-adintel-val">Анализ рекламы в Telegram</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openWarmup()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌱</div><div class="row-body"><div class="row-name">Прогрев аккаунтов</div><div class="row-val" id="m-warmup-val">Warmup-планы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openHealth()"><div class="row-ico" style="background:rgba(239,68,68,.16)">❤️</div><div class="row-body"><div class="row-name">Health Dashboard</div><div class="row-val" id="m-health-val">Здоровье аккаунтов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openGhost()"><div class="row-ico" style="background:rgba(139,92,246,.16)">👻</div><div class="row-body"><div class="row-name">Ghost Engine</div><div class="row-val" id="m-ghost-val">Автономное присутствие</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openStars()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⭐</div><div class="row-body"><div class="row-name">Stars Hub</div><div class="row-val" id="m-stars-val">A/B монетизация</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openRegCheck()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📅</div><div class="row-body"><div class="row-name">Дата регистрации</div><div class="row-val">Reg Checker</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
@@ -733,6 +736,42 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: STARS HUB ══════════════════════ -->
+<div class="screen" id="s-stars">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⭐ Stars Hub</div>
+  </div>
+  <div class="sub-sb">
+    <div id="starsStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div class="sec">A/B Эксперименты</div>
+    <div class="lst" id="starsExps"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: GHOST ENGINE ══════════════════════ -->
+<div class="screen" id="s-ghost">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👻 Ghost Engine</div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="ghostList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: REG CHECKER ══════════════════════ -->
+<div class="screen" id="s-regcheck">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📅 Дата регистрации</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openRegCheckModal()">Проверить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="regCheckList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: DM CAMPAIGNS ══════════════════════ -->
 <div class="screen" id="s-dmcampaigns">
   <div class="hdr">
@@ -835,6 +874,17 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div id="networkStats" style="display:flex;gap:10px;padding:8px 0 12px"></div>
     <div id="networkClusters"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: BOT WEBHOOK ══════════════════════ -->
+<div class="screen" id="s-webhook">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="webhook-title">🔗 Webhook</div>
+  </div>
+  <div class="sub-sb">
+    <div id="webhookBody"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -1244,6 +1294,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ MODAL: AD INTEL ADD CHANNEL ══════════════════════ -->
+<!-- Reg Check modal -->
+<div class="mbg" id="regCheckMbg" onclick="if(event.target===this)closeRegCheckModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeRegCheckModal()">✕</div>
+    <div class="modal-title">📅 Проверить дату регистрации</div>
+    <div class="field"><label>Username, @username, ссылка или ID</label><input type="text" id="regCheckTarget" placeholder="@username или t.me/group"></div>
+    <div class="field-note">Определяет примерную дату регистрации аккаунта или создания группы/канала</div>
+    <div class="field-err" id="regCheckErr"></div>
+    <button class="btn btn-p" id="regCheckBtn" onclick="submitRegCheck()" style="width:100%">🔍 Проверить</button>
+  </div>
+</div>
+
 <!-- DM Campaign modal -->
 <div class="mbg" id="dmMbg" onclick="if(event.target===this)closeDmModal()">
   <div class="modal">
@@ -1684,6 +1746,7 @@ function buildBotDetail(d) {
     </div>
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openRelay(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">💬 Inbox (диалоги)</button>
+      <button class="btn btn-s" onclick="openBotWebhook(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">🔗 Webhook</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -3620,6 +3683,164 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Stars Hub ──────────────────────────────────────────
+const STARS_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён'};
+async function openStars() {
+  push('s-stars');
+  txt('starsStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('starsExps','');
+  try {
+    const d = await api('/api/miniapp/stars');
+    txt('starsStats',`
+      <div class="kpi-card"><div class="kpi-val">⭐${d.total_revenue||0}</div><div class="kpi-lbl">Заработано</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.total_conversions||0}</div><div class="kpi-lbl">Конверсий</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${d.active_exps||0}</div><div class="kpi-lbl">Активных A/B</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.total_exps||0}</div><div class="kpi-lbl">Всего тестов</div></div>
+    `);
+    txt('m-stars-val',`⭐${d.total_revenue||0} · ${d.active_exps||0} активных`);
+    const exps = d.experiments||[];
+    if (!exps.length) { txt('starsExps', empty('⭐','Нет экспериментов','Создайте A/B тест в боте')); return; }
+    txt('starsExps', exps.map(e=>{
+      const crA = e.impressions_a>0?((e.conversions_a/e.impressions_a)*100).toFixed(1)+'%':'—';
+      const crB = e.impressions_b>0?((e.conversions_b/e.impressions_b)*100).toFixed(1)+'%':'—';
+      const winner = e.winner?` · 🏆 ${e.winner.toUpperCase()}`:'';
+      return `<div class="row">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div>
+        <div class="row-body">
+          <div class="row-name">${esc(e.name)}${winner}</div>
+          <div class="row-val">${STARS_STATUS[e.status]||e.status} · A:⭐${e.price_a} CR${crA} · B:⭐${e.price_b} CR${crB}</div>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('starsStats','');
+    txt('starsExps', empty('⚠️','Ошибка',e.message));
+  }
+}
+
+// ── Ghost Engine ────────────────────────────────────────
+const GHOST_PERSONA = {ghost:'👻 Призрак',watcher:'👁 Наблюдатель',active:'🌟 Активный'};
+async function openGhost() {
+  push('s-ghost');
+  txt('ghostList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/ghost');
+    const profiles = d.profiles||[];
+    txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} профилей`);
+    if (!profiles.length) { txt('ghostList', empty('👻','Нет Ghost-профилей','Создайте профиль в боте')); return; }
+    txt('ghostList', profiles.map(p=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(139,92,246,.16)">${p.enabled?'🟢':'⚫'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(p.first_name||p.phone)} ${GHOST_PERSONA[p.personality]||p.personality}</div>
+          <div class="row-val">${p.daily_cap} действий/день · ${p.active_hours_start}:00–${p.active_hours_end}:00</div>
+        </div>
+        <div class="row-right" style="display:flex;gap:6px">
+          <button class="btn ${p.enabled?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="toggleGhost(${p.id},${p.enabled})">${p.enabled?'Выкл':'Вкл'}</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteGhost(${p.id})">🗑</button>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('ghostList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function toggleGhost(id, enabled) {
+  try {
+    await api(`/api/miniapp/ghost/${id}/toggle`,{method:'PUT'});
+    toast(enabled?'⚫ Отключён':'🟢 Включён');
+    openGhost();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+async function deleteGhost(id) {
+  if (!confirm('Удалить Ghost-профиль?')) return;
+  try {
+    await api(`/api/miniapp/ghost/${id}`,{method:'DELETE'});
+    toast('🗑 Удалено');
+    openGhost();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Bot Webhook ─────────────────────────────────────────
+let WEBHOOK_BOT_ID = null;
+async function openBotWebhook(botId, botName) {
+  WEBHOOK_BOT_ID = botId;
+  txt('webhook-title','🔗 Webhook · '+(botName||''));
+  push('s-webhook');
+  txt('webhookBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/bot/${botId}/webhook`);
+    const urlSet = d.url && d.url.length > 0;
+    txt('webhookBody',`
+      <div class="sec">Статус</div>
+      <div class="lst">
+        <div class="row"><div class="row-body"><div class="row-name">URL вебхука</div></div><div class="row-right" style="color:#999;font-size:12px;max-width:60%;text-align:right;word-break:break-all">${urlSet?esc(d.url):'не установлен'}</div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Ожидающих обновлений</div></div><div class="row-right" style="color:${d.pending_update_count>0?'#f59e0b':'#22c55e'}">${d.pending_update_count||0}</div></div>
+        ${d.last_error_message?`<div class="row"><div class="row-body"><div class="row-name">Последняя ошибка</div><div class="row-val" style="color:#ef4444">${esc(d.last_error_message)}</div></div></div>`:''}
+        ${d.max_connections?`<div class="row"><div class="row-body"><div class="row-name">Макс. соединений</div></div><div class="row-right">${d.max_connections}</div></div>`:''}
+      </div>
+      <div class="sec" style="margin-top:8px">Информация</div>
+      <div class="lst">
+        <div class="row"><div class="row-body"><div class="row-name">Разрешённые обновления</div><div class="row-val">${(d.allowed_updates||[]).join(', ')||'все'}</div></div></div>
+      </div>
+      ${urlSet?`<div style="padding:12px 0"><button class="btn btn-d" onclick="deleteWebhook(${botId})" style="width:100%">🗑 Удалить вебхук (сбросить очередь)</button></div>`:'<div style="padding:12px 0;color:#999;font-size:13px;text-align:center">Вебхук не установлен. Бот использует polling.</div>'}
+    `);
+  } catch(e) {
+    txt('webhookBody', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function deleteWebhook(botId) {
+  if (!confirm('Удалить вебхук? Очередь обновлений будет сброшена.')) return;
+  try {
+    await api(`/api/miniapp/bot/${botId}/webhook`,{method:'DELETE'});
+    toast('🗑 Вебхук удалён');
+    openBotWebhook(botId,'');
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Reg Checker ─────────────────────────────────────────
+function openRegCheckModal() {
+  document.getElementById('regCheckTarget').value='';
+  document.getElementById('regCheckErr').textContent='';
+  document.getElementById('regCheckBtn').disabled=false;
+  document.getElementById('regCheckMbg').style.display='flex';
+}
+function closeRegCheckModal() { document.getElementById('regCheckMbg').style.display='none'; }
+async function submitRegCheck() {
+  const target = document.getElementById('regCheckTarget').value.trim();
+  const errEl = document.getElementById('regCheckErr');
+  if (!target) { errEl.textContent='Введите цель'; return; }
+  const btn = document.getElementById('regCheckBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  try {
+    const r = await api('/api/miniapp/reg_check',{method:'POST',body:JSON.stringify({target})});
+    toast(`📅 Задача поставлена (#${r.op_id})`);
+    closeRegCheckModal();
+    openRegCheck();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🔍 Проверить'; }
+}
+async function openRegCheck() {
+  push('s-regcheck');
+  txt('regCheckList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/reg_check/history');
+    const checks = d.checks||[];
+    if (!checks.length) { txt('regCheckList', empty('📅','История пуста','Нажмите Проверить')); return; }
+    txt('regCheckList', checks.map(c=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">${c.entity_type==='channel'?'📢':'👤'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.entity_name||c.username||c.entity_id)}</div>
+          <div class="row-val">${c.reg_date?'📅 '+new Date(c.reg_date).toLocaleDateString('ru'):'❓ Дата не определена'} · ${c.method||''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('regCheckList', empty('⚠️','Ошибка',e.message));
+  }
 }
 
 // ── DM Campaigns ───────────────────────────────────────

@@ -1028,6 +1028,194 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Stars Hub ─────────────────────────────────────────────────────────────
+
+    async def stars_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            summary = await pool.fetchrow(
+                """SELECT
+                   COALESCE(SUM(revenue_a + revenue_b), 0) AS total_revenue,
+                   COALESCE(SUM(conversions_a + conversions_b), 0) AS total_conversions,
+                   COUNT(*) FILTER (WHERE status='active') AS active_exps,
+                   COUNT(*) AS total_exps
+                   FROM stars_experiments WHERE owner_id=$1""",
+                uid,
+            )
+            exps = await pool.fetch(
+                """SELECT id, name, status, winner, price_a, price_b,
+                          impressions_a, conversions_a, revenue_a,
+                          impressions_b, conversions_b, revenue_b,
+                          created_at
+                   FROM stars_experiments WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 20""",
+                uid,
+            )
+            return _json_resp({
+                "total_revenue": summary["total_revenue"],
+                "total_conversions": summary["total_conversions"],
+                "active_exps": summary["active_exps"],
+                "total_exps": summary["total_exps"],
+                "experiments": [
+                    {**dict(e), "created_at": e["created_at"].isoformat() if e["created_at"] else None}
+                    for e in exps
+                ],
+            })
+        except Exception as exc:
+            log.exception("stars_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Ghost Engine ───────────────────────────────────────────────────────────
+
+    async def ghost_profiles(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT gp.id, gp.personality, gp.enabled, gp.daily_cap,
+                          gp.active_hours_start, gp.active_hours_end, gp.created_at,
+                          ta.phone, ta.first_name, ta.username
+                   FROM ghost_profiles gp
+                   JOIN tg_accounts ta ON ta.id = gp.account_id
+                   WHERE gp.owner_id=$1 ORDER BY gp.created_at DESC""",
+                uid,
+            )
+            return _json_resp({"profiles": [
+                {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                for r in rows
+            ]})
+        except Exception as exc:
+            log.exception("ghost_profiles uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def ghost_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        profile_id = int(request.match_info["profile_id"])
+        row = await pool.fetchrow(
+            "SELECT id, enabled FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
+        )
+        if not row:
+            return _err("Не найдено", 404)
+        new_val = not row["enabled"]
+        await pool.execute(
+            "UPDATE ghost_profiles SET enabled=$1, updated_at=now() WHERE id=$2", new_val, profile_id
+        )
+        return _json_resp({"enabled": new_val})
+
+    async def ghost_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        profile_id = int(request.match_info["profile_id"])
+        await pool.execute(
+            "DELETE FROM ghost_profiles WHERE id=$1 AND owner_id=$2", profile_id, uid
+        )
+        return _json_resp({"ok": True})
+
+    # ── Bot Webhook ────────────────────────────────────────────────────────────
+
+    async def bot_webhook_info(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        bot_id = int(request.match_info["bot_id"])
+        row = await pool.fetchrow(
+            "SELECT token, username, first_name FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("Бот не найден", 404)
+        try:
+            import aiohttp as _ahttp
+            async with _ahttp.ClientSession() as sess:
+                from services import bot_api as _bapi
+                info = await _bapi.get_webhook_info(sess, row["token"])
+            return _json_resp({
+                "url": info.get("url", "") or "",
+                "pending_update_count": info.get("pending_update_count", 0),
+                "last_error_message": info.get("last_error_message", ""),
+                "max_connections": info.get("max_connections", 0),
+                "allowed_updates": info.get("allowed_updates", []),
+                "bot_username": row["username"],
+            })
+        except Exception as exc:
+            log.exception("bot_webhook_info uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
+    async def bot_webhook_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        bot_id = int(request.match_info["bot_id"])
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+        )
+        if not row:
+            return _err("Бот не найден", 404)
+        try:
+            import aiohttp as _ahttp
+            async with _ahttp.ClientSession() as sess:
+                from services import bot_api as _bapi
+                result = await _bapi.delete_webhook(sess, row["token"])
+            return _json_resp({"ok": result.get("ok", False)})
+        except Exception as exc:
+            log.exception("bot_webhook_delete uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+
+    # ── Reg Checker (Registration Date) ───────────────────────────────────────
+
+    async def reg_check_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT entity_id, entity_type, entity_name, username,
+                          reg_date, method, checked_at
+                   FROM reg_check_cache WHERE checked_by=$1
+                   ORDER BY checked_at DESC LIMIT 30""",
+                uid,
+            )
+            return _json_resp({"checks": [
+                {
+                    **dict(r),
+                    "reg_date": r["reg_date"].isoformat() if r["reg_date"] else None,
+                    "checked_at": r["checked_at"].isoformat() if r["checked_at"] else None,
+                }
+                for r in rows
+            ]})
+        except Exception as exc:
+            log.exception("reg_check_history uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def reg_check_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        target = (body.get("target") or "").strip()
+        if not target:
+            return _err("Укажите цель проверки", 400)
+        try:
+            label = f"Проверка даты регистрации: {target}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'reg_check','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"target": target}), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("reg_check_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── DM Campaigns ───────────────────────────────────────────────────────────
 
     async def dm_campaigns_list(request: web.Request) -> web.Response:
@@ -2988,6 +3176,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
     # Health Dashboard
     app.router.add_get("/api/miniapp/health", health_overview)
+    # Stars Hub
+    app.router.add_get("/api/miniapp/stars", stars_overview)
+    # Ghost Engine
+    app.router.add_get("/api/miniapp/ghost", ghost_profiles)
+    app.router.add_put("/api/miniapp/ghost/{profile_id}/toggle", ghost_toggle)
+    app.router.add_delete("/api/miniapp/ghost/{profile_id}", ghost_delete)
+    # Bot Webhook
+    app.router.add_get("/api/miniapp/bot/{bot_id}/webhook", bot_webhook_info)
+    app.router.add_delete("/api/miniapp/bot/{bot_id}/webhook", bot_webhook_delete)
+    # Reg Checker
+    app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
+    app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
