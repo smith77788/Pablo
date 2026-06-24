@@ -664,6 +664,202 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Failed to cancel", 500)
 
+    # ── CRM Contacts ─────────────────────────────────────────────────────────
+
+    async def crm_contacts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        search = (request.query.get("q") or "").strip()
+        tag = (request.query.get("tag") or "").strip()
+        try:
+            offset = max(0, int(request.query.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        if search:
+            rows = await _safe_fetch(pool,
+                """SELECT id, tg_user_id, username, first_name, last_name, phone,
+                          tags, notes, source, created_at
+                   FROM crm_contacts WHERE owner_id=$1
+                     AND (first_name ILIKE $2 OR last_name ILIKE $2 OR username ILIKE $2 OR phone ILIKE $2)
+                   ORDER BY created_at DESC LIMIT 50 OFFSET $3""",
+                uid, f"%{search}%", offset)
+        elif tag:
+            rows = await _safe_fetch(pool,
+                """SELECT id, tg_user_id, username, first_name, last_name, phone,
+                          tags, notes, source, created_at
+                   FROM crm_contacts WHERE owner_id=$1 AND $2=ANY(tags)
+                   ORDER BY created_at DESC LIMIT 50 OFFSET $3""",
+                uid, tag, offset)
+        else:
+            rows = await _safe_fetch(pool,
+                """SELECT id, tg_user_id, username, first_name, last_name, phone,
+                          tags, notes, source, created_at
+                   FROM crm_contacts WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 50 OFFSET $2""",
+                uid, offset)
+        total = await _safe_count(pool, "SELECT COUNT(*) FROM crm_contacts WHERE owner_id=$1", uid)
+        # Unique tags across all contacts
+        tags_row = await _safe_fetch(pool,
+            "SELECT DISTINCT unnest(tags) AS tag FROM crm_contacts WHERE owner_id=$1 ORDER BY tag", uid)
+        all_tags = [r["tag"] for r in tags_row]
+        return _json_resp({"contacts": rows, "total": total, "offset": offset, "all_tags": all_tags})
+
+    async def bot_audience(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
+        active = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id)
+        new_today = await _safe_count(pool,
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= now()-INTERVAL '1 day'", bot_id)
+        new_7d = await _safe_count(pool,
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= now()-INTERVAL '7 days'", bot_id)
+        new_30d = await _safe_count(pool,
+            "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND first_seen >= now()-INTERVAL '30 days'", bot_id)
+        # Growth by day (last 14 days)
+        growth = await _safe_fetch(pool,
+            """SELECT DATE(first_seen) AS day, COUNT(*) AS new_users
+               FROM bot_users WHERE bot_id=$1 AND first_seen >= now()-INTERVAL '14 days'
+               GROUP BY day ORDER BY day""", bot_id)
+        # Tags distribution
+        tags = await _safe_fetch(pool,
+            """SELECT tag, COUNT(*) AS cnt FROM user_tags WHERE bot_id=$1
+               GROUP BY tag ORDER BY cnt DESC LIMIT 10""", bot_id)
+        return _json_resp({
+            "total": total, "active": active,
+            "new_today": new_today, "new_7d": new_7d, "new_30d": new_30d,
+            "growth": growth, "tags": tags,
+        })
+
+    # ── Keywords / Search Rankings ────────────────────────────────────────────
+
+    async def keywords(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT tk.id, tk.keyword, mb.username AS bot_username, mb.bot_id,
+                      tk.is_active, tk.created_at,
+                      (SELECT sr.position FROM search_rankings sr
+                       WHERE sr.keyword_id=tk.id ORDER BY sr.checked_at DESC LIMIT 1) AS last_position,
+                      (SELECT sr.checked_at FROM search_rankings sr
+                       WHERE sr.keyword_id=tk.id ORDER BY sr.checked_at DESC LIMIT 1) AS last_checked
+               FROM tracked_keywords tk
+               JOIN managed_bots mb ON mb.bot_id=tk.bot_id
+               WHERE tk.owner_id=$1
+               ORDER BY tk.created_at DESC LIMIT 50""", uid)
+        return _json_resp({"keywords": rows})
+
+    async def add_keyword(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        bot_id = body.get("bot_id")
+        keyword = (body.get("keyword") or "").strip().lower()
+        if not bot_id or not keyword:
+            return _err("bot_id and keyword required")
+        if len(keyword) > 100:
+            return _err("keyword too long")
+        try:
+            bot_id_int = int(bot_id)
+        except (TypeError, ValueError):
+            return _err("Invalid bot_id")
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO tracked_keywords(bot_id, owner_id, keyword)
+                   VALUES($1,$2,$3) ON CONFLICT(bot_id, keyword) DO UPDATE SET is_active=true
+                   RETURNING id""",
+                bot_id_int, uid, keyword)
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("add_keyword uid=%d", uid)
+            return _err("Failed to add keyword", 500)
+
+    async def delete_keyword(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            kw_id = int(request.match_info["kw_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid kw_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM tracked_keywords WHERE id=$1 AND owner_id=$2", kw_id, uid)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to delete", 500)
+
+    # ── Account Warmup control ────────────────────────────────────────────────
+
+    async def start_warmup(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+        if not owns:
+            return _err("Account not found", 404)
+        plan_type = body.get("plan_type", "standard")
+        if plan_type not in ("standard", "gentle", "aggressive"):
+            plan_type = "standard"
+        target_days = {"standard": 14, "gentle": 21, "aggressive": 7}[plan_type]
+        daily_actions = {"standard": 10, "gentle": 5, "aggressive": 20}[plan_type]
+        # Cancel any active warmup first
+        try:
+            await pool.execute(
+                "UPDATE account_warmup_plans SET status='paused' WHERE account_id=$1 AND status='active'",
+                acc_id)
+            row = await pool.fetchrow(
+                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
+                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                uid, acc_id, plan_type, target_days, daily_actions)
+            return _json_resp({"ok": True, "id": row["id"], "target_days": target_days})
+        except Exception:
+            log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
+            return _err("Failed to start warmup", 500)
+
+    async def pause_warmup(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid acc_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE account_warmup_plans SET status='paused'
+                   WHERE account_id=$1 AND owner_id=$2 AND status='active'
+                   RETURNING id""", acc_id, uid)
+            if not row:
+                return _err("No active warmup", 404)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to pause", 500)
+
     # ── Schedules ────────────────────────────────────────────────────────────
 
     async def bot_schedules(request: web.Request) -> web.Response:
@@ -1047,6 +1243,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
+    # CRM
+    app.router.add_get("/api/miniapp/crm/contacts", crm_contacts)
+    # Audience
+    app.router.add_get("/api/miniapp/bot/{bot_id}/audience", bot_audience)
+    # Keywords / Search Rankings
+    app.router.add_get("/api/miniapp/keywords", keywords)
+    app.router.add_post("/api/miniapp/keyword", add_keyword)
+    app.router.add_delete("/api/miniapp/keyword/{kw_id}", delete_keyword)
+    # Account Warmup control
+    app.router.add_post("/api/miniapp/account/{acc_id}/warmup/start", start_warmup)
+    app.router.add_post("/api/miniapp/account/{acc_id}/warmup/pause", pause_warmup)
     # Schedules
     app.router.add_get("/api/miniapp/bot/{bot_id}/schedules", bot_schedules)
     app.router.add_post("/api/miniapp/bot/{bot_id}/schedule", create_schedule)

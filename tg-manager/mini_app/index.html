@@ -379,10 +379,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
     </div>
 
-    <div class="sec" style="margin-top:4px">Аналитика</div>
+    <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
     <div class="lst">
       <div class="row tap" onclick="openAnalytics()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Статистика роста</div><div class="row-val">Подписчики за 7 дней</div></div><div class="row-right chev">›</div></div>
-      <div class="row tap" onclick="openKeywords()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">Позиции в поиске</div><div class="row-val" id="kw-val">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openKeywordsScreen()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">Позиции в поиске</div><div class="row-val" id="kw-val">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openCRM()"><div class="row-ico" style="background:rgba(239,68,68,.16)">👤</div><div class="row-body"><div class="row-name">CRM — Контакты</div><div class="row-val" id="m-crm-cnt">—</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Платформа</div>
@@ -435,6 +436,46 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="lst" id="topBots"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Позиции в поиске</div>
     <div class="lst" id="kwList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ CRM CONTACTS ══════════════════════ -->
+<div class="screen" id="s-crm">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">👤 CRM — Контакты</div>
+    <div class="hdr-meta"><div class="hdr-user" id="crm-cnt"></div></div>
+  </div>
+  <div class="sub-sb">
+    <div style="padding:8px 16px 4px">
+      <input type="text" id="crmSearch" placeholder="🔍 Поиск по имени, нику, телефону..." style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:12px;padding:10px 13px;font-size:15px;color:var(--text);outline:none" oninput="filterCRM(this.value)">
+    </div>
+    <div id="crmTags" style="display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch"></div>
+    <div class="lst" id="crmList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="crm-more" style="padding:12px 16px;display:none">
+      <button class="btn btn-s" style="width:100%" onclick="loadMoreCRM()">Загрузить ещё</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ BOT AUDIENCE ══════════════════════ -->
+<div class="screen" id="s-audience">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="aud-name">Аудитория</div>
+  </div>
+  <div class="sub-sb" id="aud-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ KEYWORDS ══════════════════════ -->
+<div class="screen" id="s-keywords">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔍 Позиции в поиске</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openKwModal()">+ Добавить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="kwTrackList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -561,6 +602,25 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="arErr"></div>
     <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: KEYWORD ══════════════════════ -->
+<div class="mbg" id="kwMbg" onclick="if(event.target===this)closeKwModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeKwModal()">✕</div>
+    <div class="modal-title">🔍 Добавить ключевое слово</div>
+    <div class="field">
+      <label>Бот</label>
+      <select id="kwBot"></select>
+    </div>
+    <div class="field">
+      <label>Ключевое слово</label>
+      <input type="text" id="kwText" maxlength="100" placeholder="Напр: telegram bot, автоответчик...">
+      <div class="field-note">По этому слову бот будет отслеживаться в поиске Telegram</div>
+    </div>
+    <div class="field-err" id="kwErr"></div>
+    <button class="btn btn-p" id="kwBtn" onclick="saveKw()" style="width:100%">🔍 Добавить</button>
   </div>
 </div>
 
@@ -915,6 +975,7 @@ function buildBotDetail(d) {
     </div>
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openSchedule(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">⏰ Расписание</button>
+      <button class="btn btn-s" onclick="openAudience(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">📊 Аудитория</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -1169,18 +1230,22 @@ function buildAccDetail(d) {
 
   if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(245,158,11,.18);color:#f59e0b">⭐ Premium</span>';
 
-  const warmupHtml = warmup ? `
-    <div class="sec" style="margin-top:8px">Прогрев</div>
+  const warmupHtml = `
+    <div class="sec" style="margin-top:8px">Прогрев аккаунта</div>
     <div class="lst">
-      <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔥</div>
+      ${warmup ? `<div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔥</div>
         <div class="row-body"><div class="row-name">День прогрева</div>
           <div class="row-val">${warmup.current_day||0} / ${warmup.target_days||21}</div>
         </div>
         <div class="row-right"><span class="badge ${warmup.status==='active'?'b-gr':warmup.status==='completed'?'b-bl':'b-gy'}">${
           {active:'▶ Идёт',completed:'✓ Завершён',paused:'⏸ Пауза'}[warmup.status]||warmup.status||'—'
         }</span></div>
-      </div>
-    </div>` : '';
+      </div>` : '<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Прогрев не запущен</div>'}
+    </div>
+    <div class="actions" style="padding-top:4px">
+      ${(!warmup||warmup.status!=='active')?`<button class="btn btn-g" onclick="startWarmup(${a.id},'standard')">🔥 Запустить (стандарт)</button>`:''}
+      ${warmup&&warmup.status==='active'?`<button class="btn btn-o" onclick="pauseWarmup(${a.id})">⏸ Пауза</button>`:''}
+    </div>`;
 
   function cap(ico, name2, val, cls) {
     const vc = val===true?'cap-yes':val===false?'cap-no':'cap-prem';
@@ -1598,6 +1663,230 @@ async function loadAnalytics() {
 }
 
 function openKeywords() { push('s-analytics'); loadAnalytics(); }
+
+// ── CRM ────────────────────────────────────────────────
+let CRM_OFFSET = 0, CRM_TOTAL = 0, CRM_QUERY = '', CRM_TAG = '';
+
+function openCRM() {
+  CRM_OFFSET=0; CRM_QUERY=''; CRM_TAG='';
+  push('s-crm');
+  txt('crmList','<div class="spin-wrap"><div class="spin"></div></div>');
+  document.getElementById('crmSearch').value='';
+  txt('crmTags','');
+  loadCRM(false);
+}
+
+async function loadCRM(append) {
+  try {
+    let url = `/api/miniapp/crm/contacts?offset=${CRM_OFFSET}`;
+    if (CRM_QUERY) url += '&q='+encodeURIComponent(CRM_QUERY);
+    if (CRM_TAG) url += '&tag='+encodeURIComponent(CRM_TAG);
+    const d = await api(url);
+    CRM_TOTAL = d.total||0;
+    txt('crm-cnt', CRM_TOTAL+' контактов');
+    txt('m-crm-cnt', CRM_TOTAL+' контактов');
+    // Render tag chips
+    if (!append && (d.all_tags||[]).length) {
+      document.getElementById('crmTags').innerHTML =
+        `<span class="badge ${!CRM_TAG?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px" onclick="setCRMTag('')">Все</span>` +
+        d.all_tags.map(t=>`<span class="badge ${CRM_TAG===t?'b-bl':'b-gy'}" style="cursor:pointer;padding:5px 10px;white-space:nowrap" onclick="setCRMTag('${esc(t)}')">#${esc(t)}</span>`).join('');
+    }
+    const contacts = d.contacts||[];
+    if (!contacts.length && !append) {
+      txt('crmList', empty('👤','Нет контактов','Контакты добавляются через DM-кампании и аудиторию'));
+      return;
+    }
+    const html = contacts.map(c=>{
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || (c.username?'@'+c.username:'User #'+c.tg_user_id);
+      const tags = (c.tags||[]).map(t=>`<span class="badge b-gy" style="font-size:10px">#${esc(t)}</span>`).join(' ');
+      return `<div class="li" style="cursor:default">
+        <div class="ava ava-red">👤</div>
+        <div class="li-body">
+          <div class="li-name">${esc(name)}${c.username?` <span style="color:var(--hint)">@${esc(c.username)}</span>`:''}</div>
+          <div class="li-sub">${c.phone?esc(c.phone)+' · ':''} ${tags||'без тегов'}</div>
+        </div>
+        ${c.source?`<span class="badge b-gy" style="font-size:10px">${esc(c.source)}</span>`:''}
+      </div>`;
+    }).join('');
+    if (append) document.getElementById('crmList').insertAdjacentHTML('beforeend', html);
+    else txt('crmList', html);
+    CRM_OFFSET += contacts.length;
+    document.getElementById('crm-more').style.display = CRM_OFFSET < CRM_TOTAL ? 'block':'none';
+  } catch(e) {
+    if (!append) txt('crmList', `<div class="err-msg">${esc(e.message)}</div>`);
+    else toast('Ошибка: '+e.message);
+  }
+}
+
+async function loadMoreCRM() { await loadCRM(true); }
+
+let _crmTimer;
+function filterCRM(q) {
+  clearTimeout(_crmTimer);
+  _crmTimer = setTimeout(async ()=>{
+    CRM_QUERY = q; CRM_TAG=''; CRM_OFFSET=0;
+    txt('crmList','<div class="spin-wrap"><div class="spin"></div></div>');
+    await loadCRM(false);
+  }, 400);
+}
+
+function setCRMTag(t) {
+  CRM_TAG=t; CRM_QUERY=''; CRM_OFFSET=0;
+  document.getElementById('crmSearch').value='';
+  txt('crmList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadCRM(false);
+}
+
+// ── Audience ───────────────────────────────────────────
+async function openAudience(botId, botName) {
+  txt('aud-name', 'Аудитория · '+botName);
+  txt('aud-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-audience');
+  try {
+    const d = await api('/api/miniapp/bot/'+botId+'/audience');
+    txt('aud-body', buildAudience(d, botId, botName));
+  } catch(e) {
+    txt('aud-body', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function buildAudience(d, botId, botName) {
+  const growth = d.growth||[];
+  let chartHtml = '';
+  if (growth.length) {
+    const max = Math.max(...growth.map(g=>g.new_users||0), 1);
+    chartHtml = `<div class="sec">Рост за 14 дней</div>
+    <div class="lst" style="padding:14px 14px 10px;margin:0 16px">
+      <div class="chart" style="height:70px">${growth.map(g=>{
+        const h = Math.max(3, Math.round((g.new_users||0)/max*60));
+        const lbl = new Date(g.day).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+        return `<div class="bar-wrap"><div class="bar" style="height:${h}px"></div><div class="bar-lbl">${lbl}</div></div>`;
+      }).join('')}</div>
+    </div>`;
+  }
+  const tags = d.tags||[];
+  const tagsHtml = tags.length ? `
+    <div class="sec" style="margin-top:8px">Теги подписчиков</div>
+    <div class="lst">${tags.map(t=>`<div class="li" style="cursor:default">
+      <div class="ava ava-orange">🏷</div>
+      <div class="li-body"><div class="li-name">#${esc(t.tag||'')}</div></div>
+      <span class="badge b-bl">${num(t.cnt||0)}</span>
+    </div>`).join('')}</div>` : '';
+  return `
+    <div class="stats2" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="s2col"><div class="s2val">${num(d.total)}</div><div class="s2lbl">Всего</div></div>
+      <div class="s2col"><div class="s2val">${num(d.active)}</div><div class="s2lbl">Активных</div></div>
+      <div class="s2col"><div class="s2val">${num(d.new_7d)}</div><div class="s2lbl">За 7 дней</div></div>
+    </div>
+    <div class="stats2" style="grid-template-columns:1fr 1fr;margin-top:8px">
+      <div class="s2col"><div class="s2val">+${num(d.new_today)}</div><div class="s2lbl">Сегодня</div></div>
+      <div class="s2col"><div class="s2val">+${num(d.new_30d)}</div><div class="s2lbl">За 30 дней</div></div>
+    </div>
+    ${chartHtml}
+    ${tagsHtml}
+    <div style="height:16px"></div>`;
+}
+
+// ── Keywords ───────────────────────────────────────────
+function openKeywordsScreen() {
+  push('s-keywords');
+  txt('kwTrackList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadKeywords();
+}
+
+// Keep old openKeywords for analytics
+function openKeywords() { push('s-analytics'); loadAnalytics(); }
+
+async function loadKeywords() {
+  try {
+    const d = await api('/api/miniapp/keywords');
+    const items = d.keywords||[];
+    if (!items.length) { txt('kwTrackList', empty('🔍','Нет отслеживаемых слов','Нажмите + Добавить')); return; }
+    txt('kwTrackList', items.map(k=>{
+      const pos = k.last_position;
+      const posStr = pos!=null?'#'+pos:'—';
+      const pc = pos!=null?(pos<=3?'b-gr':pos<=10?'b-bl':pos<=30?'b-or':'b-gy'):'b-gy';
+      const bot = k.bot_username?'@'+k.bot_username:'бот #'+k.bot_id;
+      const checked = k.last_checked ? ago(k.last_checked) : 'не проверено';
+      return `<div class="li">
+        <div class="ava ava-green">🔍</div>
+        <div class="li-body">
+          <div class="li-name">${esc(k.keyword)}</div>
+          <div class="li-sub">${esc(bot)} · ${checked}</div>
+        </div>
+        <div class="li-right">
+          <span class="badge ${pc}">${posStr}</span>
+          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteKw(${k.id})">🗑</span>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('kwTrackList', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+async function deleteKw(id) {
+  try {
+    await api('/api/miniapp/keyword/'+id, {method:'DELETE'});
+    toast('Удалено'); loadKeywords();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+function openKwModal() {
+  if (!BOTS.length) { toast('Сначала загрузите боты'); return; }
+  document.getElementById('kwBot').innerHTML = BOTS.map(b=>{
+    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+    return `<option value="${b.bot_id}">${esc(name)}</option>`;
+  }).join('');
+  document.getElementById('kwText').value='';
+  document.getElementById('kwErr').style.display='none';
+  document.getElementById('kwBtn').disabled=false;
+  document.getElementById('kwBtn').textContent='🔍 Добавить';
+  document.getElementById('kwMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeKwModal() { document.getElementById('kwMbg').classList.remove('show'); }
+
+async function saveKw() {
+  const bot_id = document.getElementById('kwBot').value;
+  const keyword = document.getElementById('kwText').value.trim().toLowerCase();
+  const errEl = document.getElementById('kwErr');
+  errEl.style.display='none';
+  if (!keyword) { errEl.textContent='Введите ключевое слово'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('kwBtn');
+  btn.disabled=true; btn.textContent='⏳ Добавление...';
+  try {
+    await api('/api/miniapp/keyword', {method:'POST', body: JSON.stringify({bot_id, keyword})});
+    closeKwModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Ключевое слово добавлено');
+    loadKeywords();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='🔍 Добавить'; }
+}
+
+// ── Account Warmup control ─────────────────────────────
+async function startWarmup(accId, planType) {
+  try {
+    const d = await api('/api/miniapp/account/'+accId+'/warmup/start', {
+      method:'POST', body: JSON.stringify({plan_type: planType})
+    });
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🔥 Прогрев запущен · '+d.target_days+' дней');
+    openAccount(accId);
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+async function pauseWarmup(accId) {
+  try {
+    await api('/api/miniapp/account/'+accId+'/warmup/pause', {method:'POST'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('⏸ Прогрев поставлен на паузу');
+    openAccount(accId);
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
 
 // ── Schedule ───────────────────────────────────────────
 let SCH_BOT_ID = null;
