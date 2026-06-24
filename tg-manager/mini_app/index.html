@@ -302,6 +302,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterAcc('cooldown',this)">Кулдаун</div>
     </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec-row" style="margin-top:12px">
+      <div class="sec">📡 Каналы и чаты</div>
+      <span class="sec-btn" onclick="openChannels()">Открыть →</span>
+    </div>
+    <div class="lst" id="chPreview"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -857,14 +862,43 @@ async function toggleFunnel(id, el) {
 // ── Accounts ───────────────────────────────────────────
 async function loadAccounts() {
   try {
-    const d = await api('/api/miniapp/accounts');
-    CUR_ACCS = d.accounts||[];
+    const [ad, cd] = await Promise.all([
+      api('/api/miniapp/accounts'),
+      api('/api/miniapp/channels'),
+    ]);
+    CUR_ACCS = ad.accounts||[];
+    CUR_CHANNELS = cd.channels||[];
     document.getElementById('acc-cnt').textContent = CUR_ACCS.length+' аккаунтов';
     txt('m-acc-cnt', CUR_ACCS.length+' аккаунтов');
+    txt('m-ch-cnt', CUR_CHANNELS.length+' каналов');
     renderAccounts(CUR_ACCS);
+    renderChPreview(CUR_CHANNELS);
   } catch(e) {
     document.getElementById('accList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
+    txt('chPreview', '');
   }
+}
+
+function renderChPreview(list) {
+  const el = document.getElementById('chPreview');
+  if (!el) return;
+  if (!list.length) { el.innerHTML=empty('📡','Нет каналов','Добавьте канал через меню в Telegram'); return; }
+  const preview = list.slice(0,3);
+  const more = list.length - 3;
+  el.innerHTML = preview.map(c=>{
+    const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
+    const type = c.type==='supergroup'?'💬':c.type==='channel'?'📡':'💬';
+    return `<div class="li tap" onclick="openChannel(${c.channel_id})">
+      <div class="ava ava-purple">${type}</div>
+      <div class="li-body">
+        <div class="li-name">${esc(name)}</div>
+        <div class="li-sub">${num(c.member_count||0)} участников</div>
+      </div>
+      <span class="chev">›</span>
+    </div>`;
+  }).join('') + (more>0
+    ? `<div class="li tap" onclick="openChannels()"><div class="ava ava-purple">+${more}</div><div class="li-body"><div class="li-name">Показать все ${list.length} каналов</div></div><span class="chev">›</span></div>`
+    : '');
 }
 
 function filterAcc(mode, btn) {
@@ -925,7 +959,7 @@ function buildAccDetail(d) {
   const warmup = d.warmup;
   const ops = d.recent_ops||[];
 
-  const name = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.username || a.phone || 'Аккаунт';
+  const name = a.first_name || (a.username ? '@'+a.username : a.phone || 'Аккаунт');
   const initials = name.slice(0,2).toUpperCase();
   const avatarColors = ['pava-blue','pava-green','pava-orange','pava-purple','pava-teal'];
   const avatarCls = avatarColors[(a.id||0) % avatarColors.length];

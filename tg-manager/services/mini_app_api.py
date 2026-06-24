@@ -62,7 +62,8 @@ async def _safe_fetchrow(pool: asyncpg.Pool, query: str, *args) -> dict | None:
     try:
         row = await pool.fetchrow(query, *args)
         return dict(row) if row else None
-    except Exception:
+    except Exception as e:
+        log.warning("_safe_fetchrow error: %s | query=%.120s", e, query)
         return None
 
 
@@ -463,7 +464,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except (KeyError, ValueError):
             return _err("Invalid acc_id", 400)
         acc = await _safe_fetchrow(pool,
-            """SELECT id, phone, first_name, last_name, username, tg_user_id,
+            """SELECT id, phone, first_name, username, tg_user_id,
                       is_active, added_at, last_used,
                       COALESCE(trust_score, 100) AS trust_score,
                       COALESCE(acc_status, 'ok') AS acc_status,
