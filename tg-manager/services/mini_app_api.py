@@ -3814,16 +3814,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not account_id:
             return _err("account_id required")
         acc = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND banned=FALSE",
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
             int(account_id), uid,
         )
         if not acc:
-            return _err("account not found or banned", 404)
-        await pool.execute(
-            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('create_channel',$1,'pending',$2)",
-            json.dumps({"title": title, "about": about, "account_id": account_id}), uid,
+            return _err("Аккаунт не найден или неактивен", 404)
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+            "VALUES($1,'create_channel','pending',$2,1,$3) RETURNING id",
+            uid, json.dumps({"title": title, "about": about, "account_id": account_id}),
+            f"Создать канал: {title}",
         )
-        return _json_resp({"ok": True})
+        return _json_resp({"ok": True, "op_id": op_id})
 
     async def channel_factory_recent(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -3851,16 +3853,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not account_id:
             return _err("account_id required")
         acc = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND banned=FALSE",
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
             int(account_id), uid,
         )
         if not acc:
-            return _err("account not found or banned", 404)
-        await pool.execute(
-            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('create_group',$1,'pending',$2)",
-            json.dumps({"title": title, "account_id": account_id, "is_supergroup": is_supergroup}), uid,
+            return _err("Аккаунт не найден или неактивен", 404)
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+            "VALUES($1,'create_group','pending',$2,1,$3) RETURNING id",
+            uid, json.dumps({"title": title, "account_id": account_id, "is_supergroup": is_supergroup}),
+            f"Создать группу: {title}",
         )
-        return _json_resp({"ok": True})
+        return _json_resp({"ok": True, "op_id": op_id})
 
     # ── Physics Hub ──────────────────────────────────────────────────────────
 
@@ -3971,7 +3975,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("auth")
         rows = await pool.fetch(
-            "SELECT id, op_type, status, payload, created_at FROM operation_queue "
+            "SELECT id, op_type, status, params, label, created_at FROM operation_queue "
             "WHERE owner_id=$1 AND op_type='content_clone' ORDER BY created_at DESC LIMIT 20",
             uid,
         )
@@ -3986,11 +3990,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not source:
             return _err("source required")
         account_id = body.get("account_id")
-        await pool.execute(
-            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('content_clone',$1,'pending',$2)",
-            json.dumps({"source": source, "account_id": account_id}), uid,
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+            "VALUES($1,'content_clone','pending',$2,1,$3) RETURNING id",
+            uid, json.dumps({"source": source, "account_id": account_id}),
+            f"Клонировать контент: {source}",
         )
-        return _json_resp({"ok": True})
+        return _json_resp({"ok": True, "op_id": op_id})
 
     # ── Clone Adapt ───────────────────────────────────────────────────────────
 
@@ -4112,14 +4118,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("auth")
         tpl_id = int(request.match_info["tpl_id"])
-        tpl = await pool.fetchrow("SELECT id FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
+        tpl = await pool.fetchrow("SELECT id, title FROM self_promo_templates WHERE id=$1 AND is_active", tpl_id)
         if not tpl:
-            return _err("template not found or inactive", 404)
-        await pool.execute(
-            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('self_promo_blast',$1,'pending',$2)",
-            json.dumps({"template_id": tpl_id}), uid,
+            return _err("Шаблон не найден или неактивен", 404)
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+            "VALUES($1,'self_promo_blast','pending',$2,1,$3) RETURNING id",
+            uid, json.dumps({"template_id": tpl_id}),
+            f"Self-promo: {tpl['title'] or tpl_id}",
         )
-        return _json_resp({"ok": True})
+        return _json_resp({"ok": True, "op_id": op_id})
 
     # ── Semantic Memory ───────────────────────────────────────────────────────
 

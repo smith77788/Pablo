@@ -1290,7 +1290,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-title">🖥 Nodes Hub</div>
   </div>
   <div class="sub-sb">
-    <div id="nodesStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
+      Ноды — Telegram Forum Groups для управления ресурсами бота.<br>
+      Чтобы подключить ноду:<br>
+      1. Создайте Forum Group в Telegram<br>
+      2. Добавьте бота в группу как администратора<br>
+      3. В боте: Ещё → Nodes Hub → Добавить воркспейс
+    </div>
+    <div id="nodesStats" style="display:flex;gap:10px;padding:4px 0 10px"></div>
     <div class="lst" id="nodesList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -4729,9 +4736,9 @@ function openAiMemoryModal() {
   document.getElementById('aiMemBody').value='';
   document.getElementById('aiMemErr').textContent='';
   document.getElementById('aiMemBtn').disabled=false;
-  document.getElementById('aiMemMbg').style.display='flex';
+  document.getElementById('aiMemMbg').classList.add('show');
 }
-function closeAiMemoryModal() { document.getElementById('aiMemMbg').style.display='none'; }
+function closeAiMemoryModal() { document.getElementById('aiMemMbg').classList.remove('show'); }
 async function submitAiMemory() {
   const title = document.getElementById('aiMemTitle').value.trim();
   const body = document.getElementById('aiMemBody').value.trim();
@@ -4796,7 +4803,7 @@ async function openNodes() {
       <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${active}</div><div class="kpi-lbl">Активных</div></div>
     `);
     txt('m-nodes-val',`${active} активных нод`);
-    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Создайте Forum Workspace в боте')); return; }
+    if (!nodes.length) { txt('nodesList', empty('🖥','Нет нод','Подключите Forum Group через бота (инструкция выше)')); return; }
     txt('nodesList', nodes.map(n=>`
       <div class="row tap" onclick="openNodeThreads(${n.id},'${esc(n.name||n.node_type)}')">
         <div class="row-ico" style="background:rgba(34,197,94,.16)">${n.is_active?'🟢':'⚫'}</div>
@@ -5028,9 +5035,9 @@ function openRegCheckModal() {
   document.getElementById('regCheckTarget').value='';
   document.getElementById('regCheckErr').textContent='';
   document.getElementById('regCheckBtn').disabled=false;
-  document.getElementById('regCheckMbg').style.display='flex';
+  document.getElementById('regCheckMbg').classList.add('show');
 }
-function closeRegCheckModal() { document.getElementById('regCheckMbg').style.display='none'; }
+function closeRegCheckModal() { document.getElementById('regCheckMbg').classList.remove('show'); }
 async function submitRegCheck() {
   const target = document.getElementById('regCheckTarget').value.trim();
   const errEl = document.getElementById('regCheckErr');
@@ -5073,9 +5080,9 @@ function openDmModal() {
   document.getElementById('dmErr').textContent='';
   document.getElementById('dmBtn').disabled=false;
   document.getElementById('dmBtn').textContent='💾 Создать черновик';
-  document.getElementById('dmMbg').style.display='flex';
+  document.getElementById('dmMbg').classList.add('show');
 }
-function closeDmModal() { document.getElementById('dmMbg').style.display='none'; }
+function closeDmModal() { document.getElementById('dmMbg').classList.remove('show'); }
 async function submitDmCampaign() {
   const name = document.getElementById('dmName').value.trim();
   const text = document.getElementById('dmText').value.trim();
@@ -5148,7 +5155,7 @@ async function deleteDm(id) {
 async function openWarmupModal() {
   document.getElementById('warmupErr').textContent='';
   document.getElementById('warmupBtn').disabled=false;
-  document.getElementById('warmupMbg').style.display='flex';
+  document.getElementById('warmupMbg').classList.add('show');
   const sel = document.getElementById('warmupAccSel');
   sel.innerHTML='<option value="">Загрузка...</option>';
   try {
@@ -5159,7 +5166,7 @@ async function openWarmupModal() {
       : '<option value="">Нет активных аккаунтов</option>';
   } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
 }
-function closeWarmupModal() { document.getElementById('warmupMbg').style.display='none'; }
+function closeWarmupModal() { document.getElementById('warmupMbg').classList.remove('show'); }
 async function submitWarmup() {
   const account_id = parseInt(document.getElementById('warmupAccSel').value);
   const plan_type = document.getElementById('warmupPlan').value;
@@ -5365,10 +5372,10 @@ function openAdIntelModal() {
   document.getElementById('adIntelErr').textContent='';
   document.getElementById('adIntelBtn').disabled=false;
   document.getElementById('adIntelBtn').textContent='🚀 Запустить сканирование';
-  document.getElementById('adIntelMbg').style.display='flex';
+  document.getElementById('adIntelMbg').classList.add('show');
 }
 function closeAdIntelModal() {
-  document.getElementById('adIntelMbg').style.display='none';
+  document.getElementById('adIntelMbg').classList.remove('show');
 }
 async function submitAdIntelChannel() {
   const ch = document.getElementById('adIntelCh').value.trim().replace(/^@/,'');
@@ -6326,7 +6333,7 @@ async function loadCfRecent() {
         <div class="row-body">
           <div class="row-name">${esc(r.title)}</div>
           <div class="row-val">${r.username?'@'+esc(r.username):'—'} · ${r.type||'channel'}</div>
-          <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
+          <div class="row-val" style="color:var(--hint)">${ago(r.added_at||r.created_at)}</div>
         </div>
       </div>
     `).join(''));
