@@ -1028,6 +1028,53 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Error Reports ─────────────────────────────────────────────────────────
+
+    async def submit_error_report(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            description = str(body.get("description", "")).strip()
+            context = body.get("context", None)
+        except Exception:
+            return _err("bad body", 400)
+        if len(description) < 10:
+            return _err("Описание слишком короткое (мин. 10 символов)", 400)
+        if len(description) > 2000:
+            return _err("Описание слишком длинное (макс. 2000 символов)", 400)
+        try:
+            report_id = await pool.fetchval(
+                """INSERT INTO error_reports(user_id, description, context, status)
+                   VALUES($1,$2,$3,'new') RETURNING id""",
+                uid, description,
+                __import__("json").dumps(context) if context else None,
+            )
+        except Exception as exc:
+            log.exception("submit_error_report uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "report_id": report_id})
+
+    async def my_error_reports(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await pool.fetch(
+            "SELECT id, description, status, created_at FROM error_reports "
+            "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
+            uid,
+        )
+        return _json_resp({"reports": [
+            {
+                "id": r["id"],
+                "description": (r["description"] or "")[:120],
+                "status": r["status"] or "new",
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]})
+
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
     async def toggle_bot(request: web.Request) -> web.Response:
@@ -1851,6 +1898,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Error Reports
+    app.router.add_post("/api/miniapp/error_report", submit_error_report)
+    app.router.add_get("/api/miniapp/error_reports", my_error_reports)
     # Account Cleaner
     app.router.add_get("/api/miniapp/cleaner/accounts", cleaner_accounts)
     app.router.add_post("/api/miniapp/cleaner/submit", cleaner_submit)

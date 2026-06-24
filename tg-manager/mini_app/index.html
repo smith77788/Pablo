@@ -395,6 +395,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="lst">
       <div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div><div class="row-body"><div class="row-name">BotMother OS</div><div class="row-val">Telegram Automation Platform</div></div></div>
       <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
+      <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
     </div>
   </div>
 </div>
@@ -716,6 +717,27 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
+<div class="screen" id="s-errreport">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🐛 Баг-репорт</div>
+  </div>
+  <div class="sub-sb" style="padding:12px">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:10px">
+      Опишите что произошло: что делали, какая ошибка, когда произошло.
+    </div>
+    <div class="field">
+      <label>Описание проблемы</label>
+      <textarea id="errRepText" style="width:100%;min-height:160px;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:12px;color:#fff;font-size:14px;resize:vertical;box-sizing:border-box" maxlength="2000" placeholder="Опишите ошибку подробно..."></textarea>
+    </div>
+    <div id="errRepErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
+    <button class="btn btn-p" id="errRepBtn" onclick="submitErrReport()" style="width:100%">📤 Отправить</button>
+    <div class="sec" style="margin-top:16px">Мои отчёты</div>
+    <div class="lst" id="errRepList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -3249,6 +3271,47 @@ async function submitCleaner() {
     toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
     back();
   } catch(e) { document.getElementById('cleanerErr').textContent=e.message||'Ошибка'; btn.disabled=false; btn.textContent='🚀 Запустить очистку'; }
+}
+
+// ── Error Report ───────────────────────────────────────
+async function openErrorReport() {
+  push('s-errreport');
+  document.getElementById('errRepText').value='';
+  document.getElementById('errRepErr').textContent='';
+  loadErrReports();
+}
+async function loadErrReports() {
+  txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/error_reports');
+    const rs = d.reports||[];
+    if (!rs.length) { txt('errRepList', empty('🐛','Нет отчётов','')); return; }
+    const statusLabels = {new:'🆕 Новый', viewing:'👀 Просмотрен', fixing:'🔧 В работе', fixed:'✅ Исправлен', duplicate:'🔁 Дубликат'};
+    txt('errRepList', rs.map(r=>`
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">#${r.id} · ${statusLabels[r.status]||r.status}</div>
+          <div class="row-val">${esc(r.description)}</div>
+          <div class="row-val" style="color:#555">${ago(r.created_at)}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('errRepList', empty('⚠️','Ошибка',e.message)); }
+}
+async function submitErrReport() {
+  const description = document.getElementById('errRepText').value.trim();
+  const errEl = document.getElementById('errRepErr');
+  errEl.textContent='';
+  if (description.length < 10) { errEl.textContent='Минимум 10 символов'; return; }
+  const btn = document.getElementById('errRepBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  try {
+    const r = await api('/api/miniapp/error_report', {method:'POST', body:JSON.stringify({description, context:{screen:CUR}})});
+    document.getElementById('errRepText').value='';
+    toast(`✅ Отчёт #${r.report_id} отправлен, спасибо!`);
+    loadErrReports();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
 }
 
 // ── Utils ──────────────────────────────────────────────
