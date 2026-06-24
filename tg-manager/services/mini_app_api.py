@@ -1028,6 +1028,194 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── CRM Deals ─────────────────────────────────────────────────────────────
+
+    async def crm_deals(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        stage = request.rel_url.query.get("stage")
+        try:
+            if stage:
+                rows = await pool.fetch(
+                    "SELECT id, title, contact, stage, value, notes, created_at, updated_at "
+                    "FROM crm_deals WHERE owner_id=$1 AND stage=$2 ORDER BY updated_at DESC LIMIT 50",
+                    uid, stage,
+                )
+            else:
+                rows = await pool.fetch(
+                    "SELECT id, title, contact, stage, value, notes, created_at, updated_at "
+                    "FROM crm_deals WHERE owner_id=$1 ORDER BY updated_at DESC LIMIT 50",
+                    uid,
+                )
+        except Exception as exc:
+            log.exception("crm_deals uid=%d", uid)
+            return _err(str(exc), 500)
+        # Also get pipeline summary
+        summary_rows = await pool.fetch(
+            "SELECT stage, COUNT(*) AS cnt, COALESCE(SUM(value),0) AS total "
+            "FROM crm_deals WHERE owner_id=$1 GROUP BY stage",
+            uid,
+        )
+        summary = {r["stage"]: {"count": int(r["cnt"]), "total": float(r["total"])} for r in summary_rows}
+        return _json_resp({
+            "deals": [
+                {
+                    "id": r["id"], "title": r["title"] or "",
+                    "contact": r["contact"] or "", "stage": r["stage"] or "lead",
+                    "value": float(r["value"]) if r["value"] else 0,
+                    "notes": (r["notes"] or "")[:100],
+                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+                }
+                for r in rows
+            ],
+            "summary": summary,
+        })
+
+    async def create_crm_deal(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            title = str(body.get("title", "")).strip()
+            contact = str(body.get("contact", "")).strip()
+            stage = str(body.get("stage", "lead")).strip()
+            value = float(body.get("value", 0) or 0)
+            notes = str(body.get("notes", "")).strip()
+        except Exception:
+            return _err("bad body", 400)
+        if not title:
+            return _err("title обязателен", 400)
+        valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
+        if stage not in valid_stages:
+            stage = "lead"
+        try:
+            deal_id = await pool.fetchval(
+                """INSERT INTO crm_deals(owner_id, title, contact, stage, value, notes)
+                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                uid, title, contact or None, stage, value, notes or None,
+            )
+        except Exception as exc:
+            log.exception("create_crm_deal uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "deal_id": deal_id})
+
+    async def update_crm_deal_stage(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            deal_id = int(request.match_info["deal_id"])
+            body = await request.json()
+            stage = str(body.get("stage", "")).strip()
+        except Exception:
+            return _err("bad request", 400)
+        valid_stages = ("lead", "contact", "proposal", "negotiation", "won", "lost")
+        if stage not in valid_stages:
+            return _err("invalid stage", 400)
+        res = await pool.execute(
+            "UPDATE crm_deals SET stage=$1, updated_at=now() WHERE id=$2 AND owner_id=$3",
+            stage, deal_id, uid,
+        )
+        if res == "UPDATE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True})
+
+    async def delete_crm_deal(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            deal_id = int(request.match_info["deal_id"])
+        except (KeyError, ValueError):
+            return _err("bad deal_id", 400)
+        res = await pool.execute(
+            "DELETE FROM crm_deals WHERE id=$1 AND owner_id=$2", deal_id, uid
+        )
+        if res == "DELETE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True})
+
+    # ── Workspaces ─────────────────────────────────────────────────────────────
+
+    async def workspaces_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT w.id, w.name, w.description,
+                          (SELECT COUNT(*) FROM workspace_members WHERE workspace_id=w.id) AS member_count,
+                          wm.role
+                   FROM workspaces w
+                   JOIN workspace_members wm ON wm.workspace_id=w.id AND wm.user_id=$1
+                   WHERE w.is_active=TRUE ORDER BY w.created_at DESC""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("workspaces_list uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"workspaces": [
+            {
+                "id": r["id"], "name": r["name"] or "",
+                "description": r["description"] or "",
+                "member_count": int(r["member_count"] or 0),
+                "role": r["role"] or "member",
+            }
+            for r in rows
+        ]})
+
+    async def create_workspace(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            name = str(body.get("name", "")).strip()[:100]
+            description = str(body.get("description", "")).strip()[:500]
+        except Exception:
+            return _err("bad body", 400)
+        if not name:
+            return _err("name обязателен", 400)
+        try:
+            ws_id = await pool.fetchval(
+                "INSERT INTO workspaces(owner_id, name, description) VALUES($1,$2,$3) RETURNING id",
+                uid, name, description or None,
+            )
+            await pool.execute(
+                "INSERT INTO workspace_members(workspace_id, user_id, role, invited_by) VALUES($1,$2,'owner',$2)",
+                ws_id, uid,
+            )
+        except Exception as exc:
+            log.exception("create_workspace uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"ok": True, "ws_id": ws_id})
+
+    async def leave_workspace(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ws_id = int(request.match_info["ws_id"])
+        except (KeyError, ValueError):
+            return _err("bad ws_id", 400)
+        # Check if owner — owners must delete instead of leave
+        role = await pool.fetchval(
+            "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+            ws_id, uid,
+        )
+        if not role:
+            return _err("Not a member", 404)
+        if role == "owner":
+            # Delete workspace entirely
+            await pool.execute("DELETE FROM workspaces WHERE id=$1 AND owner_id=$2", ws_id, uid)
+        else:
+            await pool.execute(
+                "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws_id, uid
+            )
+        return _json_resp({"ok": True})
+
     # ── Promo Platform ────────────────────────────────────────────────────────
 
     async def promo_overview(request: web.Request) -> web.Response:
@@ -2022,6 +2210,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # CRM Deals
+    app.router.add_get("/api/miniapp/crm/deals", crm_deals)
+    app.router.add_post("/api/miniapp/crm/deal", create_crm_deal)
+    app.router.add_put("/api/miniapp/crm/deal/{deal_id}/stage", update_crm_deal_stage)
+    app.router.add_delete("/api/miniapp/crm/deal/{deal_id}", delete_crm_deal)
+    # Workspaces
+    app.router.add_get("/api/miniapp/workspaces", workspaces_list)
+    app.router.add_post("/api/miniapp/workspace", create_workspace)
+    app.router.add_delete("/api/miniapp/workspace/{ws_id}", leave_workspace)
     # Promo Platform
     app.router.add_get("/api/miniapp/promo", promo_overview)
     app.router.add_post("/api/miniapp/promo/order", promo_create_order_api)

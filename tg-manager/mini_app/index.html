@@ -388,6 +388,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openAnalytics()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Статистика роста</div><div class="row-val">Подписчики за 7 дней</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openKeywordsScreen()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">Позиции в поиске</div><div class="row-val" id="kw-val">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCRM()"><div class="row-ico" style="background:rgba(239,68,68,.16)">👤</div><div class="row-body"><div class="row-name">CRM — Контакты</div><div class="row-val" id="m-crm-cnt">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openCRMDeals()"><div class="row-ico" style="background:rgba(34,197,94,.16)">💼</div><div class="row-body"><div class="row-name">CRM — Сделки</div><div class="row-val" id="m-deal-cnt">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openWorkspaces()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🏢</div><div class="row-body"><div class="row-name">Рабочие пространства</div><div class="row-val" id="m-ws-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCompetitors()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Мониторинг конкурентов</div><div class="row-val" id="m-comp-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openNetBcModal()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📣</div><div class="row-body"><div class="row-name">Рассылка по всем ботам</div><div class="row-val">Один текст — все боты</div></div><div class="row-right chev">›</div></div>
     </div>
@@ -721,6 +723,41 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: CRM DEALS ══════════════════════ -->
+<div class="screen" id="s-crmdeals">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">💼 CRM — Сделки</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openDealModal()">+ Сделка</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="dealSummary" style="display:flex;gap:8px;overflow-x:auto;padding:6px 0 10px;-webkit-overflow-scrolling:touch"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 0 8px">
+      <button class="btn btn-p" onclick="filterDeals(null,this)" id="dealFilterAll">Все</button>
+      <button class="btn btn-s" onclick="filterDeals('lead',this)" id="dealFilterLead">Лид</button>
+      <button class="btn btn-s" onclick="filterDeals('contact',this)" id="dealFilterContact">Контакт</button>
+      <button class="btn btn-s" onclick="filterDeals('proposal',this)" id="dealFilterProposal">Предложение</button>
+      <button class="btn btn-s" onclick="filterDeals('won',this)" id="dealFilterWon">Выиграно</button>
+    </div>
+    <div class="lst" id="dealList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: WORKSPACES ══════════════════════ -->
+<div class="screen" id="s-workspaces">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🏢 Рабочие пространства</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openWsModal()">+ Создать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
+      Командная работа: приглашайте участников и управляйте общими ботами в одном пространстве.
+    </div>
+    <div class="lst" id="wsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: PROMO PLATFORM ══════════════════════ -->
 <div class="screen" id="s-promo">
   <div class="hdr">
@@ -1010,6 +1047,43 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="cmdErr"></div>
     <button class="btn btn-p" id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: CRM DEAL ══════════════════════ -->
+<div class="mbg" id="dealMbg" onclick="if(event.target===this)closeDealModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeDealModal()">✕</div>
+    <div class="modal-title">💼 Новая сделка</div>
+    <div class="field"><label>Название</label><input type="text" id="dealTitle" maxlength="200" placeholder="Напр: Продажа подписки"></div>
+    <div class="field"><label>Контакт</label><input type="text" id="dealContact" maxlength="200" placeholder="@username или имя"></div>
+    <div class="field">
+      <label>Стадия</label>
+      <select id="dealStage" style="width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px;color:#fff;font-size:15px">
+        <option value="lead">🎯 Лид</option>
+        <option value="contact">📞 Контакт</option>
+        <option value="proposal">📄 Предложение</option>
+        <option value="negotiation">🤝 Переговоры</option>
+        <option value="won">✅ Выиграно</option>
+        <option value="lost">❌ Проиграно</option>
+      </select>
+    </div>
+    <div class="field"><label>Сумма ($)</label><input type="number" id="dealValue" min="0" step="0.01" value="0"></div>
+    <div class="field"><label>Заметки</label><input type="text" id="dealNotes" maxlength="500" placeholder="Необязательно"></div>
+    <div class="field-err" id="dealErr"></div>
+    <button class="btn btn-p" id="dealSaveBtn" onclick="saveDeal()" style="width:100%">➕ Создать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: WORKSPACE ══════════════════════ -->
+<div class="mbg" id="wsMbg" onclick="if(event.target===this)closeWsModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeWsModal()">✕</div>
+    <div class="modal-title">🏢 Новое пространство</div>
+    <div class="field"><label>Название</label><input type="text" id="wsName" maxlength="100" placeholder="Напр: Команда продаж"></div>
+    <div class="field"><label>Описание (необязательно)</label><input type="text" id="wsDesc" maxlength="500" placeholder="Описание..."></div>
+    <div class="field-err" id="wsErr"></div>
+    <button class="btn btn-p" id="wsSaveBtn" onclick="saveWorkspace()" style="width:100%">➕ Создать</button>
   </div>
 </div>
 
@@ -3280,6 +3354,142 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── CRM Deals ──────────────────────────────────────────
+let DEALS_DATA = [], DEALS_FILTER = null;
+const STAGE_LABELS = {lead:'🎯 Лид',contact:'📞 Контакт',proposal:'📄 Предложение',negotiation:'🤝 Переговоры',won:'✅ Выиграно',lost:'❌ Проиграно'};
+async function openCRMDeals() {
+  DEALS_FILTER = null;
+  push('s-crmdeals');
+  loadDeals();
+}
+async function loadDeals() {
+  txt('dealList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/crm/deals'+(DEALS_FILTER?'?stage='+DEALS_FILTER:''));
+    DEALS_DATA = d.deals||[];
+    // Summary bar
+    const sum = d.summary||{};
+    const stages = ['lead','contact','proposal','negotiation','won','lost'];
+    txt('dealSummary', stages.map(s=>{
+      const c = sum[s]?.count||0;
+      return c>0?`<div class="kpi-card" style="min-width:70px;text-align:center"><div style="font-size:16px;font-weight:700">${c}</div><div style="font-size:10px;color:#aaa">${STAGE_LABELS[s].split(' ')[1]||s}</div></div>`:''
+    }).join(''));
+    txt('m-deal-cnt', DEALS_DATA.length+' сделок');
+    if (!DEALS_DATA.length) { txt('dealList', empty('💼','Нет сделок','Создайте первую сделку')); return; }
+    txt('dealList', DEALS_DATA.map(d2=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">💼</div>
+        <div class="row-body">
+          <div class="row-name">${esc(d2.title)}</div>
+          <div class="row-val">${STAGE_LABELS[d2.stage]||d2.stage}${d2.contact?' · '+esc(d2.contact):''}${d2.value?` · $${d2.value.toFixed(0)}`:''}</div>
+          <div class="row-val" style="color:#555">${ago(d2.updated_at)}</div>
+        </div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDeal(${d2.id})">✕</button></div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('dealList', empty('⚠️','Ошибка',e.message)); }
+}
+function filterDeals(stage, btn) {
+  DEALS_FILTER = stage;
+  document.querySelectorAll('[id^="dealFilter"]').forEach(el=>el.className='btn btn-s');
+  if (btn) btn.className='btn btn-p';
+  loadDeals();
+}
+function openDealModal() {
+  ['dealTitle','dealContact','dealNotes'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('dealValue').value='0';
+  document.getElementById('dealStage').value='lead';
+  document.getElementById('dealErr').textContent='';
+  document.getElementById('dealMbg').classList.add('show');
+}
+function closeDealModal() { document.getElementById('dealMbg').classList.remove('show'); }
+async function saveDeal() {
+  const title = document.getElementById('dealTitle').value.trim();
+  const errEl = document.getElementById('dealErr');
+  errEl.textContent='';
+  if (!title) { errEl.textContent='Введите название'; return; }
+  const btn = document.getElementById('dealSaveBtn');
+  btn.disabled=true; btn.textContent='Создаю…';
+  try {
+    const r = await api('/api/miniapp/crm/deal', {method:'POST', body:JSON.stringify({
+      title,
+      contact: document.getElementById('dealContact').value.trim(),
+      stage: document.getElementById('dealStage').value,
+      value: parseFloat(document.getElementById('dealValue').value)||0,
+      notes: document.getElementById('dealNotes').value.trim(),
+    })});
+    closeDealModal();
+    toast(`✅ Сделка #${r.deal_id} создана`);
+    loadDeals();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='➕ Создать'; }
+}
+async function deleteDeal(dealId) {
+  if (!confirm('Удалить сделку?')) return;
+  try {
+    await api('/api/miniapp/crm/deal/'+dealId, {method:'DELETE'});
+    toast('Удалено');
+    loadDeals();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+
+// ── Workspaces ──────────────────────────────────────────
+async function openWorkspaces() {
+  push('s-workspaces');
+  loadWorkspaces();
+}
+async function loadWorkspaces() {
+  txt('wsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/workspaces');
+    const ws = d.workspaces||[];
+    txt('m-ws-cnt', ws.length+' пространств');
+    if (!ws.length) { txt('wsList', empty('🏢','Нет пространств','Создайте командное пространство')); return; }
+    txt('wsList', ws.map(w=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">🏢</div>
+        <div class="row-body">
+          <div class="row-name">${esc(w.name)}</div>
+          <div class="row-val">${w.member_count} участников · ${w.role==='owner'?'👑 Владелец':'👤 Участник'}</div>
+          ${w.description?`<div class="row-val" style="color:#666">${esc(w.description)}</div>`:''}
+        </div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="leaveWs(${w.id},'${w.role}')">${w.role==='owner'?'🗑':'🚪'}</button></div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('wsList', empty('⚠️','Ошибка',e.message)); }
+}
+function openWsModal() {
+  document.getElementById('wsName').value='';
+  document.getElementById('wsDesc').value='';
+  document.getElementById('wsErr').textContent='';
+  document.getElementById('wsMbg').classList.add('show');
+}
+function closeWsModal() { document.getElementById('wsMbg').classList.remove('show'); }
+async function saveWorkspace() {
+  const name = document.getElementById('wsName').value.trim();
+  const errEl = document.getElementById('wsErr');
+  errEl.textContent='';
+  if (!name) { errEl.textContent='Введите название'; return; }
+  const btn = document.getElementById('wsSaveBtn');
+  btn.disabled=true; btn.textContent='Создаю…';
+  try {
+    await api('/api/miniapp/workspace', {method:'POST', body:JSON.stringify({name, description:document.getElementById('wsDesc').value.trim()})});
+    closeWsModal();
+    toast('✅ Пространство создано');
+    loadWorkspaces();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='➕ Создать'; }
+}
+async function leaveWs(wsId, role) {
+  const msg = role==='owner' ? 'Удалить пространство? Участники потеряют доступ.' : 'Покинуть пространство?';
+  if (!confirm(msg)) return;
+  try {
+    await api('/api/miniapp/workspace/'+wsId, {method:'DELETE'});
+    toast(role==='owner' ? '🗑 Пространство удалено' : '🚪 Вы покинули пространство');
+    loadWorkspaces();
+  } catch(e) { toast('⚠️ '+e.message); }
 }
 
 // ── Promo Platform ─────────────────────────────────────
