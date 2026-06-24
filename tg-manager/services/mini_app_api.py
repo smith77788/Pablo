@@ -1028,6 +1028,92 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Relay (Inbox) ─────────────────────────────────────────────────────────
+
+    async def relay_sessions_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        owned = await pool.fetchval(
+            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+        )
+        if not owned:
+            return _err("Not found", 404)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, user_id, username, first_name, last_activity, messages_count
+                   FROM relay_sessions WHERE bot_id=$1 ORDER BY last_activity DESC LIMIT 50""",
+                bot_id,
+            )
+        except Exception as exc:
+            log.exception("relay_sessions uid=%d bot=%d", uid, bot_id)
+            return _err(str(exc), 500)
+        return _json_resp({"sessions": [
+            {
+                "id": r["id"],
+                "user_id": r["user_id"],
+                "username": r["username"] or "",
+                "name": r["first_name"] or r["username"] or str(r["user_id"]),
+                "last_activity": r["last_activity"].isoformat() if r["last_activity"] else None,
+                "messages_count": r["messages_count"] or 0,
+            }
+            for r in rows
+        ]})
+
+    async def relay_session_messages(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            session_id = int(request.match_info["session_id"])
+        except (KeyError, ValueError):
+            return _err("bad session_id", 400)
+        # Verify ownership via join
+        row = await pool.fetchrow(
+            """SELECT rs.id FROM relay_sessions rs
+               JOIN managed_bots mb ON mb.bot_id=rs.bot_id
+               WHERE rs.id=$1 AND mb.added_by=$2""",
+            session_id, uid,
+        )
+        if not row:
+            return _err("Not found", 404)
+        msgs = await pool.fetch(
+            "SELECT id, direction, text, created_at FROM relay_messages "
+            "WHERE session_id=$1 ORDER BY created_at ASC LIMIT 100",
+            session_id,
+        )
+        return _json_resp({"messages": [
+            {
+                "id": r["id"],
+                "direction": r["direction"],
+                "text": r["text"] or "",
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in msgs
+        ]})
+
+    async def relay_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+            enabled = bool(body.get("enabled", True))
+        except Exception:
+            return _err("bad request", 400)
+        res = await pool.execute(
+            "UPDATE managed_bots SET relay_enabled=$1 WHERE bot_id=$2 AND added_by=$3",
+            enabled, bot_id, uid,
+        )
+        if res == "UPDATE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True, "relay_enabled": enabled})
+
     # ── API Keys (API Hub) ─────────────────────────────────────────────────────
 
     async def api_keys_list(request: web.Request) -> web.Response:
@@ -2387,6 +2473,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Relay (Inbox)
+    app.router.add_get("/api/miniapp/bot/{bot_id}/relay/sessions", relay_sessions_list)
+    app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)
+    app.router.add_put("/api/miniapp/bot/{bot_id}/relay/toggle", relay_toggle)
     # API Keys
     app.router.add_get("/api/miniapp/api_keys", api_keys_list)
     app.router.add_delete("/api/miniapp/api_key/{key_id}", revoke_api_key)

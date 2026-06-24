@@ -726,6 +726,29 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: RELAY SESSIONS ══════════════════════ -->
+<div class="screen" id="s-relay">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="relay-title">💬 Inbox</div>
+    <div class="hdr-meta" id="relay-toggle"></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="relayList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: RELAY MESSAGES ══════════════════════ -->
+<div class="screen" id="s-relaymsgs">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="relaymsgs-title">💬 Диалог</div>
+  </div>
+  <div class="sub-sb" id="relayMsgBody" style="padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div class="spin-wrap"><div class="spin"></div></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: API KEYS ══════════════════════ -->
 <div class="screen" id="s-apikeys">
   <div class="hdr">
@@ -1496,6 +1519,9 @@ function buildBotDetail(d) {
     </div>
     <div class="actions" style="padding-top:0">
       <button class="btn btn-g" onclick="openBotStats(${d.bot.bot_id},'${esc(CUR_BOT.name)}')" style="width:100%">📊 Детальная статистика</button>
+    </div>
+    <div class="actions" style="padding-top:0">
+      <button class="btn btn-s" onclick="openRelay(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">💬 Inbox (диалоги)</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -3432,6 +3458,62 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Relay / Inbox ───────────────────────────────────────
+let RELAY_BOT_ID = null;
+async function openRelay(botId, botName) {
+  RELAY_BOT_ID = botId;
+  txt('relay-title', '💬 Inbox · '+(botName||''));
+  push('s-relay');
+  txt('relay-toggle','');
+  txt('relayList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    // Check relay_enabled status
+    const bot = BOTS.find(b=>b.bot_id===botId)||CUR_BOT;
+    const enabled = bot?.relay_enabled!==false;
+    txt('relay-toggle', `<button class="btn ${enabled?'btn-o':'btn-p'}" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="toggleRelay(${botId},${!enabled})">${enabled?'⏸ Выкл':'▶ Вкл'}</button>`);
+    const d = await api('/api/miniapp/bot/'+botId+'/relay/sessions');
+    const sessions = d.sessions||[];
+    if (!sessions.length) { txt('relayList', empty('💬','Нет диалогов','Пользователи ещё не написали')); return; }
+    txt('relayList', sessions.map(s=>`
+      <div class="row tap" onclick="openRelaySession(${s.id},'${esc(s.name)}')">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">💬</div>
+        <div class="row-body">
+          <div class="row-name">${s.username?'@'+esc(s.username):esc(s.name)}</div>
+          <div class="row-val">${num(s.messages_count)} сообщений · ${ago(s.last_activity)}</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('relayList', empty('⚠️','Ошибка',e.message)); }
+}
+async function toggleRelay(botId, enable) {
+  try {
+    await api('/api/miniapp/bot/'+botId+'/relay/toggle', {method:'PUT', body:JSON.stringify({enabled:enable})});
+    toast(enable?'▶ Relay включён':'⏸ Relay выключен');
+    openRelay(botId, '');
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+async function openRelaySession(sessionId, name) {
+  txt('relaymsgs-title', '💬 '+name);
+  push('s-relaymsgs');
+  txt('relayMsgBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/relay/session/'+sessionId+'/messages');
+    const msgs = d.messages||[];
+    if (!msgs.length) { txt('relayMsgBody', empty('💬','Нет сообщений','')); return; }
+    document.getElementById('relayMsgBody').innerHTML = msgs.map(m=>{
+      const isOut = m.direction==='out';
+      return `<div style="display:flex;flex-direction:column;align-items:${isOut?'flex-end':'flex-start'}">
+        <div style="background:${isOut?'#7c3aed':'#2a2a2a'};border-radius:12px;padding:8px 12px;max-width:85%;font-size:14px;word-break:break-word">${esc(m.text)}</div>
+        <div style="font-size:10px;color:#555;margin-top:2px">${isOut?'↑ Отправлено':'↓ Получено'} ${ago(m.created_at)}</div>
+      </div>`;
+    }).join('');
+    // Scroll to bottom
+    const el = document.getElementById('relayMsgBody');
+    el.scrollTop = el.scrollHeight;
+  } catch(e) { txt('relayMsgBody', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── API Keys ───────────────────────────────────────────
