@@ -374,6 +374,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openChannels()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Каналы и чаты</div><div class="row-val" id="m-ch-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="goTab('broadcasts')"><div class="row-ico" style="background:rgba(168,85,247,.16)">📨</div><div class="row-body"><div class="row-name">Рассылки и кампании</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openOps()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⚙️</div><div class="row-body"><div class="row-name">Очередь операций</div><div class="row-val" id="m-ops-cnt"></div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openTemplates()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📝</div><div class="row-body"><div class="row-name">Шаблоны сообщений</div><div class="row-val" id="m-tpl-cnt"></div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openMassPub()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Массовая публикация</div><div class="row-val">Пост во все каналы</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика</div>
@@ -435,6 +438,74 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ BOT SCHEDULE ══════════════════════ -->
+<div class="screen" id="s-schedule">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="sch-name">Расписание</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openSchModal()">+ Запланировать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="schList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ TEMPLATES ══════════════════════ -->
+<div class="screen" id="s-templates">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📝 Шаблоны</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openTplModal()">+ Создать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MASS PUBLISH ══════════════════════ -->
+<div class="screen" id="s-masspub">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📡 Массовая публикация</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Опубликовать сразу во все каналы</div>
+    <div class="lst" style="padding:14px">
+      <div class="field" style="margin-bottom:12px">
+        <label>Текст поста</label>
+        <textarea id="mpText" rows="6" maxlength="4096" placeholder="Введите текст публикации..."></textarea>
+        <div class="field-note"><span id="mpLen">0</span>/4096</div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label>Задержка между постами</label>
+        <select id="mpDelay">
+          <option value="5">⚡ 5 сек (быстро)</option>
+          <option value="30" selected>🛡️ 30 сек (безопасно)</option>
+          <option value="60">🐌 60 сек (осторожно)</option>
+          <option value="-1">🧠 Умный (30–90 сек)</option>
+        </select>
+      </div>
+      <div class="field-err" id="mpErr"></div>
+      <button class="btn btn-p" id="mpBtn" onclick="sendMassPublish()" style="width:100%;margin-top:4px">📡 Опубликовать во все каналы</button>
+    </div>
+    <div class="sec" style="margin-top:4px">Последние операции публикации</div>
+    <div class="lst" id="mpOpsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ PROXIES ══════════════════════ -->
+<div class="screen" id="s-proxies">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌐 Прокси</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openProxyModal()">+ Добавить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Мои прокси</div>
+    <div class="lst" id="proxyList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
 </div><!-- /content -->
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
@@ -490,6 +561,63 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="arErr"></div>
     <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: SCHEDULE ══════════════════════ -->
+<div class="mbg" id="schMbg" onclick="if(event.target===this)closeSchModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeSchModal()">✕</div>
+    <div class="modal-title">⏰ Запланировать рассылку</div>
+    <div class="field">
+      <label>Текст сообщения</label>
+      <textarea id="schText" rows="5" maxlength="4096" placeholder="Текст рассылки..."></textarea>
+    </div>
+    <div class="field">
+      <label>Дата и время (UTC)</label>
+      <input type="datetime-local" id="schDate">
+      <div class="field-note">Время UTC+0 — сервер отправит точно в указанное время</div>
+    </div>
+    <div class="field-err" id="schErr"></div>
+    <button class="btn btn-p" id="schBtn" onclick="saveSchedule()" style="width:100%">⏰ Запланировать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: TEMPLATE ══════════════════════ -->
+<div class="mbg" id="tplMbg" onclick="if(event.target===this)closeTplModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeTplModal()">✕</div>
+    <div class="modal-title">📝 Новый шаблон</div>
+    <div class="field">
+      <label>Название шаблона</label>
+      <input type="text" id="tplName" maxlength="80" placeholder="Напр: Приветствие нового подписчика">
+    </div>
+    <div class="field">
+      <label>Текст шаблона</label>
+      <textarea id="tplText" rows="6" maxlength="4096" placeholder="Поддерживается HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;..."></textarea>
+      <div class="field-note"><span id="tplLen">0</span>/4096</div>
+    </div>
+    <div class="field-err" id="tplErr"></div>
+    <button class="btn btn-p" id="tplBtn" onclick="saveTpl()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: PROXY ══════════════════════ -->
+<div class="mbg" id="proxyMbg" onclick="if(event.target===this)closeProxyModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeProxyModal()">✕</div>
+    <div class="modal-title">🌐 Добавить прокси</div>
+    <div class="field">
+      <label>URL прокси</label>
+      <input type="text" id="proxyUrl" placeholder="socks5://user:pass@host:port">
+      <div class="field-note">Форматы: socks5://, socks4://, http://</div>
+    </div>
+    <div class="field">
+      <label>Метка (необязательно)</label>
+      <input type="text" id="proxyLabel" maxlength="50" placeholder="Напр: RU-proxy-1">
+    </div>
+    <div class="field-err" id="proxyErr"></div>
+    <button class="btn btn-p" id="proxyBtn" onclick="saveProxy()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -784,6 +912,9 @@ function buildBotDetail(d) {
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openBotFunnels(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">🔄 Воронки</button>
       <button class="btn btn-s" onclick="openBotSubs(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">👥 Подписчики</button>
+    </div>
+    <div class="actions" style="padding-top:0">
+      <button class="btn btn-s" onclick="openSchedule(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">⏰ Расписание</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -1467,6 +1598,312 @@ async function loadAnalytics() {
 }
 
 function openKeywords() { push('s-analytics'); loadAnalytics(); }
+
+// ── Schedule ───────────────────────────────────────────
+let SCH_BOT_ID = null;
+let SCH_BOT_NAME = '';
+
+async function openSchedule(botId, botName) {
+  SCH_BOT_ID = botId;
+  SCH_BOT_NAME = botName;
+  txt('sch-name', 'Расписание · '+botName);
+  txt('schList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-schedule');
+  await loadSchedules();
+}
+
+async function loadSchedules() {
+  try {
+    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules');
+    const items = d.schedules||[];
+    if (!items.length) {
+      txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
+      return;
+    }
+    const statIco = {pending:'⏳',done:'✅',cancelled:'❌',missed:'⚠️'};
+    txt('schList', items.map(s=>{
+      const dt = new Date(s.execute_at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
+      const [bc,bl] = stb(s.status);
+      const preview = (s.message_text||'').substring(0,60);
+      const canCancel = s.status==='pending';
+      return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="ava ava-orange">${statIco[s.status]||'⏰'}</div>
+          <div class="li-body">
+            <div class="li-name">${dt} UTC</div>
+            <div class="li-sub">${esc(preview)}${preview.length===60?'…':''}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="badge ${bc}">${bl}</span>
+            ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="cancelSchedule(${s.id})">Отмена</span>`:''}
+          </div>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('schList', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function openSchModal() {
+  document.getElementById('schText').value='';
+  document.getElementById('schErr').style.display='none';
+  document.getElementById('schBtn').disabled=false;
+  document.getElementById('schBtn').textContent='⏰ Запланировать';
+  // Default: tomorrow 10:00 UTC
+  const d = new Date(); d.setUTCDate(d.getUTCDate()+1); d.setUTCHours(10,0,0,0);
+  document.getElementById('schDate').value = d.toISOString().slice(0,16);
+  document.getElementById('schMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeSchModal() { document.getElementById('schMbg').classList.remove('show'); }
+
+async function saveSchedule() {
+  const text = document.getElementById('schText').value.trim();
+  const dateVal = document.getElementById('schDate').value;
+  const errEl = document.getElementById('schErr');
+  errEl.style.display='none';
+  if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  if (!dateVal) { errEl.textContent='Выберите дату'; errEl.style.display='block'; return; }
+  const dt = new Date(dateVal+'Z');
+  if (isNaN(dt.getTime()) || dt < new Date()) { errEl.textContent='Дата должна быть в будущем'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('schBtn');
+  btn.disabled=true; btn.textContent='⏳ Сохранение...';
+  try {
+    await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedule', {
+      method:'POST', body: JSON.stringify({text, execute_at: dt.toISOString()})
+    });
+    closeSchModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Рассылка запланирована');
+    await loadSchedules();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='⏰ Запланировать'; }
+}
+
+async function cancelSchedule(id) {
+  try {
+    await api('/api/miniapp/schedule/'+id+'/cancel', {method:'POST'});
+    toast('Отменено'); await loadSchedules();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Templates ──────────────────────────────────────────
+function openTemplates() {
+  push('s-templates');
+  txt('tplList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  loadTemplates();
+}
+
+async function loadTemplates() {
+  try {
+    const d = await api('/api/miniapp/templates');
+    const items = d.templates||[];
+    txt('m-tpl-cnt', items.length ? items.length+' шаблонов' : '');
+    if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Нажмите + Создать')); return; }
+    txt('tplList', items.map(t=>{
+      const txt2 = (t.template?.text || '').substring(0, 60);
+      return `<div class="li">
+        <div class="ava ava-green">📝</div>
+        <div class="li-body">
+          <div class="li-name">${esc(t.name||'Шаблон')}</div>
+          <div class="li-sub">${esc(txt2)}${txt2.length===60?'…':''}</div>
+        </div>
+        <div class="li-right">
+          <span style="font-size:18px;cursor:pointer;color:var(--blue);padding:4px" onclick="useTpl(${t.id},'${esc(t.name||'')}','${esc((t.template?.text||'').replace(/'/g,"&#39;"))}')">📤</span>
+          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteTpl(${t.id})">🗑</span>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('tplList', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function useTpl(id, name, text) {
+  // Вставить шаблон в модалку рассылки
+  document.getElementById('bcastText').value = text;
+  document.getElementById('bcastLen').textContent = text.length;
+  back();
+  toast('📝 Шаблон «'+name+'» вставлен');
+}
+
+async function deleteTpl(id) {
+  try {
+    await api('/api/miniapp/template/'+id, {method:'DELETE'});
+    toast('Удалено'); loadTemplates();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+function openTplModal() {
+  document.getElementById('tplName').value='';
+  document.getElementById('tplText').value='';
+  document.getElementById('tplLen').textContent='0';
+  document.getElementById('tplErr').style.display='none';
+  document.getElementById('tplBtn').disabled=false;
+  document.getElementById('tplBtn').textContent='💾 Сохранить';
+  document.getElementById('tplMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeTplModal() { document.getElementById('tplMbg').classList.remove('show'); }
+
+document.getElementById('tplText').addEventListener('input', function(){
+  document.getElementById('tplLen').textContent = this.value.length;
+});
+
+async function saveTpl() {
+  const name = document.getElementById('tplName').value.trim();
+  const text = document.getElementById('tplText').value.trim();
+  const errEl = document.getElementById('tplErr');
+  errEl.style.display='none';
+  if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
+  if (!text) { errEl.textContent='Введите текст шаблона'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('tplBtn');
+  btn.disabled=true; btn.textContent='⏳ Сохранение...';
+  try {
+    await api('/api/miniapp/template', {method:'POST', body: JSON.stringify({name, text})});
+    closeTplModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Шаблон сохранён');
+    loadTemplates();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
+}
+
+// ── Mass Publish ───────────────────────────────────────
+function openMassPub() {
+  document.getElementById('mpText').value='';
+  document.getElementById('mpLen').textContent='0';
+  document.getElementById('mpErr').style.display='none';
+  document.getElementById('mpBtn').disabled=false;
+  document.getElementById('mpBtn').textContent='📡 Опубликовать во все каналы';
+  push('s-masspub');
+  loadMpOps();
+}
+
+document.getElementById('mpText').addEventListener('input', function(){
+  document.getElementById('mpLen').textContent = this.value.length;
+});
+
+async function loadMpOps() {
+  try {
+    const d = await api('/api/miniapp/operations');
+    const ops = (d.operations||[]).filter(o=>o.op_type==='mass_publish').slice(0,5);
+    if (!ops.length) { txt('mpOpsList', empty('📡','Нет операций публикации')); return; }
+    txt('mpOpsList', ops.map(o=>{
+      const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
+      const [bc,bl]=stb(o.status);
+      return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="ava ava-purple">📡</div>
+          <div class="li-body">
+            <div class="li-name">Массовая публикация</div>
+            <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} каналов · ${ago(o.created_at)}</div>
+          </div>
+          <span class="badge ${bc}">${bl}</span>
+        </div>
+        ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('mpOpsList',''); }
+}
+
+async function sendMassPublish() {
+  const text = document.getElementById('mpText').value.trim();
+  const delay = parseInt(document.getElementById('mpDelay').value);
+  const errEl = document.getElementById('mpErr');
+  errEl.style.display='none';
+  if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('mpBtn');
+  btn.disabled=true; btn.textContent='⏳ Добавление в очередь...';
+  try {
+    const d = await api('/api/miniapp/mass_publish', {method:'POST', body: JSON.stringify({text, delay})});
+    document.getElementById('mpText').value='';
+    document.getElementById('mpLen').textContent='0';
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Публикация запущена · '+num(d.total)+' каналов · op #'+d.op_id);
+    loadMpOps();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='📡 Опубликовать во все каналы'; }
+}
+
+// ── Proxies ────────────────────────────────────────────
+function openProxies() {
+  push('s-proxies');
+  txt('proxyList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  loadProxies();
+}
+
+async function loadProxies() {
+  try {
+    const d = await api('/api/miniapp/proxies');
+    const items = d.proxies||[];
+    txt('m-proxy-cnt', items.length ? items.length+' прокси' : 'Нет прокси');
+    if (!items.length) { txt('proxyList', empty('🌐','Нет прокси','Добавьте SOCKS5/HTTP прокси')); return; }
+    txt('proxyList', items.map(p=>{
+      const alive = p.is_alive===true?'🟢':p.is_alive===false?'🔴':'⚪';
+      const type = (p.proxy_type||'socks5').toUpperCase();
+      const host = (p.proxy_url||'').split('@').pop();
+      return `<div class="li">
+        <div class="ava ava-blue">🌐</div>
+        <div class="li-body">
+          <div class="li-name">${esc(p.label||host||'Прокси #'+p.id)}</div>
+          <div class="li-sub">${type} · ${alive} ${p.is_alive===true?'Работает':p.is_alive===false?'Не отвечает':'Не проверен'}</div>
+        </div>
+        <div class="li-right">
+          <span class="badge ${p.is_active?'b-gr':'b-gy'}">${p.is_active?'Вкл':'Выкл'}</span>
+          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteProxy(${p.id})">🗑</span>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('proxyList', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function openProxyModal() {
+  document.getElementById('proxyUrl').value='';
+  document.getElementById('proxyLabel').value='';
+  document.getElementById('proxyErr').style.display='none';
+  document.getElementById('proxyBtn').disabled=false;
+  document.getElementById('proxyBtn').textContent='➕ Добавить';
+  document.getElementById('proxyMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeProxyModal() { document.getElementById('proxyMbg').classList.remove('show'); }
+
+async function saveProxy() {
+  const url = document.getElementById('proxyUrl').value.trim();
+  const label = document.getElementById('proxyLabel').value.trim();
+  const errEl = document.getElementById('proxyErr');
+  errEl.style.display='none';
+  if (!url) { errEl.textContent='Введите URL прокси'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('proxyBtn');
+  btn.disabled=true; btn.textContent='⏳ Добавление...';
+  try {
+    await api('/api/miniapp/proxy', {method:'POST', body: JSON.stringify({proxy_url:url, label:label||null})});
+    closeProxyModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Прокси добавлен');
+    loadProxies();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
+}
+
+async function deleteProxy(id) {
+  try {
+    await api('/api/miniapp/proxy/'+id, {method:'DELETE'});
+    toast('Удалено'); loadProxies();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
 
 // ── Bot Subscribers ────────────────────────────────────
 let BS_BOT_ID = null;

@@ -664,6 +664,236 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Failed to cancel", 500)
 
+    # ── Schedules ────────────────────────────────────────────────────────────
+
+    async def bot_schedules(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        rows = await _safe_fetch(pool,
+            """SELECT id, message_text, execute_at, status, created_at
+               FROM scheduled_broadcasts WHERE bot_id=$1
+               ORDER BY execute_at DESC LIMIT 20""", bot_id)
+        return _json_resp({"schedules": rows})
+
+    async def create_schedule(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        text = (body.get("text") or "").strip()
+        execute_at = (body.get("execute_at") or "").strip()
+        if not text:
+            return _err("text required")
+        if not execute_at:
+            return _err("execute_at required (ISO datetime)")
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        try:
+            import datetime
+            dt = datetime.datetime.fromisoformat(execute_at.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                import datetime as _dt
+                dt = dt.replace(tzinfo=_dt.timezone.utc)
+        except ValueError:
+            return _err("execute_at must be ISO datetime (e.g. 2025-12-31T15:00:00Z)")
+        try:
+            row = await pool.fetchrow(
+                "INSERT INTO scheduled_broadcasts(bot_id, message_text, execute_at, created_by) VALUES($1,$2,$3,$4) RETURNING id",
+                bot_id, text, dt, uid)
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("create_schedule bot=%d uid=%d", bot_id, uid)
+            return _err("Failed to create schedule", 500)
+
+    async def cancel_schedule(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            sch_id = int(request.match_info["sch_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid sch_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE scheduled_broadcasts SET status='cancelled'
+                   WHERE id=$1 AND created_by=$2 AND status='pending'
+                   RETURNING id""", sch_id, uid)
+            if not row:
+                return _err("Not found or already done", 404)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to cancel", 500)
+
+    # ── Templates ────────────────────────────────────────────────────────────
+
+    async def templates(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT id, name, asset_type, template, created_at
+               FROM asset_templates WHERE owner_id=$1 AND asset_type='post'
+               ORDER BY created_at DESC LIMIT 30""", uid)
+        for r in rows:
+            if isinstance(r.get("template"), str):
+                import json as _json
+                try:
+                    r["template"] = _json.loads(r["template"])
+                except Exception:
+                    r["template"] = {}
+        return _json_resp({"templates": rows})
+
+    async def create_template(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        text = (body.get("text") or "").strip()
+        if not name:
+            return _err("name required")
+        if not text:
+            return _err("text required")
+        if len(text) > 4096:
+            return _err("text too long (max 4096)")
+        import json as _json
+        try:
+            row = await pool.fetchrow(
+                "INSERT INTO asset_templates(owner_id, asset_type, name, template) VALUES($1,'post',$2,$3::jsonb) RETURNING id",
+                uid, name, _json.dumps({"text": text}))
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("create_template uid=%d", uid)
+            return _err("Failed to create template", 500)
+
+    async def delete_template(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            tpl_id = int(request.match_info["tpl_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid tpl_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to delete", 500)
+
+    # ── Mass Publish ─────────────────────────────────────────────────────────
+
+    async def mass_publish(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        text = (body.get("text") or "").strip()
+        delay = int(body.get("delay", 30))
+        channel_ids = body.get("channel_ids")  # optional list; None = all channels
+        if not text:
+            return _err("text required")
+        if len(text) > 4096:
+            return _err("text too long (max 4096)")
+        if delay not in (5, 30, 60, -1):
+            delay = 30
+        # Count target channels
+        if channel_ids:
+            total = len(channel_ids)
+        else:
+            total = await _safe_count(pool,
+                "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
+        if total == 0:
+            return _err("No channels to publish to")
+        params = {"text": text, "delay": delay, "owner_id": uid}
+        if channel_ids:
+            params["channel_ids"] = channel_ids
+        try:
+            from services.operation_bus import submit
+            op_id = await submit(pool, uid, "mass_publish", params, total_items=total)
+            return _json_resp({"ok": True, "op_id": op_id, "total": total})
+        except Exception:
+            log.exception("mass_publish uid=%d", uid)
+            return _err("Failed to enqueue mass publish", 500)
+
+    # ── Proxies ──────────────────────────────────────────────────────────────
+
+    async def proxies(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT id, label, proxy_url, proxy_type, is_active, is_alive, last_check, created_at
+               FROM user_proxies WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50""", uid)
+        return _json_resp({"proxies": rows})
+
+    async def add_proxy(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        proxy_url = (body.get("proxy_url") or "").strip()
+        label = (body.get("label") or "").strip() or None
+        if not proxy_url:
+            return _err("proxy_url required")
+        import re as _re
+        if not _re.match(r"^(socks5|socks4|http)://", proxy_url, _re.IGNORECASE):
+            return _err("proxy_url must start with socks5://, socks4://, or http://")
+        proxy_type = "socks5"
+        if proxy_url.lower().startswith("http://"):
+            proxy_type = "http"
+        elif proxy_url.lower().startswith("socks4://"):
+            proxy_type = "socks4"
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO user_proxies(owner_id, label, proxy_url, proxy_type)
+                   VALUES($1,$2,$3,$4) ON CONFLICT(owner_id, proxy_url) DO UPDATE
+                   SET label=EXCLUDED.label RETURNING id""",
+                uid, label, proxy_url, proxy_type)
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("add_proxy uid=%d", uid)
+            return _err("Failed to add proxy", 500)
+
+    async def delete_proxy(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            proxy_id = int(request.match_info["proxy_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid proxy_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM user_proxies WHERE id=$1 AND owner_id=$2", proxy_id, uid)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to delete proxy", 500)
+
     # ── Analytics ────────────────────────────────────────────────────────────
 
     async def analytics(request: web.Request) -> web.Response:
@@ -817,6 +1047,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
+    # Schedules
+    app.router.add_get("/api/miniapp/bot/{bot_id}/schedules", bot_schedules)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/schedule", create_schedule)
+    app.router.add_post("/api/miniapp/schedule/{sch_id}/cancel", cancel_schedule)
+    # Templates
+    app.router.add_get("/api/miniapp/templates", templates)
+    app.router.add_post("/api/miniapp/template", create_template)
+    app.router.add_delete("/api/miniapp/template/{tpl_id}", delete_template)
+    # Mass Publish
+    app.router.add_post("/api/miniapp/mass_publish", mass_publish)
+    # Proxies
+    app.router.add_get("/api/miniapp/proxies", proxies)
+    app.router.add_post("/api/miniapp/proxy", add_proxy)
+    app.router.add_delete("/api/miniapp/proxy/{proxy_id}", delete_proxy)
     # Analytics
     app.router.add_get("/api/miniapp/analytics", analytics)
     # Subscription
