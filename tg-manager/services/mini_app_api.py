@@ -876,6 +876,106 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"ok": True, "count": len(commands)})
         return _err("Telegram API error", 500)
 
+    # ── Bot Stats (detailed) ───────────────────────────────────────────────────
+
+    async def bot_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        owned = await pool.fetchval(
+            "SELECT 1 FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid
+        )
+        if not owned:
+            return _err("Not found", 404)
+        from database import db as _db
+        try:
+            stats = await _db.get_bot_stats(pool, bot_id)
+            daily = await _db.get_audience_daily_growth(pool, bot_id, days=7)
+        except Exception as exc:
+            log.exception("bot_stats bot=%d uid=%d", bot_id, uid)
+            return _err(str(exc), 500)
+        daily_list = [{"date": str(r["d"]), "count": int(r["cnt"])} for r in daily]
+        return _json_resp({**stats, "daily_growth": daily_list})
+
+    # ── Profile Setter ─────────────────────────────────────────────────────────
+
+    async def profile_setter_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        total = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+            "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+            uid,
+        )
+        return _json_resp({"available_accounts": int(total or 0)})
+
+    async def profile_setter_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            op = str(body.get("op", "")).strip()
+            acc_count = int(body.get("acc_count", 0))
+        except Exception:
+            return _err("bad body", 400)
+        if op not in ("name", "avatar", "2fa"):
+            return _err("op must be name|avatar|2fa", 400)
+        if acc_count < 0:
+            return _err("acc_count must be >= 0", 400)
+        total = await pool.fetchval(
+            "SELECT COUNT(*) FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+            "AND (cooldown_until IS NULL OR cooldown_until < NOW())",
+            uid,
+        )
+        total = int(total or 0)
+        use = min(acc_count, total) if acc_count > 0 else total
+        if use == 0:
+            return _err("Нет доступных аккаунтов", 400)
+        rows = await pool.fetch(
+            "SELECT id FROM tg_accounts "
+            "WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL "
+            "AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
+            "ORDER BY trust_score DESC NULLS LAST LIMIT $2",
+            uid, use,
+        )
+        account_ids = [r["id"] for r in rows]
+        import json as _json
+        params: dict = {"op": op, "account_ids": account_ids}
+        if op == "name":
+            params["name_data"] = {
+                "first_name": str(body.get("first_name", "")).strip()[:64],
+                "last_name": str(body.get("last_name", "")).strip()[:64],
+                "about": str(body.get("about", "")).strip()[:70],
+            }
+        elif op == "avatar":
+            url = str(body.get("avatar_url", "")).strip()
+            if not url.startswith("http"):
+                return _err("avatar_url must start with http", 400)
+            params["avatar_url"] = url
+        elif op == "2fa":
+            new_pass = str(body.get("new_password", "")).strip()
+            if len(new_pass) < 4:
+                return _err("Пароль минимум 4 символа", 400)
+            params["new_password"] = new_pass
+            params["current_password"] = str(body.get("current_password", "")).strip()
+            params["hint"] = str(body.get("hint", "")).strip()
+        label_map = {"name": "Имя/Bio", "avatar": "Аватар", "2fa": "2FA пароль"}
+        label = f"Сеттер: {label_map.get(op, op)} × {len(account_ids)} акк."
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,'bulk_set_profile','pending',$2,$3,$4) RETURNING id",
+            uid, _json.dumps(params), len(account_ids), label,
+        )
+        return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
+
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
     async def toggle_bot(request: web.Request) -> web.Response:
@@ -1688,6 +1788,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/deeplink/{link_id}", delete_deeplink)
     # Engagement segments
     app.router.add_get("/api/miniapp/bot/{bot_id}/engagement", bot_engagement)
+    # Bot Stats (detailed)
+    app.router.add_get("/api/miniapp/bot/{bot_id}/stats", bot_stats)
+    # Profile Setter
+    app.router.add_get("/api/miniapp/profile_setter/status", profile_setter_status)
+    app.router.add_post("/api/miniapp/profile_setter", profile_setter_submit)
     # Bot Notes
     app.router.add_get("/api/miniapp/bot/{bot_id}/note", bot_note)
     app.router.add_put("/api/miniapp/bot/{bot_id}/note", save_bot_note)

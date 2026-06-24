@@ -378,6 +378,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openTemplates()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📝</div><div class="row-body"><div class="row-name">Шаблоны сообщений</div><div class="row-val" id="m-tpl-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openMassPub()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Массовая публикация</div><div class="row-val">Пост во все каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openProfileSetter()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎨</div><div class="row-body"><div class="row-name">Сеттер профилей</div><div class="row-val">Имя, аватар, 2FA для аккаунтов</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
@@ -638,6 +639,60 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div style="padding:12px 0 4px">
       <button class="btn btn-d" style="width:100%" onclick="clearBotCommands()">🗑 Удалить все команды</button>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: BOT STATS ══════════════════════ -->
+<div class="screen" id="s-botstats">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="bstats-title">📊 Статистика</div>
+  </div>
+  <div class="sub-sb">
+    <div id="bstatsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0"></div>
+    <div class="sec" style="margin-top:8px">Рост аудитории (7 дней)</div>
+    <div id="bstatsChart" style="background:#1a1a1a;border-radius:12px;padding:14px;min-height:60px"></div>
+    <div class="sec" style="margin-top:8px">Детали</div>
+    <div class="lst" id="bstatsDetails"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: PROFILE SETTER ══════════════════════ -->
+<div class="screen" id="s-profilesetter">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🎨 Сеттер профилей</div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
+      Массовое оформление аккаунтов: имя, фото, 2FA.<br>
+      Доступно аккаунтов: <b id="setterAvail">—</b>
+    </div>
+    <div class="sec">Тип операции</div>
+    <div id="setterTabs" style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0 10px">
+      <button class="btn btn-p" onclick="selectSetterOp('name')" id="setterTab-name">📝 Имя/Bio</button>
+      <button class="btn btn-s" onclick="selectSetterOp('avatar')" id="setterTab-avatar">🖼 Аватар</button>
+      <button class="btn btn-s" onclick="selectSetterOp('2fa')" id="setterTab-2fa">🔑 2FA</button>
+    </div>
+    <div id="setterNameFields">
+      <div class="field"><label>Имя (спинтакс: {Алекс|Макс})</label><input type="text" id="setterFirstName" maxlength="64" placeholder="Имя"></div>
+      <div class="field"><label>Фамилия</label><input type="text" id="setterLastName" maxlength="64" placeholder="Фамилия"></div>
+      <div class="field"><label>Bio (до 70 симв.)</label><input type="text" id="setterAbout" maxlength="70" placeholder="Предприниматель"></div>
+    </div>
+    <div id="setterAvatarFields" style="display:none">
+      <div class="field"><label>URL изображения</label><input type="url" id="setterAvatarUrl" placeholder="https://example.com/photo.jpg"></div>
+    </div>
+    <div id="setter2faFields" style="display:none">
+      <div class="field"><label>Новый пароль (мин 4 символа)</label><input type="password" id="setter2faNew" maxlength="64" placeholder="Новый пароль"></div>
+      <div class="field"><label>Текущий пароль (если уже стоит)</label><input type="password" id="setter2faCur" maxlength="64" placeholder="Оставьте пустым если не установлен"></div>
+      <div class="field"><label>Подсказка (необязательно)</label><input type="text" id="setter2faHint" maxlength="64" placeholder="Подсказка"></div>
+    </div>
+    <div class="field">
+      <label>Кол-во аккаунтов (0 = все)</label>
+      <input type="number" id="setterCount" min="0" value="0">
+    </div>
+    <div id="setterErr" style="color:#f87171;font-size:13px;margin:6px 0"></div>
+    <button class="btn btn-p" id="setterBtn" onclick="submitProfileSetter()" style="width:100%">🚀 Запустить</button>
   </div>
 </div>
 
@@ -1177,6 +1232,9 @@ function buildBotDetail(d) {
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openBotNote(${d.bot.bot_id})">📝 Заметка</button>
       <button class="btn btn-s" onclick="openBotCommands(${d.bot.bot_id})">⌨️ Команды</button>
+    </div>
+    <div class="actions" style="padding-top:0">
+      <button class="btn btn-g" onclick="openBotStats(${d.bot.bot_id},'${esc(CUR_BOT.name)}')" style="width:100%">📊 Детальная статистика</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -3009,6 +3067,110 @@ async function clearBotCommands() {
     toast('🗑 Все команды удалены');
     loadBotCommands();
   } catch(e) { toast('⚠️ '+e.message); }
+}
+
+// ── Bot Stats (detailed) ───────────────────────────────
+let BSTATS_BOT_ID = null;
+async function openBotStats(botId, botName) {
+  BSTATS_BOT_ID = botId;
+  txt('bstats-title', '📊 ' + (botName||'Статистика'));
+  push('s-botstats');
+  txt('bstatsGrid', '<div class="spin-wrap" style="grid-column:1/-1"><div class="spin"></div></div>');
+  txt('bstatsChart', '');
+  txt('bstatsDetails', '');
+  try {
+    const d = await api('/api/miniapp/bot/'+botId+'/stats');
+    const kpis = [
+      {v:num(d.aud_total),l:'Аудитория'},
+      {v:'+'+num(d.aud_today),l:'Новых за 24ч'},
+      {v:num(d.broadcasts_total),l:'Рассылок'},
+      {v:num(d.broadcasts_sent),l:'Отправлено'},
+      {v:num(d.active_replies),l:'Авто-ответов'},
+      {v:num(d.active_funnels),l:'Воронок'},
+      {v:num(d.relay_sessions),l:'Диалогов'},
+      {v:num(d.funnel_users),l:'В воронках'},
+    ];
+    txt('bstatsGrid', kpis.map(k=>`<div class="card" style="text-align:center"><div style="font-size:22px;font-weight:700">${k.v}</div><div style="font-size:11px;color:#aaa;margin-top:2px">${k.l}</div></div>`).join(''));
+    // Draw simple bar chart for daily growth
+    const daily = d.daily_growth||[];
+    if (daily.length) {
+      const maxC = Math.max(...daily.map(d2=>d2.count),1);
+      const bars = daily.map(d2=>{
+        const h = Math.max(4, Math.round(d2.count/maxC*60));
+        const date = d2.date.slice(5); // MM-DD
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">
+          <div style="font-size:10px;color:#888">${num(d2.count)}</div>
+          <div style="width:100%;height:${h}px;background:#7c3aed;border-radius:3px"></div>
+          <div style="font-size:10px;color:#666">${date}</div>
+        </div>`;
+      }).join('');
+      txt('bstatsChart', `<div style="display:flex;align-items:flex-end;gap:4px;height:80px">${bars}</div>`);
+    } else {
+      txt('bstatsChart', '<div style="color:#666;font-size:13px;text-align:center">Нет данных</div>');
+    }
+    const compl = d.funnel_total_subs ? Math.round(d.funnel_completed/d.funnel_total_subs*100) : 0;
+    txt('bstatsDetails', `
+      <div class="row"><div class="row-body"><div class="row-name">Входящих сообщений</div></div><div class="row-right">${num(d.msg_in)}</div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Исходящих сообщений</div></div><div class="row-right">${num(d.msg_out)}</div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Новых диалогов за 24ч</div></div><div class="row-right">${num(d.relay_today)}</div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Завершили воронку</div></div><div class="row-right">${num(d.funnel_completed)} (${compl}%)</div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Покинули воронку</div></div><div class="row-right">${num(d.funnel_dropped||0)}</div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Рост за 7 дней</div></div><div class="row-right">+${num(d.aud_week)}</div></div>
+    `);
+  } catch(e) {
+    txt('bstatsGrid', `<div style="grid-column:1/-1">${empty('⚠️','Ошибка',e.message)}</div>`);
+  }
+}
+
+// ── Profile Setter ─────────────────────────────────────
+let SETTER_OP = 'name';
+async function openProfileSetter() {
+  push('s-profilesetter');
+  selectSetterOp('name');
+  document.getElementById('setterAvail').textContent='…';
+  document.getElementById('setterErr').textContent='';
+  try {
+    const d = await api('/api/miniapp/profile_setter/status');
+    document.getElementById('setterAvail').textContent = d.available_accounts;
+  } catch(e) { document.getElementById('setterAvail').textContent='?'; }
+}
+function selectSetterOp(op) {
+  SETTER_OP = op;
+  ['name','avatar','2fa'].forEach(o=>{
+    const btn = document.getElementById('setterTab-'+o);
+    if (btn) btn.className = o===op ? 'btn btn-p' : 'btn btn-s';
+  });
+  document.getElementById('setterNameFields').style.display = op==='name'?'':'none';
+  document.getElementById('setterAvatarFields').style.display = op==='avatar'?'':'none';
+  document.getElementById('setter2faFields').style.display = op==='2fa'?'':'none';
+}
+async function submitProfileSetter() {
+  const errEl = document.getElementById('setterErr');
+  errEl.textContent='';
+  const acc_count = parseInt(document.getElementById('setterCount').value)||0;
+  const body = {op: SETTER_OP, acc_count};
+  if (SETTER_OP==='name') {
+    body.first_name = document.getElementById('setterFirstName').value.trim();
+    body.last_name = document.getElementById('setterLastName').value.trim();
+    body.about = document.getElementById('setterAbout').value.trim();
+    if (!body.first_name && !body.last_name && !body.about) { errEl.textContent='Заполните хотя бы одно поле'; return; }
+  } else if (SETTER_OP==='avatar') {
+    body.avatar_url = document.getElementById('setterAvatarUrl').value.trim();
+    if (!body.avatar_url) { errEl.textContent='Введите URL'; return; }
+  } else {
+    body.new_password = document.getElementById('setter2faNew').value.trim();
+    body.current_password = document.getElementById('setter2faCur').value.trim();
+    body.hint = document.getElementById('setter2faHint').value.trim();
+    if (!body.new_password) { errEl.textContent='Введите новый пароль'; return; }
+  }
+  const btn = document.getElementById('setterBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  try {
+    const r = await api('/api/miniapp/profile_setter', {method:'POST', body:JSON.stringify(body)});
+    toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
+    back();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
 }
 
 // ── Utils ──────────────────────────────────────────────
