@@ -1028,6 +1028,65 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Network / Cluster Overview ─────────────────────────────────────────────
+
+    async def network_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bots = await pool.fetch(
+                """SELECT bot_id, username, first_name, is_active, bot_role, cluster, swarm_enabled, swarm_weight
+                   FROM managed_bots WHERE added_by=$1 ORDER BY cluster, bot_role""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("network_overview uid=%d", uid)
+            return _err(str(exc), 500)
+        # Group by cluster
+        clusters: dict = {}
+        for r in bots:
+            cl = r["cluster"] or "default"
+            if cl not in clusters:
+                clusters[cl] = []
+            clusters[cl].append({
+                "bot_id": r["bot_id"],
+                "name": r["username"] or r["first_name"] or str(r["bot_id"]),
+                "is_active": bool(r["is_active"]),
+                "role": r["bot_role"] or "general",
+                "swarm": bool(r["swarm_enabled"]),
+                "weight": float(r["swarm_weight"] or 1.0),
+            })
+        return _json_resp({
+            "clusters": [
+                {"name": name, "bots": bot_list}
+                for name, bot_list in clusters.items()
+            ],
+            "total_bots": len(bots),
+        })
+
+    async def set_bot_role_api(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+            role = str(body.get("role", "general")).strip()
+            cluster = str(body.get("cluster", "default")).strip()[:64]
+        except Exception:
+            return _err("bad request", 400)
+        valid_roles = ("entry", "conversion", "retention", "general")
+        if role not in valid_roles:
+            return _err(f"role must be one of {valid_roles}", 400)
+        res = await pool.execute(
+            "UPDATE managed_bots SET bot_role=$1, cluster=$2 WHERE bot_id=$3 AND added_by=$4",
+            role, cluster, bot_id, uid,
+        )
+        if res == "UPDATE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True})
+
     # ── Relay (Inbox) ─────────────────────────────────────────────────────────
 
     async def relay_sessions_list(request: web.Request) -> web.Response:
@@ -2473,6 +2532,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Network / Cluster
+    app.router.add_get("/api/miniapp/network", network_overview)
+    app.router.add_put("/api/miniapp/bot/{bot_id}/role", set_bot_role_api)
     # Relay (Inbox)
     app.router.add_get("/api/miniapp/bot/{bot_id}/relay/sessions", relay_sessions_list)
     app.router.add_get("/api/miniapp/relay/session/{session_id}/messages", relay_session_messages)
