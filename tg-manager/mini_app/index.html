@@ -386,6 +386,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openNetwork()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🕸</div><div class="row-body"><div class="row-name">Сеть ботов</div><div class="row-val" id="m-net-cnt">Кластеры и роли</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openShield()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🛡</div><div class="row-body"><div class="row-name">Account Shield</div><div class="row-val" id="m-shield-val">Защита от бана</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openAdIntel()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📡</div><div class="row-body"><div class="row-name">Ad Intelligence</div><div class="row-val" id="m-adintel-val">Анализ рекламы в Telegram</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openPhysics()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚛️</div><div class="row-body"><div class="row-name">Physics Hub</div><div class="row-val" id="m-physics-val">Риски аккаунтов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openGraph()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🕸</div><div class="row-body"><div class="row-name">Graph Hub</div><div class="row-val" id="m-graph-val">Граф аудитории</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openCompliance()"><div class="row-ico" style="background:rgba(34,197,94,.16)">✅</div><div class="row-body"><div class="row-name">Compliance</div><div class="row-val" id="m-compliance-val">Аудит операций</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openMultigeo()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🌍</div><div class="row-body"><div class="row-name">Мультигео</div><div class="row-val">Мультиязычные профили ботов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openWarmup()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌱</div><div class="row-body"><div class="row-name">Прогрев аккаунтов</div><div class="row-val" id="m-warmup-val">Warmup-планы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openHealth()"><div class="row-ico" style="background:rgba(239,68,68,.16)">❤️</div><div class="row-body"><div class="row-name">Health Dashboard</div><div class="row-val" id="m-health-val">Здоровье аккаунтов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openGhost()"><div class="row-ico" style="background:rgba(139,92,246,.16)">👻</div><div class="row-body"><div class="row-name">Ghost Engine</div><div class="row-val" id="m-ghost-val">Автономное присутствие</div></div><div class="row-right chev">›</div></div>
@@ -442,6 +446,52 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div><div class="row-body"><div class="row-name">BotMother OS</div><div class="row-val">Telegram Automation Platform</div></div></div>
       <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
       <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ PHYSICS HUB ══════════════════════ -->
+<div class="screen" id="s-physics">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚛️ Physics Hub</div></div>
+  <div class="sub-sb">
+    <div class="sec">Риски аккаунтов</div>
+    <div class="lst" id="physicsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ GRAPH HUB ══════════════════════ -->
+<div class="screen" id="s-graph">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Graph Hub</div></div>
+  <div class="sub-sb">
+    <div class="sec">Статистика графа</div>
+    <div class="lst" id="graphStats"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Топ пересечений аудитории</div>
+    <div class="lst" id="graphOverlaps"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ COMPLIANCE HUB ══════════════════════ -->
+<div class="screen" id="s-compliance">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">✅ Compliance</div></div>
+  <div class="sub-sb">
+    <div class="sec">Аудит операций</div>
+    <div class="lst" id="complianceStats"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Последние записи</div>
+    <div class="lst" id="complianceList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MULTIGEO ══════════════════════ -->
+<div class="screen" id="s-multigeo">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Мультигео</div></div>
+  <div class="sub-sb">
+    <div class="lst" style="margin:12px 16px">
+      <div class="row"><div class="row-body">
+        <div class="row-name">🌍 Мультиязычные профили ботов</div>
+        <div class="row-val">Задайте имя, описание и short description бота на разных языках через Telegram-бота BotMother.</div>
+        <div class="row-val" style="margin-top:6px">Поддерживаемые языки: 🇷🇺 ru · 🇬🇧 en · 🇩🇪 de · 🇫🇷 fr · 🇪🇸 es · 🇮🇹 it и другие.</div>
+        <div class="row-val" style="margin-top:6px;color:var(--hint)">Используйте команду /multigeo в боте для управления.</div>
+      </div></div>
     </div>
   </div>
 </div>
@@ -5745,6 +5795,99 @@ async function submitErrReport() {
     loadErrReports();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
+}
+
+// ── Physics Hub ────────────────────────────────────────
+async function openPhysics() {
+  push('s-physics');
+  txt('physicsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/physics');
+    if (!rows.length) { txt('physicsList', empty('⚛️','Нет данных риска','Данные появятся после выполнения операций')); return; }
+    const riskLabel = r => r>=0.8?'🔴 Критический':r>=0.5?'🟠 Высокий':r>=0.3?'🟡 Средний':'🟢 Низкий';
+    txt('physicsList', rows.map(r => `
+      <div class="row">
+        <div class="row-ico" style="background:rgba(239,68,68,.16)">📱</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
+          <div class="row-val">${riskLabel(r.risk_score||0)} · Риск: ${((r.risk_score||0)*100).toFixed(0)}%</div>
+          <div class="row-val">Бан-вер.: ${((r.ban_probability||0)*100).toFixed(0)}% · Ops/24h: ${r.ops_24h||0}</div>
+          ${r.flood_rate_1h?`<div class="row-val" style="color:#f59e0b">Flood 1h: ${(r.flood_rate_1h).toFixed(1)}/час</div>`:''}
+          <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
+        </div>
+      </div>
+    `).join(''));
+    const high = rows.filter(r=>(r.risk_score||0)>=0.5).length;
+    document.getElementById('m-physics-val').textContent = high?`${high} проблем`:rows.length+' аккаунтов';
+  } catch(e) { txt('physicsList', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Graph Hub ───────────────────────────────────────────
+async function openGraph() {
+  push('s-graph');
+  txt('graphStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('graphOverlaps','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const [st, ov] = await Promise.all([
+      api('/api/miniapp/graph'),
+      api('/api/miniapp/graph/overlaps')
+    ]);
+    txt('graphStats', `
+      <div class="row"><div class="row-body"><div class="row-name">Нодов</div><div class="row-val">${num(st.nodes||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Рёбер</div><div class="row-val">${num(st.edges||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Сильных пересечений</div><div class="row-val">${num(st.strong_overlaps||0)}</div></div></div>
+    `);
+    document.getElementById('m-graph-val').textContent = (st.nodes||0)+' нодов';
+    if (!ov.length) { txt('graphOverlaps', empty('🕸','Нет пересечений','')); return; }
+    txt('graphOverlaps', ov.map(r => `
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">${esc(r.title_a||r.username_a||'?')} ⟷ ${esc(r.title_b||r.username_b||'?')}</div>
+          <div class="row-val">Пересечение: ${((r.overlap_pct||0)*100).toFixed(1)}% · Общих: ${r.shared_users||0}</div>
+          <div class="row-val" style="color:var(--hint)">${ago(r.computed_at)}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('graphStats', empty('⚠️','Ошибка',e.message));
+    txt('graphOverlaps','');
+  }
+}
+
+// ── Compliance Hub ──────────────────────────────────────
+async function openCompliance() {
+  push('s-compliance');
+  txt('complianceStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('complianceList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/compliance');
+    const t = d.totals||{};
+    txt('complianceStats', `
+      <div class="row"><div class="row-body"><div class="row-name">Всего записей</div><div class="row-val">${num(t.total||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Успешных</div><div class="row-val" style="color:#22c55e">${num(t.ok_cnt||0)}</div></div></div>
+      <div class="row"><div class="row-body"><div class="row-name">Рисковых</div><div class="row-val" style="color:#ef4444">${num(t.risk_cnt||0)}</div></div></div>
+    `);
+    document.getElementById('m-compliance-val').textContent = (t.total||0)+' записей';
+    const rows = d.recent||[];
+    if (!rows.length) { txt('complianceList', empty('📋','Нет записей','')); return; }
+    const outCls = {success:'b-gr',ban:'b-rd',flood_wait:'b-or',error:'b-rd'};
+    txt('complianceList', rows.map(r => `
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">${esc(r.op_type)}</div>
+          <div class="row-val"><span class="badge ${outCls[r.outcome]||'b-gy'}">${r.outcome}</span> · ${ago(r.created_at)}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('complianceStats', empty('⚠️','Ошибка',e.message));
+    txt('complianceList','');
+  }
+}
+
+// ── Multigeo ────────────────────────────────────────────
+function openMultigeo() {
+  push('s-multigeo');
 }
 
 // ── Content Cloner ─────────────────────────────────────

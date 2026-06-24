@@ -3545,6 +3545,108 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_referrals": count,
         })
 
+    # ── Physics Hub ──────────────────────────────────────────────────────────
+
+    async def physics_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT ars.account_id, ta.phone, ta.username, ta.first_name,
+                   ars.risk_score, ars.ban_probability, ars.flood_rate_1h,
+                   ars.ops_24h, ars.last_flood_at, ars.computed_at
+            FROM account_risk_scores ars
+            JOIN tg_accounts ta ON ta.id = ars.account_id
+            WHERE ta.owner_id = $1
+            ORDER BY ars.risk_score DESC NULLS LAST
+            LIMIT 30
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def physics_account_telemetry(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        account_id = int(request.match_info["account_id"])
+        owner = await pool.fetchval(
+            "SELECT owner_id FROM tg_accounts WHERE id=$1", account_id
+        )
+        if owner != uid:
+            return _err("forbidden", 403)
+        rows = await pool.fetch(
+            """
+            SELECT op_type, outcome, COUNT(*) AS cnt,
+                   AVG(flood_wait_s) AS avg_flood, AVG(duration_ms) AS avg_dur
+            FROM op_telemetry
+            WHERE account_id=$1 AND created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY op_type, outcome ORDER BY cnt DESC LIMIT 20
+            """,
+            account_id,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    # ── Graph Hub ─────────────────────────────────────────────────────────────
+
+    async def graph_stats(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        stats = await pool.fetchrow(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM graph_nodes) AS nodes,
+                (SELECT COUNT(*) FROM graph_edges) AS edges,
+                (SELECT COUNT(*) FROM audience_overlaps WHERE overlap_pct > 0.1) AS strong_overlaps
+            """
+        )
+        return _json_resp(dict(stats) if stats else {})
+
+    async def graph_overlaps(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT ao.overlap_pct, ao.shared_users, ao.computed_at,
+                   na.title AS title_a, na.username AS username_a,
+                   nb.title AS title_b, nb.username AS username_b
+            FROM audience_overlaps ao
+            JOIN graph_nodes na ON na.id = ao.node_a
+            JOIN graph_nodes nb ON nb.id = ao.node_b
+            WHERE ao.overlap_pct > 0.05
+            ORDER BY ao.overlap_pct DESC LIMIT 20
+            """
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    # ── Compliance Hub ────────────────────────────────────────────────────────
+
+    async def compliance_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        totals = await pool.fetchrow(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE outcome='success') AS ok_cnt,
+                   COUNT(*) FILTER (WHERE outcome IN ('ban','flood_wait')) AS risk_cnt
+            FROM compliance_audit WHERE user_id=$1
+            """,
+            uid,
+        )
+        recent = await pool.fetch(
+            "SELECT op_type, outcome, created_at FROM compliance_audit "
+            "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
+            uid,
+        )
+        return _json_resp({
+            "totals": dict(totals) if totals else {},
+            "recent": [dict(r) for r in recent],
+        })
+
     # ── Content Cloner ───────────────────────────────────────────────────────
 
     async def content_cloner_history(request: web.Request) -> web.Response:
@@ -4062,6 +4164,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reg Checker
     app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
+    # Physics Hub
+    app.router.add_get("/api/miniapp/physics", physics_overview)
+    app.router.add_get("/api/miniapp/physics/{account_id}/telemetry", physics_account_telemetry)
+    # Graph Hub
+    app.router.add_get("/api/miniapp/graph", graph_stats)
+    app.router.add_get("/api/miniapp/graph/overlaps", graph_overlaps)
+    # Compliance Hub
+    app.router.add_get("/api/miniapp/compliance", compliance_overview)
     # Content Cloner
     app.router.add_get("/api/miniapp/content_cloner/history", content_cloner_history)
     app.router.add_post("/api/miniapp/content_cloner/submit", content_cloner_submit)
