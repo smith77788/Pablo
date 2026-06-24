@@ -506,6 +506,7 @@ let SSE = null;
 let BOTS = [];         // cached bot list
 let CUR_BOT = null;    // bot for sub-screens
 let CUR_ACCS = [];     // cached accounts
+let CUR_CHANNELS = []; // cached channels
 let REF_CODE = null;
 
 // ── Boot ───────────────────────────────────────────────
@@ -1060,7 +1061,6 @@ function buildAccDetail(d) {
 }
 
 // ── Channels ───────────────────────────────────────────
-let CUR_CHANNELS = [];
 async function openChannels() {
   push('s-channels');
   txt('chList', '<div class="spin-wrap"><div class="spin"></div></div>');
