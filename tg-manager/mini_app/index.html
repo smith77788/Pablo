@@ -435,6 +435,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openQuickPost()"><div class="row-ico" style="background:rgba(168,85,247,.16)">✍️</div><div class="row-body"><div class="row-name">Quick Post</div><div class="row-val">Быстрая публикация в каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openReporter()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🚨</div><div class="row-body"><div class="row-name">Репортинг</div><div class="row-val">Жалобы на аккаунты/каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openBotFactory()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🏭</div><div class="row-body"><div class="row-name">Bot Factory</div><div class="row-val" id="m-botfactory-val">Создание и импорт ботов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openGlobalPresence()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌍</div><div class="row-body"><div class="row-name">Global Presence</div><div class="row-val" id="m-gp-val">Гео-развёртывание каналов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openMassOps()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚡</div><div class="row-body"><div class="row-name">Mass Ops</div><div class="row-val" id="m-massops-val">Массовые операции</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openEcosystems()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌐</div><div class="row-body"><div class="row-name">Экосистемы</div><div class="row-val" id="m-eco-val">Управление экосистемами</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openChannelFactory()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📢</div><div class="row-body"><div class="row-name">Channel Factory</div><div class="row-val">Создание каналов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openGroupFactory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">👥</div><div class="row-body"><div class="row-name">Group Factory</div><div class="row-val">Создание групп</div></div><div class="row-right chev">›</div></div>
@@ -450,6 +452,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
       <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ GLOBAL PRESENCE ══════════════════════ -->
+<div class="screen" id="s-globalpresence">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌍 Global Presence</div></div>
+  <div class="sub-sb">
+    <div class="sec">Планы глобального присутствия</div>
+    <div class="lst" id="gpList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ GLOBAL PRESENCE DETAIL ══════════════════════ -->
+<div class="screen" id="s-gpdetail">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="gpdetail-name">План</div></div>
+  <div class="sub-sb" id="gpdetail-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ MASS OPS ══════════════════════ -->
+<div class="screen" id="s-massops">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚡ Mass Ops</div></div>
+  <div class="sub-sb">
+    <div class="sec">Массовые операции</div>
+    <div class="lst" id="massopsList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -5852,6 +5878,105 @@ async function submitErrReport() {
     loadErrReports();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
+}
+
+// ── Global Presence ────────────────────────────────────
+const GP_TYPES = {channel:'📢 Канал',group:'👥 Группа',bot:'🤖 Бот',package:'📦 Пакет',full_package:'🎁 Полный пакет'};
+async function openGlobalPresence() {
+  push('s-globalpresence');
+  txt('gpList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/global_presence');
+    if (!rows.length) { txt('gpList', empty('🌍','Планов нет','Создайте глобальное развёртывание через бота')); return; }
+    txt('gpList', rows.map(r => {
+      const done=r.done_targets||0, total=r.total_targets||0;
+      const pct=total>0?Math.round(done/total*100):0;
+      const [cls,lbl]=stb(r.status);
+      return `
+        <div class="row tap" onclick="openGpDetail(${r.id},'${esc(r.name_pattern)}')">
+          <div class="row-body">
+            <div class="row-name">${esc(r.name_pattern)}</div>
+            <div class="row-val">${GP_TYPES[r.asset_type]||r.asset_type} · <span class="badge ${cls}">${lbl}</span></div>
+            <div class="row-val">Целей: ${done}/${total} (${pct}%) · Ошибок: ${r.failed_targets||0}</div>
+            <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
+          </div>
+          <div class="row-right chev">›</div>
+        </div>
+      `;
+    }).join(''));
+    const active = rows.filter(r=>r.status==='running').length;
+    document.getElementById('m-gp-val').textContent = active?`${active} активных`:rows.length+' планов';
+  } catch(e) { txt('gpList', empty('⚠️','Ошибка',e.message)); }
+}
+async function openGpDetail(planId, planName) {
+  push('s-gpdetail');
+  document.getElementById('gpdetail-name').textContent = planName||'План';
+  txt('gpdetail-body','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/global_presence/${planId}`);
+    const p = d.plan;
+    const targets = d.targets||[];
+    const stCls = {done:'b-gr',failed:'b-rd',running:'b-or',pending:'b-gy',skipped:'b-gy'};
+    let html = `
+      <div class="lst" style="margin:12px 16px 0">
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${GP_TYPES[p.asset_type]||p.asset_type}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${p.status}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Паттерн</div><div class="row-val">${esc(p.name_pattern)}</div></div></div>
+        ${p.username_pattern?`<div class="row"><div class="row-body"><div class="row-name">Username</div><div class="row-val">${esc(p.username_pattern)}</div></div></div>`:''}
+      </div>
+      <div class="sec" style="margin-top:8px">Цели (${targets.length})</div>
+      <div class="lst" style="margin:0 16px">
+    `;
+    if (!targets.length) {
+      html += empty('🌍','Нет целей','');
+    } else {
+      targets.forEach(t => {
+        html += `
+          <div class="row">
+            <div class="row-body">
+              <div class="row-name">${t.country?esc(t.country):'—'} ${t.city?'· '+esc(t.city):''}</div>
+              <div class="row-val">${esc(t.planned_name||'—')} · <span class="badge ${stCls[t.status]||'b-gy'}">${t.status}</span></div>
+              ${t.error_message?`<div class="row-val" style="color:#ef4444">${esc(t.error_message)}</div>`:''}
+            </div>
+          </div>
+        `;
+      });
+    }
+    html += '</div>';
+    txt('gpdetail-body', html);
+  } catch(e) { txt('gpdetail-body', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Mass Ops ────────────────────────────────────────────
+const MASS_OP_LABELS = {
+  mass_post:'📨 Масс. публикация', mass_join:'➕ Масс. подписка',
+  mass_leave:'➖ Масс. выход', mass_invite:'📨 Масс. инвайт',
+  mass_mute:'🔕 Масс. мьют', mass_unmute:'🔔 Масс. размьют',
+  mass_delete:'🗑 Масс. удаление', mass_forward:'⏩ Масс. форвард'
+};
+async function openMassOps() {
+  push('s-massops');
+  txt('massopsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/mass_ops');
+    if (!rows.length) { txt('massopsList', empty('⚡','Нет массовых операций','')); return; }
+    txt('massopsList', rows.map(r => {
+      const [cls,lbl]=stb(r.status);
+      const opName = MASS_OP_LABELS[r.op_type]||esc(r.op_type);
+      const progress = r.total_items?`${r.done_items||0}/${r.total_items}`:'—';
+      return `
+        <div class="row">
+          <div class="row-body">
+            <div class="row-name">${opName}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · Прогресс: ${progress}</div>
+            <div class="row-val" style="color:var(--hint)">${ago(r.created_at)} ${r.finished_at?'→ '+ago(r.finished_at):''}</div>
+          </div>
+        </div>
+      `;
+    }).join(''));
+    const running = rows.filter(r=>r.status==='running').length;
+    document.getElementById('m-massops-val').textContent = running?`${running} активных`:rows.length+' операций';
+  } catch(e) { txt('massopsList', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── Ecosystems ─────────────────────────────────────────

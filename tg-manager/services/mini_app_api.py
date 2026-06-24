@@ -3545,6 +3545,64 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_referrals": count,
         })
 
+    # ── Global Presence ───────────────────────────────────────────────────────
+
+    async def global_presence_plans(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT gpp.id, gpp.asset_type, gpp.name_pattern, gpp.status,
+                   gpp.created_at, gpp.updated_at,
+                   COUNT(gpt.id) AS total_targets,
+                   COUNT(gpt.id) FILTER (WHERE gpt.status='done') AS done_targets,
+                   COUNT(gpt.id) FILTER (WHERE gpt.status='failed') AS failed_targets
+            FROM global_presence_plans gpp
+            LEFT JOIN global_presence_targets gpt ON gpt.plan_id = gpp.id
+            WHERE gpp.owner_id=$1
+            GROUP BY gpp.id, gpp.asset_type, gpp.name_pattern,
+                     gpp.status, gpp.created_at, gpp.updated_at
+            ORDER BY gpp.created_at DESC LIMIT 20
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def global_presence_plan_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        plan_id = int(request.match_info["plan_id"])
+        plan = await pool.fetchrow(
+            "SELECT * FROM global_presence_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
+        )
+        if not plan:
+            return _err("not found", 404)
+        targets = await pool.fetch(
+            "SELECT country, city, language, asset_type, planned_name, status, error_message "
+            "FROM global_presence_targets WHERE plan_id=$1 ORDER BY status, country, city LIMIT 100",
+            plan_id,
+        )
+        return _json_resp({"plan": dict(plan), "targets": [dict(t) for t in targets]})
+
+    # ── Mass Ops ──────────────────────────────────────────────────────────────
+
+    async def mass_ops_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT id, op_type, status, done_items, total_items, created_at, finished_at
+            FROM operation_queue
+            WHERE owner_id=$1 AND op_type LIKE 'mass_%'
+            ORDER BY created_at DESC LIMIT 30
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
     # ── Ecosystems ────────────────────────────────────────────────────────────
 
     async def ecosystems_list(request: web.Request) -> web.Response:
@@ -4276,6 +4334,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reg Checker
     app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
+    # Global Presence
+    app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
+    app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
+    # Mass Ops
+    app.router.add_get("/api/miniapp/mass_ops", mass_ops_overview)
     # Ecosystems
     app.router.add_get("/api/miniapp/ecosystems", ecosystems_list)
     app.router.add_get("/api/miniapp/ecosystem/{eco_id}", ecosystem_detail)
