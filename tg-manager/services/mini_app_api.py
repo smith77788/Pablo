@@ -1028,6 +1028,111 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Audience Parser (read-only history) ───────────────────────────────────
+
+    async def parser_runs(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, source_type, source_ref, parse_type, status,
+                          total_found, total_saved, started_at, finished_at, error
+                   FROM parser_runs WHERE owner_id=$1 ORDER BY started_at DESC LIMIT 30""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("parser_runs uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"runs": [
+            {
+                "id": r["id"],
+                "source": r["source_ref"] or "",
+                "source_type": r["source_type"] or "",
+                "parse_type": r["parse_type"] or "",
+                "status": r["status"] or "pending",
+                "total_found": r["total_found"] or 0,
+                "total_saved": r["total_saved"] or 0,
+                "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+                "error": (r["error"] or "")[:200],
+            }
+            for r in rows
+        ]})
+
+    async def parsed_audience(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        source = request.rel_url.query.get("source", "")
+        limit = min(int(request.rel_url.query.get("limit", "50")), 200)
+        offset = int(request.rel_url.query.get("offset", "0"))
+        try:
+            if source:
+                rows = await pool.fetch(
+                    """SELECT tg_user_id, username, first_name, last_name, is_premium,
+                              source_title, source_type, parsed_at
+                       FROM parsed_audiences WHERE owner_id=$1 AND source_username ILIKE $2
+                       ORDER BY parsed_at DESC LIMIT $3 OFFSET $4""",
+                    uid, f"%{source}%", limit, offset,
+                )
+            else:
+                rows = await pool.fetch(
+                    """SELECT tg_user_id, username, first_name, last_name, is_premium,
+                              source_title, source_type, parsed_at
+                       FROM parsed_audiences WHERE owner_id=$1
+                       ORDER BY parsed_at DESC LIMIT $2 OFFSET $3""",
+                    uid, limit, offset,
+                )
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM parsed_audiences WHERE owner_id=$1", uid
+            )
+        except Exception as exc:
+            log.exception("parsed_audience uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({
+            "total": int(total or 0),
+            "users": [
+                {
+                    "tg_user_id": r["tg_user_id"],
+                    "username": r["username"] or "",
+                    "name": " ".join(filter(None, [r["first_name"], r["last_name"]])),
+                    "is_premium": bool(r["is_premium"]),
+                    "source_title": r["source_title"] or "",
+                    "source_type": r["source_type"] or "",
+                    "parsed_at": r["parsed_at"].isoformat() if r["parsed_at"] else None,
+                }
+                for r in rows
+            ],
+        })
+
+    async def submit_parse_job(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            source_ref = str(body.get("source_ref", "")).strip().lstrip("@")
+            parse_type = str(body.get("parse_type", "members")).strip()
+            limit = int(body.get("limit", 500))
+        except Exception:
+            return _err("bad body", 400)
+        if not source_ref:
+            return _err("source_ref обязателен", 400)
+        if parse_type not in ("members", "active", "comments"):
+            parse_type = "members"
+        if limit < 1 or limit > 10000:
+            limit = 500
+        import json as _json
+        label = f"Парсинг {parse_type} из @{source_ref} (до {limit})"
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,'parse_audience','pending',$2,$3,$4) RETURNING id",
+            uid,
+            _json.dumps({"source_ref": source_ref, "parse_type": parse_type, "limit": limit}),
+            limit, label,
+        )
+        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+
     # ── CRM Deals ─────────────────────────────────────────────────────────────
 
     async def crm_deals(request: web.Request) -> web.Response:
@@ -2210,6 +2315,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Audience Parser
+    app.router.add_get("/api/miniapp/parser/runs", parser_runs)
+    app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
+    app.router.add_post("/api/miniapp/parser/submit", submit_parse_job)
     # CRM Deals
     app.router.add_get("/api/miniapp/crm/deals", crm_deals)
     app.router.add_post("/api/miniapp/crm/deal", create_crm_deal)

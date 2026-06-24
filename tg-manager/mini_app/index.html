@@ -392,6 +392,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openWorkspaces()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🏢</div><div class="row-body"><div class="row-name">Рабочие пространства</div><div class="row-val" id="m-ws-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCompetitors()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Мониторинг конкурентов</div><div class="row-val" id="m-comp-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openNetBcModal()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📣</div><div class="row-body"><div class="row-name">Рассылка по всем ботам</div><div class="row-val">Один текст — все боты</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openParser()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div><div class="row-body"><div class="row-name">Парсер аудитории</div><div class="row-val" id="m-parser-cnt">Участники каналов/групп</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Платформа</div>
@@ -723,6 +724,30 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: AUDIENCE PARSER ══════════════════════ -->
+<div class="screen" id="s-parser">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔭 Парсер аудитории</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openParserModal()">▶ Запустить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div style="display:flex;gap:8px;padding:4px 0 10px">
+      <button class="btn btn-p" onclick="showParserTab('runs')" id="parserTabRuns">⏱ История</button>
+      <button class="btn btn-s" onclick="showParserTab('audience')" id="parserTabAudience">👥 Аудитория</button>
+    </div>
+    <div id="parserRunsPane">
+      <div class="lst" id="parserRunList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+    <div id="parserAudiencePane" style="display:none">
+      <div style="padding:0 0 8px">
+        <input type="text" id="parserSearch" placeholder="🔍 Фильтр по источнику..." style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:12px;padding:9px 13px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box" oninput="loadParsedAudience(this.value)">
+      </div>
+      <div class="lst" id="parserAudList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: CRM DEALS ══════════════════════ -->
 <div class="screen" id="s-crmdeals">
   <div class="hdr">
@@ -1047,6 +1072,26 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="cmdErr"></div>
     <button class="btn btn-p" id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: PARSER ══════════════════════ -->
+<div class="mbg" id="parserMbg" onclick="if(event.target===this)closeParserModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeParserModal()">✕</div>
+    <div class="modal-title">🔭 Запустить парсинг</div>
+    <div class="field"><label>Источник (@username или ссылка)</label><input type="text" id="parserSrc" placeholder="@channel или t.me/channel"></div>
+    <div class="field">
+      <label>Тип парсинга</label>
+      <select id="parserType" style="width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px;color:#fff;font-size:15px">
+        <option value="members">👥 Все участники</option>
+        <option value="active">🔥 Активные (последние)</option>
+        <option value="comments">💬 Оставившие комментарии</option>
+      </select>
+    </div>
+    <div class="field"><label>Лимит (макс. 10000)</label><input type="number" id="parserLimit" min="10" max="10000" value="500"></div>
+    <div class="field-err" id="parserErr"></div>
+    <button class="btn btn-p" id="parserBtn" onclick="submitParser()" style="width:100%">🚀 Запустить</button>
   </div>
 </div>
 
@@ -3352,6 +3397,82 @@ async function submitProfileSetter() {
     const r = await api('/api/miniapp/profile_setter', {method:'POST', body:JSON.stringify(body)});
     toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
     back();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Audience Parser ────────────────────────────────────
+async function openParser() {
+  push('s-parser');
+  showParserTab('runs');
+  loadParserRuns();
+}
+function showParserTab(tab) {
+  document.getElementById('parserRunsPane').style.display = tab==='runs'?'':'none';
+  document.getElementById('parserAudiencePane').style.display = tab==='audience'?'':'none';
+  document.getElementById('parserTabRuns').className = tab==='runs'?'btn btn-p':'btn btn-s';
+  document.getElementById('parserTabAudience').className = tab==='audience'?'btn btn-p':'btn btn-s';
+  if (tab==='audience') loadParsedAudience('');
+}
+async function loadParserRuns() {
+  txt('parserRunList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/parser/runs');
+    const runs = d.runs||[];
+    if (!runs.length) { txt('parserRunList', empty('⏱','Нет запусков','Запустите первый парсинг')); return; }
+    const stIco = {pending:'⏳',running:'⚙️',done:'✅',failed:'❌',cancelled:'🚫'};
+    txt('parserRunList', runs.map(r=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.source)} · ${r.parse_type}</div>
+          <div class="row-val">${stIco[r.status]||'?'} ${r.status} · ${num(r.total_saved)} сохранено</div>
+          <div class="row-val" style="color:#555">${ago(r.started_at)}${r.error?' · ⚠️'+esc(r.error.slice(0,60)):''}</div>
+        </div>
+      </div>
+    `).join(''));
+    txt('m-parser-cnt', runs.filter(r=>r.status==='done').reduce((s,r)=>s+r.total_saved,0)+' спарсено');
+  } catch(e) { txt('parserRunList', empty('⚠️','Ошибка',e.message)); }
+}
+async function loadParsedAudience(source) {
+  txt('parserAudList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/parser/audience?limit=50'+(source?'&source='+encodeURIComponent(source):''));
+    const users = d.users||[];
+    if (!users.length) { txt('parserAudList', empty('👥','Нет данных','Запустите парсинг')); return; }
+    txt('parserAudList', `<div class="sec" style="margin-bottom:4px">Всего: ${num(d.total)}</div>`+users.map(u=>`
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">${u.username?'@'+esc(u.username):(esc(u.name)||'ID '+u.tg_user_id)}${u.is_premium?' ⭐':''}</div>
+          <div class="row-val">${esc(u.source_title)||u.source_type} · ${ago(u.parsed_at)}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('parserAudList', empty('⚠️','Ошибка',e.message)); }
+}
+function openParserModal() {
+  document.getElementById('parserSrc').value='';
+  document.getElementById('parserLimit').value='500';
+  document.getElementById('parserErr').textContent='';
+  document.getElementById('parserMbg').classList.add('show');
+}
+function closeParserModal() { document.getElementById('parserMbg').classList.remove('show'); }
+async function submitParser() {
+  const src = document.getElementById('parserSrc').value.trim().replace(/^@/,'').replace(/.*t\.me\//,'');
+  const errEl = document.getElementById('parserErr');
+  errEl.textContent='';
+  if (!src) { errEl.textContent='Введите источник'; return; }
+  const btn = document.getElementById('parserBtn');
+  btn.disabled=true; btn.textContent='Ставлю в очередь…';
+  try {
+    const r = await api('/api/miniapp/parser/submit', {method:'POST', body:JSON.stringify({
+      source_ref: src,
+      parse_type: document.getElementById('parserType').value,
+      limit: parseInt(document.getElementById('parserLimit').value)||500,
+    })});
+    closeParserModal();
+    toast(`✅ Парсинг поставлен в очередь (#${r.op_id})`);
+    loadParserRuns();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
 }
