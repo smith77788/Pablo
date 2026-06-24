@@ -381,6 +381,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openProfileSetter()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎨</div><div class="row-body"><div class="row-name">Сеттер профилей</div><div class="row-val">Имя, аватар, 2FA для аккаунтов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCleaner()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🧹</div><div class="row-body"><div class="row-name">Очистка аккаунтов</div><div class="row-val">Выход из чатов, удаление контактов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openApiKeys()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔑</div><div class="row-body"><div class="row-name">API Ключи</div><div class="row-val" id="m-apikey-cnt">Управление ключами</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openStrike()"><div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div><div class="row-body"><div class="row-name">Strike — История</div><div class="row-val">Операции Strike</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
@@ -721,6 +723,37 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: API KEYS ══════════════════════ -->
+<div class="screen" id="s-apikeys">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔑 API Ключи</div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
+      API ключи для интеграции BotMother с вашими сервисами.<br>
+      Для создания нового ключа используйте Telegram-бота (команда /api).
+    </div>
+    <div class="sec">Активные ключи</div>
+    <div class="lst" id="apiKeyList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: STRIKE HISTORY ══════════════════════ -->
+<div class="screen" id="s-strike">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⚔️ Strike — История</div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:8px">
+      История операций Strike (массовые жалобы, накрутки).<br>
+      Для запуска новой операции используйте Telegram-бота.
+    </div>
+    <div class="lst" id="strikeList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -3399,6 +3432,60 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── API Keys ───────────────────────────────────────────
+async function openApiKeys() {
+  push('s-apikeys');
+  txt('apiKeyList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/api_keys');
+    const keys = d.keys||[];
+    txt('m-apikey-cnt', keys.filter(k=>k.is_active).length+' активных');
+    if (!keys.length) { txt('apiKeyList', empty('🔑','Нет ключей','Создайте ключ через Telegram-бота')); return; }
+    txt('apiKeyList', keys.map(k=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">🔑</div>
+        <div class="row-body">
+          <div class="row-name">${esc(k.name)||'Без названия'} ${k.is_active?'🟢':'🔴'}</div>
+          <div class="row-val"><code>${esc(k.prefix)}****</code>${k.last_used_at?' · исп. '+ago(k.last_used_at):''}</div>
+          <div class="row-val" style="color:#555">Создан ${ago(k.created_at)}</div>
+        </div>
+        ${k.is_active?`<div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="revokeApiKey(${k.id})">Откл</button></div>`:''}
+      </div>
+    `).join(''));
+  } catch(e) { txt('apiKeyList', empty('⚠️','Ошибка',e.message)); }
+}
+async function revokeApiKey(keyId) {
+  if (!confirm('Отключить API ключ?')) return;
+  try {
+    await api('/api/miniapp/api_key/'+keyId, {method:'DELETE'});
+    toast('🔑 Ключ отключён');
+    openApiKeys();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+
+// ── Strike History ──────────────────────────────────────
+async function openStrike() {
+  push('s-strike');
+  txt('strikeList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/strike/history');
+    const ops = d.operations||[];
+    if (!ops.length) { txt('strikeList', empty('⚔️','Нет операций','Strike не запускался')); return; }
+    txt('strikeList', ops.map(op=>{
+      const [cls,lbl]=stb(op.status);
+      const pct = op.total?Math.round(op.processed/op.total*100):0;
+      return `<div class="row">
+        <div class="row-ico" style="background:rgba(239,68,68,.16)">⚔️</div>
+        <div class="row-body">
+          <div class="row-name">${esc(op.label)}</div>
+          <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${num(op.processed)}/${num(op.total)} (${pct}%)</div>
+          <div class="row-val" style="color:#555">${ago(op.created_at)}</div>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('strikeList', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── Audience Parser ────────────────────────────────────

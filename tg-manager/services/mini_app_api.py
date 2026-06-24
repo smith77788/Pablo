@@ -1028,6 +1028,78 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── API Keys (API Hub) ─────────────────────────────────────────────────────
+
+    async def api_keys_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, name, key_prefix, is_active, created_at, last_used_at
+                   FROM api_keys WHERE user_id=$1 ORDER BY created_at DESC""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("api_keys_list uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"keys": [
+            {
+                "id": r["id"], "name": r["name"] or "",
+                "prefix": r["key_prefix"] or "",
+                "is_active": bool(r["is_active"]),
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "last_used_at": r["last_used_at"].isoformat() if r["last_used_at"] else None,
+            }
+            for r in rows
+        ]})
+
+    async def revoke_api_key(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            key_id = int(request.match_info["key_id"])
+        except (KeyError, ValueError):
+            return _err("bad key_id", 400)
+        res = await pool.execute(
+            "UPDATE api_keys SET is_active=FALSE WHERE id=$1 AND user_id=$2",
+            key_id, uid,
+        )
+        if res == "UPDATE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True})
+
+    # ── Strike history ─────────────────────────────────────────────────────────
+
+    async def strike_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, op_type, label, status, total_items, processed_items,
+                          created_at, finished_at, params
+                   FROM operation_queue
+                   WHERE owner_id=$1 AND op_type LIKE 'strike%'
+                   ORDER BY created_at DESC LIMIT 30""",
+                uid,
+            )
+        except Exception as exc:
+            log.exception("strike_history uid=%d", uid)
+            return _err(str(exc), 500)
+        return _json_resp({"operations": [
+            {
+                "id": r["id"], "label": r["label"] or r["op_type"],
+                "status": r["status"] or "pending",
+                "total": r["total_items"] or 0,
+                "processed": r["processed_items"] or 0,
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "finished_at": r["finished_at"].isoformat() if r["finished_at"] else None,
+            }
+            for r in rows
+        ]})
+
     # ── Audience Parser (read-only history) ───────────────────────────────────
 
     async def parser_runs(request: web.Request) -> web.Response:
@@ -2315,6 +2387,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # API Keys
+    app.router.add_get("/api/miniapp/api_keys", api_keys_list)
+    app.router.add_delete("/api/miniapp/api_key/{key_id}", revoke_api_key)
+    # Strike history
+    app.router.add_get("/api/miniapp/strike/history", strike_history)
     # Audience Parser
     app.router.add_get("/api/miniapp/parser/runs", parser_runs)
     app.router.add_get("/api/miniapp/parser/audience", parsed_audience)
