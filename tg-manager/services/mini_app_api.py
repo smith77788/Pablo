@@ -1028,6 +1028,288 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── DM Campaigns ───────────────────────────────────────────────────────────
+
+    async def dm_campaigns_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT id, name, status, sent_count, fail_count, total_targets,
+                          text_template, target_type, created_at
+                   FROM dm_campaigns WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 50""",
+                uid,
+            )
+            return _json_resp({"campaigns": [
+                {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                for r in rows
+            ]})
+        except Exception as exc:
+            log.exception("dm_campaigns_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def dm_campaign_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = (body.get("name") or "").strip()
+        text = (body.get("text") or "").strip()
+        target_type = body.get("target_type", "bot_users")
+        target_id = body.get("target_id")
+        if not name or not text:
+            return _err("Заполните название и текст", 400)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id)
+                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                uid, name, text, target_type, target_id,
+            )
+            return _json_resp({"id": row["id"]})
+        except Exception as exc:
+            log.exception("dm_campaign_create uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def dm_campaign_launch(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        campaign_id = int(request.match_info["campaign_id"])
+        row = await pool.fetchrow(
+            "SELECT id, name FROM dm_campaigns WHERE id=$1 AND owner_id=$2",
+            campaign_id, uid,
+        )
+        if not row:
+            return _err("Не найдено", 404)
+        try:
+            label = f"DM-кампания: {row['name']}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'dm_campaign','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"campaign_id": campaign_id}), label,
+            )
+            await pool.execute(
+                "UPDATE dm_campaigns SET status='running', started_at=now() WHERE id=$1", campaign_id
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("dm_campaign_launch uid=%d cid=%d", uid, campaign_id)
+            return _err(str(exc), 500)
+
+    async def dm_campaign_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        campaign_id = int(request.match_info["campaign_id"])
+        await pool.execute(
+            "DELETE FROM dm_campaigns WHERE id=$1 AND owner_id=$2", campaign_id, uid
+        )
+        return _json_resp({"ok": True})
+
+    # ── Account Warmup ─────────────────────────────────────────────────────────
+
+    async def warmup_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            plans = await pool.fetch(
+                """SELECT wp.id, wp.plan_type, wp.current_day, wp.target_days,
+                          wp.daily_actions, wp.status, wp.started_at,
+                          ta.phone, ta.first_name, ta.username
+                   FROM account_warmup_plans wp
+                   JOIN tg_accounts ta ON ta.id = wp.account_id
+                   WHERE wp.owner_id=$1
+                   ORDER BY wp.started_at DESC LIMIT 50""",
+                uid,
+            )
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1", uid
+            )
+            active = await pool.fetchval(
+                "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
+            )
+            return _json_resp({
+                "total": total, "active": active,
+                "plans": [
+                    {**dict(p), "started_at": p["started_at"].isoformat() if p["started_at"] else None}
+                    for p in plans
+                ],
+            })
+        except Exception as exc:
+            log.exception("warmup_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def warmup_create_plan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        account_id = body.get("account_id")
+        plan_type = body.get("plan_type", "standard")
+        if not account_id:
+            return _err("account_id обязателен", 400)
+        acc = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
+        )
+        if not acc:
+            return _err("Аккаунт не найден", 404)
+        try:
+            days_map = {"gentle": 21, "standard": 14, "aggressive": 10}
+            actions_map = {"gentle": 5, "standard": 10, "aggressive": 12}
+            target_days = days_map.get(plan_type, 14)
+            daily_actions = actions_map.get(plan_type, 10)
+            label = f"Прогрев аккаунта ({plan_type})"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'account_warmup','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"account_id": account_id, "plan_type": plan_type}), label,
+            )
+            await pool.execute(
+                """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT (account_id) DO UPDATE
+                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=now()""",
+                uid, account_id, plan_type, target_days, daily_actions,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("warmup_create_plan uid=%d acc=%s", uid, account_id)
+            return _err(str(exc), 500)
+
+    async def warmup_delete_plan(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        plan_id = int(request.match_info["plan_id"])
+        await pool.execute(
+            "DELETE FROM account_warmup_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
+        )
+        return _json_resp({"ok": True})
+
+    # ── A/B Experiments ────────────────────────────────────────────────────────
+
+    async def experiments_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
+                          b.username AS bot_username, b.first_name AS bot_name, e.bot_id,
+                          (SELECT COUNT(*) FROM experiment_variants ev WHERE ev.experiment_id=e.id) AS variant_count
+                   FROM experiments e
+                   JOIN managed_bots b ON b.bot_id = e.bot_id
+                   WHERE b.added_by=$1
+                   ORDER BY e.created_at DESC LIMIT 50""",
+                uid,
+            )
+            return _json_resp({"experiments": [
+                {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                for r in rows
+            ]})
+        except Exception as exc:
+            log.exception("experiments_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def experiment_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        exp_id = int(request.match_info["exp_id"])
+        try:
+            exp = await pool.fetchrow(
+                """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
+                          e.winner_variant_id, e.min_sample_size, b.username AS bot_username
+                   FROM experiments e
+                   JOIN managed_bots b ON b.bot_id=e.bot_id
+                   WHERE e.id=$1 AND b.added_by=$2""",
+                exp_id, uid,
+            )
+            if not exp:
+                return _err("Не найдено", 404)
+            variants = await pool.fetch(
+                "SELECT id, name, content, weight, impressions, conversions FROM experiment_variants WHERE experiment_id=$1 ORDER BY id",
+                exp_id,
+            )
+            return _json_resp({
+                **dict(exp),
+                "created_at": exp["created_at"].isoformat() if exp["created_at"] else None,
+                "variants": [dict(v) for v in variants],
+            })
+        except Exception as exc:
+            log.exception("experiment_detail uid=%d exp=%d", uid, exp_id)
+            return _err(str(exc), 500)
+
+    async def experiment_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        exp_id = int(request.match_info["exp_id"])
+        await pool.execute(
+            "DELETE FROM experiments e USING managed_bots b WHERE e.id=$1 AND e.bot_id=b.bot_id AND b.added_by=$2",
+            exp_id, uid,
+        )
+        return _json_resp({"ok": True})
+
+    # ── Health Dashboard ───────────────────────────────────────────────────────
+
+    async def health_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            stats = await pool.fetchrow(
+                """SELECT
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE acc_status='active') AS active,
+                   COUNT(*) FILTER (WHERE acc_status IN ('banned','deactivated')) AS banned,
+                   COUNT(*) FILTER (WHERE cooldown_until > now()) AS cooling,
+                   COUNT(*) FILTER (WHERE trust_score IS NOT NULL AND trust_score < 40) AS low_trust
+                   FROM tg_accounts WHERE owner_id=$1""",
+                uid,
+            )
+            flood_7d = await pool.fetchval(
+                """SELECT COUNT(*) FROM account_flood_log afl
+                   JOIN tg_accounts ta ON ta.id=afl.account_id
+                   WHERE ta.owner_id=$1 AND afl.created_at > now()-interval '7 days'""",
+                uid,
+            )
+            warmup_active = await pool.fetchval(
+                "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1 AND status='active'", uid
+            )
+            # Recent flood events
+            events = await pool.fetch(
+                """SELECT afl.operation, afl.flood_seconds, afl.created_at,
+                          ta.phone, ta.first_name
+                   FROM account_flood_log afl
+                   JOIN tg_accounts ta ON ta.id=afl.account_id
+                   WHERE ta.owner_id=$1
+                   ORDER BY afl.created_at DESC LIMIT 10""",
+                uid,
+            )
+            return _json_resp({
+                "total": stats["total"], "active": stats["active"],
+                "banned": stats["banned"], "cooling": stats["cooling"],
+                "low_trust": stats["low_trust"], "flood_7d": flood_7d,
+                "warmup_active": warmup_active,
+                "events": [
+                    {**dict(e), "created_at": e["created_at"].isoformat() if e["created_at"] else None}
+                    for e in events
+                ],
+            })
+        except Exception as exc:
+            log.exception("health_overview uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── Account Shield ─────────────────────────────────────────────────────────
 
     async def shield_summary(request: web.Request) -> web.Response:
@@ -2691,6 +2973,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Account Cleaner
     app.router.add_get("/api/miniapp/cleaner/accounts", cleaner_accounts)
     app.router.add_post("/api/miniapp/cleaner/submit", cleaner_submit)
+    # DM Campaigns
+    app.router.add_get("/api/miniapp/dm_campaigns", dm_campaigns_list)
+    app.router.add_post("/api/miniapp/dm_campaigns", dm_campaign_create)
+    app.router.add_post("/api/miniapp/dm_campaign/{campaign_id}/launch", dm_campaign_launch)
+    app.router.add_delete("/api/miniapp/dm_campaign/{campaign_id}", dm_campaign_delete)
+    # Account Warmup
+    app.router.add_get("/api/miniapp/warmup", warmup_overview)
+    app.router.add_post("/api/miniapp/warmup", warmup_create_plan)
+    app.router.add_delete("/api/miniapp/warmup/{plan_id}", warmup_delete_plan)
+    # A/B Experiments
+    app.router.add_get("/api/miniapp/experiments", experiments_list)
+    app.router.add_get("/api/miniapp/experiment/{exp_id}", experiment_detail)
+    app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
+    # Health Dashboard
+    app.router.add_get("/api/miniapp/health", health_overview)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 

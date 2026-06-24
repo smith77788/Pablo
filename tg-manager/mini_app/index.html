@@ -386,6 +386,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openNetwork()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🕸</div><div class="row-body"><div class="row-name">Сеть ботов</div><div class="row-val" id="m-net-cnt">Кластеры и роли</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openShield()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🛡</div><div class="row-body"><div class="row-name">Account Shield</div><div class="row-val" id="m-shield-val">Защита от бана</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openAdIntel()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📡</div><div class="row-body"><div class="row-name">Ad Intelligence</div><div class="row-val" id="m-adintel-val">Анализ рекламы в Telegram</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openWarmup()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌱</div><div class="row-body"><div class="row-name">Прогрев аккаунтов</div><div class="row-val" id="m-warmup-val">Warmup-планы</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openHealth()"><div class="row-ico" style="background:rgba(239,68,68,.16)">❤️</div><div class="row-body"><div class="row-name">Health Dashboard</div><div class="row-val" id="m-health-val">Здоровье аккаунтов</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
@@ -397,6 +399,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openWorkspaces()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🏢</div><div class="row-body"><div class="row-name">Рабочие пространства</div><div class="row-val" id="m-ws-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCompetitors()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Мониторинг конкурентов</div><div class="row-val" id="m-comp-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openNetBcModal()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📣</div><div class="row-body"><div class="row-name">Рассылка по всем ботам</div><div class="row-val">Один текст — все боты</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openDmCampaigns()"><div class="row-ico" style="background:rgba(59,130,246,.16)">✉️</div><div class="row-body"><div class="row-name">DM-кампании</div><div class="row-val" id="m-dm-cnt">Прямые рассылки</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openExperiments()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div><div class="row-body"><div class="row-name">A/B Эксперименты</div><div class="row-val" id="m-exp-cnt">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openParser()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div><div class="row-body"><div class="row-name">Парсер аудитории</div><div class="row-val" id="m-parser-cnt">Участники каналов/групп</div></div><div class="row-right chev">›</div></div>
     </div>
 
@@ -726,6 +730,68 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: DM CAMPAIGNS ══════════════════════ -->
+<div class="screen" id="s-dmcampaigns">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">✉️ DM-кампании</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openDmModal()">+ Новая</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="dmStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="lst" id="dmList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ACCOUNT WARMUP ══════════════════════ -->
+<div class="screen" id="s-warmup">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🌱 Прогрев аккаунтов</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openWarmupModal()">+ Запустить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="warmupStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="sec">Активные планы</div>
+    <div class="lst" id="warmupList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: A/B EXPERIMENTS ══════════════════════ -->
+<div class="screen" id="s-experiments">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🧪 A/B Эксперименты</div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="experimentsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: EXPERIMENT DETAIL ══════════════════════ -->
+<div class="screen" id="s-expdetail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="expdetail-title">🧪 Эксперимент</div>
+  </div>
+  <div class="sub-sb">
+    <div id="expdetailBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: HEALTH DASHBOARD ══════════════════════ -->
+<div class="screen" id="s-health">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">❤️ Health Dashboard</div>
+  </div>
+  <div class="sub-sb">
+    <div id="healthStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div class="sec">Последние флуд-события (7 дней)</div>
+    <div class="lst" id="healthEvents"></div>
   </div>
 </div>
 
@@ -1178,6 +1244,44 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <!-- ══════════════════════ MODAL: AD INTEL ADD CHANNEL ══════════════════════ -->
+<!-- DM Campaign modal -->
+<div class="mbg" id="dmMbg" onclick="if(event.target===this)closeDmModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeDmModal()">✕</div>
+    <div class="modal-title">✉️ Новая DM-кампания</div>
+    <div class="field"><label>Название кампании</label><input type="text" id="dmName" placeholder="Рассылка подписчикам"></div>
+    <div class="field"><label>Текст сообщения</label><textarea id="dmText" rows="4" placeholder="Привет! У нас новость..." style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+    <div class="field">
+      <label>Аудитория</label>
+      <select id="dmTarget" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="bot_users">Подписчики ботов</option>
+        <option value="crm">CRM-контакты</option>
+      </select>
+    </div>
+    <div class="field-err" id="dmErr"></div>
+    <button class="btn btn-p" id="dmBtn" onclick="submitDmCampaign()" style="width:100%">💾 Создать черновик</button>
+  </div>
+</div>
+
+<!-- Warmup modal -->
+<div class="mbg" id="warmupMbg" onclick="if(event.target===this)closeWarmupModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeWarmupModal()">✕</div>
+    <div class="modal-title">🌱 Запустить прогрев</div>
+    <div class="field"><label>Аккаунт</label><select id="warmupAccSel" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px"><option value="">Загрузка...</option></select></div>
+    <div class="field">
+      <label>Режим прогрева</label>
+      <select id="warmupPlan" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+        <option value="gentle">🌱 Gentle (21 день, 5 действий/день)</option>
+        <option value="standard" selected>🌿 Standard (14 дней, 10 действий/день)</option>
+        <option value="aggressive">🔥 Intensive (10 дней, 12 действий/день)</option>
+      </select>
+    </div>
+    <div class="field-err" id="warmupErr"></div>
+    <button class="btn btn-p" id="warmupBtn" onclick="submitWarmup()" style="width:100%">🚀 Запустить прогрев</button>
+  </div>
+</div>
+
 <div class="mbg" id="adIntelMbg" onclick="if(event.target===this)closeAdIntelModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeAdIntelModal()">✕</div>
@@ -3516,6 +3620,261 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── DM Campaigns ───────────────────────────────────────
+function openDmModal() {
+  document.getElementById('dmName').value='';
+  document.getElementById('dmText').value='';
+  document.getElementById('dmErr').textContent='';
+  document.getElementById('dmBtn').disabled=false;
+  document.getElementById('dmBtn').textContent='💾 Создать черновик';
+  document.getElementById('dmMbg').style.display='flex';
+}
+function closeDmModal() { document.getElementById('dmMbg').style.display='none'; }
+async function submitDmCampaign() {
+  const name = document.getElementById('dmName').value.trim();
+  const text = document.getElementById('dmText').value.trim();
+  const target_type = document.getElementById('dmTarget').value;
+  const errEl = document.getElementById('dmErr');
+  if (!name||!text) { errEl.textContent='Заполните название и текст'; return; }
+  const btn = document.getElementById('dmBtn');
+  btn.disabled=true; btn.textContent='Создаю…';
+  try {
+    await api('/api/miniapp/dm_campaigns',{method:'POST',body:JSON.stringify({name,text,target_type})});
+    toast('✅ Черновик создан');
+    closeDmModal();
+    openDmCampaigns();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='💾 Создать черновик'; }
+}
+const DM_STATUS = {draft:'📝 Черновик',running:'▶️ Выполняется',paused:'⏸ Пауза',done:'✅ Завершена',failed:'❌ Ошибка'};
+async function openDmCampaigns() {
+  push('s-dmcampaigns');
+  txt('dmStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('dmList','');
+  try {
+    const d = await api('/api/miniapp/dm_campaigns');
+    const cmp = d.campaigns||[];
+    const running = cmp.filter(c=>c.status==='running').length;
+    const done = cmp.filter(c=>c.status==='done').length;
+    txt('dmStats',`
+      <div class="kpi-card"><div class="kpi-val">${cmp.length}</div><div class="kpi-lbl">Всего</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${running}</div><div class="kpi-lbl">Запущено</div></div>
+      <div class="kpi-card"><div class="kpi-val">${done}</div><div class="kpi-lbl">Завершено</div></div>
+    `);
+    txt('m-dm-cnt', cmp.length+' кампаний');
+    if (!cmp.length) { txt('dmList', empty('✉️','Нет кампаний','Нажмите + Новая')); return; }
+    txt('dmList', cmp.map(c=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">✉️</div>
+        <div class="row-body">
+          <div class="row-name">${esc(c.name)}</div>
+          <div class="row-val">${DM_STATUS[c.status]||c.status} · ${c.sent_count||0}/${c.total_targets||0} отправлено</div>
+        </div>
+        <div class="row-right" style="display:flex;gap:6px;align-items:center">
+          ${c.status==='draft'?`<button class="btn btn-p" style="padding:5px 10px;font-size:12px;min-width:0" onclick="launchDm(${c.id})">▶</button>`:''}
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteDm(${c.id})">🗑</button>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('dmStats','');
+    txt('dmList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function launchDm(id) {
+  if (!confirm('Запустить кампанию?')) return;
+  try {
+    await api(`/api/miniapp/dm_campaign/${id}/launch`,{method:'POST'});
+    toast('▶️ Кампания запущена');
+    openDmCampaigns();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+async function deleteDm(id) {
+  if (!confirm('Удалить кампанию?')) return;
+  try {
+    await api(`/api/miniapp/dm_campaign/${id}`,{method:'DELETE'});
+    toast('🗑 Удалено');
+    openDmCampaigns();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Account Warmup ─────────────────────────────────────
+async function openWarmupModal() {
+  document.getElementById('warmupErr').textContent='';
+  document.getElementById('warmupBtn').disabled=false;
+  document.getElementById('warmupMbg').style.display='flex';
+  const sel = document.getElementById('warmupAccSel');
+  sel.innerHTML='<option value="">Загрузка...</option>';
+  try {
+    const d = await api('/api/miniapp/accounts');
+    const accs = (d.accounts||[]).filter(a=>a.status==='active'||a.acc_status==='active');
+    sel.innerHTML = accs.length
+      ? accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone)} · ${esc(a.phone||'')}</option>`).join('')
+      : '<option value="">Нет активных аккаунтов</option>';
+  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+}
+function closeWarmupModal() { document.getElementById('warmupMbg').style.display='none'; }
+async function submitWarmup() {
+  const account_id = parseInt(document.getElementById('warmupAccSel').value);
+  const plan_type = document.getElementById('warmupPlan').value;
+  const errEl = document.getElementById('warmupErr');
+  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
+  const btn = document.getElementById('warmupBtn');
+  btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r = await api('/api/miniapp/warmup',{method:'POST',body:JSON.stringify({account_id,plan_type})});
+    toast(`🌱 Прогрев запущен (#${r.op_id})`);
+    closeWarmupModal();
+    openWarmup();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🚀 Запустить прогрев'; }
+}
+const WARMUP_PLAN = {gentle:'🌱 Gentle',standard:'🌿 Standard',aggressive:'🔥 Intensive'};
+const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён',failed:'❌ Ошибка'};
+async function openWarmup() {
+  push('s-warmup');
+  txt('warmupStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('warmupList','');
+  try {
+    const d = await api('/api/miniapp/warmup');
+    txt('warmupStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего планов</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+    `);
+    txt('m-warmup-val',`${d.active||0} активных · ${d.total||0} планов`);
+    const plans = d.plans||[];
+    if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить')); return; }
+    txt('warmupList', plans.map(p=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">🌱</div>
+        <div class="row-body">
+          <div class="row-name">${esc(p.first_name||p.phone)} ${WARMUP_PLAN[p.plan_type]||p.plan_type}</div>
+          <div class="row-val">${WARMUP_STATUS[p.status]||p.status} · День ${p.current_day||0}/${p.target_days||0}</div>
+        </div>
+        <div class="row-right">
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deleteWarmupPlan(${p.id})">🗑</button>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('warmupStats','');
+    txt('warmupList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function deleteWarmupPlan(id) {
+  if (!confirm('Удалить план прогрева?')) return;
+  try {
+    await api(`/api/miniapp/warmup/${id}`,{method:'DELETE'});
+    toast('🗑 Удалено');
+    openWarmup();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── A/B Experiments ────────────────────────────────────
+const EXP_STATUS = {draft:'📝 Черновик',active:'🟢 Активен',paused:'⏸ Пауза',completed:'✅ Завершён'};
+const EXP_TYPE = {start_message:'Приветствие',auto_reply:'Авто-ответ',funnel:'Воронка'};
+async function openExperiments() {
+  push('s-experiments');
+  txt('experimentsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/experiments');
+    const exps = d.experiments||[];
+    txt('m-exp-cnt', exps.length+' экспериментов');
+    if (!exps.length) { txt('experimentsList', empty('🧪','Нет экспериментов','Создайте A/B тест в боте')); return; }
+    txt('experimentsList', exps.map(e=>`
+      <div class="row tap" onclick="openExpDetail(${e.id},'${esc(e.name)}')">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">🧪</div>
+        <div class="row-body">
+          <div class="row-name">${esc(e.name)}</div>
+          <div class="row-val">${EXP_STATUS[e.status]||e.status} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type} · ${e.variant_count||0} вариантов</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('experimentsList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function openExpDetail(id, name) {
+  push('s-expdetail');
+  txt('expdetail-title','🧪 '+esc(name));
+  txt('expdetailBody','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/experiment/${id}`);
+    const vars = d.variants||[];
+    const total_impr = vars.reduce((s,v)=>s+(v.impressions||0),0);
+    txt('expdetailBody',`
+      <div style="display:flex;gap:10px;padding:8px 0 12px">
+        <div class="kpi-card"><div class="kpi-val">${EXP_STATUS[d.status]||d.status}</div><div class="kpi-lbl">Статус</div></div>
+        <div class="kpi-card"><div class="kpi-val">${vars.length}</div><div class="kpi-lbl">Вариантов</div></div>
+        <div class="kpi-card"><div class="kpi-val">${total_impr}</div><div class="kpi-lbl">Показов</div></div>
+      </div>
+      <div class="sec">Варианты</div>
+      <div class="lst">${vars.map(v=>{
+        const cr = v.impressions>0?((v.conversions/v.impressions)*100).toFixed(1)+'%':'—';
+        const winner = d.winner_variant_id===v.id?' 🏆':'';
+        return `<div class="row">
+          <div class="row-body">
+            <div class="row-name">${esc(v.name)}${winner}</div>
+            <div class="row-val">Показов: ${v.impressions} · CR: ${cr} · Вес: ${v.weight}%</div>
+          </div>
+        </div>`;
+      }).join('')}</div>
+      <div style="padding:12px 0">
+        <button class="btn btn-d" onclick="deleteExp(${id})" style="width:100%">🗑 Удалить эксперимент</button>
+      </div>
+    `);
+  } catch(e) {
+    txt('expdetailBody', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function deleteExp(id) {
+  if (!confirm('Удалить эксперимент?')) return;
+  try {
+    await api(`/api/miniapp/experiment/${id}`,{method:'DELETE'});
+    toast('🗑 Удалено');
+    back(); back();
+    openExperiments();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Health Dashboard ───────────────────────────────────
+async function openHealth() {
+  push('s-health');
+  txt('healthStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('healthEvents','');
+  try {
+    const d = await api('/api/miniapp/health');
+    const risk = d.banned>0||d.low_trust>0?'⚠️ Есть угрозы':'✅ Норма';
+    const riskColor = d.banned>0||d.low_trust>0?'#f59e0b':'#22c55e';
+    txt('healthStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#ef4444">${d.banned||0}</div><div class="kpi-lbl">Забанено</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#f59e0b">${d.cooling||0}</div><div class="kpi-lbl">Cooldown</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#ef4444">${d.low_trust||0}</div><div class="kpi-lbl">Низкий траст</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#f59e0b">${d.flood_7d||0}</div><div class="kpi-lbl">Флуд 7д</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.warmup_active||0}</div><div class="kpi-lbl">На прогреве</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:${riskColor}">${risk}</div><div class="kpi-lbl">Статус</div></div>
+    `);
+    txt('m-health-val',`${d.banned||0} забанено · ${d.flood_7d||0} флуд`);
+    const events = d.events||[];
+    if (!events.length) { txt('healthEvents', empty('📋','Нет флуд-событий за 7 дней','')); return; }
+    txt('healthEvents', events.map(ev=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(239,68,68,.16)">⚠️</div>
+        <div class="row-body">
+          <div class="row-name">${esc(ev.first_name||ev.phone)} · ${esc(ev.operation||'operation')}</div>
+          <div class="row-val">Флуд: ${ev.flood_seconds||0}с · ${ev.created_at?new Date(ev.created_at).toLocaleDateString('ru'):''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('healthStats','');
+    txt('healthEvents', empty('⚠️','Ошибка',e.message));
+  }
 }
 
 // ── Account Shield ─────────────────────────────────────
