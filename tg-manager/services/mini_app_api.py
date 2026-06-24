@@ -3545,6 +3545,118 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_referrals": count,
         })
 
+    # ── Ecosystems ────────────────────────────────────────────────────────────
+
+    async def ecosystems_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT e.id, e.name, e.ecosystem_type, e.status, e.health_score,
+                   e.risk_level, e.region, e.created_at, e.updated_at,
+                   COUNT(em.id) AS member_count
+            FROM ecosystems e
+            LEFT JOIN ecosystem_members em ON em.ecosystem_id = e.id
+            WHERE e.owner_id=$1
+            GROUP BY e.id, e.name, e.ecosystem_type, e.status, e.health_score,
+                     e.risk_level, e.region, e.created_at, e.updated_at
+            ORDER BY e.updated_at DESC NULLS LAST
+            LIMIT 30
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def ecosystem_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        eco_id = int(request.match_info["eco_id"])
+        eco = await pool.fetchrow(
+            "SELECT * FROM ecosystems WHERE id=$1 AND owner_id=$2", eco_id, uid
+        )
+        if not eco:
+            return _err("not found", 404)
+        members = await pool.fetch(
+            "SELECT object_type, object_id, role, added_at "
+            "FROM ecosystem_members WHERE ecosystem_id=$1 ORDER BY added_at DESC LIMIT 50",
+            eco_id,
+        )
+        events = await pool.fetch(
+            "SELECT event_type, severity, title, occurred_at "
+            "FROM ecosystem_events WHERE ecosystem_id=$1 ORDER BY occurred_at DESC LIMIT 20",
+            eco_id,
+        )
+        return _json_resp({
+            "eco": dict(eco),
+            "members": [dict(m) for m in members],
+            "events": [dict(ev) for ev in events],
+        })
+
+    # ── Channel Factory ───────────────────────────────────────────────────────
+
+    async def channel_factory_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        body = await request.json()
+        title = (body.get("title") or "").strip()
+        about = (body.get("about") or "").strip()
+        account_id = body.get("account_id")
+        if not title:
+            return _err("title required")
+        if not account_id:
+            return _err("account_id required")
+        acc = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND banned=FALSE",
+            int(account_id), uid,
+        )
+        if not acc:
+            return _err("account not found or banned", 404)
+        await pool.execute(
+            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('create_channel',$1,'pending',$2)",
+            json.dumps({"title": title, "about": about, "account_id": account_id}), uid,
+        )
+        return _json_resp({"ok": True})
+
+    async def channel_factory_recent(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            "SELECT id, title, username, type, created_at FROM managed_channels "
+            "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 20",
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    # ── Group Factory ─────────────────────────────────────────────────────────
+
+    async def group_factory_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        body = await request.json()
+        title = (body.get("title") or "").strip()
+        account_id = body.get("account_id")
+        is_supergroup = body.get("is_supergroup", True)
+        if not title:
+            return _err("title required")
+        if not account_id:
+            return _err("account_id required")
+        acc = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND banned=FALSE",
+            int(account_id), uid,
+        )
+        if not acc:
+            return _err("account not found or banned", 404)
+        await pool.execute(
+            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('create_group',$1,'pending',$2)",
+            json.dumps({"title": title, "account_id": account_id, "is_supergroup": is_supergroup}), uid,
+        )
+        return _json_resp({"ok": True})
+
     # ── Physics Hub ──────────────────────────────────────────────────────────
 
     async def physics_overview(request: web.Request) -> web.Response:
@@ -4164,6 +4276,14 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reg Checker
     app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
+    # Ecosystems
+    app.router.add_get("/api/miniapp/ecosystems", ecosystems_list)
+    app.router.add_get("/api/miniapp/ecosystem/{eco_id}", ecosystem_detail)
+    # Channel Factory
+    app.router.add_post("/api/miniapp/channel_factory/submit", channel_factory_submit)
+    app.router.add_get("/api/miniapp/channel_factory/recent", channel_factory_recent)
+    # Group Factory
+    app.router.add_post("/api/miniapp/group_factory/submit", group_factory_submit)
     # Physics Hub
     app.router.add_get("/api/miniapp/physics", physics_overview)
     app.router.add_get("/api/miniapp/physics/{account_id}/telemetry", physics_account_telemetry)

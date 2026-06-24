@@ -435,6 +435,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openQuickPost()"><div class="row-ico" style="background:rgba(168,85,247,.16)">✍️</div><div class="row-body"><div class="row-name">Quick Post</div><div class="row-val">Быстрая публикация в каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openReporter()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🚨</div><div class="row-body"><div class="row-name">Репортинг</div><div class="row-val">Жалобы на аккаунты/каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openBotFactory()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🏭</div><div class="row-body"><div class="row-name">Bot Factory</div><div class="row-val" id="m-botfactory-val">Создание и импорт ботов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openEcosystems()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🌐</div><div class="row-body"><div class="row-name">Экосистемы</div><div class="row-val" id="m-eco-val">Управление экосистемами</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openChannelFactory()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📢</div><div class="row-body"><div class="row-name">Channel Factory</div><div class="row-val">Создание каналов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openGroupFactory()"><div class="row-ico" style="background:rgba(168,85,247,.16)">👥</div><div class="row-body"><div class="row-name">Group Factory</div><div class="row-val">Создание групп</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openContentCloner()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📋</div><div class="row-body"><div class="row-name">Content Cloner</div><div class="row-val">Клонирование контента каналов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCloneAdapt()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔄</div><div class="row-body"><div class="row-name">Clone & Adapt</div><div class="row-val">История клонирования ботов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openContentMesh()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🕸</div><div class="row-body"><div class="row-name">Content Mesh</div><div class="row-val" id="m-mesh-val">Сети репостинга</div></div><div class="row-right chev">›</div></div>
@@ -446,6 +449,60 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div><div class="row-body"><div class="row-name">BotMother OS</div><div class="row-val">Telegram Automation Platform</div></div></div>
       <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
       <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ECOSYSTEMS ══════════════════════ -->
+<div class="screen" id="s-ecosystems">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🌐 Экосистемы</div></div>
+  <div class="sub-sb">
+    <div class="sec">Мои экосистемы</div>
+    <div class="lst" id="ecoList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ECOSYSTEM DETAIL ══════════════════════ -->
+<div class="screen" id="s-ecodetail">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="ecodetail-name">Экосистема</div></div>
+  <div class="sub-sb" id="ecodetail-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ CHANNEL FACTORY ══════════════════════ -->
+<div class="screen" id="s-chanfactory">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📢 Channel Factory</div></div>
+  <div class="sub-sb">
+    <div class="sec">Создать канал</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <input type="text" id="cfTitle" placeholder="Название канала" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <textarea id="cfAbout" placeholder="Описание (необязательно)" rows="2" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;resize:none;margin-bottom:8px"></textarea>
+      <select id="cfAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+        <option value="">Выберите аккаунт...</option>
+      </select>
+      <button class="btn btn-p" style="width:100%" onclick="submitChannelFactory()">📢 Создать канал</button>
+      <div id="cfErr" style="color:#ef4444;font-size:13px;margin-top:6px"></div>
+    </div>
+    <div class="sec" style="margin-top:4px">Последние каналы</div>
+    <div class="lst" id="cfRecent"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ GROUP FACTORY ══════════════════════ -->
+<div class="screen" id="s-groupfactory">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">👥 Group Factory</div></div>
+  <div class="sub-sb">
+    <div class="sec">Создать группу</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <input type="text" id="gfTitle" placeholder="Название группы" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+      <select id="gfAccount" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box;margin-bottom:8px">
+        <option value="">Выберите аккаунт...</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);margin-bottom:8px">
+        <input type="checkbox" id="gfSupergroup" checked style="width:16px;height:16px">
+        Супергруппа
+      </label>
+      <button class="btn btn-p" style="width:100%" onclick="submitGroupFactory()">👥 Создать группу</button>
+      <div id="gfErr" style="color:#ef4444;font-size:13px;margin-top:6px"></div>
     </div>
   </div>
 </div>
@@ -5795,6 +5852,148 @@ async function submitErrReport() {
     loadErrReports();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
+}
+
+// ── Ecosystems ─────────────────────────────────────────
+const ECO_TYPES = {network:'🕸 Сеть',media:'📱 Медиа',commerce:'🛒 Торговля',community:'🏘 Сообщество',custom:'🌐 Кастом'};
+const RISK_LABEL = {low:'🟢 Низкий',medium:'🟡 Средний',high:'🟠 Высокий',critical:'🔴 Критический'};
+async function openEcosystems() {
+  push('s-ecosystems');
+  txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/ecosystems');
+    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Создайте через бота')); return; }
+    txt('ecoList', rows.map(r => `
+      <div class="row tap" onclick="openEcoDetail(${r.id},'${esc(r.name)}')">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">${(ECO_TYPES[r.ecosystem_type]||'🌐').charAt(0)}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.name)}</div>
+          <div class="row-val">${ECO_TYPES[r.ecosystem_type]||r.ecosystem_type} · ${RISK_LABEL[r.risk_level]||r.risk_level}</div>
+          <div class="row-val">Участников: ${r.member_count||0} · Здоровье: ${((r.health_score||1)*100).toFixed(0)}%</div>
+          ${r.region?`<div class="row-val" style="color:var(--hint)">📍 ${esc(r.region)}</div>`:''}
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join(''));
+    document.getElementById('m-eco-val').textContent = rows.length+' экосистем';
+  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',e.message)); }
+}
+async function openEcoDetail(ecoId, ecoName) {
+  push('s-ecodetail');
+  document.getElementById('ecodetail-name').textContent = ecoName||'Экосистема';
+  txt('ecodetail-body','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/ecosystem/${ecoId}`);
+    const e = d.eco;
+    const members = d.members||[];
+    const events = d.events||[];
+    const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
+    let html = `
+      <div class="lst" style="margin:12px 16px 0">
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${ECO_TYPES[e.ecosystem_type]||e.ecosystem_type}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${e.status}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Риск</div><div class="row-val">${RISK_LABEL[e.risk_level]||e.risk_level}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Здоровье</div><div class="row-val">${((e.health_score||1)*100).toFixed(0)}%</div></div></div>
+        ${e.description?`<div class="row"><div class="row-body"><div class="row-name">Описание</div><div class="row-val">${esc(e.description)}</div></div></div>`:''}
+      </div>
+      <div class="sec" style="margin-top:8px">Участники (${members.length})</div>
+      <div class="lst" style="margin:0 16px">
+        ${members.length?members.map(m=>`
+          <div class="row"><div class="row-body">
+            <div class="row-name">${esc(m.object_type)} #${m.object_id}</div>
+            <div class="row-val">Роль: ${m.role} · ${ago(m.added_at)}</div>
+          </div></div>
+        `).join(''):empty('👥','Нет участников','')}
+      </div>
+      <div class="sec" style="margin-top:8px">События (${events.length})</div>
+      <div class="lst" style="margin:0 16px">
+        ${events.length?events.map(ev=>`
+          <div class="row"><div class="row-body">
+            <div class="row-name"><span class="badge ${sevCls[ev.severity]||'b-gy'}">${ev.severity}</span> ${esc(ev.title)}</div>
+            <div class="row-val">${esc(ev.event_type)} · ${ago(ev.occurred_at)}</div>
+          </div></div>
+        `).join(''):empty('📋','Нет событий','')}
+      </div>
+    `;
+    txt('ecodetail-body', html);
+  } catch(e) { txt('ecodetail-body', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Channel Factory ─────────────────────────────────────
+async function openChannelFactory() {
+  push('s-chanfactory');
+  document.getElementById('cfTitle').value='';
+  document.getElementById('cfAbout').value='';
+  document.getElementById('cfErr').textContent='';
+  loadCfAccounts();
+  loadCfRecent();
+}
+async function loadCfAccounts() {
+  const sel = document.getElementById('cfAccount');
+  try {
+    const d = await api('/api/miniapp/accounts');
+    const accs = d.accounts||d||[];
+    sel.innerHTML='<option value="">Выберите аккаунт...</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
+  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+}
+async function loadCfRecent() {
+  txt('cfRecent','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/channel_factory/recent');
+    if (!rows.length) { txt('cfRecent', empty('📢','Нет каналов','')); return; }
+    txt('cfRecent', rows.map(r=>`
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">${esc(r.title)}</div>
+          <div class="row-val">${r.username?'@'+esc(r.username):'—'} · ${r.type||'channel'}</div>
+          <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('cfRecent', empty('⚠️','Ошибка',e.message)); }
+}
+async function submitChannelFactory() {
+  const title = document.getElementById('cfTitle').value.trim();
+  const about = document.getElementById('cfAbout').value.trim();
+  const account_id = document.getElementById('cfAccount').value;
+  const errEl = document.getElementById('cfErr');
+  errEl.textContent='';
+  if (!title) { errEl.textContent='Укажите название'; return; }
+  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
+  try {
+    await api('/api/miniapp/channel_factory/submit',{method:'POST',body:JSON.stringify({title,about,account_id:+account_id})});
+    toast('✅ Канал будет создан в ближайшее время');
+    document.getElementById('cfTitle').value='';
+    document.getElementById('cfAbout').value='';
+    loadCfRecent();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+}
+
+// ── Group Factory ───────────────────────────────────────
+async function openGroupFactory() {
+  push('s-groupfactory');
+  document.getElementById('gfTitle').value='';
+  document.getElementById('gfErr').textContent='';
+  const sel = document.getElementById('gfAccount');
+  try {
+    const d = await api('/api/miniapp/accounts');
+    const accs = d.accounts||d||[];
+    sel.innerHTML='<option value="">Выберите аккаунт...</option>'+accs.map(a=>`<option value="${a.id}">${esc(a.first_name||a.phone||'?')} ${a.username?'@'+esc(a.username):''}</option>`).join('');
+  } catch(e) { sel.innerHTML='<option value="">Ошибка загрузки</option>'; }
+}
+async function submitGroupFactory() {
+  const title = document.getElementById('gfTitle').value.trim();
+  const account_id = document.getElementById('gfAccount').value;
+  const is_supergroup = document.getElementById('gfSupergroup').checked;
+  const errEl = document.getElementById('gfErr');
+  errEl.textContent='';
+  if (!title) { errEl.textContent='Укажите название'; return; }
+  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
+  try {
+    await api('/api/miniapp/group_factory/submit',{method:'POST',body:JSON.stringify({title,account_id:+account_id,is_supergroup})});
+    toast('✅ Группа будет создана в ближайшее время');
+    document.getElementById('gfTitle').value='';
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
 }
 
 // ── Physics Hub ────────────────────────────────────────
