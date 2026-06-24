@@ -778,6 +778,104 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _json_resp({"hot": 0, "warm": 0, "cold": 0, "lost": 0, "total": 0})
         return _json_resp({k: int(row[k] or 0) for k in ("hot", "warm", "cold", "lost", "total")})
 
+    # ── Bot Notes ─────────────────────────────────────────────────────────────
+
+    async def bot_note(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        row = await pool.fetchrow(
+            "SELECT note FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("Not found", 404)
+        return _json_resp({"note": row["note"] or ""})
+
+    async def save_bot_note(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            body = await request.json()
+            note = str(body.get("note", "")).strip()[:2000]
+        except Exception:
+            return _err("bad body", 400)
+        res = await pool.execute(
+            "UPDATE managed_bots SET note=$3 WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid, note or None,
+        )
+        if res == "UPDATE 0":
+            return _err("Not found", 404)
+        return _json_resp({"ok": True})
+
+    # ── Bot Commands ───────────────────────────────────────────────────────────
+
+    async def bot_commands(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("Not found", 404)
+        from services import bot_api
+        import aiohttp as _ahttp
+        async with _ahttp.ClientSession() as sess:
+            cmds = await bot_api.get_my_commands(sess, row["token"])
+        return _json_resp({"commands": cmds})
+
+    async def set_bot_commands(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("bad bot_id", 400)
+        try:
+            body = await request.json()
+            commands = body.get("commands", [])
+            if not isinstance(commands, list):
+                return _err("commands must be array", 400)
+            for c in commands:
+                if not isinstance(c, dict) or not c.get("command") or not c.get("description"):
+                    return _err("each command must have command and description", 400)
+                if len(c["command"]) > 32 or len(c["description"]) > 256:
+                    return _err("command or description too long", 400)
+        except Exception:
+            return _err("bad body", 400)
+        row = await pool.fetchrow(
+            "SELECT token FROM managed_bots WHERE bot_id=$1 AND added_by=$2",
+            bot_id, uid,
+        )
+        if not row:
+            return _err("Not found", 404)
+        from services import bot_api
+        import aiohttp as _ahttp
+        async with _ahttp.ClientSession() as sess:
+            if commands:
+                ok = await bot_api.set_my_commands(sess, row["token"], commands)
+            else:
+                ok = await bot_api.delete_my_commands(sess, row["token"])
+        if ok:
+            return _json_resp({"ok": True, "count": len(commands)})
+        return _err("Telegram API error", 500)
+
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
     async def toggle_bot(request: web.Request) -> web.Response:
@@ -1590,6 +1688,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/deeplink/{link_id}", delete_deeplink)
     # Engagement segments
     app.router.add_get("/api/miniapp/bot/{bot_id}/engagement", bot_engagement)
+    # Bot Notes
+    app.router.add_get("/api/miniapp/bot/{bot_id}/note", bot_note)
+    app.router.add_put("/api/miniapp/bot/{bot_id}/note", save_bot_note)
+    # Bot Commands
+    app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
+    app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 

@@ -605,6 +605,42 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: BOT NOTE ══════════════════════ -->
+<div class="screen" id="s-botnote">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📝 Заметка к боту</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="saveBotNote()">Сохранить</button></div>
+  </div>
+  <div class="sub-sb" style="padding:12px">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:10px">
+      Личная пометка, видна только вам. Помогает не запутаться среди нескольких ботов.<br>
+      Отправьте пустой текст чтобы удалить заметку.
+    </div>
+    <textarea id="noteText" style="width:100%;min-height:180px;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:12px;color:#fff;font-size:15px;resize:vertical;box-sizing:border-box" placeholder="Например: продажи, тест, клиент X..."></textarea>
+    <div id="noteErr" style="color:#f87171;font-size:13px;margin-top:6px"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: BOT COMMANDS ══════════════════════ -->
+<div class="screen" id="s-botcommands">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">⌨️ Команды бота</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openCmdModal()">+ Добавить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#aaa;margin-bottom:4px">
+      Команды отображаются в меню бота (кнопка / в чате Telegram).
+    </div>
+    <div class="sec">Текущие команды</div>
+    <div class="lst" id="cmdList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div style="padding:12px 0 4px">
+      <button class="btn btn-d" style="width:100%" onclick="clearBotCommands()">🗑 Удалить все команды</button>
+    </div>
+  </div>
+</div>
+
 </div><!-- /content -->
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
@@ -817,6 +853,24 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="dlErr"></div>
     <button class="btn btn-p" id="dlBtn" onclick="saveDl()" style="width:100%">➕ Создать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: BOT COMMAND ══════════════════════ -->
+<div class="mbg" id="cmdMbg" onclick="if(event.target===this)closeCmdModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeCmdModal()">✕</div>
+    <div class="modal-title">⌨️ Добавить команду</div>
+    <div class="field">
+      <label>Команда (без /)</label>
+      <input type="text" id="cmdName" maxlength="32" placeholder="help" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'')">
+    </div>
+    <div class="field">
+      <label>Описание</label>
+      <input type="text" id="cmdDesc" maxlength="256" placeholder="Помощь">
+    </div>
+    <div class="field-err" id="cmdErr"></div>
+    <button class="btn btn-p" id="cmdSaveBtn" onclick="saveCmd()" style="width:100%">➕ Добавить</button>
   </div>
 </div>
 
@@ -1119,6 +1173,10 @@ function buildBotDetail(d) {
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openDeeplinks(${d.bot.bot_id})">🔗 Deep Links</button>
       <button class="btn btn-s" onclick="openEngagement(${d.bot.bot_id})">🔥 Активность</button>
+    </div>
+    <div class="actions" style="padding-top:0">
+      <button class="btn btn-s" onclick="openBotNote(${d.bot.bot_id})">📝 Заметка</button>
+      <button class="btn btn-s" onclick="openBotCommands(${d.bot.bot_id})">⌨️ Команды</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -2859,6 +2917,98 @@ async function loadEngagement() {
       </div>
     `).join(''));
   } catch(e) { txt('engGrid', `<div style="grid-column:1/-1">${empty('⚠️','Ошибка',e.message)}</div>`); }
+}
+
+// ── Bot Note ───────────────────────────────────────────
+let NOTE_BOT_ID = null;
+async function openBotNote(botId) {
+  NOTE_BOT_ID = botId;
+  push('s-botnote');
+  document.getElementById('noteText').value='';
+  document.getElementById('noteErr').textContent='';
+  try {
+    const d = await api('/api/miniapp/bot/'+botId+'/note');
+    document.getElementById('noteText').value = d.note||'';
+  } catch(e) { document.getElementById('noteErr').textContent=e.message; }
+}
+async function saveBotNote() {
+  const note = document.getElementById('noteText').value.trim();
+  const errEl = document.getElementById('noteErr');
+  errEl.textContent='';
+  try {
+    await api('/api/miniapp/bot/'+NOTE_BOT_ID+'/note', {method:'PUT', body:JSON.stringify({note})});
+    toast(note ? '✅ Заметка сохранена' : '🗑 Заметка удалена');
+    back();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+}
+
+// ── Bot Commands ────────────────────────────────────────
+let CMD_BOT_ID = null;
+let CMD_LIST = [];
+async function openBotCommands(botId) {
+  CMD_BOT_ID = botId;
+  push('s-botcommands');
+  loadBotCommands();
+}
+async function loadBotCommands() {
+  txt('cmdList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands');
+    CMD_LIST = d.commands||[];
+    if (!CMD_LIST.length) { txt('cmdList', empty('⌨️','Нет команд','Добавьте первую команду')); return; }
+    txt('cmdList', CMD_LIST.map((c,i)=>`
+      <div class="row">
+        <div class="row-body">
+          <div class="row-name">/${esc(c.command)}</div>
+          <div class="row-val">${esc(c.description)}</div>
+        </div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteCmd(${i})">✕</button></div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('cmdList', empty('⚠️','Ошибка',e.message)); }
+}
+function openCmdModal() {
+  document.getElementById('cmdName').value='';
+  document.getElementById('cmdDesc').value='';
+  document.getElementById('cmdErr').textContent='';
+  document.getElementById('cmdMbg').classList.add('show');
+}
+function closeCmdModal() { document.getElementById('cmdMbg').classList.remove('show'); }
+async function saveCmd() {
+  const cmd = document.getElementById('cmdName').value.trim();
+  const desc = document.getElementById('cmdDesc').value.trim();
+  const errEl = document.getElementById('cmdErr');
+  errEl.textContent='';
+  if (!cmd) { errEl.textContent='Введите команду'; return; }
+  if (!desc) { errEl.textContent='Введите описание'; return; }
+  const merged = CMD_LIST.filter(c=>c.command!==cmd);
+  merged.push({command:cmd, description:desc});
+  const btn = document.getElementById('cmdSaveBtn');
+  btn.disabled=true; btn.textContent='Сохраняю…';
+  try {
+    await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:merged})});
+    closeCmdModal();
+    toast('✅ Команда добавлена');
+    loadBotCommands();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
+}
+async function deleteCmd(idx) {
+  if (!confirm('Удалить команду /'+CMD_LIST[idx]?.command+'?')) return;
+  const newList = CMD_LIST.filter((_,i)=>i!==idx);
+  try {
+    await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:newList})});
+    toast('Удалено');
+    loadBotCommands();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+async function clearBotCommands() {
+  if (!confirm('Удалить все команды бота?')) return;
+  try {
+    await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:[]})});
+    toast('🗑 Все команды удалены');
+    loadBotCommands();
+  } catch(e) { toast('⚠️ '+e.message); }
 }
 
 // ── Utils ──────────────────────────────────────────────
