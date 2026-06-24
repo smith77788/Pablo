@@ -401,7 +401,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         rows = await _safe_fetch(pool,
-            """SELECT channel_id, username, title,
+            """SELECT channel_id AS id, channel_id, username, title,
                       COALESCE(members_count, 0) AS member_count,
                       type, added_at
                FROM managed_channels WHERE owner_id=$1
@@ -1277,6 +1277,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "DELETE FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
         )
         return _json_resp({"ok": True})
+
+    async def persona_create(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        name = (body.get("persona_name") or "").strip()
+        if not name:
+            return _err("Имя персоны обязательно", 400)
+        VALID_STYLES = {"formal", "casual", "expert", "friendly", "sarcastic", "neutral"}
+        speech_style = body.get("speech_style", "casual")
+        if speech_style not in VALID_STYLES:
+            speech_style = "casual"
+        try:
+            interests_raw = body.get("interests", "")
+            if isinstance(interests_raw, list):
+                interests = [str(i).strip() for i in interests_raw if str(i).strip()]
+            else:
+                interests = [t.strip() for t in str(interests_raw).split(",") if t.strip()]
+            age = int(body.get("age") or 25)
+            age = max(18, min(80, age))
+            row = await pool.fetchrow(
+                """INSERT INTO persona_profiles
+                   (owner_id, persona_name, bio, age, interests, speech_style, tone, niche, backstory, is_active)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
+                   RETURNING id, persona_name, is_active""",
+                uid, name,
+                (body.get("bio") or "").strip() or None,
+                age,
+                interests,
+                speech_style,
+                (body.get("tone") or "positive").strip(),
+                (body.get("niche") or "").strip() or None,
+                (body.get("backstory") or "").strip() or None,
+            )
+            return _json_resp({"ok": True, "persona": dict(row)})
+        except Exception:
+            log.exception("persona_create uid=%d", uid)
+            return _err("Ошибка создания персоны", 500)
 
     # ── Auto Registrar ─────────────────────────────────────────────────────────
 
@@ -4406,6 +4448,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_get("/api/miniapp/bot_factory", bot_factory_status)
     # Persona Hub
     app.router.add_get("/api/miniapp/personas", persona_list)
+    app.router.add_post("/api/miniapp/persona", persona_create)
     app.router.add_put("/api/miniapp/persona/{persona_id}/toggle", persona_toggle)
     app.router.add_delete("/api/miniapp/persona/{persona_id}", persona_delete)
     # Auto Registrar

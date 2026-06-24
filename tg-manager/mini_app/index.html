@@ -1161,6 +1161,41 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sub-sb">
     <div id="personaStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
     <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Создать персону</div>
+    <div style="padding:8px 0">
+      <div class="field">
+        <label>Имя персоны *</label>
+        <input type="text" id="pName" placeholder="Например: Алексей" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+      <div class="field">
+        <label>Стиль речи</label>
+        <select id="pStyle" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="casual">💬 Разговорный (casual)</option>
+          <option value="formal">🎩 Формальный (formal)</option>
+          <option value="expert">🔬 Экспертный (expert)</option>
+          <option value="friendly">😊 Дружелюбный (friendly)</option>
+          <option value="sarcastic">😏 Саркастический (sarcastic)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Ниша / тема</label>
+        <input type="text" id="pNiche" placeholder="Крипто, инвестиции, IT..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+      <div class="field">
+        <label>Биография (кратко)</label>
+        <textarea id="pBio" rows="2" placeholder="Краткое описание персонажа..." style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;resize:none"></textarea>
+      </div>
+      <div class="field">
+        <label>Интересы (через запятую)</label>
+        <input type="text" id="pInterests" placeholder="трейдинг, технологии, путешествия" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+      <div class="field">
+        <label>Возраст</label>
+        <input type="number" id="pAge" value="25" min="18" max="80" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+      <div class="field-err" id="pErr"></div>
+      <button class="btn btn-p" onclick="submitPersona()" style="width:100%">🎭 Создать персону</button>
+    </div>
   </div>
 </div>
 
@@ -4476,7 +4511,7 @@ async function openBotFactory() {
         <div class="row-ico" style="background:rgba(34,197,94,.16)">${b.is_active?'🟢':'🔴'}</div>
         <div class="row-body">
           <div class="row-name">@${esc(b.username||b.first_name||b.bot_id)}</div>
-          <div class="row-val">${b.created_at?new Date(b.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">${(b.added_at||b.created_at)?new Date(b.added_at||b.created_at).toLocaleDateString('ru'):''}</div>
         </div>
       </div>
     `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
@@ -4501,7 +4536,7 @@ async function openPersonas() {
       <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${active}</div><div class="kpi-lbl">Активных</div></div>
     `);
     txt('m-persona-val',`${active} активных · ${personas.length} персон`);
-    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Создайте AI-персону в боте')); return; }
+    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Заполните форму ниже и нажмите «Создать персону»')); return; }
     txt('personaList', personas.map(p=>`
       <div class="row">
         <div class="row-ico" style="background:rgba(168,85,247,.16)">${p.is_active?'🟢':'⚫'}</div>
@@ -4535,6 +4570,37 @@ async function deletePersona(id) {
     openPersonas();
   } catch(e) { toast('Ошибка: '+e.message); }
 }
+async function submitPersona() {
+  const name = (document.getElementById('pName')||{}).value?.trim();
+  const errEl = document.getElementById('pErr');
+  if (!name) { if(errEl) errEl.textContent='Укажите имя персоны'; return; }
+  if(errEl) errEl.textContent='';
+  const btn = document.querySelector('#s-personas .btn-p');
+  if(btn) { btn.disabled=true; btn.textContent='Создание...'; }
+  try {
+    await api('/api/miniapp/persona', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        persona_name: name,
+        speech_style: document.getElementById('pStyle')?.value||'casual',
+        niche: document.getElementById('pNiche')?.value?.trim()||'',
+        bio: document.getElementById('pBio')?.value?.trim()||'',
+        interests: document.getElementById('pInterests')?.value?.trim()||'',
+        age: parseInt(document.getElementById('pAge')?.value||'25')
+      })
+    });
+    toast('🎭 Персона создана!');
+    ['pName','pNiche','pBio','pInterests'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    document.getElementById('pAge').value='25';
+    openPersonas();
+  } catch(e) {
+    if(errEl) errEl.textContent='Ошибка: '+e.message;
+    toast('Ошибка создания');
+  } finally {
+    if(btn) { btn.disabled=false; btn.textContent='🎭 Создать персону'; }
+  }
+}
 
 // ── Auto Registrar ──────────────────────────────────────
 async function openAutoreg() {
@@ -4555,7 +4621,7 @@ async function openAutoreg() {
         <div class="row-ico" style="background:rgba(34,197,94,.16)">📱</div>
         <div class="row-body">
           <div class="row-name">${esc(a.first_name||a.phone)}</div>
-          <div class="row-val">${esc(a.phone)} · ${a.acc_status||'—'} · ${a.created_at?new Date(a.created_at).toLocaleDateString('ru'):''}</div>
+          <div class="row-val">${esc(a.phone)} · ${a.acc_status||'—'} · ${(a.added_at||a.created_at)?new Date(a.added_at||a.created_at).toLocaleDateString('ru'):''}</div>
         </div>
       </div>
     `).join(''));
