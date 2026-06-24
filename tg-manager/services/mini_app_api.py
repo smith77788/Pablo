@@ -3545,6 +3545,125 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_referrals": count,
         })
 
+    # ── Content Cloner ───────────────────────────────────────────────────────
+
+    async def content_cloner_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            "SELECT id, op_type, status, payload, created_at FROM operation_queue "
+            "WHERE owner_id=$1 AND op_type='content_clone' ORDER BY created_at DESC LIMIT 20",
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def content_cloner_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        body = await request.json()
+        source = (body.get("source") or "").strip()
+        if not source:
+            return _err("source required")
+        account_id = body.get("account_id")
+        await pool.execute(
+            "INSERT INTO operation_queue (op_type, payload, status, owner_id) VALUES ('content_clone',$1,'pending',$2)",
+            json.dumps({"source": source, "account_id": account_id}), uid,
+        )
+        return _json_resp({"ok": True})
+
+    # ── Clone Adapt ───────────────────────────────────────────────────────────
+
+    async def clone_adapt_history(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT h.id, h.source_bot_id, h.target_bot_id, h.fields,
+                   h.status, h.details, h.created_at,
+                   sb.username AS source_uname, sb.first_name AS source_name,
+                   tb.username AS target_uname, tb.first_name AS target_name
+            FROM clone_adapt_history h
+            LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
+            LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
+            WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT 30
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    # ── Content Mesh ──────────────────────────────────────────────────────────
+
+    async def content_meshes_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT cm.id, cm.name, cm.enabled, cm.source_channel, cm.delay_minutes,
+                   COUNT(DISTINCT mt.id) AS targets_count,
+                   COUNT(mq.id) FILTER (WHERE mq.status='pending') AS pending_posts,
+                   cm.created_at
+            FROM content_meshes cm
+            LEFT JOIN mesh_targets mt ON mt.mesh_id = cm.id
+            LEFT JOIN mesh_queue mq ON mq.mesh_id = cm.id
+            WHERE cm.owner_id=$1
+            GROUP BY cm.id, cm.name, cm.enabled, cm.source_channel,
+                     cm.delay_minutes, cm.created_at
+            ORDER BY cm.id DESC
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def content_mesh_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        mesh_id = int(request.match_info["mesh_id"])
+        mesh = await pool.fetchrow(
+            "SELECT enabled FROM content_meshes WHERE id=$1 AND owner_id=$2", mesh_id, uid
+        )
+        if not mesh:
+            return _err("not found", 404)
+        new_state = not mesh["enabled"]
+        await pool.execute(
+            "UPDATE content_meshes SET enabled=$1, updated_at=NOW() WHERE id=$2", new_state, mesh_id
+        )
+        return _json_resp({"enabled": new_state})
+
+    # ── Narrative Engine ──────────────────────────────────────────────────────
+
+    async def narrative_campaigns_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            "SELECT id, topic, campaign_type, spread_hours, posts_total, posts_published, status, created_at "
+            "FROM narrative_campaigns WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 30",
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    async def narrative_campaign_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        cid = int(request.match_info["campaign_id"])
+        campaign = await pool.fetchrow(
+            "SELECT * FROM narrative_campaigns WHERE id=$1 AND owner_id=$2", cid, uid
+        )
+        if not campaign:
+            return _err("not found", 404)
+        posts = await pool.fetch(
+            "SELECT channel_username, angle, status, scheduled_at, published_at "
+            "FROM narrative_posts WHERE campaign_id=$1 ORDER BY scheduled_at LIMIT 50",
+            cid,
+        )
+        return _json_resp({"campaign": dict(campaign), "posts": [dict(p) for p in posts]})
+
     # ── Self Promo ───────────────────────────────────────────────────────────
 
     async def self_promo_list(request: web.Request) -> web.Response:
@@ -3943,6 +4062,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reg Checker
     app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
+    # Content Cloner
+    app.router.add_get("/api/miniapp/content_cloner/history", content_cloner_history)
+    app.router.add_post("/api/miniapp/content_cloner/submit", content_cloner_submit)
+    # Clone Adapt
+    app.router.add_get("/api/miniapp/clone_adapt/history", clone_adapt_history)
+    # Content Mesh
+    app.router.add_get("/api/miniapp/content_meshes", content_meshes_list)
+    app.router.add_put("/api/miniapp/content_mesh/{mesh_id}/toggle", content_mesh_toggle)
+    # Narrative Engine
+    app.router.add_get("/api/miniapp/narrative", narrative_campaigns_list)
+    app.router.add_get("/api/miniapp/narrative/{campaign_id}", narrative_campaign_detail)
     # Self Promo
     app.router.add_get("/api/miniapp/self_promo", self_promo_list)
     app.router.add_put("/api/miniapp/self_promo/{tpl_id}/toggle", self_promo_toggle)

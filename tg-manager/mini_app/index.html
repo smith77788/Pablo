@@ -431,6 +431,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openQuickPost()"><div class="row-ico" style="background:rgba(168,85,247,.16)">✍️</div><div class="row-body"><div class="row-name">Quick Post</div><div class="row-val">Быстрая публикация в каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openReporter()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🚨</div><div class="row-body"><div class="row-name">Репортинг</div><div class="row-val">Жалобы на аккаунты/каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openBotFactory()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🏭</div><div class="row-body"><div class="row-name">Bot Factory</div><div class="row-val" id="m-botfactory-val">Создание и импорт ботов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openContentCloner()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📋</div><div class="row-body"><div class="row-name">Content Cloner</div><div class="row-val">Клонирование контента каналов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openCloneAdapt()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔄</div><div class="row-body"><div class="row-name">Clone & Adapt</div><div class="row-val">История клонирования ботов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openContentMesh()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🕸</div><div class="row-body"><div class="row-name">Content Mesh</div><div class="row-val" id="m-mesh-val">Сети репостинга</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openNarrative()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📖</div><div class="row-body"><div class="row-name">Narrative Engine</div><div class="row-val" id="m-narr-val">Нарратив-кампании</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Платформа</div>
@@ -440,6 +444,54 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
     </div>
   </div>
+</div>
+
+<!-- ══════════════════════ CONTENT CLONER ══════════════════════ -->
+<div class="screen" id="s-contentcloner">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📋 Content Cloner</div></div>
+  <div class="sub-sb">
+    <div class="sec">Клонирование контента</div>
+    <div class="lst" style="margin:0 16px 12px;padding:14px">
+      <input type="text" id="clonerSrc" placeholder="@channel или -100xxx" style="width:100%;background:var(--bg2);border:1px solid var(--sep);border-radius:10px;padding:9px 12px;font-size:15px;color:var(--text);outline:none;box-sizing:border-box">
+      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitCloner()">📋 Клонировать</button>
+      <div id="clonerErr" style="color:#ef4444;font-size:13px;margin-top:6px"></div>
+    </div>
+    <div class="sec" style="margin-top:4px">История</div>
+    <div class="lst" id="clonerHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ CLONE ADAPT ══════════════════════ -->
+<div class="screen" id="s-cloneadapt">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🔄 Clone & Adapt</div></div>
+  <div class="sub-sb">
+    <div class="sec">История клонирования ботов</div>
+    <div class="lst" id="caHistory"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ CONTENT MESH ══════════════════════ -->
+<div class="screen" id="s-contentmesh">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🕸 Content Mesh</div></div>
+  <div class="sub-sb">
+    <div class="sec">Сети контент-репостинга</div>
+    <div class="lst" id="meshList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ NARRATIVE ENGINE ══════════════════════ -->
+<div class="screen" id="s-narrative">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📖 Narrative Engine</div></div>
+  <div class="sub-sb">
+    <div class="sec">Нарратив-кампании</div>
+    <div class="lst" id="narrativeList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ NARRATIVE DETAIL ══════════════════════ -->
+<div class="screen" id="s-narrativedetail">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title" id="narr-name">Кампания</div></div>
+  <div class="sub-sb" id="narr-body"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
 <!-- ══════════════════════ SELF PROMO ══════════════════════ -->
@@ -5693,6 +5745,167 @@ async function submitErrReport() {
     loadErrReports();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
+}
+
+// ── Content Cloner ─────────────────────────────────────
+async function openContentCloner() {
+  push('s-contentcloner');
+  document.getElementById('clonerSrc').value='';
+  document.getElementById('clonerErr').textContent='';
+  loadClonerHistory();
+}
+async function loadClonerHistory() {
+  txt('clonerHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/content_cloner/history');
+    if (!rows.length) { txt('clonerHistory', empty('📋','Нет операций','')); return; }
+    txt('clonerHistory', rows.map(r => {
+      const payload = r.payload||{};
+      const src = typeof payload==='object' ? (payload.source||'—') : '—';
+      const [cls,lbl]=stb(r.status);
+      return `
+        <div class="row">
+          <div class="row-body">
+            <div class="row-name">Источник: ${esc(src)}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${ago(r.created_at)}</div>
+          </div>
+        </div>
+      `;
+    }).join(''));
+  } catch(e) { txt('clonerHistory', empty('⚠️','Ошибка',e.message)); }
+}
+async function submitCloner() {
+  const src = document.getElementById('clonerSrc').value.trim();
+  const errEl = document.getElementById('clonerErr');
+  errEl.textContent='';
+  if (!src) { errEl.textContent='Укажите источник'; return; }
+  try {
+    await api('/api/miniapp/content_cloner/submit',{method:'POST',body:JSON.stringify({source:src})});
+    toast('✅ Операция клонирования запущена');
+    document.getElementById('clonerSrc').value='';
+    loadClonerHistory();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+}
+
+// ── Clone Adapt ─────────────────────────────────────────
+async function openCloneAdapt() {
+  push('s-cloneadapt');
+  txt('caHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/clone_adapt/history');
+    if (!rows.length) { txt('caHistory', empty('🔄','Нет истории','')); return; }
+    txt('caHistory', rows.map(r => {
+      const src = r.source_name || (r.source_uname?'@'+r.source_uname:'—');
+      const tgt = r.target_name || (r.target_uname?'@'+r.target_uname:'—');
+      const [cls,lbl]=stb(r.status==='ok'?'done':r.status);
+      return `
+        <div class="row">
+          <div class="row-body">
+            <div class="row-name">${esc(src)} → ${esc(tgt)}</div>
+            <div class="row-val">Поля: ${esc(r.fields||'—')}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${ago(r.created_at)}</div>
+            ${r.details?`<div class="row-val" style="color:var(--hint)">${esc(r.details)}</div>`:''}
+          </div>
+        </div>
+      `;
+    }).join(''));
+  } catch(e) { txt('caHistory', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Content Mesh ────────────────────────────────────────
+async function openContentMesh() {
+  push('s-contentmesh');
+  txt('meshList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/content_meshes');
+    if (!rows.length) { txt('meshList', empty('🕸','Мешей нет','Создайте сеть через бота')); return; }
+    txt('meshList', rows.map(r => `
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">${r.enabled?'🟢':'🔴'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.name)}</div>
+          <div class="row-val">Источник: ${esc(r.source_channel||'—')} · Задержка: ${r.delay_minutes}м</div>
+          <div class="row-val">Целей: ${r.targets_count||0} · В очереди: ${r.pending_posts||0}</div>
+        </div>
+        <div class="row-right">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px" onclick="toggleMesh(${r.id},this)">${r.enabled?'Выкл':'Вкл'}</button>
+        </div>
+      </div>
+    `).join(''));
+    document.getElementById('m-mesh-val').textContent = rows.length+' сетей';
+  } catch(e) { txt('meshList', empty('⚠️','Ошибка',e.message)); }
+}
+async function toggleMesh(meshId, btn) {
+  btn.disabled=true;
+  try {
+    const r = await api(`/api/miniapp/content_mesh/${meshId}/toggle`,{method:'PUT'});
+    toast(r.enabled?'🟢 Меш включён':'🔴 Меш выключен');
+    openContentMesh();
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+
+// ── Narrative Engine ────────────────────────────────────
+async function openNarrative() {
+  push('s-narrative');
+  txt('narrativeList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/narrative');
+    if (!rows.length) { txt('narrativeList', empty('📖','Кампаний нет','Создайте нарратив через бота')); return; }
+    const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
+    const statusCls = {draft:'b-gy',active:'b-gr',paused:'b-or',completed:'b-bl',cancelled:'b-gy'};
+    txt('narrativeList', rows.map(r => `
+      <div class="row tap" onclick="openNarrativeDetail(${r.id},'${esc(r.topic)}')">
+        <div class="row-body">
+          <div class="row-name">${esc(r.topic)}</div>
+          <div class="row-val">${typeLabel[r.campaign_type]||r.campaign_type} · ${r.spread_hours}ч</div>
+          <div class="row-val">Постов: ${r.posts_published||0}/${r.posts_total||0} · <span class="badge ${statusCls[r.status]||'b-gy'}">${r.status}</span></div>
+          <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join(''));
+    document.getElementById('m-narr-val').textContent = rows.length+' кампаний';
+  } catch(e) { txt('narrativeList', empty('⚠️','Ошибка',e.message)); }
+}
+async function openNarrativeDetail(cid, topic) {
+  push('s-narrativedetail');
+  document.getElementById('narr-name').textContent = topic||'Кампания';
+  txt('narr-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api(`/api/miniapp/narrative/${cid}`);
+    const c = d.campaign;
+    const posts = d.posts||[];
+    const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
+    let html = `
+      <div class="lst" style="margin:12px 16px 0">
+        <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${typeLabel[c.campaign_type]||c.campaign_type}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val">${c.status}</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Время распределения</div><div class="row-val">${c.spread_hours}ч</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val">${c.posts_published||0}/${c.posts_total||0} постов</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Послание</div><div class="row-val">${esc(c.core_message)}</div></div></div>
+      </div>
+      <div class="sec" style="margin-top:8px">Посты (${posts.length})</div>
+    `;
+    if (!posts.length) {
+      html += empty('📭','Постов нет','');
+    } else {
+      const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
+      html += '<div class="lst" style="margin:0 16px">';
+      posts.forEach(p => {
+        const [cls,lbl]=stb(p.status);
+        html += `
+          <div class="row">
+            <div class="row-body">
+              <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
+              <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
+            </div>
+          </div>
+        `;
+      });
+      html += '</div>';
+    }
+    txt('narr-body', html);
+  } catch(e) { txt('narr-body', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── Self Promo ─────────────────────────────────────────
