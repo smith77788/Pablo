@@ -444,6 +444,10 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openCloneAdapt()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔄</div><div class="row-body"><div class="row-name">Clone & Adapt</div><div class="row-val">История клонирования ботов</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openContentMesh()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🕸</div><div class="row-body"><div class="row-name">Content Mesh</div><div class="row-val" id="m-mesh-val">Сети репостинга</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openNarrative()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📖</div><div class="row-body"><div class="row-name">Narrative Engine</div><div class="row-val" id="m-narr-val">Нарратив-кампании</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openAssetTemplates()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📐</div><div class="row-body"><div class="row-name">Asset Templates</div><div class="row-val" id="m-at-val">Шаблоны активов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openInfraHealth()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🏥</div><div class="row-body"><div class="row-name">Infra Health</div><div class="row-val" id="m-ih-val">Алерты и восстановление</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openSwarm()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🐝</div><div class="row-body"><div class="row-name">Swarm</div><div class="row-val" id="m-swarm-val">Метрики роевого управления</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openPresencePacks()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📦</div><div class="row-body"><div class="row-name">Presence Packs</div><div class="row-val" id="m-pp-val">Пакеты присутствия</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Платформа</div>
@@ -452,6 +456,50 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
       <div class="row tap" onclick="openErrorReport()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🐛</div><div class="row-body"><div class="row-name">Сообщить об ошибке</div><div class="row-val">Отправить баг-репорт</div></div><div class="row-right chev">›</div></div>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ASSET TEMPLATES ══════════════════════ -->
+<div class="screen" id="s-assettemplates">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📐 Asset Templates</div></div>
+  <div class="sub-sb">
+    <div style="padding:8px 16px 4px;display:flex;gap:6px;overflow-x:auto">
+      <button class="btn btn-s" onclick="filterAssetTpl('',this)" id="at-all" style="flex:0 0 auto">Все</button>
+      <button class="btn" onclick="filterAssetTpl('bot',this)" style="flex:0 0 auto;background:var(--bg2)">🤖 Бот</button>
+      <button class="btn" onclick="filterAssetTpl('channel',this)" style="flex:0 0 auto;background:var(--bg2)">📢 Канал</button>
+      <button class="btn" onclick="filterAssetTpl('group',this)" style="flex:0 0 auto;background:var(--bg2)">👥 Группа</button>
+      <button class="btn" onclick="filterAssetTpl('post',this)" style="flex:0 0 auto;background:var(--bg2)">📝 Пост</button>
+    </div>
+    <div class="lst" id="atList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ INFRA HEALTH CENTER ══════════════════════ -->
+<div class="screen" id="s-infrahealth">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🏥 Infra Health</div></div>
+  <div class="sub-sb">
+    <div class="sec">Активные алерты</div>
+    <div class="lst" id="ihAlerts"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">События восстановления</div>
+    <div class="lst" id="ihRecovery"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SWARM ══════════════════════ -->
+<div class="screen" id="s-swarm">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">🐝 Swarm</div></div>
+  <div class="sub-sb">
+    <div class="sec">Метрики ботов</div>
+    <div class="lst" id="swarmList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ PRESENCE PACKS ══════════════════════ -->
+<div class="screen" id="s-presencepacks">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📦 Presence Packs</div></div>
+  <div class="sub-sb">
+    <div class="sec">Пакеты присутствия</div>
+    <div class="lst" id="ppList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -5878,6 +5926,147 @@ async function submitErrReport() {
     loadErrReports();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='📤 Отправить'; }
+}
+
+// ── Asset Templates ────────────────────────────────────
+let _atFilter='';
+async function openAssetTemplates() {
+  push('s-assettemplates');
+  loadAssetTpl(_atFilter);
+}
+function filterAssetTpl(type, btn) {
+  _atFilter=type;
+  document.querySelectorAll('#s-assettemplates .btn').forEach(b=>b.classList.remove('btn-p'));
+  if (btn) btn.classList.add('btn-p');
+  loadAssetTpl(type);
+}
+async function loadAssetTpl(type) {
+  txt('atList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const url = '/api/miniapp/asset_templates'+(type?`?type=${encodeURIComponent(type)}`:'');
+    const rows = await api(url);
+    if (!rows.length) { txt('atList', empty('📐','Шаблонов нет','Создайте через бота')); return; }
+    const typeIco={bot:'🤖',channel:'📢',group:'👥',post:'📝'};
+    txt('atList', rows.map(r=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">${typeIco[r.asset_type]||'📐'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.name)}</div>
+          <div class="row-val">${r.asset_type} · ${ago(r.created_at)}</div>
+        </div>
+        <div class="row-right">
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;color:#ef4444" onclick="deleteAssetTpl(${r.id},this)">✕</button>
+        </div>
+      </div>
+    `).join(''));
+    document.getElementById('m-at-val').textContent = rows.length+' шаблонов';
+  } catch(e) { txt('atList', empty('⚠️','Ошибка',e.message)); }
+}
+async function deleteAssetTpl(id, btn) {
+  if (!confirm('Удалить шаблон?')) return;
+  btn.disabled=true;
+  try {
+    await api(`/api/miniapp/asset_template/${id}`,{method:'DELETE'});
+    toast('🗑 Шаблон удалён');
+    loadAssetTpl(_atFilter);
+  } catch(e) { toast('⚠️ '+e.message); btn.disabled=false; }
+}
+
+// ── Infra Health Center ─────────────────────────────────
+async function openInfraHealth() {
+  push('s-infrahealth');
+  txt('ihAlerts','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('ihRecovery','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/infra_health');
+    const alerts = d.alerts||[];
+    const recovery = d.recovery||[];
+    const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
+    if (!alerts.length) {
+      txt('ihAlerts', empty('✅','Нет активных алертов','Инфраструктура работает нормально'));
+    } else {
+      txt('ihAlerts', alerts.map(a=>`
+        <div class="row">
+          <div class="row-ico" style="background:rgba(239,68,68,.16)">⚠️</div>
+          <div class="row-body">
+            <div class="row-name"><span class="badge ${sevCls[a.severity]||'b-gy'}">${a.severity}</span> ${esc(a.title)}</div>
+            <div class="row-val">${esc(a.alert_type)}${a.target_type?' · '+esc(a.target_type):''}</div>
+            <div class="row-val" style="color:var(--hint)">${ago(a.first_seen_at)}</div>
+          </div>
+        </div>
+      `).join(''));
+    }
+    document.getElementById('m-ih-val').textContent = alerts.length?`${alerts.length} алертов`:'Всё в норме';
+    if (!recovery.length) {
+      txt('ihRecovery', empty('🔄','Нет событий восстановления',''));
+    } else {
+      txt('ihRecovery', recovery.map(r=>`
+        <div class="row">
+          <div class="row-body">
+            <div class="row-name">${esc(r.recovery_type)} · ${esc(r.action)}</div>
+            <div class="row-val"><span class="badge ${sevCls[r.severity]||'b-gy'}">${r.severity}</span> · ${stb(r.status)[1]}</div>
+            <div class="row-val" style="color:var(--hint)">${ago(r.created_at)}</div>
+          </div>
+        </div>
+      `).join(''));
+    }
+  } catch(e) {
+    txt('ihAlerts', empty('⚠️','Ошибка',e.message));
+    txt('ihRecovery','');
+  }
+}
+
+// ── Swarm ───────────────────────────────────────────────
+const SWARM_ROLES={entry:'🚪 Вход',conversion:'💰 Конверсия',retention:'🔄 Удержание',general:'🤖 Общий'};
+async function openSwarm() {
+  push('s-swarm');
+  txt('swarmList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/swarm');
+    if (!rows.length) { txt('swarmList', empty('🐝','Нет данных','Роевые метрики появятся после активации')); return; }
+    txt('swarmList', rows.map(r=>{
+      const score = r.score?r.score.toFixed(2):'—';
+      const ctr = r.ctr?(r.ctr*100).toFixed(1)+'%':'—';
+      const cvr = r.conversion_rate?(r.conversion_rate*100).toFixed(1)+'%':'—';
+      const d1 = r.retention_d1?(r.retention_d1*100).toFixed(0)+'%':'—';
+      const d7 = r.retention_d7?(r.retention_d7*100).toFixed(0)+'%':'—';
+      return `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(245,158,11,.16)">🤖</div>
+          <div class="row-body">
+            <div class="row-name">${esc(r.first_name||'?')} ${r.username?'@'+esc(r.username):''}</div>
+            <div class="row-val">${SWARM_ROLES[r.bot_role]||r.bot_role} · ${r.swarm_enabled?'🟢 Рой':'⚫ Выкл'} · Score: ${score}</div>
+            <div class="row-val">CTR: ${ctr} · CVR: ${cvr} · D1: ${d1} · D7: ${d7}</div>
+            ${r.cluster&&r.cluster!=='default'?`<div class="row-val" style="color:var(--hint)">Кластер: ${esc(r.cluster)}</div>`:''}
+          </div>
+        </div>
+      `;
+    }).join(''));
+    const enabled = rows.filter(r=>r.swarm_enabled).length;
+    document.getElementById('m-swarm-val').textContent = `${enabled} в рое / ${rows.length} всего`;
+  } catch(e) { txt('swarmList', empty('⚠️','Ошибка',e.message)); }
+}
+
+// ── Presence Packs ──────────────────────────────────────
+async function openPresencePacks() {
+  push('s-presencepacks');
+  txt('ppList','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const rows = await api('/api/miniapp/presence_packs');
+    if (!rows.length) { txt('ppList', empty('📦','Пакетов нет','Создайте через бота')); return; }
+    txt('ppList', rows.map(r=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">📦</div>
+        <div class="row-body">
+          <div class="row-name">${esc(r.name)}</div>
+          ${r.description?`<div class="row-val">${esc(r.description)}</div>`:''}
+          ${r.target_label?`<div class="row-val" style="color:var(--accent)">🎯 ${esc(r.target_label)}</div>`:''}
+          ${r.target_url?`<div class="row-val" style="color:var(--hint)">${esc(r.target_url)}</div>`:''}
+        </div>
+      </div>
+    `).join(''));
+    document.getElementById('m-pp-val').textContent = rows.length+' пакетов';
+  } catch(e) { txt('ppList', empty('⚠️','Ошибка',e.message)); }
 }
 
 // ── Global Presence ────────────────────────────────────

@@ -3545,6 +3545,111 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "total_referrals": count,
         })
 
+    # ── Asset Templates ──────────────────────────────────────────────────────
+
+    async def asset_templates_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        asset_type = request.rel_url.query.get("type")
+        if asset_type:
+            rows = await pool.fetch(
+                "SELECT id, asset_type, name, created_at FROM asset_templates "
+                "WHERE owner_id=$1 AND asset_type=$2 ORDER BY created_at DESC LIMIT 50",
+                uid, asset_type,
+            )
+        else:
+            rows = await pool.fetch(
+                "SELECT id, asset_type, name, created_at FROM asset_templates "
+                "WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50",
+                uid,
+            )
+        return _json_resp([dict(r) for r in rows])
+
+    async def asset_template_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        tpl_id = int(request.match_info["tpl_id"])
+        tpl = await pool.fetchrow(
+            "SELECT * FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
+        )
+        if not tpl:
+            return _err("not found", 404)
+        return _json_resp(dict(tpl))
+
+    async def asset_template_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        tpl_id = int(request.match_info["tpl_id"])
+        result = await pool.execute(
+            "DELETE FROM asset_templates WHERE id=$1 AND owner_id=$2", tpl_id, uid
+        )
+        if result == "DELETE 0":
+            return _err("not found", 404)
+        return _json_resp({"ok": True})
+
+    # ── Infra Health Center ───────────────────────────────────────────────────
+
+    async def infra_health_overview(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        alerts = await pool.fetch(
+            "SELECT id, alert_type, severity, title, description, target_type, "
+            "is_active, first_seen_at, resolved_at "
+            "FROM infrastructure_alerts WHERE owner_id=$1 AND is_active=TRUE "
+            "ORDER BY first_seen_at DESC LIMIT 20",
+            uid,
+        )
+        recovery = await pool.fetch(
+            "SELECT id, recovery_type, target_type, trigger, action, status, "
+            "severity, created_at, completed_at "
+            "FROM recovery_events WHERE owner_id=$1 "
+            "ORDER BY created_at DESC LIMIT 20",
+            uid,
+        )
+        return _json_resp({
+            "alerts": [dict(a) for a in alerts],
+            "recovery": [dict(r) for r in recovery],
+        })
+
+    # ── Swarm ─────────────────────────────────────────────────────────────────
+
+    async def swarm_metrics(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            """
+            SELECT mb.bot_id, mb.username, mb.first_name, mb.bot_role, mb.cluster,
+                   mb.swarm_weight, mb.swarm_enabled,
+                   bm.ctr, bm.conversion_rate, bm.retention_d1, bm.retention_d7, bm.score,
+                   bm.updated_at
+            FROM managed_bots mb
+            LEFT JOIN bot_metrics bm ON bm.bot_id = mb.bot_id
+            WHERE mb.added_by=$1
+            ORDER BY COALESCE(bm.score, 0) DESC
+            LIMIT 30
+            """,
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
+    # ── Presence Packs ────────────────────────────────────────────────────────
+
+    async def presence_packs_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("auth")
+        rows = await pool.fetch(
+            "SELECT id, name, description, target_url, target_label, bot_id "
+            "FROM presence_packs WHERE owner_id=$1 ORDER BY id DESC LIMIT 30",
+            uid,
+        )
+        return _json_resp([dict(r) for r in rows])
+
     # ── Global Presence ───────────────────────────────────────────────────────
 
     async def global_presence_plans(request: web.Request) -> web.Response:
@@ -4334,6 +4439,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Reg Checker
     app.router.add_get("/api/miniapp/reg_check/history", reg_check_history)
     app.router.add_post("/api/miniapp/reg_check", reg_check_submit)
+    # Asset Templates
+    app.router.add_get("/api/miniapp/asset_templates", asset_templates_list)
+    app.router.add_get("/api/miniapp/asset_template/{tpl_id}", asset_template_detail)
+    app.router.add_delete("/api/miniapp/asset_template/{tpl_id}", asset_template_delete)
+    # Infra Health Center
+    app.router.add_get("/api/miniapp/infra_health", infra_health_overview)
+    # Swarm
+    app.router.add_get("/api/miniapp/swarm", swarm_metrics)
+    # Presence Packs
+    app.router.add_get("/api/miniapp/presence_packs", presence_packs_list)
     # Global Presence
     app.router.add_get("/api/miniapp/global_presence", global_presence_plans)
     app.router.add_get("/api/miniapp/global_presence/{plan_id}", global_presence_plan_detail)
