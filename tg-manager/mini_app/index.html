@@ -572,6 +572,39 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: DEEPLINKS ══════════════════════ -->
+<div class="screen" id="s-deeplinks">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔗 Deep Links</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openDlModal()">+ Создать</button></div>
+  </div>
+  <div class="sub-sb">
+    <div id="dlStats" style="display:flex;gap:10px;padding:10px 0 4px"></div>
+    <div class="sec">Ссылки</div>
+    <div class="lst" id="dlList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ENGAGEMENT ══════════════════════ -->
+<div class="screen" id="s-engagement">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🔥 Активность аудитории</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Сегменты пользователей</div>
+    <div id="engGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 0"></div>
+    <div class="sec" style="margin-top:12px">О сегментах</div>
+    <div class="card" style="font-size:13px;line-height:1.6;color:#aaa">
+      <b>🔥 Горячие</b> — активны сегодня<br>
+      <b>🌡 Тёплые</b> — активны за 7 дней<br>
+      <b>❄️ Холодные</b> — активны за 30 дней<br>
+      <b>💀 Потерянные</b> — не заходили 30+ дней
+    </div>
+  </div>
+</div>
+
 </div><!-- /content -->
 
 <!-- ══════════════════════ TABBAR ══════════════════════ -->
@@ -765,6 +798,25 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="proxyErr"></div>
     <button class="btn btn-p" id="proxyBtn" onclick="saveProxy()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: DEEPLINK ══════════════════════ -->
+<div class="mbg" id="dlMbg" onclick="if(event.target===this)closeDlModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeDlModal()">✕</div>
+    <div class="modal-title">🔗 Новый Deep Link</div>
+    <div class="field">
+      <label>Название</label>
+      <input type="text" id="dlName" maxlength="100" placeholder="Напр: Реклама ВК">
+    </div>
+    <div class="field">
+      <label>Start-параметр</label>
+      <input type="text" id="dlParam" maxlength="64" placeholder="vk_ad_june" oninput="this.value=this.value.replace(/[^a-zA-Z0-9_-]/g,'')">
+      <div class="field-note">Только a-z, A-Z, 0-9, _ и -. Ссылка: t.me/bot?start=<b>параметр</b></div>
+    </div>
+    <div class="field-err" id="dlErr"></div>
+    <button class="btn btn-p" id="dlBtn" onclick="saveDl()" style="width:100%">➕ Создать</button>
   </div>
 </div>
 
@@ -1063,6 +1115,10 @@ function buildBotDetail(d) {
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openSchedule(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">⏰ Расписание</button>
       <button class="btn btn-s" onclick="openAudience(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">📊 Аудитория</button>
+    </div>
+    <div class="actions" style="padding-top:0">
+      <button class="btn btn-s" onclick="openDeeplinks(${d.bot.bot_id})">🔗 Deep Links</button>
+      <button class="btn btn-s" onclick="openEngagement(${d.bot.bot_id})">🔥 Активность</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -2710,6 +2766,99 @@ function closeRef() { document.getElementById('refMbg').classList.remove('show')
 function copyRef() {
   const url = `https://t.me/botmother_bot?start=ref_${REF_CODE}`;
   navigator.clipboard?.writeText(url).then(()=>toast('✅ Ссылка скопирована!')).catch(()=>toast(url));
+}
+
+// ── Deep Links ─────────────────────────────────────────
+let DL_BOT_ID = null;
+async function openDeeplinks(botId) {
+  DL_BOT_ID = botId;
+  push('s-deeplinks');
+  loadDeeplinks();
+}
+async function loadDeeplinks() {
+  txt('dlList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('dlStats', '');
+  try {
+    const d = await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplinks');
+    const links = d.links||[];
+    txt('dlStats', `
+      <div class="kpi-card"><div class="kpi-val">${links.length}</div><div class="kpi-lbl">Ссылок</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(d.total_clicks)}</div><div class="kpi-lbl">Кликов</div></div>
+      <div class="kpi-card"><div class="kpi-val">${num(d.referrals)}</div><div class="kpi-lbl">Рефералов</div></div>
+    `);
+    if (!links.length) { txt('dlList', empty('🔗','Нет ссылок','Создайте первую Deep Link')); return; }
+    txt('dlList', links.map(l=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(139,92,246,.16)">🔗</div>
+        <div class="row-body">
+          <div class="row-name">${esc(l.name)}</div>
+          <div class="row-val">?start=${esc(l.start_param)} · ${num(l.click_count)} кликов · ${num(l.unique_users)} уник.</div>
+        </div>
+        <div class="row-right"><button class="btn btn-d" style="padding:5px 10px;min-width:0;font-size:12px" onclick="deleteDl(${l.id})">✕</button></div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('dlList', empty('⚠️','Ошибка загрузки',e.message)); }
+}
+function openDlModal() {
+  document.getElementById('dlName').value='';
+  document.getElementById('dlParam').value='';
+  document.getElementById('dlErr').textContent='';
+  document.getElementById('dlMbg').classList.add('show');
+}
+function closeDlModal() { document.getElementById('dlMbg').classList.remove('show'); }
+async function saveDl() {
+  const name = document.getElementById('dlName').value.trim();
+  const param = document.getElementById('dlParam').value.trim();
+  const errEl = document.getElementById('dlErr');
+  errEl.textContent='';
+  if (!name) { errEl.textContent='Введите название'; return; }
+  if (!param) { errEl.textContent='Введите start-параметр'; return; }
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(param)) { errEl.textContent='Только a-z, A-Z, 0-9, _ и - (до 64 символов)'; return; }
+  const btn = document.getElementById('dlBtn');
+  btn.disabled=true; btn.textContent='Создаю…';
+  try {
+    await api('/api/miniapp/bot/'+DL_BOT_ID+'/deeplink', {method:'POST', body:JSON.stringify({name,start_param:param})});
+    closeDlModal();
+    toast('✅ Deep Link создан');
+    loadDeeplinks();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='➕ Создать'; }
+}
+async function deleteDl(linkId) {
+  if (!confirm('Удалить Deep Link?')) return;
+  try {
+    await api('/api/miniapp/deeplink/'+linkId, {method:'DELETE'});
+    toast('Удалено');
+    loadDeeplinks();
+  } catch(e) { toast('⚠️ '+e.message); }
+}
+
+// ── Engagement ─────────────────────────────────────────
+let ENG_BOT_ID = null;
+async function openEngagement(botId) {
+  ENG_BOT_ID = botId;
+  push('s-engagement');
+  loadEngagement();
+}
+async function loadEngagement() {
+  txt('engGrid', '<div class="spin-wrap" style="grid-column:1/-1"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/bot/'+ENG_BOT_ID+'/engagement');
+    const segs = [
+      {ico:'🔥',label:'Горячие',key:'hot',color:'rgba(239,68,68,.15)'},
+      {ico:'🌡',label:'Тёплые',key:'warm',color:'rgba(249,115,22,.15)'},
+      {ico:'❄️',label:'Холодные',key:'cold',color:'rgba(59,130,246,.15)'},
+      {ico:'💀',label:'Потерянные',key:'lost',color:'rgba(107,114,128,.15)'},
+    ];
+    txt('engGrid', segs.map(s=>`
+      <div class="card" style="background:${s.color};text-align:center">
+        <div style="font-size:28px">${s.ico}</div>
+        <div style="font-size:24px;font-weight:700;margin:4px 0">${num(d[s.key]||0)}</div>
+        <div style="font-size:12px;color:#aaa">${s.label}</div>
+        <div style="font-size:11px;color:#666;margin-top:2px">${d.total?Math.round((d[s.key]||0)/d.total*100)+'%':'0%'}</div>
+      </div>
+    `).join(''));
+  } catch(e) { txt('engGrid', `<div style="grid-column:1/-1">${empty('⚠️','Ошибка',e.message)}</div>`); }
 }
 
 // ── Utils ──────────────────────────────────────────────

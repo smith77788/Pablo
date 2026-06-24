@@ -664,6 +664,120 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Failed to cancel", 500)
 
+    # ── Deeplinks ────────────────────────────────────────────────────────────
+
+    async def bot_deeplinks(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        links = await _safe_fetch(pool,
+            """SELECT id, name, start_param, click_count, unique_users, created_at
+               FROM bot_deep_links WHERE bot_id=$1 ORDER BY click_count DESC LIMIT 30""", bot_id)
+        total_clicks = sum(l["click_count"] or 0 for l in links)
+        referrals = await _safe_count(pool,
+            "SELECT COUNT(*) FROM referrals WHERE bot_id=$1", bot_id)
+        return _json_resp({"links": links, "total_clicks": total_clicks, "referrals": referrals})
+
+    async def create_deeplink(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        name = (body.get("name") or "").strip()
+        start_param = (body.get("start_param") or "").strip().lower()
+        if not name or not start_param:
+            return _err("name and start_param required")
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_-]{1,64}$', start_param):
+            return _err("start_param: only letters, digits, _ and - allowed (max 64 chars)")
+        try:
+            row = await pool.fetchrow(
+                "INSERT INTO bot_deep_links(bot_id, name, start_param) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id",
+                bot_id, name, start_param)
+            if not row:
+                return _err("start_param already exists for this bot")
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("create_deeplink bot=%d uid=%d", bot_id, uid)
+            return _err("Failed to create deeplink", 500)
+
+    async def delete_deeplink(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            link_id = int(request.match_info["link_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid link_id", 400)
+        try:
+            await pool.execute(
+                """DELETE FROM bot_deep_links WHERE id=$1
+                   AND bot_id IN (SELECT bot_id FROM managed_bots WHERE added_by=$2)""",
+                link_id, uid)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to delete", 500)
+
+    # ── Engagement segments ───────────────────────────────────────────────────
+
+    async def bot_engagement(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        # Try user_activity table first, fallback to bot_users.last_seen
+        try:
+            row = await pool.fetchrow(
+                """SELECT
+                     COUNT(*) FILTER (WHERE last_seen >= now()-INTERVAL '1 day') AS hot,
+                     COUNT(*) FILTER (WHERE last_seen >= now()-INTERVAL '7 days'
+                                      AND last_seen < now()-INTERVAL '1 day') AS warm,
+                     COUNT(*) FILTER (WHERE last_seen >= now()-INTERVAL '30 days'
+                                      AND last_seen < now()-INTERVAL '7 days') AS cold,
+                     COUNT(*) FILTER (WHERE last_seen < now()-INTERVAL '30 days') AS lost,
+                     COUNT(*) AS total
+                   FROM user_activity WHERE bot_id=$1""", bot_id)
+        except Exception:
+            try:
+                row = await pool.fetchrow(
+                    """SELECT
+                         COUNT(*) FILTER (WHERE last_seen >= now()-INTERVAL '1 day') AS hot,
+                         COUNT(*) FILTER (WHERE last_seen >= now()-INTERVAL '7 days'
+                                          AND last_seen < now()-INTERVAL '1 day') AS warm,
+                         COUNT(*) FILTER (WHERE last_seen >= now()-INTERVAL '30 days'
+                                          AND last_seen < now()-INTERVAL '7 days') AS cold,
+                         COUNT(*) FILTER (WHERE last_seen < now()-INTERVAL '30 days') AS lost,
+                         COUNT(*) AS total
+                       FROM bot_users WHERE bot_id=$1""", bot_id)
+            except Exception:
+                row = None
+        if not row:
+            return _json_resp({"hot": 0, "warm": 0, "cold": 0, "lost": 0, "total": 0})
+        return _json_resp({k: int(row[k] or 0) for k in ("hot", "warm", "cold", "lost", "total")})
+
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
     async def toggle_bot(request: web.Request) -> web.Response:
@@ -1470,6 +1584,12 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Subscription
     app.router.add_get("/api/miniapp/subscription", subscription)
     app.router.add_get("/api/miniapp/referral", referral)
+    # Deeplinks
+    app.router.add_get("/api/miniapp/bot/{bot_id}/deeplinks", bot_deeplinks)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/deeplink", create_deeplink)
+    app.router.add_delete("/api/miniapp/deeplink/{link_id}", delete_deeplink)
+    # Engagement segments
+    app.router.add_get("/api/miniapp/bot/{bot_id}/engagement", bot_engagement)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
