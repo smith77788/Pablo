@@ -349,7 +349,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="sb">
     <div class="sec-row"><div class="sec">Рассылки по ботам</div></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div></div>
+    <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div><span class="sec-btn" onclick="openCmpModal()">+ Создать</span></div>
     <div class="lst" id="cmpList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:4px"><div class="sec">Воронки</div></div>
     <div class="lst" id="funList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -401,6 +401,21 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="seg-opt" onclick="filterOps('failed',this)">Ошибки</div>
     </div>
     <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
+<div class="screen" id="s-botsubs">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="bs-name">Подписчики</div>
+    <div class="hdr-meta"><div class="hdr-user" id="bs-cnt"></div></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="bsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="bs-more" style="padding:12px 16px;display:none">
+      <button class="btn btn-s" style="width:100%" onclick="loadMoreSubs()">Загрузить ещё</button>
+    </div>
   </div>
 </div>
 
@@ -475,6 +490,51 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="arErr"></div>
     <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: DM CAMPAIGN ══════════════════════ -->
+<div class="mbg" id="cmpMbg" onclick="if(event.target===this)closeCmpModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeCmpModal()">✕</div>
+    <div class="modal-title">📨 Новая DM-кампания</div>
+    <div class="field">
+      <label>Название кампании</label>
+      <input type="text" id="cmpName" maxlength="100" placeholder="Напр: Весенняя акция">
+    </div>
+    <div class="field">
+      <label>Аудитория</label>
+      <select id="cmpTargetType" onchange="updateCmpTargetBot()">
+        <option value="all_bots">Все боты — все подписчики</option>
+        <option value="bot_users">Конкретный бот</option>
+      </select>
+    </div>
+    <div class="field" id="cmpBotField" style="display:none">
+      <label>Бот</label>
+      <select id="cmpBot"></select>
+    </div>
+    <div class="field">
+      <label>Текст сообщения</label>
+      <textarea id="cmpText" rows="5" maxlength="4096" placeholder="Текст личного сообщения..."></textarea>
+      <div class="field-note"><span id="cmpLen">0</span>/4096</div>
+    </div>
+    <div class="field-err" id="cmpErr"></div>
+    <button class="btn btn-p" id="cmpBtn" onclick="saveCmp()" style="width:100%">📨 Создать черновик</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: POST TO CHANNEL ══════════════════════ -->
+<div class="mbg" id="chPostMbg" onclick="if(event.target===this)closeChPost()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeChPost()">✕</div>
+    <div class="modal-title">📝 Публикация в канал</div>
+    <div class="field">
+      <label>Текст поста</label>
+      <textarea id="chPostText" rows="6" maxlength="4096" placeholder="Введите текст публикации..."></textarea>
+      <div class="field-note"><span id="chPostLen">0</span>/4096</div>
+    </div>
+    <div class="field-err" id="chPostErr"></div>
+    <button class="btn btn-p" id="chPostBtn" onclick="sendChPost()" style="width:100%">📤 Опубликовать</button>
   </div>
 </div>
 
@@ -723,6 +783,7 @@ function buildBotDetail(d) {
     </div>
     <div class="actions" style="padding-top:0">
       <button class="btn btn-s" onclick="openBotFunnels(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">🔄 Воронки</button>
+      <button class="btn btn-s" onclick="openBotSubs(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">👥 Подписчики</button>
     </div>
     <div class="sec">Последние рассылки</div>
     <div class="lst">${bcasts}</div>
@@ -862,22 +923,22 @@ async function toggleFunnel(id, el) {
 
 // ── Accounts ───────────────────────────────────────────
 async function loadAccounts() {
-  try {
-    const [ad, cd] = await Promise.all([
-      api('/api/miniapp/accounts'),
-      api('/api/miniapp/channels'),
-    ]);
+  // Accounts and channels load independently — one failure doesn't break the other
+  api('/api/miniapp/accounts').then(ad => {
     CUR_ACCS = ad.accounts||[];
-    CUR_CHANNELS = cd.channels||[];
     document.getElementById('acc-cnt').textContent = CUR_ACCS.length+' аккаунтов';
     txt('m-acc-cnt', CUR_ACCS.length+' аккаунтов');
-    txt('m-ch-cnt', CUR_CHANNELS.length+' каналов');
     renderAccounts(CUR_ACCS);
-    renderChPreview(CUR_CHANNELS);
-  } catch(e) {
+  }).catch(e => {
     document.getElementById('accList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
+  });
+  api('/api/miniapp/channels').then(cd => {
+    CUR_CHANNELS = cd.channels||[];
+    txt('m-ch-cnt', CUR_CHANNELS.length+' каналов');
+    renderChPreview(CUR_CHANNELS);
+  }).catch(() => {
     txt('chPreview', '');
-  }
+  });
 }
 
 function renderChPreview(list) {
@@ -1128,6 +1189,10 @@ function buildChDetail(d) {
       <div class="profile-name">${esc(name)}</div>
       ${c.username?`<div class="profile-sub">@${esc(c.username)}</div>`:''}
       <div class="profile-badges"><span class="badge b-bl">${type}</span></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})">📝 Опубликовать</button>
     </div>
 
     <div class="sec">Информация</div>
@@ -1402,6 +1467,158 @@ async function loadAnalytics() {
 }
 
 function openKeywords() { push('s-analytics'); loadAnalytics(); }
+
+// ── Bot Subscribers ────────────────────────────────────
+let BS_BOT_ID = null;
+let BS_OFFSET = 0;
+let BS_TOTAL = 0;
+
+async function openBotSubs(botId, botName) {
+  BS_BOT_ID = botId;
+  BS_OFFSET = 0;
+  txt('bs-name', 'Подписчики · '+botName);
+  txt('bs-cnt', '');
+  txt('bsList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  document.getElementById('bs-more').style.display='none';
+  push('s-botsubs');
+  await loadBotSubs(false);
+}
+
+async function loadBotSubs(append) {
+  try {
+    const d = await api('/api/miniapp/bot/'+BS_BOT_ID+'/subscribers?offset='+BS_OFFSET);
+    const subs = d.subscribers||[];
+    BS_TOTAL = d.total||0;
+    txt('bs-cnt', BS_TOTAL+' подп.');
+    if (!subs.length && !append) {
+      txt('bsList', empty('👥','Нет подписчиков','Бот ещё не получил подписчиков'));
+      return;
+    }
+    const html = subs.map(u=>{
+      const name = u.first_name||(u.username?'@'+u.username:'User #'+u.user_id);
+      return `<div class="li" style="cursor:default">
+        <div class="ava ava-teal">👤</div>
+        <div class="li-body">
+          <div class="li-name">${esc(name)}${u.username?' <span style="color:var(--hint)">@'+esc(u.username)+'</span>':''}</div>
+          <div class="li-sub">${u.is_active?'🟢 Активен':'🔴 Неактивен'} · ${ago(u.last_seen)}</div>
+        </div>
+        <span class="badge ${u.is_active?'b-gr':'b-gy'}">#${u.user_id}</span>
+      </div>`;
+    }).join('');
+    if (append) {
+      document.getElementById('bsList').insertAdjacentHTML('beforeend', html);
+    } else {
+      txt('bsList', html);
+    }
+    BS_OFFSET += subs.length;
+    const moreEl = document.getElementById('bs-more');
+    moreEl.style.display = (BS_OFFSET < BS_TOTAL) ? 'block' : 'none';
+  } catch(e) {
+    if (!append) txt('bsList', `<div class="err-msg">${esc(e.message)}</div>`);
+    else toast('Ошибка: '+e.message);
+  }
+}
+
+async function loadMoreSubs() {
+  await loadBotSubs(true);
+}
+
+// ── DM Campaign modal ──────────────────────────────────
+function openCmpModal() {
+  if (!BOTS.length) { toast('Сначала загрузите боты'); goTab('bots'); return; }
+  document.getElementById('cmpName').value='';
+  document.getElementById('cmpTargetType').value='all_bots';
+  document.getElementById('cmpText').value='';
+  document.getElementById('cmpLen').textContent='0';
+  document.getElementById('cmpErr').style.display='none';
+  document.getElementById('cmpBtn').disabled=false;
+  document.getElementById('cmpBtn').textContent='📨 Создать черновик';
+  updateCmpTargetBot();
+  document.getElementById('cmpMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeCmpModal() { document.getElementById('cmpMbg').classList.remove('show'); }
+
+function updateCmpTargetBot() {
+  const type = document.getElementById('cmpTargetType').value;
+  const bf = document.getElementById('cmpBotField');
+  bf.style.display = type==='bot_users'?'block':'none';
+  if (type==='bot_users') {
+    document.getElementById('cmpBot').innerHTML = BOTS.map(b=>{
+      const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+      return `<option value="${b.bot_id}">${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
+    }).join('');
+  }
+}
+
+document.getElementById('cmpText').addEventListener('input', function(){
+  document.getElementById('cmpLen').textContent = this.value.length;
+});
+
+async function saveCmp() {
+  const name = document.getElementById('cmpName').value.trim();
+  const text = document.getElementById('cmpText').value.trim();
+  const target_type = document.getElementById('cmpTargetType').value;
+  const target_id = target_type==='bot_users' ? document.getElementById('cmpBot').value : null;
+  const errEl = document.getElementById('cmpErr');
+  errEl.style.display='none';
+  if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
+  if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('cmpBtn');
+  btn.disabled=true; btn.textContent='⏳ Сохранение...';
+  try {
+    const d = await api('/api/miniapp/dm_campaign', {
+      method:'POST',
+      body: JSON.stringify({name, text_template:text, target_type, target_id})
+    });
+    closeCmpModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ DM-кампания создана · '+num(d.total_targets)+' получателей');
+    LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='📨 Создать черновик'; }
+}
+
+// ── Post to channel modal ──────────────────────────────
+let CH_POST_ID = null;
+
+function openChPostModal(chId) {
+  CH_POST_ID = chId;
+  document.getElementById('chPostText').value='';
+  document.getElementById('chPostLen').textContent='0';
+  document.getElementById('chPostErr').style.display='none';
+  document.getElementById('chPostBtn').disabled=false;
+  document.getElementById('chPostBtn').textContent='📤 Опубликовать';
+  document.getElementById('chPostMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeChPost() { document.getElementById('chPostMbg').classList.remove('show'); }
+
+document.getElementById('chPostText').addEventListener('input', function(){
+  document.getElementById('chPostLen').textContent = this.value.length;
+});
+
+async function sendChPost() {
+  const text = document.getElementById('chPostText').value.trim();
+  const errEl = document.getElementById('chPostErr');
+  errEl.style.display='none';
+  if (!text) { errEl.textContent='Введите текст поста'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('chPostBtn');
+  btn.disabled=true; btn.textContent='⏳ Публикация...';
+  try {
+    const d = await api('/api/miniapp/channel/'+CH_POST_ID+'/post', {
+      method:'POST', body: JSON.stringify({text})
+    });
+    closeChPost();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Пост поставлен в очередь · op #'+d.op_id);
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='📤 Опубликовать'; }
+}
 
 // ── Subscription & Referral ────────────────────────────
 async function loadSub() {

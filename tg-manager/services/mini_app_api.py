@@ -492,6 +492,107 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             "recent_ops": recent_ops,
         })
 
+    async def bot_subscribers(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        try:
+            offset = max(0, int(request.query.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        rows = await _safe_fetch(pool,
+            """SELECT user_id, username, first_name, last_seen, is_active, first_seen
+               FROM bot_users WHERE bot_id=$1
+               ORDER BY last_seen DESC NULLS LAST
+               LIMIT 50 OFFSET $2""", bot_id, offset)
+        total = await _safe_count(pool, "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1", bot_id)
+        return _json_resp({"subscribers": rows, "total": total, "offset": offset})
+
+    async def create_dm_campaign(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        name = (body.get("name") or "").strip()
+        text_template = (body.get("text_template") or "").strip()
+        target_type = body.get("target_type", "all_bots")
+        target_id = body.get("target_id")
+        if not name:
+            return _err("name required")
+        if not text_template:
+            return _err("text_template required")
+        if target_type not in ("bot_users", "all_bots", "crm", "parsed_audience"):
+            return _err("Invalid target_type")
+        if target_type == "bot_users" and not target_id:
+            return _err("target_id required for bot_users target")
+        total_targets = 0
+        if target_type == "bot_users" and target_id:
+            try:
+                bot_id_int = int(target_id)
+                total_targets = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
+            except (TypeError, ValueError):
+                pass
+        elif target_type == "all_bots":
+            total_targets = await _safe_count(pool,
+                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                   WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, status, total_targets)
+                   VALUES($1,$2,$3,$4,$5,'draft',$6) RETURNING id""",
+                uid, name, text_template, target_type,
+                int(target_id) if target_id else None, total_targets)
+            return _json_resp({"ok": True, "id": row["id"], "total_targets": total_targets})
+        except Exception:
+            log.exception("create_dm_campaign uid=%d", uid)
+            return _err("Failed to create campaign", 500)
+
+    async def post_to_channel(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        text = (body.get("text") or "").strip()
+        if not text:
+            return _err("text required")
+        if len(text) > 4096:
+            return _err("Message too long (max 4096 chars)")
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, acc_id FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+            ch_id, uid)
+        if not ch:
+            return _err("Channel not found", 404)
+        if not ch.get("acc_id"):
+            return _err("No linked account for this channel", 400)
+        try:
+            from services.operation_bus import submit
+            op_id = await submit(pool, uid, "bulk_post_to_channel", {
+                "channel_id": ch_id,
+                "account_id": ch["acc_id"],
+                "text": text,
+            }, total_items=1)
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception:
+            log.exception("post_to_channel ch=%d uid=%d", ch_id, uid)
+            return _err("Failed to enqueue post", 500)
+
     async def channel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -706,8 +807,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Accounts
     app.router.add_get("/api/miniapp/accounts", accounts)
     app.router.add_get("/api/miniapp/account/{acc_id}", account_detail)
-    # Channels detail
+    # Channels
     app.router.add_get("/api/miniapp/channel/{ch_id}", channel_detail)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/post", post_to_channel)
+    # Bot subscribers
+    app.router.add_get("/api/miniapp/bot/{bot_id}/subscribers", bot_subscribers)
+    # DM campaigns
+    app.router.add_post("/api/miniapp/dm_campaign", create_dm_campaign)
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
