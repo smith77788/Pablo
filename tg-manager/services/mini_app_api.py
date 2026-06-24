@@ -1038,20 +1038,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             accs = await pool.fetchval("SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid)
             channels = await pool.fetchval("SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid)
             bots = await pool.fetchval("SELECT COUNT(*) FROM managed_bots WHERE added_by=$1", uid)
-            # Channel-to-account links via joined_channels
-            links = await pool.fetchval(
-                """SELECT COUNT(*) FROM joined_channels jc
-                   JOIN tg_accounts ta ON ta.id=jc.account_id
-                   WHERE ta.owner_id=$1""",
-                uid,
-            )
+            # Channel-to-account links via joined_channels (table may not exist)
+            try:
+                links = await pool.fetchval(
+                    """SELECT COUNT(*) FROM joined_channels jc
+                       JOIN tg_accounts ta ON ta.id=jc.account_id
+                       WHERE ta.owner_id=$1""",
+                    uid,
+                )
+            except Exception:
+                links = 0
             # Bot-user relationships
-            bot_users_total = await pool.fetchval(
-                """SELECT COUNT(*) FROM bot_users bu
-                   JOIN managed_bots b ON b.bot_id=bu.bot_id
-                   WHERE b.added_by=$1""",
-                uid,
-            )
+            try:
+                bot_users_total = await pool.fetchval(
+                    """SELECT COUNT(*) FROM bot_users bu
+                       JOIN managed_bots b ON b.bot_id=bu.bot_id
+                       WHERE b.added_by=$1""",
+                    uid,
+                )
+            except Exception:
+                bot_users_total = 0
             return _json_resp({
                 "accounts": accs, "channels": channels, "bots": bots,
                 "channel_links": links, "bot_users_total": bot_users_total,
@@ -1412,30 +1418,48 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            ref_row = await pool.fetchrow(
-                """SELECT ref_code, tier, commission_rate, total_earned,
-                          (SELECT COUNT(*) FROM referrals WHERE referrer_id=$1) AS referral_count,
-                          (SELECT COUNT(*) FROM referrals WHERE referrer_id=$1 AND status='paid') AS paid_count
-                   FROM users WHERE id=$1""",
+            ref_code_row = await pool.fetchrow(
+                "SELECT code FROM platform_referral_codes WHERE user_id=$1", uid
+            )
+            amb_row = await pool.fetchrow(
+                """SELECT a.tier_key, a.total_commission,
+                          COALESCE(t.commission_pct, 0) AS commission_rate,
+                          COALESCE(t.tier_name, 'Базовый') AS tier_name
+                   FROM ambassador_status a
+                   LEFT JOIN ambassador_tiers t ON t.tier_key = a.tier_key
+                   WHERE a.user_id=$1""",
+                uid,
+            )
+            referral_count = await pool.fetchval(
+                "SELECT COUNT(*) FROM platform_referrals WHERE referrer_id=$1", uid
+            )
+            paid_count = await pool.fetchval(
+                """SELECT COUNT(*) FROM platform_referrals r
+                   WHERE r.referrer_id=$1 AND r.paid_at IS NOT NULL""",
                 uid,
             )
             top_refs = await pool.fetch(
-                """SELECT u.id, u.username, r.created_at, r.status
-                   FROM referrals r
-                   JOIN users u ON u.id=r.referred_id
+                """SELECT u.user_id AS id, u.username, r.created_at, r.activated_at
+                   FROM platform_referrals r
+                   JOIN platform_users u ON u.user_id=r.referred_id
                    WHERE r.referrer_id=$1
                    ORDER BY r.created_at DESC LIMIT 20""",
                 uid,
             )
             return _json_resp({
-                "ref_code": ref_row["ref_code"] if ref_row else None,
-                "tier": ref_row["tier"] if ref_row else "basic",
-                "commission_rate": float(ref_row["commission_rate"] or 0) if ref_row else 0,
-                "total_earned": float(ref_row["total_earned"] or 0) if ref_row else 0,
-                "referral_count": ref_row["referral_count"] if ref_row else 0,
-                "paid_count": ref_row["paid_count"] if ref_row else 0,
+                "ref_code": ref_code_row["code"] if ref_code_row else None,
+                "tier": amb_row["tier_key"] if amb_row else "basic",
+                "tier_name": amb_row["tier_name"] if amb_row else "Базовый",
+                "commission_rate": float(amb_row["commission_rate"] or 0) if amb_row else 0,
+                "total_earned": float(amb_row["total_commission"] or 0) if amb_row else 0,
+                "referral_count": int(referral_count or 0),
+                "paid_count": int(paid_count or 0),
                 "referrals": [
-                    {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                    {
+                        "id": r["id"], "username": r["username"],
+                        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                        "status": "active" if r["activated_at"] else "pending",
+                    }
                     for r in top_refs
                 ],
             })
@@ -1562,6 +1586,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            table_exists = await pool.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='gift_inventory')"
+            )
+            if not table_exists:
+                return _json_resp({"total": 0, "transferable": 0, "items": [], "note": "Таблица подарков ещё не создана. Запустите сканирование через бота."})
             items = await pool.fetch(
                 """SELECT gi.id, gi.gift_type, gi.stars_cost, gi.is_transferable,
                           gi.is_unique, gi.is_premium, gi.scanned_at,
@@ -2414,7 +2443,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
-                """SELECT id, op_type, label, status, total_items, processed_items,
+                """SELECT id, op_type, label, status, total_items, done_items,
                           created_at, finished_at, params
                    FROM operation_queue
                    WHERE owner_id=$1 AND op_type LIKE 'strike%'
@@ -2429,7 +2458,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "id": r["id"], "label": r["label"] or r["op_type"],
                 "status": r["status"] or "pending",
                 "total": r["total_items"] or 0,
-                "processed": r["processed_items"] or 0,
+                "processed": r["done_items"] or 0,
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "finished_at": r["finished_at"].isoformat() if r["finished_at"] else None,
             }

@@ -107,6 +107,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 .btn-g{background:rgba(34,197,94,.18);color:var(--green)}
 .btn-r{background:rgba(239,68,68,.18);color:var(--red)}
 .btn-o{background:rgba(245,158,11,.18);color:var(--orange)}
+.btn-d{background:rgba(239,68,68,.18);color:#ef4444}
 
 /* ─── Badge ──────────────────────────────────────────────────── */
 .badge{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
@@ -2867,7 +2868,6 @@ function renderBcasts(items) {
 function renderCmps(items) {
   const el = document.getElementById('cmpList');
   if (!items.length) { el.innerHTML=empty('📨','Нет DM-кампаний'); return; }
-  const [bc,bl]=stb;
   el.innerHTML = items.map(c=>{
     const [bc,bl]=stb(c.status);
     return `<div class="li" style="cursor:default">
