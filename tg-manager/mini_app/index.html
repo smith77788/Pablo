@@ -282,6 +282,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
   <div class="hdr">
     <div class="back" onclick="back()">←</div>
     <div class="hdr-title" id="bf-name">Воронки</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openFunnelModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
     <div class="sec">Воронки бота</div>
@@ -384,6 +385,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openAnalytics()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Статистика роста</div><div class="row-val">Подписчики за 7 дней</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openKeywordsScreen()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">Позиции в поиске</div><div class="row-val" id="kw-val">—</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openCRM()"><div class="row-ico" style="background:rgba(239,68,68,.16)">👤</div><div class="row-body"><div class="row-name">CRM — Контакты</div><div class="row-val" id="m-crm-cnt">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openCompetitors()"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Мониторинг конкурентов</div><div class="row-val" id="m-comp-cnt">—</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openNetBcModal()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📣</div><div class="row-body"><div class="row-name">Рассылка по всем ботам</div><div class="row-val">Один текст — все боты</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Платформа</div>
@@ -436,6 +439,28 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="lst" id="topBots"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec" style="margin-top:8px">Позиции в поиске</div>
     <div class="lst" id="kwList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ FUNNEL DETAIL ══════════════════════ -->
+<div class="screen" id="s-funneldetail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="fd-name">Воронка</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="toggleFunnelFromDetail()">Вкл/Выкл</button></div>
+  </div>
+  <div class="sub-sb" id="fd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ COMPETITORS ══════════════════════ -->
+<div class="screen" id="s-competitors">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📈 Конкуренты</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openCompModal()">+ Добавить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lst" id="compList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -602,6 +627,68 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div class="field-err" id="arErr"></div>
     <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: CREATE FUNNEL ══════════════════════ -->
+<div class="mbg" id="funnelMbg" onclick="if(event.target===this)closeFunnelModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeFunnelModal()">✕</div>
+    <div class="modal-title">🔄 Новая воронка</div>
+    <div class="field">
+      <label>Название</label>
+      <input type="text" id="fnName" maxlength="80" placeholder="Напр: Онбординг новых пользователей">
+    </div>
+    <div class="field">
+      <label>Триггер запуска</label>
+      <select id="fnTrigger" onchange="toggleFnKw()">
+        <option value="start">При /start</option>
+        <option value="keyword">Ключевое слово</option>
+      </select>
+    </div>
+    <div class="field" id="fnKwField" style="display:none">
+      <label>Ключевое слово</label>
+      <input type="text" id="fnKw" maxlength="50" placeholder="Например: цена, помощь, купить">
+    </div>
+    <div class="field">
+      <label>Первое сообщение воронки</label>
+      <textarea id="fnMsg" rows="4" maxlength="4096" placeholder="Текст первого сообщения..."></textarea>
+    </div>
+    <div class="field-err" id="fnErr"></div>
+    <button class="btn btn-p" id="fnBtn" onclick="saveFunnel()" style="width:100%">🔄 Создать</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: COMPETITOR ══════════════════════ -->
+<div class="mbg" id="compMbg" onclick="if(event.target===this)closeCompModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeCompModal()">✕</div>
+    <div class="modal-title">📈 Добавить конкурента</div>
+    <div class="field">
+      <label>Username канала</label>
+      <input type="text" id="compUsername" placeholder="@channel или channel (без @)">
+    </div>
+    <div class="field">
+      <label>Метка (необязательно)</label>
+      <input type="text" id="compLabel" maxlength="60" placeholder="Напр: Главный конкурент">
+    </div>
+    <div class="field-err" id="compErr"></div>
+    <button class="btn btn-p" id="compBtn" onclick="saveComp()" style="width:100%">➕ Добавить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: NETWORK BROADCAST ══════════════════════ -->
+<div class="mbg" id="netbcMbg" onclick="if(event.target===this)closeNetBc()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeNetBc()">✕</div>
+    <div class="modal-title">📣 Рассылка по всем ботам</div>
+    <div class="field">
+      <label>Текст сообщения</label>
+      <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики всех ваших ботов..."></textarea>
+      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — все боты</div>
+    </div>
+    <div class="field-err" id="netbcErr"></div>
+    <button class="btn btn-p" id="netbcBtn" onclick="sendNetBc()" style="width:100%">📣 Разослать всем</button>
   </div>
 </div>
 
@@ -1089,14 +1176,15 @@ async function openBotFunnels(botId, botName) {
     const d = await api('/api/miniapp/bot/'+botId+'/funnels');
     const fns = d.funnels||[];
     if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Создайте воронку через бота в Telegram')); return; }
-    txt('bfList', fns.map(f=>`<div class="li">
+    txt('bfList', fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
       <div class="ava ava-orange">🔄</div>
       <div class="li-body">
         <div class="li-name">${esc(f.name||'Воронка')}</div>
         <div class="li-sub">Активных: ${num(f.active_subs||0)} · Завершено: ${num(f.total_subs||0)}</div>
       </div>
       <div class="li-right">
-        <div class="toggle ${f.is_active?'on':'off'}" onclick="toggleFunnel(${f.id},this)"></div>
+        <div class="toggle ${f.is_active?'on':'off'}" onclick="event.stopPropagation();toggleFunnel(${f.id},this)"></div>
+        <span class="chev">›</span>
       </div>
     </div>`).join(''));
   } catch(e) { txt('bfList', `<div class="err-msg">${esc(e.message)}</div>`); }
@@ -1663,6 +1751,246 @@ async function loadAnalytics() {
 }
 
 function openKeywords() { push('s-analytics'); loadAnalytics(); }
+
+// ── Bot toggle ─────────────────────────────────────────
+async function toggleBotActive(botId, el) {
+  const wasOn = el.classList.contains('on');
+  el.classList.toggle('on',!wasOn); el.classList.toggle('off',wasOn);
+  try {
+    const d = await api('/api/miniapp/bot/'+botId+'/toggle', {method:'PUT'});
+    toast(d.is_active?'🟢 Бот включён':'⭕ Бот выключен');
+    // Update BOTS cache
+    const b = BOTS.find(x=>x.bot_id==botId);
+    if (b) b.is_active = d.is_active;
+  } catch(e) {
+    el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn);
+    toast('Ошибка: '+e.message);
+  }
+}
+
+// ── Funnel Detail ──────────────────────────────────────
+let CUR_FUNNEL_ID = null;
+
+async function openFunnelDetail(funnelId, funnelName) {
+  CUR_FUNNEL_ID = funnelId;
+  txt('fd-name', funnelName);
+  txt('fd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-funneldetail');
+  try {
+    const d = await api('/api/miniapp/funnel/'+funnelId+'/steps');
+    txt('fd-body', buildFunnelDetail(d));
+  } catch(e) {
+    txt('fd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function buildFunnelDetail(d) {
+  const f = d.funnel||{};
+  const steps = d.steps||[];
+  const trig = f.trigger_type==='keyword'?`🔑 ${esc(f.keyword||'?')}`:'🚀 /start';
+  const stepsHtml = steps.length
+    ? steps.map((s,i)=>`<div class="li" style="cursor:default">
+        <div class="ava ${['ava-blue','ava-green','ava-orange','ava-purple','ava-teal'][i%5]}">${i+1}</div>
+        <div class="li-body">
+          <div class="li-name">${esc((s.message_text||'').substring(0,60))}${(s.message_text||'').length>60?'…':''}</div>
+          <div class="li-sub">Задержка: ${s.delay_minutes?s.delay_minutes+' мин':'сразу'}</div>
+        </div>
+      </div>`).join('')
+    : '<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Нет шагов</div>';
+  return `
+    <div class="stats2">
+      <div class="s2col"><div class="s2val">${num(d.subs_active)}</div><div class="s2lbl">В воронке</div></div>
+      <div class="s2col"><div class="s2val">${num(d.subs_total)}</div><div class="s2lbl">Прошло всего</div></div>
+    </div>
+    <div class="sec" style="margin-top:8px">Настройки</div>
+    <div class="lst">
+      <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">🎯</div>
+        <div class="row-body"><div class="row-name">Триггер</div><div class="row-val">${trig}</div></div>
+      </div>
+      <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">📊</div>
+        <div class="row-body"><div class="row-name">Шагов в воронке</div><div class="row-val">${steps.length}</div></div>
+      </div>
+      <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">📡</div>
+        <div class="row-body"><div class="row-name">Статус</div></div>
+        <div class="row-right"><div class="toggle ${f.is_active?'on':'off'}" onclick="toggleFunnel(${f.id},this)"></div></div>
+      </div>
+    </div>
+    <div class="sec" style="margin-top:8px">Шаги воронки</div>
+    <div class="lst">${stepsHtml}</div>
+    <div style="height:16px"></div>`;
+}
+
+function toggleFunnelFromDetail() {
+  if (!CUR_FUNNEL_ID) return;
+  const tog = document.querySelector('#fd-body .toggle');
+  if (tog) toggleFunnel(CUR_FUNNEL_ID, tog);
+}
+
+let FUNNEL_SAVE_BOT = null;
+function openFunnelModal() {
+  FUNNEL_SAVE_BOT = CUR_BOT?.id;
+  document.getElementById('fnName').value='';
+  document.getElementById('fnTrigger').value='start';
+  document.getElementById('fnKw').value='';
+  document.getElementById('fnMsg').value='';
+  document.getElementById('fnErr').style.display='none';
+  document.getElementById('fnBtn').disabled=false;
+  toggleFnKw();
+  document.getElementById('funnelMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeFunnelModal() { document.getElementById('funnelMbg').classList.remove('show'); }
+function toggleFnKw() {
+  document.getElementById('fnKwField').style.display =
+    document.getElementById('fnTrigger').value==='keyword'?'block':'none';
+}
+
+async function saveFunnel() {
+  const name = document.getElementById('fnName').value.trim();
+  const trigger_type = document.getElementById('fnTrigger').value;
+  const keyword = document.getElementById('fnKw').value.trim();
+  const first_message = document.getElementById('fnMsg').value.trim();
+  const errEl = document.getElementById('fnErr');
+  errEl.style.display='none';
+  if (!name) { errEl.textContent='Введите название'; errEl.style.display='block'; return; }
+  if (!first_message) { errEl.textContent='Введите первое сообщение'; errEl.style.display='block'; return; }
+  if (trigger_type==='keyword' && !keyword) { errEl.textContent='Введите ключевое слово'; errEl.style.display='block'; return; }
+  if (!FUNNEL_SAVE_BOT) { errEl.textContent='Бот не выбран'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('fnBtn');
+  btn.disabled=true; btn.textContent='⏳ Создание...';
+  try {
+    await api('/api/miniapp/bot/'+FUNNEL_SAVE_BOT+'/funnel', {
+      method:'POST', body: JSON.stringify({name, trigger_type, keyword:keyword||null, first_message})
+    });
+    closeFunnelModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Воронка создана');
+    // Reload funnels list
+    const d = await api('/api/miniapp/bot/'+FUNNEL_SAVE_BOT+'/funnels');
+    const fns = d.funnels||[];
+    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок')); return; }
+    document.getElementById('bfList').innerHTML = fns.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${esc(f.name||'Воронка')}')">
+      <div class="ava ava-orange">🔄</div>
+      <div class="li-body">
+        <div class="li-name">${esc(f.name||'Воронка')}</div>
+        <div class="li-sub">Активных: ${num(f.active_subs||0)} · Завершено: ${num(f.total_subs||0)}</div>
+      </div>
+      <div class="li-right">
+        <div class="toggle ${f.is_active?'on':'off'}" onclick="event.stopPropagation();toggleFunnel(${f.id},this)"></div>
+        <span class="chev">›</span>
+      </div>
+    </div>`).join('');
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='🔄 Создать'; }
+}
+
+// ── Competitors ────────────────────────────────────────
+function openCompetitors() {
+  push('s-competitors');
+  txt('compList','<div class="spin-wrap"><div class="spin"></div></div>');
+  loadCompetitors();
+}
+
+async function loadCompetitors() {
+  try {
+    const d = await api('/api/miniapp/competitors');
+    const items = d.competitors||[];
+    txt('m-comp-cnt', items.length ? items.length+' конкурентов' : 'Нет');
+    if (!items.length) { txt('compList', empty('📈','Нет конкурентов','Добавьте канал для мониторинга')); return; }
+    txt('compList', items.map(c=>{
+      const members = c.last_members!=null?num(c.last_members)+' участников':'не проверен';
+      const checked = c.last_checked ? ago(c.last_checked) : 'никогда';
+      return `<div class="li">
+        <div class="ava ava-orange">📈</div>
+        <div class="li-body">
+          <div class="li-name">${c.label?esc(c.label):'@'+esc(c.username)}</div>
+          <div class="li-sub">@${esc(c.username)} · ${members} · ${checked}</div>
+        </div>
+        <div class="li-right">
+          ${c.last_members!=null?`<span class="badge b-bl">${num(c.last_members)}</span>`:''}
+          <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteComp(${c.id})">🗑</span>
+        </div>
+      </div>`;
+    }).join(''));
+  } catch(e) {
+    txt('compList', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function openCompModal() {
+  document.getElementById('compUsername').value='';
+  document.getElementById('compLabel').value='';
+  document.getElementById('compErr').style.display='none';
+  document.getElementById('compBtn').disabled=false;
+  document.getElementById('compBtn').textContent='➕ Добавить';
+  document.getElementById('compMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeCompModal() { document.getElementById('compMbg').classList.remove('show'); }
+
+async function saveComp() {
+  const username = document.getElementById('compUsername').value.trim().replace('@','');
+  const label = document.getElementById('compLabel').value.trim();
+  const errEl = document.getElementById('compErr');
+  errEl.style.display='none';
+  if (!username) { errEl.textContent='Введите username'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('compBtn');
+  btn.disabled=true; btn.textContent='⏳ Добавление...';
+  try {
+    await api('/api/miniapp/competitor', {method:'POST', body:JSON.stringify({username, label:label||null})});
+    closeCompModal();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Конкурент добавлен');
+    loadCompetitors();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='➕ Добавить'; }
+}
+
+async function deleteComp(id) {
+  try {
+    await api('/api/miniapp/competitor/'+id, {method:'DELETE'});
+    toast('Удалено'); loadCompetitors();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Network Broadcast ──────────────────────────────────
+function openNetBcModal() {
+  document.getElementById('netbcText').value='';
+  document.getElementById('netbcLen').textContent='0';
+  document.getElementById('netbcErr').style.display='none';
+  document.getElementById('netbcBtn').disabled=false;
+  document.getElementById('netbcBtn').textContent='📣 Разослать всем';
+  document.getElementById('netbcMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeNetBc() { document.getElementById('netbcMbg').classList.remove('show'); }
+
+document.getElementById('netbcText').addEventListener('input', function(){
+  document.getElementById('netbcLen').textContent = this.value.length;
+});
+
+async function sendNetBc() {
+  const text = document.getElementById('netbcText').value.trim();
+  const errEl = document.getElementById('netbcErr');
+  errEl.style.display='none';
+  if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('netbcBtn');
+  btn.disabled=true; btn.textContent='⏳ Запуск...';
+  try {
+    const d = await api('/api/miniapp/network_broadcast', {method:'POST', body:JSON.stringify({text})});
+    closeNetBc();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast(`✅ Запущено ${d.broadcasts_created} рассылок · ${num(d.total_recipients)} получателей`);
+    LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='📣 Разослать всем'; }
+}
 
 // ── CRM ────────────────────────────────────────────────
 let CRM_OFFSET = 0, CRM_TOTAL = 0, CRM_QUERY = '', CRM_TAG = '';

@@ -664,6 +664,192 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             return _err("Failed to cancel", 500)
 
+    # ── Bot toggle / edit ─────────────────────────────────────────────────────
+
+    async def toggle_bot(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid bot_id", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE managed_bots SET is_active = NOT is_active
+                   WHERE bot_id=$1 AND added_by=$2 RETURNING bot_id, is_active""",
+                bot_id, uid)
+            if not row:
+                return _err("Bot not found", 404)
+            return _json_resp({"ok": True, "is_active": row["is_active"]})
+        except Exception:
+            return _err("Failed to toggle bot", 500)
+
+    # ── Funnel Steps ──────────────────────────────────────────────────────────
+
+    async def funnel_steps(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            funnel_id = int(request.match_info["funnel_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid funnel_id", 400)
+        # Verify ownership via managed_bots
+        funnel = await _safe_fetchrow(pool,
+            """SELECT f.id, f.name, f.trigger_type, f.keyword, f.is_active, mb.username AS bot_username
+               FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
+               WHERE f.id=$1 AND mb.added_by=$2""", funnel_id, uid)
+        if not funnel:
+            return _err("Funnel not found", 404)
+        steps = await _safe_fetch(pool,
+            "SELECT id, step_order, message_text, delay_minutes FROM funnel_steps WHERE funnel_id=$1 ORDER BY step_order",
+            funnel_id)
+        subs_active = await _safe_count(pool,
+            "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1 AND completed=false", funnel_id)
+        subs_total = await _safe_count(pool,
+            "SELECT COUNT(*) FROM funnel_subscriptions WHERE funnel_id=$1", funnel_id)
+        return _json_resp({
+            "funnel": funnel,
+            "steps": steps,
+            "subs_active": subs_active,
+            "subs_total": subs_total,
+        })
+
+    async def create_funnel(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Invalid request", 400)
+        owns = await _safe_count(pool,
+            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id, uid)
+        if not owns:
+            return _err("Bot not found", 404)
+        name = (body.get("name") or "").strip()
+        trigger_type = body.get("trigger_type", "start")
+        keyword = (body.get("keyword") or "").strip() or None
+        first_message = (body.get("first_message") or "").strip()
+        if not name:
+            return _err("name required")
+        if trigger_type not in ("start", "keyword"):
+            return _err("trigger_type must be start or keyword")
+        if trigger_type == "keyword" and not keyword:
+            return _err("keyword required for keyword trigger")
+        if not first_message:
+            return _err("first_message required")
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    funnel_row = await conn.fetchrow(
+                        "INSERT INTO funnels(bot_id, name, trigger_type, keyword) VALUES($1,$2,$3,$4) RETURNING id",
+                        bot_id, name, trigger_type, keyword)
+                    funnel_id = funnel_row["id"]
+                    await conn.execute(
+                        "INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes) VALUES($1,1,$2,0)",
+                        funnel_id, first_message)
+            return _json_resp({"ok": True, "funnel_id": funnel_id})
+        except Exception:
+            log.exception("create_funnel bot=%d uid=%d", bot_id, uid)
+            return _err("Failed to create funnel", 500)
+
+    # ── Competitors ────────────────────────────────────────────────────────────
+
+    async def competitors_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await _safe_fetch(pool,
+            """SELECT id, username, label, channel_id, last_members, last_checked, created_at
+               FROM competitors WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 50""", uid)
+        return _json_resp({"competitors": rows})
+
+    async def add_competitor(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        username = (body.get("username") or "").strip().lstrip("@").lower()
+        label = (body.get("label") or "").strip() or None
+        if not username:
+            return _err("username required")
+        if len(username) > 50:
+            return _err("username too long")
+        try:
+            row = await pool.fetchrow(
+                """INSERT INTO competitors(owner_id, username, label) VALUES($1,$2,$3)
+                   ON CONFLICT(owner_id, username) DO UPDATE SET label=EXCLUDED.label
+                   RETURNING id""",
+                uid, username, label)
+            return _json_resp({"ok": True, "id": row["id"]})
+        except Exception:
+            log.exception("add_competitor uid=%d", uid)
+            return _err("Failed to add competitor", 500)
+
+    async def delete_competitor(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            comp_id = int(request.match_info["comp_id"])
+        except (KeyError, ValueError):
+            return _err("Invalid comp_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM competitors WHERE id=$1 AND owner_id=$2", comp_id, uid)
+            return _json_resp({"ok": True})
+        except Exception:
+            return _err("Failed to delete", 500)
+
+    # ── Network Broadcast (all bots) ──────────────────────────────────────────
+
+    async def network_broadcast(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON")
+        text = (body.get("text") or "").strip()
+        if not text:
+            return _err("text required")
+        if len(text) > 4096:
+            return _err("text too long (max 4096)")
+        # Get all active bots with subscriber counts
+        bots = await _safe_fetch(pool,
+            """SELECT mb.bot_id, COUNT(bu.user_id) FILTER (WHERE bu.is_active=true) AS active_subs
+               FROM managed_bots mb
+               LEFT JOIN bot_users bu ON bu.bot_id=mb.bot_id
+               WHERE mb.added_by=$1 AND mb.is_active=true
+               GROUP BY mb.bot_id""", uid)
+        if not bots:
+            return _err("No active bots found")
+        total_recipients = sum(b["active_subs"] or 0 for b in bots)
+        created_ids = []
+        for b in bots:
+            if not (b["active_subs"] or 0):
+                continue
+            try:
+                row = await pool.fetchrow(
+                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
+                    b["bot_id"], text, b["active_subs"], uid)
+                created_ids.append(row["id"])
+            except Exception:
+                log.warning("network_broadcast: failed bot=%d", b["bot_id"])
+        return _json_resp({
+            "ok": True,
+            "broadcasts_created": len(created_ids),
+            "total_recipients": total_recipients,
+            "broadcast_ids": created_ids,
+        })
+
     # ── CRM Contacts ─────────────────────────────────────────────────────────
 
     async def crm_contacts(request: web.Request) -> web.Response:
@@ -1243,6 +1429,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Operations
     app.router.add_get("/api/miniapp/operations", operations)
     app.router.add_post("/api/miniapp/operation/{op_id}/cancel", cancel_operation)
+    # Bot toggle
+    app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)
+    # Funnel steps
+    app.router.add_get("/api/miniapp/funnel/{funnel_id}/steps", funnel_steps)
+    app.router.add_post("/api/miniapp/bot/{bot_id}/funnel", create_funnel)
+    # Competitors
+    app.router.add_get("/api/miniapp/competitors", competitors_list)
+    app.router.add_post("/api/miniapp/competitor", add_competitor)
+    app.router.add_delete("/api/miniapp/competitor/{comp_id}", delete_competitor)
+    # Network broadcast
+    app.router.add_post("/api/miniapp/network_broadcast", network_broadcast)
     # CRM
     app.router.add_get("/api/miniapp/crm/contacts", crm_contacts)
     # Audience
