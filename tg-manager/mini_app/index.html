@@ -379,6 +379,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openMassPub()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Массовая публикация</div><div class="row-val">Пост во все каналы</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openProxies()"><div class="row-ico" style="background:rgba(59,130,246,.16)">🌐</div><div class="row-body"><div class="row-name">Прокси</div><div class="row-val" id="m-proxy-cnt"></div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openProfileSetter()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎨</div><div class="row-body"><div class="row-name">Сеттер профилей</div><div class="row-val">Имя, аватар, 2FA для аккаунтов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openCleaner()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🧹</div><div class="row-body"><div class="row-name">Очистка аккаунтов</div><div class="row-val">Выход из чатов, удаление контактов</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Аналитика и CRM</div>
@@ -693,6 +694,28 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="setterErr" style="color:#f87171;font-size:13px;margin:6px 0"></div>
     <button class="btn btn-p" id="setterBtn" onclick="submitProfileSetter()" style="width:100%">🚀 Запустить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ACCOUNT CLEANER ══════════════════════ -->
+<div class="screen" id="s-cleaner">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🧹 Очистка аккаунтов</div>
+  </div>
+  <div class="sub-sb">
+    <div class="card" style="font-size:13px;color:#f87171;margin-bottom:8px">
+      ⚠️ Действия необратимы! Аккаунт покинет все чаты или потеряет контакты.
+    </div>
+    <div class="sec">Выберите аккаунт и операцию</div>
+    <div class="lst" id="cleanerAccList"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:12px">Операция</div>
+    <div style="display:flex;gap:8px;padding:4px 0 10px">
+      <button class="btn btn-p" onclick="selectCleanerOp('leave_all_chats')" id="cleanerOpLeave">🚪 Выйти из чатов</button>
+      <button class="btn btn-s" onclick="selectCleanerOp('delete_contacts')" id="cleanerOpContacts">👥 Удалить контакты</button>
+    </div>
+    <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
+    <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
   </div>
 </div>
 
@@ -3171,6 +3194,61 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Account Cleaner ────────────────────────────────────
+let CLEANER_ACC_ID = null;
+let CLEANER_OP = 'leave_all_chats';
+async function openCleaner() {
+  CLEANER_ACC_ID = null;
+  CLEANER_OP = 'leave_all_chats';
+  push('s-cleaner');
+  selectCleanerOp('leave_all_chats');
+  loadCleanerAccounts();
+}
+async function loadCleanerAccounts() {
+  txt('cleanerAccList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/cleaner/accounts');
+    const accs = d.accounts||[];
+    if (!accs.length) { txt('cleanerAccList', empty('📵','Нет аккаунтов с сессией','')); return; }
+    txt('cleanerAccList', accs.map(a=>{
+      const warn = a.asset_count>0 ? `<div class="row-val" style="color:#f87171">⚠️ ${a.asset_count} управл. каналов</div>` : '';
+      return `<div class="row tap" onclick="selectCleanerAcc(${a.id},'${esc(a.name)}')" id="cleanerAcc-${a.id}">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">📱</div>
+        <div class="row-body"><div class="row-name">${esc(a.name)}</div>${a.phone?`<div class="row-val">${esc(a.phone)}</div>`:''}${warn}</div>
+        <div class="row-right chev">›</div>
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('cleanerAccList', empty('⚠️','Ошибка',e.message)); }
+}
+function selectCleanerAcc(accId, name) {
+  CLEANER_ACC_ID = accId;
+  document.querySelectorAll('[id^="cleanerAcc-"]').forEach(el=>el.classList.remove('on'));
+  const el = document.getElementById('cleanerAcc-'+accId);
+  if (el) el.classList.add('on');
+  const btn = document.getElementById('cleanerBtn');
+  btn.disabled = false;
+  btn.textContent = '🚀 Запустить очистку';
+  document.getElementById('cleanerErr').textContent='';
+}
+function selectCleanerOp(op) {
+  CLEANER_OP = op;
+  document.getElementById('cleanerOpLeave').className = op==='leave_all_chats'?'btn btn-p':'btn btn-s';
+  document.getElementById('cleanerOpContacts').className = op==='delete_contacts'?'btn btn-p':'btn btn-s';
+}
+async function submitCleaner() {
+  if (!CLEANER_ACC_ID) { document.getElementById('cleanerErr').textContent='Выберите аккаунт'; return; }
+  const opLabels = {leave_all_chats:'выйти из всех чатов', delete_contacts:'удалить все контакты'};
+  if (!confirm(`Вы уверены? Аккаунт #${CLEANER_ACC_ID}: ${opLabels[CLEANER_OP]}.\nЭто необратимо!`)) return;
+  const btn = document.getElementById('cleanerBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  document.getElementById('cleanerErr').textContent='';
+  try {
+    const r = await api('/api/miniapp/cleaner/submit', {method:'POST', body:JSON.stringify({op:CLEANER_OP, account_id:CLEANER_ACC_ID})});
+    toast(`✅ ${r.label} — поставлено в очередь (#${r.op_id})`);
+    back();
+  } catch(e) { document.getElementById('cleanerErr').textContent=e.message||'Ошибка'; btn.disabled=false; btn.textContent='🚀 Запустить очистку'; }
 }
 
 // ── Utils ──────────────────────────────────────────────

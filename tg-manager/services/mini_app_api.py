@@ -976,6 +976,58 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(account_ids)})
 
+    # ── Account Cleaner ────────────────────────────────────────────────────────
+
+    async def cleaner_accounts(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        rows = await pool.fetch(
+            """SELECT id, phone, first_name,
+                      (SELECT COUNT(*) FROM managed_channels WHERE acc_id=tg_accounts.id) AS asset_count
+               FROM tg_accounts
+               WHERE owner_id=$1 AND is_active=TRUE AND session_str IS NOT NULL AND session_str <> ''
+               ORDER BY added_at""",
+            uid,
+        )
+        return _json_resp({"accounts": [
+            {
+                "id": r["id"],
+                "phone": r["phone"] or "",
+                "name": r["first_name"] or r["phone"] or str(r["id"]),
+                "asset_count": int(r["asset_count"] or 0),
+            }
+            for r in rows
+        ]})
+
+    async def cleaner_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+            op = str(body.get("op", "")).strip()
+            account_id = int(body["account_id"])
+        except Exception:
+            return _err("bad body", 400)
+        if op not in ("leave_all_chats", "delete_contacts"):
+            return _err("op must be leave_all_chats or delete_contacts", 400)
+        row = await pool.fetchrow(
+            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            account_id, uid,
+        )
+        if not row:
+            return _err("Аккаунт не найден или нет сессии", 404)
+        import json as _json
+        label_map = {"leave_all_chats": "Выход из чатов", "delete_contacts": "Удаление контактов"}
+        label = f"Cleaner: {label_map[op]} акк #{account_id}"
+        op_id = await pool.fetchval(
+            "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+            "VALUES($1,$2,'pending',$3,1,$4) RETURNING id",
+            uid, op, _json.dumps({"account_id": account_id}), label,
+        )
+        return _json_resp({"ok": True, "op_id": op_id, "label": label})
+
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
     async def toggle_bot(request: web.Request) -> web.Response:
@@ -1799,6 +1851,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Bot Commands
     app.router.add_get("/api/miniapp/bot/{bot_id}/commands", bot_commands)
     app.router.add_put("/api/miniapp/bot/{bot_id}/commands", set_bot_commands)
+    # Account Cleaner
+    app.router.add_get("/api/miniapp/cleaner/accounts", cleaner_accounts)
+    app.router.add_post("/api/miniapp/cleaner/submit", cleaner_submit)
     # SSE
     app.router.add_get("/api/miniapp/events", events)
 
