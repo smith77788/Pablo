@@ -6,440 +6,576 @@
 <title>BotMother</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root {
-  --bg: var(--tg-theme-bg-color, #ffffff);
-  --bg2: var(--tg-theme-secondary-bg-color, #f2f2f7);
-  --text: var(--tg-theme-text-color, #000000);
-  --hint: var(--tg-theme-hint-color, #8e8e93);
-  --link: var(--tg-theme-link-color, #007aff);
-  --btn: var(--tg-theme-button-color, #007aff);
-  --btn-text: var(--tg-theme-button-text-color, #ffffff);
-  --sep: rgba(142,142,147,.18);
-  --danger: #ff3b30;
-  --green: #34c759;
-  --orange: #ff9f0a;
-  --purple: #af52de;
-  --tab-h: 56px;
-  --safe-b: env(safe-area-inset-bottom, 0px);
-  --safe-t: env(safe-area-inset-top, 0px);
+:root{
+  --bg:var(--tg-theme-bg-color,#18181b);
+  --bg2:var(--tg-theme-secondary-bg-color,#27272a);
+  --text:var(--tg-theme-text-color,#fafafa);
+  --hint:var(--tg-theme-hint-color,#71717a);
+  --btn:var(--tg-theme-button-color,#3b82f6);
+  --btn-text:var(--tg-theme-button-text-color,#fff);
+  --sep:rgba(113,113,122,.2);
+  --green:#22c55e;--orange:#f59e0b;--purple:#a855f7;--red:#ef4444;--blue:#3b82f6;--teal:#14b8a6;
+  --tab-h:56px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:15px}
-
-/* ─── App shell ──────────────────────────────────────────────── */
 #app{display:flex;flex-direction:column;height:100vh}
 #content{flex:1;overflow:hidden;position:relative}
-.screen{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;flex-direction:column}
-.screen.show{display:flex}
-.screen-body{flex:1;padding:0 0 calc(var(--tab-h) + var(--safe-b) + 8px)}
-.screen.sub .screen-body{padding-bottom:20px}
+
+/* ─── Screens ───────────────────────────────────────────────── */
+.screen{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:none;background:var(--bg)}
+.screen.show{display:block}
+.sb{padding-bottom:calc(var(--tab-h) + var(--safe-b) + 12px)}
+.sub-sb{padding-bottom:24px}
 
 /* ─── Header ─────────────────────────────────────────────────── */
-.hdr{padding:calc(var(--safe-t) + 10px) 16px 10px;background:var(--bg);border-bottom:1px solid var(--sep);display:flex;align-items:center;gap:10px;flex-shrink:0;position:sticky;top:0;z-index:50}
-.hdr-back{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--bg2);cursor:pointer;flex-shrink:0;font-size:18px;line-height:1}
-.hdr-back:active{opacity:.6}
-.hdr-title{flex:1;font-size:17px;font-weight:700;letter-spacing:-.3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.hdr-right{text-align:right;flex-shrink:0}
+.hdr{padding:calc(var(--safe-t) + 10px) 16px 10px;background:var(--bg);border-bottom:1px solid var(--sep);display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:50}
+.back{width:34px;height:34px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;color:var(--text);flex-shrink:0}
+.back:active{opacity:.6}
+.hdr-title{flex:1;font-size:17px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr-meta{text-align:right;flex-shrink:0}
 .hdr-user{font-size:13px;color:var(--hint);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr-live{font-size:11px;color:var(--green);display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:1px}
-.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
-.live-dot.pulse{animation:blink 2s ease-in-out infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 
-/* ─── Tab bar ────────────────────────────────────────────────── */
-#tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:rgba(var(--tg-theme-bg-color,255,255,255),.94);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid var(--sep);display:flex;z-index:100}
+/* ─── Tabbar ─────────────────────────────────────────────────── */
+#tabbar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:rgba(24,24,27,.94);backdrop-filter:blur(20px);border-top:1px solid var(--sep);display:flex;z-index:100}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;user-select:none}
 .tab:active{opacity:.6}
 .tab-ico{font-size:22px;line-height:1;position:relative}
 .tab-lbl{font-size:10px;color:var(--hint);font-weight:500;transition:color .15s}
 .tab.on .tab-lbl{color:var(--btn)}
-.tab.on .tab-ico::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--btn)}
+.tab.on .tab-ico::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--btn)}
 
-/* ─── Section labels ─────────────────────────────────────────── */
-.sec{padding:16px 16px 8px;font-size:12px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em}
+/* ─── Section ────────────────────────────────────────────────── */
+.sec{padding:14px 16px 7px;font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em}
+.sec-row{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 7px}
+.sec-row .sec{padding:0}
+.sec-btn{font-size:13px;font-weight:600;color:var(--btn);cursor:pointer}
+.sec-btn:active{opacity:.6}
 
-/* ─── Card grid ──────────────────────────────────────────────── */
+/* ─── Cards ──────────────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px 0}
-.card{background:var(--bg2);border-radius:16px;padding:14px;cursor:pointer;transition:transform .12s,opacity .12s}
+.card{background:var(--bg2);border-radius:16px;padding:14px;cursor:pointer;transition:transform .12s,opacity .12s;min-height:90px}
 .card:active{transform:scale(.96);opacity:.8}
-.card-ico{font-size:24px;line-height:1;margin-bottom:6px}
-.card-val{font-size:26px;font-weight:700;letter-spacing:-.5px;line-height:1}
-.card-lbl{font-size:12px;color:var(--hint);margin-top:3px}
+.card-ico{font-size:22px;margin-bottom:6px}
+.card-val{font-size:24px;font-weight:700;letter-spacing:-.5px}
+.card-lbl{font-size:12px;color:var(--hint);margin-top:3px;line-height:1.3}
 
 /* ─── Lists ──────────────────────────────────────────────────── */
 .lst{background:var(--bg2);border-radius:16px;overflow:hidden;margin:0 16px}
-.lst-item{padding:11px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--sep);cursor:pointer}
-.lst-item:last-child{border-bottom:none}
-.lst-item:active{background:rgba(0,0,0,.04)}
+.li{padding:12px 14px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--sep)}
+.li:last-child{border-bottom:none}
+.li.tap{cursor:pointer}
+.li.tap:active{background:rgba(255,255,255,.04)}
 .ava{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
-.ava-blue{background:rgba(0,122,255,.14);color:#007aff}
-.ava-green{background:rgba(52,199,89,.14);color:var(--green)}
-.ava-orange{background:rgba(255,159,10,.14);color:var(--orange)}
-.ava-purple{background:rgba(175,82,222,.14);color:var(--purple)}
-.ava-red{background:rgba(255,59,48,.14);color:var(--danger)}
-.lst-info{flex:1;min-width:0}
-.lst-name{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lst-sub{font-size:13px;color:var(--hint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lst-right{font-size:13px;color:var(--hint);flex-shrink:0;display:flex;align-items:center;gap:4px}
-.chev{font-size:14px;color:var(--hint)}
+.ava-blue{background:rgba(59,130,246,.18);color:var(--blue)}
+.ava-green{background:rgba(34,197,94,.18);color:var(--green)}
+.ava-orange{background:rgba(245,158,11,.18);color:var(--orange)}
+.ava-purple{background:rgba(168,85,247,.18);color:var(--purple)}
+.ava-red{background:rgba(239,68,68,.18);color:var(--red)}
+.ava-teal{background:rgba(20,184,166,.18);color:var(--teal)}
+.li-body{flex:1;min-width:0}
+.li-name{font-size:15px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.li-sub{font-size:13px;color:var(--hint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.li-right{flex-shrink:0;display:flex;align-items:center;gap:6px}
+.chev{color:var(--hint);font-size:16px;flex-shrink:0}
 
-/* ─── Rows (settings-style) ──────────────────────────────────── */
-.row{padding:12px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--sep)}
+/* ─── Rows (settings) ────────────────────────────────────────── */
+.row{padding:12px 14px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--sep)}
 .row:last-child{border-bottom:none}
 .row.tap{cursor:pointer}
-.row.tap:active{background:rgba(0,0,0,.04)}
+.row.tap:active{background:rgba(255,255,255,.04)}
 .row-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
 .row-body{flex:1;min-width:0}
 .row-name{font-size:15px;font-weight:500}
 .row-val{font-size:13px;color:var(--hint);margin-top:1px}
-.row-right{flex-shrink:0;font-size:13px;color:var(--hint)}
+.row-right{flex-shrink:0;font-size:13px;color:var(--hint);display:flex;align-items:center;gap:6px}
 
-/* ─── Stat row ───────────────────────────────────────────────── */
-.stat-row{display:flex;justify-content:space-around;padding:14px 16px;background:var(--bg2);border-radius:16px;margin:0 16px}
-.stat-col{text-align:center}
-.stat-val{font-size:22px;font-weight:700;letter-spacing:-.5px}
-.stat-lbl{font-size:11px;color:var(--hint);margin-top:2px}
+/* ─── Stats grid (2x2) ────────────────────────────────────────── */
+.stats2{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--sep);border-radius:14px;overflow:hidden;margin:12px 16px 0}
+.s2col{background:var(--bg2);padding:12px 10px;text-align:center}
+.s2val{font-size:22px;font-weight:700;letter-spacing:-.4px}
+.s2lbl{font-size:11px;color:var(--hint);margin-top:2px}
 
 /* ─── Action buttons ─────────────────────────────────────────── */
 .actions{display:flex;gap:10px;padding:12px 16px 4px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:opacity .12s,transform .1s;white-space:nowrap;flex:1;min-width:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 16px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;border:none;outline:none;transition:opacity .12s,transform .1s;white-space:nowrap;flex:1;min-width:120px}
 .btn:active{opacity:.7;transform:scale(.97)}
-.btn-primary{background:var(--btn);color:var(--btn-text)}
-.btn-secondary{background:var(--bg2);color:var(--text)}
-.btn-danger{background:rgba(255,59,48,.12);color:var(--danger)}
-.btn-green{background:rgba(52,199,89,.15);color:var(--green)}
+.btn:disabled{opacity:.4;pointer-events:none}
+.btn-p{background:var(--btn);color:var(--btn-text)}
+.btn-s{background:var(--bg2);color:var(--text)}
+.btn-g{background:rgba(34,197,94,.18);color:var(--green)}
+.btn-r{background:rgba(239,68,68,.18);color:var(--red)}
+.btn-o{background:rgba(245,158,11,.18);color:var(--orange)}
 
 /* ─── Badge ──────────────────────────────────────────────────── */
-.badge{display:inline-flex;align-items:center;font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px}
-.b-green{background:rgba(52,199,89,.15);color:var(--green)}
-.b-blue{background:rgba(0,122,255,.15);color:#007aff}
-.b-orange{background:rgba(255,159,10,.15);color:var(--orange)}
-.b-gray{background:rgba(142,142,147,.15);color:var(--hint)}
-.b-red{background:rgba(255,59,48,.15);color:var(--danger)}
+.badge{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.b-gr{background:rgba(34,197,94,.18);color:var(--green)}
+.b-bl{background:rgba(59,130,246,.18);color:var(--blue)}
+.b-or{background:rgba(245,158,11,.18);color:var(--orange)}
+.b-gy{background:rgba(113,113,122,.18);color:var(--hint)}
+.b-rd{background:rgba(239,68,68,.18);color:var(--red)}
+.b-pu{background:rgba(168,85,247,.18);color:var(--purple)}
 
-/* ─── Progress bar ───────────────────────────────────────────── */
+/* ─── Toggle ─────────────────────────────────────────────────── */
+.toggle{width:44px;height:26px;border-radius:13px;cursor:pointer;position:relative;flex-shrink:0;transition:background .2s}
+.toggle.on{background:var(--green)}
+.toggle.off{background:rgba(113,113,122,.3)}
+.toggle::after{content:'';position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.toggle.on::after{left:21px}
+.toggle.off::after{left:3px}
+
+/* ─── Progress ───────────────────────────────────────────────── */
 .prog{height:3px;background:var(--sep);border-radius:2px;margin-top:6px;overflow:hidden}
 .prog-fill{height:100%;border-radius:2px;background:var(--btn);transition:width .6s}
 
 /* ─── Empty / Error ──────────────────────────────────────────── */
 .empty{text-align:center;padding:40px 20px;color:var(--hint)}
-.empty-ico{font-size:40px;margin-bottom:10px;opacity:.6}
-.empty-txt{font-size:14px}
-.empty-sub{font-size:13px;margin-top:4px;color:var(--hint);opacity:.7}
+.empty-ico{font-size:38px;margin-bottom:10px;opacity:.7}
+.empty-txt{font-size:14px;font-weight:500}
+.empty-sub{font-size:13px;margin-top:4px;opacity:.7}
+.err-msg{padding:14px 16px;color:var(--red);font-size:14px;text-align:center}
 
 /* ─── Skeleton ───────────────────────────────────────────────── */
-.sk{background:linear-gradient(90deg,rgba(120,120,128,.14) 25%,rgba(120,120,128,.06) 50%,rgba(120,120,128,.14) 75%);background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
+.sk{background:linear-gradient(90deg,rgba(255,255,255,.06) 25%,rgba(255,255,255,.02) 50%,rgba(255,255,255,.06) 75%);background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
 @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
-
-/* ─── Toast ──────────────────────────────────────────────────── */
-#toast{position:fixed;bottom:calc(var(--tab-h) + var(--safe-b) + 12px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(30,30,30,.9);backdrop-filter:blur(12px);color:#fff;padding:9px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;z-index:300;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center}
-#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-
-/* ─── Modal ──────────────────────────────────────────────────── */
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:flex-end}
-.modal-bg.show{display:flex;animation:bgIn .2s ease}
-@keyframes bgIn{from{opacity:0}to{opacity:1}}
-.modal{background:var(--bg);border-radius:20px 20px 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:90vh;overflow-y:auto;animation:modalIn .25s ease}
-@keyframes modalIn{from{transform:translateY(100%)}to{transform:none}}
-.modal-title{font-size:17px;font-weight:700;margin-bottom:16px;text-align:center}
-.modal-close{position:absolute;top:16px;right:16px;width:30px;height:30px;border-radius:50%;background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--hint)}
-.modal-close:active{opacity:.6}
-.field{margin-bottom:14px}
-.field label{display:block;font-size:13px;font-weight:500;color:var(--hint);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
-.field textarea,.field input{width:100%;background:var(--bg2);border:none;border-radius:12px;padding:12px 14px;font-size:15px;color:var(--text);font-family:inherit;resize:none;outline:none;min-height:100px}
-.field-note{font-size:12px;color:var(--hint);margin-top:5px}
 
 /* ─── Spinner ────────────────────────────────────────────────── */
 .spin-wrap{padding:32px;display:flex;justify-content:center}
-.spin{width:26px;height:26px;border:2.5px solid rgba(0,122,255,.2);border-top-color:var(--btn);border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:26px;height:26px;border:2.5px solid rgba(59,130,246,.2);border-top-color:var(--btn);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
 
-/* ─── Activity ───────────────────────────────────────────────── */
+/* ─── Toast ──────────────────────────────────────────────────── */
+#toast{position:fixed;bottom:calc(var(--tab-h)+var(--safe-b)+12px);left:50%;transform:translateX(-50%) translateY(8px);background:rgba(24,24,27,.96);backdrop-filter:blur(16px);border:1px solid var(--sep);color:var(--text);padding:9px 18px;border-radius:22px;font-size:13px;font-weight:500;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;z-index:400;white-space:nowrap;max-width:calc(100vw - 32px);text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ─── Modal ──────────────────────────────────────────────────── */
+.mbg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:flex-end}
+.mbg.show{display:flex;animation:mbin .2s ease}
+@keyframes mbin{from{opacity:0}to{opacity:1}}
+.modal{background:var(--bg2);border-radius:20px 20px 0 0;padding:20px 16px calc(var(--safe-b)+20px);width:100%;max-height:88vh;overflow-y:auto;animation:min .25s ease;position:relative}
+@keyframes min{from{transform:translateY(100%)}to{transform:none}}
+.modal-title{font-size:17px;font-weight:700;margin-bottom:16px;text-align:center}
+.modal-x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--hint);font-size:15px}
+.modal-x:active{opacity:.6}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--hint);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em}
+.field textarea,.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--sep);border-radius:12px;padding:11px 13px;font-size:15px;color:var(--text);font-family:inherit;resize:none;outline:none;-webkit-appearance:none;appearance:none}
+.field textarea:focus,.field input:focus,.field select:focus{border-color:var(--btn)}
+.field-note{font-size:12px;color:var(--hint);margin-top:5px}
+.field-err{font-size:13px;color:var(--red);background:rgba(239,68,68,.1);border-radius:10px;padding:8px 12px;margin-top:8px;display:none}
+
+/* ─── Activity feed ──────────────────────────────────────────── */
 .act{padding:10px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--sep)}
 .act:last-child{border-bottom:none}
-.act-ico{width:34px;height:34px;border-radius:9px;background:rgba(0,122,255,.12);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.act-ico{width:34px;height:34px;border-radius:9px;background:rgba(59,130,246,.14);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
 .act-body{flex:1;min-width:0}
 .act-txt{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .act-time{font-size:12px;color:var(--hint);margin-top:1px}
+
+/* ─── Chart bars ─────────────────────────────────────────────── */
+.chart{display:flex;align-items:flex-end;gap:4px;height:60px;padding:0 16px 0}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+.bar{width:100%;background:var(--btn);border-radius:4px 4px 0 0;transition:height .4s}
+.bar-lbl{font-size:9px;color:var(--hint)}
+
+/* ─── Live dot ───────────────────────────────────────────────── */
+.ld{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
+.ld.pulse{animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ─── Segmented control ──────────────────────────────────────── */
+.seg{display:flex;background:var(--bg2);border-radius:10px;padding:2px;gap:2px;margin:8px 16px}
+.seg-opt{flex:1;padding:6px;text-align:center;font-size:13px;font-weight:500;color:var(--hint);cursor:pointer;border-radius:8px;transition:all .15s}
+.seg-opt.on{background:var(--bg);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+
+/* ─── Profile header (Telegram-style) ───────────────────── */
+.profile-hdr{display:flex;flex-direction:column;align-items:center;padding:24px 16px 16px;text-align:center}
+.profile-ava{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700;color:#fff;margin-bottom:12px;flex-shrink:0}
+.pava-blue{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
+.pava-green{background:linear-gradient(135deg,#22c55e,#15803d)}
+.pava-orange{background:linear-gradient(135deg,#f59e0b,#b45309)}
+.pava-purple{background:linear-gradient(135deg,#a855f7,#7c3aed)}
+.pava-teal{background:linear-gradient(135deg,#14b8a6,#0f766e)}
+.pava-red{background:linear-gradient(135deg,#ef4444,#b91c1c)}
+.profile-name{font-size:22px;font-weight:700;letter-spacing:-.3px;margin-bottom:3px}
+.profile-sub{font-size:14px;color:var(--hint);margin-bottom:8px}
+.profile-badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:4px}
+
+/* ─── Capability grid ─────────────────────────────────────── */
+.cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 16px 8px}
+.cap-item{background:var(--bg2);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:9px}
+.cap-ico{font-size:18px;flex-shrink:0}
+.cap-body{flex:1;min-width:0}
+.cap-name{font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.04em}
+.cap-val{font-size:13px;font-weight:600;margin-top:2px}
+.cap-yes{color:var(--green)}.cap-no{color:var(--hint)}.cap-prem{color:#f59e0b}
+
+/* ─── Trust meter ─────────────────────────────────────────── */
+.trust-bar{height:6px;border-radius:3px;background:var(--sep);overflow:hidden;margin-top:6px}
+.trust-fill{height:100%;border-radius:3px;transition:width .6s}
 </style>
 </head>
 <body>
 <div id="app">
-
-<!-- ═══════════════════════════════════════════════════════════════ SCREENS -->
 <div id="content">
 
-<!-- ── HOME ───────────────────────────────────────────────── -->
+<!-- ══════════════════════ HOME ══════════════════════ -->
 <div class="screen show" id="s-home">
   <div class="hdr">
     <div class="hdr-title">🤖 BotMother</div>
-    <div class="hdr-right">
-      <div class="hdr-user" id="hUser">Загрузка...</div>
-      <div class="hdr-live" id="hLive" style="display:none">
-        <span class="live-dot pulse"></span><span>Real-time</span>
-      </div>
+    <div class="hdr-meta">
+      <div class="hdr-user" id="hUser">...</div>
+      <div class="hdr-live" id="hLive" style="display:none"><span class="ld pulse"></span><span>Real-time</span></div>
     </div>
   </div>
-  <div class="screen-body">
+  <div class="sb">
     <div class="cards" id="cards">
-      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:24px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:30px;width:55%;margin-bottom:6px"></div><div class="sk" style="height:14px;width:70%"></div></div>
+      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
+      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
+      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
+      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
+      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
+      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
     </div>
-    <div class="sec"><span class="live-dot" style="display:inline-block;margin-right:5px;width:5px;height:5px;border-radius:50%;background:var(--green)"></span>Последняя активность</div>
+    <div class="sec"><span class="ld" style="margin-right:5px"></span>Последняя активность</div>
     <div class="lst" id="actList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
-<!-- ── BOTS LIST ───────────────────────────────────────────── -->
+<!-- ══════════════════════ BOTS LIST ══════════════════════ -->
 <div class="screen" id="s-bots">
   <div class="hdr">
     <div class="hdr-title">🤖 Мои боты</div>
-    <div class="hdr-right"><div class="hdr-user" id="bots-count"></div></div>
+    <div class="hdr-meta"><div class="hdr-user" id="bots-cnt"></div></div>
   </div>
-  <div class="screen-body">
+  <div class="sb">
     <div class="sec">Управляемые боты</div>
     <div class="lst" id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
-<!-- ── BOT DETAIL ──────────────────────────────────────────── -->
-<div class="screen sub" id="s-botdetail">
+<!-- ══════════════════════ BOT DETAIL ══════════════════════ -->
+<div class="screen" id="s-botdetail">
   <div class="hdr">
-    <div class="hdr-back" onclick="back()">←</div>
-    <div class="hdr-title" id="bd-title">Бот</div>
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="bd-name">Бот</div>
   </div>
-  <div class="screen-body" id="bd-body">
-    <div class="spin-wrap"><div class="spin"></div></div>
+  <div class="sub-sb" id="bd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ AUTO-REPLIES ══════════════════════ -->
+<div class="screen" id="s-autoreplies">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="ar-name">Авто-ответы</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openArModal()">+ Добавить</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Авто-ответы бота</div>
+    <div class="lst" id="arList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
-<!-- ── CHANNELS ────────────────────────────────────────────── -->
+<!-- ══════════════════════ BOT FUNNELS ══════════════════════ -->
+<div class="screen" id="s-botfunnels">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="bf-name">Воронки</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Воронки бота</div>
+    <div class="lst" id="bfList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
+<div class="screen" id="s-accounts">
+  <div class="hdr">
+    <div class="hdr-title">📱 Аккаунты</div>
+    <div class="hdr-meta"><div class="hdr-user" id="acc-cnt"></div></div>
+  </div>
+  <div class="sb">
+    <div class="seg" id="acc-seg">
+      <div class="seg-opt on" onclick="filterAcc('all',this)">Все</div>
+      <div class="seg-opt" onclick="filterAcc('active',this)">Активные</div>
+      <div class="seg-opt" onclick="filterAcc('cooldown',this)">Кулдаун</div>
+    </div>
+    <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ACCOUNT DETAIL ══════════════════════ -->
+<div class="screen" id="s-accdetail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="acd-name">Аккаунт</div>
+  </div>
+  <div class="sub-sb" id="acd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ CHANNELS LIST ══════════════════════ -->
 <div class="screen" id="s-channels">
   <div class="hdr">
-    <div class="hdr-title">📡 Каналы</div>
-    <div class="hdr-right"><div class="hdr-user" id="ch-count"></div></div>
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📡 Каналы и чаты</div>
+    <div class="hdr-meta"><div class="hdr-user" id="ch-cnt"></div></div>
   </div>
-  <div class="screen-body">
-    <div class="sec">Подключённые каналы</div>
+  <div class="sub-sb">
     <div class="lst" id="chList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div style="padding:16px;font-size:13px;color:var(--hint);text-align:center">
-      Для подключения канала — используйте меню бота в Telegram
-    </div>
   </div>
 </div>
 
-<!-- ── CAMPAIGNS ──────────────────────────────────────────── -->
-<div class="screen" id="s-campaigns">
+<!-- ══════════════════════ CHANNEL DETAIL ══════════════════════ -->
+<div class="screen" id="s-chdetail">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title" id="chd-name">Канал</div>
+  </div>
+  <div class="sub-sb" id="chd-body"><div class="spin-wrap"><div class="spin"></div></div></div>
+</div>
+
+<!-- ══════════════════════ BROADCASTS ══════════════════════ -->
+<div class="screen" id="s-broadcasts">
   <div class="hdr">
     <div class="hdr-title">📨 Рассылки</div>
+    <div class="hdr-meta"><button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBcastPick()">+ Создать</button></div>
   </div>
-  <div class="screen-body">
-    <div class="sec">Рассылки по ботам</div>
+  <div class="sb">
+    <div class="sec-row"><div class="sec">Рассылки по ботам</div></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">DM-кампании</div>
+    <div class="sec-row" style="margin-top:4px"><div class="sec">DM-кампании</div></div>
     <div class="lst" id="cmpList"><div class="spin-wrap"><div class="spin"></div></div></div>
-    <div class="sec" style="margin-top:8px">Воронки</div>
+    <div class="sec-row" style="margin-top:4px"><div class="sec">Воронки</div></div>
     <div class="lst" id="funList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
-<!-- ── MORE ───────────────────────────────────────────────── -->
+<!-- ══════════════════════ MORE ══════════════════════ -->
 <div class="screen" id="s-more">
-  <div class="hdr">
-    <div class="hdr-title">⚙️ Ещё</div>
-  </div>
-  <div class="screen-body">
+  <div class="hdr"><div class="hdr-title">⚙️ Ещё</div></div>
+  <div class="sb">
     <div class="sec">Аккаунт</div>
     <div class="lst">
-      <div class="row">
-        <div class="row-ico" style="background:rgba(0,122,255,.12)">💳</div>
-        <div class="row-body">
-          <div class="row-name">Тариф</div>
-          <div class="row-val" id="planVal">Загрузка...</div>
-        </div>
-      </div>
-      <div class="row">
-        <div class="row-ico" style="background:rgba(52,199,89,.12)">📡</div>
-        <div class="row-body">
-          <div class="row-name">Real-time поток</div>
-          <div class="row-val" id="sseVal">Подключение...</div>
-        </div>
-      </div>
+      <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">💳</div><div class="row-body"><div class="row-name">Тариф</div><div class="row-val" id="planVal">Загрузка...</div></div></div>
+      <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">📡</div><div class="row-body"><div class="row-name">Real-time</div><div class="row-val" id="sseVal">Подключение...</div></div></div>
+      <div class="row tap" onclick="goRef()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎁</div><div class="row-body"><div class="row-name">Реферальная программа</div><div class="row-val" id="refVal">Загрузка...</div></div><div class="row-right"><span class="chev">›</span></div></div>
     </div>
 
-    <div class="sec" style="margin-top:8px">Платформа</div>
+    <div class="sec" style="margin-top:4px">Разделы</div>
     <div class="lst">
-      <div class="row">
-        <div class="row-ico" style="background:rgba(175,82,222,.12)">🤖</div>
-        <div class="row-body">
-          <div class="row-name">BotMother OS</div>
-          <div class="row-val">Telegram Automation Platform</div>
-        </div>
-      </div>
-      <div class="row">
-        <div class="row-ico" style="background:rgba(255,159,10,.12)">📊</div>
-        <div class="row-body">
-          <div class="row-name">Статистика</div>
-          <div class="row-val" id="statsSum">—</div>
-        </div>
-      </div>
+      <div class="row tap" onclick="goTab('bots')"><div class="row-ico" style="background:rgba(59,130,246,.16)">🤖</div><div class="row-body"><div class="row-name">Мои боты</div><div class="row-val" id="m-bots-cnt"></div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="goTab('accounts')"><div class="row-ico" style="background:rgba(20,184,166,.16)">📱</div><div class="row-body"><div class="row-name">TG Аккаунты</div><div class="row-val" id="m-acc-cnt"></div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openChannels()"><div class="row-ico" style="background:rgba(168,85,247,.16)">📡</div><div class="row-body"><div class="row-name">Каналы и чаты</div><div class="row-val" id="m-ch-cnt"></div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="goTab('broadcasts')"><div class="row-ico" style="background:rgba(168,85,247,.16)">📨</div><div class="row-body"><div class="row-name">Рассылки и кампании</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openOps()"><div class="row-ico" style="background:rgba(245,158,11,.16)">⚙️</div><div class="row-body"><div class="row-name">Очередь операций</div><div class="row-val" id="m-ops-cnt"></div></div><div class="row-right chev">›</div></div>
     </div>
 
-    <div class="sec" style="margin-top:8px">Навигация</div>
+    <div class="sec" style="margin-top:4px">Аналитика</div>
     <div class="lst">
-      <div class="row tap" onclick="goTab('bots')">
-        <div class="row-ico" style="background:rgba(0,122,255,.12)">🤖</div>
-        <div class="row-body"><div class="row-name">Мои боты</div></div>
-        <div class="row-right chev">›</div>
-      </div>
-      <div class="row tap" onclick="goTab('channels')">
-        <div class="row-ico" style="background:rgba(52,199,89,.12)">📡</div>
-        <div class="row-body"><div class="row-name">Каналы</div></div>
-        <div class="row-right chev">›</div>
-      </div>
-      <div class="row tap" onclick="goTab('campaigns')">
-        <div class="row-ico" style="background:rgba(175,82,222,.12)">📨</div>
-        <div class="row-body"><div class="row-name">Рассылки и кампании</div></div>
-        <div class="row-right chev">›</div>
-      </div>
+      <div class="row tap" onclick="openAnalytics()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📊</div><div class="row-body"><div class="row-name">Статистика роста</div><div class="row-val">Подписчики за 7 дней</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openKeywords()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔍</div><div class="row-body"><div class="row-name">Позиции в поиске</div><div class="row-val" id="kw-val">—</div></div><div class="row-right chev">›</div></div>
     </div>
+
+    <div class="sec" style="margin-top:4px">Платформа</div>
+    <div class="lst">
+      <div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🤖</div><div class="row-body"><div class="row-name">BotMother OS</div><div class="row-val">Telegram Automation Platform</div></div></div>
+      <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📈</div><div class="row-body"><div class="row-name">Сводка</div><div class="row-val" id="statsSum">—</div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ OPERATIONS ══════════════════════ -->
+<div class="screen" id="s-ops">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">⚙️ Операции</div></div>
+  <div class="sub-sb">
+    <div class="seg" id="ops-seg">
+      <div class="seg-opt on" onclick="filterOps(null,this)">Все</div>
+      <div class="seg-opt" onclick="filterOps('running',this)">В работе</div>
+      <div class="seg-opt" onclick="filterOps('pending',this)">Ожидают</div>
+      <div class="seg-opt" onclick="filterOps('failed',this)">Ошибки</div>
+    </div>
+    <div class="lst" id="opsList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ ANALYTICS ══════════════════════ -->
+<div class="screen" id="s-analytics">
+  <div class="hdr"><div class="back" onclick="back()">←</div><div class="hdr-title">📊 Аналитика</div></div>
+  <div class="sub-sb">
+    <div class="sec">Рост подписчиков (7 дней)</div>
+    <div class="lst" style="padding:14px 14px 10px;margin:0 16px">
+      <div class="chart" id="growthChart"></div>
+      <div id="growthTotal" style="text-align:center;font-size:13px;color:var(--hint);margin-top:8px"></div>
+    </div>
+    <div class="sec" style="margin-top:8px">Топ ботов</div>
+    <div class="lst" id="topBots"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div class="sec" style="margin-top:8px">Позиции в поиске</div>
+    <div class="lst" id="kwList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
 </div><!-- /content -->
 
-<!-- ═══════════════════════════════════════════════════════════════ TABBAR -->
+<!-- ══════════════════════ TABBAR ══════════════════════ -->
 <div id="tabbar">
   <div class="tab on" id="t-home" onclick="goTab('home')"><span class="tab-ico">🏠</span><span class="tab-lbl">Главная</span></div>
   <div class="tab" id="t-bots" onclick="goTab('bots')"><span class="tab-ico">🤖</span><span class="tab-lbl">Боты</span></div>
-  <div class="tab" id="t-channels" onclick="goTab('channels')"><span class="tab-ico">📡</span><span class="tab-lbl">Каналы</span></div>
-  <div class="tab" id="t-campaigns" onclick="goTab('campaigns')"><span class="tab-ico">📨</span><span class="tab-lbl">Рассылки</span></div>
+  <div class="tab" id="t-accounts" onclick="goTab('accounts')"><span class="tab-ico">📱</span><span class="tab-lbl">Аккаунты</span></div>
+  <div class="tab" id="t-broadcasts" onclick="goTab('broadcasts')"><span class="tab-ico">📨</span><span class="tab-lbl">Рассылки</span></div>
   <div class="tab" id="t-more" onclick="goTab('more')"><span class="tab-ico">⚙️</span><span class="tab-lbl">Ещё</span></div>
 </div>
 
 <div id="toast"></div>
 
-<!-- ═══════════════════════════════════════════════════════════════ BROADCAST MODAL -->
-<div class="modal-bg" id="bcastModal" onclick="if(event.target===this)closeBcast()">
-  <div class="modal" style="position:relative">
-    <div class="modal-close" onclick="closeBcast()">✕</div>
+<!-- ══════════════════════ MODAL: BROADCAST ══════════════════════ -->
+<div class="mbg" id="bcastMbg" onclick="if(event.target===this)closeBcast()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeBcast()">✕</div>
     <div class="modal-title">📢 Новая рассылка</div>
-    <div id="bcast-bot-info" style="background:var(--bg2);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--hint)">
-      Выберите бота
+    <div class="field">
+      <label>Бот</label>
+      <select id="bcastBot"></select>
     </div>
     <div class="field">
       <label>Текст сообщения</label>
-      <textarea id="bcastText" placeholder="Введите текст рассылки..." rows="5" maxlength="4096"></textarea>
-      <div class="field-note"><span id="bcastLen">0</span>/4096 символов · <span id="bcastRecip"></span></div>
+      <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст..."></textarea>
+      <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
     </div>
-    <div id="bcastErr" style="display:none;background:rgba(255,59,48,.1);border-radius:10px;padding:9px 12px;font-size:13px;color:var(--danger);margin-bottom:12px"></div>
-    <button class="btn btn-primary" id="bcastSendBtn" onclick="sendBroadcast()" style="width:100%">
-      📢 Отправить всем подписчикам
-    </button>
+    <div class="field-err" id="bcastErr"></div>
+    <button class="btn btn-p" id="bcastBtn" onclick="sendBcast()" style="width:100%">📢 Отправить</button>
   </div>
 </div>
+
+<!-- ══════════════════════ MODAL: AUTO-REPLY ══════════════════════ -->
+<div class="mbg" id="arMbg" onclick="if(event.target===this)closeArModal()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeArModal()">✕</div>
+    <div class="modal-title">💬 Новый авто-ответ</div>
+    <div class="field">
+      <label>Тип триггера</label>
+      <select id="arType" onchange="toggleArKw()">
+        <option value="keyword">Ключевое слово</option>
+        <option value="start">При /start</option>
+        <option value="any">Любое сообщение</option>
+      </select>
+    </div>
+    <div class="field" id="arKwField">
+      <label>Ключевое слово</label>
+      <input type="text" id="arKw" placeholder="Например: цена, помощь, привет">
+    </div>
+    <div class="field">
+      <label>Текст ответа</label>
+      <textarea id="arText" rows="4" maxlength="4096" placeholder="Сообщение которое отправит бот..."></textarea>
+    </div>
+    <div class="field-err" id="arErr"></div>
+    <button class="btn btn-p" id="arBtn" onclick="saveAutoReply()" style="width:100%">💾 Сохранить</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ MODAL: REFERRAL ══════════════════════ -->
+<div class="mbg" id="refMbg" onclick="if(event.target===this)closeRef()">
+  <div class="modal">
+    <div class="modal-x" onclick="closeRef()">✕</div>
+    <div class="modal-title">🎁 Реферальная программа</div>
+    <div id="refBody" style="text-align:center;padding:8px 0 16px">
+      <div class="spin-wrap"><div class="spin"></div></div>
+    </div>
+    <button class="btn btn-p" id="refCopyBtn" onclick="copyRef()" style="width:100%;display:none">📋 Скопировать ссылку</button>
+  </div>
+</div>
+
+</div><!-- /app -->
 
 <script>
 'use strict';
 const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
+tg.ready(); tg.expand();
 
-// ──────────────────────────────────── State
-let TOKEN = null;
-let CUR_TAB = 'home';
-let STACK = [];           // sub-screen stack
-let LOADED = {};
+// ── State ──────────────────────────────────────────────
+let TK = null;         // auth token
+let CUR = 'home';      // current tab
+let STACK = [];        // sub-screen stack
+let LOADED = {};       // which tabs loaded
 let SSE = null;
-let BCAST_BOT = null;     // current bot for broadcast modal
-let CACHE = {};
+let BOTS = [];         // cached bot list
+let CUR_BOT = null;    // bot for sub-screens
+let CUR_ACCS = [];     // cached accounts
+let REF_CODE = null;
 
-const TABS = ['home','bots','channels','campaigns','more'];
-
-// ──────────────────────────────────── Boot
+// ── Boot ───────────────────────────────────────────────
 (async function boot() {
   const u = tg.initDataUnsafe?.user;
-  if (u) {
-    const name = [u.first_name, u.last_name].filter(Boolean).join(' ');
-    document.getElementById('hUser').textContent = name || ('@' + (u.username || 'User'));
-  }
+  if (u) document.getElementById('hUser').textContent =
+    [u.first_name, u.last_name].filter(Boolean).join(' ') || ('@'+(u.username||'User'));
   try {
     const r = await fetch('/api/miniapp/auth', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({initData: tg.initData || ''}),
     });
-    if (!r.ok) throw new Error('Auth ' + r.status);
-    const d = await r.json();
-    TOKEN = d.token;
-    await loadHome();
+    if (!r.ok) throw new Error('Auth '+r.status);
+    TK = (await r.json()).token;
+    loadHome();
     openSSE();
-    loadSubscription();
+    loadSub();
+    loadRef();
   } catch(e) {
-    document.getElementById('cards').innerHTML = err('Ошибка авторизации: ' + e.message);
+    document.getElementById('cards').innerHTML = `<div class="err-msg" style="grid-column:span 2">⚠️ ${esc(e.message)}</div>`;
   }
 })();
 
-// ──────────────────────────────────── API
-async function api(path, opts) {
+// ── API ────────────────────────────────────────────────
+async function api(path, opts={}) {
   const r = await fetch(path, {
-    ...(opts||{}),
-    headers: {'Authorization': 'Bearer '+TOKEN, 'Content-Type':'application/json', ...((opts||{}).headers||{})},
+    ...opts,
+    headers: {'Authorization':'Bearer '+TK, 'Content-Type':'application/json', ...(opts.headers||{})},
   });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (!r.ok) { const t=await r.text(); throw new Error('HTTP '+r.status+': '+t.substring(0,80)); }
   return r.json();
 }
 
-// ──────────────────────────────────── SSE
+// ── SSE ────────────────────────────────────────────────
 function openSSE() {
   if (SSE) { try{SSE.close()}catch(_){} }
-  SSE = new EventSource('/api/miniapp/events?token=' + encodeURIComponent(TOKEN));
-  SSE.addEventListener('stats', e => {
-    renderCards(JSON.parse(e.data));
-  });
-  SSE.addEventListener('activity', e => {
-    renderActivity(JSON.parse(e.data).items || []);
-  });
+  SSE = new EventSource('/api/miniapp/events?token='+encodeURIComponent(TK));
+  SSE.addEventListener('stats', e => renderCards(JSON.parse(e.data)));
+  SSE.addEventListener('activity', e => renderAct(JSON.parse(e.data).items||[]));
   SSE.onopen = () => {
-    document.getElementById('hLive').style.display = 'flex';
-    document.getElementById('sseVal').textContent = '🟢 Подключено (real-time)';
+    document.getElementById('hLive').style.display='flex';
+    document.getElementById('sseVal').textContent='🟢 Подключено';
   };
   SSE.onerror = () => {
-    document.getElementById('hLive').style.display = 'none';
-    document.getElementById('sseVal').textContent = '🟡 Переподключение...';
+    document.getElementById('hLive').style.display='none';
+    document.getElementById('sseVal').textContent='🟡 Переподключение...';
     setTimeout(openSSE, 6000);
   };
 }
 
-// ──────────────────────────────────── Navigation
+// ── Navigation ─────────────────────────────────────────
+const TAB_SCREENS = ['s-home','s-bots','s-accounts','s-broadcasts','s-more'];
+
 function goTab(tab) {
   if (STACK.length) {
-    // close sub-screen first
-    STACK = [];
-    document.querySelectorAll('.screen.sub').forEach(s => s.classList.remove('show'));
-    document.getElementById('tabbar').style.display = 'flex';
+    STACK=[];
+    document.querySelectorAll('.screen').forEach(s=>{
+      if (!TAB_SCREENS.includes(s.id)) s.classList.remove('show');
+    });
+    showTabbar(true);
   }
-  if (tab === CUR_TAB && !STACK.length) { return; }
-  document.querySelectorAll('.screen:not(.sub)').forEach(s => s.classList.remove('show'));
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('show'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   document.getElementById('s-'+tab).classList.add('show');
   const ti = document.getElementById('t-'+tab);
   if (ti) ti.classList.add('on');
-  CUR_TAB = tab;
+  CUR = tab;
   tg.HapticFeedback?.impactOccurred('light');
-  if (!LOADED[tab]) {
-    LOADED[tab] = true;
-    if (tab==='bots') loadBots();
-    else if (tab==='channels') loadChannels();
-    else if (tab==='campaigns') loadCampaigns();
-  }
+  if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
 }
 
-function push(screenId) {
-  STACK.push(screenId);
-  document.getElementById(screenId).classList.add('show');
-  document.getElementById('tabbar').style.display = 'none';
+function push(sid) {
+  STACK.push(sid);
+  document.getElementById(sid).classList.add('show');
+  showTabbar(false);
   tg.HapticFeedback?.impactOccurred('light');
 }
 
@@ -447,272 +583,584 @@ function back() {
   if (!STACK.length) return;
   const id = STACK.pop();
   document.getElementById(id).classList.remove('show');
-  if (!STACK.length) {
-    document.getElementById('tabbar').style.display = 'flex';
-  }
+  if (!STACK.length) showTabbar(true);
   tg.HapticFeedback?.impactOccurred('light');
 }
 
-// ──────────────────────────────────── Home / Dashboard
+function showTabbar(v) { document.getElementById('tabbar').style.display = v?'flex':'none'; }
+
+function loadTab(tab) {
+  if (tab==='bots') loadBots();
+  else if (tab==='accounts') loadAccounts();
+  else if (tab==='broadcasts') loadBroadcasts();
+}
+
+// ── Home ───────────────────────────────────────────────
 async function loadHome() {
   try {
     const d = await api('/api/miniapp/dashboard');
-    CACHE.dash = d;
     renderCards(d);
-    renderActivity(d.recent_activity || []);
-    updatePlan(d.plan, d.plan_expires_at);
-    document.getElementById('statsSum').textContent =
-      `${num(d.bots)} бот · ${num(d.channels)} каналов · ${num(d.subscribers)} подп.`;
+    renderAct(d.recent_activity||[]);
+    updateMoreStats(d);
   } catch(e) {
-    document.getElementById('cards').innerHTML = err('Не удалось загрузить: ' + e.message);
+    document.getElementById('cards').innerHTML = `<div class="err-msg" style="grid-column:span 2">Ошибка: ${esc(e.message)}</div>`;
   }
 }
 
 function renderCards(d) {
-  const cards = [
-    {ico:'🤖', val:d.bots,             lbl:'Управляемых ботов', tab:'bots'},
-    {ico:'📡', val:d.channels,         lbl:'Каналов',           tab:'channels'},
-    {ico:'👥', val:d.subscribers,      lbl:'Подписчиков',       tab:'bots'},
-    {ico:'📨', val:d.campaigns_active, lbl:'Активных кампаний', tab:'campaigns'},
+  const items = [
+    {ico:'🤖',val:d.bots,lbl:'Управляемых ботов',tab:'bots'},
+    {ico:'📱',val:d.accounts,lbl:'TG аккаунтов',tab:'accounts'},
+    {ico:'👥',val:d.subscribers,lbl:'Подписчиков',tab:'bots'},
+    {ico:'📨',val:d.campaigns_active,lbl:'Активных кампаний',tab:'broadcasts'},
+    {ico:'🔄',val:d.funnels_active,lbl:'В воронках',tab:'broadcasts'},
+    {ico:'⚙️',val:d.ops_running,lbl:'Операций сейчас',tab:'more'},
   ];
-  document.getElementById('cards').innerHTML = cards.map(c =>
+  document.getElementById('cards').innerHTML = items.map(c=>
     `<div class="card" onclick="goTab('${c.tab}')">
       <div class="card-ico">${c.ico}</div>
       <div class="card-val">${num(c.val)}</div>
       <div class="card-lbl">${c.lbl}</div>
-    </div>`
-  ).join('');
-  if (d.bots !== undefined) {
-    document.getElementById('statsSum').textContent =
-      `${num(d.bots)} бот · ${num(d.channels)} каналов · ${num(d.subscribers)} подп.`;
-  }
-}
-
-function renderActivity(items) {
-  const el = document.getElementById('actList');
-  if (!items.length) { el.innerHTML = empty('📭','Нет активности','Действия появятся здесь'); return; }
-  const icons = {message_sent:'📨',broadcast_sent:'📢',campaign_started:'🚀',
-    campaign_completed:'✅',funnel_subscribed:'🔄',funnel_completed:'🎯',
-    bot_added:'🤖',channel_added:'📡',user_registered:'👤',payment_received:'💳',error:'⚠️'};
-  el.innerHTML = items.map(i => `
-    <div class="act">
-      <div class="act-ico">${icons[i.action]||'•'}</div>
-      <div class="act-body">
-        <div class="act-txt">${esc(i.action||'событие')}</div>
-        <div class="act-time">${ago(i.created_at)}</div>
-      </div>
-      <span class="badge ${i.status==='error'?'b-red':i.status==='warning'?'b-orange':'b-green'}">${i.status||'ok'}</span>
     </div>`).join('');
 }
 
-// ──────────────────────────────────── Bots
-async function loadBots() {
-  try {
-    const d = await api('/api/miniapp/bots');
-    CACHE.bots = d.bots || [];
-    renderBotList(CACHE.bots);
-    document.getElementById('bots-count').textContent = CACHE.bots.length + ' ботов';
-  } catch(e) {
-    document.getElementById('botList').innerHTML = err('Ошибка загрузки');
+function renderAct(items) {
+  const el = document.getElementById('actList');
+  if (!items.length) { el.innerHTML=empty('📭','Нет активности','Действия появятся здесь'); return; }
+  const icons={message_sent:'📨',broadcast_sent:'📢',campaign_started:'🚀',campaign_completed:'✅',funnel_subscribed:'🔄',bot_added:'🤖',channel_added:'📡',payment_received:'💳',error:'⚠️'};
+  el.innerHTML = items.map(i=>`<div class="act">
+    <div class="act-ico">${icons[i.action]||'•'}</div>
+    <div class="act-body"><div class="act-txt">${esc(i.action||'событие')}</div><div class="act-time">${ago(i.created_at)}</div></div>
+    <span class="badge ${i.status==='error'?'b-rd':i.status==='warning'?'b-or':'b-gr'}">${i.status||'ok'}</span>
+  </div>`).join('');
+}
+
+function updateMoreStats(d) {
+  if (d.bots!==undefined) {
+    txt('m-bots-cnt', `${num(d.bots)} бот · ${num(d.subscribers)} подп.`);
+    txt('m-acc-cnt', `${num(d.accounts)} аккаунтов`);
+    txt('m-ch-cnt', `${num(d.channels)} каналов`);
+    txt('m-ops-cnt', d.ops_running?`🟡 ${d.ops_running} работает`:'Нет активных');
+    txt('statsSum', `${num(d.bots)} бот · ${num(d.channels)} каналов · ${num(d.subscribers)} подп.`);
   }
 }
 
-function renderBotList(bots) {
-  const el = document.getElementById('botList');
-  if (!bots.length) {
-    el.innerHTML = empty('🤖','Нет ботов','Добавьте бота через меню в Telegram');
-    return;
+// ── Bots ───────────────────────────────────────────────
+async function loadBots() {
+  try {
+    const d = await api('/api/miniapp/bots');
+    BOTS = d.bots||[];
+    document.getElementById('bots-cnt').textContent = BOTS.length+' ботов';
+    const el = document.getElementById('botList');
+    if (!BOTS.length) { el.innerHTML=empty('🤖','Нет ботов','Добавьте бота через меню в Telegram'); return; }
+    el.innerHTML = BOTS.map(b=>{
+      const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+      return `<div class="li tap" onclick="openBot(${b.bot_id})">
+        <div class="ava ava-blue">🤖</div>
+        <div class="li-body">
+          <div class="li-name">${esc(name)}</div>
+          <div class="li-sub">${b.is_active?'🟢 Активен':'🔴 Выкл'} · ${num(b.subscriber_count||0)} подп.</div>
+        </div>
+        <div class="li-right"><span class="badge b-bl">${num(b.subscriber_count||0)}</span><span class="chev">›</span></div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('botList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
   }
-  el.innerHTML = bots.map(b => {
-    const name = b.username ? '@'+b.username : (b.first_name||'Бот #'+b.bot_id);
-    const sub = (b.subscriber_count||0);
-    return `<div class="lst-item" onclick="openBot(${b.bot_id})">
-      <div class="ava ava-blue">🤖</div>
-      <div class="lst-info">
-        <div class="lst-name">${esc(name)}</div>
-        <div class="lst-sub">${b.is_active?'🟢 Активен':'🔴 Отключён'} · ${num(sub)} подп.</div>
+}
+
+async function openBot(botId) {
+  const b = BOTS.find(x=>x.bot_id==botId);
+  const name = b?(b.username?'@'+b.username:(b.first_name||'Бот #'+botId)):'Бот';
+  CUR_BOT = {id:botId, name};
+  txt('bd-name', name);
+  txt('bd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-botdetail');
+  try {
+    const d = await api('/api/miniapp/bot/'+botId);
+    txt('bd-body', buildBotDetail(d));
+  } catch(e) {
+    txt('bd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function buildBotDetail(d) {
+  const b = d.bot;
+  const bcasts = (d.recent_broadcasts||[]).length
+    ? d.recent_broadcasts.map(bc=>`<div class="li" style="cursor:default">
+        <div class="ava ava-purple">📢</div>
+        <div class="li-body">
+          <div class="li-name">${esc((bc.message_text||'').substring(0,55))}${(bc.message_text||'').length>55?'…':''}</div>
+          <div class="li-sub">✓ ${num(bc.sent_count)} · ✕ ${num(bc.failed_count)} · <span class="badge ${stb(bc.status)[0]}">${stb(bc.status)[1]}</span></div>
+        </div>
+      </div>`).join('')
+    : `<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Рассылок ещё не было</div>`;
+  const users = (d.recent_users||[]).length
+    ? d.recent_users.slice(0,5).map(u=>`<div class="li" style="cursor:default">
+        <div class="ava ava-teal">👤</div>
+        <div class="li-body">
+          <div class="li-name">${esc(u.first_name||(u.username?'@'+u.username:'User #'+u.user_id))}</div>
+          <div class="li-sub">${u.is_active?'🟢 Активен':'🔴 Неактивен'} · ${ago(u.last_seen)}</div>
+        </div>
+      </div>`).join('')
+    : `<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Подписчиков нет</div>`;
+  return `
+    <div class="stats2">
+      <div class="s2col"><div class="s2val">${num(d.active_subscribers)}</div><div class="s2lbl">Активных</div></div>
+      <div class="s2col"><div class="s2val">${num(d.total_subscribers)}</div><div class="s2lbl">Всего подп.</div></div>
+      <div class="s2col"><div class="s2val">${num(d.active_funnels)}</div><div class="s2lbl">Воронок</div></div>
+      <div class="s2col"><div class="s2val">${num(d.auto_replies)}</div><div class="s2lbl">Авто-ответов</div></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-p" onclick="openBcastForBot(${d.bot.bot_id},'${esc(CUR_BOT.name)}',${d.active_subscribers})">📢 Рассылка</button>
+      <button class="btn btn-s" onclick="openArScreen()">💬 Авто-ответы</button>
+    </div>
+    <div class="actions" style="padding-top:0">
+      <button class="btn btn-s" onclick="openBotFunnels(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">🔄 Воронки</button>
+    </div>
+    <div class="sec">Последние рассылки</div>
+    <div class="lst">${bcasts}</div>
+    <div class="sec" style="margin-top:8px">Последние подписчики</div>
+    <div class="lst">${users}</div>
+    <div style="height:16px"></div>`;
+}
+
+// ── Auto-replies ───────────────────────────────────────
+async function openArScreen() {
+  if (!CUR_BOT) return;
+  txt('ar-name', 'Авто-ответы · '+CUR_BOT.name);
+  txt('arList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-autoreplies');
+  await loadArList();
+}
+
+async function loadArList() {
+  if (!CUR_BOT) return;
+  try {
+    const d = await api('/api/miniapp/bot/'+CUR_BOT.id+'/auto_replies');
+    renderArList(d.auto_replies||[]);
+  } catch(e) {
+    txt('arList', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function renderArList(items) {
+  const el = document.getElementById('arList');
+  if (!items.length) { el.innerHTML=empty('💬','Нет авто-ответов','Нажмите + Добавить чтобы создать'); return; }
+  el.innerHTML = items.map(r=>{
+    const trig = r.trigger_type==='keyword'?`🔑 ${esc(r.keyword||'?')}`:r.trigger_type==='start'?'🚀 /start':'📬 Любое';
+    return `<div class="li">
+      <div class="ava ava-blue">💬</div>
+      <div class="li-body">
+        <div class="li-name">${trig}</div>
+        <div class="li-sub">${esc((r.response_text||'').substring(0,50))}${(r.response_text||'').length>50?'…':''}</div>
       </div>
-      <div class="lst-right"><span class="badge b-blue">${num(sub)}</span> <span class="chev">›</span></div>
+      <div class="li-right">
+        <div class="toggle ${r.is_active?'on':'off'}" onclick="toggleAr(${r.id},this)"></div>
+        <span style="font-size:18px;cursor:pointer;color:var(--red);padding:4px" onclick="deleteAr(${r.id})">🗑</span>
+      </div>
     </div>`;
   }).join('');
 }
 
-async function openBot(botId) {
-  document.getElementById('bd-title').textContent = 'Загрузка...';
-  document.getElementById('bd-body').innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
-  push('s-botdetail');
+async function toggleAr(id, el) {
+  const wasOn = el.classList.contains('on');
+  el.classList.toggle('on',!wasOn); el.classList.toggle('off',wasOn);
   try {
-    const d = await api('/api/miniapp/bot/' + botId);
-    const b = d.bot;
-    const name = b.username ? '@'+b.username : (b.first_name||'Бот #'+b.bot_id);
-    document.getElementById('bd-title').textContent = name;
+    await api('/api/miniapp/auto_reply/'+id+'/toggle', {method:'PUT'});
+    toast(wasOn?'Авто-ответ выключен':'Авто-ответ включён');
+  } catch(e) {
+    el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn);
+    toast('Ошибка: '+e.message);
+  }
+}
 
-    const bcastsHtml = (d.recent_broadcasts||[]).length
-      ? (d.recent_broadcasts||[]).map(bc => `
-          <div class="lst-item" style="cursor:default">
-            <div class="ava ava-purple">📢</div>
-            <div class="lst-info">
-              <div class="lst-name">${esc((bc.message_text||'').substring(0,50))}${(bc.message_text||'').length>50?'…':''}</div>
-              <div class="lst-sub">✓ ${num(bc.sent_count)} · ✕ ${num(bc.failed_count)} · ${statusBadgeText(bc.status)}</div>
-            </div>
-          </div>`).join('')
-      : `<div style="padding:14px 14px;color:var(--hint);font-size:14px">Рассылок ещё не было</div>`;
+async function deleteAr(id) {
+  tg.showConfirm?.('Удалить авто-ответ?', async ok => { if (ok) { await doDeleteAr(id); } }) ?? await doDeleteAr(id);
+}
+async function doDeleteAr(id) {
+  try {
+    await api('/api/miniapp/auto_reply/'+id, {method:'DELETE'});
+    toast('Удалено'); loadArList();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
 
-    document.getElementById('bd-body').innerHTML = `
-      <div style="padding:12px 16px 0">
-        <div class="stat-row">
-          <div class="stat-col">
-            <div class="stat-val">${num(d.active_subscribers)}</div>
-            <div class="stat-lbl">Активных</div>
-          </div>
-          <div class="stat-col">
-            <div class="stat-val">${num(d.total_subscribers)}</div>
-            <div class="stat-lbl">Всего подп.</div>
-          </div>
-          <div class="stat-col">
-            <div class="stat-val">${num(d.active_funnels)}</div>
-            <div class="stat-lbl">Воронок</div>
-          </div>
-          <div class="stat-col">
-            <div class="stat-val">${num(d.auto_replies)}</div>
-            <div class="stat-lbl">Авто-ответов</div>
-          </div>
+let AR_SAVE_BOT = null;
+function openArModal() {
+  AR_SAVE_BOT = CUR_BOT?.id;
+  document.getElementById('arType').value='keyword';
+  document.getElementById('arKw').value='';
+  document.getElementById('arText').value='';
+  document.getElementById('arErr').style.display='none';
+  toggleArKw();
+  document.getElementById('arMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+function closeArModal() { document.getElementById('arMbg').classList.remove('show'); }
+function toggleArKw() {
+  const show = document.getElementById('arType').value==='keyword';
+  document.getElementById('arKwField').style.display=show?'block':'none';
+}
+async function saveAutoReply() {
+  const type = document.getElementById('arType').value;
+  const kw = document.getElementById('arKw').value.trim();
+  const text = document.getElementById('arText').value.trim();
+  const errEl = document.getElementById('arErr');
+  errEl.style.display='none';
+  if (!text) { errEl.textContent='Введите текст ответа'; errEl.style.display='block'; return; }
+  if (type==='keyword' && !kw) { errEl.textContent='Введите ключевое слово'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('arBtn');
+  btn.disabled=true; btn.textContent='Сохранение...';
+  try {
+    await api('/api/miniapp/bot/'+AR_SAVE_BOT+'/auto_reply', {
+      method:'POST', body:JSON.stringify({trigger_type:type, keyword:kw||null, response_text:text})
+    });
+    closeArModal(); toast('✅ Авто-ответ создан'); loadArList();
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+  } finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
+}
+
+// ── Bot Funnels ────────────────────────────────────────
+async function openBotFunnels(botId, botName) {
+  txt('bf-name', 'Воронки · '+botName);
+  txt('bfList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-botfunnels');
+  try {
+    const d = await api('/api/miniapp/bot/'+botId+'/funnels');
+    const fns = d.funnels||[];
+    if (!fns.length) { txt('bfList', empty('🔄','Нет воронок','Создайте воронку через бота в Telegram')); return; }
+    txt('bfList', fns.map(f=>`<div class="li">
+      <div class="ava ava-orange">🔄</div>
+      <div class="li-body">
+        <div class="li-name">${esc(f.name||'Воронка')}</div>
+        <div class="li-sub">Активных: ${num(f.active_subs||0)} · Завершено: ${num(f.total_subs||0)}</div>
+      </div>
+      <div class="li-right">
+        <div class="toggle ${f.is_active?'on':'off'}" onclick="toggleFunnel(${f.id},this)"></div>
+      </div>
+    </div>`).join(''));
+  } catch(e) { txt('bfList', `<div class="err-msg">${esc(e.message)}</div>`); }
+}
+
+async function toggleFunnel(id, el) {
+  const wasOn = el.classList.contains('on');
+  el.classList.toggle('on',!wasOn); el.classList.toggle('off',wasOn);
+  try {
+    await api('/api/miniapp/funnel/'+id+'/toggle', {method:'PUT'});
+    toast(wasOn?'Воронка остановлена':'Воронка запущена');
+  } catch(e) {
+    el.classList.toggle('on',wasOn); el.classList.toggle('off',!wasOn); toast('Ошибка: '+e.message);
+  }
+}
+
+// ── Accounts ───────────────────────────────────────────
+async function loadAccounts() {
+  try {
+    const d = await api('/api/miniapp/accounts');
+    CUR_ACCS = d.accounts||[];
+    document.getElementById('acc-cnt').textContent = CUR_ACCS.length+' аккаунтов';
+    txt('m-acc-cnt', CUR_ACCS.length+' аккаунтов');
+    renderAccounts(CUR_ACCS);
+  } catch(e) {
+    document.getElementById('accList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
+  }
+}
+
+function filterAcc(mode, btn) {
+  document.querySelectorAll('#acc-seg .seg-opt').forEach(x=>x.classList.remove('on'));
+  btn.classList.add('on');
+  const list = mode==='all' ? CUR_ACCS
+    : mode==='active' ? CUR_ACCS.filter(a=>a.is_active && !isOnCooldown(a))
+    : CUR_ACCS.filter(a=>isOnCooldown(a));
+  renderAccounts(list);
+}
+
+function isOnCooldown(a) {
+  return a.cooldown_until && new Date(a.cooldown_until) > new Date();
+}
+
+function renderAccounts(list) {
+  const el = document.getElementById('accList');
+  if (!list.length) { el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram'); return; }
+  el.innerHTML = list.map(a=>{
+    const name = a.first_name||(a.username?'@'+a.username:a.phone||'Аккаунт #'+a.id);
+    const cd = isOnCooldown(a);
+    const trust = a.trust_score!=null?Math.round(a.trust_score):100;
+    const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
+    let status, cls;
+    if (!a.is_active) { status='Выключен'; cls='b-gy'; }
+    else if (cd) { status='⏳ Кулдаун'; cls='b-or'; }
+    else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; }
+    else { status='🟢 Активен'; cls='b-gr'; }
+    return `<div class="li tap" onclick="openAccount(${a.id})">
+      <div class="ava ava-teal">📱</div>
+      <div class="li-body">
+        <div class="li-name">${esc(name)}</div>
+        <div class="li-sub">${a.phone||''} · Доверие: <span style="color:${trustColor};font-weight:600">${trust}%</span></div>
+      </div>
+      <div class="li-right"><span class="badge ${cls}">${status}</span><span class="chev">›</span></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Account Detail ─────────────────────────────────────
+async function openAccount(accId) {
+  const a = CUR_ACCS.find(x=>x.id==accId);
+  const name = a?(a.first_name||(a.username?'@'+a.username:a.phone||'Аккаунт #'+accId)):'Аккаунт';
+  txt('acd-name', name);
+  txt('acd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-accdetail');
+  try {
+    const d = await api('/api/miniapp/account/'+accId);
+    txt('acd-body', buildAccDetail(d));
+  } catch(e) {
+    txt('acd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function buildAccDetail(d) {
+  const a = d.account||{};
+  const caps = d.capabilities||{};
+  const warmup = d.warmup;
+  const ops = d.recent_ops||[];
+
+  const name = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.username || a.phone || 'Аккаунт';
+  const initials = name.slice(0,2).toUpperCase();
+  const avatarColors = ['pava-blue','pava-green','pava-orange','pava-purple','pava-teal'];
+  const avatarCls = avatarColors[(a.id||0) % avatarColors.length];
+
+  const trust = Math.round(a.trust_score||100);
+  const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
+  const cd = a.cooldown_until && new Date(a.cooldown_until) > new Date();
+
+  let statusBadge = '';
+  if (!a.is_active) statusBadge = '<span class="badge b-gy">Выключен</span>';
+  else if (a.acc_status==='banned') statusBadge = '<span class="badge b-rd">🚫 Заблокирован</span>';
+  else if (cd) statusBadge = `<span class="badge b-or">⏳ Кулдаун до ${new Date(a.cooldown_until).toLocaleDateString('ru-RU')}</span>`;
+  else statusBadge = '<span class="badge b-gr">🟢 Активен</span>';
+
+  if (caps.is_premium) statusBadge += ' <span class="badge" style="background:rgba(245,158,11,.18);color:#f59e0b">⭐ Premium</span>';
+
+  const warmupHtml = warmup ? `
+    <div class="sec" style="margin-top:8px">Прогрев</div>
+    <div class="lst">
+      <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔥</div>
+        <div class="row-body"><div class="row-name">День прогрева</div>
+          <div class="row-val">${warmup.current_day||0} / ${warmup.target_days||21}</div>
+        </div>
+        <div class="row-right"><span class="badge ${warmup.status==='active'?'b-gr':warmup.status==='completed'?'b-bl':'b-gy'}">${
+          {active:'▶ Идёт',completed:'✓ Завершён',paused:'⏸ Пауза'}[warmup.status]||warmup.status||'—'
+        }</span></div>
+      </div>
+    </div>` : '';
+
+  function cap(ico, name2, val, cls) {
+    const vc = val===true?'cap-yes':val===false?'cap-no':'cap-prem';
+    const vs = val===true?'✓ Да':val===false?'✗ Нет':String(val);
+    return `<div class="cap-item">
+      <div class="cap-ico">${ico}</div>
+      <div class="cap-body"><div class="cap-name">${name2}</div><div class="cap-val ${cls||vc}">${vs}</div></div>
+    </div>`;
+  }
+
+  const capsHtml = `
+    <div class="sec" style="margin-top:8px">Возможности</div>
+    <div class="cap-grid">
+      ${cap('💬','Личные сообщения', caps.can_dm!==false, '')}
+      ${cap('👥','Инвайт в группы', caps.can_invite!==false, '')}
+      ${cap('📡','Создать канал', caps.can_create_channel!==false, '')}
+      ${cap('🤖','Создать бота', caps.can_create_bot!==false, '')}
+      ${cap('🔗','Юзернейм', caps.can_set_username!==false, '')}
+      ${cap('🔒','2FA', caps.has_2fa===true, caps.has_2fa?'cap-yes':'cap-warn')}
+    </div>`;
+
+  const limitsHtml = (caps.daily_dm_limit||caps.daily_invite_limit) ? `
+    <div class="sec" style="margin-top:4px">Лимиты в сутки</div>
+    <div class="lst">
+      ${caps.daily_dm_limit?`<div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">💬</div><div class="row-body"><div class="row-name">Личных сообщений</div></div><div class="row-right">${caps.daily_dm_limit}</div></div>`:''}
+      ${caps.daily_invite_limit?`<div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">👥</div><div class="row-body"><div class="row-name">Инвайтов</div></div><div class="row-right">${caps.daily_invite_limit}</div></div>`:''}
+    </div>` : '';
+
+  const recentOpsHtml = ops.length ? `
+    <div class="sec" style="margin-top:8px">Последние операции</div>
+    <div class="lst">${ops.map(o=>{
+      const [bc,bl]=stb(o.status);
+      return `<div class="li" style="cursor:default">
+        <div class="ava ava-orange">⚙️</div>
+        <div class="li-body"><div class="li-name">${esc(o.op_type||'операция')}</div>
+          <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} · ${ago(o.created_at)}</div>
+        </div>
+        <span class="badge ${bc}">${bl}</span>
+      </div>`;
+    }).join('')}</div>` : '';
+
+  return `
+    <div class="profile-hdr">
+      <div class="profile-ava ${avatarCls}">${initials}</div>
+      <div class="profile-name">${esc(name)}</div>
+      ${a.username?`<div class="profile-sub">@${esc(a.username)}</div>`:''}
+      <div class="profile-badges">${statusBadge}</div>
+    </div>
+
+    <div class="sec">Профиль</div>
+    <div class="lst">
+      ${a.phone?`<div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
+      ${a.tg_user_id?`<div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
+      <div class="row"><div class="row-ico" style="background:rgba(20,184,166,.16)">🛡</div>
+        <div class="row-body">
+          <div class="row-name">Уровень доверия</div>
+          <div class="row-val" style="color:${trustColor};font-weight:600">${trust}%</div>
+          <div class="trust-bar"><div class="trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
         </div>
       </div>
-      <div class="actions">
-        <button class="btn btn-primary" onclick="openBcast(${botId}, '${esc(name)}', ${d.active_subscribers})">
-          📢 Сделать рассылку
-        </button>
-      </div>
-      <div class="sec">Последние рассылки</div>
-      <div class="lst">${bcastsHtml}</div>
-      <div style="height:16px"></div>`;
-  } catch(e) {
-    document.getElementById('bd-body').innerHTML = err('Не удалось загрузить: ' + e.message);
-  }
+      ${a.added_at?`<div class="row"><div class="row-ico" style="background:rgba(113,113,122,.16)">📅</div><div class="row-body"><div class="row-name">Добавлен</div><div class="row-val">${new Date(a.added_at).toLocaleDateString('ru-RU')}</div></div></div>`:''}
+      ${a.last_used?`<div class="row"><div class="row-ico" style="background:rgba(168,85,247,.16)">🕐</div><div class="row-body"><div class="row-name">Последнее использование</div><div class="row-val">${ago(a.last_used)}</div></div></div>`:''}
+    </div>
+
+    ${capsHtml}
+    ${limitsHtml}
+    ${warmupHtml}
+    ${recentOpsHtml}
+    <div style="height:16px"></div>`;
 }
 
-// ──────────────────────────────────── Broadcast Modal
-function openBcast(botId, botName, recipCount) {
-  BCAST_BOT = {id: botId, name: botName, count: recipCount};
-  document.getElementById('bcast-bot-info').innerHTML =
-    `<b>${esc(botName)}</b> · ${num(recipCount)} активных подписчиков получат сообщение`;
-  document.getElementById('bcastText').value = '';
-  document.getElementById('bcastLen').textContent = '0';
-  document.getElementById('bcastRecip').textContent = num(recipCount) + ' получателей';
-  document.getElementById('bcastErr').style.display = 'none';
-  document.getElementById('bcastSendBtn').disabled = false;
-  document.getElementById('bcastSendBtn').textContent = '📢 Отправить всем подписчикам';
-  document.getElementById('bcastModal').classList.add('show');
-  tg.HapticFeedback?.impactOccurred('medium');
-  setTimeout(() => document.getElementById('bcastText').focus(), 300);
-}
-
-function closeBcast() {
-  document.getElementById('bcastModal').classList.remove('show');
-}
-
-document.getElementById('bcastText').addEventListener('input', function() {
-  document.getElementById('bcastLen').textContent = this.value.length;
-});
-
-async function sendBroadcast() {
-  if (!BCAST_BOT) return;
-  const text = document.getElementById('bcastText').value.trim();
-  if (!text) {
-    document.getElementById('bcastErr').textContent = 'Введите текст сообщения';
-    document.getElementById('bcastErr').style.display = 'block';
-    return;
-  }
-  const btn = document.getElementById('bcastSendBtn');
-  btn.disabled = true;
-  btn.textContent = '⏳ Отправка...';
-  document.getElementById('bcastErr').style.display = 'none';
-  try {
-    const d = await api('/api/miniapp/broadcast', {
-      method:'POST',
-      body: JSON.stringify({bot_id: BCAST_BOT.id, text}),
-    });
-    closeBcast();
-    tg.HapticFeedback?.notificationOccurred('success');
-    toast('✅ Рассылка запущена для ' + num(d.total_users) + ' подписчиков');
-    // Refresh broadcasts tab if loaded
-    if (LOADED['campaigns']) {
-      LOADED['campaigns'] = false;
-      loadCampaigns();
-    }
-  } catch(e) {
-    document.getElementById('bcastErr').textContent = 'Ошибка: ' + e.message;
-    document.getElementById('bcastErr').style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = '📢 Отправить всем подписчикам';
-    tg.HapticFeedback?.notificationOccurred('error');
-  }
-}
-
-// ──────────────────────────────────── Channels
-async function loadChannels() {
+// ── Channels ───────────────────────────────────────────
+let CUR_CHANNELS = [];
+async function openChannels() {
+  push('s-channels');
+  txt('chList', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/channels');
-    const el = document.getElementById('chList');
-    const chs = d.channels || [];
-    document.getElementById('ch-count').textContent = chs.length ? chs.length + ' каналов' : '';
-    if (!chs.length) {
-      el.innerHTML = empty('📡','Нет каналов','Добавьте канал через меню в Telegram'); return;
-    }
-    el.innerHTML = chs.map(c => {
-      const name = c.username ? '@'+c.username : (c.title||'Канал');
-      return `<div class="lst-item" style="cursor:default">
-        <div class="ava ava-green">📡</div>
-        <div class="lst-info">
-          <div class="lst-name">${esc(name)}</div>
-          <div class="lst-sub">${c.member_count?num(c.member_count)+' участников':(c.type||'канал')}</div>
+    CUR_CHANNELS = d.channels||[];
+    txt('ch-cnt', CUR_CHANNELS.length+' каналов');
+    if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Добавьте канал через меню в Telegram')); return; }
+    txt('chList', CUR_CHANNELS.map(c=>{
+      const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
+      const type = c.type==='supergroup'?'💬 Группа':c.type==='channel'?'📡 Канал':'💬 Чат';
+      return `<div class="li tap" onclick="openChannel(${c.channel_id})">
+        <div class="ava ava-purple">📡</div>
+        <div class="li-body">
+          <div class="li-name">${esc(name)}</div>
+          <div class="li-sub">${type} · ${num(c.member_count||0)} участников</div>
         </div>
-        <div class="lst-right">${c.member_count?'<span class="badge b-green">'+num(c.member_count)+'</span>':''}</div>
+        <div class="li-right"><span class="badge b-bl">${num(c.member_count||0)}</span><span class="chev">›</span></div>
       </div>`;
-    }).join('');
+    }).join(''));
   } catch(e) {
-    document.getElementById('chList').innerHTML = err('Ошибка загрузки');
+    txt('chList', `<div class="err-msg">${esc(e.message)}</div>`);
   }
 }
 
-// ──────────────────────────────────── Campaigns
-async function loadCampaigns() {
-  document.getElementById('bcastList').innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
-  document.getElementById('cmpList').innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
-  document.getElementById('funList').innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+async function openChannel(chId) {
+  const c = CUR_CHANNELS.find(x=>x.channel_id==chId);
+  const name = c?(c.title||(c.username?'@'+c.username:'Канал #'+chId)):'Канал';
+  txt('chd-name', name);
+  txt('chd-body', '<div class="spin-wrap"><div class="spin"></div></div>');
+  push('s-chdetail');
+  try {
+    const d = await api('/api/miniapp/channel/'+chId);
+    txt('chd-body', buildChDetail(d));
+  } catch(e) {
+    txt('chd-body', `<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function buildChDetail(d) {
+  const c = d.channel||{};
+  const acc = d.linked_account;
+  const ops = d.recent_ops||[];
+
+  const name = c.title||(c.username?'@'+c.username:'Канал #'+c.channel_id);
+  const initials = name.slice(0,2).toUpperCase();
+  const type = c.type==='supergroup'?'💬 Супергруппа':c.type==='channel'?'📡 Канал':'💬 Чат';
+
+  const recentOpsHtml = ops.length ? `
+    <div class="sec" style="margin-top:8px">Последние операции</div>
+    <div class="lst">${ops.map(o=>{
+      const [bc,bl]=stb(o.status);
+      return `<div class="li" style="cursor:default">
+        <div class="ava ava-orange">⚙️</div>
+        <div class="li-body"><div class="li-name">${esc(o.op_type||'операция')}</div>
+          <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} · ${ago(o.created_at)}</div>
+        </div>
+        <span class="badge ${bc}">${bl}</span>
+      </div>`;
+    }).join('')}</div>` : '';
+
+  return `
+    <div class="profile-hdr">
+      <div class="profile-ava pava-purple">${initials}</div>
+      <div class="profile-name">${esc(name)}</div>
+      ${c.username?`<div class="profile-sub">@${esc(c.username)}</div>`:''}
+      <div class="profile-badges"><span class="badge b-bl">${type}</span></div>
+    </div>
+
+    <div class="sec">Информация</div>
+    <div class="lst">
+      <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">👥</div>
+        <div class="row-body"><div class="row-name">Участников</div><div class="row-val">${num(c.member_count||0)}</div></div>
+      </div>
+      ${c.username?`<div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">🔗</div>
+        <div class="row-body"><div class="row-name">Ссылка</div><div class="row-val">t.me/${esc(c.username)}</div></div>
+        <div class="row-right" onclick="navigator.clipboard?.writeText('https://t.me/${esc(c.username)}').then(()=>toast('Скопировано!'))"><span style="font-size:20px;cursor:pointer">📋</span></div>
+      </div>`:''}
+      ${c.channel_id?`<div class="row"><div class="row-ico" style="background:rgba(113,113,122,.16)">🆔</div>
+        <div class="row-body"><div class="row-name">ID канала</div><div class="row-val">${c.channel_id}</div></div>
+      </div>`:''}
+      ${c.added_at?`<div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">📅</div>
+        <div class="row-body"><div class="row-name">Добавлен</div><div class="row-val">${new Date(c.added_at).toLocaleDateString('ru-RU')}</div></div>
+      </div>`:''}
+    </div>
+
+    ${acc?`
+    <div class="sec" style="margin-top:8px">Аккаунт-владелец</div>
+    <div class="lst">
+      <div class="li tap" onclick="openAccount(${acc.id})">
+        <div class="ava ava-teal">📱</div>
+        <div class="li-body">
+          <div class="li-name">${esc(acc.first_name||(acc.username?'@'+acc.username:acc.phone||'Аккаунт #'+acc.id))}</div>
+          <div class="li-sub">${esc(acc.phone||'')}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+    </div>`:''}
+
+    ${recentOpsHtml}
+    <div style="height:16px"></div>`;
+}
+
+// ── Broadcasts ─────────────────────────────────────────
+async function loadBroadcasts() {
   try {
     const [bd, cd, fd] = await Promise.all([
       api('/api/miniapp/broadcasts'),
       api('/api/miniapp/campaigns'),
       api('/api/miniapp/funnels'),
     ]);
-    renderBroadcasts(bd.broadcasts||[]);
-    renderCampaigns(cd.campaigns||[]);
-    renderFunnels(fd.funnels||[]);
+    renderBcasts(bd.broadcasts||[]);
+    renderCmps(cd.campaigns||[]);
+    renderFuns(fd.funnels||[]);
   } catch(e) {
-    document.getElementById('bcastList').innerHTML = err('Ошибка загрузки');
-    document.getElementById('cmpList').innerHTML = '';
-    document.getElementById('funList').innerHTML = '';
+    txt('bcastList', `<div class="err-msg">${esc(e.message)}</div>`);
+    txt('cmpList',''); txt('funList','');
   }
 }
 
-function renderBroadcasts(items) {
+function renderBcasts(items) {
   const el = document.getElementById('bcastList');
-  if (!items.length) {
-    el.innerHTML = empty('📢','Нет рассылок','Создайте первую через раздел «Боты»'); return;
-  }
-  el.innerHTML = items.map(b => {
-    const name = b.bot_username ? '@'+b.bot_username : 'Бот #'+b.bot_id;
-    const total = (b.sent_count||0) + (b.failed_count||0);
-    const pct = total > 0 ? Math.round((b.sent_count||0)/total*100) : 0;
-    const [bc, bl] = statusBadge(b.status);
-    return `<div class="lst-item" style="display:block;cursor:default;padding:12px 14px">
+  if (!items.length) { el.innerHTML=empty('📢','Нет рассылок','Создайте первую через кнопку + или через раздел Боты'); return; }
+  el.innerHTML = items.map(b=>{
+    const bn = b.bot_username?'@'+b.bot_username:'Бот #'+b.bot_id;
+    const total = (b.sent_count||0)+(b.failed_count||0);
+    const pct = total>0?Math.round((b.sent_count||0)/total*100):0;
+    const [bc,bl]=stb(b.status);
+    return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="ava ava-purple">📢</div>
-        <div class="lst-info">
-          <div class="lst-name">${esc((b.message_text||'').substring(0,60))}${(b.message_text||'').length>60?'…':''}</div>
-          <div class="lst-sub">${esc(name)} · ✓ ${num(b.sent_count||0)} · ✕ ${num(b.failed_count||0)}</div>
+        <div class="li-body">
+          <div class="li-name">${esc((b.message_text||'').substring(0,55))}${(b.message_text||'').length>55?'…':''}</div>
+          <div class="li-sub">${esc(bn)} · ✓ ${num(b.sent_count||0)} · ✕ ${num(b.failed_count||0)}</div>
         </div>
         <span class="badge ${bc}">${bl}</span>
       </div>
@@ -721,82 +1169,245 @@ function renderBroadcasts(items) {
   }).join('');
 }
 
-function renderCampaigns(items) {
+function renderCmps(items) {
   const el = document.getElementById('cmpList');
-  if (!items.length) {
-    el.innerHTML = empty('📨','Нет DM-кампаний'); return;
-  }
-  el.innerHTML = items.map(c => {
-    const [bc, bl] = statusBadge(c.status);
-    return `<div class="lst-item" style="cursor:default">
+  if (!items.length) { el.innerHTML=empty('📨','Нет DM-кампаний'); return; }
+  const [bc,bl]=stb;
+  el.innerHTML = items.map(c=>{
+    const [bc,bl]=stb(c.status);
+    return `<div class="li" style="cursor:default">
       <div class="ava ava-orange">📨</div>
-      <div class="lst-info">
-        <div class="lst-name">${esc(c.name||'Кампания')}</div>
-        <div class="lst-sub">✓ ${num(c.sent_count||0)} · ✕ ${num(c.failed_count||0)} · ${esc(c.target_type||'')}</div>
-      </div>
+      <div class="li-body"><div class="li-name">${esc(c.name||'Кампания')}</div><div class="li-sub">✓ ${num(c.sent_count||0)} · ✕ ${num(c.failed_count||0)}</div></div>
       <span class="badge ${bc}">${bl}</span>
     </div>`;
   }).join('');
 }
 
-function renderFunnels(items) {
+function renderFuns(items) {
   const el = document.getElementById('funList');
-  if (!items.length) {
-    el.innerHTML = empty('🔄','Нет воронок'); return;
-  }
-  el.innerHTML = items.map(f => `
-    <div class="lst-item" style="cursor:default">
-      <div class="ava ava-orange">🔄</div>
-      <div class="lst-info">
-        <div class="lst-name">${esc(f.name||'Воронка')}</div>
-        <div class="lst-sub">В процессе: ${num(f.active_subs||0)} · Завершено: ${num(f.completed_subs||0)}</div>
-      </div>
-      <span class="badge ${f.is_active?'b-green':'b-gray'}">${f.is_active?'▶ Активна':'⏸ Пауза'}</span>
-    </div>`).join('');
+  if (!items.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
+  el.innerHTML = items.map(f=>`<div class="li" style="cursor:default">
+    <div class="ava ava-orange">🔄</div>
+    <div class="li-body">
+      <div class="li-name">${esc(f.name||'Воронка')}</div>
+      <div class="li-sub">${f.bot_username?'@'+esc(f.bot_username):''} · Активных: ${num(f.active_subs||0)}</div>
+    </div>
+    <span class="badge ${f.is_active?'b-gr':'b-gy'}">${f.is_active?'▶ Активна':'⏸ Пауза'}</span>
+  </div>`).join('');
 }
 
-// ──────────────────────────────────── Subscription
-async function loadSubscription() {
+// ── Broadcast modal ────────────────────────────────────
+function openBcastPick() {
+  if (!BOTS.length) { toast('Сначала загрузите список ботов'); goTab('bots'); return; }
+  fillBcastBots(-1);
+  document.getElementById('bcastText').value='';
+  document.getElementById('bcastLen').textContent='0';
+  document.getElementById('bcastErr').style.display='none';
+  document.getElementById('bcastBtn').disabled=false;
+  document.getElementById('bcastBtn').textContent='📢 Отправить';
+  updateBcastRecip();
+  document.getElementById('bcastMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+function openBcastForBot(botId, botName, recipCount) {
+  if (!BOTS.length) BOTS = [{bot_id:botId, username:botName.replace('@',''), subscriber_count:recipCount}];
+  fillBcastBots(botId);
+  document.getElementById('bcastText').value='';
+  document.getElementById('bcastLen').textContent='0';
+  document.getElementById('bcastErr').style.display='none';
+  document.getElementById('bcastBtn').disabled=false;
+  document.getElementById('bcastBtn').textContent='📢 Отправить';
+  updateBcastRecip();
+  document.getElementById('bcastMbg').classList.add('show');
+  tg.HapticFeedback?.impactOccurred('medium');
+}
+
+function fillBcastBots(selectedId) {
+  const sel = document.getElementById('bcastBot');
+  sel.innerHTML = BOTS.map(b=>{
+    const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+    return `<option value="${b.bot_id}" data-subs="${b.subscriber_count||0}" ${b.bot_id==selectedId?'selected':''}>${esc(name)} (${num(b.subscriber_count||0)} подп.)</option>`;
+  }).join('');
+  sel.addEventListener('change', updateBcastRecip);
+}
+
+function updateBcastRecip() {
+  const sel = document.getElementById('bcastBot');
+  const opt = sel.selectedOptions[0];
+  const subs = opt?parseInt(opt.dataset.subs||0):0;
+  document.getElementById('bcastRecip').textContent = num(subs)+' получателей';
+}
+
+document.getElementById('bcastText').addEventListener('input', function(){
+  document.getElementById('bcastLen').textContent = this.value.length;
+});
+
+document.getElementById('bcastBot').addEventListener('change', updateBcastRecip);
+
+function closeBcast() { document.getElementById('bcastMbg').classList.remove('show'); }
+
+async function sendBcast() {
+  const botId = document.getElementById('bcastBot').value;
+  const text = document.getElementById('bcastText').value.trim();
+  const errEl = document.getElementById('bcastErr');
+  errEl.style.display='none';
+  if (!text) { errEl.textContent='Введите текст'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('bcastBtn');
+  btn.disabled=true; btn.textContent='⏳ Отправка...';
+  try {
+    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify({bot_id:botId, text})});
+    closeBcast();
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('✅ Рассылка запущена · '+num(d.total_users)+' получателей');
+    LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
+  } catch(e) {
+    errEl.textContent='Ошибка: '+e.message; errEl.style.display='block';
+    tg.HapticFeedback?.notificationOccurred('error');
+  } finally { btn.disabled=false; btn.textContent='📢 Отправить'; }
+}
+
+// ── Operations ─────────────────────────────────────────
+let OPS_FILTER = null;
+function openOps() { txt('opsList','<div class="spin-wrap"><div class="spin"></div></div>'); push('s-ops'); loadOps(); }
+
+async function loadOps() {
+  const url = OPS_FILTER ? '/api/miniapp/operations?status='+OPS_FILTER : '/api/miniapp/operations';
+  try {
+    const d = await api(url);
+    const ops = d.operations||[];
+    if (!ops.length) { txt('opsList', empty('⚙️','Нет операций',(OPS_FILTER?'По фильтру «'+OPS_FILTER+'»':''))); return; }
+    txt('opsList', ops.map(o=>{
+      const pct = o.total_items>0?Math.round((o.done_items||0)/o.total_items*100):0;
+      const [bc,bl]=stb(o.status);
+      const canCancel = o.status==='pending'||o.status==='running';
+      return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="ava ava-orange">⚙️</div>
+          <div class="li-body">
+            <div class="li-name">${esc(o.op_type||'операция')}</div>
+            <div class="li-sub">${num(o.done_items||0)}/${num(o.total_items||0)} · ${ago(o.created_at)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="badge ${bc}">${bl}</span>
+            ${canCancel?`<span style="font-size:13px;color:var(--red);cursor:pointer;font-weight:500" onclick="cancelOp(${o.id})">Отмена</span>`:''}
+          </div>
+        </div>
+        ${o.status==='running'?`<div class="prog" style="margin-top:7px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
+        ${o.error_msg?`<div style="font-size:12px;color:var(--red);margin-top:5px">${esc(o.error_msg.substring(0,80))}</div>`:''}
+      </div>`;
+    }).join(''));
+  } catch(e) { txt('opsList',`<div class="err-msg">${esc(e.message)}</div>`); }
+}
+
+async function cancelOp(id) {
+  try {
+    await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'});
+    toast('Операция отменена'); loadOps();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+function filterOps(status, btn) {
+  OPS_FILTER=status;
+  document.querySelectorAll('#ops-seg .seg-opt').forEach(x=>x.classList.remove('on'));
+  btn.classList.add('on');
+  loadOps();
+}
+
+// ── Analytics ──────────────────────────────────────────
+function openAnalytics() { push('s-analytics'); loadAnalytics(); }
+
+async function loadAnalytics() {
+  txt('topBots','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('kwList','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('growthChart','');
+  try {
+    const d = await api('/api/miniapp/analytics');
+    // Growth chart
+    const growth = d.growth||[];
+    if (growth.length) {
+      const max = Math.max(...growth.map(g=>g.new_users||0), 1);
+      const total = growth.reduce((s,g)=>s+(g.new_users||0),0);
+      const labels = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+      document.getElementById('growthChart').innerHTML = growth.map((g,i)=>{
+        const h = Math.max(4, Math.round((g.new_users||0)/max*50));
+        const day = new Date(g.day);
+        const lbl = day.toLocaleDateString('ru-RU',{weekday:'short'});
+        return `<div class="bar-wrap"><div class="bar" style="height:${h}px" title="${g.new_users} за ${g.day}"></div><div class="bar-lbl">${lbl}</div></div>`;
+      }).join('');
+      document.getElementById('growthTotal').textContent = `+${total} новых за 7 дней`;
+    } else {
+      document.getElementById('growthChart').innerHTML = `<div class="empty-txt" style="width:100%;text-align:center;color:var(--hint)">Нет данных</div>`;
+    }
+    // Top bots
+    const tb = d.top_bots||[];
+    txt('topBots', tb.length ? tb.map(b=>{
+      const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
+      return `<div class="li" style="cursor:default">
+        <div class="ava ava-blue">🤖</div>
+        <div class="li-body"><div class="li-name">${esc(name)}</div><div class="li-sub">${num(b.active_subs||0)} активных подписчиков</div></div>
+        <span class="badge b-bl">${num(b.active_subs||0)}</span>
+      </div>`;
+    }).join('') : empty('🤖','Нет данных'));
+    // Keywords
+    const kws = d.keywords||[];
+    txt('kwList', kws.length ? kws.map(k=>{
+      const pos = k.last_position;
+      const posStr = pos!=null?'#'+pos:'Нет данных';
+      const pc = pos!=null?(pos<=3?'b-gr':pos<=10?'b-bl':pos<=30?'b-or':'b-gy'):'b-gy';
+      return `<div class="li" style="cursor:default">
+        <div class="ava ava-green">🔍</div>
+        <div class="li-body"><div class="li-name">${esc(k.keyword)}</div><div class="li-sub">${k.bot_username?'@'+esc(k.bot_username):''}</div></div>
+        <span class="badge ${pc}">${posStr}</span>
+      </div>`;
+    }).join('') : empty('🔍','Нет ключевых слов','Добавьте через меню бота'));
+    txt('kw-val', kws.length ? kws.length+' ключей отслеживается' : '—');
+  } catch(e) {
+    txt('topBots',`<div class="err-msg">${esc(e.message)}</div>`);
+  }
+}
+
+function openKeywords() { push('s-analytics'); loadAnalytics(); }
+
+// ── Subscription & Referral ────────────────────────────
+async function loadSub() {
   try {
     const d = await api('/api/miniapp/subscription');
     updatePlan(d.plan, d.expires_at);
-  } catch(e) {
-    updatePlan('free', null);
-  }
+  } catch(e) { updatePlan('free', null); }
 }
 
-function updatePlan(plan, expiresAt) {
-  let txt;
-  if (plan === 'paid') {
-    txt = '⭐ Paid — без ограничений';
-    if (expiresAt) {
-      const d = new Date(expiresAt);
-      txt += ' · до ' + d.toLocaleDateString('ru-RU');
-    }
-  } else {
-    txt = '🆓 Free — 5 ботов / 5 каналов';
-  }
-  document.getElementById('planVal').textContent = txt;
+function updatePlan(plan, exp) {
+  let t = plan==='paid'?'⭐ Paid — без ограничений':'🆓 Free — до 5 ботов';
+  if (plan==='paid' && exp) { const d=new Date(exp); t+=' · до '+d.toLocaleDateString('ru-RU'); }
+  txt('planVal', t);
 }
 
-// ──────────────────────────────────── Helpers
-function statusBadge(s) {
-  return {
-    running:   ['b-green','▶ Работает'],
-    pending:   ['b-orange','⏳ Ожидает'],
-    done:      ['b-blue','✓ Завершена'],
-    completed: ['b-blue','✓ Завершена'],
-    paused:    ['b-orange','⏸ Пауза'],
-    draft:     ['b-gray','✏ Черновик'],
-    failed:    ['b-red','✕ Ошибка'],
-    cancelled: ['b-gray','— Отменена'],
-  }[s] || ['b-gray', s||'—'];
+async function loadRef() {
+  try {
+    const d = await api('/api/miniapp/referral');
+    REF_CODE = d.code;
+    txt('refVal', d.code ? `Код: ${d.code} · ${num(d.total_referrals)} чел.` : 'Получить реферальный код');
+  } catch(e) { txt('refVal','Недоступно'); }
 }
 
-function statusBadgeText(s) {
-  return statusBadge(s)[1];
+function goRef() {
+  if (!REF_CODE) { toast('Реферальный код не найден'); return; }
+  txt('refBody', `
+    <div style="font-size:28px;margin-bottom:10px">🎁</div>
+    <div style="font-size:22px;font-weight:700;letter-spacing:2px;margin-bottom:8px">${esc(REF_CODE)}</div>
+    <div style="font-size:14px;color:var(--hint)">Пригласите друзей и получите бонусы</div>
+    <div style="margin-top:14px;font-size:13px;color:var(--hint)">Ваша реферальная ссылка будет скопирована в буфер обмена</div>`);
+  document.getElementById('refCopyBtn').style.display='block';
+  document.getElementById('refMbg').classList.add('show');
+}
+function closeRef() { document.getElementById('refMbg').classList.remove('show'); }
+function copyRef() {
+  const url = `https://t.me/botmother_bot?start=ref_${REF_CODE}`;
+  navigator.clipboard?.writeText(url).then(()=>toast('✅ Ссылка скопирована!')).catch(()=>toast(url));
 }
 
+// ── Utils ──────────────────────────────────────────────
 function num(v) {
   if (v===null||v===undefined) return '—';
   v=+v;
@@ -804,11 +1415,9 @@ function num(v) {
   if (v>=1e3) return (v/1e3).toFixed(1)+'K';
   return String(v);
 }
-
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
 function ago(ts) {
   if (!ts) return '';
   const s=(Date.now()-new Date(ts))/1000;
@@ -817,22 +1426,21 @@ function ago(ts) {
   if(s<86400) return Math.floor(s/3600)+' ч назад';
   return Math.floor(s/86400)+' дн назад';
 }
-
-function empty(ico, txt, sub) {
-  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}</div>`;
+function empty(ico,txt2,sub) {
+  return `<div class="empty"><div class="empty-ico">${ico}</div><div class="empty-txt">${txt2}</div>${sub?`<div class="empty-sub">${sub}</div>`:''}</div>`;
 }
-
-function err(msg) {
-  return `<div style="padding:16px;color:var(--danger);font-size:14px;text-align:center">${esc(msg)}</div>`;
+function txt(id, html) {
+  const el=document.getElementById(id);
+  if(el) el.innerHTML=html;
 }
-
-let _toastT=null;
+function stb(s) {
+  return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено']}[s]||['b-gy',s||'—'];
+}
+let _tt=null;
 function toast(msg) {
   const el=document.getElementById('toast');
-  el.textContent=msg;
-  el.classList.add('show');
-  clearTimeout(_toastT);
-  _toastT=setTimeout(()=>el.classList.remove('show'),2800);
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2800);
 }
 </script>
 </body>
