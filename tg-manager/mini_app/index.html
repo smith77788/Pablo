@@ -409,6 +409,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
       <div class="row tap" onclick="openGifts()"><div class="row-ico" style="background:rgba(239,68,68,.16)">🎁</div><div class="row-body"><div class="row-name">Gift Transfer</div><div class="row-val" id="m-gifts-val">Подарки в аккаунтах</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openMassInvite()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📨</div><div class="row-body"><div class="row-name">Mass Inviter</div><div class="row-val">Массовый инвайт</div></div><div class="row-right chev">›</div></div>
       <div class="row tap" onclick="openParser()"><div class="row-ico" style="background:rgba(245,158,11,.16)">🔭</div><div class="row-body"><div class="row-name">Парсер аудитории</div><div class="row-val" id="m-parser-cnt">Участники каналов/групп</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openPersonas()"><div class="row-ico" style="background:rgba(168,85,247,.16)">🎭</div><div class="row-body"><div class="row-name">Persona Hub</div><div class="row-val" id="m-persona-val">AI-персоны аккаунтов</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openReferral()"><div class="row-ico" style="background:rgba(34,197,94,.16)">🤝</div><div class="row-body"><div class="row-name">Реферальная программа</div><div class="row-val" id="m-ref-val">—</div></div><div class="row-right chev">›</div></div>
+    </div>
+
+    <div class="sec" style="margin-top:4px">Автоматизация</div>
+    <div class="lst">
+      <div class="row tap" onclick="openAutoreg()"><div class="row-ico" style="background:rgba(34,197,94,.16)">📱</div><div class="row-body"><div class="row-name">Авторег аккаунтов</div><div class="row-val" id="m-autoreg-val">Регистрация через SMS</div></div><div class="row-right chev">›</div></div>
+      <div class="row tap" onclick="openPhoneChecker()"><div class="row-ico" style="background:rgba(59,130,246,.16)">📞</div><div class="row-body"><div class="row-name">Phone Checker</div><div class="row-val">Проверка номеров</div></div><div class="row-right chev">›</div></div>
     </div>
 
     <div class="sec" style="margin-top:4px">Платформа</div>
@@ -737,6 +745,90 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
     <div id="cleanerErr" style="color:#f87171;font-size:13px;margin:4px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%" disabled>Выберите аккаунт</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: PERSONA HUB ══════════════════════ -->
+<div class="screen" id="s-personas">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🎭 Persona Hub</div>
+  </div>
+  <div class="sub-sb">
+    <div id="personaStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="lst" id="personaList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: AUTO REGISTRAR ══════════════════════ -->
+<div class="screen" id="s-autoreg">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📱 Авторег</div>
+  </div>
+  <div class="sub-sb">
+    <div id="autoregStats" style="display:flex;gap:10px;padding:8px 0 10px"></div>
+    <div class="sec">Новая регистрация</div>
+    <div style="padding:8px 0">
+      <div class="field">
+        <label>Количество аккаунтов (1–50)</label>
+        <input type="number" id="autoregCount" value="1" min="1" max="50" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px">
+      </div>
+      <div class="field">
+        <label>Страна</label>
+        <select id="autoregCountry" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="RU">🇷🇺 Россия</option>
+          <option value="UA">🇺🇦 Украина</option>
+          <option value="KZ">🇰🇿 Казахстан</option>
+          <option value="US">🇺🇸 США</option>
+          <option value="GB">🇬🇧 Великобритания</option>
+          <option value="DE">🇩🇪 Германия</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>SMS-сервис</label>
+        <select id="autoregService" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(30,30,40,.9);color:#fff;font-size:14px">
+          <option value="smsactivate">SMS-Activate</option>
+          <option value="5sim">5sim.net</option>
+        </select>
+      </div>
+      <div class="field-err" id="autoregErr"></div>
+      <button class="btn btn-p" id="autoregBtn" onclick="submitAutoreg()" style="width:100%">📱 Зарегистрировать</button>
+    </div>
+    <div class="sec" style="margin-top:8px">Последние аккаунты</div>
+    <div class="lst" id="autoregRecent"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: PHONE CHECKER ══════════════════════ -->
+<div class="screen" id="s-phonechecker">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">📞 Phone Checker</div>
+  </div>
+  <div class="sub-sb">
+    <div class="sec">Проверка номеров</div>
+    <div style="padding:8px 0">
+      <div class="field"><label>Номера телефонов (по одному на строке или через запятую)</label><textarea id="phoneCheckInput" rows="5" placeholder="+79001234567&#10;+79001234568&#10;+79001234569" style="width:100%;resize:vertical;padding:10px;border-radius:10px;border:1.5px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px"></textarea></div>
+      <div class="field-err" id="phoneCheckErr"></div>
+      <button class="btn btn-p" id="phoneCheckBtn" onclick="submitPhoneCheck()" style="width:100%">🔍 Проверить</button>
+    </div>
+    <div class="sec" style="margin-top:8px">История задач</div>
+    <div class="lst" id="phoneCheckHistory"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: REFERRAL ══════════════════════ -->
+<div class="screen" id="s-referral">
+  <div class="hdr">
+    <div class="back" onclick="back()">←</div>
+    <div class="hdr-title">🤝 Реферальная программа</div>
+  </div>
+  <div class="sub-sb">
+    <div id="referralStats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0 12px"></div>
+    <div id="referralCode" style="padding:8px 0 12px"></div>
+    <div class="sec">Рефералы</div>
+    <div class="lst" id="referralList"></div>
   </div>
 </div>
 
@@ -3773,6 +3865,177 @@ async function submitProfileSetter() {
     back();
   } catch(e) { errEl.textContent=e.message||'Ошибка'; }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить'; }
+}
+
+// ── Persona Hub ─────────────────────────────────────────
+const PERSONA_STYLE = {formal:'🎩 Формальный',casual:'😊 Casual',expert:'🔬 Эксперт',friendly:'🤗 Дружелюбный',sarcastic:'😏 Саркастичный',neutral:'😐 Нейтральный'};
+async function openPersonas() {
+  push('s-personas');
+  txt('personaStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('personaList','');
+  try {
+    const d = await api('/api/miniapp/personas');
+    const personas = d.personas||[];
+    const active = personas.filter(p=>p.is_active).length;
+    txt('personaStats',`
+      <div class="kpi-card"><div class="kpi-val">${personas.length}</div><div class="kpi-lbl">Персон</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">${active}</div><div class="kpi-lbl">Активных</div></div>
+    `);
+    txt('m-persona-val',`${active} активных · ${personas.length} персон`);
+    if (!personas.length) { txt('personaList', empty('🎭','Нет персон','Создайте AI-персону в боте')); return; }
+    txt('personaList', personas.map(p=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(168,85,247,.16)">${p.is_active?'🟢':'⚫'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(p.persona_name)} ${PERSONA_STYLE[p.speech_style]||p.speech_style||''}</div>
+          <div class="row-val">${esc(p.first_name||p.phone||'')} · ${esc(p.niche||'')} · ${p.age||'?'} лет</div>
+        </div>
+        <div class="row-right" style="display:flex;gap:6px">
+          <button class="btn ${p.is_active?'btn-d':'btn-p'}" style="padding:5px 10px;font-size:12px;min-width:0" onclick="togglePersona(${p.id},${p.is_active})">${p.is_active?'Выкл':'Вкл'}</button>
+          <button class="btn btn-d" style="padding:5px 10px;font-size:12px;min-width:0" onclick="deletePersona(${p.id})">🗑</button>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('personaStats','');
+    txt('personaList', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function togglePersona(id, active) {
+  try {
+    await api(`/api/miniapp/persona/${id}/toggle`,{method:'PUT'});
+    toast(active?'⚫ Деактивировано':'🟢 Активировано');
+    openPersonas();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+async function deletePersona(id) {
+  if (!confirm('Удалить персону?')) return;
+  try {
+    await api(`/api/miniapp/persona/${id}`,{method:'DELETE'});
+    toast('🗑 Удалено');
+    openPersonas();
+  } catch(e) { toast('Ошибка: '+e.message); }
+}
+
+// ── Auto Registrar ──────────────────────────────────────
+async function openAutoreg() {
+  push('s-autoreg');
+  txt('autoregStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('autoregRecent','');
+  try {
+    const d = await api('/api/miniapp/autoreg');
+    txt('autoregStats',`
+      <div class="kpi-card"><div class="kpi-val">${d.total_accounts||0}</div><div class="kpi-lbl">Аккаунтов</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#f59e0b">${d.pending_registrations||0}</div><div class="kpi-lbl">В очереди</div></div>
+    `);
+    txt('m-autoreg-val',`${d.total_accounts||0} аккаунтов`);
+    const recent = d.recent||[];
+    if (!recent.length) { txt('autoregRecent', empty('📱','Нет недавних аккаунтов','')); return; }
+    txt('autoregRecent', recent.map(a=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">📱</div>
+        <div class="row-body">
+          <div class="row-name">${esc(a.first_name||a.phone)}</div>
+          <div class="row-val">${esc(a.phone)} · ${a.acc_status||'—'} · ${a.created_at?new Date(a.created_at).toLocaleDateString('ru'):''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('autoregStats','');
+    txt('autoregRecent', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function submitAutoreg() {
+  const count = parseInt(document.getElementById('autoregCount').value)||1;
+  const country = document.getElementById('autoregCountry').value;
+  const service = document.getElementById('autoregService').value;
+  const errEl = document.getElementById('autoregErr');
+  const btn = document.getElementById('autoregBtn');
+  btn.disabled=true; btn.textContent='Запускаю…';
+  try {
+    const r = await api('/api/miniapp/autoreg',{method:'POST',body:JSON.stringify({count,country,service})});
+    toast(`📱 Регистрация запущена (#${r.op_id})`);
+    errEl.textContent='';
+    openAutoreg();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='📱 Зарегистрировать'; }
+}
+
+// ── Phone Checker ────────────────────────────────────────
+async function openPhoneChecker() {
+  push('s-phonechecker');
+  txt('phoneCheckHistory','<div class="spin-wrap"><div class="spin"></div></div>');
+  try {
+    const d = await api('/api/miniapp/operations');
+    const ops = (d.operations||[]).filter(o=>o.op_type==='phone_check').slice(0,10);
+    if (!ops.length) { txt('phoneCheckHistory', empty('📞','Нет истории проверок','')); return; }
+    txt('phoneCheckHistory', ops.map(o=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">📞</div>
+        <div class="row-body">
+          <div class="row-name">${esc(o.label||'phone_check')}</div>
+          <div class="row-val">${o.status} · ${o.done_items||0}/${o.total_items||0} проверено</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('phoneCheckHistory', empty('⚠️','Ошибка',e.message));
+  }
+}
+async function submitPhoneCheck() {
+  const phones = document.getElementById('phoneCheckInput').value.trim();
+  const errEl = document.getElementById('phoneCheckErr');
+  if (!phones) { errEl.textContent='Введите номера телефонов'; return; }
+  const btn = document.getElementById('phoneCheckBtn');
+  btn.disabled=true; btn.textContent='Отправляю…';
+  try {
+    const r = await api('/api/miniapp/phone_check',{method:'POST',body:JSON.stringify({phones})});
+    toast(`📞 Запущена проверка ${r.count} номеров (#${r.op_id})`);
+    errEl.textContent='';
+    openPhoneChecker();
+  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  finally { btn.disabled=false; btn.textContent='🔍 Проверить'; }
+}
+
+// ── Referral Dashboard ───────────────────────────────────
+const REFERRAL_TIER = {basic:'🥉 Базовый',silver:'🥈 Серебро',gold:'🥇 Золото',diamond:'💎 Платина'};
+async function openReferral() {
+  push('s-referral');
+  txt('referralStats','<div class="spin-wrap"><div class="spin"></div></div>');
+  txt('referralCode','');
+  txt('referralList','');
+  try {
+    const d = await api('/api/miniapp/referral/detail');
+    txt('referralStats',`
+      <div class="kpi-card"><div class="kpi-val">${REFERRAL_TIER[d.tier]||d.tier||'—'}</div><div class="kpi-lbl">Уровень</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.referral_count||0}</div><div class="kpi-lbl">Рефералов</div></div>
+      <div class="kpi-card"><div class="kpi-val">${d.paid_count||0}</div><div class="kpi-lbl">Оплативших</div></div>
+      <div class="kpi-card"><div class="kpi-val" style="color:#22c55e">$${Number(d.total_earned||0).toFixed(2)}</div><div class="kpi-lbl">Заработано</div></div>
+    `);
+    txt('m-ref-val',`${d.referral_count||0} рефералов · ${d.commission_rate||0}% комиссия`);
+    if (d.ref_code) {
+      txt('referralCode',`
+        <div class="lst">
+          <div class="row"><div class="row-body"><div class="row-name">Ваш реферальный код</div><div class="row-val" style="color:#a78bfa;font-size:16px;font-weight:600">${esc(d.ref_code)}</div></div></div>
+          <div class="row"><div class="row-body"><div class="row-name">Комиссия</div></div><div class="row-right" style="color:#22c55e">${d.commission_rate||0}%</div></div>
+        </div>
+      `);
+    }
+    const refs = d.referrals||[];
+    if (!refs.length) { txt('referralList', empty('🤝','Нет рефералов','Поделитесь кодом!')); return; }
+    txt('referralList', refs.map(r=>`
+      <div class="row">
+        <div class="row-ico" style="background:rgba(34,197,94,.16)">👤</div>
+        <div class="row-body">
+          <div class="row-name">@${esc(r.username||r.id)}</div>
+          <div class="row-val">${r.status==='paid'?'✅ Оплатил':'📋 Зарегистрирован'} · ${r.created_at?new Date(r.created_at).toLocaleDateString('ru'):''}</div>
+        </div>
+      </div>
+    `).join(''));
+  } catch(e) {
+    txt('referralStats','');
+    txt('referralList', empty('⚠️','Ошибка',e.message));
+  }
 }
 
 // ── AI Memory ───────────────────────────────────────────

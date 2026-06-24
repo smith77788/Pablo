@@ -1028,6 +1028,183 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         )
         return _json_resp({"ok": True, "op_id": op_id, "label": label})
 
+    # ── Persona Hub ───────────────────────────────────────────────────────────
+
+    async def persona_list(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            rows = await pool.fetch(
+                """SELECT pp.id, pp.persona_name, pp.bio, pp.age, pp.speech_style,
+                          pp.tone, pp.niche, pp.is_active, pp.created_at,
+                          ta.phone, ta.first_name, ta.username
+                   FROM persona_profiles pp
+                   LEFT JOIN tg_accounts ta ON ta.id=pp.account_id
+                   WHERE pp.owner_id=$1 ORDER BY pp.created_at DESC""",
+                uid,
+            )
+            return _json_resp({"personas": [
+                {
+                    **dict(r),
+                    "interests": list(r.get("interests") or []),
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                }
+                for r in rows
+            ]})
+        except Exception as exc:
+            log.exception("persona_list uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def persona_toggle(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        persona_id = int(request.match_info["persona_id"])
+        row = await pool.fetchrow(
+            "SELECT id, is_active FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
+        )
+        if not row:
+            return _err("Не найдено", 404)
+        new_val = not row["is_active"]
+        await pool.execute(
+            "UPDATE persona_profiles SET is_active=$1 WHERE id=$2", new_val, persona_id
+        )
+        return _json_resp({"is_active": new_val})
+
+    async def persona_delete(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        persona_id = int(request.match_info["persona_id"])
+        await pool.execute(
+            "DELETE FROM persona_profiles WHERE id=$1 AND owner_id=$2", persona_id, uid
+        )
+        return _json_resp({"ok": True})
+
+    # ── Auto Registrar ─────────────────────────────────────────────────────────
+
+    async def autoreg_status(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            total = await pool.fetchval(
+                "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", uid
+            )
+            recent = await pool.fetch(
+                """SELECT id, phone, first_name, acc_status, created_at
+                   FROM tg_accounts WHERE owner_id=$1
+                   ORDER BY created_at DESC LIMIT 10""",
+                uid,
+            )
+            pending_ops = await pool.fetchval(
+                "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND op_type='auto_register' AND status='pending'",
+                uid,
+            )
+            return _json_resp({
+                "total_accounts": total,
+                "pending_registrations": pending_ops,
+                "recent": [
+                    {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                    for r in recent
+                ],
+            })
+        except Exception as exc:
+            log.exception("autoreg_status uid=%d", uid)
+            return _err(str(exc), 500)
+
+    async def autoreg_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        count = int(body.get("count", 1))
+        country = body.get("country", "RU")
+        service = body.get("service", "smsactivate")
+        if count < 1 or count > 50:
+            return _err("Количество: от 1 до 50", 400)
+        try:
+            label = f"Авторег {count} аккаунт(ов) · {country}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'auto_register','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"count": count, "country": country, "service": service}), count, label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label})
+        except Exception as exc:
+            log.exception("autoreg_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Phone Checker ─────────────────────────────────────────────────────────
+
+    async def phone_check_submit(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
+        phones_raw = (body.get("phones") or "").strip()
+        if not phones_raw:
+            return _err("Укажите номера телефонов", 400)
+        phones = [p.strip() for p in phones_raw.replace(",", "\n").split("\n") if p.strip()]
+        if not phones:
+            return _err("Нет валидных номеров", 400)
+        try:
+            label = f"Проверка {len(phones)} номеров"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'phone_check','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"phones": phones}), len(phones), label,
+            )
+            return _json_resp({"ok": True, "op_id": op_id, "label": label, "count": len(phones)})
+        except Exception as exc:
+            log.exception("phone_check_submit uid=%d", uid)
+            return _err(str(exc), 500)
+
+    # ── Referral Dashboard ────────────────────────────────────────────────────
+
+    async def referral_overview_detail(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            ref_row = await pool.fetchrow(
+                """SELECT ref_code, tier, commission_rate, total_earned,
+                          (SELECT COUNT(*) FROM referrals WHERE referrer_id=$1) AS referral_count,
+                          (SELECT COUNT(*) FROM referrals WHERE referrer_id=$1 AND status='paid') AS paid_count
+                   FROM users WHERE id=$1""",
+                uid,
+            )
+            top_refs = await pool.fetch(
+                """SELECT u.id, u.username, r.created_at, r.status
+                   FROM referrals r
+                   JOIN users u ON u.id=r.referred_id
+                   WHERE r.referrer_id=$1
+                   ORDER BY r.created_at DESC LIMIT 20""",
+                uid,
+            )
+            return _json_resp({
+                "ref_code": ref_row["ref_code"] if ref_row else None,
+                "tier": ref_row["tier"] if ref_row else "basic",
+                "commission_rate": float(ref_row["commission_rate"] or 0) if ref_row else 0,
+                "total_earned": float(ref_row["total_earned"] or 0) if ref_row else 0,
+                "referral_count": ref_row["referral_count"] if ref_row else 0,
+                "paid_count": ref_row["paid_count"] if ref_row else 0,
+                "referrals": [
+                    {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
+                    for r in top_refs
+                ],
+            })
+        except Exception as exc:
+            log.exception("referral_overview_detail uid=%d", uid)
+            return _err(str(exc), 500)
+
     # ── AI Memory ─────────────────────────────────────────────────────────────
 
     async def ai_memory_list(request: web.Request) -> web.Response:
@@ -3364,6 +3541,17 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_delete("/api/miniapp/experiment/{exp_id}", experiment_delete)
     # Health Dashboard
     app.router.add_get("/api/miniapp/health", health_overview)
+    # Persona Hub
+    app.router.add_get("/api/miniapp/personas", persona_list)
+    app.router.add_put("/api/miniapp/persona/{persona_id}/toggle", persona_toggle)
+    app.router.add_delete("/api/miniapp/persona/{persona_id}", persona_delete)
+    # Auto Registrar
+    app.router.add_get("/api/miniapp/autoreg", autoreg_status)
+    app.router.add_post("/api/miniapp/autoreg", autoreg_submit)
+    # Phone Checker
+    app.router.add_post("/api/miniapp/phone_check", phone_check_submit)
+    # Referral
+    app.router.add_get("/api/miniapp/referral/detail", referral_overview_detail)
     # AI Memory
     app.router.add_get("/api/miniapp/ai_memory", ai_memory_list)
     app.router.add_post("/api/miniapp/ai_memory", ai_memory_create)
