@@ -6548,7 +6548,7 @@ async function loadClonerHistory() {
     const rows = await api('/api/miniapp/content_cloner/history');
     if (!rows.length) { txt('clonerHistory', empty('📋','Нет операций','')); return; }
     txt('clonerHistory', rows.map(r => {
-      const payload = r.payload||{};
+      const payload = r.params||r.payload||{};
       const src = typeof payload==='object' ? (payload.source||'—') : '—';
       const [cls,lbl]=stb(r.status);
       return `

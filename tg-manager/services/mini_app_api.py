@@ -2098,9 +2098,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         plan_type = body.get("plan_type", "standard")
         if not account_id:
             return _err("account_id обязателен", 400)
-        acc = await pool.fetchrow(
-            "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
-        )
+        try:
+            acc = await pool.fetchrow(
+                "SELECT id FROM tg_accounts WHERE id=$1 AND owner_id=$2", account_id, uid
+            )
+        except Exception as exc:
+            log.exception("warmup_create_plan fetchrow uid=%d", uid)
+            return _err(str(exc), 500)
         if not acc:
             return _err("Аккаунт не найден", 404)
         try:
@@ -2130,11 +2134,18 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        plan_id = int(request.match_info["plan_id"])
-        await pool.execute(
-            "DELETE FROM account_warmup_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
-        )
-        return _json_resp({"ok": True})
+        try:
+            plan_id = int(request.match_info["plan_id"])
+        except (KeyError, ValueError):
+            return _err("bad plan_id", 400)
+        try:
+            await pool.execute(
+                "DELETE FROM account_warmup_plans WHERE id=$1 AND owner_id=$2", plan_id, uid
+            )
+            return _json_resp({"ok": True})
+        except Exception as exc:
+            log.exception("warmup_delete_plan uid=%d plan=%d", uid, plan_id)
+            return _err(str(exc), 500)
 
     # ── A/B Experiments ────────────────────────────────────────────────────────
 
@@ -4173,29 +4184,40 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            "SELECT id, op_type, status, params, COALESCE(label, op_type) AS label, created_at FROM operation_queue "
-            "WHERE owner_id=$1 AND op_type='content_clone' ORDER BY created_at DESC LIMIT 20",
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                "SELECT id, op_type, status, params, COALESCE(label, op_type) AS label, created_at FROM operation_queue "
+                "WHERE owner_id=$1 AND op_type='content_clone' ORDER BY created_at DESC LIMIT 20",
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("content_cloner_history uid=%d", uid)
+            return _err(str(exc), 500)
 
     async def content_cloner_submit(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Invalid JSON", 400)
         source = (body.get("source") or "").strip()
         if not source:
             return _err("source required")
         account_id = body.get("account_id")
-        op_id = await pool.fetchval(
-            "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
-            "VALUES($1,'content_clone','pending',$2,1,$3) RETURNING id",
-            uid, json.dumps({"source": source, "account_id": account_id}),
-            f"Клонировать контент: {source}",
-        )
-        return _json_resp({"ok": True, "op_id": op_id})
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id,op_type,status,params,total_items,label) "
+                "VALUES($1,'content_clone','pending',$2,1,$3) RETURNING id",
+                uid, json.dumps({"source": source, "account_id": account_id}),
+                f"Клонировать контент: {source}",
+            )
+            return _json_resp({"ok": True, "op_id": op_id})
+        except Exception as exc:
+            log.exception("content_cloner_submit uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Clone Adapt ───────────────────────────────────────────────────────────
 
@@ -4203,20 +4225,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("auth")
-        rows = await pool.fetch(
-            """
-            SELECT h.id, h.source_bot_id, h.target_bot_id, h.fields,
-                   h.status, h.details, h.created_at,
-                   sb.username AS source_uname, sb.first_name AS source_name,
-                   tb.username AS target_uname, tb.first_name AS target_name
-            FROM clone_adapt_history h
-            LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
-            LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
-            WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT 30
-            """,
-            uid,
-        )
-        return _json_resp([dict(r) for r in rows])
+        try:
+            rows = await pool.fetch(
+                """
+                SELECT h.id, h.source_bot_id, h.target_bot_id, h.fields,
+                       h.status, h.details, h.created_at,
+                       sb.username AS source_uname, sb.first_name AS source_name,
+                       tb.username AS target_uname, tb.first_name AS target_name
+                FROM clone_adapt_history h
+                LEFT JOIN managed_bots sb ON sb.bot_id = h.source_bot_id
+                LEFT JOIN managed_bots tb ON tb.bot_id = h.target_bot_id
+                WHERE h.owner_id=$1 ORDER BY h.created_at DESC LIMIT 30
+                """,
+                uid,
+            )
+            return _json_resp([dict(r) for r in rows])
+        except Exception as exc:
+            log.exception("clone_adapt_history uid=%d", uid)
+            return _err(str(exc), 500)
 
     # ── Content Mesh ──────────────────────────────────────────────────────────
 
