@@ -2443,8 +2443,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
-                """SELECT id, op_type, label, status, total_items, done_items,
-                          created_at, finished_at, params
+                """SELECT id, op_type, COALESCE(label, op_type) AS label, status,
+                          total_items, done_items, created_at, finished_at, params
                    FROM operation_queue
                    WHERE owner_id=$1 AND op_type LIKE 'strike%'
                    ORDER BY created_at DESC LIMIT 30""",
@@ -4004,7 +4004,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("auth")
         rows = await pool.fetch(
-            "SELECT id, op_type, status, params, label, created_at FROM operation_queue "
+            "SELECT id, op_type, status, params, COALESCE(label, op_type) AS label, created_at FROM operation_queue "
             "WHERE owner_id=$1 AND op_type='content_clone' ORDER BY created_at DESC LIMIT 20",
             uid,
         )
