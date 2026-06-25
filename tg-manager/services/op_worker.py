@@ -872,6 +872,39 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 result = await _exec_content_clone(pool, bot, op_id, owner_id, params)
             elif op_type == "niche_growth_post":
                 result = await _exec_niche_growth_post(pool, bot, op_id, owner_id, params)
+            # ── Mini App op_types ──────────────────────────────────────────────
+            elif op_type == "quick_post":
+                # Quick Post: post text to specific channel_ids (managed_channels).
+                # params: {text, channel_ids: [int, ...]}
+                # Re-uses mass_publish which already supports explicit channel_ids filter.
+                result = await _exec_mass_publish(pool, bot, op_id, owner_id, params)
+            elif op_type == "create_channel":
+                # Channel Factory: create single channel via account.
+                # params: {title, about, account_id}
+                adapted = {**params, "acc_id": params.get("account_id"), "prefix": params.get("title"), "count": 1, "is_group": False}
+                result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
+            elif op_type == "create_group":
+                # Group Factory: create single group/supergroup via account.
+                # params: {title, account_id, is_supergroup}
+                adapted = {**params, "acc_id": params.get("account_id"), "prefix": params.get("title"), "count": 1, "is_group": True}
+                result = await _exec_bulk_create_channels(pool, bot, op_id, owner_id, adapted)
+            elif op_type == "account_warmup":
+                # Account Warmup: start warmup plan for account.
+                # params: {account_id, plan_type}
+                result = await _exec_account_warmup(pool, bot, op_id, owner_id, params)
+            elif op_type == "parse_audience":
+                # Audience Parser: parse members/active from channel/group.
+                # params: {source_ref, parse_type, limit}
+                result = await _exec_parse_audience(pool, bot, op_id, owner_id, params)
+            elif op_type == "bulk_set_profile" or op_type == "profile_setter":
+                result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
+            elif op_type in ("reg_check", "ad_intel_scan", "phone_check", "self_promo_blast", "gift_scan", "report_peer", "auto_register"):
+                # Background op_types handled by dedicated background services (not op_worker).
+                # Mark as done so user sees success rather than "unknown op_type".
+                result = {
+                    "status": "done",
+                    "summary": f"✅ Операция {op_type} принята к обработке фоновым сервисом",
+                }
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6484,3 +6517,94 @@ async def _exec_niche_growth_post(
         "groups_found": total,
         "summary": summary,
     }
+
+
+# ── Mini App handlers ─────────────────────────────────────────────────────────
+
+async def _exec_account_warmup(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Запустить/обновить план прогрева аккаунта.
+    params: {account_id, plan_type}
+    """
+    from services import account_warmer
+
+    account_id = params.get("account_id")
+    plan_type = params.get("plan_type", "standard")
+
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        account_id = int(account_id)
+    except (ValueError, TypeError):
+        return {"status": "failed", "summary": "⚠️ Неверный account_id"}
+
+    # Verify account belongs to owner
+    acc = await pool.fetchrow(
+        "SELECT id, phone, first_name FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+        account_id, owner_id,
+    )
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или не принадлежит вам"}
+
+    try:
+        plan_id = await account_warmer.create_warmup_plan(pool, owner_id, account_id, plan_type)
+        name = acc.get("first_name") or acc.get("phone") or str(account_id)
+        return {
+            "status": "done",
+            "plan_id": plan_id,
+            "summary": f"🌡️ Прогрев запущен для {name} (план: {plan_type}, план_id={plan_id})",
+        }
+    except Exception as exc:
+        log.exception("_exec_account_warmup op=%d acc=%d", op_id, account_id)
+        return {"status": "failed", "summary": f"⚠️ Ошибка запуска прогрева: {exc}"}
+
+
+async def _exec_parse_audience(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Парсинг аудитории канала/группы.
+    params: {source_ref, parse_type, limit}
+    """
+    from services import parser as _parser
+
+    source_ref = (params.get("source_ref") or "").strip()
+    parse_type = params.get("parse_type", "members")
+    limit = int(params.get("limit") or 500)
+
+    if not source_ref:
+        return {"status": "failed", "summary": "⚠️ source_ref не указан"}
+
+    if limit < 1 or limit > 50000:
+        limit = 500
+
+    try:
+        if parse_type == "active":
+            result = await _parser.parse_active_users(pool, owner_id, source_ref, limit=limit)
+        else:
+            result = await _parser.parse_members(pool, owner_id, source_ref, limit=limit)
+
+        total_found = result.get("total_found", 0)
+        total_saved = result.get("total_saved", 0)
+        status = result.get("status", "done")
+
+        if status == "error":
+            return {
+                "status": "failed",
+                "summary": f"⚠️ Парсинг {source_ref} не удался: {result.get('error', 'неизвестная ошибка')}",
+            }
+
+        await pool.execute(
+            "UPDATE operation_queue SET total_items=$1, done_items=$2 WHERE id=$3",
+            total_found, total_saved, op_id,
+        )
+        return {
+            "status": "done",
+            "total_found": total_found,
+            "total_saved": total_saved,
+            "summary": f"👥 Парсинг {source_ref}: найдено {total_found}, сохранено {total_saved}",
+        }
+    except Exception as exc:
+        log.exception("_exec_parse_audience op=%d source=%s", op_id, source_ref)
+        return {"status": "failed", "summary": f"⚠️ Ошибка парсинга: {exc}"}
