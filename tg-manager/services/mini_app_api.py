@@ -83,19 +83,14 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
     ops_running = await _safe_count(pool,
         "SELECT COUNT(*) FROM operation_queue WHERE owner_id=$1 AND status='running'", uid)
     try:
+        # funnels.bot_id → managed_bots.added_by = owner
         funnels_active = int(await pool.fetchval(
             """SELECT COUNT(*) FROM funnel_subscriptions fs
                JOIN funnels f ON f.id=fs.funnel_id
-               WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL
-                 AND COALESCE(fs.dropped, false)=false""", uid) or 0)
+               JOIN managed_bots mb ON mb.bot_id=f.bot_id
+               WHERE mb.added_by=$1 AND COALESCE(fs.completed, false)=false""", uid) or 0)
     except Exception:
-        try:
-            funnels_active = int(await pool.fetchval(
-                """SELECT COUNT(*) FROM funnel_subscriptions fs
-                   JOIN funnels f ON f.id=fs.funnel_id
-                   WHERE f.owner_user_id=$1 AND fs.completed_at IS NULL""", uid) or 0)
-        except Exception:
-            funnels_active = 0
+        funnels_active = 0
     return {
         "bots": bots,
         "channels": channels,
@@ -163,7 +158,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             stats["plan_expires_at"] = None
         try:
             activity = await pool.fetch(
-                "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10",
+                "SELECT action, status, occurred_at AS created_at FROM activity_log WHERE owner_id=$1 ORDER BY occurred_at DESC LIMIT 10",
                 uid)
             stats["recent_activity"] = [dict(r) for r in activity]
         except Exception:
@@ -375,9 +370,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             bot_id_int = int(bot_id)
         except (TypeError, ValueError):
             return _err("Invalid bot_id")
-        owns = await _safe_count(pool,
-            "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2", bot_id_int, uid)
-        if not owns:
+        bot_row = await _safe_fetchrow(pool,
+            "SELECT bot_id, token FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            bot_id_int, uid)
+        if not bot_row:
             return _err("Bot not found", 404)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", bot_id_int)
@@ -385,7 +381,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             row = await pool.fetchrow(
                 "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
                 bot_id_int, text, total, uid)
-            return _json_resp({"ok": True, "broadcast_id": row["id"], "total_users": total})
+            broadcast_id = row["id"]
+            # Create op_queue entry so user can track progress
+            label = f"Рассылка боту @{bot_row.get('username', bot_id_int)}: {text[:40]}…" if len(text) > 40 else f"Рассылка: {text[:60]}"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'run_broadcast','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"bot_id": bot_id_int, "broadcast_id": broadcast_id, "text": text}),
+                total, label,
+            )
+            return _json_resp({"ok": True, "broadcast_id": broadcast_id, "op_id": op_id, "total_users": total})
         except Exception:
             log.exception("create_broadcast bot=%d uid=%d", bot_id_int, uid)
             return _err("Failed to create broadcast", 500)
@@ -1264,7 +1269,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 """SELECT s.owner_id, s.chan_id, s.title, s.about, s.username, s.created_at,
                           c.title AS channel_title, c.username AS channel_username
                    FROM seo_ai_suggestions s
-                   LEFT JOIN managed_channels c ON c.id=s.chan_id
+                   LEFT JOIN managed_channels c ON c.channel_id=s.chan_id
                    WHERE s.owner_id=$1 ORDER BY s.created_at DESC LIMIT 20""",
                 uid,
             )
@@ -2012,13 +2017,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         target_id = body.get("target_id")
         if not name or not text:
             return _err("Заполните название и текст", 400)
+        # Calculate total_targets depending on type
+        total_targets = 0
+        try:
+            if target_type == "bot_users" and target_id:
+                total_targets = await _safe_count(pool,
+                    "SELECT COUNT(*) FROM bot_users WHERE bot_id=$1 AND is_active=true", int(target_id))
+            elif target_type == "all_bots":
+                total_targets = await _safe_count(pool,
+                    """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
+                       JOIN managed_bots mb ON mb.bot_id=bu.bot_id
+                       WHERE mb.added_by=$1 AND bu.is_active=true""", uid)
+        except Exception:
+            total_targets = 0
         try:
             row = await pool.fetchrow(
-                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id)
-                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
-                uid, name, text, target_type, target_id,
+                """INSERT INTO dm_campaigns(owner_id, name, text_template, target_type, target_id, total_targets)
+                   VALUES($1,$2,$3,$4,$5,$6) RETURNING id""",
+                uid, name, text, target_type, int(target_id) if target_id else None, total_targets,
             )
-            return _json_resp({"id": row["id"]})
+            return _json_resp({"id": row["id"], "total_targets": total_targets})
         except Exception as exc:
             log.exception("dm_campaign_create uid=%d", uid)
             return _err(str(exc), 500)
@@ -3316,23 +3334,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not bots:
             return _err("No active bots found")
         total_recipients = sum(b["active_subs"] or 0 for b in bots)
-        created_ids = []
-        for b in bots:
-            if not (b["active_subs"] or 0):
-                continue
-            try:
-                row = await pool.fetchrow(
-                    "INSERT INTO broadcasts(bot_id, message_text, total_users, status, created_by) VALUES($1,$2,$3,'pending',$4) RETURNING id",
-                    b["bot_id"], text, b["active_subs"], uid)
-                created_ids.append(row["id"])
-            except Exception:
-                log.warning("network_broadcast: failed bot=%d", b["bot_id"])
-        return _json_resp({
-            "ok": True,
-            "broadcasts_created": len(created_ids),
-            "total_recipients": total_recipients,
-            "broadcast_ids": created_ids,
-        })
+        segment = body.get("segment", "all_each")
+        lang = body.get("lang", "")
+        label = f"Network Broadcast: {text[:40]}{'…' if len(text) > 40 else ''}"
+        try:
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'network_broadcast','pending',$2,$3,$4) RETURNING id",
+                uid, _json.dumps({"text": text, "segment": segment, "lang": lang}),
+                total_recipients, label,
+            )
+            return _json_resp({
+                "ok": True,
+                "op_id": op_id,
+                "total_recipients": total_recipients,
+                "label": label,
+            })
+        except Exception:
+            log.exception("network_broadcast op_queue uid=%d", uid)
+            return _err("Failed to queue broadcast", 500)
 
     # ── CRM Contacts ─────────────────────────────────────────────────────────
 
@@ -3504,9 +3524,19 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 acc_id)
             row = await pool.fetchrow(
                 """INSERT INTO account_warmup_plans(owner_id, account_id, plan_type, target_days, daily_actions)
-                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT (account_id) DO UPDATE
+                   SET plan_type=$3, target_days=$4, daily_actions=$5, status='active', started_at=NOW()
+                   RETURNING id""",
                 uid, acc_id, plan_type, target_days, daily_actions)
-            return _json_resp({"ok": True, "id": row["id"], "target_days": target_days})
+            # Also create op_queue entry so op_worker executes warmup logic
+            label = f"Прогрев аккаунта #{acc_id} ({plan_type})"
+            op_id = await pool.fetchval(
+                "INSERT INTO operation_queue(owner_id, op_type, status, params, total_items, label) "
+                "VALUES($1,'account_warmup','pending',$2,1,$3) RETURNING id",
+                uid, _json.dumps({"account_id": acc_id, "plan_type": plan_type}), label,
+            )
+            return _json_resp({"ok": True, "id": row["id"], "op_id": op_id, "target_days": target_days})
         except Exception:
             log.exception("start_warmup acc=%d uid=%d", acc_id, uid)
             return _err("Failed to start warmup", 500)
@@ -4256,15 +4286,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("auth")
         try:
+            # Filter via owner's known channels (graph_nodes has no owner_id)
             stats = await pool.fetchrow(
                 """
                 SELECT
-                    (SELECT COUNT(*) FROM graph_nodes) AS nodes,
-                    (SELECT COUNT(*) FROM graph_edges) AS edges,
-                    (SELECT COUNT(*) FROM audience_overlaps WHERE overlap_pct > 0.1) AS strong_overlaps
-                """
+                    (SELECT COUNT(*) FROM graph_nodes gn
+                     WHERE EXISTS (
+                         SELECT 1 FROM managed_channels mc
+                         WHERE mc.owner_id=$1
+                           AND (mc.username = gn.username OR mc.channel_id::text = gn.entity_id)
+                     )) AS nodes,
+                    (SELECT COUNT(*) FROM graph_edges ge
+                     JOIN graph_nodes na ON na.id = ge.from_node
+                     WHERE EXISTS (
+                         SELECT 1 FROM managed_channels mc
+                         WHERE mc.owner_id=$1
+                           AND (mc.username = na.username OR mc.channel_id::text = na.entity_id)
+                     )) AS edges,
+                    (SELECT COUNT(*) FROM audience_overlaps ao
+                     JOIN graph_nodes na ON na.id = ao.node_a
+                     WHERE ao.overlap_pct > 0.1
+                       AND EXISTS (
+                           SELECT 1 FROM managed_channels mc
+                           WHERE mc.owner_id=$1
+                             AND (mc.username = na.username OR mc.channel_id::text = na.entity_id)
+                       )) AS strong_overlaps
+                """,
+                uid,
             )
-            return _json_resp(dict(stats) if stats else {})
+            return _json_resp(dict(stats) if stats else {"nodes": 0, "edges": 0, "strong_overlaps": 0})
         except Exception as exc:
             log.exception("graph_stats uid=%d", uid)
             return _err(str(exc), 500)
@@ -4283,8 +4333,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 JOIN graph_nodes na ON na.id = ao.node_a
                 JOIN graph_nodes nb ON nb.id = ao.node_b
                 WHERE ao.overlap_pct > 0.05
+                  AND EXISTS (
+                      SELECT 1 FROM managed_channels mc
+                      WHERE mc.owner_id=$1
+                        AND (mc.username = na.username OR mc.username = nb.username
+                             OR mc.channel_id::text = na.entity_id OR mc.channel_id::text = nb.entity_id)
+                  )
                 ORDER BY ao.overlap_pct DESC LIMIT 20
-                """
+                """,
+                uid,
             )
             return _json_resp([dict(r) for r in rows])
         except Exception as exc:
@@ -4715,7 +4772,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         async def fetch_activity() -> list:
             try:
                 rows = await pool.fetch(
-                    "SELECT action, status, created_at FROM activity_log WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10",
+                    "SELECT action, status, occurred_at AS created_at FROM activity_log WHERE owner_id=$1 ORDER BY occurred_at DESC LIMIT 10",
                     uid)
                 return [dict(r) for r in rows]
             except Exception:

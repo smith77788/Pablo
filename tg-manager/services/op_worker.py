@@ -896,7 +896,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                 # Audience Parser: parse members/active from channel/group.
                 # params: {source_ref, parse_type, limit}
                 result = await _exec_parse_audience(pool, bot, op_id, owner_id, params)
-            elif op_type == "bulk_set_profile" or op_type == "profile_setter":
+            elif op_type == "profile_setter":
                 result = await _exec_bulk_set_profile(pool, bot, op_id, owner_id, params)
             elif op_type == "reg_check":
                 # params: {target: "username or @username or link"}
@@ -922,6 +922,12 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     "status": "done",
                     "summary": "✅ Авто-регистрация запущена через систему",
                 }
+            elif op_type == "leave_all_chats":
+                result = await _exec_leave_all_chats(pool, bot, op_id, owner_id, params)
+            elif op_type == "delete_contacts":
+                result = await _exec_delete_contacts(pool, bot, op_id, owner_id, params)
+            elif op_type == "run_broadcast":
+                result = await _exec_run_broadcast(pool, bot, op_id, owner_id, params)
             else:
                 log.warning(
                     "op_worker: unknown op_type=%r for op_id=%s owner_id=%s — marking failed",
@@ -6998,4 +7004,185 @@ async def _exec_report_peer(
         "fail": fail_count,
         "total": len(accounts),
         "summary": f"🚩 Репорт {target}: ✅ {ok_count}/{len(accounts)} успешно" + (f" ❌ {fail_count}" if fail_count else ""),
+    }
+
+
+async def _exec_leave_all_chats(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Выход из всех чатов/групп аккаунта.
+    params: {account_id: int}
+    """
+    from services import account_manager
+    from telethon.tl.functions.messages import GetDialogsRequest
+    from telethon.tl.types import InputPeerEmpty
+
+    account_id = params.get("account_id")
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            int(account_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+
+    client = account_manager._make_client(acc["session_str"], dict(acc))
+    left = 0
+    failed = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+        dialogs = await client(GetDialogsRequest(
+            offset_date=None, offset_id=0, offset_peer=InputPeerEmpty(),
+            limit=200, hash=0,
+        ))
+        chats = [d.entity for d in dialogs.dialogs
+                 if hasattr(d, "entity") and getattr(d.entity, "megagroup", False) or
+                 getattr(getattr(d, "entity", None), "__class__", None).__name__ in ("Chat", "Channel")]
+        total = len(chats)
+        await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+        for entity in chats:
+            if await _is_cancelled(pool, op_id):
+                break
+            try:
+                await client.delete_dialog(entity)
+                left += 1
+            except Exception as exc:
+                log.debug("leave_all_chats: skip %s: %s", getattr(entity, "id", "?"), exc)
+                failed += 1
+            await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+            await asyncio.sleep(1.5)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    return {
+        "status": "done",
+        "left": left,
+        "failed": failed,
+        "summary": f"🚪 Выход из чатов: ✅ {left} успешно" + (f" ❌ {failed}" if failed else ""),
+    }
+
+
+async def _exec_delete_contacts(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Удаление всех контактов аккаунта.
+    params: {account_id: int}
+    """
+    from services import account_manager
+    from telethon.tl.functions.contacts import GetContactsRequest, DeleteContactsRequest
+
+    account_id = params.get("account_id")
+    if not account_id:
+        return {"status": "failed", "summary": "⚠️ account_id не указан"}
+
+    try:
+        acc = await pool.fetchrow(
+            "SELECT * FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND session_str IS NOT NULL",
+            int(account_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения аккаунта: {exc}"}
+
+    if not acc:
+        return {"status": "failed", "summary": "⚠️ Аккаунт не найден или нет сессии"}
+
+    client = account_manager._make_client(acc["session_str"], dict(acc))
+    deleted = 0
+    try:
+        await asyncio.wait_for(client.connect(), timeout=15)
+        contacts = await asyncio.wait_for(client(GetContactsRequest(hash=0)), timeout=30)
+        users = getattr(contacts, "users", [])
+        total = len(users)
+        await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+        if users:
+            try:
+                await asyncio.wait_for(client(DeleteContactsRequest(id=users)), timeout=60)
+                deleted = total
+            except Exception as exc:
+                log.warning("delete_contacts bulk failed: %s — trying one by one", exc)
+                for u in users:
+                    if await _is_cancelled(pool, op_id):
+                        break
+                    try:
+                        await client(DeleteContactsRequest(id=[u]))
+                        deleted += 1
+                    except Exception:
+                        pass
+                    await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
+                    await asyncio.sleep(0.5)
+        await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", deleted, op_id)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    return {
+        "status": "done",
+        "deleted": deleted,
+        "summary": f"🗑 Удаление контактов: ✅ {deleted} из {total if users else 0} удалено",
+    }
+
+
+async def _exec_run_broadcast(
+    pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
+) -> dict:
+    """Запуск рассылки через broadcaster для одного бота.
+    params: {bot_id: int, broadcast_id: int, text: str}
+    """
+    from services import broadcaster
+
+    bot_id = params.get("bot_id")
+    broadcast_id = params.get("broadcast_id")
+    text = (params.get("text") or "").strip()
+
+    if not bot_id or not text:
+        return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
+
+    try:
+        bot_row = await pool.fetchrow(
+            "SELECT token, bot_id FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND is_active=TRUE",
+            int(bot_id), owner_id,
+        )
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения бота: {exc}"}
+
+    if not bot_row:
+        return {"status": "failed", "summary": "⚠️ Бот не найден"}
+
+    try:
+        user_ids = [r["user_id"] for r in await pool.fetch(
+            "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE", int(bot_id)
+        )]
+    except Exception as exc:
+        return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
+
+    if not user_ids:
+        return {"status": "done", "summary": "📭 Нет активных подписчиков для рассылки"}
+
+    total = len(user_ids)
+    await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
+
+    # Create/reuse broadcast record
+    if not broadcast_id:
+        from database import db as _db
+        broadcast_id = await _db.create_broadcast(pool, int(bot_id), text, total, owner_id)
+
+    broadcaster.start(pool, None, broadcast_id, bot_row["token"], int(bot_id), text, None, user_ids, None)
+    await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", total, op_id)
+
+    return {
+        "status": "done",
+        "broadcast_id": broadcast_id,
+        "total": total,
+        "summary": f"📢 Рассылка запущена: {total} получателей",
     }
