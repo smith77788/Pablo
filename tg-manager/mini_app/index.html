@@ -215,6 +215,93 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 /* ─── Trust meter ─────────────────────────────────────────── */
 .trust-bar{height:6px;border-radius:3px;background:var(--sep);overflow:hidden;margin-top:6px}
 .trust-fill{height:100%;border-radius:3px;transition:width .6s}
+
+/* ─── Management tile grid ───────────────────────────────── */
+.mgmt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 4px}
+.mgmt-tile{background:var(--bg2);border-radius:14px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;transition:transform .12s,opacity .12s;text-align:center;min-height:70px;justify-content:center}
+.mgmt-tile:active{transform:scale(.93);opacity:.7}
+.mgmt-tile-ico{font-size:22px;line-height:1}
+.mgmt-tile-lbl{font-size:10.5px;font-weight:600;color:var(--hint);line-height:1.2}
+
+/* ─── Bot profile header ─────────────────────────────────── */
+.bot-phdr{display:flex;align-items:center;gap:14px;padding:16px 16px 8px}
+.bot-phdr-ava{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;flex-shrink:0;letter-spacing:-.5px}
+.bot-phdr-body{flex:1;min-width:0}
+.bot-phdr-name{font-size:18px;font-weight:700;letter-spacing:-.3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px}
+.bot-phdr-sub{font-size:13px;color:var(--hint);margin-bottom:5px}
+
+/* ─── KPI bar (4-col) ───────────────────────────────────── */
+.kpi-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--sep);border-radius:14px;overflow:hidden;margin:0 16px 4px}
+.kpi-col{background:var(--bg2);padding:10px 6px;text-align:center}
+.kpi-val{font-size:19px;font-weight:700;letter-spacing:-.4px}
+.kpi-lbl{font-size:10px;color:var(--hint);margin-top:2px;line-height:1.2}
+
+/* ─── Bot cards grid ─────────────────────────────────────── */
+.bot-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px 0}
+.bot-card{background:var(--bg2);border-radius:16px;padding:14px;cursor:pointer;transition:transform .12s,opacity .12s;position:relative;overflow:hidden}
+.bot-card:active{transform:scale(.96);opacity:.8}
+.bot-card-ava{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;margin-bottom:10px;letter-spacing:-.3px}
+.bot-card-name{font-size:12.5px;font-weight:700;letter-spacing:-.2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:6px}
+.bot-card-subs{font-size:26px;font-weight:700;letter-spacing:-.6px;line-height:1;margin-bottom:2px}
+.bot-card-lbl{font-size:11px;color:var(--hint);margin-bottom:8px}
+.bot-card-del{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:8px;background:rgba(239,68,68,.14);display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;z-index:2}
+.bot-card-del:active{opacity:.6}
+
+/* ─── Broadcast mini-table ───────────────────────────────── */
+.bc-table{margin:0 16px;border-radius:12px;overflow:hidden;background:var(--bg2)}
+.bc-head{display:grid;grid-template-columns:1fr 52px 52px 64px;padding:8px 12px;border-bottom:1px solid var(--sep)}
+.bc-head span{font-size:10px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.05em}
+.bc-row{display:grid;grid-template-columns:1fr 52px 52px 64px;padding:9px 12px;border-bottom:1px solid var(--sep);align-items:center}
+.bc-row:last-child{border-bottom:none}
+.bc-cell{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bc-num{font-size:12px;font-weight:600;text-align:center}
+
+/* ─── Funnel step flow ───────────────────────────────────── */
+.funnel-flow{padding:4px 16px}
+.ffstep{display:flex;gap:10px;position:relative}
+.ffstep-line{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:24px}
+.ffstep-dot{width:24px;height:24px;border-radius:50%;background:var(--btn);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.ffstep-tail{width:2px;flex:1;background:var(--sep);min-height:16px;margin:2px 0}
+.ffstep-body{background:var(--bg2);border-radius:12px;padding:10px 12px;margin-bottom:8px;flex:1}
+.ffstep-delay{font-size:11px;color:var(--hint);margin-bottom:4px;font-weight:500}
+.ffstep-text{font-size:13px;line-height:1.4;color:var(--text)}
+
+/* ─── Home dashboard ─────────────────────────────────────── */
+.dash-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px 0}
+.dash-card{background:var(--bg2);border-radius:16px;padding:14px;cursor:pointer;transition:transform .12s,opacity .12s;min-height:96px;position:relative;overflow:hidden}
+.dash-card:active{transform:scale(.96);opacity:.8}
+.dash-card-ico{font-size:20px;margin-bottom:6px}
+.dash-card-val{font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:1}
+.dash-card-lbl{font-size:11.5px;color:var(--hint);margin-top:4px}
+.dash-card-badge{display:inline-flex;font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-top:4px}
+
+/* ─── Account status KPI bar ─────────────────────────────── */
+.acc-kpi{display:flex;gap:8px;padding:10px 16px 4px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.acc-kpi::-webkit-scrollbar{display:none}
+.acc-kpi-card{background:var(--bg2);border-radius:12px;padding:10px 14px;flex-shrink:0;min-width:90px;cursor:pointer;border:2px solid transparent;transition:border-color .15s}
+.acc-kpi-card.on{border-color:var(--btn)}
+.acc-kpi-card:active{opacity:.7}
+.acc-kpi-num{font-size:20px;font-weight:700;letter-spacing:-.4px}
+.acc-kpi-lbl{font-size:10px;color:var(--hint);margin-top:2px;white-space:nowrap}
+
+/* ─── Filter chip row ────────────────────────────────────── */
+.filter-chips{display:flex;gap:6px;padding:4px 16px 8px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.filter-chips::-webkit-scrollbar{display:none}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:20px;font-size:12px;font-weight:600;background:var(--bg2);color:var(--hint);cursor:pointer;white-space:nowrap;border:1.5px solid transparent;flex-shrink:0}
+.chip.on{background:rgba(59,130,246,.15);color:var(--blue);border-color:rgba(59,130,246,.3)}
+.chip:active{opacity:.7}
+
+/* ─── Enhanced account row ───────────────────────────────── */
+.acc-row{padding:10px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--sep);cursor:pointer}
+.acc-row:last-child{border-bottom:none}
+.acc-row:active{background:rgba(255,255,255,.04)}
+.acc-ava{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.acc-body{flex:1;min-width:0}
+.acc-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-phone{font-size:11px;color:var(--hint);margin-top:1px;display:flex;align-items:center;gap:4px}
+.acc-trust{height:2px;border-radius:1px;background:var(--sep);margin-top:5px;overflow:hidden;width:80px}
+.acc-trust-fill{height:100%;border-radius:1px}
+.acc-right{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 </style>
 </head>
 <body>
@@ -231,13 +318,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     </div>
   </div>
   <div class="sb">
-    <div class="cards" id="cards">
-      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
-      <div class="card"><div class="sk" style="height:22px;width:40%;margin-bottom:8px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:5px"></div><div class="sk" style="height:13px;width:70%"></div></div>
+    <div class="dash-cards" id="cards">
+      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
+      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
+      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
+      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
+      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
+      <div class="dash-card"><div class="sk" style="height:20px;width:35%;margin-bottom:10px"></div><div class="sk" style="height:28px;width:50%;margin-bottom:6px"></div><div class="sk" style="height:12px;width:60%"></div></div>
     </div>
     <div class="sec"><span class="ld" style="margin-right:5px"></span>Последняя активность</div>
     <div class="lst" id="actList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -248,13 +335,13 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
 <div class="screen" id="s-bots">
   <div class="hdr">
     <div class="hdr-title">🤖 Мои боты</div>
-    <div class="hdr-meta">
-      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBotAddModal()">+ Добавить</button>
+    <div class="hdr-meta" style="display:flex;align-items:center;gap:8px">
+      <span id="bots-cnt" style="font-size:12px;color:var(--hint)"></span>
+      <button class="btn btn-p" style="flex:0;padding:7px 14px;min-width:0;font-size:13px" onclick="openBotAddModal()">+ Бот</button>
     </div>
   </div>
-  <div class="sb">
-    <div class="sec">Управляемые боты</div>
-    <div class="lst" id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
+  <div class="sb" id="botsBody">
+    <div id="botList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -300,10 +387,20 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFo
     <div class="hdr-meta"><div class="hdr-user" id="acc-cnt"></div></div>
   </div>
   <div class="sb">
-    <div class="seg" id="acc-seg">
-      <div class="seg-opt on" onclick="filterAcc('all',this)">Все</div>
-      <div class="seg-opt" onclick="filterAcc('active',this)">Активные</div>
-      <div class="seg-opt" onclick="filterAcc('cooldown',this)">Кулдаун</div>
+    <!-- KPI status bar -->
+    <div class="acc-kpi" id="accKpi">
+      <div class="acc-kpi-card on" onclick="filterAcc('all',this)" data-filter="all">
+        <div class="acc-kpi-num" id="kpi-all">—</div><div class="acc-kpi-lbl">Все</div>
+      </div>
+      <div class="acc-kpi-card" onclick="filterAcc('active',this)" data-filter="active">
+        <div class="acc-kpi-num" id="kpi-active" style="color:var(--green)">—</div><div class="acc-kpi-lbl">Активных</div>
+      </div>
+      <div class="acc-kpi-card" onclick="filterAcc('cooldown',this)" data-filter="cooldown">
+        <div class="acc-kpi-num" id="kpi-cd" style="color:var(--orange)">—</div><div class="acc-kpi-lbl">Кулдаун</div>
+      </div>
+      <div class="acc-kpi-card" onclick="filterAcc('banned',this)" data-filter="banned">
+        <div class="acc-kpi-num" id="kpi-ban" style="color:var(--red)">—</div><div class="acc-kpi-lbl">Заблокированы</div>
+      </div>
     </div>
     <div class="lst" id="accList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="sec-row" style="margin-top:12px">
@@ -2693,30 +2790,55 @@ async function loadHome() {
 
 function renderCards(d) {
   const items = [
-    {ico:'🤖',val:d.bots,lbl:'Управляемых ботов',tab:'bots'},
-    {ico:'📱',val:d.accounts,lbl:'TG аккаунтов',tab:'accounts'},
-    {ico:'👥',val:d.subscribers,lbl:'Подписчиков',tab:'bots'},
-    {ico:'📨',val:d.campaigns_active,lbl:'Активных кампаний',tab:'broadcasts'},
-    {ico:'🔄',val:d.funnels_active,lbl:'В воронках',tab:'broadcasts'},
-    {ico:'⚙️',val:d.ops_running,lbl:'Операций сейчас',tab:'more'},
+    {ico:'🤖', val:d.bots,             lbl:'Боты',           tab:'bots',       color:'var(--blue)',   badge: d.bots?'Управление':'Добавить'},
+    {ico:'📱', val:d.accounts,          lbl:'Аккаунты',       tab:'accounts',   color:'var(--teal)',   badge: d.accounts?'Активные':'Добавить'},
+    {ico:'👥', val:d.subscribers,       lbl:'Подписчики',     tab:'bots',       color:'var(--green)',  badge: d.subscribers?'Всего':'Нет данных'},
+    {ico:'📨', val:d.campaigns_active,  lbl:'Кампании',       tab:'broadcasts', color:'var(--purple)', badge: d.campaigns_active?'Активных':'Создать'},
+    {ico:'🔄', val:d.funnels_active,    lbl:'В воронках',     tab:'broadcasts', color:'var(--orange)', badge: d.funnels_active?'Активных':'Нет'},
+    {ico:'⚙️', val:d.ops_running,       lbl:'Операции',       tab:'more',       color:'var(--hint)',   badge: d.ops_running?'Работает':'Простой'},
   ];
+  document.getElementById('cards').className = 'dash-cards';
   document.getElementById('cards').innerHTML = items.map(c=>
-    `<div class="card" onclick="goTab('${c.tab}')">
-      <div class="card-ico">${c.ico}</div>
-      <div class="card-val">${num(c.val)}</div>
-      <div class="card-lbl">${c.lbl}</div>
+    `<div class="dash-card" onclick="goTab('${c.tab}')">
+      <div class="dash-card-ico">${c.ico}</div>
+      <div class="dash-card-val" style="color:${c.color}">${num(c.val)}</div>
+      <div class="dash-card-lbl">${c.lbl}</div>
+      <div class="dash-card-badge" style="background:rgba(255,255,255,.06);color:var(--hint)">${c.badge}</div>
     </div>`).join('');
 }
 
 function renderAct(items) {
   const el = document.getElementById('actList');
   if (!items.length) { el.innerHTML=empty('📭','Нет активности','Действия появятся здесь'); return; }
-  const icons={message_sent:'📨',broadcast_sent:'📢',campaign_started:'🚀',campaign_completed:'✅',funnel_subscribed:'🔄',bot_added:'🤖',channel_added:'📡',payment_received:'💳',error:'⚠️'};
-  el.innerHTML = items.map(i=>`<div class="act">
-    <div class="act-ico">${icons[i.action]||'•'}</div>
-    <div class="act-body"><div class="act-txt">${esc(i.action||'событие')}</div><div class="act-time">${ago(i.created_at)}</div></div>
-    <span class="badge ${i.status==='error'?'b-rd':i.status==='warning'?'b-or':'b-gr'}">${i.status||'ok'}</span>
-  </div>`).join('');
+  const ACT_INFO = {
+    message_sent:      ['📨','Сообщение отправлено'],
+    broadcast_sent:    ['📢','Рассылка отправлена'],
+    broadcast_started: ['🚀','Рассылка запущена'],
+    campaign_started:  ['📩','Кампания запущена'],
+    campaign_completed:['✅','Кампания завершена'],
+    funnel_subscribed: ['🔄','Подписан на воронку'],
+    bot_added:         ['🤖','Бот добавлен'],
+    channel_added:     ['📡','Канал добавлен'],
+    payment_received:  ['💳','Платёж получен'],
+    account_banned:    ['🚫','Аккаунт забанен'],
+    warmup_completed:  ['🌱','Прогрев завершён'],
+    operation_done:    ['⚙️','Операция выполнена'],
+    error:             ['⚠️','Ошибка'],
+  };
+  el.innerHTML = items.map(i=>{
+    const [ico, lbl] = ACT_INFO[i.action] || ['•', i.action||'событие'];
+    const detail = i.detail || i.bot_username ? `@${i.bot_username||''}` : '';
+    const stCls = i.status==='error'?'b-rd':i.status==='warning'?'b-or':i.status==='completed'?'b-gr':'b-bl';
+    const stLbl = {ok:'✓',error:'✕',warning:'!',completed:'✓',running:'▶'}[i.status]||i.status||'';
+    return `<div class="act">
+      <div class="act-ico">${ico}</div>
+      <div class="act-body">
+        <div class="act-txt">${lbl}${detail?' · <span style="color:var(--hint)">'+esc(detail)+'</span>':''}</div>
+        <div class="act-time">${ago(i.created_at)}</div>
+      </div>
+      <span class="badge ${stCls}">${stLbl}</span>
+    </div>`;
+  }).join('');
 }
 
 function updateMoreStats(d) {
@@ -2730,30 +2852,43 @@ function updateMoreStats(d) {
 }
 
 // ── Bots ───────────────────────────────────────────────
+const BOT_GRADS = [
+  'linear-gradient(135deg,#3b82f6,#1d4ed8)',
+  'linear-gradient(135deg,#22c55e,#15803d)',
+  'linear-gradient(135deg,#a855f7,#7c3aed)',
+  'linear-gradient(135deg,#f59e0b,#b45309)',
+  'linear-gradient(135deg,#14b8a6,#0f766e)',
+  'linear-gradient(135deg,#ef4444,#b91c1c)',
+];
+
 async function loadBots() {
   try {
     const d = await api('/api/miniapp/bots');
     BOTS = d.bots||[];
-    document.getElementById('bots-cnt').textContent = BOTS.length+' ботов';
-    const el = document.getElementById('botList');
-    if (!BOTS.length) { el.innerHTML=empty('🤖','Нет ботов','Нажмите «+ Добавить» чтобы подключить бота'); return; }
-    el.innerHTML = BOTS.map(b=>{
+    const cntEl = document.getElementById('bots-cnt');
+    if (cntEl) cntEl.textContent = BOTS.length ? BOTS.length+' ботов' : '';
+    const wrap = document.getElementById('botsBody');
+    if (!BOTS.length) {
+      wrap.innerHTML = '<div id="botList">'+empty('🤖','Нет ботов','Нажмите «+ Бот» чтобы подключить бота')+'</div>';
+      return;
+    }
+    wrap.innerHTML = '<div class="bot-cards" id="botList">'+BOTS.map(b=>{
       const name = b.username?'@'+b.username:(b.first_name||'Бот #'+b.bot_id);
-      return `<div class="li">
-        <div class="ava ava-blue tap" onclick="openBot(${b.bot_id})">🤖</div>
-        <div class="li-body tap" onclick="openBot(${b.bot_id})">
-          <div class="li-name">${esc(name)}</div>
-          <div class="li-sub">${b.is_active?'🟢 Активен':'🔴 Выкл'} · ${num(b.subscriber_count||0)} подп.</div>
-        </div>
-        <div class="li-right" style="display:flex;gap:6px;align-items:center">
-          <span class="badge b-bl">${num(b.subscriber_count||0)}</span>
-          <span class="chev tap" onclick="openBot(${b.bot_id})">›</span>
-          <button class="btn btn-s" style="padding:5px 8px;font-size:12px;background:rgba(239,68,68,.18);color:#f87171" onclick="removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</button>
-        </div>
+      const initials = (b.first_name||name).replace('@','').slice(0,2).toUpperCase();
+      const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
+      const active = b.is_active;
+      const subs = b.subscriber_count||0;
+      return `<div class="bot-card" onclick="openBot(${b.bot_id})">
+        <div class="bot-card-del" onclick="event.stopPropagation();removeBotConfirm(${b.bot_id},'${esc(name)}')">🗑</div>
+        <div class="bot-card-ava" style="background:${grad}">${initials}</div>
+        <div class="bot-card-name">${esc(name)}</div>
+        <div class="bot-card-subs">${num(subs)}</div>
+        <div class="bot-card-lbl">подписчиков</div>
+        <span class="badge ${active?'b-gr':'b-gy'}" style="margin-top:4px;display:inline-flex">${active?'🟢 Активен':'Выкл'}</span>
       </div>`;
-    }).join('');
+    }).join('')+'</div>';
   } catch(e) {
-    document.getElementById('botList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
+    document.getElementById('botsBody').innerHTML=`<div id="botList"><div class="err-msg">${esc(e.message)}</div></div>`;
   }
 }
 
@@ -2783,62 +2918,89 @@ async function removeBotConfirm(botId, name) {
 
 function buildBotDetail(d) {
   const b = d.bot;
+  const bname = b.username ? '@'+b.username : (b.first_name || 'Бот #'+b.bot_id);
+  const initials = (b.first_name||bname).replace('@','').slice(0,2).toUpperCase();
+  const grad = BOT_GRADS[b.bot_id % BOT_GRADS.length];
+  const bid = b.bot_id;
+  const bn = esc(CUR_BOT.name);
+
+  // Management sections as tile grids
+  const mgmtSections = [
+    { title:'Рассылки и воронки', tiles:[
+      {ico:'📢',lbl:'Рассылка',       fn:`openBcastForBot(${bid},'${bn}',${d.active_subscribers})`},
+      {ico:'🔄',lbl:'Воронки',        fn:`openBotFunnels(${bid},'${bn}')`},
+      {ico:'💬',lbl:'Авто-ответы',    fn:`openArScreen()`},
+      {ico:'⏰',lbl:'Расписание',     fn:`openSchedule(${bid},'${bn}')`},
+      {ico:'🔀',lbl:'Авто-воронки',  fn:`openAutoFunnels()`},
+      {ico:'🎯',lbl:'Аудитория',      fn:`openAudience(${bid},'${bn}')`},
+    ]},
+    { title:'Аналитика', tiles:[
+      {ico:'📊',lbl:'Статистика',     fn:`openBotStats(${bid},'${bn}')`},
+      {ico:'👥',lbl:'Подписчики',     fn:`openBotSubs(${bid},'${bn}')`},
+      {ico:'🔥',lbl:'Активность',     fn:`openEngagement(${bid})`},
+      {ico:'🔍',lbl:'Позиции',        fn:`openKeywordsScreen()`},
+      {ico:'🧬',lbl:'DNA аудит.',     fn:`openAudienceDna()`},
+      {ico:'🧠',lbl:'AI Память',      fn:`openAiMemory()`},
+    ]},
+    { title:'Инструменты', tiles:[
+      {ico:'💬',lbl:'Inbox',          fn:`openRelay(${bid},'${bn}')`},
+      {ico:'🔗',lbl:'Deep Links',     fn:`openDeeplinks(${bid})`},
+      {ico:'⌨️',lbl:'Команды',        fn:`openBotCommands(${bid})`},
+      {ico:'🔗',lbl:'Webhook',        fn:`openBotWebhook(${bid},'${bn}')`},
+      {ico:'🌍',lbl:'Мультигео',      fn:`openMultigeo()`},
+      {ico:'📝',lbl:'Заметка',        fn:`openBotNote(${bid})`},
+    ]},
+  ];
+
   const bcasts = (d.recent_broadcasts||[]).length
-    ? d.recent_broadcasts.map(bc=>`<div class="li" style="cursor:default">
-        <div class="ava ava-purple">📢</div>
-        <div class="li-body">
-          <div class="li-name">${esc((bc.message_text||'').substring(0,55))}${(bc.message_text||'').length>55?'…':''}</div>
-          <div class="li-sub">✓ ${num(bc.sent_count)} · ✕ ${num(bc.failed_count)} · <span class="badge ${stb(bc.status)[0]}">${stb(bc.status)[1]}</span></div>
-        </div>
-      </div>`).join('')
-    : `<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Рассылок ещё не было</div>`;
-  const users = (d.recent_users||[]).length
-    ? d.recent_users.slice(0,5).map(u=>`<div class="li" style="cursor:default">
+    ? `<div class="bc-table">
+        <div class="bc-head"><span>Рассылка</span><span style="text-align:center">✓</span><span style="text-align:center">✕</span><span>Статус</span></div>
+        ${d.recent_broadcasts.slice(0,4).map(bc=>`<div class="bc-row">
+          <div class="bc-cell">${esc((bc.message_text||'').substring(0,28))}${(bc.message_text||'').length>28?'…':''}</div>
+          <div class="bc-num" style="color:var(--green)">${num(bc.sent_count)}</div>
+          <div class="bc-num" style="color:var(--red)">${num(bc.failed_count)}</div>
+          <div class="bc-cell"><span class="badge ${stb(bc.status)[0]}">${stb(bc.status)[1]}</span></div>
+        </div>`).join('')}
+      </div>`
+    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Рассылок ещё не было</div></div>`;
+
+  const subs = (d.recent_users||[]).length
+    ? `<div class="lst">${d.recent_users.slice(0,5).map(u=>`<div class="li" style="cursor:default">
         <div class="ava ava-teal">👤</div>
         <div class="li-body">
           <div class="li-name">${esc(u.first_name||(u.username?'@'+u.username:'User #'+u.user_id))}</div>
           <div class="li-sub">${u.is_active?'🟢 Активен':'🔴 Неактивен'} · ${ago(u.last_seen)}</div>
         </div>
-      </div>`).join('')
-    : `<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Подписчиков нет</div>`;
+      </div>`).join('')}</div>`
+    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Подписчиков нет</div></div>`;
+
   return `
-    <div class="stats2">
-      <div class="s2col"><div class="s2val">${num(d.active_subscribers)}</div><div class="s2lbl">Активных</div></div>
-      <div class="s2col"><div class="s2val">${num(d.total_subscribers)}</div><div class="s2lbl">Всего подп.</div></div>
-      <div class="s2col"><div class="s2val">${num(d.active_funnels)}</div><div class="s2lbl">Воронок</div></div>
-      <div class="s2col"><div class="s2val">${num(d.auto_replies)}</div><div class="s2lbl">Авто-ответов</div></div>
+    <div class="bot-phdr">
+      <div class="bot-phdr-ava" style="background:${grad}">${initials}</div>
+      <div class="bot-phdr-body">
+        <div class="bot-phdr-name">${esc(bname)}</div>
+        <div class="bot-phdr-sub">${num(d.active_subscribers)} активных · ${num(d.total_subscribers)} всего</div>
+        ${b.is_active?'<span class="badge b-gr">🟢 Активен</span>':'<span class="badge b-gy">Выключен</span>'}
+      </div>
     </div>
-    <div class="actions">
-      <button class="btn btn-p" onclick="openBcastForBot(${d.bot.bot_id},'${esc(CUR_BOT.name)}',${d.active_subscribers})">📢 Рассылка</button>
-      <button class="btn btn-s" onclick="openArScreen()">💬 Авто-ответы</button>
+    <div class="kpi-bar">
+      <div class="kpi-col"><div class="kpi-val" style="color:var(--green)">${num(d.active_subscribers)}</div><div class="kpi-lbl">Активных</div></div>
+      <div class="kpi-col"><div class="kpi-val">${num(d.total_subscribers)}</div><div class="kpi-lbl">Всего подп.</div></div>
+      <div class="kpi-col"><div class="kpi-val" style="color:var(--orange)">${num(d.active_funnels)}</div><div class="kpi-lbl">Воронок</div></div>
+      <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${num(d.auto_replies)}</div><div class="kpi-lbl">Авто-отв.</div></div>
     </div>
-    <div class="actions" style="padding-top:0">
-      <button class="btn btn-s" onclick="openBotFunnels(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">🔄 Воронки</button>
-      <button class="btn btn-s" onclick="openBotSubs(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">👥 Подписчики</button>
-    </div>
-    <div class="actions" style="padding-top:0">
-      <button class="btn btn-s" onclick="openSchedule(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">⏰ Расписание</button>
-      <button class="btn btn-s" onclick="openAudience(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">📊 Аудитория</button>
-    </div>
-    <div class="actions" style="padding-top:0">
-      <button class="btn btn-s" onclick="openDeeplinks(${d.bot.bot_id})">🔗 Deep Links</button>
-      <button class="btn btn-s" onclick="openEngagement(${d.bot.bot_id})">🔥 Активность</button>
-    </div>
-    <div class="actions" style="padding-top:0">
-      <button class="btn btn-s" onclick="openBotNote(${d.bot.bot_id})">📝 Заметка</button>
-      <button class="btn btn-s" onclick="openBotCommands(${d.bot.bot_id})">⌨️ Команды</button>
-    </div>
-    <div class="actions" style="padding-top:0">
-      <button class="btn btn-g" onclick="openBotStats(${d.bot.bot_id},'${esc(CUR_BOT.name)}')" style="width:100%">📊 Детальная статистика</button>
-    </div>
-    <div class="actions" style="padding-top:0">
-      <button class="btn btn-s" onclick="openRelay(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">💬 Inbox (диалоги)</button>
-      <button class="btn btn-s" onclick="openBotWebhook(${d.bot.bot_id},'${esc(CUR_BOT.name)}')">🔗 Webhook</button>
-    </div>
-    <div class="sec">Последние рассылки</div>
-    <div class="lst">${bcasts}</div>
+    ${mgmtSections.map(s=>`
+      <div class="sec">${s.title}</div>
+      <div class="mgmt-grid">
+        ${s.tiles.map(t=>`<div class="mgmt-tile" onclick="${t.fn}">
+          <div class="mgmt-tile-ico">${t.ico}</div>
+          <div class="mgmt-tile-lbl">${t.lbl}</div>
+        </div>`).join('')}
+      </div>`).join('')}
+    <div class="sec" style="margin-top:8px">Последние рассылки</div>
+    ${bcasts}
     <div class="sec" style="margin-top:8px">Последние подписчики</div>
-    <div class="lst">${users}</div>
+    ${subs}
     <div style="height:16px"></div>`;
 }
 
@@ -2977,8 +3139,10 @@ async function loadAccounts() {
   // Accounts and channels load independently — one failure doesn't break the other
   api('/api/miniapp/accounts').then(ad => {
     CUR_ACCS = ad.accounts||[];
-    document.getElementById('acc-cnt').textContent = CUR_ACCS.length+' аккаунтов';
-    txt('m-acc-cnt', CUR_ACCS.length+' аккаунтов');
+    const cnt = CUR_ACCS.length;
+    document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
+    txt('m-acc-cnt', cnt+' аккаунтов');
+    updateAccKpi(CUR_ACCS);
     renderAccounts(CUR_ACCS);
   }).catch(e => {
     document.getElementById('accList').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`;
@@ -3014,39 +3178,84 @@ function renderChPreview(list) {
     : '');
 }
 
+function isOnCooldown(a) {
+  return a.cooldown_until && new Date(a.cooldown_until) > new Date();
+}
+
+// Maps phone prefix to country flag emoji
+function phoneFlag(phone) {
+  if (!phone) return '🌐';
+  const p = String(phone).replace(/\D/g,'');
+  if (p.startsWith('7') || p.startsWith('8')) return '🇷🇺';
+  if (p.startsWith('380')) return '🇺🇦';
+  if (p.startsWith('375')) return '🇧🇾';
+  if (p.startsWith('374')) return '🇦🇲';
+  if (p.startsWith('995')) return '🇬🇪';
+  if (p.startsWith('998')) return '🇺🇿';
+  if (p.startsWith('1')) return '🇺🇸';
+  if (p.startsWith('44')) return '🇬🇧';
+  if (p.startsWith('49')) return '🇩🇪';
+  if (p.startsWith('33')) return '🇫🇷';
+  if (p.startsWith('34')) return '🇪🇸';
+  if (p.startsWith('86')) return '🇨🇳';
+  if (p.startsWith('91')) return '🇮🇳';
+  if (p.startsWith('55')) return '🇧🇷';
+  if (p.startsWith('62')) return '🇮🇩';
+  if (p.startsWith('84')) return '🇻🇳';
+  return '🌐';
+}
+
+let ACC_FILTER = 'all';
+
 function filterAcc(mode, btn) {
-  document.querySelectorAll('#acc-seg .seg-opt').forEach(x=>x.classList.remove('on'));
+  ACC_FILTER = mode;
+  document.querySelectorAll('#accKpi .acc-kpi-card').forEach(x=>x.classList.remove('on'));
   btn.classList.add('on');
-  const list = mode==='all' ? CUR_ACCS
-    : mode==='active' ? CUR_ACCS.filter(a=>a.is_active && !isOnCooldown(a))
-    : CUR_ACCS.filter(a=>isOnCooldown(a));
+  let list;
+  if (mode==='all') list = CUR_ACCS;
+  else if (mode==='active') list = CUR_ACCS.filter(a=>a.is_active && !isOnCooldown(a) && a.acc_status!=='banned');
+  else if (mode==='cooldown') list = CUR_ACCS.filter(a=>isOnCooldown(a));
+  else if (mode==='banned') list = CUR_ACCS.filter(a=>a.acc_status==='banned');
+  else list = CUR_ACCS;
   renderAccounts(list);
 }
 
-function isOnCooldown(a) {
-  return a.cooldown_until && new Date(a.cooldown_until) > new Date();
+function updateAccKpi(list) {
+  const all = list.length;
+  const active = list.filter(a=>a.is_active&&!isOnCooldown(a)&&a.acc_status!=='banned').length;
+  const cd = list.filter(a=>isOnCooldown(a)).length;
+  const banned = list.filter(a=>a.acc_status==='banned').length;
+  const el = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
+  el('kpi-all', all); el('kpi-active', active); el('kpi-cd', cd); el('kpi-ban', banned);
 }
 
 function renderAccounts(list) {
   const el = document.getElementById('accList');
   if (!list.length) { el.innerHTML=empty('📱','Нет аккаунтов','Добавьте аккаунт через меню в Telegram'); return; }
   el.innerHTML = list.map(a=>{
-    const name = a.first_name||(a.username?'@'+a.username:a.phone||'Аккаунт #'+a.id);
+    const name = a.first_name||(a.username?'@'+a.username:'#'+a.id);
+    const phone = a.phone || '';
+    const flag = phoneFlag(phone);
     const cd = isOnCooldown(a);
     const trust = a.trust_score!=null?Math.round(a.trust_score):100;
     const trustColor = trust>=80?'var(--green)':trust>=50?'var(--orange)':'var(--red)';
-    let status, cls;
-    if (!a.is_active) { status='Выключен'; cls='b-gy'; }
-    else if (cd) { status='⏳ Кулдаун'; cls='b-or'; }
-    else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; }
-    else { status='🟢 Активен'; cls='b-gr'; }
-    return `<div class="li tap" onclick="openAccount(${a.id})">
-      <div class="ava ava-teal">📱</div>
-      <div class="li-body">
-        <div class="li-name">${esc(name)}</div>
-        <div class="li-sub">${a.phone||''} · Доверие: <span style="color:${trustColor};font-weight:600">${trust}%</span></div>
+    let status, cls, ava_cls;
+    if (!a.is_active) { status='Выкл'; cls='b-gy'; ava_cls='ava-teal'; }
+    else if (a.acc_status==='banned') { status='🚫 Бан'; cls='b-rd'; ava_cls='ava-red'; }
+    else if (cd) { status='⏳ Кулдаун'; cls='b-or'; ava_cls='ava-orange'; }
+    else { status='Активен'; cls='b-gr'; ava_cls='ava-teal'; }
+    return `<div class="acc-row" onclick="openAccount(${a.id})">
+      <div class="ava ${ava_cls}" style="font-size:15px">${flag}</div>
+      <div class="acc-body">
+        <div class="acc-name">${esc(name)}</div>
+        <div class="acc-phone">${esc(phone)}</div>
+        <div class="acc-trust"><div class="acc-trust-fill" style="width:${trust}%;background:${trustColor}"></div></div>
       </div>
-      <div class="li-right"><span class="badge ${cls}">${status}</span><span class="chev">›</span></div>
+      <div class="acc-right">
+        <span class="badge ${cls}">${status}</span>
+        <span style="font-size:10px;color:var(--hint)">${trust}%</span>
+        <span class="chev">›</span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -3303,24 +3512,28 @@ async function loadBroadcasts() {
 
 function renderBcasts(items) {
   const el = document.getElementById('bcastList');
-  if (!items.length) { el.innerHTML=empty('📢','Нет рассылок','Создайте первую через кнопку + или через раздел Боты'); return; }
-  el.innerHTML = items.map(b=>{
-    const bn = b.bot_username?'@'+b.bot_username:'Бот #'+b.bot_id;
-    const total = (b.sent_count||0)+(b.failed_count||0);
-    const pct = total>0?Math.round((b.sent_count||0)/total*100):0;
-    const [bc,bl]=stb(b.status);
-    return `<div class="li" style="display:block;cursor:default;padding:11px 14px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="ava ava-purple">📢</div>
-        <div class="li-body">
-          <div class="li-name">${esc((b.message_text||'').substring(0,55))}${(b.message_text||'').length>55?'…':''}</div>
-          <div class="li-sub">${esc(bn)} · ✓ ${num(b.sent_count||0)} · ✕ ${num(b.failed_count||0)}</div>
+  if (!items.length) {
+    el.className='lst'; el.innerHTML=empty('📢','Нет рассылок','Создайте через кнопку + или раздел Боты'); return;
+  }
+  el.className = 'bc-table';
+  el.innerHTML = `<div class="bc-head"><span>Текст / Бот</span><span style="text-align:center">✓</span><span style="text-align:center">✕</span><span>Статус</span></div>`
+    + items.map(b=>{
+      const bn = b.bot_username?'@'+b.bot_username:'#'+b.bot_id;
+      const txt = (b.message_text||'').substring(0,26)+((b.message_text||'').length>26?'…':'');
+      const total = (b.sent_count||0)+(b.failed_count||0);
+      const pct = total>0?Math.round((b.sent_count||0)/total*100):0;
+      const [bc,bl]=stb(b.status);
+      return `<div class="bc-row">
+        <div style="overflow:hidden;min-width:0">
+          <div class="bc-cell" style="font-weight:500">${esc(txt)}</div>
+          <div style="font-size:10px;color:var(--hint);margin-top:1px">${esc(bn)}</div>
+          ${b.status==='running'?`<div class="prog" style="width:80px;margin-top:3px"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
         </div>
-        <span class="badge ${bc}">${bl}</span>
-      </div>
-      ${b.status==='running'?`<div class="prog"><div class="prog-fill" style="width:${pct}%"></div></div>`:''}
-    </div>`;
-  }).join('');
+        <div class="bc-num" style="color:var(--green)">${num(b.sent_count||0)}</div>
+        <div class="bc-num" style="color:var(--red)">${num(b.failed_count||0)}</div>
+        <div class="bc-cell"><span class="badge ${bc}">${bl}</span></div>
+      </div>`;
+    }).join('');
 }
 
 function renderCmps(items) {
@@ -3558,35 +3771,46 @@ function buildFunnelDetail(d) {
   const f = d.funnel||{};
   const steps = d.steps||[];
   const trig = f.trigger_type==='keyword'?`🔑 ${esc(f.keyword||'?')}`:'🚀 /start';
+
   const stepsHtml = steps.length
-    ? steps.map((s,i)=>`<div class="li" style="cursor:default">
-        <div class="ava ${['ava-blue','ava-green','ava-orange','ava-purple','ava-teal'][i%5]}">${i+1}</div>
-        <div class="li-body">
-          <div class="li-name">${esc((s.message_text||'').substring(0,60))}${(s.message_text||'').length>60?'…':''}</div>
-          <div class="li-sub">Задержка: ${s.delay_minutes?s.delay_minutes+' мин':'сразу'}</div>
-        </div>
-      </div>`).join('')
-    : '<div style="padding:12px 14px;font-size:14px;color:var(--hint)">Нет шагов</div>';
+    ? `<div class="funnel-flow">${steps.map((s,i)=>{
+        const isLast = i===steps.length-1;
+        const delayLbl = s.delay_minutes
+          ? (s.delay_minutes>=60 ? Math.round(s.delay_minutes/60)+' ч' : s.delay_minutes+' мин')
+          : 'сразу';
+        return `<div class="ffstep">
+          <div class="ffstep-line">
+            <div class="ffstep-dot">${i+1}</div>
+            ${isLast?'':'<div class="ffstep-tail"></div>'}
+          </div>
+          <div class="ffstep-body">
+            <div class="ffstep-delay">⏱ ${delayLbl}${i>0?' после запуска':''}</div>
+            <div class="ffstep-text">${esc((s.message_text||'').substring(0,120))}${(s.message_text||'').length>120?'…':''}</div>
+            ${s.button_text?`<div style="margin-top:6px"><span class="badge b-bl">🔗 ${esc(s.button_text)}</span></div>`:''}
+          </div>
+        </div>`;
+      }).join('')}</div>`
+    : `<div class="lst"><div style="padding:14px;font-size:14px;color:var(--hint)">Нет шагов. Добавьте первый шаг через бота.</div></div>`;
+
   return `
-    <div class="stats2">
-      <div class="s2col"><div class="s2val">${num(d.subs_active)}</div><div class="s2lbl">В воронке</div></div>
-      <div class="s2col"><div class="s2val">${num(d.subs_total)}</div><div class="s2lbl">Прошло всего</div></div>
+    <div class="kpi-bar" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="kpi-col"><div class="kpi-val" style="color:var(--blue)">${steps.length}</div><div class="kpi-lbl">Шагов</div></div>
+      <div class="kpi-col"><div class="kpi-val" style="color:var(--green)">${num(d.subs_active||0)}</div><div class="kpi-lbl">В воронке</div></div>
+      <div class="kpi-col"><div class="kpi-val">${num(d.subs_total||0)}</div><div class="kpi-lbl">Прошло</div></div>
     </div>
-    <div class="sec" style="margin-top:8px">Настройки</div>
-    <div class="lst">
-      <div class="row"><div class="row-ico" style="background:rgba(245,158,11,.16)">🎯</div>
+    <div class="lst" style="margin:8px 16px 4px">
+      <div class="row">
+        <div class="row-ico" style="background:rgba(245,158,11,.16)">🎯</div>
         <div class="row-body"><div class="row-name">Триггер</div><div class="row-val">${trig}</div></div>
       </div>
-      <div class="row"><div class="row-ico" style="background:rgba(34,197,94,.16)">📊</div>
-        <div class="row-body"><div class="row-name">Шагов в воронке</div><div class="row-val">${steps.length}</div></div>
-      </div>
-      <div class="row"><div class="row-ico" style="background:rgba(59,130,246,.16)">📡</div>
-        <div class="row-body"><div class="row-name">Статус</div></div>
+      <div class="row">
+        <div class="row-ico" style="background:rgba(59,130,246,.16)">📡</div>
+        <div class="row-body"><div class="row-name">Статус воронки</div></div>
         <div class="row-right"><div class="toggle ${f.is_active?'on':'off'}" onclick="toggleFunnel(${f.id},this)"></div></div>
       </div>
     </div>
-    <div class="sec" style="margin-top:8px">Шаги воронки</div>
-    <div class="lst">${stepsHtml}</div>
+    <div class="sec" style="margin-top:8px">🔀 Цепочка сообщений</div>
+    ${stepsHtml}
     <div style="height:16px"></div>`;
 }
 
