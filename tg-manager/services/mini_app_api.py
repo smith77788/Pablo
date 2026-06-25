@@ -109,6 +109,16 @@ async def _stats(pool: asyncpg.Pool, uid: int) -> dict:
 
 def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
 
+    async def _apply_inline_migrations(application: web.Application) -> None:
+        try:
+            await pool.execute(
+                "ALTER TABLE operation_queue ADD COLUMN IF NOT EXISTS label TEXT"
+            )
+        except Exception:
+            log.exception("inline migration failed")
+
+    app.on_startup.append(_apply_inline_migrations)
+
     async def handle_options(request: web.Request) -> web.Response:
         return web.Response(headers={
             "Access-Control-Allow-Origin": "*",
@@ -2093,7 +2103,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    COUNT(*) FILTER (WHERE acc_status='active') AS active,
                    COUNT(*) FILTER (WHERE acc_status IN ('banned','deactivated')) AS banned,
                    COUNT(*) FILTER (WHERE cooldown_until > now()) AS cooling,
-                   COUNT(*) FILTER (WHERE trust_score IS NOT NULL AND trust_score < 40) AS low_trust
+                   COUNT(*) FILTER (WHERE trust_score IS NOT NULL AND trust_score < 0.4) AS low_trust
                    FROM tg_accounts WHERE owner_id=$1""",
                 uid,
             )
